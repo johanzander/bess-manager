@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+requests==2.31.0
+python-dateutil==2.8.2
+pytz==2023.3
+debugpy==1.6.7
+python-dotenv==1.0.0
+APScheduler==3.11.0
+watchdog==3.0.0
+loguru==0.6.0
+pyyaml

@@ -1,0 +1,9 @@
+{
+  "input": "http://localhost:8000/openapi.json",
+  "output": "./src/api",
+  "client": "react-query",
+  "useOptions": true,
+  "useUnionTypes": true,
+  "exportSchemas": true,
+  "hooks": true
+}

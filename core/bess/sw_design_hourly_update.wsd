@@ -1,0 +1,76 @@
+title Hourly Update Process
+participant "BESS Controller\n(pyscript)" as BESSController
+participant BatterySystemManager
+participant "Home Assistant\nController" as HAController
+participant PriceManager
+participant EnergyManager
+participant "Optimization Alg" as Optimizer
+participant Schedule
+participant GrowattScheduleMgr
+participant "Battery/Inverter" as Inverter
+
+BESSController->BatterySystemManager: update_schedule(hour)
+note right of BatterySystemManager: Get planned action\nfrom current schedule
+
+BatterySystemManager->EnergyManager: update_hour_data(hour)
+note right of EnergyManager: Process data for\ncompleted hour
+
+EnergyManager->HAController: get_battery_soc()
+HAController-->EnergyManager: current_soc
+
+EnergyManager->HAController: get_sensor_value("tlx_import_from_grid_today")
+HAController-->EnergyManager: grid_import_today
+
+EnergyManager->HAController: get_sensor_value("tlx_solar_generation_today")
+HAController-->EnergyManager: solar_generation_today
+
+EnergyManager->HAController: get_sensor_value("tlx_all_batteries_charge_today")
+HAController-->EnergyManager: battery_charge_today
+
+EnergyManager->HAController: get_sensor_value("tlx_all_batteries_discharge_today")
+HAController-->EnergyManager: battery_discharge_today
+
+EnergyManager->HAController: get_sensor_value("tlx_export_to_grid_today")
+HAController-->EnergyManager: grid_export_today
+
+EnergyManager->HAController: get_sensor_value("tlx_load_consumption_today")
+HAController-->EnergyManager: home_consumption_today
+
+EnergyManager->HAController: get_sensor_value("tlx_batteries_charged_from_grid_today")
+HAController-->EnergyManager: grid_to_battery_today
+
+note over EnergyManager: Calculate incremental flows\nDetect solar charging\nValidate energy balance
+
+EnergyManager-->BatterySystemManager: hour_data
+
+BatterySystemManager->EnergyManager: get_combined_energy_data(hour)
+EnergyManager-->BatterySystemManager: combined_energy_profile
+
+BatterySystemManager->PriceManager: get_today_prices()
+PriceManager-->BatterySystemManager: price_entries
+
+note over BatterySystemManager: Calculate cost basis of stored energy\nCombine past schedule with future optimization
+
+BatterySystemManager->Optimizer: optimize_battery(prices[hour:], battery_params, consumption[hour:], solar[hour:], current_soc, virtual_stored_energy)
+note right of BatterySystemManager: Only optimize future hours
+Optimizer-->BatterySystemManager: optimization_results
+
+BatterySystemManager->Schedule: set_optimization_results(combined_actions, combined_soe, prices, ...)
+Schedule-->BatterySystemManager: new_schedule
+
+BatterySystemManager->GrowattScheduleMgr: create_schedule(new_schedule)
+GrowattScheduleMgr-->BatterySystemManager: growatt_schedule
+
+note over BatterySystemManager: Compare with current schedule
+alt schedules differ or hour == 0
+    BatterySystemManager->HAController: set_grid_charge(enabled/disabled)
+    HAController->Inverter: service.call(switch, turn_on/off, switch.rkm0d7n04x_charge_from_grid)
+    Inverter-->HAController: success
+    
+    BatterySystemManager->HAController: set_discharging_power_rate(rate)
+    HAController->Inverter: service.call(number, set_value, number.rkm0d7n04x_discharging_power_rate)
+    Inverter-->HAController: success
+end
+
+HAController-->BatterySystemManager: success
+BatterySystemManager-->BESSController: success

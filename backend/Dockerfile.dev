@@ -1,0 +1,24 @@
+FROM python:3.13-slim
+
+# Set work directory
+WORKDIR /app
+
+# Install OS-level dependencies
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends gcc \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements and install them (as root)
+COPY backend/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy rest of the code
+COPY backend/ /app/
+COPY core/bess /app/core/bess
+
+# Expose port
+EXPOSE 8080
+
+# Run with uvicorn
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8080"]

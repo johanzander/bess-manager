@@ -1,0 +1,46 @@
+title Initial Schedule Creation
+
+participant "BESS Controller\n(pyscript)" as BESSController
+participant BatterySystemManager
+participant "Home Assistant\nController" as HAController
+participant PriceManager
+participant EnergyMonitor
+participant "Optimization Alg" as Optimizer
+participant Schedule
+participant GrowattScheduleMgr
+participant "Battery/Inverter" as Inverter
+
+BESSController->BatterySystemManager: apply_todays_schedule()
+BatterySystemManager->PriceManager: get_today_prices()
+PriceManager-->BatterySystemManager: price_entries
+
+BatterySystemManager->HAController: get_battery_soc()
+HAController-->BatterySystemManager: current_soc
+
+BatterySystemManager->EnergyMonitor: get_consumption_predictions()
+EnergyMonitor-->BatterySystemManager: consumption_predictions
+
+BatterySystemManager->EnergyMonitor: get_solar_predictions()
+EnergyMonitor-->BatterySystemManager: solar_predictions
+
+BatterySystemManager->Optimizer: optimize_battery(prices, battery_params, consumption, solar, soc)
+Optimizer-->BatterySystemManager: optimization_results (actions, state_of_energy)
+
+BatterySystemManager->Schedule: set_optimization_results(actions, state_of_energy, prices, ...)
+Schedule-->BatterySystemManager: schedule object
+
+BatterySystemManager->GrowattScheduleMgr: create_schedule(schedule)
+GrowattScheduleMgr-->BatterySystemManager: growatt_schedule
+
+BatterySystemManager->HAController: disable_all_TOU_settings()
+HAController->Inverter: service.call(growatt_server, update_tlx_inverter_time_segment, ...)
+Inverter-->HAController: success
+
+loop for each TOU segment
+    BatterySystemManager->HAController: set_inverter_time_segment(segment)
+    HAController->Inverter: service.call(growatt_server, update_tlx_inverter_time_segment, ...)
+    Inverter-->HAController: success
+end
+
+HAController-->BatterySystemManager: success
+BatterySystemManager-->BESSController: success

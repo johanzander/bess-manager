@@ -1,0 +1,46 @@
+services:
+  bess-dev:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile.dev
+    container_name: bess-dev
+    volumes:
+      - ./backend:/app
+      - ./core:/app/core
+    environment:
+      - TZ=Europe/Stockholm
+      - FLASK_DEBUG=true
+      - HA_URL=${HA_URL}
+      - HA_TOKEN=${HA_TOKEN}
+      - HA_DB_URL=${HA_DB_URL}
+      - HA_DB_USER_NAME=${HA_DB_USER_NAME}
+      - HA_DB_PASSWORD=${HA_DB_PASSWORD}
+      - PYTHONPATH=/workspaces/batterymanager
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env      
+    restart: unless-stopped
+    networks:
+      - bess-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "5173:5173"
+    environment:
+      - TZ=Europe/Stockholm
+      - VITE_API_URL=http://bess-dev:8080
+    depends_on:
+      - bess-dev
+    networks:
+      - bess-network
+
+networks:
+  bess-network:
+    driver: bridge

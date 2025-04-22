@@ -1,0 +1,121 @@
+name: "BESS Manager"
+description: "Battery Energy Storage System optimization and management"
+version: "1.0.30"
+slug: "bess_manager"
+init: false
+arch:
+  - aarch64
+  - amd64
+  - armhf
+  - armv7
+  - i386
+startup: application
+boot: auto
+ports:
+  8080/tcp: 8080
+ingress: true
+ingress_port: 8080
+panel_icon: mdi:battery-charging
+panel_title: BESS Manager
+panel_admin: true
+hassio_api: true
+homeassistant_api: true
+auth_api: true
+options:
+  battery:
+    total_capacity: 30.0
+    min_soc: 10.0
+    cycle_cost: 0.50
+    charging_power_rate: 40
+  consumption:
+    default_hourly: 3.5
+  price:
+    area: "SE4"
+    markup_rate: 0.08
+    vat_multiplier: 1.25
+    additional_costs: 1.03
+    tax_reduction: 0.6518
+    use_actual_price: false
+  sensors:
+    battery_soc: "sensor.rkm0d7n04x_statement_of_charge_soc"
+    battery_charge_power: "sensor.rkm0d7n04x_all_batteries_charge_power"
+    battery_discharge_power: "sensor.rkm0d7n04x_all_batteries_discharged_power"
+    battery_charge_stop_soc: "number.rkm0d7n04x_charge_stop_soc"
+    battery_discharge_stop_soc: "number.rkm0d7n04x_discharge_stop_soc"
+    battery_charging_power_rate: "number.rkm0d7n04x_charging_power_rate"
+    battery_discharging_power_rate: "number.rkm0d7n04x_discharging_power_rate"
+    grid_charge: "switch.rkm0d7n04x_charge_from_grid"
+    battery_charged_today: "sensor.rkm0d7n04x_all_batteries_charged_today"
+    battery_discharged_today: "sensor.rkm0d7n04x_all_batteries_discharged_today"
+    solar_production_today: "sensor.rkm0d7n04x_solar_production_today"
+    self_consumption_today: "sensor.rkm0d7n04x_self_consumption_today"
+    export_to_grid_today: "sensor.rkm0d7n04x_export_to_grid_today"
+    load_consumption_today: "sensor.rkm0d7n04x_load_consumption_today"
+    import_from_grid_today: "sensor.rkm0d7n04x_import_from_grid_today"
+    batteries_charged_from_grid_today: "sensor.rkm0d7n04x_batteries_charged_from_grid_today"
+    ev_energy_today: "sensor.zap263668_energy_today"
+    current_l1: "sensor.current_l1_gustavsgatan_32a"
+    current_l2: "sensor.current_l2_gustavsgatan_32a"
+    current_l3: "sensor.current_l3_gustavsgatan_32a"
+    lifetime_battery_charged: "sensor.rkm0d7n04x_lifetime_total_all_batteries_charged"
+    lifetime_battery_discharged: "sensor.rkm0d7n04x_lifetime_total_all_batteries_discharged"
+    lifetime_solar_energy: "sensor.rkm0d7n04x_lifetime_total_solar_energy"
+    lifetime_export_to_grid: "sensor.rkm0d7n04x_lifetime_total_export_to_grid"
+    lifetime_load_consumption: "sensor.rkm0d7n04x_lifetime_total_load_consumption"
+    lifetime_import_from_grid: "sensor.rkm0d7n04x_lifetime_total_import_from_grid"
+    lifetime_system_production: "sensor.rkm0d7n04x_lifetime_system_production"
+    lifetime_self_consumption: "sensor.rkm0d7n04x_lifetime_self_consumption"
+    zap_energy_meter: "sensor.zap263668_energy_meter"
+    nordpool_kwh_today: "sensor.nordpool_kwh_se4_sek_2_10_025"
+    nordpool_kwh_tomorrow: "sensor.nordpool_kwh_se4_sek_2_10_025"
+    48h_avg_grid_import: "sensor.48h_average_grid_import_power"
+    1h_avg_grid_import: "sensor.1h_average_grid_import_power"
+schema:
+  battery:
+    total_capacity: float
+    min_soc: float
+    cycle_cost: float
+    charging_power_rate: float
+  consumption:
+    default_hourly: float
+  price:
+    area: str
+    markup_rate: float
+    vat_multiplier: float
+    additional_costs: float
+    tax_reduction: float
+    use_actual_price: bool
+  sensors:
+    battery_soc: str
+    battery_charge_power: str
+    battery_discharge_power: str
+    battery_charge_stop_soc: str
+    battery_discharge_stop_soc: str
+    battery_charging_power_rate: str
+    battery_discharging_power_rate: str
+    grid_charge: str
+    battery_charged_today: str
+    battery_discharged_today: str
+    solar_production_today: str
+    self_consumption_today: str
+    export_to_grid_today: str
+    load_consumption_today: str
+    import_from_grid_today: str
+    batteries_charged_from_grid_today: str
+    ev_energy_today: str
+    current_l1: str
+    current_l2: str
+    current_l3: str
+    lifetime_battery_charged: str
+    lifetime_battery_discharged: str
+    lifetime_solar_energy: str
+    lifetime_export_to_grid: str
+    lifetime_load_consumption: str
+    lifetime_import_from_grid: str
+    lifetime_system_production: str
+    lifetime_self_consumption: str
+    zap_energy_meter: str
+    nordpool_kwh_today: str
+    nordpool_kwh_tomorrow: str
+    48h_avg_grid_import: str
+    1h_avg_grid_import: str

@@ -1,3 +1,0 @@
-battery_manager:
-  module: battery_manager
-  class: BatteryManager

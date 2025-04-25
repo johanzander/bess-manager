@@ -35,7 +35,8 @@ class Schedule:
         self.state_of_energy: list[float] = []
         self.intervals: list[dict] = []
         self.hourly_results: list[HourlyResult] = []
-        self.calc: SavingsCalculator = None
+        self.calc: SavingsCalculator | None = None
+        self.hourly_settings: list[dict] = []
         self.optimization_results = None
         self.solar_charged: list[float] = []
 
@@ -47,7 +48,7 @@ class Schedule:
         cycle_cost: float,
         hourly_consumption: list[float],
         solar_charged: list[float] | None = None,
-    ):
+    ) -> None:
         """Set optimization results and calculate costs.
 
         Args:
@@ -116,7 +117,7 @@ class Schedule:
 
         self._create_hourly_intervals()
 
-    def _create_hourly_intervals(self):
+    def _create_hourly_intervals(self) -> None:
         """Create one interval per hour."""
         self.intervals = []
         hour = 0

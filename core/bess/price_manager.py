@@ -1,7 +1,7 @@
 """Electricity price management with configurable sources."""
 
-from datetime import date, datetime, timedelta
 import logging
+from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -11,6 +11,7 @@ from .settings import PriceSettings
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
+
 
 class PriceSource:
     """Base class for price sources."""
@@ -77,7 +78,7 @@ class HANordpoolSource(PriceSource):
         # Remove VAT from HA prices (they include 25% VAT)
         prices_no_vat = []
         for price in prices:
-            prices_no_vat.append(float(price) / 1.25)  # noqa: PERF401
+            prices_no_vat.append(float(price) / 1.25)
 
         return self._create_price_list(prices_no_vat, target_date or today, calculator)
 

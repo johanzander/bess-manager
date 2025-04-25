@@ -7,8 +7,8 @@ initialization, prediction handling, and energy flow calculations.
 
 import logging
 
-from bess.energy_manager import EnergyManager
 import pytest
+from bess.energy_manager import EnergyManager
 
 logger = logging.getLogger(__name__)
 
@@ -27,11 +27,11 @@ class TestInitialization:
         assert em.default_consumption == 4.5
 
         # Check predictions initialization
-        assert len(em._consumption_predictions) == 24  # noqa: SLF001
-        assert all(val == 4.5 for val in em._consumption_predictions)  # noqa: SLF001
+        assert len(em._consumption_predictions) == 24
+        assert all(val == 4.5 for val in em._consumption_predictions)
 
-        assert len(em._solar_predictions) == 24  # noqa: SLF001
-        assert all(val == 0.0 for val in em._solar_predictions)  # noqa: SLF001
+        assert len(em._solar_predictions) == 24
+        assert all(val == 0.0 for val in em._solar_predictions)
 
     def test_init_with_custom_values(self, mock_controller):
         """Test initialization with custom values."""
@@ -48,7 +48,7 @@ class TestInitialization:
         assert em.default_consumption == 3.0
 
         # Check predictions
-        assert all(val == 3.0 for val in em._consumption_predictions)  # noqa: SLF001
+        assert all(val == 3.0 for val in em._consumption_predictions)
 
 
 class TestPredictions:
@@ -63,7 +63,7 @@ class TestPredictions:
         em.set_consumption_predictions(pattern)
 
         # Verify pattern was stored
-        assert em._consumption_predictions == pattern  # noqa: SLF001
+        assert em._consumption_predictions == pattern
 
         # Test invalid length
         with pytest.raises(ValueError):
@@ -94,7 +94,7 @@ class TestPredictions:
         assert len(solar_predictions) == 24
 
         # Or directly access the internal attribute if needed
-        assert len(em._solar_predictions) == 24  # noqa: SLF001
+        assert len(em._solar_predictions) == 24
 
 
 class TestEnergyFlowCalculation:
@@ -139,7 +139,7 @@ class TestEnergyFlowCalculation:
         previous, current = mock_readings
 
         # Mock the sensor mappings to match what _calculate_hourly_energy_flows expects
-        flows = empty_energy_manager._calculate_hourly_energy_flows(  # noqa: SLF001
+        flows = empty_energy_manager._calculate_hourly_energy_flows(
             current, previous, hour_of_day=12
         )
 
@@ -174,7 +174,7 @@ class TestEnergyFlowCalculation:
             "rkm0d7n04x_lifetime_total_load_consumption": 1.5,
         }
 
-        flows = empty_energy_manager._calculate_hourly_energy_flows(current, previous)  # noqa: SLF001
+        flows = empty_energy_manager._calculate_hourly_energy_flows(current, previous)
 
         # Check that rollover is detected (values are not negative)
         assert flows["battery_charge"] >= 0

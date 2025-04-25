@@ -1,5 +1,6 @@
 from datetime import date, datetime, timedelta
 
+import pytest
 from bess.price_manager import (
     ElectricityPriceManager,
     Guru56APISource,
@@ -7,7 +8,6 @@ from bess.price_manager import (
     MockSource,
     NordpoolAPISource,
 )
-import pytest
 
 
 @pytest.fixture

@@ -2,11 +2,11 @@
 
 # Define public API - only include what users should directly access
 __all__ = [
-    "BatterySystemManager",  # Main facade
-    "HomeAssistantAPIController",  # Used by pyscript integrations
     "BatterySettings",  # Public settings classes
-    "HomeSettings",
+    "BatterySystemManager",  # Main facade
     "ConsumptionSettings",
+    "HomeAssistantAPIController",  # Used by pyscript integrations
+    "HomeSettings",
     "PriceSettings",
 ]
 

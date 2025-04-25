@@ -86,8 +86,8 @@ Usage:
     energy_manager.log_energy_balance()
 """
 
-from datetime import datetime, time
 import logging
+from datetime import datetime, time
 
 from .influxdb_helper import get_sensor_data
 
@@ -220,12 +220,10 @@ class EnergyManager:
         try:
             current_hour, current_minute, today = self._get_current_time_info()
 
-            _LOGGER.info(
-                "Fetching historical data for energy manager initialization")
+            _LOGGER.info("Fetching historical data for energy manager initialization")
 
             # Determine end hour for data collection
-            end_hour = self._determine_historical_end_hour(
-                current_hour, current_minute)
+            end_hour = self._determine_historical_end_hour(current_hour, current_minute)
             end_time = datetime.combine(today, time(hour=end_hour))
             _LOGGER.info(
                 "Fetching historical data up to %s",
@@ -241,14 +239,12 @@ class EnergyManager:
 
             # Now process remaining hours (1 through end_hour)
             for hour in range(1, end_hour + 1):
-                self._process_historical_hour_data(
-                    hour, today, readings_by_hour)
+                self._process_historical_hour_data(hour, today, readings_by_hour)
 
             # Set the last processed hour to the highest hour with data
             if readings_by_hour:
                 self._last_processed_hour = max(readings_by_hour.keys())
-                _LOGGER.info("Set last processed hour to %d",
-                             self._last_processed_hour)
+                _LOGGER.info("Set last processed hour to %d", self._last_processed_hour)
 
             _LOGGER.info(
                 "Successfully processed historical data for %d hours",
@@ -286,8 +282,7 @@ class EnergyManager:
             current_soc = None
             if self._ha_controller:
                 current_soc = self._ha_controller.get_battery_soc()
-                _LOGGER.info(
-                    "Current SOC from controller: %.1f%%", current_soc)
+                _LOGGER.info("Current SOC from controller: %.1f%%", current_soc)
 
             # Input validation
             if current_soc is not None and not 0 <= current_soc <= 100:
@@ -305,8 +300,7 @@ class EnergyManager:
             # Store current SOC for current hour specifically
             if current_soc is not None:
                 self._battery_soc[current_hour] = current_soc
-                self._battery_soe[current_hour] = self._soc_to_energy(
-                    current_soc)
+                self._battery_soe[current_hour] = self._soc_to_energy(current_soc)
                 _LOGGER.debug(
                     "Stored current SOC %.1f%% for hour %d",
                     current_soc,
@@ -333,8 +327,7 @@ class EnergyManager:
         try:
             hour_zero_time = datetime.combine(today, time(hour=0))
             cumulative_sensors = self._get_cumulative_sensors()
-            hour_zero_data = get_sensor_data(
-                cumulative_sensors, hour_zero_time)
+            hour_zero_data = get_sensor_data(cumulative_sensors, hour_zero_time)
 
             if hour_zero_data and hour_zero_data.get("status") == "success":
                 hour_zero_readings = hour_zero_data.get("data", {})
@@ -375,8 +368,7 @@ class EnergyManager:
                     hour_zero_readings["rkm0d7n04x_statement_of_charge_soc"]
                 )
                 if not 0 <= soc_value <= 100:
-                    _LOGGER.warning(
-                        "Invalid SOC for hour 0: %.1f%%", soc_value)
+                    _LOGGER.warning("Invalid SOC for hour 0: %.1f%%", soc_value)
                     return
 
                 self._battery_soc[0] = soc_value
@@ -433,8 +425,7 @@ class EnergyManager:
                     self._store_hourly_soc(hour, hour_readings)
 
                     # Calculate energy flows between previous hour and this hour
-                    self._calculate_hourly_flows(
-                        hour, hour_readings, readings_by_hour)
+                    self._calculate_hourly_flows(hour, hour_readings, readings_by_hour)
                 else:
                     _LOGGER.warning("No readings for hour %d", hour)
             else:
@@ -446,11 +437,9 @@ class EnergyManager:
         """Store SOC from hourly readings if available."""
         if "rkm0d7n04x_statement_of_charge_soc" in hour_readings:
             try:
-                soc_value = float(
-                    hour_readings["rkm0d7n04x_statement_of_charge_soc"])
+                soc_value = float(hour_readings["rkm0d7n04x_statement_of_charge_soc"])
                 if not 0 <= soc_value <= 100:
-                    _LOGGER.warning(
-                        "Invalid SOC for hour %d: %.1f%%", hour, soc_value)
+                    _LOGGER.warning("Invalid SOC for hour %d: %.1f%%", hour, soc_value)
                     return
 
                 self._battery_soc[hour] = soc_value
@@ -461,8 +450,7 @@ class EnergyManager:
                     soc_value,
                 )
             except (ValueError, TypeError) as e:
-                _LOGGER.warning(
-                    "Error converting hour %d SOC: %s", hour, str(e))
+                _LOGGER.warning("Error converting hour %d SOC: %s", hour, str(e))
 
     def _calculate_hourly_flows(self, hour, hour_readings, readings_by_hour):
         """Calculate energy flows between previous hour and current hour."""
@@ -504,8 +492,7 @@ class EnergyManager:
             else:
                 _LOGGER.warning("No valid flows to store for hour %d", hour)
         except (ValueError, KeyError, TypeError) as e:
-            _LOGGER.warning(
-                "Error calculating flows for hour %d: %s", hour, str(e))
+            _LOGGER.warning("Error calculating flows for hour %d: %s", hour, str(e))
 
     def _extract_flows_from_readings(self, hour, current_readings, previous_readings):
         """Extract energy flows by comparing current and previous readings.
@@ -687,14 +674,12 @@ class EnergyManager:
             )
 
             # Ensure solar_to_battery doesn't exceed battery_charge or solar_production
-            solar_to_battery = min(
-                solar_to_battery, battery_charge, solar_production)
+            solar_to_battery = min(solar_to_battery, battery_charge, solar_production)
 
             flows["solar_to_battery"] = solar_to_battery
 
             # Grid-to-Battery = Battery Charge - Solar-to-Battery
-            flows["grid_to_battery"] = max(
-                0, battery_charge - solar_to_battery)
+            flows["grid_to_battery"] = max(0, battery_charge - solar_to_battery)
 
             _LOGGER.debug(
                 "Hour %s: Solar to battery = %.2f kWh (from new sensors)",
@@ -725,13 +710,11 @@ class EnergyManager:
             else:
                 # During day, calculate solar_to_battery based on flows
                 # Solar charging is limited by both available solar and actual battery charging
-                solar_to_battery = max(
-                    0, min(solar_production, battery_charge))
+                solar_to_battery = max(0, min(solar_production, battery_charge))
                 flows["solar_to_battery"] = solar_to_battery
 
                 # Grid charging is the remainder of battery charging not covered by solar
-                flows["grid_to_battery"] = max(
-                    0, battery_charge - solar_to_battery)
+                flows["grid_to_battery"] = max(0, battery_charge - solar_to_battery)
 
                 _LOGGER.debug(
                     "Hour %s: Solar to battery = %.2f kWh (based on solar availability)",
@@ -782,8 +765,7 @@ class EnergyManager:
         has_self_consumption = "self_consumption_total" in validated
 
         # 1. Night hours validation (6pm-6am)
-        is_night = hour_of_day is not None and (
-            hour_of_day < 6 or hour_of_day >= 20)
+        is_night = hour_of_day is not None and (hour_of_day < 6 or hour_of_day >= 20)
         if is_night:
             # No solar at night
             if validated.get("system_production", 0) > 0.1:
@@ -812,8 +794,7 @@ class EnergyManager:
                     validated.get("grid_to_battery", 0),
                     validated.get("battery_charge", 0),
                 )
-                validated["grid_to_battery"] = validated.get(
-                    "battery_charge", 0)
+                validated["grid_to_battery"] = validated.get("battery_charge", 0)
                 validated["solar_to_battery"] = 0.0
 
         # 2. Physical constraints for all hours
@@ -840,8 +821,7 @@ class EnergyManager:
                 validated.get("solar_to_battery", 0),
                 validated.get("system_production", 0),
             )
-            validated["solar_to_battery"] = validated.get(
-                "system_production", 0)
+            validated["solar_to_battery"] = validated.get("system_production", 0)
 
         # 3. Check for suspicious simultaneous charge/discharge
         if (
@@ -933,10 +913,8 @@ class EnergyManager:
             import_hour_1 = validated_flows.get("import_from_grid", 0.0)
             load_hour_1 = validated_flows.get("load_consumption", 0.0)
             battery_charge_hour_1 = validated_flows.get("battery_charge", 0.0)
-            grid_to_battery_hour_1 = validated_flows.get(
-                "grid_to_battery", 0.0)
-            solar_to_battery_hour_1 = validated_flows.get(
-                "solar_to_battery", 0.0)
+            grid_to_battery_hour_1 = validated_flows.get("grid_to_battery", 0.0)
+            solar_to_battery_hour_1 = validated_flows.get("solar_to_battery", 0.0)
 
             # Check for reasonable values before using
             if import_hour_1 > 10.0 or load_hour_1 > 10.0:
@@ -948,10 +926,8 @@ class EnergyManager:
                 return
 
             # Use actual hour 1 values to set reasonable hour 0 values
-            self._import_from_grid[0] = import_hour_1 * \
-                0.9  # Slightly less than hour 1
-            self._load_consumption[0] = load_hour_1 * \
-                0.9  # Slightly less than hour 1
+            self._import_from_grid[0] = import_hour_1 * 0.9  # Slightly less than hour 1
+            self._load_consumption[0] = load_hour_1 * 0.9  # Slightly less than hour 1
             self._battery_charge[0] = (
                 battery_charge_hour_1 * 0.8
             )  # Somewhat less than hour 1
@@ -991,8 +967,7 @@ class EnergyManager:
                     self._consumption_predictions = consumption_predictions
                     _LOGGER.info(
                         "Fetched consumption predictions: %s",
-                        [round(value, 1)
-                         for value in self._consumption_predictions],
+                        [round(value, 1) for value in self._consumption_predictions],
                     )
                 else:
                     _LOGGER.warning(
@@ -1064,8 +1039,7 @@ class EnergyManager:
         previous_hour = hour - 1
         if previous_hour < 0:
             # For hour 0, we need the previous day's data
-            _LOGGER.warning(
-                "Previous hour would be from yesterday, using estimates")
+            _LOGGER.warning("Previous hour would be from yesterday, using estimates")
             return self._get_initial_baseline_readings()
 
         # Try to get readings directly from InfluxDB
@@ -1073,16 +1047,13 @@ class EnergyManager:
         previous_time = datetime.combine(today, time(hour=previous_hour))
 
         try:
-            _LOGGER.debug(
-                "Fetching previous hour readings for hour %d", previous_hour)
-            historical_data = get_sensor_data(
-                self.energy_sensors, previous_time)
+            _LOGGER.debug("Fetching previous hour readings for hour %d", previous_hour)
+            historical_data = get_sensor_data(self.energy_sensors, previous_time)
 
             if historical_data and historical_data.get("status") == "success":
                 previous_readings = historical_data.get("data", {})
                 if previous_readings:
-                    _LOGGER.debug(
-                        "Found previous hour data for hour %d", previous_hour)
+                    _LOGGER.debug("Found previous hour data for hour %d", previous_hour)
                     # Check if SOC is available
                     if "rkm0d7n04x_statement_of_charge_soc" in previous_readings:
                         _LOGGER.debug(
@@ -1093,14 +1064,12 @@ class EnergyManager:
                     return previous_readings
                 _LOGGER.warning("No data found for hour %d", previous_hour)
             else:
-                _LOGGER.warning(
-                    "Failed to get data for hour %d", previous_hour)
+                _LOGGER.warning("Failed to get data for hour %d", previous_hour)
         except (ValueError, KeyError) as e:
             _LOGGER.error("Error getting previous hour readings: %s", e)
 
         # If we couldn't get data for previous hour, use initial baseline
-        _LOGGER.warning(
-            "Falling back to baseline values for hour %d", previous_hour)
+        _LOGGER.warning("Falling back to baseline values for hour %d", previous_hour)
         return self._get_initial_baseline_readings()
 
     def _get_current_readings(self):
@@ -1155,8 +1124,7 @@ class EnergyManager:
             try:
                 current_soc = self._ha_controller.get_battery_soc()
                 readings["rkm0d7n04x_statement_of_charge_soc"] = current_soc
-                _LOGGER.debug(
-                    "Using current SOC for baseline: %.1f%%", current_soc)
+                _LOGGER.debug("Using current SOC for baseline: %.1f%%", current_soc)
             except (AttributeError, ValueError):
                 # Use a reasonable default
                 readings["rkm0d7n04x_statement_of_charge_soc"] = self.min_soc + 20.0
@@ -1191,8 +1159,7 @@ class EnergyManager:
         # Store battery SOC/SOE if available in readings
         if readings and "rkm0d7n04x_statement_of_charge_soc" in readings:
             # Use sensor reading directly
-            measured_soc = float(
-                readings["rkm0d7n04x_statement_of_charge_soc"])
+            measured_soc = float(readings["rkm0d7n04x_statement_of_charge_soc"])
             # Validate SOC value
             if not 0 <= measured_soc <= 100:
                 _LOGGER.warning(
@@ -1348,8 +1315,7 @@ class EnergyManager:
 
         # Get hourly data from sensors
         try:
-            hourly_data, current_readings = self._fetch_hourly_sensor_data(
-                hour)
+            hourly_data, current_readings = self._fetch_hourly_sensor_data(hour)
             if not hourly_data:
                 return self._create_fallback_result(hour)
 
@@ -1490,8 +1456,7 @@ class EnergyManager:
             current_readings = hourly_data.get("data", {})
 
             # Ensure SOC is available
-            current_readings = self._ensure_soc_in_readings(
-                hour, current_readings)
+            current_readings = self._ensure_soc_in_readings(hour, current_readings)
         except (ValueError, KeyError) as e:
             _LOGGER.warning("Error fetching hourly sensor data: %s", str(e))
             return None, None
@@ -1512,11 +1477,9 @@ class EnergyManager:
                         "Using current controller SOC instead: %.1f%%", current_soc
                     )
                 except (AttributeError, ValueError) as e:
-                    _LOGGER.warning(
-                        "Failed to get SOC from controller: %s", str(e))
+                    _LOGGER.warning("Failed to get SOC from controller: %s", str(e))
         else:
-            soc_value = float(
-                current_readings["rkm0d7n04x_statement_of_charge_soc"])
+            soc_value = float(current_readings["rkm0d7n04x_statement_of_charge_soc"])
             _LOGGER.debug("Hour %d has measured SOC: %.1f%%", hour, soc_value)
 
         return current_readings
@@ -1525,8 +1488,7 @@ class EnergyManager:
         """Process the hourly sensor data and calculate energy flows."""
         try:
             # Get previous hour readings
-            previous_readings = self._get_previous_hour_readings_for_update(
-                hour)
+            previous_readings = self._get_previous_hour_readings_for_update(hour)
 
             if not current_readings or not previous_readings:
                 return None
@@ -1538,10 +1500,8 @@ class EnergyManager:
 
             # Validate and store flows
             if flows:
-                validated_flows = self._validate_hourly_flows(
-                    flows, None, hour)
-                self._store_energy_flows(
-                    hour, validated_flows, current_readings)
+                validated_flows = self._validate_hourly_flows(flows, None, hour)
+                self._store_energy_flows(hour, validated_flows, current_readings)
 
                 # Update last processed hour
                 self._last_processed_hour = hour
@@ -1555,8 +1515,7 @@ class EnergyManager:
             return self._create_soc_fallback_result(hour, current_readings)
         except (ValueError, KeyError, AttributeError) as e:
             _LOGGER.warning(
-                "Error processing hourly sensor data for hour %d: %s", hour, str(
-                    e)
+                "Error processing hourly sensor data for hour %d: %s", hour, str(e)
             )
             return None
 
@@ -1580,12 +1539,11 @@ class EnergyManager:
             energy_data["battery_soc"] = float(
                 current_readings["rkm0d7n04x_statement_of_charge_soc"]
             )
-            energy_data["battery_soe"] = self._soc_to_energy(
-                energy_data["battery_soc"])
+            energy_data["battery_soe"] = self._soc_to_energy(energy_data["battery_soc"])
 
         # Add energy flows
         for key, value in validated_flows.items():
-            energy_data[key] = value  # noqa: PERF403
+            energy_data[key] = value
 
         _LOGGER.info(
             "Hour %02d updated: Solar=%.2f, Load=%.2f, Battery Δ=%.2f kWh, SOC=%.1f%%",
@@ -1613,8 +1571,7 @@ class EnergyManager:
                     current_readings["rkm0d7n04x_statement_of_charge_soc"]
                 ),
                 "battery_soe": self._soc_to_energy(
-                    float(
-                        current_readings["rkm0d7n04x_statement_of_charge_soc"])
+                    float(current_readings["rkm0d7n04x_statement_of_charge_soc"])
                 ),
             }
         return self._create_fallback_result(hour)
@@ -1865,8 +1822,7 @@ class EnergyManager:
                     # Regular difference calculation
                     flows[flow_key] = current_value - previous_value
             except (ValueError, TypeError) as e:
-                _LOGGER.warning(
-                    "Error calculating flow for %s: %s", sensor_name, e)
+                _LOGGER.warning("Error calculating flow for %s: %s", sensor_name, e)
 
         # Calculate derived flows using the more accurate method
         return self._calculate_derived_flows(flows, hour_of_day)
@@ -2121,13 +2077,11 @@ class EnergyManager:
                     # Only apply action if SOC allows (don't charge above 100%, don't discharge below min_soc)
                     if action > 0 and running_soc < 100.0:  # Charging
                         # Don't exceed total capacity
-                        new_soe = min(self.total_capacity,
-                                      running_soe + action)
+                        new_soe = min(self.total_capacity, running_soe + action)
                         running_soe = new_soe
                     elif action < 0 and running_soc > self.min_soc:  # Discharging
                         # Don't go below reserved capacity
-                        new_soe = max(self.reserved_capacity,
-                                      running_soe + action)
+                        new_soe = max(self.reserved_capacity, running_soe + action)
                         running_soe = new_soe
 
                     # Calculate SOC from SOE
@@ -2304,7 +2258,7 @@ class EnergyManager:
         historical_hours = []
         for data in hourly_data:
             if data["is_historical"]:
-                historical_hours.append(data["hour"])  # noqa: PERF401
+                historical_hours.append(data["hour"])
 
         # Get first and last historical hours for reporting
         if historical_hours:
@@ -2328,8 +2282,7 @@ class EnergyManager:
 
             # FIXED ENERGY BALANCE CALCULATION
             # Total energy flows
-            total_energy_in = totals["import_from_grid"] + \
-                totals["system_production"]
+            total_energy_in = totals["import_from_grid"] + totals["system_production"]
 
             # Correctly account for battery in the total energy flows
             total_energy_out = (
@@ -2433,8 +2386,7 @@ class EnergyManager:
             is_historical = data.get("is_historical", False)
 
             # Use prediction indicator only for future hours or non-historical data points
-            indicator = "★" if (
-                hour >= current_hour or not is_historical) else " "
+            indicator = "★" if (hour >= current_hour or not is_historical) else " "
 
             # For values, use star only if the current row has the indicator
             value_indicator = indicator
@@ -2498,12 +2450,9 @@ class EnergyManager:
 
         # Add summary footer with exact formatting
         lines.append("\nEnergy Balance Summary:")
-        lines.append("  Period: " + period_display +
-                     "  (★ indicates predicted values)")
-        lines.append("  Total Energy In: " +
-                     str(round(total_energy_in, 2)) + " kWh")
-        lines.append("  Total Energy Out: " +
-                     str(round(total_energy_out, 2)) + " kWh")
+        lines.append("  Period: " + period_display + "  (★ indicates predicted values)")
+        lines.append("  Total Energy In: " + str(round(total_energy_in, 2)) + " kWh")
+        lines.append("  Total Energy Out: " + str(round(total_energy_out, 2)) + " kWh")
 
         balance_diff_str = str(round(balance_difference, 2))
         balance_pct_str = str(round(balance_percent, 1))
@@ -2521,16 +2470,14 @@ class EnergyManager:
 
             # Total battery charging line
             batt_charge_str = str(round(totals["battery_charge"], 2))
-            lines.append("  Total battery charging: " +
-                         batt_charge_str + " kWh")
+            lines.append("  Total battery charging: " + batt_charge_str + " kWh")
 
             # Solar to battery line
             solar_value = totals.get("solar_to_battery", 0)
             solar_value_str = str(round(solar_value, 2))
 
             if totals["battery_charge"] > 0:
-                solar_percentage = (
-                    solar_value / totals["battery_charge"]) * 100
+                solar_percentage = (solar_value / totals["battery_charge"]) * 100
             else:
                 solar_percentage = 0
             solar_percentage_str = str(round(solar_percentage, 1))
@@ -2563,8 +2510,7 @@ class EnergyManager:
 
             # Battery discharge line
             discharge_value_str = str(round(totals["battery_discharge"], 2))
-            lines.append("  Total battery discharging: " +
-                         discharge_value_str + " kWh")
+            lines.append("  Total battery discharging: " + discharge_value_str + " kWh")
 
         # Add warning if significant imbalance
         if abs(balance_percent) > 5:

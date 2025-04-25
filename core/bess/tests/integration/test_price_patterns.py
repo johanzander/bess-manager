@@ -1,7 +1,7 @@
 """Integration tests for battery optimization with various price patterns."""
 
-from datetime import date
 import logging
+from datetime import date
 
 import pytest
 
@@ -109,11 +109,11 @@ class TestBatteryOptimization:
         system.price_settings.use_actual_price = False
 
         # Explicitly set consumption predictions
-        system._energy_manager.set_consumption_predictions(test_case["consumption"])  # noqa: SLF001
+        system._energy_manager.set_consumption_predictions(test_case["consumption"])
 
         # Create a mock price source with test data
         mock_source = MockSource(price_data)
-        system._price_manager.source = mock_source  # noqa: SLF001
+        system._price_manager.source = mock_source
 
         # Format price entries directly to match what the system expects
         today = date.today()
@@ -142,15 +142,12 @@ class TestBatteryOptimization:
         logger.info("Testing case: %s", case_name)
 
         # Verify costs and savings
-        assert abs(schedule_data["summary"]
-                   ["baseCost"] - expected["base_cost"]) < 1e-2
+        assert abs(schedule_data["summary"]["baseCost"] - expected["base_cost"]) < 1e-2
         assert (
-            abs(schedule_data["summary"]["optimizedCost"] -
-                expected["optimized_cost"])
+            abs(schedule_data["summary"]["optimizedCost"] - expected["optimized_cost"])
             < 1e-2
         )
-        assert abs(schedule_data["summary"]
-                   ["savings"] - expected["savings"]) < 1e-2
+        assert abs(schedule_data["summary"]["savings"] - expected["savings"]) < 1e-2
 
         # Verify energy flows
         assert abs(total_charge - expected["charge"]) < 1e-1

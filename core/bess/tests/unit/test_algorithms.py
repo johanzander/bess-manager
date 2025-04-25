@@ -2,9 +2,9 @@
 
 import logging
 
+import pytest
 from bess.algorithms import optimize_battery
 from bess.schedule import Schedule
-import pytest
 
 logger = logging.getLogger(__name__)
 

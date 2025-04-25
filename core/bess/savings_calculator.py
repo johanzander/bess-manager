@@ -163,12 +163,12 @@ class SavingsCalculator:
 
     def calculate_summary(self, hourly_results: list[HourlyResult]) -> dict:
         """Calculate summary metrics from hourly results."""
-        total_base_cost = 0
-        total_grid_cost = 0
-        total_battery_cost = 0
-        total_savings = 0
-        total_charged = 0
-        total_discharged = 0
+        total_base_cost: float = 0
+        total_grid_cost: float = 0
+        total_battery_cost: float = 0
+        total_savings: float = 0
+        total_charged: float = 0
+        total_discharged: float = 0
 
         for r in hourly_results:
             total_base_cost += r.base_cost
@@ -194,7 +194,7 @@ class SavingsCalculator:
         """Format complete schedule data for API response."""
         hourly_data = []
         for r in hourly_results:
-            hourly_data.append(r.to_dict())  # noqa: PERF401
+            hourly_data.append(r.to_dict())
         return {
             "hourlyData": hourly_data,
             "summary": self.calculate_summary(hourly_results),

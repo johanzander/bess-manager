@@ -7,21 +7,21 @@ import { BatterySettings, ElectricitySettings } from './types';
 
 // Default settings to use when real settings are not available
 const DEFAULT_BATTERY_SETTINGS: BatterySettings = {
-  totalCapacity: 10,
-  reservedCapacity: 2,
-  estimatedConsumption: 1.5,
+  totalCapacity: 30.0,
+  reservedCapacity: 3.0, // 10% of 30.0
+  estimatedConsumption: 3.5,
   maxChargeDischarge: 6,
-  chargeCycleCost: 10,
-  chargingPowerRate: 90,
-  useActualPrice: true
+  chargeCycleCost: 0.50,
+  chargingPowerRate: 40,
+  useActualPrice: false
 };
 
 const DEFAULT_ELECTRICITY_SETTINGS: ElectricitySettings = {
-  markupRate: 0.05,
+  markupRate: 0.08,
   vatMultiplier: 1.25,
-  additionalCosts: 0.45,
-  taxReduction: 0.1,
-  area: 'SE3'
+  additionalCosts: 1.03,
+  taxReduction: 0.6518,
+  area: 'SE4'
 };
 
 // An ErrorBoundary component to catch rendering errors

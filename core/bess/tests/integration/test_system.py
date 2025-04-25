@@ -3,7 +3,6 @@
 import logging
 
 import pytest
-
 from bess import BatterySystemManager
 from bess.price_manager import MockSource
 

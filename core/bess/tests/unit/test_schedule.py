@@ -9,13 +9,14 @@ def test_schedule_creation():
         state_of_energy=[3.0, 4.0, 4.0, 3.0],
         prices=[0.5, 1.0, 2.0],
         cycle_cost=0.1,
-        hourly_consumption=[1.0, 1.0, 1.0]
+        hourly_consumption=[1.0, 1.0, 1.0],
     )
 
     # Test basic structure
     assert len(schedule.actions) == 3
     assert len(schedule.state_of_energy) == 4
-    assert hasattr(schedule, 'optimization_results')
+    assert hasattr(schedule, "optimization_results")
+
 
 def test_schedule_intervals():
     """Test schedule interval creation."""
@@ -25,7 +26,7 @@ def test_schedule_intervals():
         state_of_energy=[3.0, 4.0, 4.0, 3.0],
         prices=[0.5, 1.0, 2.0],
         cycle_cost=0.1,
-        hourly_consumption=[1.0, 1.0, 1.0]
+        hourly_consumption=[1.0, 1.0, 1.0],
     )
 
     # Check intervals
@@ -33,6 +34,7 @@ def test_schedule_intervals():
     assert schedule.intervals[0]["state"] == "charging"
     assert schedule.intervals[1]["state"] == "standby"
     assert schedule.intervals[2]["state"] == "discharging"
+
 
 def test_get_hour_settings():
     """Test get_hour_settings functionality."""
@@ -42,7 +44,7 @@ def test_get_hour_settings():
         state_of_energy=[3.0, 4.0, 4.0, 3.0],
         prices=[0.5, 1.0, 2.0],
         cycle_cost=0.1,
-        hourly_consumption=[1.0, 1.0, 1.0]
+        hourly_consumption=[1.0, 1.0, 1.0],
     )
 
     # Test hour settings

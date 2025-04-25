@@ -4,23 +4,14 @@ The module includes functionality to parse responses, handle timezones, and proc
 This module is designed to run within either the Pyscript environment or a standard Python environment.
 """
 
-from datetime import datetime
 import logging
 import os
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import requests
 
 _LOGGER = logging.getLogger(__name__)
-
-
-def run_requests_executor(func, *args, **kwargs):
-    """Run HTTP request with proper environment handling.
-    
-    Uses task.executor in pyscript environment, or runs directly in standard Python.
-    """
-    # Run directly in standard Python environment
-    return func(*args, **kwargs)
 
 
 def get_influxdb_config():
@@ -30,14 +21,10 @@ def get_influxdb_config():
     ha_db_user = os.environ.get("HA_DB_USER_NAME", "")
     ha_db_pass = os.environ.get("HA_DB_PASSWORD", "")
 
-    return {
-        "url": ha_db_url,
-        "username": ha_db_user, 
-        "password": ha_db_pass
-    }
+    return {"url": ha_db_url, "username": ha_db_user, "password": ha_db_pass}
 
 
-def get_sensor_data(sensors_list, end_time=None):
+def get_sensor_data(sensors_list, end_time=None) -> dict:
     """Get sensor data for each hour of today with incremental values for cumulative sensors."""
     # Set up timezone
     local_tz = ZoneInfo("Europe/Stockholm")
@@ -50,7 +37,7 @@ def get_sensor_data(sensors_list, end_time=None):
 
     # Get configuration
     influxdb_config = get_influxdb_config()
-    
+
     url = influxdb_config.get("url", "")
     username = influxdb_config.get("username", "")
     password = influxdb_config.get("password", "")
@@ -101,20 +88,23 @@ def get_sensor_data(sensors_list, end_time=None):
 
         if response.status_code != 200:
             _LOGGER.error("Error from InfluxDB: %s", response.status_code)
-            return {"status": "error", "message": f"InfluxDB error: {response.status_code}"}
+            return {
+                "status": "error",
+                "message": f"InfluxDB error: {response.status_code}",
+            }
 
         sensor_readings = parse_influxdb_response(response.text)
         return {"status": "success", "data": sensor_readings}
-    
+
     except requests.RequestException as e:
         _LOGGER.error("Error connecting to InfluxDB: %s", str(e))
-        return {"status": "error", "message": f"Connection error: {str(e)}"}
+        return {"status": "error", "message": f"Connection error: {e!s}"}
     except Exception as e:
         _LOGGER.error("Unexpected error: %s", str(e))
-        return {"status": "error", "message": f"Unexpected error: {str(e)}"}
+        return {"status": "error", "message": f"Unexpected error: {e!s}"}
 
 
-def parse_influxdb_response(response_text):
+def parse_influxdb_response(response_text) -> dict:
     """Parse InfluxDB response to extract the latest measurement for each sensor."""
     readings = {}
     lines = response_text.strip().split("\n")

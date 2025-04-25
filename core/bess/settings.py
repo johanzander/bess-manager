@@ -47,7 +47,7 @@ class PriceSettings:
         self.min_profit = MIN_PROFIT
         self.use_actual_price = USE_ACTUAL_PRICE
 
-    def asdict(self):
+    def asdict(self) -> dict:
         """Convert to dictionary for API."""
         return {
             "area": self.area,
@@ -58,7 +58,7 @@ class PriceSettings:
             "useActualPrice": self.use_actual_price,
         }
 
-    def update(self, **kwargs) -> None:
+    def update(self, **kwargs: dict) -> None:
         """Update settings from dict."""
         conversions = {
             "markupRate": "markup_rate",
@@ -88,7 +88,7 @@ class BatterySettings:
         self.reserved_capacity = BATTERY_STORAGE_SIZE_KWH * self.min_soc / 100
         self.cycle_cost = BATTERY_CHARGE_CYCLE_COST_SEK
 
-    def asdict(self):
+    def asdict(self) -> dict:
         """Convert to dictionary for API."""
         return {
             "totalCapacity": self.total_capacity,
@@ -98,10 +98,10 @@ class BatterySettings:
             "maxChargeDischarge": self.max_charge_power_kw,
             "chargeCycleCost": self.cycle_cost,
             "chargingPowerRate": self.charging_power_rate,
-            "estimatedConsumption": 25.0 # FIXME
+            "estimatedConsumption": 25.0,  # FIXME
         }
 
-    def update(self, **kwargs):
+    def update(self, **kwargs: dict) -> None:
         """Update settings from dict."""
         conversions = {
             "totalCapacity": "total_capacity",
@@ -126,14 +126,15 @@ class ConsumptionSettings:
         self.default_hourly = HOME_HOURLY_CONSUMPTION_KWH
         self.min_valid = MIN_CONSUMPTION
 
-    def asdict(self):
+    def asdict(self) -> dict:
         """Convert to dictionary for API."""
         return {
-            "defaultHourly": self.default_hourly, 
+            "defaultHourly": self.default_hourly,
             "minValid": self.min_valid,
-            "estimatedConsumption": self.default_hourly}
+            "estimatedConsumption": self.default_hourly,
+        }
 
-    def update(self, **kwargs):
+    def update(self, **kwargs: dict) -> None:
         """Update settings from dict."""
         conversions = {"defaultHourly": "default_hourly", "minValid": "min_valid"}
 
@@ -152,7 +153,7 @@ class HomeSettings:
         self.voltage = HOUSE_VOLTAGE_V
         self.safety_margin = SAFETY_MARGIN_FACTOR
 
-    def asdict(self):
+    def asdict(self) -> dict:
         """Convert to dictionary for API."""
         return {
             "maxFuseCurrent": self.max_fuse_current,
@@ -160,7 +161,7 @@ class HomeSettings:
             "safetyMargin": self.safety_margin,
         }
 
-    def update(self, **kwargs):
+    def update(self, **kwargs: dict) -> None:
         """Update settings from dict."""
         conversions = {
             "maxFuseCurrent": "max_fuse_current",

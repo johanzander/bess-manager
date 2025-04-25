@@ -1,5 +1,6 @@
 import logging
 import sys
+
 from loguru import logger
 
 # Remove default handler
@@ -10,7 +11,7 @@ logger.add(
     sys.stderr,
     format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <5}</level> | <cyan>{name}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
     level="INFO",
-    colorize=True 
+    colorize=True,
 )
 
 # Add file logging if needed
@@ -19,8 +20,9 @@ logger.add(
     rotation="10 MB",  # Rotate when file reaches 10 MB
     retention="7 days",  # Keep logs for 7 days
     compression="zip",  # Compress rotated logs
-    level="DEBUG"
+    level="DEBUG",
 )
+
 
 # Intercept standard logging
 class InterceptHandler(logging.Handler):
@@ -40,6 +42,7 @@ class InterceptHandler(logging.Handler):
         logger.opt(depth=depth, exception=record.exc_info).log(
             level, record.getMessage()
         )
+
 
 # Configure standard logging to use Loguru
 logging.basicConfig(handlers=[InterceptHandler()], level=0, force=True)

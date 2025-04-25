@@ -330,7 +330,7 @@ class GrowattScheduleManager:
                     )
 
             # Now process each consecutive period, checking for overlaps with existing intervals
-            for i, period in enumerate(consecutive_periods):
+            for _, period in enumerate(consecutive_periods):
                 if not period:
                     continue
 
@@ -734,7 +734,7 @@ class GrowattScheduleManager:
             row = (
                 f"║ {period_display:12} ║"
                 f" {batt_mode:14} ║"
-                f" {str(grid_charge):11} ║"
+                f" {grid_charge!s:11} ║"
                 f" {discharge_rate:13} ║"
                 f" {action:10} ║"
             )
@@ -787,16 +787,16 @@ class GrowattScheduleManager:
             "{batt_mode:>" + str(col_widths["mode"]) + "} "
             "{enabled!s:>" + str(col_widths["enabled"]) + "}"
         )
-        
+
         formatted_settings = []
         for setting in daily_settings:
             # Create a copy with None values replaced with empty strings
             safe_setting = {}
             for key, value in setting.items():
                 safe_setting[key] = "" if value is None else value
-            
+
             formatted_settings.append(setting_format.format(**safe_setting))
-        
+
         if header:
             lines.insert(0, "\n" + header)
         lines.extend(formatted_settings)

@@ -3,14 +3,14 @@
 import logging
 
 import pytest
-
-from bess import BatterySystemManager
+from bess.battery_system import BatterySystemManager
+from bess.ha_api_controller import HomeAssistantAPIController
 from bess.price_manager import MockSource
 
 logger = logging.getLogger(__name__)
 
 
-def test_solar_charging_adaptation(mock_controller):
+def test_solar_charging_adaptation(mock_controller: HomeAssistantAPIController) -> None:
     """Test that system detects and adapts to unexpected solar charging."""
 
     # First, ensure the mock controller has required methods
@@ -49,14 +49,14 @@ def test_solar_charging_adaptation(mock_controller):
     system._energy_manager._battery_charge[hour_to_test] = 2.5
 
     # Define a has_hour_data function
-    def has_hour_data_override(hour):
+    def has_hour_data_override(hour: int) -> bool:
         return hour == hour_to_test
 
     # Apply the override
     system._energy_manager.has_hour_data = has_hour_data_override
 
     # Define a get_energy_data function
-    def get_energy_data_override(hour):
+    def get_energy_data_override(hour: int) -> dict | None:
         if hour == hour_to_test:
             return {
                 "battery_soc": 55.0,
@@ -90,7 +90,9 @@ def test_solar_charging_adaptation(mock_controller):
         pytest.skip(f"Current implementation not compatible: {e!s}")
 
 
-def test_virtual_stored_energy_current_behavior(mock_controller):
+def test_virtual_stored_energy_current_behavior(
+    mock_controller: HomeAssistantAPIController,
+) -> None:
     """Test that verifies the current behavior of virtual stored energy optimization.
 
     This test reproduces the scenario from the logs where:
@@ -102,16 +104,58 @@ def test_virtual_stored_energy_current_behavior(mock_controller):
     """
     # Price data from the log - notice hour 6 has price 1.200
     prices = [
-        0.720, 0.704, 0.704, 0.720, 0.728, 0.768, 1.200,
-        1.640, 1.352, 0.736, 0.512, 0.000, -0.024, -0.024,
-        -0.016, -0.016, 0.000, 0.368, 0.736, 1.224, 0.864,
-        0.768, 0.744, 0.720
+        0.720,
+        0.704,
+        0.704,
+        0.720,
+        0.728,
+        0.768,
+        1.200,
+        1.640,
+        1.352,
+        0.736,
+        0.512,
+        0.000,
+        -0.024,
+        -0.024,
+        -0.016,
+        -0.016,
+        0.000,
+        0.368,
+        0.736,
+        1.224,
+        0.864,
+        0.768,
+        0.744,
+        0.720,
     ]
 
     # Solar data from the log
     solar_predictions = [
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.8, 2.3, 3.7, 4.8, 5.5,
-        5.8, 5.8, 5.3, 4.4, 3.3, 1.9, 0.9, 0.1, 0.0, 0.0, 0.0, 0.0
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.8,
+        2.3,
+        3.7,
+        4.8,
+        5.5,
+        5.8,
+        5.8,
+        5.3,
+        4.4,
+        3.3,
+        1.9,
+        0.9,
+        0.1,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
     ]
 
     # Create system with the controller
@@ -139,8 +183,7 @@ def test_virtual_stored_energy_current_behavior(mock_controller):
 
     # Log initial SOC and energy
     initial_soc = mock_controller.get_battery_soc()
-    initial_soe = (initial_soc / 100.0) * \
-        system.battery_settings.total_capacity
+    initial_soe = (initial_soc / 100.0) * system.battery_settings.total_capacity
     logger.info(f"Initial SOC: {initial_soc}%, SOE: {initial_soe} kWh")
 
     # Create schedule (using hour 0)
@@ -157,15 +200,17 @@ def test_virtual_stored_energy_current_behavior(mock_controller):
     logger.info(f"Hour 6 (price 1.200) action: {actions[6]}")
 
     # Document discharge hours
-    discharge_hours = [(hour, -actions[hour], prices[hour])
-                       for hour in range(24) if actions[hour] < 0]
+    discharge_hours = [
+        (hour, -actions[hour], prices[hour]) for hour in range(24) if actions[hour] < 0
+    ]
     logger.info("Current discharge pattern:")
     for hour, amount, price in discharge_hours:
         logger.info(f"  Hour {hour}: {amount:.2f} kWh (price: {price:.3f})")
 
     # Document charging hours
-    charge_hours = [(hour, actions[hour], prices[hour])
-                    for hour in range(24) if actions[hour] > 0]
+    charge_hours = [
+        (hour, actions[hour], prices[hour]) for hour in range(24) if actions[hour] > 0
+    ]
     logger.info("Current charging pattern:")
     for hour, amount, price in charge_hours:
         logger.info(f"  Hour {hour}: {amount:.2f} kWh (price: {price:.3f})")
@@ -177,28 +222,31 @@ def test_virtual_stored_energy_current_behavior(mock_controller):
     logger.info(f"Total charging: {total_charging:.2f} kWh")
     logger.info(f"Total discharge: {total_discharge:.2f} kWh")
     logger.info(
-        f"Savings: {schedule.get_schedule_data()['summary']['savings']:.2f} SEK")
+        f"Savings: {schedule.get_schedule_data()['summary']['savings']:.2f} SEK"
+    )
 
     # Expected results based on current algorithm behavior
     expected_total_discharge = 34.6  # From log
-    expected_total_charging = 6.0    # From log
-    expected_savings = 22.63         # From log
+    expected_total_charging = 6.0  # From log
+    expected_savings = 22.63  # From log
 
     # Assert current behavior
-    assert abs(total_discharge - expected_total_discharge) < 1.0, (
-        f"Expected total discharge around {expected_total_discharge} kWh, got {total_discharge} kWh"
-    )
+    assert (
+        abs(total_discharge - expected_total_discharge) < 1.0
+    ), f"Expected total discharge around {expected_total_discharge} kWh, got {total_discharge} kWh"
 
-    assert abs(total_charging - expected_total_charging) < 1.0, (
-        f"Expected total charging around {expected_total_charging} kWh, got {total_charging} kWh"
-    )
+    assert (
+        abs(total_charging - expected_total_charging) < 1.0
+    ), f"Expected total charging around {expected_total_charging} kWh, got {total_charging} kWh"
 
-    assert abs(schedule.get_schedule_data()['summary']['savings'] - expected_savings) < 1.0, (
-        f"Expected savings around {expected_savings} SEK, got {schedule.get_schedule_data()['summary']['savings']} SEK"
-    )
+    assert (
+        abs(schedule.get_schedule_data()["summary"]["savings"] - expected_savings) < 1.0
+    ), f"Expected savings around {expected_savings} SEK, got {schedule.get_schedule_data()['summary']['savings']} SEK"
 
 
-def test_current_algorithm_with_solar(mock_controller):
+def test_current_algorithm_with_solar(
+    mock_controller: HomeAssistantAPIController,
+) -> None:
     """Test the current algorithm's behavior with solar predictions.
 
     This test documents how the current algorithm handles a scenario with:
@@ -210,16 +258,58 @@ def test_current_algorithm_with_solar(mock_controller):
     """
     # Use the same prices from the log
     prices = [
-        0.720, 0.704, 0.704, 0.720, 0.728, 0.768, 1.200,
-        1.640, 1.352, 0.736, 0.512, 0.000, -0.024, -0.024,
-        -0.016, -0.016, 0.000, 0.368, 0.736, 1.224, 0.864,
-        0.768, 0.744, 0.720
+        0.720,
+        0.704,
+        0.704,
+        0.720,
+        0.728,
+        0.768,
+        1.200,
+        1.640,
+        1.352,
+        0.736,
+        0.512,
+        0.000,
+        -0.024,
+        -0.024,
+        -0.016,
+        -0.016,
+        0.000,
+        0.368,
+        0.736,
+        1.224,
+        0.864,
+        0.768,
+        0.744,
+        0.720,
     ]
 
     # Solar data from the log
     solar_predictions = [
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.8, 2.3, 3.7, 4.8, 5.5,
-        5.8, 5.8, 5.3, 4.4, 3.3, 1.9, 0.9, 0.1, 0.0, 0.0, 0.0, 0.0
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.8,
+        2.3,
+        3.7,
+        4.8,
+        5.5,
+        5.8,
+        5.8,
+        5.3,
+        4.4,
+        3.3,
+        1.9,
+        0.9,
+        0.1,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
     ]
 
     # Create system with the controller
@@ -266,15 +356,17 @@ def test_current_algorithm_with_solar(mock_controller):
     logger.info(f"Total discharge: {total_discharge:.2f} kWh")
 
     # Log discharge pattern
-    discharge_hours = [(hour, -actions[hour], prices[hour])
-                       for hour in range(24) if actions[hour] < 0]
+    discharge_hours = [
+        (hour, -actions[hour], prices[hour]) for hour in range(24) if actions[hour] < 0
+    ]
     logger.info("Current discharge pattern:")
     for hour, amount, price in discharge_hours:
         logger.info(f"  Hour {hour}: {amount:.2f} kWh (price: {price:.3f})")
 
     # Log charging pattern
-    charge_hours = [(hour, actions[hour], prices[hour])
-                    for hour in range(24) if actions[hour] > 0]
+    charge_hours = [
+        (hour, actions[hour], prices[hour]) for hour in range(24) if actions[hour] > 0
+    ]
     logger.info("Current charging pattern:")
     for hour, amount, price in charge_hours:
         logger.info(f"  Hour {hour}: {amount:.2f} kWh (price: {price:.3f})")
@@ -283,32 +375,34 @@ def test_current_algorithm_with_solar(mock_controller):
     if hasattr(schedule, "solar_charged"):
         logger.info("Schedule includes solar_charged attribute:")
         total_solar_in_schedule = sum(schedule.solar_charged)
-        logger.info(
-            f"Total solar in schedule: {total_solar_in_schedule:.2f} kWh")
+        logger.info(f"Total solar in schedule: {total_solar_in_schedule:.2f} kWh")
 
-        solar_hours = [(hour, schedule.solar_charged[hour])
-                       for hour in range(24) if schedule.solar_charged[hour] > 0]
+        solar_hours = [
+            (hour, schedule.solar_charged[hour])
+            for hour in range(24)
+            if schedule.solar_charged[hour] > 0
+        ]
         for hour, amount in solar_hours:
             logger.info(f"  Hour {hour}: {amount:.2f} kWh solar charged")
 
     # Document savings
-    savings = schedule.get_schedule_data()['summary']['savings']
+    savings = schedule.get_schedule_data()["summary"]["savings"]
     logger.info(f"Total savings: {savings:.2f} SEK")
 
     # Verify values match expected (from log)
     expected_total_discharge = 34.6  # From log
-    expected_total_charging = 6.0    # From log
-    expected_savings = 22.63         # From log
+    expected_total_charging = 6.0  # From log
+    expected_savings = 22.63  # From log
 
     # Assert current behavior
-    assert abs(total_discharge - expected_total_discharge) < 1.0, (
-        f"Expected total discharge around {expected_total_discharge} kWh, got {total_discharge} kWh"
-    )
+    assert (
+        abs(total_discharge - expected_total_discharge) < 1.0
+    ), f"Expected total discharge around {expected_total_discharge} kWh, got {total_discharge} kWh"
 
-    assert abs(total_charging - expected_total_charging) < 1.0, (
-        f"Expected total charging around {expected_total_charging} kWh, got {total_charging} kWh"
-    )
+    assert (
+        abs(total_charging - expected_total_charging) < 1.0
+    ), f"Expected total charging around {expected_total_charging} kWh, got {total_charging} kWh"
 
-    assert abs(savings - expected_savings) < 1.0, (
-        f"Expected savings around {expected_savings} SEK, got {savings} SEK"
-    )
+    assert (
+        abs(savings - expected_savings) < 1.0
+    ), f"Expected savings around {expected_savings} SEK, got {savings} SEK"

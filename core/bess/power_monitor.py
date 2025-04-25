@@ -21,6 +21,7 @@ This module is designed to work with the Home Assistant controller and to be run
 
 import logging
 
+from .ha_api_controller import HomeAssistantAPIController
 from .settings import (
     BATTERY_MAX_CHARGE_DISCHARGE_POWER_KW,
     BatterySettings,
@@ -30,12 +31,13 @@ from .settings import (
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
+
 class HomePowerMonitor:
     """Monitors home power consumption and manages battery charging."""
 
     def __init__(
         self,
-        ha_controller,
+        ha_controller: HomeAssistantAPIController,
         home_settings: HomeSettings | None = None,
         battery_settings: BatterySettings | None = None,
         step_size: int = 5,
@@ -80,7 +82,7 @@ class HomePowerMonitor:
             )
         )
 
-    def get_current_phase_loads_w(self):
+    def get_current_phase_loads_w(self) -> tuple[float, float, float]:
         """Get current load on each phase in watts."""
         l1_current = self.controller.get_l1_current()
         l2_current = self.controller.get_l2_current()
@@ -92,7 +94,7 @@ class HomePowerMonitor:
             l3_current * self.home_settings.voltage,
         )
 
-    def calculate_available_charging_power(self):
+    def calculate_available_charging_power(self) -> float:
         """Calculate safe battery charging power based on most loaded phase."""
         # Get current loads in watts
         l1, l2, l3 = self.get_current_phase_loads_w()
@@ -136,7 +138,7 @@ class HomePowerMonitor:
 
         return max(0, charging_power_pct)
 
-    def adjust_battery_charging(self):
+    def adjust_battery_charging(self) -> None:
         """Adjust battery charging power based on available capacity."""
         if not self.controller.grid_charge_enabled():
             return

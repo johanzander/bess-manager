@@ -9,7 +9,6 @@ interface BatteryScheduleTableProps {
 
 export const BatteryScheduleTable: React.FC<BatteryScheduleTableProps> = ({
   hourlyData,
-  settings,
   summary,
 }) => {
   return (
@@ -44,6 +43,9 @@ export const BatteryScheduleTable: React.FC<BatteryScheduleTableProps> = ({
               SOE (kWh)
             </th>
             <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border bg-green-50">
+              Solar Charged (kWh)
+            </th>
+            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border bg-green-50">
               Charge (kWh)
             </th>
             <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border bg-green-50">
@@ -71,14 +73,23 @@ export const BatteryScheduleTable: React.FC<BatteryScheduleTableProps> = ({
                 {hour.price.toFixed(2)}
               </td>
               <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border">
-                {settings.estimatedConsumption.toFixed(1)}
+                {hour.consumption.toFixed(1)}
               </td>
               <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border">
-                {(hour.price * settings.estimatedConsumption).toFixed(2)}
+                {(hour.price * hour.consumption).toFixed(2)}
               </td>
               {/* Optimized Case Data */}
               <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border">
                 {hour.batteryLevel.toFixed(1)}
+              </td>
+              <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border">
+                <span className={`px-2 inline-flex text-sm leading-5 font-semibold rounded-full ${
+                  hour.solarCharged > 0
+                    ? 'bg-green-100 text-green-800'
+                    : 'bg-gray-100 text-gray-800'
+                }`}>
+                  {hour.solarCharged.toFixed(1)}
+                </span>
               </td>
               <td className="px-3 py-2 whitespace-nowrap border">
                 <span className={`px-2 inline-flex text-sm leading-5 font-semibold rounded-full ${
@@ -113,12 +124,15 @@ export const BatteryScheduleTable: React.FC<BatteryScheduleTableProps> = ({
             <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border">
             </td>
             <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border">
-              {(24 * settings.estimatedConsumption).toFixed(1)}
+              {hourlyData.reduce((sum, h) => sum + h.consumption, 0).toFixed(1)}
             </td>
             <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border">
               {summary.baseCost.toFixed(2)}
             </td>
             <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border">
+            </td>
+            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border">
+              {hourlyData.reduce((sum, h) => sum + h.solarCharged, 0).toFixed(1)}
             </td>
             <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border">
               C: {hourlyData.reduce((sum, h) => sum + (h.action > 0 ? h.action : 0), 0).toFixed(1)}

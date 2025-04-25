@@ -4,15 +4,13 @@ This controller provides the same interface as HomeAssistantController
 but uses the REST API instead of direct pyscript access.
 """
 
-import json
 import logging
 import time
-import sys
 
 import requests
 
 logger = logging.getLogger(__name__)
-#logger.setLevel(logging.DEBUG)
+# logger.setLevel(logging.DEBUG)
 
 
 def run_request(http_method, *args, **kwargs):
@@ -36,12 +34,11 @@ def run_request(http_method, *args, **kwargs):
         logger.error("Error during HTTP request: %s", str(e))
         raise
 
+
 class HomeAssistantAPIController:
     """A class for interacting with Inverter controls via Home Assistant REST API."""
 
-    def __init__(
-        self, base_url="", token=None, sensor_config=None
-    ) -> None:
+    def __init__(self, base_url="", token=None, sensor_config=None) -> None:
         """Initialize the Controller with Home Assistant API access.
 
         Args:
@@ -59,12 +56,14 @@ class HomeAssistantAPIController:
         self.max_attempts = 4
         self.retry_delay = 4  # seconds
         self.test_mode = False
-        
+
         # Use provided sensor configuration
         self.sensors = sensor_config or {}
-        
-        logger.info(f"Initialized HomeAssistantAPIController with {len(self.sensors)} sensor mappings")
-                    
+
+        logger.info(
+            f"Initialized HomeAssistantAPIController with {len(self.sensors)} sensor mappings"
+        )
+
     def _api_request(self, method, path, **kwargs):
         """Make an API request to Home Assistant with retry logic.
 
@@ -101,12 +100,12 @@ class HomeAssistantAPIController:
             )
             return None
 
-        url = "{}{}".format(self.base_url, path)
+        url = f"{self.base_url}{path}"
         logger.info("Making API request to %s %s", method.upper(), url)
         for attempt in range(self.max_attempts):
             try:
                 http_method = getattr(requests, method.lower())
-                
+
                 # Use the environment-aware request function
                 response = run_request(
                     http_method, url=url, headers=self.headers, timeout=30, **kwargs
@@ -196,6 +195,7 @@ class HomeAssistantAPIController:
         # Modify URL to include query parameters if needed
         if query_params:
             import urllib.parse
+
             path += "?" + urllib.parse.urlencode(query_params)
 
         # Make API call
@@ -208,7 +208,9 @@ class HomeAssistantAPIController:
             if sensor_name in self.sensors:
                 # Use the configured entity ID
                 entity_id = self.sensors[sensor_name]
-                logger.debug(f"Using configured entity ID '{entity_id}' for sensor '{sensor_name}'")
+                logger.debug(
+                    f"Using configured entity ID '{entity_id}' for sensor '{sensor_name}'"
+                )
             elif "." in sensor_name:
                 # This is already a full entity ID
                 entity_id = sensor_name
@@ -225,8 +227,9 @@ class HomeAssistantAPIController:
                 return float(response["state"])
             else:
                 logger.warning(
-                    "Sensor %s (entity_id: %s) returned invalid response or no state", 
-                    sensor_name, entity_id
+                    "Sensor %s (entity_id: %s) returned invalid response or no state",
+                    sensor_name,
+                    entity_id,
                 )
                 return 0.0
 
@@ -236,12 +239,10 @@ class HomeAssistantAPIController:
         except requests.RequestException as e:
             logger.error("Error fetching sensor %s: %s", sensor_name, str(e))
             return 0.0
-            
+
     def get_estimated_consumption(self):
         """Get estimated hourly consumption for 24 hours."""
-        avg_consumption = (
-            self.get_sensor_value("48h_avg_grid_import") / 1000
-        )
+        avg_consumption = self.get_sensor_value("48h_avg_grid_import") / 1000
         return [avg_consumption] * 24
 
     def get_solar_generation_today(self):
@@ -291,7 +292,9 @@ class HomeAssistantAPIController:
 
     def get_charge_stop_soc(self):
         """Get the charge stop state of charge (SOC)."""
-        entity_id = self.sensors.get("battery_charge_stop_soc", "number.rkm0d7n04x_charge_stop_soc")
+        entity_id = self.sensors.get(
+            "battery_charge_stop_soc", "number.rkm0d7n04x_charge_stop_soc"
+        )
         response = self._api_request("get", f"/api/states/{entity_id}")
         if response and "state" in response:
             return float(response["state"])
@@ -302,14 +305,21 @@ class HomeAssistantAPIController:
         self.service_call_with_retry(
             "number",
             "set_value",
-            entity_id=self.sensors.get("battery_charge_stop_soc", "number.rkm0d7n04x_charge_stop_soc"),
+            entity_id=self.sensors.get(
+                "battery_charge_stop_soc", "number.rkm0d7n04x_charge_stop_soc"
+            ),
             value=charge_stop_soc,
         )
 
     def get_discharge_stop_soc(self):
         """Get the discharge stop state of charge (SOC)."""
         response = self._api_request(
-            "get", "/api/states/{}".format(self.sensors.get("battery_discharge_stop_soc", "number.rkm0d7n04x_discharge_stop_soc"))
+            "get",
+            "/api/states/{}".format(
+                self.sensors.get(
+                    "battery_discharge_stop_soc", "number.rkm0d7n04x_discharge_stop_soc"
+                )
+            ),
         )
         if response and "state" in response:
             return float(response["state"])
@@ -320,14 +330,22 @@ class HomeAssistantAPIController:
         self.service_call_with_retry(
             "number",
             "set_value",
-            entity_id=self.sensors.get("battery_discharge_stop_soc", "number.rkm0d7n04x_discharge_stop_soc"),
+            entity_id=self.sensors.get(
+                "battery_discharge_stop_soc", "number.rkm0d7n04x_discharge_stop_soc"
+            ),
             value=discharge_stop_soc,
         )
 
     def get_charging_power_rate(self):
         """Get the charging power rate."""
         response = self._api_request(
-            "get", "/api/states/{}".format(self.sensors.get("battery_charging_power_rate", "number.rkm0d7n04x_charging_power_rate"))
+            "get",
+            "/api/states/{}".format(
+                self.sensors.get(
+                    "battery_charging_power_rate",
+                    "number.rkm0d7n04x_charging_power_rate",
+                )
+            ),
         )
         if response and "state" in response:
             return float(response["state"])
@@ -338,7 +356,9 @@ class HomeAssistantAPIController:
         self.service_call_with_retry(
             "number",
             "set_value",
-            entity_id=self.sensors.get("battery_charging_power_rate", "number.rkm0d7n04x_charging_power_rate"),
+            entity_id=self.sensors.get(
+                "battery_charging_power_rate", "number.rkm0d7n04x_charging_power_rate"
+            ),
             value=rate,
         )
 
@@ -346,7 +366,12 @@ class HomeAssistantAPIController:
         """Get the discharging power rate."""
         response = self._api_request(
             "get",
-            "/api/states/{}".format(self.sensors.get("battery_discharging_power_rate", "number.rkm0d7n04x_discharging_power_rate")),
+            "/api/states/{}".format(
+                self.sensors.get(
+                    "battery_discharging_power_rate",
+                    "number.rkm0d7n04x_discharging_power_rate",
+                )
+            ),
         )
         if response and "state" in response:
             return float(response["state"])
@@ -357,7 +382,10 @@ class HomeAssistantAPIController:
         self.service_call_with_retry(
             "number",
             "set_value",
-            entity_id=self.sensors.get("battery_discharging_power_rate", "number.rkm0d7n04x_discharging_power_rate"),
+            entity_id=self.sensors.get(
+                "battery_discharging_power_rate",
+                "number.rkm0d7n04x_discharging_power_rate",
+            ),
             value=rate,
         )
 
@@ -379,13 +407,20 @@ class HomeAssistantAPIController:
             logger.info("Disabling grid charge")
 
         self.service_call_with_retry(
-            "switch", service, entity_id=self.sensors.get("grid_charge", "switch.rkm0d7n04x_charge_from_grid")
+            "switch",
+            service,
+            entity_id=self.sensors.get(
+                "grid_charge", "switch.rkm0d7n04x_charge_from_grid"
+            ),
         )
 
     def grid_charge_enabled(self):
         """Return True if grid charging is enabled."""
         response = self._api_request(
-            "get", "/api/states/{}".format(self.sensors.get("grid_charge", "switch.rkm0d7n04x_charge_from_grid"))
+            "get",
+            "/api/states/{}".format(
+                self.sensors.get("grid_charge", "switch.rkm0d7n04x_charge_from_grid")
+            ),
         )
         if response and "state" in response:
             return response["state"] == "on"
@@ -435,7 +470,9 @@ class HomeAssistantAPIController:
                     return service_response["time_segments"]
 
             # If the result doesn't match expected format, log and return empty list
-            logger.warning("Unexpected response format from read_tlx_inverter_time_segments")
+            logger.warning(
+                "Unexpected response format from read_tlx_inverter_time_segments"
+            )
             return []
 
         except Exception as e:
@@ -498,7 +535,7 @@ class HomeAssistantAPIController:
         if day_offset == 1:
             entity_id = "sensor.solcast_pv_forecast_forecast_tomorrow"
 
-        response = self._api_request("get", "/api/states/{}".format(entity_id))
+        response = self._api_request("get", f"/api/states/{entity_id}")
 
         if not response or "attributes" not in response:
             logger.warning(
@@ -533,78 +570,99 @@ class HomeAssistantAPIController:
 
         return hourly_values
 
-
     def _get_nordpool_prices(self, is_tomorrow=False):
         """Get Nordpool prices from Home Assistant sensor.
-        
+
         Args:
             is_tomorrow: If True, get tomorrow's prices, otherwise today's
-        
+
         Returns:
             list: List of hourly prices or raises an exception if data is unavailable
         """
         try:
             # Determine which sensor to use
-            sensor_key = "nordpool_kwh_tomorrow" if is_tomorrow else "nordpool_kwh_today"
-            entity_id = self.sensors.get(sensor_key, "sensor.nordpool_kwh_se4_sek_2_10_025")
-            
+            sensor_key = (
+                "nordpool_kwh_tomorrow" if is_tomorrow else "nordpool_kwh_today"
+            )
+            entity_id = self.sensors.get(
+                sensor_key, "sensor.nordpool_kwh_se4_sek_2_10_025"
+            )
+
             time_label = "tomorrow" if is_tomorrow else "today"
             logger.debug(f"Fetching Nordpool prices for {time_label} from {entity_id}")
-            
+
             # Get entity state
             entity_response = self._api_request("get", f"/api/states/{entity_id}")
-            
+
             if not entity_response:
-                logger.error(f"Could not retrieve Nordpool sensor state for {time_label}")
+                logger.error(
+                    f"Could not retrieve Nordpool sensor state for {time_label}"
+                )
                 raise ValueError(f"Nordpool prices for {time_label} are unavailable")
-            
+
             # Access attributes from the response
             attributes = entity_response.get("attributes", {})
-            
+
             # Try to get raw data from attributes
             raw_data_key = "raw_tomorrow" if is_tomorrow else "raw_today"
             raw_data = attributes.get(raw_data_key)
-            
+
             if raw_data:
                 # Process raw data
                 processed_prices = [hour_data["value"] for hour_data in raw_data]
-                
+
                 # Handle DST transitions
                 if len(processed_prices) == 23:
-                    logger.info(f"Detected spring forward DST transition for {time_label} - adding extra hour")
+                    logger.info(
+                        f"Detected spring forward DST transition for {time_label} - adding extra hour"
+                    )
                     middle_idx = len(processed_prices) // 2
                     processed_prices.insert(middle_idx, processed_prices[middle_idx])
                 elif len(processed_prices) == 25:
-                    logger.info(f"Detected fall back DST transition for {time_label} - removing extra hour")
+                    logger.info(
+                        f"Detected fall back DST transition for {time_label} - removing extra hour"
+                    )
                     middle_idx = len(processed_prices) // 2
                     processed_prices.pop(middle_idx)
-                
+
                 # Final validation
                 if len(processed_prices) != 24:
-                    logger.error(f"Unexpected number of hours for {time_label}: {len(processed_prices)}")
-                    raise ValueError(f"Invalid number of hourly prices for {time_label}")
-                
-                logger.info(f"Successfully extracted {len(processed_prices)} hourly prices from {raw_data_key}")
+                    logger.error(
+                        f"Unexpected number of hours for {time_label}: {len(processed_prices)}"
+                    )
+                    raise ValueError(
+                        f"Invalid number of hourly prices for {time_label}"
+                    )
+
+                logger.info(
+                    f"Successfully extracted {len(processed_prices)} hourly prices from {raw_data_key}"
+                )
                 return processed_prices
-            
+
             # Fallback to the regular array if raw data isn't available
             regular_data_key = "tomorrow" if is_tomorrow else "today"
             regular_prices = attributes.get(regular_data_key)
-            
+
             if regular_prices:
-                logger.info(f"Using '{regular_data_key}' attribute with {len(regular_prices)} hourly prices")
+                logger.info(
+                    f"Using '{regular_data_key}' attribute with {len(regular_prices)} hourly prices"
+                )
                 return regular_prices
-            
+
             # Check if tomorrow's prices are valid (for tomorrow only)
             if is_tomorrow and attributes.get("tomorrow_valid") is False:
-                logger.error("Tomorrow's prices are not yet available (tomorrow_valid=false)")
+                logger.error(
+                    "Tomorrow's prices are not yet available (tomorrow_valid=false)"
+                )
                 raise ValueError("Tomorrow's Nordpool prices are not yet available")
-            
-            logger.error(f"Could not find price data for {time_label} in Nordpool sensor attributes")
+
+            logger.error(
+                f"Could not find price data for {time_label} in Nordpool sensor attributes"
+            )
             raise ValueError(f"Nordpool prices for {time_label} are unavailable")
-        
+
         except Exception as e:
-            logger.error(f"Error fetching Nordpool prices for {time_label}: {str(e)}")
+            logger.error(f"Error fetching Nordpool prices for {time_label}: {e!s}")
             raise
 
     def get_nordpool_prices_today(self):
@@ -645,7 +703,7 @@ class HomeAssistantAPIController:
                     entity_id = self.sensors.get(sensor, f"sensor.{sensor}")
 
                 # Get sensor state
-                response = self._api_request("get", "/api/states/{}".format(entity_id))
+                response = self._api_request("get", f"/api/states/{entity_id}")
                 if response and "state" in response:
                     try:
                         # Store the value, converting to float for numeric sensors
@@ -682,19 +740,46 @@ class HomeAssistantAPIController:
 
         """
         sensors = [
-            self.sensors.get("lifetime_battery_charged", "sensor.rkm0d7n04x_lifetime_total_all_batteries_charged"),
-            self.sensors.get("lifetime_battery_discharged", "sensor.rkm0d7n04x_lifetime_total_all_batteries_discharged"),
-            self.sensors.get("lifetime_solar_energy", "sensor.rkm0d7n04x_lifetime_total_solar_energy"),
-            self.sensors.get("lifetime_export_to_grid", "sensor.rkm0d7n04x_lifetime_total_export_to_grid"),
-            self.sensors.get("lifetime_load_consumption", "sensor.rkm0d7n04x_lifetime_total_load_consumption"),
-            self.sensors.get("lifetime_import_from_grid", "sensor.rkm0d7n04x_lifetime_total_import_from_grid"),
-            self.sensors.get("lifetime_system_production", "sensor.rkm0d7n04x_lifetime_system_production"),
-            self.sensors.get("lifetime_self_consumption", "sensor.rkm0d7n04x_lifetime_self_consumption"),
+            self.sensors.get(
+                "lifetime_battery_charged",
+                "sensor.rkm0d7n04x_lifetime_total_all_batteries_charged",
+            ),
+            self.sensors.get(
+                "lifetime_battery_discharged",
+                "sensor.rkm0d7n04x_lifetime_total_all_batteries_discharged",
+            ),
+            self.sensors.get(
+                "lifetime_solar_energy", "sensor.rkm0d7n04x_lifetime_total_solar_energy"
+            ),
+            self.sensors.get(
+                "lifetime_export_to_grid",
+                "sensor.rkm0d7n04x_lifetime_total_export_to_grid",
+            ),
+            self.sensors.get(
+                "lifetime_load_consumption",
+                "sensor.rkm0d7n04x_lifetime_total_load_consumption",
+            ),
+            self.sensors.get(
+                "lifetime_import_from_grid",
+                "sensor.rkm0d7n04x_lifetime_total_import_from_grid",
+            ),
+            self.sensors.get(
+                "lifetime_system_production",
+                "sensor.rkm0d7n04x_lifetime_system_production",
+            ),
+            self.sensors.get(
+                "lifetime_self_consumption",
+                "sensor.rkm0d7n04x_lifetime_self_consumption",
+            ),
             self.sensors.get("zap_energy_meter", "sensor.zap263668_energy_meter"),
         ]
 
         if include_soc:
-            sensors.append(self.sensors.get("battery_soc", "sensor.rkm0d7n04x_statement_of_charge_soc"))
+            sensors.append(
+                self.sensors.get(
+                    "battery_soc", "sensor.rkm0d7n04x_statement_of_charge_soc"
+                )
+            )
 
         return sensors
 

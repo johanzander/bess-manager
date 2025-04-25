@@ -66,8 +66,8 @@ Example usage #2: FastAPI backend + Nordpool API
     `schedule = system.create_schedule("2022-01-01")`
 """
 
-from datetime import datetime
 import logging
+from datetime import datetime
 
 from .algorithms import optimize_battery
 from .battery_monitor import BatteryMonitor
@@ -729,19 +729,19 @@ class BatterySystemManager:
         try:
             for i in range(optimization_hour):
                 if i < len(self._current_schedule.actions):
-                    optimization_data["combined_actions"][i] = (
-                        self._current_schedule.actions[i]
-                    )
+                    optimization_data["combined_actions"][
+                        i
+                    ] = self._current_schedule.actions[i]
                 if i < len(self._current_schedule.state_of_energy):
-                    optimization_data["combined_soe"][i] = (
-                        self._current_schedule.state_of_energy[i]
-                    )
+                    optimization_data["combined_soe"][
+                        i
+                    ] = self._current_schedule.state_of_energy[i]
                 if hasattr(self._current_schedule, "solar_charged") and i < len(
                     self._current_schedule.solar_charged
                 ):
-                    optimization_data["solar_charged"][i] = (
-                        self._current_schedule.solar_charged[i]
-                    )
+                    optimization_data["solar_charged"][
+                        i
+                    ] = self._current_schedule.solar_charged[i]
         except (IndexError, AttributeError) as e:
             logger.warning("Failed to copy historical data from schedule: %s", str(e))
             # Continue with default values already in optimization_data

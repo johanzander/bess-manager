@@ -1,8 +1,8 @@
 import logging
 
+import pytest
 from bess.growatt_schedule import GrowattScheduleManager
 from bess.schedule import Schedule
-import pytest
 
 logger = logging.getLogger(__name__)
 

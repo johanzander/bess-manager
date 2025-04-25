@@ -22,7 +22,7 @@ cd bess-manager
 
 Create a `.env` file in the root directory with the following content:
 
-```
+```bash
 # Home Assistant connection
 HA_URL=http://host.docker.internal:8123
 HA_TOKEN=your_long_lived_access_token_here
@@ -45,8 +45,9 @@ This will start a development container with the Flask app running.
 ### 4. Access the Application
 
 The application will be available at:
-- Flask API: http://localhost:8080
-- Web interface: http://localhost:8080
+
+- Flask API: <http://localhost:8080>
+- Web interface: <http://localhost:8080>
 
 ### 5. Developing with VS Code
 
@@ -90,6 +91,15 @@ curl http://localhost:8080/api/settings/battery
 # Get schedule for today
 curl http://localhost:8080/api/schedule/today
 
+```
+
+## Linting
+
+```bash
+black .
+ruff check --fix .
+mypy .
+pre-commit run --all-files
 ```
 
 ## Creating a Production Build

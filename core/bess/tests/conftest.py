@@ -3,7 +3,6 @@
 import logging
 
 import pytest
-
 from bess import BatterySystemManager
 from bess.price_manager import MockSource
 
@@ -399,12 +398,12 @@ def configured_system(mock_controller):
 
         # Explicitly set consumption predictions on the energy manager
         # This is the key fix - ensure the energy manager uses the correct consumption values
-        system._energy_manager.set_consumption_predictions(test_case["consumption"])  # noqa: SLF001
+        system._energy_manager.set_consumption_predictions(test_case["consumption"])
 
         system.price_settings.use_actual_price = False
 
         # Create a mock price source with the test data
-        system._price_manager.source = MockSource(price_data)  # noqa: SLF001
+        system._price_manager.source = MockSource(price_data)
 
         return system
 
@@ -463,11 +462,10 @@ def system_with_test_prices(
 ):
     """Provide a system configured with test prices for solar adaptation testing."""
     # Create system using the configured_system factory
-    system = configured_system(
-        test_solar_adaptation_case, test_solar_adaptation_prices)
+    system = configured_system(test_solar_adaptation_case, test_solar_adaptation_prices)
 
     # Make sure our system uses the same controller instance as the test will use
-    system._controller = mock_controller  # noqa: SLF001
+    system._controller = mock_controller
 
     # Additional specific configurations for solar tests
     system.battery_settings.total_capacity = 30.0
@@ -475,8 +473,8 @@ def system_with_test_prices(
     system.battery_settings.cycle_cost = 0.5
 
     # Ensure the energy manager knows about our settings too
-    system._energy_manager.total_capacity = 30.0  # noqa: SLF001
-    system._energy_manager.min_soc = 10.0  # noqa: SLF001
-    system._energy_manager.reserved_capacity = 3.0  # 10% of 30 kWh  # noqa: SLF001
+    system._energy_manager.total_capacity = 30.0
+    system._energy_manager.min_soc = 10.0
+    system._energy_manager.reserved_capacity = 3.0  # 10% of 30 kWh
 
     return system

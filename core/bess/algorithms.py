@@ -483,7 +483,7 @@ def _execute_trades_with_solar_priority(
     virtual_trades = []
     for t in trades:
         if t.get("is_virtual", False):
-            virtual_trades.append(t)  # noqa: PERF401
+            virtual_trades.append(t)
 
     if virtual_trades:
         virtual_energy_out = _process_virtual_trades(
@@ -508,7 +508,7 @@ def _execute_trades_with_solar_priority(
     solar_trades = []
     for t in trades:
         if t.get("is_solar", False):
-            solar_trades.append(t)  # noqa: PERF401
+            solar_trades.append(t)
 
     if solar_trades:
         solar_energy_out = _process_solar_trades(
@@ -531,7 +531,7 @@ def _execute_trades_with_solar_priority(
     grid_trades = []
     for t in trades:
         if not t.get("is_solar", False) and not t.get("is_virtual", False):
-            grid_trades.append(t)  # noqa: PERF401
+            grid_trades.append(t)
 
     if grid_trades:
         grid_energy_in, grid_energy_out = _process_grid_trades(
@@ -708,9 +708,11 @@ def _process_virtual_trades(
         max_discharge = min(
             available_virtual_energy,
             discharge_capacities[hour],
-            state_of_energy[hour] - reserved_capacity
-            if hour > 0
-            else available_virtual_energy,
+            (
+                state_of_energy[hour] - reserved_capacity
+                if hour > 0
+                else available_virtual_energy
+            ),
         )
 
         # Skip if amount is too small

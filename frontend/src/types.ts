@@ -35,6 +35,8 @@ export interface PriceData {
     batteryCost: number; 
     totalCost: number;   
     savings: number;
+    consumption: number;
+    solarCharged: number;
   }
   
   export interface ScheduleSummary {

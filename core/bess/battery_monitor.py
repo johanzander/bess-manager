@@ -4,6 +4,8 @@
 
 import logging
 
+from .growatt_schedule import GrowattScheduleManager
+from .ha_api_controller import HomeAssistantAPIController
 from .settings import BatterySettings, HomeSettings
 
 logger = logging.getLogger(__name__)
@@ -14,8 +16,8 @@ class BatteryMonitor:
 
     def __init__(
         self,
-        ha_controller,
-        schedule_manager,
+        ha_controller: HomeAssistantAPIController,
+        schedule_manager: GrowattScheduleManager,
         home_settings: HomeSettings | None = None,
         battery_settings: BatterySettings | None = None,
     ) -> None:

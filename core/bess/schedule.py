@@ -162,89 +162,38 @@ class Schedule:
         """Get all hourly intervals for the day."""
         return self.intervals
 
-    def get_schedule_data(self) -> dict:
+    def get_schedule_data(self):
         """Get complete schedule data."""
         if not self.calc or not self.hourly_results:
             raise ValueError(
                 "Schedule not fully initialized - missing cost calculations"
             )
+
+        # Get the base schedule data from the calculator
         return self.calc.format_schedule_data(self.hourly_results)
 
     def log_schedule(self) -> None:
-        """Print the current schedule data in formatted table."""
-        schedule_data = self.get_schedule_data()
-        hourly_data = schedule_data["hourlyData"]
-        summary = schedule_data["summary"]
+        """Print basic schedule information.
 
-        # Table headers with solar column
-        lines = [
-            "\nBattery Schedule:",
-            "╔════════╦═════════════════════════════╦╦══════════════════════════════════════════════════════════════════════╗",
-            "║        ║        Base Case            ║║                            Optimized Case                            ║",
-            "║  Hour  ╠═════════╦═══════╦═══════════╬╬══════╦═══════╦════════╦═════════╦═══════════╦════════════╦═══════════╣",
-            "║        ║  Price  ║ Cons. ║   Cost    ║║  SOE ║ Solar ║ Action ║ G.Cost  ║  B.Cost   ║ Tot. Cost  ║  Savings  ║",
-            "╠════════╬═════════╬═══════╬═══════════╬╬══════╬═══════╬════════╬═════════╬═══════════╬════════════╬═══════════╣",
-        ]
+        Note: For detailed reports with solar and battery comparisons,
+        use BatterySystemReporter instead.
+        """
+        try:
+            schedule_data = self.get_schedule_data()
+            summary = schedule_data["summary"]
 
-        # Format hourly data
-        total_charged = 0
-        total_discharged = 0
-        total_solar = 0
-
-        for hour_data in hourly_data:
-            action = hour_data["action"]
-            solar = hour_data.get("solarCharged", 0.0)
-            if action > 0:
-                total_charged += action
-            elif action < 0:
-                total_discharged -= action
-            total_solar += solar
-
-            row = (
-                f"║ {hour_data['hour']}  ║"
-                f" {hour_data['price']:>7.3f} ║"
-                f" {hour_data['consumption']:>5.1f} ║"
-                f" {hour_data['baseCost']:>9.2f} ║║"
-                f" {hour_data['batteryLevel']:>4.1f} ║"
-                f" {solar:>5.1f} ║"
-                f" {action:>6.1f} ║"
-                f" {hour_data['gridCost']:>7.2f} ║"
-                f" {hour_data['batteryCost']:>9.2f} ║"
-                f" {hour_data['totalCost']:>10.2f} ║"
-                f" {hour_data['savings']:>9.2f} ║"
+            logger.info(
+                "\nSchedule Summary:\n"
+                f"Base Cost: {summary['baseCost']:.2f} SEK\n"
+                f"Optimized Cost: {summary['optimizedCost']:.2f} SEK\n"
+                f"Savings: {summary['savings']:.2f} SEK\n"
+                f"Savings Percentage: {summary['savings']/summary['baseCost']*100 if summary['baseCost'] > 0 else 0:.1f}%\n"
             )
-            lines.append(row)
 
-        # Format totals
-        total_consumption = 0
-        for hour_data in hourly_data:
-            total_consumption += hour_data["consumption"]
-
-        lines.extend(
-            [
-                "╠════════╬═════════╬═══════╬═══════════╬╬══════╬═══════╬════════╬═════════╬═══════════╬════════════╬═══════════╣",
-                f"║ TOTAL  ║         ║{total_consumption:>7.1f}║{summary['baseCost']:>10.2f} ║║      ║"
-                f"S:{total_solar:>4.1f} ║"
-                f"C:{total_charged:>5.1f} ║"
-                f"{summary['gridCosts']:>8.2f} ║{summary['batteryCosts']:>10.2f} ║"
-                f"{summary['optimizedCost']:>11.2f} ║{summary['savings']:>10.2f} ║",
-                f"║        ║         ║       ║           ║║      ║       ║D:{total_discharged:>5.1f} ║         ║           ║            ║           ║",
-                "╚════════╩═════════╩═══════╩═══════════╩╩══════╩═══════╩════════╩═════════╩═══════════╩════════════╩═══════════╝",
-            ]
-        )
-
-        # Format summary
-        lines.extend(
-            [
-                "\nSummary:",
-                f"Base case cost:               {summary['baseCost']:>8.2f} SEK",
-                f"Optimized cost:               {summary['optimizedCost']:>8.2f} SEK",
-                f"Total savings:                {summary['savings']:>8.2f} SEK",
-                f"Savings percentage:           {(summary['savings']/summary['baseCost']*100):>8.1f} %",
-                f"Total energy charged:         {total_charged:>8.1f} kWh",
-                f"Total solar charging:         {total_solar:>8.1f} kWh",
-                f"Total energy discharged:      {total_discharged:>8.1f} kWh\n",
-            ]
-        )
-
-        logger.info("\n".join(lines))
+            # Add a note about the Reporter
+            logger.info(
+                "Note: For detailed comparison reports including solar-only scenarios,\n"
+                "use the BatterySystemReporter class instead.\n"
+            )
+        except Exception as e:
+            logger.error(f"Error generating basic schedule report: {e}")

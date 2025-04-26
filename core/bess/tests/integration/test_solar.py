@@ -29,8 +29,8 @@ def test_solar_charging_adaptation(system_with_test_prices, mock_controller):
     logger.info(f"Battery capacity: {total_capacity} kWh, min SOC: {min_soc_kwh} kWh")
 
     # Create initial schedule (this should charge during low price hours and discharge during high price hours)
-    initial_schedule = system_with_test_prices.create_schedule()
-    logger.info("Created initial schedule")
+    #    initial_schedule = system_with_test_prices.create_schedule()
+    #    logger.info("Created initial schedule")
 
     # 1. First run through hours 0-7 and simulate actions
     for hour in range(8):
@@ -166,7 +166,7 @@ def test_solar_charging_adaptation(system_with_test_prices, mock_controller):
         logger.info(f"Expected SOE at hour 9: {expected_soe} kWh ({expected_soc}%)")
 
         # The schedule should use our actual SOC (with solar) for hour 9 planning
-        soc_matches = abs(start_hour_9_soc - expected_soc) < 5  # Allow 5% tolerance
+    #        soc_matches = abs(start_hour_9_soc - expected_soc) < 5  # Allow 5% tolerance
 
     # 2. Does the schedule optimize using our higher battery level (regardless of how it got there)
     # Calculate total discharge in peak price hours

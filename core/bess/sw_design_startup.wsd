@@ -32,10 +32,6 @@ Schedule-->BatterySystemManager: schedule object
 BatterySystemManager->GrowattScheduleMgr: create_schedule(schedule)
 GrowattScheduleMgr-->BatterySystemManager: growatt_schedule
 
-BatterySystemManager->HAController: disable_all_TOU_settings()
-HAController->Inverter: service.call(growatt_server, update_tlx_inverter_time_segment, ...)
-Inverter-->HAController: success
-
 loop for each TOU segment
     BatterySystemManager->HAController: set_inverter_time_segment(segment)
     HAController->Inverter: service.call(growatt_server, update_tlx_inverter_time_segment, ...)

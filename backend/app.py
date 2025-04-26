@@ -101,34 +101,30 @@ class BESSController:
                 settings = {
                     "battery": {
                         "totalCapacity": options["battery"]["total_capacity"],
-                        "minSoc": options["battery"]["min_soc"],
                         "chargeCycleCost": options["battery"]["cycle_cost"],
-                        "chargingPowerRate": options["battery"]["charging_power_rate"],
-                        "reservedCapacity": options["battery"]["total_capacity"]
-                        * (options["battery"]["min_soc"] / 100),
-                        "maxChargeDischarge": 6.0,  # Add default if not in config
-                        "estimatedConsumption": options["consumption"][
-                            "default_hourly"
-                        ],  # Map this correctly
-                        "useActualPrice": options["price"]["use_actual_price"],
+                        "maxChargeDischargePower": options["battery"][
+                            "max_charge_discharge_power"
+                        ],
+                        "estimatedConsumption": options["home"]["consumption"],
                     },
-                    "consumption": {
-                        "defaultHourly": options["consumption"]["default_hourly"]
-                    },
+                    "consumption": {"defaultHourly": options["home"]["consumption"]},
                     "price": {
-                        "area": options["price"]["area"],
-                        "markupRate": options["price"]["markup_rate"],
-                        "vatMultiplier": options["price"]["vat_multiplier"],
-                        "additionalCosts": options["price"]["additional_costs"],
-                        "taxReduction": options["price"]["tax_reduction"],
-                        "useActualPrice": options["price"]["use_actual_price"],
-                        "minProfit": options["price"].get("min_profit", 0.05),
+                        "area": options["electricity_price"]["area"],
+                        "markupRate": options["electricity_price"]["markup_rate"],
+                        "vatMultiplier": options["electricity_price"]["vat_multiplier"],
+                        "additionalCosts": options["electricity_price"][
+                            "additional_costs"
+                        ],
+                        "taxReduction": options["electricity_price"]["tax_reduction"],
+                        "minProfit": options["electricity_price"].get(
+                            "min_profit", 0.05
+                        ),
                     },
                 }
+                logger.debug(f"Loaded settings: {json.dumps(settings, indent=2)}")
                 self.system.update_settings(settings)
-                logger.info("Loaded settings from configuration")
-        except Exception as e:
-            logger.error("Error loading settings: %s", str(e))
+        except Exception:
+            logger.error("Error loading settings", exc_info=True)
 
     def _load_options(self):
         """Load options from Home Assistant add-on config or environment vars."""
@@ -325,22 +321,94 @@ async def update_electricity_price_settings(settings: dict):
 async def get_battery_schedule(
     date: str = Query(None, description="Date in YYYY-MM-DD format"),
 ):
-    """Get battery schedule data for dashboard."""
-    try:
-        # First, check if a current schedule exists
-        if bess_controller.system._current_schedule is not None:
-            return bess_controller.system._current_schedule.get_schedule_data()
+    """Get battery schedule data for dashboard with enhanced reporting.
 
-        # If no current schedule, then create a new one
+    This endpoint returns the schedule data with three calculation scenarios:
+    1. Grid-Only: Base case with all consumption from grid
+    2. Solar-Only: Impact of solar without battery optimization
+    3. Solar+Battery: Full optimization with both technologies
+
+    Args:
+        date: Date to get schedule for in YYYY-MM-DD format (defaults to today)
+
+    Returns:
+        Complete schedule data with hourly breakdown and summary statistics
+    """
+    try:
         target_date = (
             datetime.strptime(date, "%Y-%m-%d").date()
             if date
             else datetime.now().date()
         )
+        logger.info(f"Generating schedule for {target_date}")
+
+        # Create the optimized schedule
         schedule = bess_controller.system.create_schedule(price_date=target_date)
-        return schedule.get_schedule_data()
+
+        # Get the enhanced schedule data with all three scenarios
+        schedule_data = schedule.get_schedule_data()
+        logger.info(f"Schedule data generated successfully for {target_date}")
+
+        return schedule_data
     except Exception as e:
-        logger.error(f"Error getting battery schedule: {e}")
+        logger.error(f"Error getting battery schedule: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.get("/api/schedule/detailed")
+async def get_detailed_schedule(
+    date: str = Query(None, description="Date in YYYY-MM-DD format"),
+):
+    """Get detailed battery schedule with energy data and enhanced reporting.
+
+    This endpoint combines:
+    1. The enhanced schedule with three scenarios (Grid-Only, Solar-Only, Solar+Battery)
+    2. Energy profile data for visualization
+
+    Args:
+        date: Date to get schedule for in YYYY-MM-DD format (defaults to today)
+
+    Returns:
+        Combined schedule and energy profile data
+    """
+    try:
+        target_date = (
+            datetime.strptime(date, "%Y-%m-%d").date()
+            if date
+            else datetime.now().date()
+        )
+
+        # Get the basic schedule with enhanced reporting
+        schedule = bess_controller.system.create_schedule(price_date=target_date)
+        schedule_data = schedule.get_schedule_data()
+
+        # Get the energy profile for additional data
+        current_hour = (
+            datetime.now().hour if target_date == datetime.now().date() else 0
+        )
+        energy_profile = (
+            bess_controller.system._energy_manager.get_full_day_energy_profile(
+                current_hour
+            )
+        )
+
+        # Add energy profile data to the response
+        result = {
+            **schedule_data,
+            "energyProfile": {
+                "consumption": energy_profile["consumption"],
+                "solar": energy_profile["solar"],
+                "battery_soc": energy_profile["battery_soc"],
+                "actualHours": energy_profile.get("actual_hours", 0),
+            },
+        }
+
+        logger.info(
+            f"Detailed schedule with energy profile generated for {target_date}"
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Error getting detailed schedule: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
@@ -435,89 +503,4 @@ async def get_energy_profile(
         return profile
     except Exception as e:
         logger.error(f"Error getting energy profile: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
-
-
-@app.get("/api/schedule/detailed")
-async def get_detailed_schedule(
-    date: str = Query(None, description="Date in YYYY-MM-DD format"),
-):
-    """Get detailed battery schedule with energy data."""
-    try:
-        target_date = (
-            datetime.strptime(date, "%Y-%m-%d").date()
-            if date
-            else datetime.now().date()
-        )
-
-        # Get the basic schedule
-        schedule = bess_controller.system.create_schedule(price_date=target_date)
-        schedule_data = schedule.get_schedule_data()
-
-        # Get the energy profile for additional data
-        current_hour = (
-            datetime.now().hour if target_date == datetime.now().date() else 0
-        )
-        energy_profile = (
-            bess_controller.system._energy_manager.get_full_day_energy_profile(
-                current_hour
-            )
-        )
-
-        # Add energy profile data to the response
-        return {
-            **schedule_data,
-            "energyProfile": {
-                "consumption": energy_profile["consumption"],
-                "solar": energy_profile["solar"],
-                "battery_soc": energy_profile["battery_soc"],
-                "actualHours": energy_profile.get("actual_hours", 0),
-            },
-        }
-    except Exception as e:
-        logger.error(f"Error getting detailed schedule: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
-
-
-@app.get("/api/system/status")
-async def get_system_status():
-    """Get current system status including battery state and active flows."""
-    try:
-        current_hour = datetime.now().hour
-
-        status = {
-            "timestamp": datetime.now().isoformat(),
-            "battery": {
-                "soc": bess_controller.system._controller.get_battery_soc(),
-                "charging_power": bess_controller.system._controller.get_battery_charge_power(),
-                "discharging_power": bess_controller.system._controller.get_battery_discharge_power(),
-                "grid_charge_enabled": bess_controller.system._controller.grid_charge_enabled(),
-                "charging_power_rate": bess_controller.system._controller.get_charging_power_rate(),
-                "discharging_power_rate": bess_controller.system._controller.get_discharging_power_rate(),
-            },
-            "energy": {},
-        }
-
-        # Add today's energy data if available
-        if hasattr(bess_controller.system._energy_manager, "get_energy_data"):
-            try:
-                energy_data = bess_controller.system._energy_manager.get_energy_data(
-                    current_hour
-                )
-                if energy_data:
-                    status["energy"] = {
-                        "solar_production": bess_controller.system._controller.get_solar_generation_today(),
-                        "grid_import": bess_controller.system._controller.get_import_from_grid_today(),
-                        "grid_export": bess_controller.system._controller.get_export_to_grid_today(),
-                        "load_consumption": bess_controller.system._controller.get_load_consumption_today(),
-                        "battery_charge": bess_controller.system._controller.get_battery_charge_today(),
-                        "battery_discharge": bess_controller.system._controller.get_battery_discharge_today(),
-                        "grid_to_battery": bess_controller.system._controller.get_grid_to_battery_today(),
-                    }
-            except Exception as e:
-                logger.warning(f"Could not get energy data for current hour: {e}")
-
-        return status
-    except Exception as e:
-        logger.error(f"Error getting system status: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e

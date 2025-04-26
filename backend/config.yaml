@@ -22,20 +22,21 @@ hassio_api: true
 homeassistant_api: true
 auth_api: true
 options:
+  home:
+    consumption: 3.5                # default hourly consumption in kWh
+    max_fuse_current: 25            # Maximum fuse current in amperes
+    voltage: 230                    # Line voltage in volts
+    safety_margin_factor: 0.95      # Safety margin for power calculations (95%)
   battery:
-    total_capacity: 30.0
-    min_soc: 10.0
-    cycle_cost: 0.50
-    charging_power_rate: 40
-  consumption:
-    default_hourly: 3.5
-  price:
-    area: "SE4"
-    markup_rate: 0.08
-    vat_multiplier: 1.25
-    additional_costs: 1.03
-    tax_reduction: 0.6518
-    use_actual_price: false
+    total_capacity: 30.0             # kWh
+    max_charge_discharge_power: 15.0 # kW
+    cycle_cost: 0.50                 # 50 öre/kWh / charge/discharge cycle
+  electricity_price:
+    area: "SE4"                      # Area for Nordpool pricing
+    markup_rate: 0.08                # 8 öre/kWh
+    vat_multiplier: 1.25             # 25% VAT
+    additional_costs: 1.03           # överföringsavgift: 28.90 öre, energiskatt: 53.50 öre + 25% moms
+    tax_reduction: 0.6518            # 60 öre skattereduktion + 5.18 öre förlustersättning
   sensors:
     battery_soc: "sensor.rkm0d7n04x_statement_of_charge_soc"
     battery_charge_power: "sensor.rkm0d7n04x_all_batteries_charge_power"
@@ -71,20 +72,21 @@ options:
     48h_avg_grid_import: "sensor.48h_average_grid_import_power"
     1h_avg_grid_import: "sensor.1h_average_grid_import_power"
 schema:
+  home:
+    consumption: float
+    max_fuse_current: int
+    voltage: int
+    safety_margin_factor: float
   battery:
     total_capacity: float
-    min_soc: float
+    max_charge_discharge_power: float
     cycle_cost: float
-    charging_power_rate: float
-  consumption:
-    default_hourly: float
-  price:
+  electricity_price:
     area: str
     markup_rate: float
     vat_multiplier: float
     additional_costs: float
     tax_reduction: float
-    use_actual_price: bool
   sensors:
     battery_soc: str
     battery_charge_power: str

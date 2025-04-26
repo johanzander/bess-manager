@@ -101,7 +101,7 @@ class HomeAssistantAPIController:
             return None
 
         url = f"{self.base_url}{path}"
-        logger.info("Making API request to %s %s", method.upper(), url)
+        logger.debug("Making API request to %s %s", method.upper(), url)
         for attempt in range(self.max_attempts):
             try:
                 http_method = getattr(requests, method.lower())
@@ -143,7 +143,7 @@ class HomeAssistantAPIController:
                     )
                     raise  # Re-raise the last exception
 
-    def service_call_with_retry(self, service_domain, service_name, **kwargs):
+    def _service_call_with_retry(self, service_domain, service_name, **kwargs):
         """Call Home Assistant service with retry logic.
 
         Args:
@@ -281,7 +281,6 @@ class HomeAssistantAPIController:
         """Get total grid to battery charging for today in kWh."""
         return self.get_sensor_value("batteries_charged_from_grid_today")
 
-    # Optional auxiliary load sensors
     def get_ev_energy_today(self):
         """Get total EV charging energy for today in kWh."""
         return self.get_sensor_value("ev_energy_today")
@@ -292,100 +291,53 @@ class HomeAssistantAPIController:
 
     def get_charge_stop_soc(self):
         """Get the charge stop state of charge (SOC)."""
-        entity_id = self.sensors.get(
-            "battery_charge_stop_soc", "number.rkm0d7n04x_charge_stop_soc"
-        )
-        response = self._api_request("get", f"/api/states/{entity_id}")
-        if response and "state" in response:
-            return float(response["state"])
-        return 100.0  # Default value
+        return self.get_sensor_value("battery_charge_stop_soc")
 
     def set_charge_stop_soc(self, charge_stop_soc):
         """Set the charge stop state of charge (SOC)."""
-        self.service_call_with_retry(
+        self._service_call_with_retry(
             "number",
             "set_value",
-            entity_id=self.sensors.get(
-                "battery_charge_stop_soc", "number.rkm0d7n04x_charge_stop_soc"
-            ),
+            entity_id=self.sensors.get("battery_charge_stop_soc"),
             value=charge_stop_soc,
         )
 
     def get_discharge_stop_soc(self):
         """Get the discharge stop state of charge (SOC)."""
-        response = self._api_request(
-            "get",
-            "/api/states/{}".format(
-                self.sensors.get(
-                    "battery_discharge_stop_soc", "number.rkm0d7n04x_discharge_stop_soc"
-                )
-            ),
-        )
-        if response and "state" in response:
-            return float(response["state"])
-        return 10.0  # Default value
+        return self.get_sensor_value("battery_discharge_stop_soc")
 
     def set_discharge_stop_soc(self, discharge_stop_soc):
         """Set the discharge stop state of charge (SOC)."""
-        self.service_call_with_retry(
+        self._service_call_with_retry(
             "number",
             "set_value",
-            entity_id=self.sensors.get(
-                "battery_discharge_stop_soc", "number.rkm0d7n04x_discharge_stop_soc"
-            ),
+            entity_id=self.sensors.get("battery_discharge_stop_soc"),
             value=discharge_stop_soc,
         )
 
     def get_charging_power_rate(self):
         """Get the charging power rate."""
-        response = self._api_request(
-            "get",
-            "/api/states/{}".format(
-                self.sensors.get(
-                    "battery_charging_power_rate",
-                    "number.rkm0d7n04x_charging_power_rate",
-                )
-            ),
-        )
-        if response and "state" in response:
-            return float(response["state"])
-        return 40.0  # Default value
+        return self.get_sensor_value("battery_charging_power_rate")
 
     def set_charging_power_rate(self, rate):
         """Set the charging power rate."""
-        self.service_call_with_retry(
+        self._service_call_with_retry(
             "number",
             "set_value",
-            entity_id=self.sensors.get(
-                "battery_charging_power_rate", "number.rkm0d7n04x_charging_power_rate"
-            ),
+            entity_id=self.sensors.get("battery_charging_power_rate"),
             value=rate,
         )
 
     def get_discharging_power_rate(self):
         """Get the discharging power rate."""
-        response = self._api_request(
-            "get",
-            "/api/states/{}".format(
-                self.sensors.get(
-                    "battery_discharging_power_rate",
-                    "number.rkm0d7n04x_discharging_power_rate",
-                )
-            ),
-        )
-        if response and "state" in response:
-            return float(response["state"])
-        return 0.0  # Default value
+        return self.get_sensor_value("battery_discharging_power_rate")
 
     def set_discharging_power_rate(self, rate):
         """Set the discharging power rate."""
-        self.service_call_with_retry(
+        self._service_call_with_retry(
             "number",
             "set_value",
-            entity_id=self.sensors.get(
-                "battery_discharging_power_rate",
-                "number.rkm0d7n04x_discharging_power_rate",
-            ),
+            entity_id=self.sensors.get("battery_discharging_power_rate"),
             value=rate,
         )
 
@@ -406,12 +358,10 @@ class HomeAssistantAPIController:
         else:
             logger.info("Disabling grid charge")
 
-        self.service_call_with_retry(
+        self._service_call_with_retry(
             "switch",
             service,
-            entity_id=self.sensors.get(
-                "grid_charge", "switch.rkm0d7n04x_charge_from_grid"
-            ),
+            entity_id=self.sensors.get("grid_charge"),
         )
 
     def grid_charge_enabled(self):
@@ -443,7 +393,7 @@ class HomeAssistantAPIController:
             if batt_mode in mode_map:
                 batt_mode_val = mode_map[batt_mode]
 
-        self.service_call_with_retry(
+        self._service_call_with_retry(
             "growatt_server",
             "update_tlx_inverter_time_segment",
             segment_id=segment_id,
@@ -457,7 +407,7 @@ class HomeAssistantAPIController:
         """Read all time segments from the inverter with retry logic."""
         try:
             # Call the service and get the response
-            result = self.service_call_with_retry(
+            result = self._service_call_with_retry(
                 "growatt_server",
                 "read_tlx_inverter_time_segments",
                 return_response=True,  # Explicitly set return_response
@@ -505,17 +455,6 @@ class HomeAssistantAPIController:
         """Enable or disable test mode."""
         self.test_mode = enabled
         logger.info("%s test mode", "Enabled" if enabled else "Disabled")
-
-    def disable_all_TOU_settings(self):
-        """Clear the Time of Use (TOU) settings."""
-        for segment_id in range(1, 9):
-            self.set_inverter_time_segment(
-                segment_id=segment_id,
-                batt_mode="battery-first",
-                start_time="00:00",
-                end_time="23:59",
-                enabled=False,
-            )
 
     def get_l1_current(self):
         """Get the current load for L1."""
@@ -584,9 +523,7 @@ class HomeAssistantAPIController:
             sensor_key = (
                 "nordpool_kwh_tomorrow" if is_tomorrow else "nordpool_kwh_today"
             )
-            entity_id = self.sensors.get(
-                sensor_key, "sensor.nordpool_kwh_se4_sek_2_10_025"
-            )
+            entity_id = self.sensors.get(sensor_key)
 
             time_label = "tomorrow" if is_tomorrow else "today"
             logger.debug(f"Fetching Nordpool prices for {time_label} from {entity_id}")
@@ -729,7 +666,7 @@ class HomeAssistantAPIController:
             logger.error("Error fetching sensor data: %s", str(e))
             return {"status": "error", "message": str(e)}
 
-    def get_battery_energy_sensors(self, include_soc=True):
+    def get_battery_energy_sensors(self):
         """Get all battery energy-related sensors.
 
         Args:
@@ -740,46 +677,17 @@ class HomeAssistantAPIController:
 
         """
         sensors = [
-            self.sensors.get(
-                "lifetime_battery_charged",
-                "sensor.rkm0d7n04x_lifetime_total_all_batteries_charged",
-            ),
-            self.sensors.get(
-                "lifetime_battery_discharged",
-                "sensor.rkm0d7n04x_lifetime_total_all_batteries_discharged",
-            ),
-            self.sensors.get(
-                "lifetime_solar_energy", "sensor.rkm0d7n04x_lifetime_total_solar_energy"
-            ),
-            self.sensors.get(
-                "lifetime_export_to_grid",
-                "sensor.rkm0d7n04x_lifetime_total_export_to_grid",
-            ),
-            self.sensors.get(
-                "lifetime_load_consumption",
-                "sensor.rkm0d7n04x_lifetime_total_load_consumption",
-            ),
-            self.sensors.get(
-                "lifetime_import_from_grid",
-                "sensor.rkm0d7n04x_lifetime_total_import_from_grid",
-            ),
-            self.sensors.get(
-                "lifetime_system_production",
-                "sensor.rkm0d7n04x_lifetime_system_production",
-            ),
-            self.sensors.get(
-                "lifetime_self_consumption",
-                "sensor.rkm0d7n04x_lifetime_self_consumption",
-            ),
-            self.sensors.get("zap_energy_meter", "sensor.zap263668_energy_meter"),
+            self.sensors.get("lifetime_battery_charged"),
+            self.sensors.get("lifetime_battery_discharged"),
+            self.sensors.get("lifetime_solar_energy"),
+            self.sensors.get("lifetime_export_to_grid"),
+            self.sensors.get("lifetime_load_consumption"),
+            self.sensors.get("lifetime_import_from_grid"),
+            self.sensors.get("lifetime_system_production"),
+            self.sensors.get("lifetime_self_consumption"),
+            self.sensors.get("zap_energy_meter"),
+            self.sensors.get("battery_soc"),
         ]
-
-        if include_soc:
-            sensors.append(
-                self.sensors.get(
-                    "battery_soc", "sensor.rkm0d7n04x_statement_of_charge_soc"
-                )
-            )
 
         return sensors
 

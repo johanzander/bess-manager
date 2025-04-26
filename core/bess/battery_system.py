@@ -75,6 +75,7 @@ from .energy_manager import EnergyManager
 from .growatt_schedule import GrowattScheduleManager
 from .power_monitor import HomePowerMonitor
 from .price_manager import ElectricityPriceManager, HANordpoolSource
+from .reporter import BatterySystemReporter
 from .schedule import Schedule
 from .settings import BatterySettings, ConsumptionSettings, HomeSettings, PriceSettings
 
@@ -283,6 +284,26 @@ class BatterySystemManager:
         # If we get here, no relevant differences were found
         return False, "Schedules match"
 
+    def log_battery_schedule(self) -> None:
+        """Generate and log a comprehensive battery schedule report.
+
+        This method uses the BatterySystemReporter to create a detailed report
+        comparing grid-only, solar-only, and battery-optimized scenarios.
+        """
+        if not self._current_schedule:
+            logger.warning("No current schedule available for reporting")
+            return
+
+        # Create reporter with current energy manager and schedule
+        reporter = BatterySystemReporter(
+            energy_manager=self._energy_manager,
+            schedule=self._current_schedule,
+            price_manager=self._price_manager,
+        )
+
+        # Generate and log the report
+        reporter.log_comparison_report()
+
     def update_battery_schedule(
         self, hour: int, prepare_next_day: bool = False
     ) -> bool:
@@ -401,6 +422,8 @@ class BatterySystemManager:
             except TimeoutError as e:
                 logger.error("Timeout when applying schedule: %s", str(e))
                 return False
+
+            self.log_battery_schedule()
 
         # Always apply the current hour's settings when not preparing for next day
         if not prepare_next_day:
@@ -1124,6 +1147,7 @@ class BatterySystemManager:
                 )
 
             temp_schedule.log_schedule()
+            self.log_battery_schedule()
 
             # Create new Growatt schedule manager
             temp_growatt = GrowattScheduleManager()
@@ -1611,6 +1635,7 @@ class BatterySystemManager:
             # Check for schedule
             if self._current_schedule:
                 self._current_schedule.log_schedule()
+                self.log_battery_schedule()
 
         except (AttributeError, ValueError, KeyError) as e:
             logger.error("Failed to log system startup: %s", str(e))
@@ -1705,6 +1730,8 @@ class BatterySystemManager:
                 )
 
                 schedule.log_schedule()
+                self.log_battery_schedule()
+
                 self._schedule_manager.create_schedule(schedule)
                 self._current_schedule = schedule
         except (ValueError, KeyError, AttributeError) as e:

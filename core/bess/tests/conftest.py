@@ -131,10 +131,6 @@ class MockHomeAssistantController:
         """Get the current on line 3."""
         return self.settings["l3_current"]
 
-    def disable_all_TOU_settings(self):
-        """Clear all TOU settings."""
-        self.settings["tou_settings"] = []
-
     def set_inverter_time_segment(self, **kwargs):
         """Store TOU setting."""
         self.settings["tou_settings"].append(kwargs)

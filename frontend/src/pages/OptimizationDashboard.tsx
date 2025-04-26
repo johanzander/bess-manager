@@ -33,7 +33,8 @@ export default function OptimizationDashboard({
         date: selectedDate.toISOString().split('T')[0],
       };
   
-      const response = await api.get('/api/schedule', { params });
+      // Use the detailed endpoint to get enhanced reporting data
+      const response = await api.get('/api/schedule/detailed', { params });
       const scheduleData: ScheduleData = response.data;
   
       if (!scheduleData.hourlyData || scheduleData.hourlyData.length === 0) {
@@ -41,7 +42,7 @@ export default function OptimizationDashboard({
         return;
       }
   
-      console.log('Fetched schedule data:', scheduleData);
+      console.log('Fetched enhanced schedule data:', scheduleData);
   
       setData(scheduleData);
     } catch (err) {
@@ -76,14 +77,25 @@ export default function OptimizationDashboard({
 
   return (
     <div className="p-6 space-y-8 bg-gray-50">
-      <SummaryCards summary={data.summary} hourlyData={data.hourlyData} />
-      <BatteryLevelChart hourlyData={data.hourlyData} settings={settings} />
-      <BatteryActionsChart hourlyData={data.hourlyData} />
-      <BatteryScheduleTable
-        hourlyData={data.hourlyData}
-        settings={settings}
-        summary={data.summary}
-      />
+      <div className="mb-8">
+        <SummaryCards summary={data.summary} hourlyData={data.hourlyData} />
+      </div>
+      
+      <div className="mb-8">
+        <BatteryLevelChart hourlyData={data.hourlyData} settings={settings} />
+      </div>
+      
+      <div className="mb-8">
+        <BatteryActionsChart hourlyData={data.hourlyData} />
+      </div>
+      
+      <div className="mb-8">
+        <BatteryScheduleTable
+          hourlyData={data.hourlyData}
+          settings={settings}
+          summary={data.summary}
+        />
+      </div>
     </div>
   );
 }

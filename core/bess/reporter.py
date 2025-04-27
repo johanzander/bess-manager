@@ -13,16 +13,16 @@ logger = logging.getLogger(__name__)
 class BatterySystemReporter:
     """Generates comprehensive reports comparing different energy scenarios."""
 
-    def __init__(self, energy_manager, schedule, price_manager) -> None:
+    def __init__(self, energy_manager, schedule_getter, price_manager) -> None:
         """Initialize with required dependencies.
 
         Args:
             energy_manager: Energy manager instance with solar and consumption data
-            schedule: Battery schedule with optimization results
-            price_manager: price manager for buy/sell price
+            schedule_getter: Function that returns the current schedule
+            price_manager: Price manager for buy/sell price
         """
         self.energy_manager = energy_manager
-        self.schedule = schedule
+        self.schedule_getter = schedule_getter
         self.price_manager = price_manager
 
     def generate_comparison_report(self) -> dict:
@@ -31,12 +31,14 @@ class BatterySystemReporter:
         Returns:
             dict: Complete report data with hourly breakdown and summary metrics
         """
-        # Get optimization results from schedule
-        if not hasattr(self.schedule, "get_schedule_data"):
-            logger.error("Schedule does not have get_schedule_data method")
+        # Get the current schedule using the getter
+        current_schedule = self.schedule_getter()
+        if not current_schedule:
+            logger.error("No current schedule available for reporting")
             return {}
 
-        schedule_data = self.schedule.get_schedule_data()
+        # Get optimization results from schedule
+        schedule_data = current_schedule.get_schedule_data()
         hourly_data = schedule_data["hourlyData"]
         summary = schedule_data[
             "summary"
@@ -46,9 +48,9 @@ class BatterySystemReporter:
         prices = self._extract_prices(hourly_data)
 
         # Get solar and consumption data from energy manager
-        energy_profile = self._get_energy_profile()
-        solar_production = energy_profile.get("solar", [0.0] * 24)
-        consumption = energy_profile.get("consumption", [0.0] * 24)
+        energy_profile = self.energy_manager.get_full_day_energy_profile()
+        solar_production = energy_profile["solar"]
+        consumption = energy_profile["consumption"]
 
         # Calculate solar-only scenario
         solar_only_data = self._calculate_solar_only_scenario(
@@ -81,6 +83,32 @@ class BatterySystemReporter:
         summary["solarOnlyCost"] = solar_only_data["summary"]["solar_only_total_cost"]
         summary["solarOnlySavings"] = solar_only_data["summary"]["solar_only_savings"]
 
+        # Calculate total battery charge, discharge and cycles
+        total_battery_charge = 0.0
+        total_battery_discharge = 0.0
+
+        for hour_data in hourly_data:
+            action = hour_data.get("action", 0.0)
+            if action > 0:
+                total_battery_charge += action
+            elif action < 0:
+                total_battery_discharge += abs(action)
+
+        # Add metrics to summary
+        summary["totalBatteryCharge"] = total_battery_charge
+        summary["totalBatteryDischarge"] = total_battery_discharge
+
+        # Estimate battery cycles (full cycle = charge capacity / total capacity)
+        # Access capacity from the current schedule if available
+        battery_capacity = 30.0  # Default capacity in kWh
+        if hasattr(current_schedule, "total_capacity"):
+            battery_capacity = current_schedule.total_capacity
+
+        estimated_cycles = (total_battery_charge + total_battery_discharge) / (
+            2 * battery_capacity
+        )
+        summary["cycleCount"] = estimated_cycles
+
         # Battery-only savings is the additional savings beyond solar-only
         total_savings = summary["baseCost"] - summary["optimizedCost"]
         battery_only_savings = total_savings - summary["solarOnlySavings"]
@@ -97,23 +125,18 @@ class BatterySystemReporter:
 
         return {"hourlyData": hourly_data, "summary": summary}
 
-    def _get_energy_profile(self) -> dict:
-        """Get energy profile from energy manager with fallbacks.
+    def generate_daily_savings_report(self) -> dict:
+        """Generate a daily savings report focused on economic metrics.
+
+        This is a more focused report than the full comparison report,
+        emphasizing financial savings and key metrics for the daily dashboard.
 
         Returns:
-            dict: Energy profile with solar and consumption data
+            dict: Daily savings report data
         """
-        try:
-            if hasattr(self.energy_manager, "get_full_day_energy_profile"):
-                return self.energy_manager.get_full_day_energy_profile()
-            else:
-                logger.warning(
-                    "Energy manager does not have get_full_day_energy_profile method"
-                )
-                return {}
-        except Exception as e:
-            logger.error(f"Error getting energy profile: {e}")
-            return {}
+        # Currently just an alias for generate_comparison_report
+        # You can extend this with more specific daily savings information
+        return self.generate_comparison_report()
 
     def _extract_prices(self, hourly_data) -> list:
         """Extract hourly prices from schedule data.

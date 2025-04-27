@@ -107,6 +107,7 @@ class BatterySystemManager:
         self._initial_soc = None
         self._power_monitor = None
         self._battery_monitor = None
+        self._reporter = None
 
         # Initialize controller
         self._controller = controller
@@ -151,6 +152,12 @@ class BatterySystemManager:
             self._schedule_manager,
             home_settings=self.home_settings,
             battery_settings=self.battery_settings,
+        )
+
+        self._reporter = BatterySystemReporter(
+            energy_manager=self._energy_manager,
+            schedule_getter=lambda: self._current_schedule,
+            price_manager=self._price_manager,
         )
 
         # Try to read current schedule from inverter at startup
@@ -294,15 +301,9 @@ class BatterySystemManager:
             logger.warning("No current schedule available for reporting")
             return
 
-        # Create reporter with current energy manager and schedule
-        reporter = BatterySystemReporter(
-            energy_manager=self._energy_manager,
-            schedule=self._current_schedule,
-            price_manager=self._price_manager,
-        )
-
         # Generate and log the report
-        reporter.log_comparison_report()
+        if self._reporter:
+            self._reporter.log_comparison_report()
 
     def update_battery_schedule(
         self, hour: int, prepare_next_day: bool = False
@@ -1741,3 +1742,18 @@ class BatterySystemManager:
             if schedule is None:
                 raise ValueError("Optimization failed to produce valid results")
             return schedule
+
+    def get_daily_savings_report(self):
+        """Get the daily savings report comparing different energy scenarios.
+
+        Returns:
+            dict: Report data with hourly breakdown and summary metrics
+
+        Raises:
+            ValueError: If no current schedule is available
+        """
+        if not self._current_schedule:
+            raise ValueError("No current schedule available")
+
+        # Generate and return the daily savings report
+        return self._reporter.generate_daily_savings_report()

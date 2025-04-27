@@ -5,6 +5,7 @@ import { BatteryActionsChart } from '../components/BatteryActionsChart';
 import { BatteryScheduleTable } from '../components/BatteryScheduleTable';
 import { BatterySettings, ElectricitySettings, ScheduleData } from '../types';
 import api from '../lib/api';
+import DailySavingsReport from '../components/DailySavingsReport';
 
 interface DashboardProps {
   selectedDate: Date;
@@ -88,14 +89,16 @@ export default function OptimizationDashboard({
       <div className="mb-8">
         <BatteryActionsChart hourlyData={data.hourlyData} />
       </div>
-      
-      <div className="mb-8">
-        <BatteryScheduleTable
-          hourlyData={data.hourlyData}
+
+      {/* Daily Savings Report */}
+      <div className="mb-6">
+        <h2 className="text-2xl font-bold text-gray-800 mb-4">Daily Savings Report</h2>
+        <DailySavingsReport 
+          selectedDate={selectedDate} 
           settings={settings}
-          summary={data.summary}
         />
       </div>
+      
     </div>
   );
 }

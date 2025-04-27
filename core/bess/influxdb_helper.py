@@ -4,24 +4,59 @@ The module includes functionality to parse responses, handle timezones, and proc
 This module is designed to run within either the Pyscript environment or a standard Python environment.
 """
 
+import json
 import logging
 import os
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import requests
+from dotenv import load_dotenv
 
 _LOGGER = logging.getLogger(__name__)
 
 
 def get_influxdb_config():
-    """Get InfluxDB configuration from pyscript or return defaults."""
+    """Load InfluxDB config from options.json or fallback to .env."""
+    config = {"url": "", "username": "", "password": ""}
 
-    ha_db_url = os.environ.get("HA_DB_URL", "")
-    ha_db_user = os.environ.get("HA_DB_USER_NAME", "")
-    ha_db_pass = os.environ.get("HA_DB_PASSWORD", "")
+    # 1. Try load from Home Assistant options.json
+    try:
+        if os.path.exists("/data/options.json"):
+            with open("/data/options.json") as f:
+                options = json.load(f)
+            influxdb_config = options.get("influxdb", {})
+            config.update(
+                {
+                    "url": influxdb_config.get("url", ""),
+                    "username": influxdb_config.get("username", ""),
+                    "password": influxdb_config.get("password", ""),
+                }
+            )
+            _LOGGER.info("Loaded InfluxDB config from options.json")
+    except Exception as e:
+        _LOGGER.warning("Failed to load options.json: %s", str(e))
 
-    return {"url": ha_db_url, "username": ha_db_user, "password": ha_db_pass}
+    # 2. Fallback to .env if necessary
+    if not config["url"] or not config["username"] or not config["password"]:
+        try:
+            load_dotenv()  # this loads from .env automatically
+            config.update(
+                {
+                    "url": os.getenv("HA_DB_URL", ""),
+                    "username": os.getenv("HA_DB_USER_NAME", ""),
+                    "password": os.getenv("HA_DB_PASSWORD", ""),
+                }
+            )
+            _LOGGER.info("Loaded InfluxDB config from .env file")
+        except Exception as e:
+            _LOGGER.warning("Failed to load .env file: %s", str(e))
+
+    # 3. Final check
+    if not config["url"] or not config["username"] or not config["password"]:
+        _LOGGER.error("InfluxDB configuration is incomplete.")
+
+    return config
 
 
 def get_sensor_data(sensors_list, end_time=None) -> dict:

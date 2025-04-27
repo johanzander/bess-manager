@@ -1,73 +1,77 @@
-export type AreaCode = 'SE1' | 'SE2' | 'SE3' | 'SE4';
-
-export interface BatterySettings {
-  totalCapacity: number;
-  reservedCapacity: number;
-  estimatedConsumption: number;
-  maxChargeDischarge: number;
-  chargeCycleCost: number;
-  chargingPowerRate: number;
-  useActualPrice: boolean;
-}
-
-export interface ElectricitySettings {
-  markupRate: number;
-  vatMultiplier: number;
-  additionalCosts: number;
-  taxReduction: number;
-  area: AreaCode;
-}
-
-export interface PriceData {
-  timestamp: string;
-  price: number;
-  buy_price: number;
-  sell_price: number;
-}
-
 export interface HourlyData {
   hour: string;
   price: number;
   consumption: number;
-  baseCost: number;
   batteryLevel: number;
   action: number;
-  gridUsed?: number;     // Grid energy needed in Solar+Battery case
-  gridCost: number;      // Cost of grid energy in Solar+Battery case
-  batteryCost: number;   // Cost of battery operations
-  totalCost: number;     // Total cost in Solar+Battery case
-  savings: number;       // Total savings compared to Grid-Only case
+  gridCost: number;
+  batteryCost: number;
+  totalCost: number;
+  baseCost: number;
+  savings: number;
   
-  // Solar fields
-  solarProduction?: number;    // Total solar production this hour
-  solarCharged?: number;       // For backward compatibility
-  directSolarUsed?: number;    // Solar energy directly used
-  solarExcess?: number;        // Excess solar not immediately used
+  // Solar data fields
+  solarProduction?: number;
+  directSolar?: number;
+  exportSolar?: number;
+  importFromGrid?: number;
+  solarOnlyCost?: number;
+  solarSavings?: number;
+  gridOnlyCost?: number;
+  batterySavings?: number;
+  batteryGridConsumption?: number;
   
-  // Solar-only scenario fields
-  solarOnlyGridNeeded?: number; // Grid energy needed in Solar-Only case
-  solarOnlyCost?: number;       // Cost in Solar-Only case
-  solarOnlySavings?: number;    // Savings in Solar-Only case compared to Grid-Only
+  // Legacy field for compatibility
+  solarCharged?: number;
 }
 
 export interface ScheduleSummary {
-  baseCost: number;               // Grid-Only total cost
-  optimizedCost: number;          // Solar+Battery total cost
-  savings: number;                // Total savings (Grid-Only - Optimized)
-  cycleCount?: number;            // Battery cycle count
-  gridCosts: number;              // Grid energy costs in Optimized case
-  batteryCosts: number;           // Battery operation costs
-  
-  // Enhanced reporting fields
-  solarOnlyCost?: number;         // Cost with solar but no battery
-  solarOnlySavings?: number;      // Savings from solar only
-  batterySavings?: number;        // Additional savings from battery
-  totalSolarProduction?: number;  // Total solar production
-  totalBatteryCharge?: number;    // Total energy charged to battery
-  totalBatteryDischarge?: number; // Total energy discharged from battery
+  baseCost: number;
+  optimizedCost: number;
+  gridCosts: number;
+  batteryCosts: number;
+  savings: number;
 }
 
-export interface ScheduleData {
+export interface BatterySettings {
+  totalCapacity: number;
+  reservedCapacity: number;
+  minSoc: number;
+  maxSoc: number;
+  maxChargeDischarge: number;
+  chargeCycleCost: number;
+  chargingPowerRate: number;
+  estimatedConsumption: number;
+}
+
+export interface EnhancedSummary {
+  gridOnlyCost: number;
+  solarOnlyCost: number;
+  batterySolarCost: number;
+  solarSavings: number;
+  batterySavings: number;
+  totalSavings: number;
+  solarProduction: number;
+  directSolarUse: number;
+  solarExcess: number;
+  totalCharged: number;
+  totalDischarged: number;
+  estimatedBatteryCycles: number;
+  totalConsumption?: number;
+  totalImport?: number;
+}
+
+export interface EnergyProfile {
+  consumption: number[];
+  solar: number[];
+  battery_soc: number[];
+  battery_soe?: number[];
+  actualHours: number;
+}
+
+export interface ScheduleResponse {
   hourlyData: HourlyData[];
   summary: ScheduleSummary;
+  energyProfile?: EnergyProfile;
+  enhancedSummary?: EnhancedSummary;
 }

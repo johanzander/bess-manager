@@ -1,6 +1,6 @@
 name: "BESS Manager"
 description: "Battery Energy Storage System optimization and management"
-version: "1.0.30"
+version: "1.0.35"
 slug: "bess_manager"
 init: false
 arch:
@@ -22,6 +22,10 @@ hassio_api: true
 homeassistant_api: true
 auth_api: true
 options:
+  influxdb:
+    url: "http://homeassistant.local:8086/api/v2/query"
+    username: "your_db_username_here"
+    password: "your_db_password_here"
   home:
     consumption: 3.5                # default hourly consumption in kWh
     max_fuse_current: 25            # Maximum fuse current in amperes
@@ -72,6 +76,10 @@ options:
     48h_avg_grid_import: "sensor.48h_average_grid_import_power"
     1h_avg_grid_import: "sensor.1h_average_grid_import_power"
 schema:
+  influxdb:
+    url: str
+    username: str
+    password: str
   home:
     consumption: float
     max_fuse_current: int

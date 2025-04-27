@@ -1,102 +1,139 @@
 import React from 'react';
 import { HourlyData, ScheduleSummary, BatterySettings } from '../types';
 
+interface EnhancedSummary {
+  gridOnlyCost: number;
+  solarOnlyCost: number;
+  batterySolarCost: number;
+  solarSavings: number;
+  batterySavings: number;
+  totalSavings: number;
+  solarProduction: number;
+  directSolarUse: number;
+  solarExcess: number;
+  totalCharged: number;
+  totalDischarged: number;
+  estimatedBatteryCycles: number;
+  totalConsumption?: number;
+  totalImport?: number;
+}
+
 interface BatteryScheduleTableProps {
   hourlyData: HourlyData[];
   settings: BatterySettings;
   summary: ScheduleSummary;
+  energyProfile?: {
+    solar: number[];
+    consumption: number[];
+    battery_soc: number[];
+    actualHours: number;
+  };
+  enhancedSummary?: EnhancedSummary;
 }
 
 export const BatteryScheduleTable: React.FC<BatteryScheduleTableProps> = ({
   hourlyData,
+  settings,
   summary,
+  energyProfile,
+  enhancedSummary
 }) => {
   return (
     <div className="bg-white p-6 rounded-lg shadow overflow-x-auto">
-      <h2 className="text-xl font-semibold mb-4">Energy Optimization Schedule</h2>
+      <h2 className="text-xl font-semibold mb-4">Battery Schedule</h2>
       <table className="min-w-full divide-y divide-gray-200">
         <thead className="bg-gray-50">
           <tr>
-            <th rowSpan={2} className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border">
+            <th rowSpan={2} className="px-3 py-2 text-left text-xs font-medium text-gray-800 uppercase tracking-wider border">
               Hour
             </th>
-            <th colSpan={3} className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider border bg-red-50">
+            <th colSpan={3} className="px-3 py-2 text-center text-xs font-medium text-gray-800 uppercase tracking-wider border bg-blue-100">
               Grid-Only Case
             </th>
-            <th colSpan={4} className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider border bg-yellow-50">
+            <th colSpan={5} className="px-3 py-2 text-center text-xs font-medium text-gray-800 uppercase tracking-wider border bg-yellow-100">
               Solar-Only Case
             </th>
-            <th colSpan={5} className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider border bg-green-50">
-              Solar + Battery Case
+            <th colSpan={5} className="px-3 py-2 text-center text-xs font-medium text-gray-800 uppercase tracking-wider border bg-green-100">
+              Solar+Battery Case
             </th>
           </tr>
           <tr className="bg-gray-50">
-            {/* Grid-Only Case Headers */}
-            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border bg-red-50">
-              Price (SEK/kWh)
+            {/* Grid-Only Headers */}
+            <th className="px-3 py-2 text-left text-xs font-medium text-gray-800 uppercase tracking-wider border bg-blue-100">
+              Price
             </th>
-            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border bg-red-50">
-              Cons. (kWh)
+            <th className="px-3 py-2 text-left text-xs font-medium text-gray-800 uppercase tracking-wider border bg-blue-100">
+              Cons.
             </th>
-            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border bg-red-50">
-              Cost (SEK)
-            </th>
-            
-            {/* Solar-Only Case Headers */}
-            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border bg-yellow-50">
-              Solar (kWh)
-            </th>
-            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border bg-yellow-50">
-              Grid (kWh)
-            </th>
-            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border bg-yellow-50">
-              Cost (SEK)
-            </th>
-            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border bg-yellow-50">
-              Savings (SEK)
+            <th className="px-3 py-2 text-left text-xs font-medium text-gray-800 uppercase tracking-wider border bg-blue-100">
+              Cost
             </th>
             
-            {/* Solar + Battery Case Headers */}
-            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border bg-green-50">
-              Batt Level (kWh)
+            {/* Solar-Only Headers */}
+            <th className="px-3 py-2 text-left text-xs font-medium text-gray-800 uppercase tracking-wider border bg-yellow-100">
+              Solar
             </th>
-            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border bg-green-50">
-              Batt Action (kWh)
+            <th className="px-3 py-2 text-left text-xs font-medium text-gray-800 uppercase tracking-wider border bg-yellow-100">
+              Direct
             </th>
-            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border bg-green-50">
-              Grid (kWh)
+            <th className="px-3 py-2 text-left text-xs font-medium text-gray-800 uppercase tracking-wider border bg-yellow-100">
+              Export
             </th>
-            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border bg-green-50">
-              Cost (SEK)
+            <th className="px-3 py-2 text-left text-xs font-medium text-gray-800 uppercase tracking-wider border bg-yellow-100">
+              Import
             </th>
-            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border bg-green-50">
-              Extra Savings (SEK)
+            <th className="px-3 py-2 text-left text-xs font-medium text-gray-800 uppercase tracking-wider border bg-yellow-100">
+              Cost
+            </th>
+            
+            {/* Solar+Battery Headers */}
+            <th className="px-3 py-2 text-left text-xs font-medium text-gray-800 uppercase tracking-wider border bg-green-100">
+              SOE
+            </th>
+            <th className="px-3 py-2 text-left text-xs font-medium text-gray-800 uppercase tracking-wider border bg-green-100">
+              Action
+            </th>
+            <th className="px-3 py-2 text-left text-xs font-medium text-gray-800 uppercase tracking-wider border bg-green-100">
+              Grid
+            </th>
+            <th className="px-3 py-2 text-left text-xs font-medium text-gray-800 uppercase tracking-wider border bg-green-100">
+              Cost
+            </th>
+            <th className="px-3 py-2 text-left text-xs font-medium text-gray-800 uppercase tracking-wider border bg-green-100">
+              Savings
             </th>
           </tr>
         </thead>
         <tbody className="bg-white divide-y divide-gray-200">
           {hourlyData.map((hour, index) => {
-            // Solar-only metrics - if not directly in data, calculate them
-            const solarProduction = hour.solarProduction || hour.solarCharged || 0;
-            
-            const directSolarUsed = hour.directSolarUsed || 
-              Math.min(hour.consumption, solarProduction);
+            // Use the values directly from the API - prioritize API values over calculations
+            const solarProduction = hour.solarProduction !== undefined 
+              ? hour.solarProduction 
+              : (energyProfile?.solar?.[index] || 0);
               
-            const solarOnlyGridNeeded = hour.solarOnlyGridNeeded || 
-              Math.max(0, hour.consumption - directSolarUsed);
+            const directSolar = hour.directSolar !== undefined
+              ? hour.directSolar
+              : Math.min(hour.consumption || settings.estimatedConsumption, solarProduction);
               
-            const solarOnlyCost = hour.solarOnlyCost ?? 
-              (hour.price * solarOnlyGridNeeded);
+            const exportSolar = hour.exportSolar !== undefined
+              ? hour.exportSolar
+              : Math.max(0, solarProduction - directSolar);
               
-            const solarOnlySavings = hour.solarOnlySavings || 
-              (hour.baseCost - solarOnlyCost);
-            
-            // Battery metrics
-            const gridUsed = hour.gridUsed || 
-              Math.max(0, hour.consumption - Math.max(0, -hour.action));
+            const importFromGrid = hour.importFromGrid !== undefined
+              ? hour.importFromGrid
+              : Math.max(0, (hour.consumption || settings.estimatedConsumption) - directSolar);
               
-            // Calculate the additional savings from battery
-            const batterySavings = hour.savings - solarOnlySavings;
+            const solarOnlyCost = hour.solarOnlyCost !== undefined
+              ? hour.solarOnlyCost
+              : hour.price * importFromGrid;
+              
+            const gridOnlyCost = hour.gridOnlyCost !== undefined
+              ? hour.gridOnlyCost
+              : hour.baseCost || (hour.price * (hour.consumption || settings.estimatedConsumption));
+              
+            const batterySavings = hour.batterySavings !== undefined
+              ? hour.batterySavings
+              : solarOnlyCost - hour.totalCost;
             
             return (
               <tr key={index} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
@@ -104,36 +141,39 @@ export const BatteryScheduleTable: React.FC<BatteryScheduleTableProps> = ({
                   {hour.hour}
                 </td>
                 
-                {/* Grid-Only Case Data */}
-                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border">
+                {/* Grid-Only Data */}
+                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-blue-50">
                   {hour.price.toFixed(2)}
                 </td>
-                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border">
-                  {hour.consumption.toFixed(1)}
+                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-blue-50">
+                  {(hour.consumption || settings.estimatedConsumption).toFixed(1)}
                 </td>
-                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border">
-                  {hour.baseCost.toFixed(2)}
+                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-blue-50">
+                  {gridOnlyCost.toFixed(2)}
                 </td>
                 
-                {/* Solar-Only Case Data */}
-                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border">
+                {/* Solar-Only Data */}
+                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-yellow-50">
                   {solarProduction.toFixed(1)}
                 </td>
-                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border">
-                  {solarOnlyGridNeeded.toFixed(1)}
+                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-yellow-50">
+                  {directSolar.toFixed(1)}
                 </td>
-                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border">
+                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-yellow-50">
+                  {exportSolar.toFixed(1)}
+                </td>
+                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-yellow-50">
+                  {importFromGrid.toFixed(1)}
+                </td>
+                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-yellow-50">
                   {solarOnlyCost.toFixed(2)}
                 </td>
-                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border">
-                  {solarOnlySavings.toFixed(2)}
-                </td>
                 
-                {/* Solar + Battery Case Data */}
-                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border">
+                {/* Solar+Battery Data */}
+                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-green-50">
                   {hour.batteryLevel.toFixed(1)}
                 </td>
-                <td className="px-3 py-2 whitespace-nowrap border">
+                <td className="px-3 py-2 whitespace-nowrap border bg-green-50">
                   <span className={`px-2 inline-flex text-sm leading-5 font-semibold rounded-full ${
                     hour.action > 0
                       ? 'bg-green-100 text-green-800'
@@ -144,14 +184,19 @@ export const BatteryScheduleTable: React.FC<BatteryScheduleTableProps> = ({
                     {hour.action.toFixed(1)}
                   </span>
                 </td>
-                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border">
-                  {gridUsed.toFixed(1)}
+                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-green-50">
+                  {/* Grid consumption for battery+solar case */}
+                  {(hour.batteryGridConsumption !== undefined 
+                    ? hour.batteryGridConsumption 
+                    : Math.max(0, hour.action > 0 
+                      ? importFromGrid + hour.action 
+                      : importFromGrid + hour.action)).toFixed(1)}
                 </td>
-                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border">
+                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-green-50">
                   {hour.totalCost.toFixed(2)}
                 </td>
-                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border">
-                  {batterySavings.toFixed(2)}
+                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-green-50">
+                  {(gridOnlyCost - hour.totalCost).toFixed(2)}
                 </td>
               </tr>
             );
@@ -162,96 +207,85 @@ export const BatteryScheduleTable: React.FC<BatteryScheduleTableProps> = ({
             <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border">
               TOTAL
             </td>
-            {/* Grid-Only Case Totals - No Average Price */}
-            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border">
-              {/* No average price displayed here */}
+            
+            {/* Grid-Only Totals */}
+            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-blue-50"></td>
+            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-blue-50">
+              {enhancedSummary?.totalConsumption?.toFixed(1) || 
+               hourlyData.reduce((sum, h) => sum + (h.consumption || settings.estimatedConsumption), 0).toFixed(1)}
             </td>
-            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border">
-              {hourlyData.reduce((sum, h) => sum + h.consumption, 0).toFixed(1)}
-            </td>
-            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border">
-              {summary.baseCost.toFixed(2)}
+            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-blue-50">
+              {enhancedSummary?.gridOnlyCost.toFixed(2) || summary.baseCost.toFixed(2)}
             </td>
             
-            {/* Solar-Only Case Totals */}
-            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border">
-              {/* Total Solar Production */}
-              {(summary.totalSolarProduction || 
-                hourlyData.reduce((sum, h) => sum + (h.solarProduction || h.solarCharged || 0), 0)).toFixed(1)}
+            {/* Solar-Only Totals */}
+            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-yellow-50">
+              {enhancedSummary?.solarProduction.toFixed(1) || 
+               hourlyData.reduce((sum, h) => sum + (h.solarProduction || 0), 0).toFixed(1)}
             </td>
-            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border">
-              {hourlyData.reduce((sum, h) => {
-                const solarProd = h.solarProduction || h.solarCharged || 0;
-                const directSolar = Math.min(h.consumption, solarProd);
-                return sum + (h.solarOnlyGridNeeded || Math.max(0, h.consumption - directSolar));
-              }, 0).toFixed(1)}
+            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-yellow-50">
+              {enhancedSummary?.directSolarUse.toFixed(1) || 
+               hourlyData.reduce((sum, h) => sum + (h.directSolar || 0), 0).toFixed(1)}
             </td>
-            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border">
-              {(summary.solarOnlyCost || 0).toFixed(2)}
+            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-yellow-50">
+              {enhancedSummary?.solarExcess.toFixed(1) || 
+               hourlyData.reduce((sum, h) => sum + (h.exportSolar || 0), 0).toFixed(1)}
             </td>
-            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border">
-              {(summary.solarOnlySavings || 0).toFixed(2)}
+            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-yellow-50">
+              {enhancedSummary?.totalImport?.toFixed(1) || 
+               hourlyData.reduce((sum, h) => sum + (h.importFromGrid || 0), 0).toFixed(1)}
+            </td>
+            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-yellow-50">
+              {enhancedSummary?.solarOnlyCost.toFixed(2) || 
+               hourlyData.reduce((sum, h) => sum + (h.solarOnlyCost || 0), 0).toFixed(2)}
             </td>
             
-            {/* Solar + Battery Case Totals */}
-            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border">
-              {/* Battery level is not averaged/summed */}
-            </td>
-            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border">
-              C: {(summary.totalBatteryCharge || 
-                 hourlyData.reduce((sum, h) => sum + (h.action > 0 ? h.action : 0), 0)).toFixed(1)}
+            {/* Solar+Battery Totals */}
+            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-green-50"></td>
+            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-green-50">
+              C: {enhancedSummary?.totalCharged.toFixed(1) || 
+                  hourlyData.reduce((sum, h) => sum + (h.action > 0 ? h.action : 0), 0).toFixed(1)}
               <br />
-              D: {(summary.totalBatteryDischarge || 
-                 Math.abs(hourlyData.reduce((sum, h) => sum + (h.action < 0 ? h.action : 0), 0))).toFixed(1)}
+              D: {enhancedSummary?.totalDischarged.toFixed(1) || 
+                  Math.abs(hourlyData.reduce((sum, h) => sum + (h.action < 0 ? h.action : 0), 0)).toFixed(1)}
             </td>
-            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border">
-              {hourlyData.reduce((sum, h) => {
-                return sum + (h.gridUsed || Math.max(0, h.consumption - Math.max(0, -h.action)));
-              }, 0).toFixed(1)}
+            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-green-50">
+              {summary.gridCosts.toFixed(2)}
             </td>
-            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border">
-              {summary.optimizedCost.toFixed(2)}
+            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-green-50">
+              {enhancedSummary?.batterySolarCost.toFixed(2) || summary.optimizedCost.toFixed(2)}
             </td>
-            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border">
-              {(summary.batterySavings || 0).toFixed(2)}
-            </td>
-          </tr>
-          
-          {/* Final Summary Row */}
-          <tr className="bg-blue-50 font-semibold">
-            <td colSpan={3} className="px-3 py-2 text-sm text-right border">
-              Total Energy Cost:
-            </td>
-            <td className="px-3 py-2 whitespace-nowrap text-sm border">
-              {summary.baseCost.toFixed(2)} SEK
-            </td>
-            <td colSpan={3} className="px-3 py-2 text-sm text-right border">
-              Solar-Only Savings:
-            </td>
-            <td className="px-3 py-2 whitespace-nowrap text-sm border">
-              {(summary.solarOnlySavings || 0).toFixed(2)} SEK
-              <br />
-              ({((summary.solarOnlySavings || 0) / summary.baseCost * 100).toFixed(1)}%)
-            </td>
-            <td colSpan={3} className="px-3 py-2 text-sm text-right border">
-              Battery Savings:
-            </td>
-            <td colSpan={2} className="px-3 py-2 whitespace-nowrap text-sm border">
-              {(summary.batterySavings || 0).toFixed(2)} SEK 
-              <br />
-              ({((summary.batterySavings || 0) / summary.baseCost * 100).toFixed(1)}%)
-            </td>
-          </tr>
-          <tr className="bg-green-100 font-bold">
-            <td colSpan={8} className="px-3 py-2 text-right text-sm border">
-              Total Combined Savings (Solar + Battery):
-            </td>
-            <td colSpan={5} className="px-3 py-2 text-sm border">
-              {summary.savings.toFixed(2)} SEK ({(summary.savings / summary.baseCost * 100).toFixed(1)}%)
+            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-green-50">
+              {enhancedSummary?.totalSavings.toFixed(2) || summary.savings.toFixed(2)}
             </td>
           </tr>
         </tbody>
       </table>
+      
+      {/* Enhanced Summary Section */}
+      {enhancedSummary && (
+        <div className="mt-6 bg-gray-50 p-4 rounded-lg">
+          <h3 className="text-lg font-semibold mb-2">Enhanced Savings Summary</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <p className="mb-1">Grid-Only Cost: <span className="font-semibold">{enhancedSummary.gridOnlyCost.toFixed(2)} SEK</span></p>
+              <p className="mb-1">Solar-Only Cost: <span className="font-semibold">{enhancedSummary.solarOnlyCost.toFixed(2)} SEK</span></p>
+              <p className="mb-1">Solar+Battery Cost: <span className="font-semibold">{enhancedSummary.batterySolarCost.toFixed(2)} SEK</span></p>
+              <p className="mb-1">Solar Savings: <span className="font-semibold">{enhancedSummary.solarSavings.toFixed(2)} SEK ({(enhancedSummary.solarSavings / enhancedSummary.gridOnlyCost * 100).toFixed(1)}%)</span></p>
+              <p className="mb-1">Additional Battery Savings: <span className="font-semibold">{enhancedSummary.batterySavings.toFixed(2)} SEK ({(enhancedSummary.batterySavings / enhancedSummary.gridOnlyCost * 100).toFixed(1)}%)</span></p>
+              <p className="font-semibold mb-1">Total Combined Savings: <span className="text-green-600">{enhancedSummary.totalSavings.toFixed(2)} SEK ({(enhancedSummary.totalSavings / enhancedSummary.gridOnlyCost * 100).toFixed(1)}%)</span></p>
+            </div>
+            <div>
+              <p className="mb-1">Total Solar Production: <span className="font-semibold">{enhancedSummary.solarProduction.toFixed(1)} kWh</span></p>
+              <p className="mb-1">- Direct Solar Use: <span className="font-semibold">{enhancedSummary.directSolarUse.toFixed(1)} kWh</span></p>
+              <p className="mb-1">- Excess Solar Sold: <span className="font-semibold">{enhancedSummary.solarExcess.toFixed(1)} kWh</span></p>
+              <p className="mb-1">Total Energy Charged: <span className="font-semibold">{enhancedSummary.totalCharged.toFixed(1)} kWh</span></p>
+              <p className="mb-1">Total Energy Discharged: <span className="font-semibold">{enhancedSummary.totalDischarged.toFixed(1)} kWh</span></p>
+              <p className="mb-1">Estimated Battery Cycles: <span className="font-semibold">{enhancedSummary.estimatedBatteryCycles?.toFixed(1) || "0.0"}</span></p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

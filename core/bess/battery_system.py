@@ -67,12 +67,14 @@ Example usage #2: FastAPI backend + Nordpool API
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from .algorithms import optimize_battery
 from .battery_monitor import BatteryMonitor
 from .energy_manager import EnergyManager
 from .growatt_schedule import GrowattScheduleManager
+from .health_check import run_system_health_checks
+from .influxdb_helper import get_influxdb_config, get_sensor_data
 from .power_monitor import HomePowerMonitor
 from .price_manager import ElectricityPriceManager, HANordpoolSource
 from .reporter import BatterySystemReporter
@@ -165,7 +167,154 @@ class BatterySystemManager:
         self._energy_manager.fetch_and_initialize_historical_data()
         self._energy_manager.fetch_predictions()
         self.log_system_startup()
+
+        # Run health check and log results
+        self._run_health_check()
+
         logger.info("BatterySystemManager started")
+
+    def _check_historical_data_access(self):
+        """Check if the system can access historical data from InfluxDB.
+
+        Returns:
+            dict: Health check result for historical data access
+        """
+
+        result = {
+            "name": "Historical Data Access",
+            "description": "Provides past energy flow data for analysis and optimization",
+            "required": False,
+            "status": "UNKNOWN",
+            "checks": [],
+            "last_run": datetime.now().isoformat(),
+        }
+
+        # Check InfluxDB configuration
+        config_check = {
+            "name": "InfluxDB Configuration",
+            "key": None,
+            "entity_id": None,
+            "status": "UNKNOWN",
+            "value": None,
+            "error": None,
+        }
+
+        try:
+            config = get_influxdb_config()
+
+            if config["url"] and config["username"] and config["password"]:
+                config_check["status"] = "OK"
+                config_check["value"] = f"URL: {config['url']}"
+            else:
+                config_check["status"] = "ERROR"
+                missing = []
+                if not config["url"]:
+                    missing.append("URL")
+                if not config["username"]:
+                    missing.append("Username")
+                if not config["password"]:
+                    missing.append("Password")
+                config_check["error"] = f"Missing configuration: {', '.join(missing)}"
+        except Exception as e:
+            config_check["status"] = "ERROR"
+            config_check["error"] = f"Failed to load InfluxDB configuration: {e}"
+
+        result["checks"].append(config_check)
+
+        # Test data retrieval if configuration is OK
+        if config_check["status"] == "OK":
+            data_check = {
+                "name": "Data Retrieval",
+                "key": None,
+                "entity_id": None,
+                "status": "UNKNOWN",
+                "value": None,
+                "error": None,
+            }
+
+            try:
+                # Try to get data from one hour ago
+                one_hour_ago = datetime.now() - timedelta(hours=1)
+                test_sensors = ["rkm0d7n04x_statement_of_charge_soc"]
+
+                response = get_sensor_data(test_sensors, one_hour_ago)
+
+                if response["status"] == "success" and response["data"]:
+                    data_check["status"] = "OK"
+                    data_check["value"] = "Successfully retrieved historical data"
+                else:
+                    data_check["status"] = "WARNING"
+                    data_check["error"] = "No historical data available"
+            except Exception as e:
+                data_check["status"] = "ERROR"
+                data_check["error"] = f"Failed to retrieve historical data: {e}"
+
+            result["checks"].append(data_check)
+
+        # Determine overall status
+        if all(check["status"] == "OK" for check in result["checks"]):
+            result["status"] = "OK"
+        elif any(check["status"] == "ERROR" for check in result["checks"]):
+            result["status"] = "ERROR"
+        else:
+            result["status"] = "WARNING"
+
+        return result
+
+    def _run_health_check(self):
+        """Run system health check and log the results.
+
+        Returns:
+            dict: Health check results
+        """
+
+        logger.info("Running system health check...")
+        health_results = run_system_health_checks(self)
+
+        # Format and log the results nicely
+        logger.info("System Health Check Results:")
+        logger.info("=" * 80)
+
+        for component in health_results["checks"]:
+            status_indicator = (
+                "✓"
+                if component["status"] == "OK"
+                else "✗"
+                if component["status"] == "ERROR"
+                else "!"
+            )
+            required_indicator = (
+                "[REQUIRED]" if component.get("required", False) else "[OPTIONAL]"
+            )
+
+            logger.info(
+                "%s %s %s: %s",
+                status_indicator,
+                required_indicator,
+                component["name"],
+                component["status"],
+            )
+
+            # Log details for non-OK components
+            if component["status"] != "OK":
+                logger.info("-" * 40)
+                for check in component["checks"]:
+                    if check["status"] != "OK":
+                        entity_str = (
+                            f" ({check['entity_id']})" if check.get("entity_id") else ""
+                        )
+                        logger.info(
+                            "  - %s%s: %s - %s",
+                            check["name"],
+                            entity_str,
+                            check["status"],
+                            check["error"] or "No specific error",
+                        )
+                logger.info("-" * 40)
+
+        logger.info("=" * 80)
+
+        return health_results
 
     def _initialize_tou_schedule_from_inverter(self):
         """Initialize schedule from current inverter settings.

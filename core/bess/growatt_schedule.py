@@ -1,6 +1,7 @@
 """Growatt schedule management module for TOU (Time of Use) and hourly controls."""
 
 import logging
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 # logger.setLevel(logging.DEBUG)
@@ -31,6 +32,128 @@ class GrowattScheduleManager:
         self.detailed_intervals = []  # For overview display
         self.tou_intervals = []  # For actual TOU settings
         self.current_hour = 0  # Track current hour
+
+    def check_health(self, ha_controller):
+        """Check the health of the Growatt Schedule Manager component.
+
+        Args:
+            ha_controller: Home Assistant controller for accessing Growatt entities
+
+        Returns:
+            list: List containing one health check result
+        """
+
+        growatt_check = {
+            "name": "Growatt Inverter Control",
+            "description": "Controls battery charge/discharge based on optimized schedule",
+            "required": False,  # System can run in demo mode without inverter control
+            "status": "UNKNOWN",
+            "checks": [],
+            "last_run": datetime.now().isoformat(),
+        }
+
+        # Check grid charge control
+        grid_charge_check = {
+            "name": "Grid Charge Control",
+            "key": "grid_charge",
+            "entity_id": ha_controller.sensors.get("grid_charge", "Not configured"),
+            "status": "UNKNOWN",
+            "value": None,
+            "error": None,
+        }
+
+        try:
+            # Check if we can read grid charge status
+            grid_charge_status = ha_controller.grid_charge_enabled()
+            grid_charge_check["status"] = "OK"
+            grid_charge_check["value"] = f"Current status: {grid_charge_status}"
+        except Exception as e:
+            grid_charge_check["status"] = "ERROR"
+            grid_charge_check["error"] = f"Failed to read grid charge status: {e}"
+
+        growatt_check["checks"].append(grid_charge_check)
+
+        # Check discharge rate control
+        discharge_check = {
+            "name": "Discharge Rate Control",
+            "key": "battery_discharging_power_rate",
+            "entity_id": ha_controller.sensors.get(
+                "battery_discharging_power_rate", "Not configured"
+            ),
+            "status": "UNKNOWN",
+            "value": None,
+            "error": None,
+        }
+
+        try:
+            # Check if we can read discharge rate
+            discharge_rate = ha_controller.get_discharging_power_rate()
+            discharge_check["status"] = "OK"
+            discharge_check["value"] = f"Current rate: {discharge_rate}%"
+        except Exception as e:
+            discharge_check["status"] = "ERROR"
+            discharge_check["error"] = f"Failed to read discharge rate: {e}"
+
+        growatt_check["checks"].append(discharge_check)
+
+        # Check TOU interval access
+        tou_check = {
+            "name": "TOU Interval Access",
+            "key": None,
+            "entity_id": None,
+            "status": "UNKNOWN",
+            "value": None,
+            "error": None,
+        }
+
+        try:
+            # Try to read TOU segments
+            tou_segments = ha_controller.read_inverter_time_segments()
+
+            if tou_segments:
+                tou_check["status"] = "OK"
+                tou_check["value"] = f"Retrieved {len(tou_segments)} TOU segments"
+            else:
+                tou_check["status"] = "WARNING"
+                tou_check["error"] = "No TOU segments found"
+        except Exception as e:
+            tou_check["status"] = "ERROR"
+            tou_check["error"] = f"Failed to read TOU segments: {e}"
+
+        growatt_check["checks"].append(tou_check)
+
+        # Check charging power rate control
+        charging_check = {
+            "name": "Charging Power Rate",
+            "key": "battery_charging_power_rate",
+            "entity_id": ha_controller.sensors.get(
+                "battery_charging_power_rate", "Not configured"
+            ),
+            "status": "UNKNOWN",
+            "value": None,
+            "error": None,
+        }
+
+        try:
+            # Check if we can read charging power rate
+            charging_rate = ha_controller.get_charging_power_rate()
+            charging_check["status"] = "OK"
+            charging_check["value"] = f"Current rate: {charging_rate}%"
+        except Exception as e:
+            charging_check["status"] = "ERROR"
+            charging_check["error"] = f"Failed to read charging rate: {e}"
+
+        growatt_check["checks"].append(charging_check)
+
+        # Determine overall status
+        if all(check["status"] == "OK" for check in growatt_check["checks"]):
+            growatt_check["status"] = "OK"
+        elif any(check["status"] == "ERROR" for check in growatt_check["checks"]):
+            growatt_check["status"] = "ERROR"
+        else:
+            growatt_check["status"] = "WARNING"
+
+        return [growatt_check]
 
     def create_schedule(self, schedule, current_hour=0):
         """Convert generic schedule to Growatt-specific intervals.

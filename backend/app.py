@@ -15,6 +15,7 @@ from loguru import logger
 # Import BESS system modules
 from core.bess import BatterySystemManager
 from core.bess.ha_api_controller import HomeAssistantAPIController
+from core.bess.health_check import run_system_health_checks
 from core.bess.price_manager import HANordpoolSource
 
 # Get ingress prefix from environment variable
@@ -455,4 +456,15 @@ async def get_energy_profile(
         return profile
     except Exception as e:
         logger.error(f"Error getting energy profile: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.get("/api/system/health")
+async def get_system_health():
+    """Get system health check results."""
+    try:
+        health_results = run_system_health_checks(bess_controller.system)
+        return health_results
+    except Exception as e:
+        logger.error(f"Error running health checks: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e

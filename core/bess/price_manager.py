@@ -196,6 +196,148 @@ class ElectricityPriceManager:
         self.settings = PriceSettings()
         self.source = source
 
+    def check_health(self):
+        """Check the health of the Price Manager component.
+
+        Returns:
+            list: List of health check results for each functional capability
+        """
+        from datetime import datetime
+
+        results = []
+
+        # Electricity Price Retrieval (REQUIRED)
+        price_result = {
+            "name": "Electricity Price Retrieval",
+            "description": "Provides hourly electricity prices for battery optimization",
+            "required": True,
+            "status": "UNKNOWN",
+            "checks": [],
+            "last_run": datetime.now().isoformat(),
+        }
+
+        # Check for source type to provide relevant information
+        source_check = {
+            "name": "Price Source Type",
+            "key": None,
+            "entity_id": None,
+            "status": "OK",
+            "value": type(self.source).__name__,
+            "error": None,
+        }
+        price_result["checks"].append(source_check)
+
+        # Check nordpool sensors if using HomeAssistant
+        if hasattr(self.source, "ha_controller") and self.source.ha_controller:
+            nordpool_sensors = [
+                {"name": "Nordpool Today Prices", "key": "nordpool_kwh_today"},
+                {"name": "Nordpool Tomorrow Prices", "key": "nordpool_kwh_tomorrow"},
+            ]
+
+            for sensor in nordpool_sensors:
+                entity_id = self.source.ha_controller.sensors.get(
+                    sensor["key"], "Not configured"
+                )
+                check_result = {
+                    "name": sensor["name"],
+                    "key": sensor["key"],
+                    "entity_id": entity_id,
+                    "status": "UNKNOWN",
+                    "value": None,
+                    "error": None,
+                }
+
+                try:
+                    # Check if the entity exists in Home Assistant
+                    if entity_id and entity_id != "Not configured":
+                        if self.source.ha_controller._api_request(
+                            "get", f"/api/states/{entity_id}"
+                        ):
+                            check_result["status"] = "OK"
+                            check_result["value"] = "Entity exists"
+                        else:
+                            check_result["status"] = "ERROR"
+                            check_result["error"] = f"Entity {entity_id} not found"
+                    else:
+                        check_result["status"] = "ERROR"
+                        check_result["error"] = "Entity not configured"
+                except Exception as e:
+                    check_result["status"] = "ERROR"
+                    check_result["error"] = str(e)
+
+                price_result["checks"].append(check_result)
+
+        # Check price retrieval capabilities
+        price_checks = [
+            {"name": "Today's Prices", "method": "get_today_prices"},
+            {"name": "Tomorrow's Prices", "method": "get_tomorrow_prices"},
+        ]
+
+        for check in price_checks:
+            check_result = {
+                "name": check["name"],
+                "key": None,
+                "entity_id": None,
+                "status": "UNKNOWN",
+                "value": None,
+                "error": None,
+            }
+
+            try:
+                # Try to get prices
+                method = getattr(self, check["method"])
+                prices = method()
+
+                if prices and len(prices) > 0:
+                    check_result["status"] = "OK"
+                    check_result["value"] = f"Retrieved {len(prices)} price entries"
+                else:
+                    check_result["status"] = "WARNING"
+                    check_result["error"] = "No price data available"
+            except Exception as e:
+                check_result["status"] = "ERROR"
+                check_result["error"] = str(e)
+
+            price_result["checks"].append(check_result)
+
+        # Check price settings
+        settings_check = {
+            "name": "Price Settings",
+            "key": None,
+            "entity_id": None,
+            "status": "UNKNOWN",
+            "value": None,
+            "error": None,
+        }
+
+        try:
+            settings = self.get_settings()
+            if settings:
+                settings_check["status"] = "OK"
+                settings_check[
+                    "value"
+                ] = f"Price area: {settings.get('area', 'Not set')}"
+            else:
+                settings_check["status"] = "WARNING"
+                settings_check["error"] = "Settings empty or invalid"
+        except Exception as e:
+            settings_check["status"] = "ERROR"
+            settings_check["error"] = str(e)
+
+        price_result["checks"].append(settings_check)
+
+        # Determine overall status
+        if all(check["status"] == "OK" for check in price_result["checks"]):
+            price_result["status"] = "OK"
+        elif any(check["status"] == "ERROR" for check in price_result["checks"]):
+            price_result["status"] = "ERROR"
+        else:
+            price_result["status"] = "WARNING"
+
+        results.append(price_result)
+
+        return results
+
     def calculate_prices(self, base_price: float) -> dict[str, float]:
         """Calculate buy and sell prices from base price.
 

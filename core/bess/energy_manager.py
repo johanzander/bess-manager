@@ -183,6 +183,201 @@ class EnergyManager:
         # Self consumption (load - grid import) (kWh)
         self._self_consumption_total = {}
 
+    def check_health(self):
+        """Check the health of all Energy Manager components.
+
+        Returns:
+            list: List of health check results for each functional capability
+        """
+
+        results = []
+
+        # 1. Real-time Energy Flow Tracking (REQUIRED)
+        energy_flow_result = {
+            "name": "Real-time Energy Flow Tracking",
+            "description": "Collects and validates energy flows in the battery system",
+            "required": True,
+            "status": "UNKNOWN",
+            "checks": [],
+            "last_run": datetime.now().isoformat(),
+        }
+
+        # Key sensors needed for energy flow tracking
+        energy_sensors = [
+            {"name": "Battery SOC", "method": "get_battery_soc", "key": "battery_soc"},
+            {
+                "name": "Solar Production",
+                "method": "get_solar_generation_today",
+                "key": "solar_production_today",
+            },
+            {
+                "name": "Battery Charge",
+                "method": "get_battery_charge_today",
+                "key": "battery_charged_today",
+            },
+            {
+                "name": "Battery Discharge",
+                "method": "get_battery_discharge_today",
+                "key": "battery_discharged_today",
+            },
+            {
+                "name": "Self Consumption",
+                "method": "get_self_consumption_today",
+                "key": "self_consumption_today",
+            },
+            {
+                "name": "Export to Grid",
+                "method": "get_export_to_grid_today",
+                "key": "export_to_grid_today",
+            },
+            {
+                "name": "Load Consumption",
+                "method": "get_load_consumption_today",
+                "key": "load_consumption_today",
+            },
+            {
+                "name": "Import from Grid",
+                "method": "get_import_from_grid_today",
+                "key": "import_from_grid_today",
+            },
+        ]
+
+        # Check each sensor for energy flow tracking
+        for sensor in energy_sensors:
+            check_result = {
+                "name": sensor["name"],
+                "key": sensor["key"],
+                "entity_id": self._ha_controller.sensors.get(
+                    sensor["key"], "Not configured"
+                ),
+                "status": "UNKNOWN",
+                "value": None,
+                "error": None,
+            }
+
+            try:
+                # Try to get the value through the controller
+                method = getattr(self._ha_controller, sensor["method"])
+                value = method()
+
+                # Record success
+                check_result["status"] = "OK"
+                check_result["value"] = value
+            except AttributeError as e:
+                # Method doesn't exist
+                check_result["status"] = "ERROR"
+                check_result["error"] = f"Method not found: {e}"
+            except Exception as e:
+                # Other errors (likely sensor issues)
+                check_result["status"] = "ERROR"
+                check_result["error"] = str(e)
+
+            energy_flow_result["checks"].append(check_result)
+
+        # Determine overall status for energy flow tracking
+        if all(check["status"] == "OK" for check in energy_flow_result["checks"]):
+            energy_flow_result["status"] = "OK"
+        elif any(check["status"] == "ERROR" for check in energy_flow_result["checks"]):
+            energy_flow_result["status"] = "ERROR"
+        else:
+            energy_flow_result["status"] = "WARNING"
+
+        results.append(energy_flow_result)
+
+        # 2. Energy Consumption Prediction (OPTIONAL)
+        consumption_result = {
+            "name": "Energy Consumption Prediction",
+            "description": "Provides hourly consumption forecast for battery optimization",
+            "required": False,
+            "status": "UNKNOWN",
+            "checks": [],
+            "last_run": datetime.now().isoformat(),
+        }
+
+        # Check consumption prediction sensor
+        prediction_check = {
+            "name": "Consumption Prediction Sensor",
+            "key": "48h_avg_grid_import",
+            "entity_id": self._ha_controller.sensors.get(
+                "48h_avg_grid_import", "Not configured"
+            ),
+            "status": "UNKNOWN",
+            "value": None,
+            "error": None,
+        }
+
+        try:
+            # Get predicted consumption
+            consumption_predictions = self._ha_controller.get_estimated_consumption()
+
+            if consumption_predictions and len(consumption_predictions) == 24:
+                prediction_check["status"] = "OK"
+                prediction_check[
+                    "value"
+                ] = f"Forecasts available: avg={sum(consumption_predictions)/24:.2f} kWh"
+            else:
+                prediction_check["status"] = "WARNING"
+                prediction_check["value"] = "Using default values"
+                prediction_check[
+                    "error"
+                ] = "Consumption predictions unavailable or incomplete"
+        except Exception as e:
+            prediction_check["status"] = "WARNING"  # Only warning since it's optional
+            prediction_check["error"] = f"Error getting consumption predictions: {e}"
+
+        consumption_result["checks"].append(prediction_check)
+
+        # Determine overall status for consumption prediction
+        consumption_result["status"] = prediction_check["status"]
+        results.append(consumption_result)
+
+        # 3. Solar Production Prediction (OPTIONAL)
+        solar_result = {
+            "name": "Solar Production Prediction",
+            "description": "Provides hourly solar forecast for battery optimization",
+            "required": False,
+            "status": "UNKNOWN",
+            "checks": [],
+            "last_run": datetime.now().isoformat(),
+        }
+
+        # Check solcast forecast sensor
+        solcast_check = {
+            "name": "Solcast Forecast Sensor",
+            "key": "solcast_pv_forecast_forecast_today",
+            "entity_id": self._ha_controller.sensors.get(
+                "solcast_pv_forecast_forecast_today", "Not configured"
+            ),
+            "status": "UNKNOWN",
+            "value": None,
+            "error": None,
+        }
+
+        try:
+            # Get solar predictions
+            solar_predictions = self._ha_controller.get_solcast_forecast()
+
+            if solar_predictions and len(solar_predictions) == 24:
+                solcast_check["status"] = "OK"
+                solcast_check[
+                    "value"
+                ] = f"Forecast available: total={sum(solar_predictions):.2f} kWh"
+            else:
+                solcast_check["status"] = "WARNING"
+                solcast_check["value"] = "Using default values (no solar)"
+                solcast_check["error"] = "Solar forecast unavailable or incomplete"
+        except Exception as e:
+            solcast_check["status"] = "WARNING"  # Only warning since it's optional
+            solcast_check["error"] = f"Error getting solar forecast: {e}"
+
+        solar_result["checks"].append(solcast_check)
+
+        # Determine overall status for solar prediction
+        solar_result["status"] = solcast_check["status"]
+        results.append(solar_result)
+
+        return results
+
     def reset_daily_data(self):
         """Reset daily predictions and clear accumulated data.
 

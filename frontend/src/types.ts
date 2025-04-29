@@ -75,3 +75,29 @@ export interface ScheduleResponse {
   energyProfile?: EnergyProfile;
   enhancedSummary?: EnhancedSummary;
 }
+
+export type HealthStatus = "OK" | "WARNING" | "ERROR" | "UNKNOWN";
+
+export interface HealthCheckResult {
+  name: string;
+  key: string | null;
+  entity_id?: string | null;
+  status: HealthStatus;
+  value: any;
+  error: string | null;
+}
+
+export interface ComponentHealthStatus {
+  name: string;
+  description: string;
+  required: boolean;
+  status: HealthStatus;
+  checks: HealthCheckResult[];
+  last_run: string;
+}
+
+export interface SystemHealthData {
+  timestamp: string;
+  system_mode: string;
+  checks: ComponentHealthStatus[];
+}

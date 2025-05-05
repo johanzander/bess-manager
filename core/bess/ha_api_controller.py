@@ -366,12 +366,13 @@ class HomeAssistantAPIController:
 
     def grid_charge_enabled(self):
         """Return True if grid charging is enabled."""
-        response = self._api_request(
-            "get",
-            "/api/states/{}".format(
-                self.sensors.get("grid_charge", "switch.rkm0d7n04x_charge_from_grid")
-            ),
-        )
+        # Use the sensor config to get the correct entity ID
+        entity_id = self.sensors.get("grid_charge")
+        if not entity_id:
+            logger.warning("No entity ID configured for grid_charge")
+            return False
+
+        response = self._api_request("get", f"/api/states/{entity_id}")
         if response and "state" in response:
             return response["state"] == "on"
         return False
@@ -468,11 +469,18 @@ class HomeAssistantAPIController:
         """Get the current load for L3."""
         return self.get_sensor_value("current_l3")
 
-    def get_solcast_forecast(self, day_offset=0, confidence_level="estimate"):
+    def get_solar_forecast(self, day_offset=0, confidence_level="estimate"):
         """Get solar forecast data from Solcast integration."""
-        entity_id = "sensor.solcast_pv_forecast_forecast_today"
+        # Determine which sensor key to use based on day_offset
+        sensor_key = "solcast_forecast_today"
         if day_offset == 1:
-            entity_id = "sensor.solcast_pv_forecast_forecast_tomorrow"
+            sensor_key = "solcast_forecast_tomorrow"
+
+        # Get entity ID from sensor config
+        entity_id = self.sensors.get(sensor_key)
+        if not entity_id:
+            logger.warning(f"No entity ID configured for {sensor_key}")
+            return [0.0] * 24  # Return zeros as fallback
 
         response = self._api_request("get", f"/api/states/{entity_id}")
 
@@ -524,6 +532,9 @@ class HomeAssistantAPIController:
                 "nordpool_kwh_tomorrow" if is_tomorrow else "nordpool_kwh_today"
             )
             entity_id = self.sensors.get(sensor_key)
+            if not entity_id:
+                logger.warning(f"No entity ID configured for {sensor_key}")
+                raise ValueError(f"Missing entity ID configuration for {sensor_key}")
 
             time_label = "tomorrow" if is_tomorrow else "today"
             logger.debug(f"Fetching Nordpool prices for {time_label} from {entity_id}")
@@ -665,48 +676,3 @@ class HomeAssistantAPIController:
         except Exception as e:
             logger.error("Error fetching sensor data: %s", str(e))
             return {"status": "error", "message": str(e)}
-
-    def get_battery_energy_sensors(self):
-        """Get all battery energy-related sensors.
-
-        Args:
-            include_soc: Whether to include SOC sensor
-
-        Returns:
-            List of sensor entity_ids
-
-        """
-        sensors = [
-            self.sensors.get("lifetime_battery_charged"),
-            self.sensors.get("lifetime_battery_discharged"),
-            self.sensors.get("lifetime_solar_energy"),
-            self.sensors.get("lifetime_export_to_grid"),
-            self.sensors.get("lifetime_load_consumption"),
-            self.sensors.get("lifetime_import_from_grid"),
-            self.sensors.get("lifetime_system_production"),
-            self.sensors.get("lifetime_self_consumption"),
-            self.sensors.get("zap_energy_meter"),
-            self.sensors.get("battery_soc"),
-        ]
-
-        return sensors
-
-    def get_historical_sensor_data(self, sensor_name, timestamp):
-        """Get historical sensor data for a specific time.
-
-        Args:
-            sensor_name: Name of the sensor
-            timestamp: Timestamp to get data for
-
-        Returns:
-            Sensor value or None if not available
-
-        """
-        # This is a simplified implementation without historical data access
-        # For a complete implementation, you'd need to query a history service
-        # or use the InfluxDB API directly
-
-        logger.warning(
-            "Historical data not available via REST API, returning current value"
-        )
-        return self.get_sensor_value(sensor_name)

@@ -355,7 +355,7 @@ class EnergyManager:
 
         try:
             # Get solar predictions
-            solar_predictions = self._ha_controller.get_solcast_forecast()
+            solar_predictions = self._ha_controller.get_solar_forecast()
 
             if solar_predictions and len(solar_predictions) == 24:
                 solcast_check["status"] = "OK"
@@ -1169,7 +1169,7 @@ class EnergyManager:
                         "Invalid consumption predictions format, keeping defaults"
                     )
 
-                solar_predictions = self._ha_controller.get_solcast_forecast()
+                solar_predictions = self._ha_controller.get_solar_forecast()
                 if solar_predictions and len(solar_predictions) == 24:
                     self._solar_predictions = solar_predictions
                     _LOGGER.info(
@@ -1531,7 +1531,7 @@ class EnergyManager:
         """Update solar and consumption predictions from controller."""
         if self._ha_controller:
             try:
-                solar_predictions = self._ha_controller.get_solcast_forecast()
+                solar_predictions = self._ha_controller.get_solar_forecast()
                 if solar_predictions and len(solar_predictions) == 24:
                     self._solar_predictions = solar_predictions
 

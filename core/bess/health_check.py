@@ -124,7 +124,8 @@ def check_historical_data_access():
         try:
             # Try to get data from one hour ago
             one_hour_ago = datetime.now() - timedelta(hours=1)
-            test_sensors = ["rkm0d7n04x_statement_of_charge_soc"]
+            # Use generalized sensor key instead of direct entity ID
+            test_sensors = ["battery_soc"]
 
             response = get_sensor_data(test_sensors, one_hour_ago)
 

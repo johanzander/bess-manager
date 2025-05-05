@@ -74,7 +74,8 @@ options:
     nordpool_kwh_today: "sensor.nordpool_kwh_se4_sek_2_10_025"
     nordpool_kwh_tomorrow: "sensor.nordpool_kwh_se4_sek_2_10_025"
     48h_avg_grid_import: "sensor.48h_average_grid_import_power"
-    1h_avg_grid_import: "sensor.1h_average_grid_import_power"
+    solar_forecast_today: "sensor.solcast_pv_forecast_forecast_today"
+    solar_forecast_tomorrow: "sensor.solcast_pv_forecast_forecast_tomorrow"
 schema:
   influxdb:
     url: str
@@ -128,4 +129,5 @@ schema:
     nordpool_kwh_today: str
     nordpool_kwh_tomorrow: str
     48h_avg_grid_import: str
-    1h_avg_grid_import: str
+    solar_forecast_today: str
+    solar_forecast_tomorrow: str

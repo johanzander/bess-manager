@@ -84,7 +84,7 @@ class TestPredictions:
         mock_controller.solar_forecast = pattern
 
         # Update the mock function to return our pattern
-        mock_controller.get_solcast_forecast = lambda *args, **kwargs: pattern
+        mock_controller.get_solar_forecast = lambda *args, **kwargs: pattern
 
         # Call fetch_predictions to update solar predictions
         em.fetch_predictions()

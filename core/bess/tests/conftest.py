@@ -59,7 +59,7 @@ class MockHomeAssistantController:
         """Get estimated hourly consumption for 24 hours."""
         return self.consumption_forecast
 
-    def get_solcast_forecast(self, day_offset=0, confidence_level="estimate"):
+    def get_solar_forecast(self, day_offset=0, confidence_level="estimate"):
         """Get solar forecast data from Solcast integration."""
         return self.solar_forecast
 

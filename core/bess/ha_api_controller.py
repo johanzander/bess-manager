@@ -472,9 +472,9 @@ class HomeAssistantAPIController:
     def get_solar_forecast(self, day_offset=0, confidence_level="estimate"):
         """Get solar forecast data from Solcast integration."""
         # Determine which sensor key to use based on day_offset
-        sensor_key = "solcast_forecast_today"
+        sensor_key = "solar_forecast_today"
         if day_offset == 1:
-            sensor_key = "solcast_forecast_tomorrow"
+            sensor_key = "solar_forecast_tomorrow"
 
         # Get entity ID from sensor config
         entity_id = self.sensors.get(sensor_key)

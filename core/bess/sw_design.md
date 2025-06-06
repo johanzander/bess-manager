@@ -2,19 +2,19 @@
 
 ## 1. System Overview
 
-The Battery Energy Storage System (BESS) manages a home battery installation to optimize electricity costs by:
+The Battery Energy Storage System (BESS) manages a home battery installation to optimize electricity costs and maximize the value of solar and grid interactions. The system provides:
 
-1. **Charging** the battery during low-price periods
-2. **Discharging** the battery during high-price periods
-3. **Maximizing** solar charging when available
-4. **Respecting** technical constraints of the battery and home electrical system
-5. **Adaptively updating** based on real-time measurements
+1. **Globally optimal battery scheduling** over a 24-hour or longer horizon, considering all technical and economic constraints.
+2. **Integrated economic modeling** that values solar, grid, and battery wear costs, dynamically adapting to price and solar forecasts.
+3. **Real-time adaptation** to actual measurements, with the ability to re-optimize as new data arrives.
+4. **Advanced reporting and visualization** for both technical and economic performance.
+5. **Modular, extensible architecture** to support future enhancements such as multi-day optimization, machine learning-based forecasting, and grid export strategies.
 
-### 1.1 System Architecture
+## 2. System Architecture
 
 The system follows a modular design with clear separation of concerns:
 
-```
+```text
 ┌───────────────────┐
 │  BESS Controller  │  Main entry point (pyscript file in Home Assistant)
 │    (pyscript)     │  Schedules and triggers system operations
@@ -57,6 +57,7 @@ The system follows a modular design with clear separation of concerns:
 **Purpose:** Main facade that coordinates all components and provides the primary API.
 
 **Key Responsibilities:**
+
 - Initialize and configure system components
 - Create and update battery schedules
 - Apply scheduled settings to the physical battery system
@@ -64,6 +65,7 @@ The system follows a modular design with clear separation of concerns:
 - Manage system settings
 
 **Key Methods:**
+
 - `update_schedule(hour)`: Update system state for current hour
 - `create_schedule(price_entries, price_date)`: Generate optimal schedule
 - `apply_hourly_schedule(hour)`: Apply settings for specific hour
@@ -76,6 +78,7 @@ The system follows a modular design with clear separation of concerns:
 **Purpose:** Centralized management of all energy-related data and predictions.
 
 **Key Responsibilities:**
+
 - Directly collect energy measurements from sensors
 - Track historical energy flows with hourly granularity
 - Validate energy balance and detect inconsistencies
@@ -83,24 +86,26 @@ The system follows a modular design with clear separation of concerns:
 - Log energy balance reports and statistics
 
 **Key Methods:**
+
 - `update_hour_data(hour)`: Update energy data for completed hour
 - `get_combined_energy_data(current_hour)`: Get combined actual/predicted energy profile
 - `set_consumption_predictions(values)`: Set hourly consumption predictions
 - `set_solar_predictions(values)`: Set hourly solar predictions
 - `log_energy_balance()`: Log comprehensive energy balance report
 
-
 ### 2.3 Schedule
 
 **Purpose:** Represent battery charge/discharge schedule with hourly granularity.
 
 **Key Responsibilities:**
+
 - Store optimization results (actions, state of energy)
 - Calculate costs and savings
 - Format data for display and API
 - Provide interface for controller access
 
 **Key Methods:**
+
 - `set_optimization_results(actions, state_of_energy, prices, ...)`: Initialize with optimization results
 - `get_hour_settings(hour)`: Get settings for specific hour
 - `get_schedule_data()`: Get complete formatted schedule data
@@ -111,11 +116,13 @@ The system follows a modular design with clear separation of concerns:
 **Purpose:** Manage electricity price data from various sources.
 
 **Key Responsibilities:**
+
 - Fetch price data from configured source
 - Calculate retail buy/sell prices
 - Format price data for optimization
 
 **Key Methods:**
+
 - `get_today_prices()`: Get prices for current day
 - `get_tomorrow_prices()`: Get prices for next day
 - `calculate_prices(base_price)`: Apply markup, VAT, etc.
@@ -125,11 +132,13 @@ The system follows a modular design with clear separation of concerns:
 **Purpose:** Convert generic schedule to Growatt-specific format.
 
 **Key Responsibilities:**
+
 - Convert hourly schedule to Growatt TOU intervals
 - Manage grid charge and discharge rate settings
 - Format schedules for the Growatt inverter
 
 **Key Methods:**
+
 - `create_schedule(schedule)`: Process generic schedule into Growatt format
 - `get_daily_TOU_settings()`: Get battery-first TOU intervals
 - `get_hourly_settings(hour)`: Get settings for specific hour
@@ -139,11 +148,13 @@ The system follows a modular design with clear separation of concerns:
 **Purpose:** Monitor home power consumption and adjust battery charging.
 
 **Key Responsibilities:**
+
 - Monitor current draw on electrical phases
 - Calculate available charging power
 - Adjust battery charging power to prevent overload
 
 **Key Methods:**
+
 - `calculate_available_charging_power()`: Calculate safe charging power
 - `adjust_battery_charging()`: Apply calculated charging power
 
@@ -152,12 +163,14 @@ The system follows a modular design with clear separation of concerns:
 ### 3.1 Battery State
 
 **Battery Energy State:**
+
 - State of Charge (SOC): Percentage (0-100%)
 - State of Energy (SOE): Absolute energy (kWh)
 - Reserved Capacity: Minimum energy to maintain (kWh)
 - Total Capacity: Maximum energy capacity (kWh)
 
 **Actions:**
+
 - Positive values: Charging (kWh)
 - Negative values: Discharging (kWh)
 - Zero: Standby (no action)
@@ -165,11 +178,13 @@ The system follows a modular design with clear separation of concerns:
 ### 3.2 Energy Flows
 
 **Measured Values:**
+
 - Grid Import: Energy from grid (kWh)
 - Solar Generation: Energy from solar (kWh)
 - Battery SOC: Current battery level (%)
 
 **Calculated Values:**
+
 - Home Consumption: Energy used in home (kWh)
 - Battery Change: Net energy change in battery (kWh)
 - Solar to Battery: Solar energy directed to battery (kWh)
@@ -177,11 +192,13 @@ The system follows a modular design with clear separation of concerns:
 ### 3.3 Electricity Prices
 
 **Price Components:**
+
 - Base Price: Raw Nordpool spot price (SEK/kWh)
 - Buy Price: Retail price with markup, VAT (SEK/kWh)
 - Sell Price: Price received when selling back (SEK/kWh)
 
 **Time Structure:**
+
 - 24 hourly prices per day
 - Today's prices: Available early morning
 - Tomorrow's prices: Available around 13:00
@@ -189,6 +206,7 @@ The system follows a modular design with clear separation of concerns:
 ### 3.4 Settings
 
 **Battery Settings:**
+
 - Total Capacity: Maximum battery energy (kWh)
 - Min/Max SOC: Allowable state of charge range (%)
 - Max Charge/Discharge Power: Power limits (kW)
@@ -196,6 +214,7 @@ The system follows a modular design with clear separation of concerns:
 - Charging Power Rate: Maximum power percentage (%)
 
 **Price Settings:**
+
 - Area Code: Price area (SE1-SE4)
 - Markup Rate: Additional supplier cost (SEK/kWh)
 - VAT Multiplier: Value-added tax (typically 1.25)
@@ -204,6 +223,7 @@ The system follows a modular design with clear separation of concerns:
 - Min Profit: Threshold for trading (SEK/kWh)
 
 **Home Settings:**
+
 - Max Fuse Current: Circuit breaker limit (A)
 - Voltage: Line voltage (V)
 - Safety Margin: For power calculations (%)
@@ -215,6 +235,7 @@ The system follows a modular design with clear separation of concerns:
 **Purpose:** Optimize battery charging/discharging to maximize profit.
 
 **Inputs:**
+
 - Hourly electricity prices
 - Battery parameters (capacity, reserved, cycle cost)
 - Hourly consumption predictions
@@ -236,20 +257,22 @@ The system follows a modular design with clear separation of concerns:
    - Maintain energy balance
    - Only execute profitable trades
 
-
 ### 4.2 Solar Detection Algorithm
 
 **Purpose:** Detect solar energy charging the battery.
 
 **Method:**
+
 1. Compare actual battery change with planned action
 2. If actual > planned, excess is likely solar:
-   ```
+
+   ```python
    solar_to_battery = min(
        actual_change - planned_action,
        measured_solar_generation
    )
    ```
+
 3. Track solar charging for optimization and reporting
 
 ### 4.3 Energy Balance Validation
@@ -257,11 +280,13 @@ The system follows a modular design with clear separation of concerns:
 **Purpose:** Ensure energy accounting is accurate.
 
 **Energy Balance Equation:**
-```
+
+```python
 grid_import + solar_generation = home_consumption + battery_change
 ```
 
 **Validation Process:**
+
 1. Track all energy flows
 2. Calculate consumption from other measurements
 3. Ensure consumption is non-negative (adjust if needed)
@@ -272,6 +297,7 @@ grid_import + solar_generation = home_consumption + battery_change
 **Purpose:** Determine when to update the battery schedule.
 
 **Decision Criteria:**
+
 1. Always update at hour 0 (midnight)
 2. Update if solar charging differs significantly
 3. Update if TOU intervals differ
@@ -356,106 +382,3 @@ grid_import + solar_generation = home_consumption + battery_change
    - Change charging power in small steps
    - Stay within calculated safe limit
    - Only active when grid charging enabled
-
-## 6. Best Practices
-
-### 6.1 Energy Accounting
-
-1. **Always balance energy equation**
-   - grid_import + solar_generation = home_consumption + battery_change
-   - All components must be non-negative
-   - Consumption is derived to ensure balance
-
-2. **Track solar charging separately**
-   - Detect by comparing actual vs planned battery changes
-   - Value lower than grid energy for optimization
-   - Respect in future discharge decisions
-
-3. **Value stored energy correctly**
-   - Calculate weighted average cost of charged energy
-   - Include both grid and solar in cost basis
-   - Use for discharge decisions
-
-### 6.2 Schedule Management
-
-1. **Clear past/future separation**
-   - Never change past hours (already happened)
-   - Only optimize current and future hours
-   - Preserve past schedule in combined schedule
-
-2. **Consistent data structure**
-   - Same length arrays (24 hours)
-   - Consistent units (kWh for energy)
-   - Clear state representation (charging, discharging, standby)
-
-3. **Regular schedule verification**
-   - Verify energy balance
-   - Check capacity constraints
-   - Validate profitability
-
-### 6.3 Error Handling
-
-1. **Graceful degradation**
-   - Continue with default values if data missing
-   - Use predictions when measurements unavailable
-   - Log issues but avoid crashes
-
-2. **Data validation**
-   - Check SOC within range (0-100%)
-   - Ensure non-negative energy values
-   - Validate hour indices (0-23)
-
-3. **Consistent error reporting**
-   - Log at appropriate levels
-   - Include context in error messages
-   - Report energy imbalances
-
-## 7. Future Improvements
-
-### 7.1 Enhanced Solar Integration
-
-1. **Solar prediction model**
-   - Weather-based solar generation forecast
-   - Historical pattern matching
-   - Adaptive learning from actual generation
-
-2. **Solar prioritization**
-   - Dynamic control based on solar availability
-   - Preemptive battery discharge before solar peak
-   - Grid export optimization
-
-### 7.2 Advanced Optimization
-
-1. **Multi-day optimization**
-   - Look beyond 24-hour window
-   - Consider weather patterns
-   - Plan for weekends/holidays
-
-2. **Variable consumption model**
-   - Time-of-day patterns
-   - Temperature correlation
-   - Occupancy detection
-
-3. **Machine learning integration**
-   - Consumption prediction
-   - Price pattern recognition
-   - Adaptive optimization parameters
-
-### 7.3 User Experience
-
-1. **Performance dashboards**
-   - Energy flow visualization
-   - Savings tracking
-   - Prediction accuracy metrics
-
-2. **Decision explanation**
-   - Why charging/discharging decisions were made
-   - Potential alternative scenarios
-   - Profit optimization breakdown
-
-3. **Manual overrides**
-   - Special event handling
-   - Backup power reservation
-   - Grid independence mode
-
-

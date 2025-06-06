@@ -1,4 +1,5 @@
 export interface HourlyData {
+  // Core fields
   hour: string;
   price: number;
   consumption: number;
@@ -21,8 +22,36 @@ export interface HourlyData {
   batterySavings?: number;
   batteryGridConsumption?: number;
   
+  // Additional energy flow fields
+  batteryCharge?: number;
+  batteryDischarge?: number;
+  gridImport?: number;
+  gridExport?: number;
+  gridToBattery?: number;
+  solarToBattery?: number;
+  
   // Legacy field for compatibility
   solarCharged?: number;
+  
+  // API snake_case alternatives
+  battery_level?: number;
+  battery_action?: number;
+  battery_soc?: number;
+  grid_cost?: number;
+  battery_cost?: number;
+  total_cost?: number;
+  base_cost?: number;
+  solar_production?: number;
+  electricity_price?: number;
+  
+  // API camelCase alternatives
+  electricityPrice?: number;
+  batteryAction?: number;
+  batterySoc?: number;
+  homeConsumption?: number;
+  solarGenerated?: number;
+  gridImported?: number;
+  gridExported?: number;
 }
 
 export interface ScheduleSummary {
@@ -31,17 +60,37 @@ export interface ScheduleSummary {
   gridCosts: number;
   batteryCosts: number;
   savings: number;
+  
+  // Optional fields for enhanced summary
+  solarOnlySavings?: number;
+  solarOnlyCost?: number;
+  batterySavings?: number;
+  totalSolarProduction?: number;
+  totalBatteryCharge?: number;
+  totalBatteryDischarge?: number;
+  totalGridImport?: number;
+  totalGridExport?: number;
+  cycleCount?: number;
 }
 
 export interface BatterySettings {
   totalCapacity: number;
   reservedCapacity: number;
-  minSoc: number;
-  maxSoc: number;
+  minSoc?: number;
+  maxSoc?: number;
   maxChargeDischarge: number;
   chargeCycleCost: number;
   chargingPowerRate: number;
   estimatedConsumption: number;
+  useActualPrice?: boolean;
+}
+
+export interface ElectricitySettings {
+  markupRate: number;
+  vatMultiplier: number;
+  additionalCosts: number;
+  taxReduction: number;
+  area: 'SE1' | 'SE2' | 'SE3' | 'SE4';
 }
 
 export interface EnhancedSummary {
@@ -49,6 +98,8 @@ export interface EnhancedSummary {
   solarOnlyCost: number;
   batterySolarCost: number;
   solarSavings: number;
+  solarOnlySavings?: number;  // Added field for solar-only savings
+  arbitrageSavings?: number;  // Added field for arbitrage savings
   batterySavings: number;
   totalSavings: number;
   solarProduction: number;
@@ -56,8 +107,15 @@ export interface EnhancedSummary {
   solarExcess: number;
   totalCharged: number;
   totalDischarged: number;
+  totalChargeFromSolar?: number;  // Added field for battery charging from solar
+  totalChargeFromGrid?: number;   // Added field for battery charging from grid
+  totalGridExport?: number;       // Added field for total grid export
+  totalGridImport?: number;       // Added field for total grid import
+  totalBatteryGridConsumption?: number; // Added field for battery grid consumption
   estimatedBatteryCycles: number;
   totalConsumption?: number;
+  avgBuyPrice?: number;          // Added field for average buy price
+  avgSellPrice?: number;         // Added field for average sell price
   totalImport?: number;
 }
 
@@ -69,7 +127,7 @@ export interface EnergyProfile {
   actualHours: number;
 }
 
-export interface ScheduleResponse {
+export interface ScheduleData {
   hourlyData: HourlyData[];
   summary: ScheduleSummary;
   energyProfile?: EnergyProfile;
@@ -101,3 +159,5 @@ export interface SystemHealthData {
   system_mode: string;
   checks: ComponentHealthStatus[];
 }
+
+

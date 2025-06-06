@@ -25,7 +25,7 @@ WATCHED_DIRECTORIES = ["."]
 WATCHED_EXTENSIONS = [".py"]
 PYTHON_EXECUTABLE = sys.executable
 INITIAL_WAIT_TIME = 2  # seconds
-DEBOUNCE_TIME = 0.5  # seconds
+DEBOUNCE_TIME = 2.0  # seconds - increased to reduce sensitivity
 
 # Keep track of the server process
 server_process = None
@@ -39,11 +39,24 @@ class ChangeHandler(FileSystemEventHandler):
         """React to file changes."""
         global last_change_time, server_process
 
+        # Get the filename from the path
+        filename = os.path.basename(event.src_path)
+
+        # Only restart for user-initiated changes, not system/temp files
+        # Skip app.py and other problematic files that might cause restart loops
+        if (filename == "app.py") and not os.environ.get("FORCE_RELOAD_APP"):
+            print(
+                f"{YELLOW}Ignoring auto-detected change in {filename} to prevent restart loops{ENDC}"
+            )
+            return
+
         # Ignore directory changes and temp files
         if (
             event.is_directory
             or event.src_path.endswith(".pyc")
             or event.src_path.endswith("~")
+            or "__pycache__" in event.src_path
+            or ".git" in event.src_path
         ):
             return
 

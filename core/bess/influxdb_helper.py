@@ -33,7 +33,7 @@ def get_influxdb_config():
                     "password": influxdb_config.get("password", ""),
                 }
             )
-            _LOGGER.info("Loaded InfluxDB config from options.json")
+            _LOGGER.debug("Loaded InfluxDB config from options.json")
     except Exception as e:
         _LOGGER.warning("Failed to load options.json: %s", str(e))
 
@@ -48,7 +48,7 @@ def get_influxdb_config():
                     "password": os.getenv("HA_DB_PASSWORD", ""),
                 }
             )
-            _LOGGER.info("Loaded InfluxDB config from .env file")
+            _LOGGER.debug("Loaded InfluxDB config from .env file")
         except Exception as e:
             _LOGGER.warning("Failed to load .env file: %s", str(e))
 

@@ -21,8 +21,8 @@ def run_system_health_checks(system_manager):
     # These can return multiple checks per component
 
     # 1. Energy Manager components
-    if hasattr(system_manager._energy_manager, "check_health"):
-        all_component_checks.extend(system_manager._energy_manager.check_health())
+    #    if hasattr(system_manager._energy_manager, "check_health"):
+    #        all_component_checks.extend(system_manager._energy_manager.check_health())
 
     # 2. Price Manager components
     if hasattr(system_manager._price_manager, "check_health"):

@@ -1,14 +1,21 @@
 """Shared test fixtures and utilities for battery system integration tests."""
 
 import logging
+import os
+import sys
 
 import pytest
-from bess import BatterySystemManager
-from bess.price_manager import MockSource
+
+# Add the project root to Python path
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+from core.bess.battery_controller_v2 import BatterySystemManager  # noqa: E402
 
 
 class MockHomeAssistantController:
@@ -372,6 +379,59 @@ def mock_controller_with_params():
     return _create
 
 
+@pytest.fixture
+def sample_price_data(price_data_2024_08_16):
+    """
+    Provide sample price data for unit tests.
+    Uses the 2024-08-16 data for consistency with original unit tests.
+    """
+    base_prices = price_data_2024_08_16
+    return {"buy_price": base_prices, "sell_price": [p * 0.7 for p in base_prices]}
+
+
+@pytest.fixture
+def sample_consumption_data():
+    """
+    Provide sample consumption data for unit tests.
+    Uses constant 5.2 kWh per hour, matching original unit tests.
+    """
+    return [5.2] * 24
+
+
+@pytest.fixture
+def sample_solar_data():
+    """
+    Provide sample solar production data for unit tests.
+    Uses representative solar curve (zero at night, peak at noon).
+    """
+    return [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.8,
+        2.3,
+        3.7,
+        4.8,
+        5.5,
+        5.8,
+        5.8,
+        5.3,
+        4.4,
+        3.3,
+        1.9,
+        0.9,
+        0.1,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+    ]
+
+
 # SYSTEM CONFIGURATION FIXTURES
 @pytest.fixture
 def base_system(mock_controller):
@@ -396,10 +456,18 @@ def configured_system(mock_controller):
         # This is the key fix - ensure the energy manager uses the correct consumption values
         system._energy_manager.set_consumption_predictions(test_case["consumption"])
 
-        system.price_settings.use_actual_price = False
+        # Set mock prices directly in the price manager
+        system._price_manager.nordpool_prices = price_data
 
-        # Create a mock price source with the test data
-        system._price_manager.source = MockSource(price_data)
+        # Calculate buy and sell prices
+        buy_prices = [system._price_manager._calculate_buy_price(p) for p in price_data]
+        sell_prices = [
+            system._price_manager._calculate_sell_price(p) for p in price_data
+        ]
+
+        # Set the calculated prices
+        system._price_manager._buy_prices = buy_prices
+        system._price_manager._sell_prices = sell_prices
 
         return system
 

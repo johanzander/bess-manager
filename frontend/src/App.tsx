@@ -1,31 +1,12 @@
-import React, { useState, useMemo } from 'react';
-import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
-import OptimizationDashboard from './pages/OptimizationDashboard';
+import React, { useMemo } from 'react';
+import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react-router-dom';
+import DashboardPage from './pages/DashboardPage';
+import SavingsAnalysisPage from './pages/SavingsPage';
+import InverterPage from './pages/InverterPage';
+import InsightsPage from './pages/InsightsPage';
 import SystemHealthPage from './pages/SystemHealthPage';
-import DateSelector from './components/DateSelector';
-import { CombinedSettings } from './components/Settings';
 import { useSettings } from './hooks/useSettings';
-import { BatterySettings } from './types';
-import { Home, Activity } from 'lucide-react';
-
-// Default settings to use when real settings are not available
-const DEFAULT_BATTERY_SETTINGS: BatterySettings = {
-  totalCapacity: 30.0,
-  reservedCapacity: 3.0, // 10% of 30.0
-  estimatedConsumption: 3.5,
-  maxChargeDischarge: 6,
-  chargeCycleCost: 0.50,
-  chargingPowerRate: 40,
-  useActualPrice: false
-};
-
-const DEFAULT_ELECTRICITY_SETTINGS: ElectricitySettings = {
-  markupRate: 0.08,
-  vatMultiplier: 1.25,
-  additionalCosts: 1.03,
-  taxReduction: 0.6518,
-  area: 'SE4'
-};
+import { Home, Activity, TrendingUp, Brain, Zap } from 'lucide-react';
 
 // An ErrorBoundary component to catch rendering errors
 class ErrorBoundary extends React.Component<
@@ -67,18 +48,67 @@ class ErrorBoundary extends React.Component<
   }
 }
 
+// Navigation component with new 4-tab structure
+const Navigation = () => {
+  const location = useLocation();
+  
+  const isActive = (path: string) => {
+    return location.pathname === path ? 'bg-gray-100 text-gray-900' : 'text-gray-700 hover:text-gray-900';
+  };
+  
+  return (
+    <div className="flex space-x-2">
+      <Link 
+        to="/" 
+        className={`p-2 hover:bg-gray-100 rounded flex items-center space-x-1 ${isActive('/')}`}
+        title="Quick overview & live monitoring"
+      >
+        <Home className="h-5 w-5" />
+        <span className="hidden sm:inline">Dashboard</span>
+      </Link>
+      <Link 
+        to="/savings" 
+        className={`p-2 hover:bg-gray-100 rounded flex items-center space-x-1 ${isActive('/savings')}`}
+        title="Financial analysis & detailed reports"
+      >
+        <TrendingUp className="h-5 w-5" />
+        <span className="hidden sm:inline">Savings</span>
+      </Link>
+      <Link 
+        to="/inverter" 
+        className={`p-2 hover:bg-gray-100 rounded flex items-center space-x-1 ${isActive('/inverter')}`}
+        title="Inverter status & battery schedule management"
+      >
+        <Zap className="h-5 w-5" />
+        <span className="hidden sm:inline">Inverter</span>
+      </Link>
+      <Link 
+        to="/insights" 
+        className={`p-2 hover:bg-gray-100 rounded flex items-center space-x-1 ${isActive('/insights')}`}
+        title="Decision analysis & intelligence"
+      >
+        <Brain className="h-5 w-5" />
+        <span className="hidden sm:inline">Insights</span>
+      </Link>
+      <Link 
+        to="/system-health" 
+        className={`p-2 hover:bg-gray-100 rounded flex items-center space-x-1 ${isActive('/system-health')}`}
+        title="System status & component health"
+      >
+        <Activity className="h-5 w-5" />
+        <span className="hidden sm:inline">System Health</span>
+      </Link>
+    </div>
+  );
+};
+
 function App() {
   console.log('App component rendering');
-  
-  const [selectedDate, setSelectedDate] = useState(new Date());
-  const [isLoading, setIsLoading] = useState(false);
   
   try {
     const { 
       batterySettings, 
       electricitySettings, 
-      updateBatterySettings,
-      updateElectricitySettings,
       isLoading: settingsLoading,
       error: settingsError 
     } = useSettings();
@@ -90,12 +120,8 @@ function App() {
       hasElectricitySettings: !!electricitySettings
     });
 
-    const handleDateChange = (date: Date) => {
-      setSelectedDate(date);
-    };
-
     // Safely create settings with fallbacks
-    const settings = useMemo(() => {
+    const mergedSettings = useMemo(() => {
       const defaultSettings = {
         totalCapacity: 10,
         reservedCapacity: 2,
@@ -141,61 +167,22 @@ function App() {
     // Main app render
     return (
       <Router>
-        <div className="min-h-screen bg-gray-50">
-          <header className="bg-white shadow fixed top-0 left-0 w-full z-10">
-            <div className="max-w-7xl mx-auto py-2 px-4 sm:px-6 lg:px-14">
+        <div className="min-h-screen flex flex-col bg-gray-50">
+          <header className="bg-white shadow sticky top-0 z-10">
+            <div className="max-w-7xl mx-auto py-2 px-4 sm:px-6 lg:px-8">
               <div className="flex justify-between items-center">
                 <div className="flex items-center space-x-4">
-                  <ErrorBoundary>
-                    <CombinedSettings
-                      batterySettings={batterySettings || DEFAULT_BATTERY_SETTINGS}
-                      electricitySettings={electricitySettings || DEFAULT_ELECTRICITY_SETTINGS}
-                      onBatteryUpdate={updateBatterySettings}
-                      onElectricityUpdate={updateElectricitySettings}
-                    />
-                  </ErrorBoundary>
-                  <h1 className="text-2xl font-bold text-gray-900">Smart Charger</h1>
-                  <span className="italic text-gray-600 hidden sm:inline">
-                    Turn electricity price differences into savings with your home battery
-                  </span>
+                  <h1 className="text-2xl font-bold text-gray-900">ChargeIQ</h1>
                 </div>
-                <div className="flex items-center space-x-4">
-                  {/* Only show date selector on the main dashboard */}
-                  <Routes>
-                    <Route path="/" element={
-                      <ErrorBoundary>
-                        <DateSelector
-                          selectedDate={selectedDate}
-                          onDateChange={handleDateChange}
-                          isLoading={isLoading}
-                        />
-                      </ErrorBoundary>
-                    } />
-                  </Routes>
-                  
+                <div className="flex items-center space-x-4">                  
                   {/* Navigation Menu */}
-                  <div className="flex space-x-2 ml-4">
-                    <Link 
-                      to="/" 
-                      className="p-2 hover:bg-gray-100 rounded flex items-center space-x-1 text-gray-700 hover:text-gray-900"
-                    >
-                      <Home className="h-5 w-5" />
-                      <span className="hidden sm:inline">Dashboard</span>
-                    </Link>
-                    <Link 
-                      to="/system-health" 
-                      className="p-2 hover:bg-gray-100 rounded flex items-center space-x-1 text-gray-700 hover:text-gray-900"
-                    >
-                      <Activity className="h-5 w-5" />
-                      <span className="hidden sm:inline">System Health</span>
-                    </Link>
-                  </div>
+                  <Navigation />
                 </div>
               </div>
             </div>
           </header>
           
-          <main className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8 mt-24">
+          <main className="flex-1 w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
             {settingsError && (
               <div className="bg-red-50 p-6 rounded-lg shadow mb-6">
                 <h2 className="text-lg font-semibold text-red-700">Error loading settings</h2>
@@ -212,12 +199,14 @@ function App() {
             <ErrorBoundary>
               <Routes>
                 <Route path="/" element={
-                  <OptimizationDashboard 
-                    selectedDate={selectedDate} 
-                    onLoadingChange={setIsLoading}
-                    settings={settings}
+                  <DashboardPage 
+                    onLoadingChange={(loading: boolean) => console.log('Dashboard loading:', loading)}
+                    settings={mergedSettings}
                   />
                 } />
+                <Route path="/insights" element={<InsightsPage />} />
+                <Route path="/savings" element={<SavingsAnalysisPage />} />
+                <Route path="/inverter" element={<InverterPage />} />
                 <Route path="/system-health" element={<SystemHealthPage />} />
               </Routes>
             </ErrorBoundary>

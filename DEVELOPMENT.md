@@ -1,174 +1,268 @@
 # BESS Manager Development Guide
 
-This guide will help you set up a development environment for the BESS Battery Manager add-on and connect it to a local Home Assistant instance.
-
-## Prerequisites
-
-- Docker and Docker Compose installed
-- VS Code with Remote-Containers extension (recommended)
-- Home Assistant instance running locally (or accessible via network)
-- A long-lived access token from Home Assistant
+This guide helps you set up a development environment for the BESS Battery Manager add-on.
 
 ## Development Environment Setup
 
-### 1. Clone the Repository
+### Prerequisites
+
+- Docker and Docker Compose installed
+
+- VS Code with Remote-Containers extension (recommended)
+
+- Home Assistant instance (local or network-accessible)
+
+- Python 3.11 or higher
+
+- Node.js 18 or higher
+
+- A long-lived access token from Home Assistant
+
+### HomeAssistant Environment Options
+
+The BESS Manager can be developed using either a local or production HomeAssistant instance:
+
+#### Local Development
+
+When running HomeAssistant locally (e.g., on `localhost:8123`):
+
+- Set `HA_URL=http://localhost:8123` in `.env`
+
+- No token is required when running both services locally
+
+- Useful for rapid development and testing
+
+#### Production Environment
+
+When using a remote/production HomeAssistant:
+
+- Set `HA_URL` to your HomeAssistant URL
+
+- Generate and set a long-lived access token in `HA_TOKEN`
+
+- Enables testing with real production data
+
+Example `.env` configuration:
 
 ```bash
-git clone https://github.com/yourusername/bess-manager.git
-cd bess-manager
-```
+# Local development
+HA_URL=http://localhost:8123
+HA_TOKEN=  # Not needed for local development
 
-### 2. Create Environment File
-
-Create a `.env` file in the root directory with the following content:
-
-```bash
-# Home Assistant connection
-HA_URL=http://host.docker.internal:8123
+# OR Production environment
+HA_URL=https://your-ha-instance.com
 HA_TOKEN=your_long_lived_access_token_here
-
-# Development mode
-FLASK_DEBUG=true
-
 ```
 
-Replace `your_long_lived_access_token_here` with a token from your Home Assistant instance.
+### Initial Setup
 
-### 3. Start Development Container
+1. Clone the Repository:
 
-```bash
-docker-compose up -d
-```
+   ```bash
+   git clone https://github.com/johanzander/bess-manager.git
+   cd bess-manager
+   ```
 
-This will start a development container with the Flask app running.
+2. Create Environment File:
 
-### 4. Access the Application
+   ```bash
+   # Create .env in root directory
+   HA_URL=http://host.docker.internal:8123
+   HA_TOKEN=your_long_lived_access_token_here
+   FLASK_DEBUG=true
+   PORT=8080
 
-The application will be available at:
+   # Optional database settings
+   HA_DB_URL=http://homeassistant.local:8086/api/v2/query
+   HA_DB_USER_NAME=your_db_username
+   HA_DB_PASSWORD=your_db_password
+   ```
 
-- Flask API: <http://localhost:8080>
-- Web interface: <http://localhost:8080>
+3. Install Dependencies:
 
-### 5. Developing with VS Code
+   ```bash
+   pip install -r backend/requirements.txt
+   cd frontend && npm install && cd ..
+   ```
 
-If you're using VS Code with Remote-Containers:
+### Running the Development Environment
 
-1. Open the project folder in VS Code
-2. Click the green button in the bottom-left corner
+#### Option 1: Docker Development
+
+1. Start the containers:
+
+   ```bash
+   docker-compose up -d
+   ```
+
+2. Access the services:
+
+   - API: [http://localhost:8080](http://localhost:8080)
+   - Frontend: [http://localhost:8080](http://localhost:8080)
+
+#### Option 2: Local Development
+
+1. Start the backend:
+
+   ```bash
+   ./dev-run.sh
+   ```
+
+2. Start the frontend (in a separate terminal):
+
+   ```bash
+   cd frontend
+   npm run dev
+   ```
+
+3. Access the services:
+
+   - API: [http://localhost:8080](http://localhost:8080)
+   - Frontend: [http://localhost:5173](http://localhost:5173)
+
+### VS Code Integration
+
+If using VS Code with Remote-Containers:
+
+1. Open the project in VS Code
+
+2. Click the remote connection button (bottom-left corner)
+
 3. Select "Remote-Containers: Reopen in Container"
-4. VS Code will open a new window connected to the development container
-5. You can now edit the code and the changes will be reflected immediately
 
-## Debugging
+## Project Structure
 
-The Flask app runs with debug mode enabled, so you'll see detailed error messages in the console.
-
-To view logs:
-
-```bash
-docker-compose logs -f
+```text
+├── backend/           # FastAPI application and add-on config
+├── core/             # Core BESS system implementation
+│   └── bess/         # BESS-specific modules
+│       ├── tests/    # Test directory
+│       └── ...       # Implementation modules
+├── frontend/         # React-based web interface
+└── build/           # Build output (created by package-addon.sh)
+    ├── bess_manager/ # Add-on build
+    └── repository/   # Repository build
 ```
 
-## Home Assistant Access Token
+## Development Workflow
 
-To create a long-lived access token:
+### API Development
 
-1. In Home Assistant, click on your user profile (bottom left)
-2. Scroll down to "Long-Lived Access Tokens"
-3. Click "Create Token", give it a name, and copy the token value
+1. Add new endpoints in `backend/app.py`
 
-## Testing the API
+2. Update OpenAPI spec if needed
 
-You can test the API endpoints using curl:
+3. Generate frontend API client:
+
+   ```bash
+   cd frontend
+   npm run generate-api
+   ```
+
+### Frontend Development
+
+1. Navigate to `frontend/`
+
+2. Make changes to React components
+
+3. Changes hot-reload automatically
+
+4. Build for production:
+
+   ```bash
+   npm run build
+   ```
+
+### Testing
 
 ```bash
-# Check service health
-curl http://localhost:8080/
+# Run all tests
+pytest
 
-# Get battery settings
-curl http://localhost:8080/api/settings/battery
+# Run specific categories
+pytest core/bess/tests/unit/
+pytest core/bess/tests/integration/
 
-# Get schedule for today
-curl http://localhost:8080/api/schedule/today
-
+# Run with coverage
+pytest --cov=core.bess
 ```
 
-## Linting
+### Code Quality
 
 ```bash
+# Format code
 black .
 ruff check --fix .
+
+# Type checking
 mypy .
+
+# Run all pre-commit hooks
 pre-commit run --all-files
 ```
 
-## Creating a Production Build
+## Debugging
 
-To build the add-on for production:
+### Backend Debugging
 
-```bash
-# Make the script executable
-chmod +x package-addon.sh
+- Logs are available via:
 
-# Run the script
-./package-addon.sh
-```
+  ```bash
+  docker-compose logs -f
+  ```
 
-This will create a build in the `build/repository` directory that you can add to Home Assistant as a custom repository.
+- Set `FLASK_DEBUG=true` in `.env` for debug mode
 
-## Directory Structure
+### Frontend Debugging
 
-- `addon/` - Add-on files for Home Assistant
-- `core/` - Core BESS system code
-- `dev/` - Development environment files
-- `build/` - Build output directory (created by package-addon.sh)
+- Use browser developer tools
 
-## Modifying the Frontend
+- React Developer Tools extension recommended
 
-The frontend is a single HTML file with inline JavaScript. To modify it:
+- Source maps enabled in development
 
-1. Edit `addon/index.html`
-2. The changes will be reflected when you refresh the browser
+### Common Issues
 
-## Adding New Features
+1. Connection Issues:
 
-When adding new features, remember to:
+   - Verify access token validity
 
-1. Add appropriate API endpoints in `app.py`
-2. Update the frontend to use the new endpoints
-3. Test thoroughly in the development environment
-4. Update the documentation in README.md
+   - Check `HA_URL` configuration
 
-## Production Deployment
+   - Ensure Docker network connectivity
 
-To deploy to a production Home Assistant instance:
+2. Import Errors:
 
-1. Run `./package-addon.sh` to build the add-on
-2. Copy the `build/repository` directory to a web server or GitHub repository
-3. Add the repository URL to Home Assistant
-4. Install the BESS Manager add-on from the Add-on Store
+   - Verify `requirements.txt` is complete
 
-## Troubleshooting
+   - Rebuild container: `docker-compose down && docker-compose up -d`
 
-### Connection Issues
+3. API Errors:
 
-If you have trouble connecting to Home Assistant:
+   - Check logs for detailed messages
 
-1. Make sure your access token is valid
-2. Check the `HA_URL` in your `.env` file
-3. If running HA in Docker, ensure `host.docker.internal` resolves correctly
+   - Verify required Home Assistant entities exist
 
-### Module Import Errors
+   - Check access token permissions
 
-If you see module import errors:
+## Building for Production
 
-1. Make sure all required packages are in `requirements.txt`
-2. Rebuild the container: `docker-compose down && docker-compose up -d`
+1. Make the package script executable:
 
-### API Errors
+   ```bash
+   chmod +x package-addon.sh
+   ```
 
-If API calls return errors:
+2. Build the add-on:
 
-1. Check the logs for detailed error messages
-2. Verify your Home Assistant has the required entities (Nordpool, Growatt)
-3. Check permissions for your access token
+   ```bash
+   ./package-addon.sh
+   ```
+
+The build output will be in:
+
+- `build/bess_manager/` - For local installation
+
+- `build/repository/` - For custom repository distribution
+
+For deployment instructions, see [DEPLOYMENT.md](DEPLOYMENT.md).

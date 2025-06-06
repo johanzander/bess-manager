@@ -36,10 +36,15 @@ const SystemHealthPage: React.FC = () => {
           </ul>
         </div>
         <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-md">
-          <h3 className="font-semibold text-blue-800 mb-2">Troubleshooting Tip</h3>
-          <p className="text-blue-700">
-            If a component shows an error, check that the entity ID exists in Home Assistant and is configured correctly in the add-on options.
+          <h3 className="font-semibold text-blue-800 mb-2">Navigation Help</h3>
+          <p className="text-blue-700 mb-2">
+            The Smart Charger app is organized into three main sections:
           </p>
+          <ul className="list-disc pl-5 space-y-1 text-blue-700">
+            <li><span className="font-medium">Dashboard:</span> Shows the current battery schedule, levels, and actions.</li>
+            <li><span className="font-medium">Savings:</span> Provides detailed savings reports and analytics.</li>
+            <li><span className="font-medium">System Health:</span> Displays the operational status of all components.</li>
+          </ul>
         </div>
       </div>
     </div>

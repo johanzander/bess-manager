@@ -1,0 +1,38 @@
+{
+  "name": "scenario_2025_06_02_high_solar_export",
+  "description": "Real-world scenario from June 2, 2025 with high solar production and price spread allowing profitable export",
+  "base_prices": [
+    0.4320, 0.2240, 0.3776, 0.4016, 0.4256, 0.8416, 0.9696, 1.0096, 1.1296, 1.0336,
+    0.7616, 0.4400, 0.1920, 0.0880, 0.1200, 0.1520, 0.1440, 0.5216, 1.0736, 1.2256,
+    1.5936, 1.4256, 1.2496, 1.0656
+  ],
+  "home_consumption": [
+    1.0, 0.9, 1.2, 1.9, 1.2, 1.5, 1.2, 2.2, 2.4, 1.2,
+    0.8, 1.1, 1.3, 4.8, 1.7, 1.2, 1.2, 1.2, 1.2, 1.2,
+    1.2, 1.2, 1.2, 1.2
+  ],
+  "solar_production": [
+    0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.1, 0.4, 0.5, 1.2,
+    2.8, 2.9, 3.6, 2.2, 1.5, 4.0, 3.6, 2.7, 1.9, 1.2,
+    0.4, 0.0, 0.0, 0.0
+  ],
+  "battery": {
+    "initial_soc": 16.2,
+    "min_soc_kwh": 3.0,
+    "max_soc_kwh": 30.0,
+    "efficiency_charge": 1.0,
+    "efficiency_discharge": 1.0,
+    "cycle_cost_per_kwh": 0.4,
+    "max_charge_power_kw": 6.0,
+    "max_discharge_power_kw": 6.0,
+    "total_capacity": 30.0
+  },
+  "expected_results": {
+    "base_cost": 68.61,
+    "battery_solar_cost": -13.57,
+    "base_to_battery_solar_savings": 82.19,
+    "base_to_battery_solar_savings_pct": 119.78,
+    "total_charged": 9.2,
+    "total_discharged": 22.4
+  }
+}

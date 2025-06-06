@@ -1,4 +1,4 @@
-// Update this file: frontend/src/hooks/useSettings.ts
+// frontend/src/hooks/useSettings.ts
 
 import { useState, useEffect } from 'react';
 import { BatterySettings, ElectricitySettings } from '../types';
@@ -31,37 +31,9 @@ export function useSettings() {
     loadSettings();
   }, []);
 
-  const updateBatterySettings = async (settings: BatterySettings) => {
-    try {
-      const response = await api.post('/api/settings/battery', settings);
-      setBatterySettings(settings);
-  
-      // Fetch new schedule after settings update
-      await api.get('/api/schedule');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update battery settings');
-      console.error('Update battery settings error:', err);
-    }
-  };
-  
-  const updateElectricitySettings = async (settings: ElectricitySettings) => {
-    try {
-      const response = await api.post('/api/settings/electricity', settings);
-      setElectricitySettings(settings);
-  
-      // Fetch new schedule after settings update
-      await api.get('/api/schedule');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update electricity settings');
-      console.error('Update electricity settings error:', err);
-    }
-  };
-
   return {
     batterySettings,
     electricitySettings,
-    updateBatterySettings,
-    updateElectricitySettings,
     isLoading,
     error
   };

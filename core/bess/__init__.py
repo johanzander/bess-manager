@@ -4,16 +4,16 @@
 __all__ = [
     "BatterySettings",  # Public settings classes
     "BatterySystemManager",  # Main facade
-    "ConsumptionSettings",
-    "HomeAssistantAPIController",  # Used by pyscript integrations
+    "HistoricalDataStore",
+    "HomeAssistantAPIController",
     "HomeSettings",
+    "HourlyEvent",
     "PriceSettings",
 ]
 
 # Import settings used by other modules
 from .settings import (  # noqa: I001
     BatterySettings,
-    ConsumptionSettings,
     HomeSettings,
     PriceSettings,
 )
@@ -23,4 +23,4 @@ from .settings import (  # noqa: I001
 from .ha_api_controller import HomeAssistantAPIController
 
 # Import main facade class (the primary entry point to the system)
-from .battery_system import BatterySystemManager
+from .battery_controller_v2 import BatterySystemManager

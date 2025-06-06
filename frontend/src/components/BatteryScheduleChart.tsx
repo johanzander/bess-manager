@@ -15,11 +15,15 @@ export const BatteryScheduleChart: React.FC<BatteryScheduleChartProps> = ({
 }) => {
   // Prepare data for the chart
   const chartData = hourlyData.map((hour, index) => {
-    // Get the hour from "00:00" format to just the number
-    const hourNum = parseInt(hour.hour.split(':')[0]);
+    // Check if hour is a string like "00:00" or a number
+    const hourNum = typeof hour.hour === 'string' && hour.hour.includes(':') 
+      ? parseInt(hour.hour.split(':')[0])
+      : typeof hour.hour === 'number'
+        ? hour.hour 
+        : index;
     
     return {
-      hour: hour.hour,
+      hour: hourNum + ':00', // Format as "0:00" for display
       hourNum,
       price: hour.price,
       batteryLevel: hour.batteryLevel,
@@ -41,7 +45,11 @@ export const BatteryScheduleChart: React.FC<BatteryScheduleChartProps> = ({
         <ResponsiveContainer width="100%" height="100%">
           <ComposedChart data={chartData}>
             <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="hour" interval={2} />
+            <XAxis 
+              dataKey="hour" 
+              interval={2} 
+              tickFormatter={(value) => typeof value === 'string' ? value : `${value}:00`} 
+            />
             <YAxis 
               yAxisId="left" 
               domain={[0, Math.min(settings.totalCapacity + 5, Math.ceil(settings.totalCapacity * 1.15))]} 

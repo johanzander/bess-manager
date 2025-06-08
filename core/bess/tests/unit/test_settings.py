@@ -49,7 +49,7 @@ def test_battery_settings_asdict():
     assert "max_soc" in data
     assert "max_charge_power_kw" in data
     assert "max_discharge_power_kw" in data
-    assert "cycle_cost" in data
+    assert "cycle_cost_per_kwh" in data
 
     # Test that values are correct
     assert data["total_capacity"] == 30.0
@@ -57,7 +57,7 @@ def test_battery_settings_asdict():
     assert data["max_soc"] == 100
     assert data["max_charge_power_kw"] == 15.0
     assert data["max_discharge_power_kw"] == 15.0
-    assert data["cycle_cost"] == 0.4
+    assert data["cycle_cost_per_kwh"] == 0.4
 
 
 def test_battery_settings_update():

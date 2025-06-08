@@ -1,5 +1,5 @@
 """
-Robust SensorCollector - Clean sensor data collection from InfluxDB with better error handling.
+Robust SensorCollector - Clean sensor data collection from InfluxDB with strategic intent reconstruction.
 """
 
 import logging
@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 class SensorCollector:
-    """Collects sensor data from InfluxDB and calculates energy flows with robust error handling."""
+    """Collects sensor data from InfluxDB and calculates energy flows with strategic intent reconstruction."""
 
     def __init__(self, ha_controller, battery_capacity_kwh: float):
         """Initialize sensor collector."""
@@ -39,8 +39,32 @@ class SensorCollector:
             battery_capacity_kwh,
         )
 
+    def analyze_strategic_intent_from_flows(self, flows: dict[str, float]) -> str:
+        """Analyze strategic intent from reconstructed energy flows.
+        
+        This is the single source of truth for determining intent from sensor data.
+        Used both during runtime recording and restart reconstruction.
+        """
+        battery_charged = flows.get("battery_charged", 0.0)
+        battery_discharged = flows.get("battery_discharged", 0.0)
+        solar_generated = flows.get("system_production", 0.0)
+        home_consumed = flows.get("load_consumption", 0.0)
+        grid_imported = flows.get("import_from_grid", 0.0)
+        
+        if battery_charged > 0.1:
+            if grid_imported > solar_generated:
+                return "GRID_CHARGING"  # More grid than solar available
+            else:
+                return "SOLAR_STORAGE"  # Primarily solar charging
+        elif battery_discharged > 0.1:
+            if battery_discharged > home_consumed:
+                return "EXPORT_ARBITRAGE"
+            else:
+                return "LOAD_SUPPORT"
+        return "IDLE"
+
     def collect_hour_flows(self, hour: int) -> dict[str, float] | None:
-        """Collect energy flows for a specific hour with robust error handling."""
+        """Collect energy flows for a specific hour with strategic intent reconstruction."""
         if not 0 <= hour <= 23:
             logger.error("Invalid hour: %d", hour)
             return None
@@ -90,12 +114,16 @@ class SensorCollector:
                 flows["battery_soc"] / 100.0
             ) * self.battery_capacity
 
+            # Add strategic intent reconstruction
+            flows["strategic_intent"] = self.analyze_strategic_intent_from_flows(flows)
+
             logger.info(
-                "Hour %d: Solar=%.1f, Load=%.1f, SOC=%.1f%%",
+                "Hour %d: Solar=%.1f, Load=%.1f, SOC=%.1f%%, Intent=%s",
                 hour,
                 flows.get("system_production", 0),
                 flows.get("load_consumption", 0),
                 flows["battery_soc"],
+                flows["strategic_intent"],
             )
 
             return flows
@@ -107,14 +135,14 @@ class SensorCollector:
     def reconstruct_historical_flows(
         self, start_hour: int, end_hour: int
     ) -> dict[int, dict[str, float]]:
-        """Reconstruct historical energy flows from InfluxDB with robust handling."""
+        """Reconstruct historical energy flows from InfluxDB with strategic intents."""
         reconstructed_flows = {}
         now = datetime.now()
         current_hour = now.hour
         current_minute = now.minute
 
         logger.info(
-            "Reconstructing flows from hour %d to %d (current time: %02d:%02d)",
+            "Reconstructing flows with intents from hour %d to %d (current time: %02d:%02d)",
             start_hour,
             end_hour,
             current_hour,
@@ -142,7 +170,8 @@ class SensorCollector:
                 flows = self.collect_hour_flows(hour)
                 if flows:
                     reconstructed_flows[hour] = flows
-                    logger.debug("Hour %d: reconstructed successfully", hour)
+                    logger.debug("Hour %d: reconstructed successfully with intent %s", 
+                               hour, flows.get("strategic_intent", "UNKNOWN"))
                 else:
                     logger.warning("Hour %d: reconstruction failed", hour)
 
@@ -150,7 +179,7 @@ class SensorCollector:
                 logger.error("Hour %d: reconstruction error: %s", hour, e)
 
         logger.info(
-            "Reconstructed %d/%d hours successfully",
+            "Reconstructed %d/%d hours successfully with strategic intents",
             len(reconstructed_flows),
             actual_end_hour - start_hour + 1,
         )

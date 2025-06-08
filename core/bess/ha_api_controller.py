@@ -430,28 +430,6 @@ class HomeAssistantAPIController:
             logger.warning("Failed to read time segments: %s", str(e))
             return []  # Return empty list instead of failing
 
-    def print_inverter_status(self):
-        """Print the battery settings and consumption prediction."""
-        test_mode_str = "[TEST MODE] " if self.test_mode else ""
-        logger.info(
-            "\n\n===================================\n"
-            "%sInverter Settings\n"
-            "===================================\n"
-            "Charge from Grid Enabled:     %5s\n"
-            "State of Charge (SOC):       %5d%%\n"
-            "Charge Stop SOC:             %5d%%\n"
-            "Charging Power Rate:         %5d%%\n"
-            "Discharging Power Rate:      %5d%%\n"
-            "Discharge Stop SOC:          %5d%%\n",
-            test_mode_str,
-            self.grid_charge_enabled(),
-            self.get_battery_soc(),
-            self.get_charge_stop_soc(),
-            self.get_charging_power_rate(),
-            self.get_discharging_power_rate(),
-            self.get_discharge_stop_soc(),
-        )
-
     def set_test_mode(self, enabled):
         """Enable or disable test mode."""
         self.test_mode = enabled

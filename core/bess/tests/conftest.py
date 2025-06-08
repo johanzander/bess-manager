@@ -15,7 +15,7 @@ if project_root not in sys.path:
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-from core.bess.battery_controller_v2 import BatterySystemManager  # noqa: E402
+from core.bess.battery_system_manager import BatterySystemManager  # noqa: E402
 
 
 class MockHomeAssistantController:

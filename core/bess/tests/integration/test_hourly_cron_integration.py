@@ -12,13 +12,10 @@ import logging
 
 import pytest
 
-from core.bess.battery_controller_v2 import BatterySystemManager
+from core.bess.battery_system_manager import BatterySystemManager
 from core.bess.settings import BatterySettings
 
 logger = logging.getLogger(__name__)
-
-# Use BatterySystemManager as a replacement for SimpleBatterySystemManager
-# SimpleBatterySystemManager = BatterySystemManager  # This would cause name conflicts
 
 
 @pytest.fixture

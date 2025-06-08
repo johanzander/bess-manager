@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from loguru import logger
 
 # Import BESS system modules
-from core.bess.battery_controller_v2 import BatterySystemManager
+from core.bess.battery_system_manager import BatterySystemManager
 from core.bess.ha_api_controller import HomeAssistantAPIController
 from core.bess.health_check import run_system_health_checks
 from core.bess.price_manager import HomeAssistantSource

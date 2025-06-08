@@ -149,250 +149,141 @@ class DPSchedule:
 
         return periods
 
-    def log_schedule_TO_BE_REMOVED(self):
-        """Log the schedule with strategic intent information."""
-        if not self.actions:
-            logger.info("No schedule data to log")
-            return
-
-        lines = [
-            "\n╔════════════════════════════════════════════════════════════════════════════╗",
-            "║                         Battery Schedule with Strategic Intents            ║",
-            "╠════╦═══════════════════╦═══════╦════════╦═══════════════════════════════════╣",
-            "║ Hr ║ Strategic Intent  ║Action ║  SOE   ║           Description             ║",
-            "╠════╬═══════════════════╬═══════╬════════╬═══════════════════════════════════╣",
-        ]
-
-        intent_descriptions = {
-            "GRID_CHARGING": "Store cheap grid energy",
-            "SOLAR_STORAGE": "Store excess solar energy",
-            "LOAD_SUPPORT": "Support home consumption",
-            "EXPORT_ARBITRAGE": "Export for profit",
-            "SOLAR_EXPORT": "Natural solar export",
-            "IDLE": "No significant activity",
-        }
-
-        for hour in range(len(self.actions)):
-            action = self.actions[hour]
-            soe = self.state_of_energy[hour] if hour < len(self.state_of_energy) else 0
-            intent = (
-                self.strategic_intents[hour]
-                if hour < len(self.strategic_intents)
-                else "IDLE"
-            )
-            description = intent_descriptions.get(intent, "Unknown")
-
-            # Format action with direction indicator
-            if action > 0.01:
-                action_str = f"{action:5.1f}↑"  # Charging
-            elif action < -0.01:
-                action_str = f"{abs(action):5.1f}↓"  # Discharging
-            else:
-                action_str = "  0.0-"  # Idle
-
-            row = f"║ {hour:02d} ║ {intent:17} ║ {action_str:5} ║ {soe:6.1f} ║ {description:33} ║"
-            lines.append(row)
-
-        lines.append(
-            "╚════╩═══════════════════╩═══════╩════════╩═══════════════════════════════════╝"
-        )
-
-        logger.info("\n".join(lines))
-
-    def get_total_energy_flows(self) -> dict[str, float]:
-        """Get total energy flows for the day."""
-        if not self.hourly_data:
-            return {}
-
-        flows = {}
-        for key, values in self.hourly_data.items():
-            if isinstance(values, list) and len(values) > 0:
-                try:
-                    flows[f"total_{key}"] = sum(
-                        float(v) for v in values if v is not None
-                    )
-                except (ValueError, TypeError):
-                    continue
-
-        return flows
-
     def get_schedule_data(self) -> dict[str, Any]:
-        """Get schedule data in the format expected by the API endpoints.
+            """Get schedule data - snake_case only."""
+            
+            # Build hourly data array
+            hourly_data = []
 
-        This method provides compatibility with the existing API structure.
-        """
-        # Build hourly data array
-        hourly_data = []
-
-        for hour in range(len(self.actions)):
-            # Get strategic intent for this hour
-            intent = (
-                self.strategic_intents[hour]
-                if hour < len(self.strategic_intents)
-                else "IDLE"
-            )
-
-            # Get data from arrays, ensure indices are valid
-            if hour >= len(self.actions):
-                raise ValueError(
-                    f"Hour {hour} is out of range for actions array (length: {len(self.actions)})"
-                )
-            action = self.actions[hour]
-
-            if hour >= len(self.state_of_energy):
-                raise ValueError(
-                    f"Hour {hour} is out of range for state_of_energy array (length: {len(self.state_of_energy)})"
-                )
-            soe = self.state_of_energy[hour]
-
-            if hour >= len(self.prices):
-                raise ValueError(
-                    f"Hour {hour} is out of range for prices array (length: {len(self.prices)})"
-                )
-            price = self.prices[hour]
-
-            if hour >= len(self.hourly_consumption) or not self.hourly_consumption:
-                raise ValueError(
-                    f"Hour {hour} is out of range for hourly_consumption array (length: {len(self.hourly_consumption) if self.hourly_consumption else 0})"
-                )
-            consumption = self.hourly_consumption[hour]
-
-            # Calculate SOC percentage - use actual battery capacity instead of hardcoded 15.0 kWh
-            # Get capacity from battery_settings if available, otherwise default to 30.0 (standard value)
-            battery_capacity = self.original_dp_results.get("battery_settings", {}).get(
-                "total_capacity", 30.0
-            )
-
-            # Assert if battery capacity is invalid
-            if battery_capacity <= 0:
-                raise ValueError(
-                    f"Invalid battery capacity: {battery_capacity}. Must be positive."
+            for hour in range(len(self.actions)):
+                # Get strategic intent for this hour
+                intent = (
+                    self.strategic_intents[hour]
+                    if hour < len(self.strategic_intents)
+                    else "IDLE"
                 )
 
-            # Calculate SOC percentage - assert if SOE is negative
-            if soe < 0:
-                raise ValueError(
-                    f"Invalid state of energy (SOE): {soe}. Cannot be negative."
-                )
-            soc_percent = soe / battery_capacity * 100
+                # Get data from arrays, ensure indices are valid
+                if hour >= len(self.actions):
+                    raise ValueError(f"Hour {hour} is out of range for actions array (length: {len(self.actions)})")
+                action = self.actions[hour]
 
-            # Get additional data from hourly_data
-            # Don't provide defaults - if data isn't available, it shouldn't be used
-            solar_production = 0.0
-            grid_import = 0.0
-            grid_export = 0.0
+                if hour >= len(self.state_of_energy):
+                    raise ValueError(f"Hour {hour} is out of range for state_of_energy array (length: {len(self.state_of_energy)})")
+                soe = self.state_of_energy[hour]
 
-            if self.hourly_data:
-                if "solar_production" in self.hourly_data and hour < len(
-                    self.hourly_data["solar_production"]
-                ):
-                    solar_production = self.hourly_data["solar_production"][hour]
-                if "grid_import" in self.hourly_data and hour < len(
-                    self.hourly_data["grid_import"]
-                ):
-                    grid_import = self.hourly_data["grid_import"][hour]
-                if "grid_export" in self.hourly_data and hour < len(
-                    self.hourly_data["grid_export"]
-                ):
-                    grid_export = self.hourly_data["grid_export"][hour]
+                if hour >= len(self.prices):
+                    raise ValueError(f"Hour {hour} is out of range for prices array (length: {len(self.prices)})")
+                price = self.prices[hour]
 
-            # Calculate costs
-            base_cost = consumption * price
-            grid_cost = grid_import * price - grid_export * price * 0.6
-            savings = base_cost - grid_cost
+                if hour >= len(self.hourly_consumption) or not self.hourly_consumption:
+                    raise ValueError(f"Hour {hour} is out of range for hourly_consumption array (length: {len(self.hourly_consumption) if self.hourly_consumption else 0})")
+                consumption = self.hourly_consumption[hour]
 
-            hour_data = {
-                "hour": str(hour),
-                "price": price,
-                "electricityPrice": price,
-                "consumption": consumption,
-                "homeConsumption": consumption,
-                "batteryLevel": soc_percent,
-                "batterySoc": soc_percent,
-                "action": action,
-                "batteryAction": action,
-                "strategic_intent": intent,
-                "strategicIntent": intent,
-                # Cost fields
-                "gridCost": grid_cost,
-                "batteryCost": 0.0,
-                "totalCost": grid_cost,
-                "baseCost": base_cost,
-                "savings": savings,
-                "hourlyCost": grid_cost,
-                "hourlySavings": savings,
-                # Energy flows
-                "solarProduction": solar_production,
-                "gridImport": grid_import,
-                "gridExported": grid_export,
-                "gridImported": grid_import,
-                "batteryCharge": max(0, action),
-                "batteryDischarge": max(0, -action),
-                # Additional fields for compatibility
-                "data_source": "predicted",
-                "dataSource": "predicted",
-                "battery_soc_start": soc_percent,
-                "solarCharged": min(max(0, action), solar_production),
-                "effective_diff": 0.0,
-                "opportunity_score": 0.0,
+                # Calculate SOC percentage - use actual battery capacity
+                battery_capacity = self.original_dp_results.get("battery_settings", {}).get("total_capacity", 30.0)
+
+                if battery_capacity <= 0:
+                    raise ValueError(f"Invalid battery capacity: {battery_capacity}. Must be positive.")
+
+                if soe < 0:
+                    raise ValueError(f"Invalid state of energy (SOE): {soe}. Cannot be negative.")
+                soc_percent = soe / battery_capacity * 100
+
+                # Get additional data from hourly_data
+                solar_production = 0.0
+                grid_import = 0.0
+                grid_export = 0.0
+
+                if self.hourly_data:
+                    if "solar_production" in self.hourly_data and hour < len(self.hourly_data["solar_production"]):
+                        solar_production = self.hourly_data["solar_production"][hour]
+                    if "grid_import" in self.hourly_data and hour < len(self.hourly_data["grid_import"]):
+                        grid_import = self.hourly_data["grid_import"][hour]
+                    if "grid_export" in self.hourly_data and hour < len(self.hourly_data["grid_export"]):
+                        grid_export = self.hourly_data["grid_export"][hour]
+
+                # Calculate costs
+                base_cost = consumption * price
+                grid_cost = grid_import * price - grid_export * price * 0.6
+                savings = base_cost - grid_cost
+
+                hour_data = {
+                    "hour": str(hour),
+                    "price": price,
+                    "consumption": consumption,
+                    "battery_level": soc_percent,
+                    "action": action,
+                    "strategic_intent": intent,
+                    "grid_cost": grid_cost,
+                    "battery_cost": 0.0,
+                    "total_cost": grid_cost,
+                    "base_cost": base_cost,
+                    "savings": savings,
+                    "hourly_cost": grid_cost,
+                    "hourly_savings": savings,
+                    "solar_production": solar_production,
+                    "grid_import": grid_import,
+                    "grid_exported": grid_export,
+                    "grid_imported": grid_import,
+                    "battery_charge": max(0, action),
+                    "battery_discharge": max(0, -action),
+                    "data_source": "predicted",
+                    "battery_soc_start": soc_percent,
+                    "solar_charged": min(max(0, action), solar_production),
+                    "effective_diff": 0.0,
+                    "opportunity_score": 0.0,
+                }
+
+                hourly_data.append(hour_data)
+
+            # Calculate summary
+            total_consumption = sum(h["consumption"] for h in hourly_data)
+            total_solar = sum(h["solar_production"] for h in hourly_data)
+            total_grid_import = sum(h["grid_import"] for h in hourly_data)
+            total_grid_export = sum(h["grid_exported"] for h in hourly_data)
+            total_battery_charge = sum(h["battery_charge"] for h in hourly_data)
+            total_battery_discharge = sum(h["battery_discharge"] for h in hourly_data)
+            avg_price = sum(h["price"] for h in hourly_data) / len(hourly_data) if hourly_data else 0.0
+
+            # Summary calculations
+            total_base_cost = sum(h["base_cost"] for h in hourly_data)
+            total_optimized_cost = sum(h["total_cost"] for h in hourly_data)
+            total_savings = sum(h["savings"] for h in hourly_data)
+
+            summary = {
+                "base_cost": total_base_cost,
+                "optimized_cost": total_optimized_cost,
+                "grid_costs": total_grid_import * avg_price,
+                "battery_costs": 0,
+                "savings": total_savings,
+                "total_solar_production": total_solar,
+                "total_battery_charge": total_battery_charge,
+                "total_battery_discharge": total_battery_discharge,
+                "total_grid_import": total_grid_import,
+                "total_grid_export": total_grid_export,
+                "cycle_count": total_battery_discharge / battery_capacity,
+                "avg_buy_price": avg_price,
+                "avg_sell_price": avg_price * 0.6,
+                "total_consumption": total_consumption,
+                "estimated_battery_cycles": total_battery_discharge / battery_capacity,
             }
 
-            hourly_data.append(hour_data)
+            # Add strategic intent summary
+            intent_summary = {}
+            for hour_data in hourly_data:
+                intent = hour_data["strategic_intent"]
+                intent_summary[intent] = intent_summary.get(intent, 0) + 1
 
-        # Calculate summary
-        total_consumption = sum(h["homeConsumption"] for h in hourly_data)
-        total_solar = sum(h["solarProduction"] for h in hourly_data)
-        total_grid_import = sum(h["gridImport"] for h in hourly_data)
-        total_grid_export = sum(h["gridExported"] for h in hourly_data)
-        total_battery_charge = sum(h["batteryCharge"] for h in hourly_data)
-        total_battery_discharge = sum(h["batteryDischarge"] for h in hourly_data)
-        avg_price = (
-            sum(h["price"] for h in hourly_data) / len(hourly_data)
-            if hourly_data
-            else 0.0
-        )
-
-        # Summary calculations
-        total_base_cost = sum(h["baseCost"] for h in hourly_data)
-        total_optimized_cost = sum(h["totalCost"] for h in hourly_data)
-        total_savings = sum(h["savings"] for h in hourly_data)
-
-        summary = {
-            "baseCost": total_base_cost,
-            "optimizedCost": total_optimized_cost,
-            "gridCosts": total_grid_import * avg_price,
-            "batteryCosts": 0,
-            "savings": total_savings,
-            "totalSolarProduction": total_solar,
-            "totalBatteryCharge": total_battery_charge,
-            "totalBatteryDischarge": total_battery_discharge,
-            "totalGridImport": total_grid_import,
-            "totalGridExport": total_grid_export,
-            "cycleCount": total_battery_discharge
-            / battery_capacity,  # Use actual battery capacity
-            "avgBuyPrice": avg_price,
-            "avgSellPrice": avg_price * 0.6,
-            "totalConsumption": total_consumption,
-            "estimatedBatteryCycles": total_battery_discharge / battery_capacity,
-        }
-
-        # Add strategic intent summary
-        intent_summary = {}
-        for hour_data in hourly_data:
-            intent = hour_data["strategic_intent"]
-            intent_summary[intent] = intent_summary.get(intent, 0) + 1
-
-        return {
-            "hourly_data": hourly_data,
-            "hourlyData": hourly_data,  # Also provide camelCase version
-            "summary": summary,
-            "enhancedSummary": summary,
-            "strategic_intent_summary": intent_summary,
-            "strategicIntentSummary": intent_summary,
-            "energyProfile": {
-                "consumption": [h["consumption"] for h in hourly_data],
-                "solar": [h["solarProduction"] for h in hourly_data],
-                "battery_soc": [h["batteryLevel"] for h in hourly_data],
-                "actualHours": 0,  # This would be set by the daily view builder
-            },
-        }
+            return {
+                "hourly_data": hourly_data,
+                "summary": summary,
+                "enhanced_summary": summary,
+                "strategic_intent_summary": intent_summary,
+                "energy_profile": {
+                    "consumption": [h["consumption"] for h in hourly_data],
+                    "solar": [h["solar_production"] for h in hourly_data],
+                    "battery_soc": [h["battery_level"] for h in hourly_data],
+                    "actual_hours": 0,
+                },
+            }

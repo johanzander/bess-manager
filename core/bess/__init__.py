@@ -23,4 +23,4 @@ from .settings import (  # noqa: I001
 from .ha_api_controller import HomeAssistantAPIController
 
 # Import main facade class (the primary entry point to the system)
-from .battery_controller_v2 import BatterySystemManager
+from .battery_system_manager import BatterySystemManager

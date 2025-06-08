@@ -50,36 +50,26 @@ class PriceSettings:
     use_actual_price: bool = USE_ACTUAL_PRICE
 
     def asdict(self) -> dict:
-        """Convert to dictionary for API."""
+        """Convert to dictionary (snake_case only)."""
         return {
             "area": self.area,
-            "markupRate": self.markup_rate,
-            "vatMultiplier": self.vat_multiplier,
-            "additionalCosts": self.additional_costs,
-            "taxReduction": self.tax_reduction,
-            "useActualPrice": self.use_actual_price,
+            "markup_rate": self.markup_rate,
+            "vat_multiplier": self.vat_multiplier,
+            "additional_costs": self.additional_costs,
+            "tax_reduction": self.tax_reduction,
+            "use_actual_price": self.use_actual_price,
         }
 
     def update(self, **kwargs: dict[str, Any]) -> None:
         """Update settings from dict."""
-        conversions = {
-            "markupRate": "markup_rate",
-            "vatMultiplier": "vat_multiplier",
-            "additionalCosts": "additional_costs",
-            "taxReduction": "tax_reduction",
-            "minProfit": "min_profit",
-            "useActualPrice": "use_actual_price",
-        }
-
         for key, value in kwargs.items():
-            internal_key = conversions.get(key, key)
-            if hasattr(self, internal_key):
-                setattr(self, internal_key, value)
+            if hasattr(self, key):
+                setattr(self, key, value)
 
 
 @dataclass
 class BatterySettings:
-    """Battery settings with canonical, modern attribute names only."""
+    """Battery settings with canonical snake_case names only."""
 
     total_capacity: float = BATTERY_STORAGE_SIZE_KWH
     min_soc: float = BATTERY_MIN_SOC  # percentage
@@ -93,16 +83,14 @@ class BatterySettings:
     reserved_capacity: float = field(init=False)
     min_soc_kwh: float = field(init=False)
     max_soc_kwh: float = field(init=False)
-    cycle_cost: float = field(init=False)
 
     def __post_init__(self):
         self.reserved_capacity = self.total_capacity * self.min_soc / 100.0
         self.min_soc_kwh = self.reserved_capacity
         self.max_soc_kwh = self.total_capacity
-        self.cycle_cost = self.cycle_cost_per_kwh
 
     def asdict(self) -> dict:
-        """Convert to dictionary for API, using only canonical (snake_case) keys."""
+        """Convert to dictionary (snake_case only)."""
         return {
             "total_capacity": self.total_capacity,
             "reserved_capacity": self.reserved_capacity,
@@ -112,61 +100,21 @@ class BatterySettings:
             "max_soc_kwh": self.max_soc_kwh,
             "max_charge_power_kw": self.max_charge_power_kw,
             "max_discharge_power_kw": self.max_discharge_power_kw,
-            "cycle_cost": self.cycle_cost,
+            "cycle_cost_per_kwh": self.cycle_cost_per_kwh,
             "charging_power_rate": self.charging_power_rate,
             "efficiency_charge": self.efficiency_charge,
             "efficiency_discharge": self.efficiency_discharge,
         }
 
     def update(self, **kwargs: dict[str, Any]) -> None:
-        from loguru import logger
-
-        logger.debug(f"BatterySettings.update called with: {kwargs}")
-
-        conversions = {
-            "totalCapacity": "total_capacity",
-            "minSoc": "min_soc",
-            "maxSoc": "max_soc",
-            "maxChargeDischarge": "max_charge_power_kw",  # Keep this for compatibility
-            "chargeCycleCost": "cycle_cost",
-            "chargingPowerRate": "charging_power_rate",
-            "efficiencyCharge": "efficiency_charge",
-            "efficiencyDischarge": "efficiency_discharge",
-        }
-
-        # Handle special case for combined charge/discharge power
-        # This ensures both values get updated when either is present
-        if "maxChargeDischarge" in kwargs:
-            value = kwargs["maxChargeDischarge"]
-            logger.debug(
-                f"Setting max_charge_power_kw and max_discharge_power_kw to {value} from maxChargeDischarge"
-            )
-            self.max_charge_power_kw = value
-            self.max_discharge_power_kw = value
-
-        if "maxChargeDischargePower" in kwargs:
-            value = kwargs["maxChargeDischargePower"]
-            logger.debug(
-                f"Setting max_charge_power_kw and max_discharge_power_kw to {value} from maxChargeDischargePower"
-            )
-            self.max_discharge_power_kw = kwargs["maxChargeDischargePower"]
-
-        # Process all other keys normally
+        """Update settings from dict."""
         for key, value in kwargs.items():
-            if key != "maxChargeDischarge" and key != "maxChargeDischargePower":
-                internal_key = conversions.get(key, key)
-                if hasattr(self, internal_key):
-                    from loguru import logger
+            if hasattr(self, key):
+                setattr(self, key, value)
+                # Handle combined power settings
+                if key == "max_charge_power_kw":
+                    self.max_discharge_power_kw = value
 
-                    logger.debug(f"Setting {internal_key} to {value} from {key}")
-                    setattr(self, internal_key, value)
-
-        # Add logging to show final values
-        from loguru import logger
-
-        logger.debug(
-            f"After update: max_charge_power_kw={self.max_charge_power_kw}, max_discharge_power_kw={self.max_discharge_power_kw}"
-        )
         self.__post_init__()
 
     def from_ha_config(self, config: dict) -> "BatterySettings":
@@ -181,14 +129,9 @@ class BatterySettings:
             self.max_discharge_power_kw = battery_config.get(
                 "max_discharge_power_kw", BATTERY_MAX_CHARGE_DISCHARGE_POWER_KW
             )
-            if "cycle_cost" in battery_config:  # TODO FIXME
-                self.cycle_cost_per_kwh = battery_config.get(
-                    "cycle_cost", BATTERY_CHARGE_CYCLE_COST_SEK
-                )
-            else:
-                self.cycle_cost_per_kwh = battery_config.get(
-                    "cycle_cost_per_kwh", BATTERY_CHARGE_CYCLE_COST_SEK
-                )
+            self.cycle_cost_per_kwh = battery_config.get(
+                "cycle_cost_per_kwh", BATTERY_CHARGE_CYCLE_COST_SEK
+            )
             self.__post_init__()
         return self
 
@@ -205,30 +148,21 @@ class HomeSettings:
     power_adjustment_step: int = 10
 
     def asdict(self) -> dict:
-        """Convert to dictionary for API."""
+        """Convert to dictionary (snake_case only)."""
         return {
-            "maxFuseCurrent": self.max_fuse_current,
+            "max_fuse_current": self.max_fuse_current,
             "voltage": self.voltage,
-            "safetyMargin": self.safety_margin,
-            "defaultHourly": self.default_hourly,
-            "minValid": self.min_valid,
-            "estimatedConsumption": self.default_hourly,
+            "safety_margin": self.safety_margin,
+            "default_hourly": self.default_hourly,
+            "min_valid": self.min_valid,
+            "estimated_consumption": self.default_hourly,
         }
 
     def update(self, **kwargs: dict[str, Any]) -> None:
         """Update settings from dict."""
-        conversions = {
-            "maxFuseCurrent": "max_fuse_current",
-            "voltage": "voltage",
-            "safetyMargin": "safety_margin",
-            "defaultHourly": "default_hourly",
-            "minValid": "min_valid",
-        }
-
         for key, value in kwargs.items():
-            internal_key = conversions.get(key, key)
-            if hasattr(self, internal_key):
-                setattr(self, internal_key, value)
+            if hasattr(self, key):
+                setattr(self, key, value)
 
     def from_ha_config(self, config: dict) -> "HomeSettings":
         """Create instance from Home Assistant add-on config."""

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { BatterySettings } from '../types';
+import api from '../lib/api';
 
 // Interface for the new DailyView API response
 interface DailyViewHourlyData {
@@ -61,34 +62,13 @@ export const SavingsOverview: React.FC<SimplifiedSavingsTableProps> = ({
         setLoading(true);
         
         // Fetch battery settings
-        const batteryResponse = await fetch('/api/settings/battery', {
-          cache: 'no-cache',
-          headers: {
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache'
-          }
-        });
-        if (batteryResponse.ok) {
-          const batteryData = await batteryResponse.json();
-          setBatterySettings(batteryData);
-          console.log('Battery settings fetched:', batteryData);
-        } else {
-          console.warn('Failed to fetch battery settings, using fallback');
-        }
+        const batteryResponse = await api.get('/api/settings/battery');
+        setBatterySettings(batteryResponse.data);
         
         // Fetch daily view
-        const dailyResponse = await fetch('/api/v2/daily_view', {
-          cache: 'no-cache',
-          headers: {
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache'
-          }
-        });
-        if (!dailyResponse.ok) {
-          throw new Error(`Failed to fetch daily view: ${dailyResponse.status} ${dailyResponse.statusText}`);
-        }
-        const dailyData = await dailyResponse.json();
-        setDailyView(dailyData);
+        const dailyResponse = await api.get('/api/v2/daily_view');
+        setDailyView(dailyResponse.data);
+
         setError(null);
         
       } catch (err) {

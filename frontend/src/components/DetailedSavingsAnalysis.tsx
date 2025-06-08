@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { BatterySettings } from '../types';
+import api from '../lib/api';
 
 // New interface based on DailyView API
 interface DailyViewHourlyData {
@@ -48,12 +49,8 @@ export const DetailedSavingsAnalysis: React.FC<BatteryScheduleTableProps> = ({
     const fetchDailyView = async () => {
       try {
         setLoading(true);
-        const response = await fetch('/api/v2/daily_view');
-        if (!response.ok) {
-          throw new Error(`Failed to fetch: ${response.status} ${response.statusText}`);
-        }
-        const data = await response.json();
-        setDailyView(data);
+        const response = await api.get('/api/v2/daily_view');
+        setDailyView(response.data);
         setError(null);
       } catch (err) {
         console.error('Error fetching daily view:', err);

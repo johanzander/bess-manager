@@ -15,12 +15,11 @@ import {
   Calendar,
   Activity,
   Target,
-  TrendingUp,
-  TrendingDown,
   DollarSign,
   List,
   BarChart3
 } from 'lucide-react';
+import api from '../lib/api';
 
 // Types for inverter data
 interface InverterStatus {
@@ -110,22 +109,16 @@ const InverterStatusDashboard: React.FC = () => {
 
   // Fetch inverter status
   const fetchInverterStatus = async (): Promise<InverterStatus> => {
-    const response = await fetch('/api/growatt/inverter_status');
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-    return await response.json();
+    const response = await api.get('/api/growatt/inverter_status');
+    return response.data;
   };
 
   // Fetch Growatt schedule
   const fetchGrowattSchedule = async (): Promise<GrowattSchedule> => {
-    const response = await fetch('/api/growatt/detailed_schedule');
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-    return await response.json();
+    const response = await api.get('/api/growatt/detailed_schedule');
+    return response.data;
   };
-
+  
   // Load all data
   const loadData = async (): Promise<void> => {
     try {
@@ -604,7 +597,7 @@ const InverterStatusDashboard: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                      {consolidatedPeriods.map((period, index) => (
+                      {consolidatedPeriods.map((period) => (
                         <tr 
                           key={period.id} 
                           className={`${period.is_active ? 'bg-blue-50' : 'bg-white'} hover:bg-gray-50`}
@@ -650,22 +643,22 @@ const InverterStatusDashboard: React.FC = () => {
                             {period.is_active && period.start_time.startsWith(growattSchedule.current_hour.toString().padStart(2, '0')) ? (
                               <div className="flex flex-col">
                                 <div className="flex items-center">
-                                  {inverterStatus?.battery_charge_power > 100 ? (
+                                  {(inverterStatus?.battery_charge_power ?? 0) > 100 ? (
                                     <ArrowUp className="h-4 w-4 text-green-600 mr-1" />
-                                  ) : inverterStatus?.battery_discharge_power > 100 ? (
+                                  ) : (inverterStatus?.battery_discharge_power ?? 0) > 100 ? (
                                     <ArrowDown className="h-4 w-4 text-red-600 mr-1" />
                                   ) : (
                                     <Minus className="h-4 w-4 text-gray-600 mr-1" />
                                   )}
                                   <span className={`font-medium ${
-                                    inverterStatus?.battery_charge_power > 100 ? 'text-green-600' :
-                                    inverterStatus?.battery_discharge_power > 100 ? 'text-red-600' :
+                                    (inverterStatus?.battery_charge_power ?? 0) > 100 ? 'text-green-600' :
+                                    (inverterStatus?.battery_discharge_power ?? 0) > 100 ? 'text-red-600' :
                                     'text-gray-600'
                                   }`}>
-                                    {inverterStatus?.battery_charge_power > 100 ? (
-                                      `Charging ${formatPower(inverterStatus.battery_charge_power)}`
-                                    ) : inverterStatus?.battery_discharge_power > 100 ? (
-                                      `Discharging ${formatPower(inverterStatus.battery_discharge_power)}`
+                                    {(inverterStatus?.battery_charge_power ?? 0) > 100 ? (
+                                      `Charging ${formatPower(inverterStatus?.battery_charge_power ?? 0)}`
+                                    ) : (inverterStatus?.battery_discharge_power ?? 0) > 100 ? (
+                                      `Discharging ${formatPower(inverterStatus?.battery_discharge_power ?? 0)}`
                                     ) : (
                                       'Idle'
                                     )}

@@ -19,6 +19,8 @@ cd ..
 # Copy base files - make sure these match what Dockerfile expects
 cp backend/Dockerfile "$BUILD_DIR/Dockerfile"
 cp backend/app.py "$BUILD_DIR/app.py"
+cp backend/api.py "$BUILD_DIR/api.py"
+cp backend/utils.py "$BUILD_DIR/utils.py"
 cp backend/log_config.py "$BUILD_DIR/log_config.py"
 cp backend/requirements.txt "$BUILD_DIR/requirements.txt"
 cp backend/run.sh "$BUILD_DIR/run.sh"

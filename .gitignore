@@ -9,7 +9,10 @@ __pycache__/
 .coverage
 htmlcov/
 venv/
+.venv/
 .env
+.mypy_cache/
+.ruff_cache/
 
 # Node.js dependencies
 node_modules/

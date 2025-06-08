@@ -36,7 +36,8 @@ class HourlyData:
     battery_soc_end: float  # %
 
     # Economic data
-    electricity_price: float  # SEK/kWh
+    buy_price: float  # SEK/kWh
+    sell_price: float  # SEK/kWh
     hourly_cost: float  # SEK - Cost of solar+battery scenario (from optimized_cost)
     hourly_savings: (
         float  # SEK - Total savings (solar+battery): base_cost - optimized_cost
@@ -48,6 +49,8 @@ class HourlyData:
     # Battery cycle cost (SEK)
     battery_cycle_cost: float = 0.0
 
+    # Strategic intent for this hour
+    strategic_intent: str = "IDLE"
 
 @dataclass
 class DailyView:
@@ -123,17 +126,13 @@ class DailyViewBuilder:
             battery_cycle_cost_per_kwh,
         )
 
-    def build_daily_view(self, current_hour: int, price_data: list[float]) -> DailyView:
-        """Build complete 00-23 daily view - DETERMINISTIC, no fallbacks."""
+    def build_daily_view(self, current_hour: int, buy_price: list[float], sell_price: list[float]) -> DailyView:
+        """Build complete 00-23 daily view"""
+        logger.info(f"Building daily view for hour {current_hour}")
+
         if not 0 <= current_hour <= 23:
             raise ValueError(f"current_hour must be 0-23, got {current_hour}")
 
-        if not price_data or len(price_data) < 24:
-            raise ValueError(
-                f"24-hour price_data is required, got {len(price_data) if price_data else 0} hours"
-            )
-
-        logger.info(f"Building daily view for hour {current_hour}")
 
         # Get latest schedule and validate coverage
         latest_schedule = self.schedule_store.get_latest_schedule()
@@ -186,12 +185,12 @@ class DailyViewBuilder:
         for hour in range(24):
             if hour < current_hour:
                 # Build from actual historical data
-                hour_data = self._build_actual_hour_data(hour, price_data[hour])
+                hour_data = self._build_actual_hour_data(hour, buy_price[hour], sell_price[hour])
                 data_sources.append("actual")
             else:
                 # Build from optimization schedule
                 hour_data = self._build_predicted_hour_data(
-                    hour, price_data[hour], current_hour
+                    hour, buy_price[hour], sell_price[hour], current_hour
                 )
                 data_sources.append("predicted")
 
@@ -228,7 +227,7 @@ class DailyViewBuilder:
         self.log_complete_daily_schedule(daily_view)
         return daily_view
 
-    def _build_actual_hour_data(self, hour: int, price: float) -> HourlyData:
+    def _build_actual_hour_data(self, hour: int, buy_price: float, sell_price: float) -> HourlyData:
         """Use saved optimization cost data from historical events without fallbacks."""
         event = self.historical_store.get_hour_event(hour)
 
@@ -253,7 +252,8 @@ class DailyViewBuilder:
             "base_cost",
             "optimized_cost",
             "hourly_savings",
-            "electricity_price",
+            "buy_price",
+            "sell_price",
         ]
 
         for field in required_fields:
@@ -293,11 +293,13 @@ class DailyViewBuilder:
             battery_discharged=event.battery_discharged,
             battery_soc_start=event.battery_soc_start,
             battery_soc_end=event.battery_soc_end,
-            electricity_price=event.electricity_price,
+            buy_price=event.buy_price,
+            sell_price=event.sell_price,
             hourly_cost=event.optimized_cost,  # solar+battery cost (full optimization)
             hourly_savings=event.hourly_savings,  # total savings (solar+battery): base_cost - optimized_cost
             battery_action=battery_action,  # Calculated from charge/discharge
-            battery_cycle_cost=battery_cycle_cost,  # Added battery cycle cost
+            battery_cycle_cost=battery_cycle_cost,
+            strategic_intent=event.strategic_intent
         )
 
     def _get_list_item(self, lst: list, index: int, name: str):
@@ -334,7 +336,7 @@ class DailyViewBuilder:
         return -1, 20.0  # 20% as a safe default
 
     def _build_predicted_hour_data(
-        self, hour: int, price: float, current_hour: int
+        self, hour: int, buy_price: float, sell_price: float, current_hour: int
     ) -> HourlyData:
         """Build hour data from predicted schedule data with proper SOC/SOE conversion."""
         # Get latest schedule that covers this hour
@@ -509,14 +511,16 @@ class DailyViewBuilder:
                     prev_soc = latest_schedule.algorithm_result.get("initial_soc", 20.0)
                     logger.info(f"Using initial SOC {prev_soc:.1f}% for hour {hour}")
 
-            # DEBUG: Log the unit conversion for problematic hours
-            if hour in [18, 19, 20]:
-                logger.info(
-                    f"Hour {hour} conversion: SOE={soe_kwh:.1f} kWh → SOC={soc_percent:.1f}%"
-                )
-                logger.info(
-                    f"Hour {hour}: Prev SOC={prev_soc:.1f}%, Action={battery_action:.1f} kWh"
-                )
+            # Get strategic intent from the DPSchedule
+            strategic_intent = "IDLE"
+            if latest_schedule and latest_schedule.algorithm_result:
+                # Get strategic intents from the original DP results
+                dp_results = latest_schedule.algorithm_result
+                if "strategic_intent" in dp_results:
+                    strategic_intents_list = dp_results["strategic_intent"]
+                    intent_index = hour - start_hour
+                    if 0 <= intent_index < len(strategic_intents_list):
+                        strategic_intent = strategic_intents_list[intent_index]
 
             return HourlyData(
                 hour=hour,
@@ -529,23 +533,25 @@ class DailyViewBuilder:
                 battery_discharged=battery_discharged,
                 battery_soc_start=prev_soc,
                 battery_soc_end=soc_percent,  # CRITICAL: Use converted percentage, not raw kWh
-                electricity_price=price,
+                buy_price=buy_price,
+                sell_price=sell_price,
                 hourly_cost=hourly_cost,
                 hourly_savings=hourly_savings,
                 battery_action=battery_action,
                 battery_cycle_cost=battery_cycle_cost,
+                strategic_intent=strategic_intent,
             )
 
         except Exception as e:
             logger.error(f"Error extracting predicted data for hour {hour}: {e}")
             raise ValueError(f"Error extracting predicted data for hour {hour}") from e
 
-    def _calculate_actual_hour_savings(self, event: HourlyEvent, price: float) -> float:
+    def _calculate_actual_hour_savings(self, event: HourlyEvent, buy_price: float) -> float:
         """Calculate savings for an actual hour compared to no-battery scenario.
 
         Args:
             event: Actual hour event
-            price: Electricity price for the hour
+            buy_price: Electricity buy_price for the hour
 
         Returns:
             float: Estimated savings in SEK for this hour (grid_only - solar_battery)
@@ -593,7 +599,7 @@ class DailyViewBuilder:
             actual_event = self.historical_store.get_hour_event(last_actual_hour)
             if actual_event:
                 # Found the bridge point - this is our last known actual SOC
-                logger.info(
+                logger.debug(
                     f"Found actual bridge at hour {last_actual_hour}: SOC={actual_event.battery_soc_end}%"
                 )
 
@@ -703,109 +709,166 @@ class DailyViewBuilder:
             )
 
     def log_complete_daily_schedule(self, daily_view: DailyView) -> None:
-        """Log complete 24-hour schedule table with correct cost scenarios.
+        """Log complete 24-hour schedule table matching energy balance structure."""
 
-        This version builds the log as a string and logs it all at once.
-        """
+        # TODO: ADD Total cost to colummn
+        # TODO: Add SOE to column
+        
         lines = []
-        lines.append("╔" + "=" * 92 + "╗")
-        lines.append("║" + " " * 30 + "COMPLETE DAILY SCHEDULE" + " " * 39 + "║")
+        lines.append("╔" + "=" * 119 + "╗")
+        lines.append("║" + " " * 52 + "DAILY SCHEDULE" + " " * 53 + "║")
         lines.append(
-            "╠════╦════════════╦═════╦══════╦╦═════╦══════╦══════╦════╦═══════╦══════╦══════╦══════╦══════╣"
+            "╠═══════╦════════════╦═══════════════════════╦═══════════════════════╦══════════════════╦═══════════════════════════════╣"
         )
         lines.append(
-            "║ Hr ║  Buy/Sell  ║Cons.║ Base ║║Sol. ║Sol→B ║Gr→B  ║SoC ║ Act.  ║ Opt. ║B.Cst ║ Tot. ║ Save ║"
+            "║       ║            ║      Energy Input     ║     Energy Output     ║     Battery      ║        Costs & Savings        ║"
         )
         lines.append(
-            "╠════╬════════════╬═════╬══════╬╬═════╬══════╬══════╬════╬═══════╬══════╬══════╬══════╬══════╣"
+            "║  Hour ║  Buy/Sell  ╠═══════╦═══════╦═══════╬═══════╦═══════╦═══════╬════════╦═════════╬═══════╦═══════╦═══════╦═══════╣"
+        )
+        lines.append(
+            "║       ║   (SEK)    ║ Solar ║ Grid  ║Bat.Dis║ Home  ║ Export║Bat.Chg║ Intent ║ SOC/SOE ║  Base ║  Grid ║ B.Wear║  Save ║"
+        )
+        lines.append(
+            "║       ║            ║ (kWh) ║ (kWh) ║ (kWh) ║ (kWh) ║ (kWh) ║ (kWh) ║        ║ (%/kWh) ║  Cost ║  Cost ║  Cost ║ (SEK) ║"
+        )
+        lines.append(
+            "╠═══════╬════════════╬═══════╬═══════╬═══════╬═══════╬═══════╬═══════╬════════╬═════════╬═══════╬═══════╬═══════╬═══════╣"
         )
 
-        # Calculate totals
+        # Calculate totals - both combined and split by actual vs predicted
         total_consumption = 0.0
         total_solar = 0.0
+        total_grid_import = 0.0
+        total_grid_export = 0.0
+        total_battery_charge = 0.0
+        total_battery_discharge = 0.0
         total_base_cost = 0.0
         total_optimized_cost = 0.0
         total_battery_cost = 0.0
         total_savings = 0.0
-        total_battery_charge = 0.0
-        total_battery_discharge = 0.0
+        
+        # Split totals
+        actual_consumption = 0.0
+        actual_solar = 0.0
+        actual_grid_import = 0.0
+        actual_grid_export = 0.0
+        actual_battery_charge = 0.0
+        actual_battery_discharge = 0.0
+        actual_base_cost = 0.0
+        actual_optimized_cost = 0.0
+        actual_battery_cost = 0.0
+        actual_savings = 0.0
+        
+        predicted_consumption = 0.0
+        predicted_solar = 0.0
+        predicted_grid_import = 0.0
+        predicted_grid_export = 0.0
+        predicted_battery_charge = 0.0
+        predicted_battery_discharge = 0.0
+        predicted_base_cost = 0.0
+        predicted_optimized_cost = 0.0
+        predicted_battery_cost = 0.0
+        predicted_savings = 0.0
 
         for hour_data in daily_view.hourly_data:
             # Calculate base cost (grid-only scenario)
-            base_cost = hour_data.home_consumed * hour_data.electricity_price
+            base_cost = hour_data.home_consumed * hour_data.buy_price
 
-            # Calculate derived values
-            sell_price = hour_data.electricity_price * 0.6
-            solar_to_battery = min(hour_data.battery_charged, hour_data.solar_generated)
-            grid_to_battery = max(0, hour_data.battery_charged - solar_to_battery)
-
-            # Mark predictions with indicator
-            indicator = "★" if hour_data.data_source == "predicted" else " "
-
-            # Format battery action with visual indicator
-            battery_action = hour_data.battery_action or 0
-            action_str = f"{abs(battery_action):4.1f}"
-            if battery_action > 0.01:
-                action_str += "↑"  # Charging
-            elif battery_action < -0.01:
-                action_str += "↓"  # Discharging
+            # Mark current hour and predicted hours
+            current_hour = datetime.now().hour
+            if hour_data.data_source == "predicted":
+                hour_marker = "★"
+            elif hour_data.hour == current_hour:
+                hour_marker = "*"
             else:
-                action_str += "-"  # Idle
-
-            # Format row with BASE COST and OPTIMIZED COST
+                hour_marker = " "
+            
+            # Format strategic intent (shortened to fit 8 chars)
+            intent_short = hour_data.strategic_intent[:8] if hour_data.strategic_intent else "IDLE"
+            
             row = (
-                f"║ {hour_data.hour:02d}{indicator}║ {hour_data.electricity_price:4.2f}/ {sell_price:4.2f} "
-                f"║ {hour_data.home_consumed:4.1f}║ {base_cost:5.2f}║"  # BASE cost (grid-only)
-                f"║ {hour_data.solar_generated:4.1f}║ {solar_to_battery:5.1f}║ {grid_to_battery:5.1f}║"
-                f"{hour_data.battery_soc_end:4.0f}║ {action_str:^6}║ "
-                f"{hour_data.hourly_cost:5.2f}║ {hour_data.battery_cycle_cost:5.2f}║ "  # Grid + Battery cost
-                f"{hour_data.hourly_cost + hour_data.battery_cycle_cost:5.2f}║ {hour_data.hourly_savings:5.2f}║"
+                f"║ {hour_data.hour:02d}:00{hour_marker}║ {hour_data.buy_price:4.2f}/ {hour_data.sell_price:4.2f} "
+                f"║ {hour_data.solar_generated:5.1f} ║ {hour_data.grid_imported:5.1f} ║ {hour_data.battery_discharged:5.1f} ║"
+                f" {hour_data.home_consumed:5.1f} ║ {hour_data.grid_exported:5.1f} ║ {hour_data.battery_charged:5.1f} ║"
+                f"{intent_short:8}║ {hour_data.battery_soc_end:7.0f} ║{base_cost:6.2f} ║{hour_data.hourly_cost:6.2f} ║{hour_data.battery_cycle_cost:6.2f} ║{hour_data.hourly_savings:6.2f} ║"
             )
             lines.append(row)
 
-            # Accumulate totals
+            # Accumulate combined totals
             total_consumption += hour_data.home_consumed
             total_solar += hour_data.solar_generated
+            total_grid_import += hour_data.grid_imported
+            total_grid_export += hour_data.grid_exported
+            total_battery_charge += hour_data.battery_charged
+            total_battery_discharge += hour_data.battery_discharged
             total_base_cost += base_cost
             total_optimized_cost += hour_data.hourly_cost
             total_battery_cost += hour_data.battery_cycle_cost
             total_savings += hour_data.hourly_savings
-            total_battery_charge += hour_data.battery_charged
-            total_battery_discharge += hour_data.battery_discharged
+
+            # Accumulate split totals
+            if hour_data.data_source == "actual":
+                actual_consumption += hour_data.home_consumed
+                actual_solar += hour_data.solar_generated
+                actual_grid_import += hour_data.grid_imported
+                actual_grid_export += hour_data.grid_exported
+                actual_battery_charge += hour_data.battery_charged
+                actual_battery_discharge += hour_data.battery_discharged
+                actual_base_cost += base_cost
+                actual_optimized_cost += hour_data.hourly_cost
+                actual_battery_cost += hour_data.battery_cycle_cost
+                actual_savings += hour_data.hourly_savings
+            else:  # predicted
+                predicted_consumption += hour_data.home_consumed
+                predicted_solar += hour_data.solar_generated
+                predicted_grid_import += hour_data.grid_imported
+                predicted_grid_export += hour_data.grid_exported
+                predicted_battery_charge += hour_data.battery_charged
+                predicted_battery_discharge += hour_data.battery_discharged
+                predicted_base_cost += base_cost
+                predicted_optimized_cost += hour_data.hourly_cost
+                predicted_battery_cost += hour_data.battery_cycle_cost
+                predicted_savings += hour_data.hourly_savings
 
         # Totals row
         lines.append(
-            "╠════╬════════════╬═════╬══════╬╬═════╬══════╬══════╬════╬═══════╬══════╬══════╬══════╬══════╣"
+            "╠═══════╬════════════╬═══════╬═══════╬═══════╬═══════╬═══════╬═══════╬════════╬═════════╬═══════╬═══════╬═══════╬═══════╣"
         )
         lines.append(
-            f"║TOT ║            ║ {total_consumption:4.1f}║{total_base_cost:6.2f}║"
-            f"║ {total_solar:4.1f}║ {0.0:5.1f}║ {0.0:5.1f}║    ║"
-            f"C:{total_battery_charge:4.1f} ║ {total_optimized_cost:5.2f}║ {total_battery_cost:5.2f}║ {total_optimized_cost + total_battery_cost:5.2f}║ {total_savings:5.2f}║"
+            f"║ TOTAL ║            ║ {total_solar:5.1f} ║ {total_grid_import:5.1f} ║ {total_battery_discharge:5.1f} ║"
+            f" {total_consumption:5.1f} ║ {total_grid_export:5.1f} ║ {total_battery_charge:5.1f} ║        ║         ║"
+            f"{total_base_cost:6.2f} ║{total_optimized_cost:6.2f} ║{total_battery_cost:6.2f} ║{total_savings:6.2f} ║"
         )
         lines.append(
-            f"║    ║            ║     ║      ║║     ║      ║      ║    ║"
-            f"D:{total_battery_discharge:4.1f} ║      ║      ║      ║      ║"
-        )
-        lines.append(
-            "╚════╩════════════╩═════╩══════╩╩═════╩══════╩══════╩════╩═══════╩══════╩══════╩══════╩══════╝"
+            "╚═══════╩════════════╩═══════╩═══════╩═══════╩═══════╩═══════╩════════╩═══════╩═════════╩═══════╩═══════╩═══════╩═══════╝"
         )
 
-        # Summary
+        # Enhanced Summary with actual vs predicted breakdown on same lines
         total_cost = total_optimized_cost + total_battery_cost
-        # Use the full savings calculation without capping
+        actual_total_cost = actual_optimized_cost + actual_battery_cost
+        predicted_total_cost = predicted_optimized_cost + predicted_battery_cost
+        
         savings_percent = (
             (total_savings / total_base_cost * 100) if total_base_cost > 0 else 0
         )
+        actual_savings_percent = (
+            (actual_savings / actual_base_cost * 100) if actual_base_cost > 0 else 0
+        )
+        predicted_savings_percent = (
+            (predicted_savings / predicted_base_cost * 100) if predicted_base_cost > 0 else 0
+        )
 
         lines.append("      Summary:")
-        lines.append(f"      Base case cost:           {total_base_cost:.2f} SEK")
-        lines.append(f"      Grid cost:                {total_optimized_cost:.2f} SEK")
-        lines.append(f"      Battery wear cost:        {total_battery_cost:.2f} SEK")
-        lines.append(f"      Total cost:               {total_cost:.2f} SEK")
-        lines.append(f"      Total savings:            {total_savings:.2f} SEK")
-        lines.append(f"      Savings percentage:         {savings_percent:.1f} %")
+        lines.append(f"      Base case cost:           {total_base_cost:8.2f} SEK  (Actual: {actual_base_cost:6.2f} + Predicted: {predicted_base_cost:6.2f})")
+        lines.append(f"      Grid cost:                {total_optimized_cost:8.2f} SEK  (Actual: {actual_optimized_cost:6.2f} + Predicted: {predicted_optimized_cost:6.2f})")
+        lines.append(f"      Battery wear cost:        {total_battery_cost:8.2f} SEK  (Actual: {actual_battery_cost:6.2f} + Predicted: {predicted_battery_cost:6.2f})")
+        lines.append(f"      Total cost:               {total_cost:8.2f} SEK  (Actual: {actual_total_cost:6.2f} + Predicted: {predicted_total_cost:6.2f})")
+        lines.append(f"      Total savings:            {total_savings:8.2f} SEK  (Actual: {actual_savings:6.2f} + Predicted: {predicted_savings:6.2f})")
+        lines.append(f"      Savings percentage:         {savings_percent:6.1f} %    (Actual: {actual_savings_percent:5.1f}% + Predicted: {predicted_savings_percent:5.1f}%)")
         lines.append(
             f"      Actual hours: {daily_view.actual_hours_count}, Predicted hours: {daily_view.predicted_hours_count}"
         )
+        lines.append("      * = current hour | ★ = predicted hours")
 
         logger.info("\n%s", "\n".join(lines))

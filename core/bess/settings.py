@@ -21,8 +21,8 @@ BATTERY_MAX_SOC = 100  # percentage
 BATTERY_MAX_CHARGE_DISCHARGE_POWER_KW = 15.0
 BATTERY_CHARGE_CYCLE_COST_SEK = 0.40  # SEK/kWh excl. VAT
 BATTERY_DEFAULT_CHARGING_POWER_RATE = 40  # percentage
-BATTERY_EFFICIENCY_CHARGE = 0.95  # 95% charging efficiency
-BATTERY_EFFICIENCY_DISCHARGE = 0.95  # 95% discharging efficiency
+BATTERY_EFFICIENCY_CHARGE = 1.0  # 100% charging efficiency
+BATTERY_EFFICIENCY_DISCHARGE = 1.0  # 100% discharging efficiency
 
 # Consumption settings defaults
 HOME_HOURLY_CONSUMPTION_KWH = 4.6

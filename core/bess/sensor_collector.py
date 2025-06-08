@@ -133,7 +133,7 @@ class SensorCollector:
             )
             return reconstructed_flows
 
-        logger.info(
+        logger.debug(
             "Adjusted reconstruction range: %d to %d", start_hour, actual_end_hour
         )
 

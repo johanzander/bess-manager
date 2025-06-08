@@ -333,7 +333,6 @@ def _calculate_reward(
     power: float,
     soc: float,
     next_soc: float,
-    electricity_price: Any,  # Not used, kept for compatibility
     hour: int,
     home_consumption: float,
     battery_settings: BatterySettings,
@@ -541,7 +540,6 @@ def _run_dynamic_programming(
                     power=power,
                     soc=soc,
                     next_soc=next_soc,
-                    electricity_price=None,
                     hour=t,
                     home_consumption=home_consumption[t],
                     solar_production=solar_production[t],
@@ -640,7 +638,6 @@ def _run_dynamic_programming(
             power=action,
             soc=trace_soc,
             next_soc=next_soc,
-            electricity_price=None,
             hour=t,
             home_consumption=home_consumption[t],
             solar_production=solar_production[t] if solar_production else 0,

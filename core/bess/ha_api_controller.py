@@ -582,7 +582,7 @@ class HomeAssistantAPIController:
                         f"Invalid number of hourly prices for {time_label}"
                     )
 
-                logger.info(
+                logger.debug(
                     f"Successfully extracted {len(processed_prices)} hourly prices from {raw_data_key}"
                 )
                 return processed_prices

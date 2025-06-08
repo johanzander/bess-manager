@@ -149,7 +149,7 @@ class DPSchedule:
 
         return periods
 
-    def log_schedule(self):
+    def log_schedule_TO_BE_REMOVED(self):
         """Log the schedule with strategic intent information."""
         if not self.actions:
             logger.info("No schedule data to log")
@@ -196,17 +196,6 @@ class DPSchedule:
         lines.append(
             "╚════╩═══════════════════╩═══════╩════════╩═══════════════════════════════════╝"
         )
-
-        # Add strategic intent summary
-        if self.strategic_intents:
-            intent_counts = {}
-            for intent in self.strategic_intents:
-                intent_counts[intent] = intent_counts.get(intent, 0) + 1
-
-            lines.append("\nStrategic Intent Summary:")
-            for intent, count in intent_counts.items():
-                description = intent_descriptions.get(intent, "Unknown")
-                lines.append(f"  {intent}: {count} hours - {description}")
 
         logger.info("\n".join(lines))
 

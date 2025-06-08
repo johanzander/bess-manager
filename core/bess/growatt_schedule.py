@@ -6,23 +6,9 @@ Updated to use strategic intents from the DP algorithm for TOU and hourly contro
 import logging
 
 from .dp_schedule import DPSchedule
+from .settings import BatterySettings
 
 logger = logging.getLogger(__name__)
-
-
-def create_tou_interval(
-    segment_id: int,
-    start_time: str,
-    end_time: str,
-) -> dict:
-    """Create a simplified Growatt TOU interval dictionary."""
-    return {
-        "segment_id": segment_id,
-        "batt_mode": "battery-first",
-        "start_time": start_time,
-        "end_time": end_time,
-        "enabled": True,
-    }
 
 
 class GrowattScheduleManager:
@@ -33,22 +19,159 @@ class GrowattScheduleManager:
     time in the DP algorithm rather than analyzing energy flows afterward.
 
     Strategic Intent → Growatt Mode Mapping:
-    - GRID_CHARGING → grid-first (enables AC charging)
+    - GRID_CHARGING → battery-first (enables AC charging)
     - SOLAR_STORAGE → battery-first (charging priority)
-    - LOAD_SUPPORT → battery-first (discharging priority)
+    - LOAD_SUPPORT → load-first (discharging priority)
     - EXPORT_ARBITRAGE → grid-first (export priority)
     - IDLE → load-first (normal operation)
     """
 
-    def __init__(self) -> None:
-        """Initialize the schedule manager."""
-        self.max_intervals = 8  # Growatt supports up to 8 TOU intervals
+    def __init__(self, battery_settings: BatterySettings) -> None:
+        """Initialize the schedule manager with required battery settings for power calculations."""
+        if battery_settings is None:
+            raise ValueError("battery_settings is required and cannot be None")
+        
+        self.max_intervals = 9  # Growatt supports up to 9 TOU intervals
         self.current_schedule = None
         self.detailed_intervals = []  # For overview display
         self.tou_intervals = []  # For actual TOU settings
         self.current_hour = 0  # Track current hour
         self.hourly_settings = {}  # Pre-calculated settings for each hour (0-23)
         self.strategic_intents = []  # Store strategic intents from DP algorithm
+        
+        # Required battery settings for power calculations
+        self.battery_settings = battery_settings
+        self.max_charge_power_kw = battery_settings.max_charge_power_kw
+        self.max_discharge_power_kw = battery_settings.max_discharge_power_kw
+
+    def _calculate_power_rates_from_action(self, battery_action_kw: float, intent: str) -> tuple[int, int]:
+        """Calculate charge and discharge power rates from battery action.
+        
+        Args:
+            battery_action_kw: Battery action in kW (positive=charge, negative=discharge)
+            intent: Strategic intent for context
+            
+        Returns:
+            Tuple of (charge_power_rate_percent, discharge_power_rate_percent)
+        """
+        # Thresholds for significant action
+        CHARGE_THRESHOLD = 0.1  # kW
+        DISCHARGE_THRESHOLD = 0.1  # kW
+        
+        charge_rate = 0
+        discharge_rate = 0
+        
+        if battery_action_kw > CHARGE_THRESHOLD:
+            # Charging action - calculate percentage of max charge power
+            charge_rate = min(100, max(5, int((battery_action_kw / self.max_charge_power_kw) * 100)))
+            
+            # For grid charging, ensure minimum effective rate
+            if intent == "GRID_CHARGING" and charge_rate < 20:
+                charge_rate = 20  # Minimum 20% for effective grid charging
+                
+        elif battery_action_kw < -DISCHARGE_THRESHOLD:
+            # Discharging action - calculate percentage of max discharge power
+            discharge_power = abs(battery_action_kw)
+            discharge_rate = min(100, max(5, int((discharge_power / self.max_discharge_power_kw) * 100)))
+            
+            # For export arbitrage, ensure high discharge rate
+            if intent == "EXPORT_ARBITRAGE" and discharge_rate < 50:
+                discharge_rate = max(50, discharge_rate)  # Minimum 50% for effective export
+        
+        return charge_rate, discharge_rate
+
+    def _calculate_hourly_settings_with_strategic_intents(self):
+        """Pre-calculate hourly settings using strategic intents and proper power rates."""
+        self.hourly_settings = {}
+
+        for hour in range(24):
+            if hour < len(self.strategic_intents):
+                intent = self.strategic_intents[hour]
+
+                # Get battery action for this hour if available
+                battery_action = 0.0
+                if (
+                    self.current_schedule
+                    and self.current_schedule.actions
+                    and hour < len(self.current_schedule.actions)
+                ):
+                    battery_action = self.current_schedule.actions[hour]
+
+                # Calculate power rates from battery action
+                charge_power_rate, discharge_power_rate = self._calculate_power_rates_from_action(
+                    battery_action, intent
+                )
+
+                # Determine settings based on strategic intent
+                if intent == "GRID_CHARGING":
+                    # Grid charging - battery-first mode with AC charging enabled
+                    grid_charge = True
+                    discharge_rate = 0
+                    charge_rate = charge_power_rate
+                    state = "charging"
+                    batt_mode = "battery-first" 
+
+                elif intent == "SOLAR_STORAGE":
+                    # Solar storage - battery-first, no AC charging (solar will charge naturally)
+                    # Charge maximum from solar, so don't limit charge rate
+                    grid_charge = False
+                    discharge_rate = 0
+                    charge_rate = 100
+                    state = "charging" if battery_action > 0.01 else "idle"
+                    batt_mode = "battery-first"
+
+                elif intent == "LOAD_SUPPORT":
+                    # Battery supporting home - load-first with discharge enabled
+                    # Dont limit discharge rate when supporting home 
+                    grid_charge = False
+                    discharge_rate = 100
+                    charge_rate = 0
+                    state = "discharging"
+                    batt_mode = "load-first" 
+
+                elif intent == "EXPORT_ARBITRAGE":
+                    # Export arbitrage - grid-first for export priority
+                    grid_charge = False
+                    discharge_rate = discharge_power_rate
+                    charge_rate = 0
+                    state = "grid-first"
+                    batt_mode = "grid-first"
+
+                elif intent == "IDLE":
+                    # No significant battery activity - load-first (normal operation)
+                    # But set charge rate to 100% to store any solar just in case...
+                    grid_charge = False
+                    discharge_rate = 0
+                    charge_rate = 100
+                    state = "idle"
+                    batt_mode = "load-first"
+                else:
+                    raise ValueError(f"Unknown strategic intent at hour {hour}: {intent}")
+
+                self.hourly_settings[hour] = {
+                    "grid_charge": grid_charge,
+                    "discharge_rate": discharge_rate,
+                    "charge_rate": charge_rate,
+                    "state": state,
+                    "batt_mode": batt_mode,
+                    "strategic_intent": intent,
+                    "battery_action": battery_action,
+                    "battery_action_kw": battery_action,
+                }
+
+                logger.debug(
+                    "Hour %02d: Intent=%s, Action=%.2fkW, ChargeRate=%d%%, DischargeRate=%d%%, GridCharge=%s, Mode=%s",
+                    hour,
+                    intent,
+                    battery_action,
+                    charge_rate,
+                    discharge_rate,
+                    grid_charge,
+                    batt_mode,
+                )
+            else:
+                raise ValueError(f"Missing strategic intent for hour {hour}: only {len(self.strategic_intents)} intents provided")
+                        
 
     def create_schedule(self, schedule: DPSchedule):
         """Process DPSchedule with strategic intents into Growatt format."""
@@ -56,36 +179,44 @@ class GrowattScheduleManager:
             "Creating Growatt schedule using strategic intents from DP algorithm"
         )
 
-        # Extract strategic intents from DP results
-        if hasattr(schedule, "original_dp_results") and schedule.original_dp_results:
-            self.strategic_intents = schedule.original_dp_results.get(
-                "strategic_intent", []
-            )
+        # UPDATED: Use strategic intents from multiple sources in priority order
+        if hasattr(self, 'strategic_intents') and self.strategic_intents:
+            # Use pre-set strategic intents (from corrected historical data)
+            logger.info("Using pre-set strategic intents (with historical corrections)")
+        elif hasattr(schedule, "strategic_intents") and schedule.strategic_intents:
+            self.strategic_intents = schedule.strategic_intents
+            logger.info("Using strategic intents from DPSchedule")
+        elif hasattr(schedule, "original_dp_results") and schedule.original_dp_results:
+            self.strategic_intents = schedule.original_dp_results.get("strategic_intent", [])
+            logger.info("Using strategic intents from DP results")
+        else:
+            self.strategic_intents = ["IDLE"] * 24
+            logger.warning("No strategic intents found, using all IDLE")
 
-            # Log strategic intent summary
-            if self.strategic_intents:
-                intent_counts = {}
-                for intent in self.strategic_intents:
-                    intent_counts[intent] = intent_counts.get(intent, 0) + 1
-                logger.info("Strategic intent distribution: %s", intent_counts)
+        # Ensure we have 24 hours of strategic intents
+        if len(self.strategic_intents) < 24:
+            logger.warning(f"Only {len(self.strategic_intents)} strategic intents, padding with IDLE")
+            while len(self.strategic_intents) < 24:
+                self.strategic_intents.append("IDLE")
 
-            # Log economic results
-            economic_results = schedule.original_dp_results.get("economic_results", {})
-            if economic_results:
-                logger.info(
-                    "Economic results: Base cost: %.2f SEK, Battery+Solar cost: %.2f SEK, Savings: %.2f SEK (%.1f%%)",
-                    economic_results.get("base_cost", 0),
-                    economic_results.get("battery_solar_cost", 0),
-                    economic_results.get("base_to_battery_solar_savings", 0),
-                    economic_results.get("base_to_battery_solar_savings_pct", 0),
-                )
+        # Log strategic intent summary
+        if self.strategic_intents:
+            # Log intent transitions
+            for hour in range(1, len(self.strategic_intents)):
+                if self.strategic_intents[hour] != self.strategic_intents[hour - 1]:
+                    logger.info(
+                        "Intent transition at hour %02d: %s → %s",
+                        hour,
+                        self.strategic_intents[hour - 1],
+                        self.strategic_intents[hour],
+                    )
 
         self.current_schedule = schedule
         self._consolidate_and_convert_with_strategic_intents()
         self._calculate_hourly_settings_with_strategic_intents()
 
         logger.info(
-            "New Growatt schedule creacompare_schedulested with %d TOU intervals based on strategic intents",
+            "New Growatt schedule created with %d TOU intervals based on strategic intents",
             len(self.tou_intervals),
         )
 
@@ -108,7 +239,7 @@ class GrowattScheduleManager:
 
         # Map strategic intents to battery modes
         intent_to_mode = {
-            "GRID_CHARGING": "grid-first",  # Enable AC charging for arbitrage
+            "GRID_CHARGING": "battery-first",  # Enable AC charging for arbitrage
             "SOLAR_STORAGE": "battery-first",  # Priority to battery charging from solar
             "LOAD_SUPPORT": "load-first",  # Priority to battery discharge for load
             "EXPORT_ARBITRAGE": "grid-first",  # Priority to grid export for profit
@@ -301,86 +432,6 @@ class GrowattScheduleManager:
                     }
                 )
 
-    def _calculate_hourly_settings_with_strategic_intents(self):
-        """Pre-calculate hourly settings using strategic intents."""
-        self.hourly_settings = {}
-
-        for hour in range(24):
-            if hour < len(self.strategic_intents):
-                intent = self.strategic_intents[hour]
-
-                # Get battery action for this hour if available
-                battery_action = 0.0
-                if (
-                    self.current_schedule
-                    and hasattr(self.current_schedule, "actions")
-                    and hour < len(self.current_schedule.actions)
-                ):
-                    battery_action = self.current_schedule.actions[hour]
-
-                # Determine settings based on strategic intent
-                if intent == "GRID_CHARGING":
-                    # Grid charging - enable AC charging, no discharge
-                    grid_charge = True
-                    discharge_rate = 0
-                    state = "charging"
-                    batt_mode = "grid-first"
-
-                elif intent == "SOLAR_STORAGE":
-                    # Solar storage - no AC charging, no discharge (solar will charge naturally)
-                    grid_charge = False
-                    discharge_rate = 0
-                    state = "charging" if battery_action > 0.01 else "idle"
-                    batt_mode = "battery-first"
-
-                elif intent == "LOAD_SUPPORT":
-                    # Battery supporting load - no AC charging, enable discharge
-                    grid_charge = False
-                    discharge_rate = 100
-                    state = "discharging"
-                    batt_mode = "load-first"
-
-                elif intent == "EXPORT_ARBITRAGE":
-                    # Export arbitrage - no AC charging, maximum discharge for export
-                    grid_charge = False
-                    discharge_rate = 100
-                    state = "grid-first"  # Special state for export priority
-                    batt_mode = "grid-first"
-
-                else:  # IDLE
-                    # No significant battery activity
-                    grid_charge = False
-                    discharge_rate = 0
-                    state = "idle"
-                    batt_mode = "load-first"
-
-                self.hourly_settings[hour] = {
-                    "grid_charge": grid_charge,
-                    "discharge_rate": discharge_rate,
-                    "state": state,
-                    "batt_mode": batt_mode,
-                    "strategic_intent": intent,
-                    "battery_action": battery_action,
-                }
-
-                logger.debug(
-                    "Hour %02d: Intent=%s, Mode=%s, GridCharge=%s, DischargeRate=%d",
-                    hour,
-                    intent,
-                    batt_mode,
-                    grid_charge,
-                    discharge_rate,
-                )
-            else:
-                # Fallback for hours without intent data
-                self.hourly_settings[hour] = {
-                    "grid_charge": False,
-                    "state": "idle",
-                    "batt_mode": "load-first",
-                    "strategic_intent": "IDLE",
-                    "battery_action": 0.0,
-                }
-
     def get_hourly_settings(self, hour):
         """Get Growatt-specific settings for a given hour with strategic intent info."""
         if hour in self.hourly_settings:
@@ -429,7 +480,7 @@ class GrowattScheduleManager:
         return descriptions.get(intent, "Unknown intent")
 
     def log_detailed_schedule_with_intent(self, header=None):
-        """Log comprehensive schedule view with strategic intents."""
+        """Log comprehensive schedule view with strategic intents and power rates."""
         if header:
             logger.info(header)
 
@@ -438,10 +489,9 @@ class GrowattScheduleManager:
             return
 
         lines = [
-            "\nDetailed Schedule with Strategic Intents:",
-            "╔════╦══════════════════╦════════════════╦═════════════╦═══════════════╦═══════════════════════════════╗",
-            "║ Hr ║ Strategic Intent ║  Battery Mode  ║ Grid Charge ║ Discharge Rate║         Description           ║",
-            "╠════╬══════════════════╬════════════════╬═════════════╬═══════════════╬═══════════════════════════════╣",
+            "\n╔════╦══════════════════╦═══════════════╦═════════════╦═══════════════╦═══════════════╦═══════════════════════════════╗",
+            "║ Hr ║ Strategic Intent ║ Battery Mode  ║ Grid Charge ║ Charge Rate % ║Discharge Rate%║         Description           ║",
+            "╠════╬══════════════════╬═══════════════╬═════════════╬═══════════════╬═══════════════╬═══════════════════════════════╣",
         ]
 
         for hour in range(24):
@@ -449,28 +499,43 @@ class GrowattScheduleManager:
             intent = settings.get("strategic_intent", "IDLE")
             batt_mode = settings.get("batt_mode", "load-first")
             grid_charge = settings.get("grid_charge", False)
+            charge_rate = settings.get("charge_rate", 0)
             discharge_rate = settings.get("discharge_rate", 0)
+            battery_action_kw = settings.get("battery_action_kw", 0.0)
             description = self._get_intent_description(intent)
 
             # Mark current hour
             hour_marker = "*" if hour == self.current_hour else " "
 
+            # Add battery action info to description showing both rates
+            if abs(battery_action_kw) > 0.01:
+                if battery_action_kw > 0:
+                    description += f" ({battery_action_kw:.1f}kW→{charge_rate}%C)"
+                else:
+                    description += f" ({abs(battery_action_kw):.1f}kW→{discharge_rate}%D)"
+            elif charge_rate > 0 or discharge_rate > 0:
+                # Show rates even if no significant action (edge cases)
+                if charge_rate > 0:
+                    description += f" (C:{charge_rate}%)"
+                if discharge_rate > 0:
+                    description += f" (D:{discharge_rate}%)"
+
             row = (
-                f"║{hour:02d}{hour_marker}║ {intent:16} ║ {batt_mode:14} ║"
-                f" {grid_charge!s:11} ║ {discharge_rate:13} ║ {description:29} ║"
+                f"║{hour:02d}{hour_marker}║ {intent:17} ║ {batt_mode:13} ║"
+                f" {grid_charge!s:11} ║ {charge_rate:13} ║ {discharge_rate:13} ║ {description[:29]:29} ║"
             )
             lines.append(row)
 
         lines.append(
-            "╚════╩══════════════════╩════════════════╩═════════════╩═══════════════╩═══════════════════════════════╝"
+            "╚═══╩═══════════════════╩═══════════════╩═════════════╩═══════════════╩═══════════════╩═══════════════════════════════╝"
         )
         lines.append("* indicates current hour")
+        lines.append("C=Charge%, D=Discharge% (kW→% shows DP action converted to hardware percentage)")
 
         logger.info("\n".join(lines))
 
     def compare_schedules(self, other_schedule, from_hour=0):
         """Enhanced schedule comparison - TOU intervals only (what's actually in the inverter)."""
-        logger.info("=== SCHEDULE COMPARISON START ===")
         logger.info(f"Comparing TOU intervals from hour {from_hour:02d}:00 onwards")
 
         # Get TOU intervals

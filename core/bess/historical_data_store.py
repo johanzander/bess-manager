@@ -46,12 +46,14 @@ class HourlyEvent:
     battery_savings: float = (
         0.0  # Savings from battery: solar_only_cost - optimized_cost
     )
-    electricity_price: float = 0.0  # Price for this hour (SEK/kWh)
+    buy_price: float = 0.0  # Price for this hour (SEK/kWh)
+    sell_price: float = 0.0  # Price for selling to grid (SEK/kWh)
 
     # Derived values (calculated automatically)
     battery_net_change: float = field(init=False)
     soc_change: float = field(init=False)
-
+    strategic_intent: str = field(default="IDLE")
+    
     def __post_init__(self):
         """Calculate derived values after initialization."""
         object.__setattr__(

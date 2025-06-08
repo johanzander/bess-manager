@@ -276,8 +276,6 @@ class HomePowerMonitor:
 
         if abs(new_power - current_power) >= self.step_size:
             logger.info(
-                "Adjusting charging power from {}% to {:.0f}% (target: {:.0f}%)".join(
-                    map(str, (current_power, new_power, target_power))
-                )
+                f"Adjusting charging power from {current_power:.0f}% to {new_power:.0f}% (target: {target_power:.0f}%)"
             )
             self.controller.set_charging_power_rate(int(new_power))

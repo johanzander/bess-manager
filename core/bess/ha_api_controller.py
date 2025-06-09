@@ -496,13 +496,20 @@ class HomeAssistantAPIController:
         return hourly_values
 
     def _get_nordpool_prices(self, is_tomorrow=False):
-        """Get Nordpool prices from Home Assistant sensor.
+        """Get Nordpool prices from Home Assistant sensor - simplified to just fetch raw data.
+
+        The HA controller is now a thin data layer that just fetches sensor data.
+        All complex logic (DST handling, timestamp validation, etc.) is handled 
+        by the PriceManager layer.
 
         Args:
             is_tomorrow: If True, get tomorrow's prices, otherwise today's
 
         Returns:
-            list: List of hourly prices or raises an exception if data is unavailable
+            list: List of hourly prices (may be 23, 24, or 25 hours for DST)
+            
+        Raises:
+            ValueError: If prices are not available for the date
         """
         try:
             # Determine which sensor to use
@@ -521,70 +528,41 @@ class HomeAssistantAPIController:
             entity_response = self._api_request("get", f"/api/states/{entity_id}")
 
             if not entity_response:
-                logger.error(
-                    f"Could not retrieve Nordpool sensor state for {time_label}"
-                )
+                logger.error(f"Could not retrieve Nordpool sensor state for {time_label}")
                 raise ValueError(f"Nordpool prices for {time_label} are unavailable")
 
             # Access attributes from the response
             attributes = entity_response.get("attributes", {})
 
-            # Try to get raw data from attributes
+            # Try to get raw data from attributes first
             raw_data_key = "raw_tomorrow" if is_tomorrow else "raw_today"
             raw_data = attributes.get(raw_data_key)
 
             if raw_data:
-                # Process raw data
-                processed_prices = [hour_data["value"] for hour_data in raw_data]
-
-                # Handle DST transitions
-                if len(processed_prices) == 23:
-                    logger.info(
-                        f"Detected spring forward DST transition for {time_label} - adding extra hour"
-                    )
-                    middle_idx = len(processed_prices) // 2
-                    processed_prices.insert(middle_idx, processed_prices[middle_idx])
-                elif len(processed_prices) == 25:
-                    logger.info(
-                        f"Detected fall back DST transition for {time_label} - removing extra hour"
-                    )
-                    middle_idx = len(processed_prices) // 2
-                    processed_prices.pop(middle_idx)
-
-                # Final validation
-                if len(processed_prices) != 24:
-                    logger.error(
-                        f"Unexpected number of hours for {time_label}: {len(processed_prices)}"
-                    )
-                    raise ValueError(
-                        f"Invalid number of hourly prices for {time_label}"
-                    )
-
-                logger.debug(
-                    f"Successfully extracted {len(processed_prices)} hourly prices from {raw_data_key}"
-                )
-                return processed_prices
+                # Extract raw prices - let PriceManager handle DST and validation
+                try:
+                    processed_prices = [hour_data["value"] for hour_data in raw_data]
+                    logger.debug(f"Successfully extracted {len(processed_prices)} hourly prices from {raw_data_key}")
+                    return processed_prices
+                except (KeyError, TypeError) as e:
+                    logger.warning(f"Invalid raw data format in {raw_data_key}: {e}")
 
             # Fallback to the regular array if raw data isn't available
             regular_data_key = "tomorrow" if is_tomorrow else "today"
             regular_prices = attributes.get(regular_data_key)
 
-            if regular_prices:
-                logger.info(
-                    f"Using '{regular_data_key}' attribute with {len(regular_prices)} hourly prices"
-                )
+            if regular_prices and isinstance(regular_prices, list):
+                logger.info(f"Using '{regular_data_key}' attribute with {len(regular_prices)} hourly prices")
                 return regular_prices
 
             # Check if tomorrow's prices are valid (for tomorrow only)
             if is_tomorrow and attributes.get("tomorrow_valid") is False:
-                logger.error(
-                    "Tomorrow's prices are not yet available (tomorrow_valid=false)"
-                )
+                logger.error("Tomorrow's prices are not yet available (tomorrow_valid=false)")
                 raise ValueError("Tomorrow's Nordpool prices are not yet available")
 
-            logger.error(
-                f"Could not find price data for {time_label} in Nordpool sensor attributes"
-            )
+            # If we get here, no price data was found
+            logger.error(f"Could not find price data for {time_label} in Nordpool sensor attributes")
+            logger.debug(f"Available attributes: {list(attributes.keys())}")
             raise ValueError(f"Nordpool prices for {time_label} are unavailable")
 
         except Exception as e:

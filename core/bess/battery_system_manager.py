@@ -1123,6 +1123,7 @@ class BatterySystemManager:
             today_prices = self._price_manager.get_today_prices()
             if hour < len(today_prices):
                 buy_price = today_prices[hour].get("buyPrice", 1.0)
+                sell_price = today_prices[hour].get("sellPrice", 0.6)
 
             # Calculate cost scenarios
             home_consumed = flows.get("load_consumption", 0.0)
@@ -1176,6 +1177,7 @@ class BatterySystemManager:
                 solar_savings=solar_savings,
                 battery_savings=battery_savings,
                 buy_price=buy_price,
+                sell_price=sell_price,
                 strategic_intent=strategic_intent,
             )
 
@@ -1431,7 +1433,7 @@ class BatterySystemManager:
         return self.daily_view_builder.build_daily_view(current_hour, buy_price, sell_price)
 
 
-    def get_daily_savings_report(self) -> dict[str, Any]:
+    def get_daily_savings_report_REMOVE_NOT_USED(self) -> dict[str, Any]:
         """Complete savings report with economic scenarios."""
         try:
             daily_view = self.daily_view_builder.build_daily_view(

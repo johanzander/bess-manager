@@ -144,22 +144,6 @@ async def get_current_schedule():
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@router.get("/api/report/daily_savings")
-async def get_daily_savings_report():
-    """Get the daily savings report."""
-    from app import bess_controller
-
-    try:
-        report = bess_controller.system.get_daily_savings_report()
-        return add_camel_case_keys(report)
-    except ValueError as e:
-        logger.warning(f"No daily savings report available: {e}")
-        raise HTTPException(status_code=404, detail="No current schedule available") from e
-    except Exception as e:
-        logger.error(f"Error generating daily savings report: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
-
-
 @router.get("/api/energy/balance")
 async def get_energy_balance():
     """Get energy balance for the day."""

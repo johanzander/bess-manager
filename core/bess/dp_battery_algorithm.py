@@ -51,10 +51,13 @@ The algorithm returns comprehensive results including:
 """
 
 __all__ = [
-    # Public API
     "optimize_battery_schedule",
     "print_results_table",
+    "calculate_hourly_costs",  
+    "EnergyFlows",            
+    "CostScenarios",      
 ]
+
 
 import logging
 from enum import Enum
@@ -63,7 +66,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-# Use absolute import for settings to avoid conflicts between old and new settings.py
+from dataclasses import dataclass
+
 from core.bess.settings import BatterySettings
 
 # Configure logging
@@ -76,6 +80,68 @@ logger = logging.getLogger(__name__)
 SOC_STEP_KWH = 0.1
 POWER_STEP_KW = 0.2
 
+
+@dataclass
+class EnergyFlows:
+    """Standardized energy flow data structure."""
+    home_consumption: float
+    solar_production: float
+    grid_import: float
+    grid_export: float
+    battery_charged: float
+    battery_discharged: float
+
+@dataclass
+class CostScenarios:
+    """All cost scenarios for one hour."""
+    base_case_cost: float
+    solar_only_cost: float
+    battery_solar_cost: float
+    solar_savings: float
+    battery_savings: float
+    total_savings: float
+    battery_wear_cost: float
+
+def calculate_hourly_costs(
+    flows: EnergyFlows,
+    buy_price: float,
+    sell_price: float,
+    battery_cycle_cost_per_kwh: float = 0.0,
+    charge_efficiency: float = 1.0,
+    discharge_efficiency: float = 1.0
+) -> CostScenarios:
+    """Single source of truth for hourly cost calculations - matches original DP algorithm logic."""
+    
+    # Base case: Grid-only (no solar, no battery)
+    base_case_cost = flows.home_consumption * buy_price
+    
+    # Solar-only case: Solar + grid (no battery) 
+    direct_solar = min(flows.solar_production, flows.home_consumption)
+    solar_excess = max(0, flows.solar_production - direct_solar)
+    grid_needed = max(0, flows.home_consumption - direct_solar)
+    
+    solar_only_cost = grid_needed * buy_price - solar_excess * sell_price
+    
+    # Battery+solar case: Full optimization
+    # Apply cycle cost only to charging (actual energy stored)
+    battery_wear_cost = flows.battery_charged * charge_efficiency * battery_cycle_cost_per_kwh
+    
+    battery_solar_cost = flows.grid_import * buy_price - flows.grid_export * sell_price + battery_wear_cost
+    
+    # Calculate savings
+    solar_savings = base_case_cost - solar_only_cost
+    battery_savings = solar_only_cost - battery_solar_cost
+    total_savings = base_case_cost - battery_solar_cost
+    
+    return CostScenarios(
+        base_case_cost=base_case_cost,
+        solar_only_cost=solar_only_cost,
+        battery_solar_cost=battery_solar_cost,
+        solar_savings=solar_savings,
+        battery_savings=battery_savings,
+        total_savings=total_savings,
+        battery_wear_cost=battery_wear_cost
+    )
 
 class StrategicIntent(Enum):
     """Strategic intents for battery actions, determined at decision time."""
@@ -845,43 +911,36 @@ def _simulate_battery(
         grid_imports.append(hourly_flows["grid_import"])
         grid_exports.append(hourly_flows["grid_export"])
 
-        # Calculate base case values (grid-only scenario)
-        base_grid_import = home_consumption[t]
-        base_grid_export = 0.0
-        base_case_grid_imports.append(base_grid_import)
-        base_case_grid_exports.append(base_grid_export)
-        base_case_cost = base_grid_import * buy_price[t]
-        base_case_costs.append(base_case_cost)
-
-        # Calculate solar-only case values (solar + grid, no battery)
-        solar_for_home = min(solar_production[t], home_consumption[t])
-        solar_excess = max(0.0, solar_production[t] - solar_for_home)
-        solar_only_grid_import = max(0.0, home_consumption[t] - solar_for_home)
-        solar_only_grid_export = solar_excess
-        solar_only_grid_imports.append(solar_only_grid_import)
-        solar_only_grid_exports.append(solar_only_grid_export)
-        solar_only_cost = (
-            solar_only_grid_import * buy_price[t]
-            - solar_only_grid_export * sell_price[t]
+        # NEW: Use shared cost calculation function
+        flows = EnergyFlows(
+            home_consumption=home_consumption[t],
+            solar_production=solar_production[t],
+            grid_import=hourly_flows["grid_import"],
+            grid_export=hourly_flows["grid_export"],
+            battery_charged=max(0, power),
+            battery_discharged=max(0, -power)
         )
-        solar_only_costs.append(solar_only_cost)
-
-        # Calculate battery+solar case costs (actual optimized scenario)
-        if power > 0:
-            cycle_degradation_cost = (
-                next_soc - soc
-            ) * battery_settings.cycle_cost_per_kwh
-            b_cost = cycle_degradation_cost
-        else:
-            cycle_degradation_cost = 0.0
-            b_cost = 0.0
-        b_costs.append(b_cost)
-        battery_solar_cost = (
-            hourly_flows["grid_import"] * buy_price[t]
-            - hourly_flows["grid_export"] * sell_price[t]
-            + cycle_degradation_cost
+        
+        costs = calculate_hourly_costs(
+            flows=flows,
+            buy_price=buy_price[t],
+            sell_price=sell_price[t],
+            battery_cycle_cost_per_kwh=battery_settings.cycle_cost_per_kwh,
+            charge_efficiency=battery_settings.efficiency_charge,
+            discharge_efficiency=battery_settings.efficiency_discharge
         )
-        battery_solar_costs.append(battery_solar_cost)
+
+        # Store results (preserving existing interface)
+        base_case_grid_imports.append(flows.home_consumption)
+        base_case_grid_exports.append(0.0)
+        base_case_costs.append(costs.base_case_cost)
+
+        solar_only_grid_imports.append(max(0, flows.home_consumption - flows.solar_production))
+        solar_only_grid_exports.append(max(0, flows.solar_production - flows.home_consumption))
+        solar_only_costs.append(costs.solar_only_cost)
+
+        b_costs.append(costs.battery_wear_cost)
+        battery_solar_costs.append(costs.battery_solar_cost)
 
         # Update SOC for next hour
         soc = next_soc
@@ -993,7 +1052,6 @@ def _simulate_battery(
         energy_flows,
         strategic_intents,
     )
-
 
 def optimize_battery_schedule(
     buy_price: list[float] | None,
@@ -1366,3 +1424,4 @@ def print_results_table(hourly_data, economic_results, buy_prices, sell_prices):
 
     # Log all output in a single call
     logger.info("\n".join(output))
+

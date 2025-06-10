@@ -51,22 +51,21 @@ The algorithm returns comprehensive results including:
 """
 
 __all__ = [
+    "CostScenarios",
+    "EnergyFlows",
+    "calculate_hourly_costs",
     "optimize_battery_schedule",
     "print_results_table",
-    "calculate_hourly_costs",  
-    "EnergyFlows",            
-    "CostScenarios",      
 ]
 
 
 import logging
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
 import numpy as np
 import pandas as pd
-
-from dataclasses import dataclass
 
 from core.bess.settings import BatterySettings
 
@@ -1253,7 +1252,7 @@ def optimize_battery_schedule(
     results = {
         "hourly_data": hourly_data,
         "energy_flows": energy_flows,
-        "strategic_intent": strategic_intents,  # Strategic intent for each hour
+        "strategic_intent": strategic_intents,
         "economic_results": economic_results,
         "soc_trace": soc_trace,
         "action_trace": action_trace,

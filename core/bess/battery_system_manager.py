@@ -64,8 +64,7 @@ class BatterySystemManager:
         self.daily_view_builder = DailyViewBuilder(
             self.historical_store,
             self.schedule_store,
-            self.battery_settings.total_capacity,
-            self.battery_settings.cycle_cost_per_kwh,
+            self.battery_settings,
         )
 
         # Initialize hardware interface with battery settings
@@ -263,15 +262,16 @@ class BatterySystemManager:
             current_hour, current_minute, today = self._get_current_time_info()
             end_hour = self._determine_historical_end_hour(current_hour, current_minute)
 
+            logger.info(f"DEBUG: Fetching historical data - current_hour={current_hour}, current_minute={current_minute}, end_hour={end_hour}")
+
             if end_hour >= 0:
-                historical_flows = self.sensor_collector.reconstruct_historical_flows(
-                    0, end_hour
-                )
+                historical_flows = self.sensor_collector.reconstruct_historical_flows(0, end_hour)
+                logger.info(f"DEBUG: Got historical flows for hours: {list(historical_flows.keys())}")
 
                 for hour, flows in historical_flows.items():
                     try:
                         self._record_historical_event(hour, flows)
-                        logger.debug(f"Stored hour {hour}: {flows}")
+                        logger.info(f"DEBUG: Stored hour {hour} with SOC={flows.get('battery_soc', 'MISSING')}")
                     except Exception as e:
                         logger.warning(f"Failed to record hour {hour}: {e}")
 
@@ -280,6 +280,8 @@ class BatterySystemManager:
                 logger.info(
                     f"Historical store now contains {len(completed_hours)} hours: {completed_hours}"
                 )
+            else:
+                logger.info("DEBUG: end_hour < 0, no historical data to fetch")
 
         except Exception as e:
             logger.error(f"Failed to initialize historical data: {e}")
@@ -382,7 +384,7 @@ class BatterySystemManager:
     def _update_energy_data(
         self, hour: int, is_first_run: bool, prepare_next_day: bool):
         """Track energy data collection with strategic intent."""
-        logger.info(f"=== ENERGY DATA UPDATE DEBUG START ===")
+        logger.info("=== ENERGY DATA UPDATE DEBUG START ===")
         logger.info(f"Hour: {hour}, is_first_run: {is_first_run}, prepare_next_day: {prepare_next_day}")
         
         if not is_first_run and hour > 0 and not prepare_next_day:
@@ -409,7 +411,7 @@ class BatterySystemManager:
                     logger.error(f"FAILED: sensor_collector returned no flows for hour {prev_hour}")
                     
                     # Debug sensor collector state
-                    logger.error(f"Sensor collector debug info:")
+                    logger.error("Sensor collector debug info:")
                     logger.error(f"  - Controller available: {self.sensor_collector._controller is not None}")
 
             except Exception as e:
@@ -431,7 +433,7 @@ class BatterySystemManager:
         # Final check: what hours do we have stored?
         completed_hours = self.historical_store.get_completed_hours()
         logger.info(f"Historical store after update: {completed_hours}")
-        logger.info(f"=== ENERGY DATA UPDATE DEBUG END ===")
+        logger.info("=== ENERGY DATA UPDATE DEBUG END ===")
 
     def _get_current_battery_soc(self) -> float | None:
         """Get current battery SOC with validation."""
@@ -670,7 +672,6 @@ class BatterySystemManager:
             logger.info(f"Initial combined_actions length: {len(combined_actions)}")
             logger.info(f"Initial combined_soe length: {len(combined_soe)}")
 
-            # CRITICAL FIX: Map optimization results to correct hours
             if "battery_action" in hourly_data:
                 battery_actions = hourly_data["battery_action"]
                 logger.info(
@@ -680,7 +681,7 @@ class BatterySystemManager:
                 for i, action in enumerate(battery_actions):
                     target_hour = optimization_hour + i
                     if target_hour < 24:
-                        logger.info(
+                        logger.debug(
                             f"  Mapping battery action index {i} (action={action:.1f}) to hour {target_hour}"
                         )
                         combined_actions[target_hour] = action
@@ -696,7 +697,7 @@ class BatterySystemManager:
                 for i, soc in enumerate(soc_values):
                     target_hour = optimization_hour + i
                     if target_hour < 24:
-                        logger.info(
+                        logger.debug(
                             f"  Mapping SOC index {i} (SOC={soc:.1f}) to hour {target_hour}"
                         )
                         if soc <= 1.0:  # Convert percentage to kWh if needed
@@ -718,7 +719,7 @@ class BatterySystemManager:
             for i, intent in enumerate(strategic_intents):
                 target_hour = optimization_hour + i
                 if target_hour < 24:
-                    logger.info(
+                    logger.debug(
                         f"  Mapping strategic intent index {i} (intent={intent}) to hour {target_hour}"
                     )
                     full_day_strategic_intents[target_hour] = intent
@@ -1100,7 +1101,7 @@ class BatterySystemManager:
 
 
     def _record_historical_event(self, hour: int, flows: dict):
-        """Record historical event from energy flows with cost data and strategic intent."""
+        """Record historical event from energy flows - SIMPLIFIED to store only facts."""
         try:
             battery_soc_end = flows.get("battery_soc", 10.0)
 
@@ -1111,6 +1112,7 @@ class BatterySystemManager:
             if previous_event:
                 battery_soc_start = previous_event.battery_soc_end
             else:
+                # Calculate start SOC from energy flows
                 battery_charge = flows.get("battery_charged", 0.0)
                 battery_discharge = flows.get("battery_discharged", 0.0)
                 net_delta_kwh = battery_charge - battery_discharge
@@ -1119,63 +1121,32 @@ class BatterySystemManager:
                 ) * 100.0
                 battery_soc_start = max(0, battery_soc_end - net_delta_percent)
 
-            # Get price for this hour
-            today_prices = self._price_manager.get_today_prices()
-            if hour < len(today_prices):
-                buy_price = today_prices[hour].get("buyPrice", 1.0)
-                sell_price = today_prices[hour].get("sellPrice", 0.6)
-
-            # Calculate cost scenarios
-            home_consumed = flows.get("load_consumption", 0.0)
-            solar_generated = flows.get("system_production", 0.0)
-            grid_imported = flows.get("import_from_grid", 0.0)
-            grid_exported = flows.get("export_to_grid", 0.0)
-
-            # Grid-only cost (baseline)
-            base_cost = home_consumed * buy_price
-
-            # Solar-only cost (with solar, no battery)
-            direct_solar = min(home_consumed, solar_generated)
-            grid_needed = max(0, home_consumed - direct_solar)
-            solar_excess = max(0, solar_generated - direct_solar)
-            solar_only_cost = (
-                grid_needed * buy_price - solar_excess * buy_price * 0.6
-            )
-
-            # Optimized cost (actual with battery + solar)
-            optimized_cost = (
-                grid_imported * buy_price
-                - grid_exported * buy_price * 0.6
-            )
-
-            # Calculate savings breakdown without capping
-            solar_savings = base_cost - solar_only_cost
-            battery_savings = solar_only_cost - optimized_cost
-            hourly_savings = (
-                base_cost - optimized_cost
-            )  # Total savings (solar + battery)
+            # Get price for this hour (context needed for cost calculations)
+            buy_price = 1.0  # Default fallback
+            sell_price = 0.6  # Default fallback
+            try:
+                today_prices = self._price_manager.get_today_prices()
+                if hour < len(today_prices):
+                    buy_price = today_prices[hour].get("buyPrice", 1.0)
+                    sell_price = today_prices[hour].get("sellPrice", 0.6)
+            except Exception as e:
+                logger.warning(f"Failed to get price for hour {hour}: {e}")
 
             # Use strategic intent from SensorCollector (already calculated)
             strategic_intent = flows.get("strategic_intent", "IDLE")
 
+            # Create event with ONLY facts - no cost calculations
             event = HourlyEvent(
                 hour=hour,
                 timestamp=datetime.now(),
                 battery_soc_start=battery_soc_start,
                 battery_soc_end=battery_soc_end,
-                solar_generated=solar_generated,
-                home_consumed=home_consumed,
-                grid_imported=grid_imported,
-                grid_exported=grid_exported,
+                solar_generated=flows.get("system_production", 0.0),
+                home_consumed=flows.get("load_consumption", 0.0),
+                grid_imported=flows.get("import_from_grid", 0.0),
+                grid_exported=flows.get("export_to_grid", 0.0),
                 battery_charged=flows.get("battery_charged", 0.0),
                 battery_discharged=flows.get("battery_discharged", 0.0),
-                # Cost data
-                base_cost=base_cost,
-                solar_only_cost=solar_only_cost,
-                optimized_cost=optimized_cost,
-                hourly_savings=hourly_savings,
-                solar_savings=solar_savings,
-                battery_savings=battery_savings,
                 buy_price=buy_price,
                 sell_price=sell_price,
                 strategic_intent=strategic_intent,
@@ -1187,7 +1158,7 @@ class BatterySystemManager:
             logger.error(f"Failed to record event for hour {hour}: {e}")
             
     def _calculate_initial_cost_basis(self, current_hour: int) -> float:
-        """Calculate cost basis using the same logic as the energy balance table."""
+        """Calculate cost basis using stored facts and shared calculation logic."""
         try:
             current_soc = self._get_current_battery_soc()
             current_soe = (current_soc / 100.0) * self.battery_settings.total_capacity
@@ -1199,7 +1170,6 @@ class BatterySystemManager:
             return 0.0
 
         completed_hours = self.historical_store.get_completed_hours()
-
         if not completed_hours:
             return self.battery_settings.cycle_cost_per_kwh
 
@@ -1214,34 +1184,21 @@ class BatterySystemManager:
             if not event:
                 continue
 
-            # Get price for this hour
-            today_prices = self._price_manager.get_today_prices()
-            hour_price = (
-                today_prices[hour]["buyPrice"] if hour < len(today_prices) else 1.0
-            )
-
-            # Handle charging using the SAME logic as _log_energy_balance()
+            # Handle charging using stored facts
             if event.battery_charged > 0:
-                # Use the same simple calculation as the energy balance table
+                # Simple calculation using stored energy flows
                 solar_to_battery = min(event.battery_charged, event.solar_generated)
                 grid_to_battery = max(0, event.battery_charged - solar_to_battery)
 
-                # Calculate costs
+                # Calculate costs using same logic as everywhere else
                 solar_cost = solar_to_battery * self.battery_settings.cycle_cost_per_kwh
                 grid_cost = grid_to_battery * (
-                    hour_price + self.battery_settings.cycle_cost_per_kwh
+                    event.buy_price + self.battery_settings.cycle_cost_per_kwh
                 )
 
                 new_energy_cost = solar_cost + grid_cost
                 running_total_cost += new_energy_cost
                 running_energy += event.battery_charged
-
-                logger.info(
-                    f"Hour {hour:02d}: Charged {event.battery_charged:.2f} kWh "
-                    f"(Solar: {solar_to_battery:.2f} @ {self.battery_settings.cycle_cost_per_kwh:.3f}, "
-                    f"Grid: {grid_to_battery:.2f} @ {hour_price + self.battery_settings.cycle_cost_per_kwh:.3f}) "
-                    f"Running avg: {running_total_cost/running_energy:.3f} SEK/kWh"
-                )
 
             # Handle discharging
             if event.battery_discharged > 0:
@@ -1256,19 +1213,12 @@ class BatterySystemManager:
                     running_total_cost = max(0, running_total_cost - discharged_cost)
                     running_energy = max(0, running_energy - event.battery_discharged)
 
-                    logger.debug(
-                        f"Hour {hour:02d}: Discharged {event.battery_discharged:.2f} kWh "
-                        f"@ {avg_cost_per_kwh:.3f} SEK/kWh, "
-                        f"removed {discharged_cost:.3f} SEK cost"
-                    )
-
                     if running_energy <= 0.1:
                         running_total_cost = 0.0
                         running_energy = 0.0
 
         if running_energy > 0.1:
             cost_basis = running_total_cost / running_energy
-            logger.info(f"Final cost basis: {cost_basis:.3f} SEK/kWh")
             return cost_basis
 
         return self.battery_settings.cycle_cost_per_kwh

@@ -401,39 +401,13 @@ class SensorCollector:
         # All other past hours should definitely be complete
         return True
 
-    def get_data_availability_status(self) -> dict:
-        """Get status of data availability for debugging."""
-        now = datetime.now()
-        current_hour = now.hour
-        current_minute = now.minute
-
-        status = {
-            "current_time": f"{current_hour:02d}:{current_minute:02d}",
-            "safe_end_hour": self._get_safe_end_hour(
-                current_hour, current_hour, current_minute
-            ),
-            "complete_hours": [],
-            "incomplete_hours": [],
-            "sensor_availability": {},
-        }
-
-        # Check each hour of today
-        for hour in range(24):
-            if self.validate_hour_completeness(hour):
-                status["complete_hours"].append(hour)
-            else:
-                status["incomplete_hours"].append(hour)
-
-        # Test sensor availability
-        try:
-            test_result = get_sensor_data(
-                self.cumulative_sensors[:3]
-            )  # Test with first 3 sensors
-            status["sensor_availability"] = {
-                "status": test_result.get("status", "unknown"),
-                "sensor_count": len(test_result.get("data", {})) if test_result else 0,
-            }
-        except Exception as e:
-            status["sensor_availability"] = {"status": "error", "error": str(e)}
-
-        return status
+    def get_soc_at_hour_start(self, hour: int) -> float:
+        """Get SOC reading from start of specified hour."""
+        readings = self._get_hour_readings(hour)
+        if not readings:
+            raise ValueError(f"No sensor readings available for hour {hour}")
+        
+        if "rkm0d7n04x_statement_of_charge_soc" not in readings:
+            raise ValueError(f"SOC sensor data missing for hour {hour}")
+        
+        return readings["rkm0d7n04x_statement_of_charge_soc"]

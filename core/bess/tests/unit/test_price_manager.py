@@ -2,8 +2,8 @@
 Test the PriceManager implementation.
 """
 
-from unittest.mock import MagicMock
 from datetime import datetime, timedelta
+from unittest.mock import MagicMock
 
 from core.bess.price_manager import HomeAssistantSource, MockSource, PriceManager
 

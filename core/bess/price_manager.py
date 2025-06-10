@@ -252,16 +252,16 @@ class HomeAssistantSource(PriceSource):
                 first_entry = sensor_data["raw_today"][0]
                 start_time = first_entry.get("start", "unknown")
                 info.append(f"raw_today({start_time[:10]})")
-            except:
-                info.append("raw_today(invalid)")
+            except (IndexError, KeyError, TypeError, AttributeError) as e:
+                info.append(f"raw_today(invalid: {type(e).__name__})")
         
         if sensor_data.get("raw_tomorrow"):
             try:
                 first_entry = sensor_data["raw_tomorrow"][0]
                 start_time = first_entry.get("start", "unknown")
                 info.append(f"raw_tomorrow({start_time[:10]})")
-            except:
-                info.append("raw_tomorrow(invalid)")
+            except (IndexError, KeyError, TypeError, AttributeError) as e:
+                info.append(f"raw_tomorrow(invalid: {type(e).__name__})")
         
         # Check for regular arrays
         if sensor_data.get("today"):

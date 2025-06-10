@@ -11,7 +11,6 @@ import pytest
 
 from core.bess.battery_system_manager import BatterySystemManager
 from core.bess.price_manager import MockSource
-from core.bess.settings import BatterySettings
 
 logger = logging.getLogger(__name__)
 

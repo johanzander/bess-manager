@@ -21,7 +21,7 @@ BATTERY_MAX_SOC = 100  # percentage
 BATTERY_MAX_CHARGE_DISCHARGE_POWER_KW = 15.0
 BATTERY_CHARGE_CYCLE_COST_SEK = 0.40  # SEK/kWh excl. VAT
 BATTERY_DEFAULT_CHARGING_POWER_RATE = 40  # percentage
-BATTERY_EFFICIENCY_CHARGE = 0.97    # Mix of solar (98%) and grid (95%) charging
+BATTERY_EFFICIENCY_CHARGE = 0.97  # Mix of solar (98%) and grid (95%) charging
 BATTERY_EFFICIENCY_DISCHARGE = 0.95  # DC-AC conversion losses
 
 # Consumption settings defaults

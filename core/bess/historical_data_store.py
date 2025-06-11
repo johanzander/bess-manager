@@ -9,8 +9,6 @@ import logging
 from dataclasses import dataclass, field
 from datetime import date, datetime
 
-from core.bess.dp_battery_algorithm import CostScenarios, calculate_hourly_costs
-
 logger = logging.getLogger(__name__)
 
 
@@ -45,7 +43,7 @@ class HourlyEvent:
     # Derived values (calculated automatically)
     battery_net_change: float = field(init=False)
     soc_change: float = field(init=False)
-    
+
     def __post_init__(self):
         """Calculate derived values after initialization."""
         object.__setattr__(
@@ -54,54 +52,20 @@ class HourlyEvent:
         object.__setattr__(
             self, "soc_change", self.battery_soc_end - self.battery_soc_start
         )
- 
+
     def to_energy_flows(self):
         """Convert to EnergyFlows format for cost calculations."""
         from core.bess.dp_battery_algorithm import EnergyFlows
-        
+
         return EnergyFlows(
             home_consumption=self.home_consumed,
             solar_production=self.solar_generated,
             grid_import=self.grid_imported,
             grid_export=self.grid_exported,
             battery_charged=self.battery_charged,
-            battery_discharged=self.battery_discharged
+            battery_discharged=self.battery_discharged,
         )
 
-    # TODO: Use this function instead of calculate_hourly_costs directly
-    def get_costs(self, battery_cycle_cost_per_kwh: float = 0.4) -> 'CostScenarios':
-        """Calculate costs on-demand using shared calculation logic."""
-        
-        return calculate_hourly_costs(
-            flows=self.to_energy_flows(),
-            buy_price=self.buy_price,
-            sell_price=self.sell_price,
-            battery_cycle_cost_per_kwh=battery_cycle_cost_per_kwh
-        )
-
-    def get_cost_summary(self, battery_cycle_cost_per_kwh: float = 0.4) -> dict[str, float]:
-        """Calculate cost summary on-demand from stored facts."""
-        if not self._events:
-            return {}
-
-        totals = {
-            "total_base_cost": 0.0,
-            "total_optimized_cost": 0.0,
-            "total_savings": 0.0,
-            "total_solar_savings": 0.0,
-            "total_battery_savings": 0.0,
-        }
-
-        for event in self._events.values():
-            costs = event.get_costs(battery_cycle_cost_per_kwh)
-            totals["total_base_cost"] += costs.base_case_cost
-            totals["total_optimized_cost"] += costs.battery_solar_cost
-            totals["total_savings"] += costs.total_savings
-            totals["total_solar_savings"] += costs.solar_savings
-            totals["total_battery_savings"] += costs.battery_savings
-
-        return totals
-        
     def validate(self) -> bool:
         """Validate that the event data is physically reasonable.
 

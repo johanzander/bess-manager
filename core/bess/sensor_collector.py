@@ -41,7 +41,7 @@ class SensorCollector:
 
     def analyze_strategic_intent_from_flows(self, flows: dict[str, float]) -> str:
         """Analyze strategic intent from reconstructed energy flows.
-        
+
         This is the single source of truth for determining intent from sensor data.
         Used both during runtime recording and restart reconstruction.
         """
@@ -50,7 +50,7 @@ class SensorCollector:
         solar_generated = flows.get("system_production", 0.0)
         home_consumed = flows.get("load_consumption", 0.0)
         grid_imported = flows.get("import_from_grid", 0.0)
-        
+
         if battery_charged > 0.1:
             if grid_imported > solar_generated:
                 return "GRID_CHARGING"  # More grid than solar available
@@ -170,8 +170,11 @@ class SensorCollector:
                 flows = self.collect_hour_flows(hour)
                 if flows:
                     reconstructed_flows[hour] = flows
-                    logger.debug("Hour %d: reconstructed successfully with intent %s", 
-                               hour, flows.get("strategic_intent", "UNKNOWN"))
+                    logger.debug(
+                        "Hour %d: reconstructed successfully with intent %s",
+                        hour,
+                        flows.get("strategic_intent", "UNKNOWN"),
+                    )
                 else:
                     logger.warning("Hour %d: reconstruction failed", hour)
 
@@ -406,8 +409,8 @@ class SensorCollector:
         readings = self._get_hour_readings(hour)
         if not readings:
             raise ValueError(f"No sensor readings available for hour {hour}")
-        
+
         if "rkm0d7n04x_statement_of_charge_soc" not in readings:
             raise ValueError(f"SOC sensor data missing for hour {hour}")
-        
+
         return readings["rkm0d7n04x_statement_of_charge_soc"]

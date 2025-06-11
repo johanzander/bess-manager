@@ -1,4 +1,5 @@
 from datetime import datetime
+
 from fastapi import APIRouter, HTTPException, Query
 from loguru import logger
 
@@ -8,6 +9,9 @@ from utils import add_camel_case_keys, convert_keys_to_snake
 # Create API router
 router = APIRouter()
 
+############################################################################################
+# API Endpoints for Settings  
+############################################################################################
 
 @router.get("/api/settings/battery")
 async def get_battery_settings():
@@ -71,78 +75,196 @@ async def update_electricity_price_settings(settings: dict):
         logger.error(f"Error updating electricity settings: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
+############################################################################################
+# API Endpoints for Schedule(s)
+############################################################################################
+
+def get_enhanced_daily_view():
+    """Get enhanced daily view with optimized additional calculations."""
+    from app import bess_controller
+
+    try:
+        daily_view = bess_controller.system.get_current_daily_view()
+
+        actual_count = len([h for h in daily_view.hourly_data if h.data_source == "actual"])
+        predicted_count = len([h for h in daily_view.hourly_data if h.data_source == "predicted"])
+        logger.info(f"Returning {actual_count} actual + {predicted_count} predicted hours")
+
+        # Calculate additional data for summary
+        hourly_data = []
+        
+        # Initialize counters for summary calculations
+        total_consumption = 0
+        total_solar = 0
+        total_grid_import = 0
+        total_grid_export = 0
+        total_battery_charge = 0
+        total_battery_discharge = 0
+        total_base_cost = 0
+        total_cost = 0
+        total_savings = 0
+        price_sum = 0.0
+        
+        # Get battery capacity from system for cycle calculations
+        battery_capacity = bess_controller.system.battery_settings.total_capacity
+        
+        # Track strategic intent distribution
+        intent_summary = {}
+        
+        # Process each hour's data
+        for h in daily_view.hourly_data:
+            # Calculate derived values
+            price = h.buy_price
+            consumption = h.home_consumed
+            solar_production = h.solar_generated
+            battery_action = h.battery_action
+            
+            # Additional calculated fields
+            direct_solar = min(consumption, solar_production)
+            grid_import = h.grid_imported
+            grid_export = h.grid_exported
+            grid_cost = grid_import * price
+            base_cost = consumption * price
+                        
+            # Create hour data dictionary with all fields
+            hour_data = {
+                "hour": h.hour,
+                "data_source": h.data_source,
+                "price": price,
+                "electricity_price": price,
+                "consumption": consumption,
+                "home_consumption": consumption,
+                "battery_level": h.battery_soc_end,
+                "battery_soc": h.battery_soc_end,
+                "action": battery_action,
+                "strategic_intent": getattr(h, 'strategic_intent', 'IDLE'),
+                
+                # Original fields
+                "solar_generated": h.solar_generated,
+                "home_consumed": h.home_consumed,
+                "grid_imported": h.grid_imported,
+                "grid_exported": h.grid_exported,
+                "battery_charged": h.battery_charged,
+                "battery_discharged": h.battery_discharged,
+                "battery_soc_start": h.battery_soc_start,
+                "battery_soc_end": h.battery_soc_end,
+                "buy_price": h.buy_price,
+                "sell_price": h.sell_price,
+                
+                # Cost fields
+                "grid_cost": grid_cost,
+                "battery_cost": 0.0,
+                "total_cost": h.hourly_cost,
+                "base_cost": base_cost,
+                "savings": h.hourly_savings,
+                "hourly_cost": h.hourly_cost,
+                "hourly_savings": h.hourly_savings,
+                
+                # Energy flow fields
+                "solar_production": solar_production,
+                "direct_solar": direct_solar,
+                "export_solar": max(0, solar_production - direct_solar),
+                "import_from_grid": max(0, consumption - direct_solar),
+                "solar_charged": min(h.battery_charged, h.solar_generated),
+                "grid_to_battery": max(0, h.battery_charged - min(h.battery_charged, h.solar_generated)),
+                
+                # Additional compatibility fields
+                "effective_diff": (h.buy_price - h.buy_price * 0.6) * 0.85 - 0.4,
+                "opportunity_score": 0.8,
+                "is_actual": h.data_source == "actual",
+                "is_predicted": h.data_source == "predicted",
+            }
+            
+            hourly_data.append(hour_data)
+            
+            # Update totals for summary
+            total_consumption += consumption
+            total_solar += solar_production
+            total_grid_import += grid_import
+            total_grid_export += grid_export
+            total_battery_charge += h.battery_charged
+            total_battery_discharge += h.battery_discharged
+            total_base_cost += base_cost
+            total_cost += h.hourly_cost
+            total_savings += h.hourly_savings
+            price_sum += price
+            
+            # Update strategic intent summary
+            intent = getattr(h, 'strategic_intent', 'IDLE')
+            intent_summary[intent] = intent_summary.get(intent, 0) + 1
+        
+        # Calculate averages
+        avg_price = price_sum / len(hourly_data) if hourly_data else 1.0
+        
+        # Create enhanced summary
+        summary = {
+            "base_cost": total_base_cost,
+            "optimized_cost": total_cost,
+            "grid_costs": total_grid_import * avg_price,
+            "battery_costs": 0,
+            "savings": total_savings,
+            "total_solar_production": total_solar,
+            "total_battery_charge": total_battery_charge,
+            "total_battery_discharge": total_battery_discharge,
+            "total_grid_import": total_grid_import,
+            "total_grid_export": total_grid_export,
+            "total_direct_solar": sum(h["direct_solar"] for h in hourly_data),
+            "total_excess_solar": sum(h["export_solar"] for h in hourly_data),
+            "cycle_count": total_battery_discharge / battery_capacity,
+            "avg_buy_price": avg_price,
+            "avg_sell_price": avg_price * 0.6,
+            "total_consumption": total_consumption,
+            "total_charge_from_solar": sum(h["solar_charged"] for h in hourly_data),
+            "total_charge_from_grid": sum(h["grid_to_battery"] for h in hourly_data),
+            "estimated_battery_cycles": total_battery_discharge / battery_capacity,
+        }
+
+        # Build final result
+        result = {
+            "date": daily_view.date.isoformat(),
+            "current_hour": daily_view.current_hour,
+            "total_daily_savings": daily_view.total_daily_savings,
+            "actual_savings_so_far": daily_view.actual_savings_so_far,
+            "predicted_remaining_savings": daily_view.predicted_remaining_savings,
+            "actual_hours_count": daily_view.actual_hours_count,
+            "predicted_hours_count": daily_view.predicted_hours_count,
+            "data_sources": daily_view.data_sources,
+            "hourly_data": hourly_data,
+            "summary": summary,
+            "enhanced_summary": summary,
+            "strategic_intent_summary": intent_summary,
+            "energy_profile": {
+                "consumption": [h["consumption"] for h in hourly_data],
+                "solar": [h["solar_production"] for h in hourly_data],
+                "battery_soc": [h["battery_level"] for h in hourly_data],
+                "actual_hours": daily_view.actual_hours_count,
+            },
+        }
+
+        return add_camel_case_keys(result)
+
+    except Exception as e:
+        logger.error(f"Error getting daily view v2: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e    
 
 @router.get("/api/schedule/detailed")
 async def get_detailed_schedule():
-    """Get detailed battery schedule data."""
-    from app import bess_controller
-    
-    try:
-        schedule_data = bess_controller.system.get_current_schedule()
-        if not schedule_data:
-            logger.info("No current schedule found, running optimization")
-            success = bess_controller.system.update_battery_schedule(hour=datetime.now().hour)
-            if success:
-                schedule_data = bess_controller.system.get_current_schedule()
-            
-        if not schedule_data:
-            raise HTTPException(status_code=500, detail="Failed to get schedule")
-
-        return add_camel_case_keys(schedule_data)
-    except Exception as e:
-        logger.error(f"Error getting detailed schedule: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
-
+    """Get detailed battery schedule data."""    
+    return get_enhanced_daily_view()
 
 @router.get("/api/schedule")
 async def get_battery_schedule(date: str = Query(None)):
-    """Get battery schedule data for dashboard."""
-    from app import bess_controller
-    
-    try:
-        if date and date != datetime.now().date().isoformat():
-            raise HTTPException(status_code=400, detail="Date-specific schedules not yet supported")
+    """Get battery schedule data for dashboard."""    
+    return get_enhanced_daily_view()
         
-        schedule_data = bess_controller.system.get_current_schedule()
-        if not schedule_data:
-            logger.info("No current schedule found, running optimization")
-            success = bess_controller.system.update_battery_schedule(hour=datetime.now().hour)
-            if success:
-                schedule_data = bess_controller.system.get_current_schedule()
-                
-        if not schedule_data:
-            raise HTTPException(status_code=500, detail="Failed to get schedule")
-            
-        return add_camel_case_keys(schedule_data)
-    except Exception as e:
-        logger.error(f"Error getting battery schedule: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e)) from e
-        
-
 @router.get("/api/schedule/current")
 async def get_current_schedule():
     """Get the current active battery schedule."""
-    from app import bess_controller
+    return get_enhanced_daily_view()
 
-    try:
-        if bess_controller.system._current_schedule is not None:
-            current_hour = datetime.now().hour
-            schedule_data = bess_controller.system._current_schedule.get_schedule_data()
-            tou_intervals = bess_controller.system._schedule_manager.get_daily_TOU_settings()
-
-            response = {
-                "current_hour": current_hour,
-                "schedule": schedule_data,
-                "tou_intervals": tou_intervals,
-            }
-            
-            return add_camel_case_keys(response)
-        else:
-            raise HTTPException(status_code=404, detail="No current schedule available")
-    except Exception as e:
-        logger.error(f"Error getting current schedule: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
-
+############################################################################################
+# API Endpoints for Report(s)
+############################################################################################
 
 @router.get("/api/energy/balance")
 async def get_energy_balance():
@@ -165,37 +287,14 @@ async def get_energy_balance():
             totals_serializable[k] = float(v) if isinstance(v, float | int) else v
 
         result = {
-            "hourly_data": hourly_data_serializable, 
-            "totals": totals_serializable
+            "hourly_data": hourly_data_serializable,
+            "totals": totals_serializable,
         }
 
         return add_camel_case_keys(result)
+
     except Exception as e:
         logger.error(f"Error getting energy balance: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
-
-
-@router.get("/api/energy/profile")
-async def get_energy_profile(
-    current_hour: int = Query(None, description="Current hour (0-23)")
-):
-    """Get the full energy profile."""
-    from app import bess_controller
-
-    try:
-        if current_hour is None:
-            current_hour = datetime.now().hour
-
-        profile = bess_controller.system.get_full_day_energy_profile(current_hour)
-
-        # Convert numpy arrays to Python lists if needed
-        for key in profile:
-            if hasattr(profile[key], "tolist"):
-                profile[key] = profile[key].tolist()
-
-        return add_camel_case_keys(profile)
-    except Exception as e:
-        logger.error(f"Error getting energy profile: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
@@ -253,13 +352,17 @@ async def get_daily_view_v2():
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+############################################################################################
+# API Endpoints for Growatt inverter (s)
+############################################################################################
+
 @router.get("/api/growatt/inverter_status")
 async def get_inverter_status():
     """Get comprehensive real-time inverter status data."""
     from app import bess_controller
 
     try:
-        controller = bess_controller.system._controller
+        controller = bess_controller.system.controller
         battery_settings = bess_controller.system.battery_settings
 
         battery_soc = controller.get_battery_soc()

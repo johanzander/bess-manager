@@ -3,10 +3,13 @@ import os
 from datetime import datetime
 
 import log_config  # noqa: F401
+
+# Import endpoints router
+from api import router as endpoints_router
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -15,11 +18,9 @@ from loguru import logger
 # Import BESS system modules
 from core.bess.battery_system_manager import BatterySystemManager
 from core.bess.ha_api_controller import HomeAssistantAPIController
-from core.bess.health_check import run_system_health_checks
-from core.bess.price_manager import HomeAssistantSource
 
-# Import endpoints router
-from api import router as endpoints_router
+#from core.bess.health_check import run_system_health_checks # TODO ADD health check
+from core.bess.price_manager import HomeAssistantSource
 
 # Get ingress prefix from environment variable
 INGRESS_PREFIX = os.environ.get("INGRESS_PREFIX", "")
@@ -59,7 +60,7 @@ class BESSController:
 
         # Initialize Home Assistant API Controller
         self.ha_controller = self._init_ha_controller()
-        self.ha_controller.set_test_mode(False)
+        self.ha_controller.set_test_mode(True)
 
         # Create Battery System Manager
         price_source = HomeAssistantSource(self.ha_controller)
@@ -139,9 +140,6 @@ class BESSController:
                 self.system.update_settings(settings)
         except Exception as e:
             logger.error(f"Error loading settings: {e}", exc_info=True)
-            logger.error(
-                f"Options dict at failure: {json.dumps(options, indent=2) if 'options' in locals() else 'N/A'}"
-            )
 
     def _load_options(self):
         """Load options from Home Assistant add-on config or environment vars."""
@@ -179,7 +177,7 @@ class BESSController:
             except Exception as e:
                 logger.error(f"Error loading from {config_yaml}: {e!s}")
 
-    def _init_scheduler(self):
+    def _init_scheduler_jobs(self):
         """Configure scheduler jobs."""
 
         # Hourly schedule update (every hour at xx:00)
@@ -209,10 +207,9 @@ class BESSController:
 
     def start(self):
         """Start the scheduler."""
-        #        try:
         self.system.start()
-        self.system.update_battery_schedule(hour=datetime.now().hour),
-        self._init_scheduler()
+        self.system.update_battery_schedule(hour=datetime.now().hour)
+        self._init_scheduler_jobs()
         logger.info("Scheduler started successfully")
 
 
@@ -228,10 +225,12 @@ async def startup_debug():
     """Print all registered routes for debugging."""
     routes = []
     for route in app.routes:
-        if hasattr(route, "methods"):
-            routes.append(f"{route.path} - {route.methods}")
+        path = getattr(route, "path", getattr(route, "mount_path", "Unknown path"))
+        methods = getattr(route, "methods", None)
+        if methods is not None:
+            routes.append(f"{path} - {methods}")
         else:
-            routes.append(f"{route.path} - Mounted route or no methods")
+            routes.append(f"{path} - Mounted route or no methods")
     logger.info(f"Registered routes: {routes}")
     logger.info(f"Using ingress base path: {ingress_base_path}")
 

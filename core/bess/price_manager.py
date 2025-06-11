@@ -81,49 +81,59 @@ class HomeAssistantSource(PriceSource):
             ValueError: If prices are not available for the date
         """
         logger = logging.getLogger(__name__)
-        
+
         try:
             # Fetch both today and tomorrow sensor data to get all available price data
             today_data = self._fetch_sensor_attributes("nordpool_kwh_today")
             tomorrow_data = self._fetch_sensor_attributes("nordpool_kwh_tomorrow")
-            
+
             # Try to find target_date in either sensor using timestamp parsing
             target_prices = None
             found_in_sensor = None
-            
+
             # Check today sensor for our target date
             if today_data:
-                prices = self._extract_prices_for_date(today_data, target_date, "today sensor")
+                prices = self._extract_prices_for_date(
+                    today_data, target_date, "today sensor"
+                )
                 if prices:
                     target_prices = prices
                     found_in_sensor = "today sensor"
                     logger.debug(f"Found {target_date} prices in today sensor")
-            
+
             # Check tomorrow sensor for our target date (might override if both have same date)
             if tomorrow_data:
-                prices = self._extract_prices_for_date(tomorrow_data, target_date, "tomorrow sensor")
+                prices = self._extract_prices_for_date(
+                    tomorrow_data, target_date, "tomorrow sensor"
+                )
                 if prices:
                     target_prices = prices
                     found_in_sensor = "tomorrow sensor"
                     logger.debug(f"Found {target_date} prices in tomorrow sensor")
-            
+
             if target_prices:
-                logger.info(f"Successfully extracted {len(target_prices)} prices for {target_date} from {found_in_sensor}")
+                logger.info(
+                    f"Successfully extracted {len(target_prices)} prices for {target_date} from {found_in_sensor}"
+                )
                 return target_prices
-            
+
             # No fallbacks - fail with diagnostic information
             logger.error(f"Failed to find price data for {target_date} in any sensor")
-            
+
             # Provide diagnostic info for debugging
-            today_available = self._get_sensor_diagnostic_info(today_data, "today sensor")
-            tomorrow_available = self._get_sensor_diagnostic_info(tomorrow_data, "tomorrow sensor")
-            
+            today_available = self._get_sensor_diagnostic_info(
+                today_data, "today sensor"
+            )
+            tomorrow_available = self._get_sensor_diagnostic_info(
+                tomorrow_data, "tomorrow sensor"
+            )
+
             error_msg = (
                 f"No price data found for {target_date}. "
                 f"Today sensor: {today_available}. "
                 f"Tomorrow sensor: {tomorrow_available}."
             )
-            
+
             raise ValueError(error_msg)
 
         except Exception as e:
@@ -139,12 +149,14 @@ class HomeAssistantSource(PriceSource):
             if not entity_id:
                 return None
 
-            response = self.ha_controller._api_request("get", f"/api/states/{entity_id}")
+            response = self.ha_controller._api_request(
+                "get", f"/api/states/{entity_id}"
+            )
             if not response or "attributes" not in response:
                 return None
-                
+
             return response["attributes"]
-            
+
         except Exception:
             return None
 
@@ -157,29 +169,29 @@ class HomeAssistantSource(PriceSource):
                 prices = self._parse_raw_data_for_date(raw_today, target_date)
                 if prices:
                     return prices
-            
-            # Then try raw_tomorrow with timestamp parsing  
+
+            # Then try raw_tomorrow with timestamp parsing
             raw_tomorrow = sensor_attributes.get("raw_tomorrow")
             if raw_tomorrow:
                 prices = self._parse_raw_data_for_date(raw_tomorrow, target_date)
                 if prices:
                     return prices
-            
+
             # Fallback to regular arrays (educated guess based on current date)
             today_array = sensor_attributes.get("today")
             tomorrow_array = sensor_attributes.get("tomorrow")
-            
+
             current_date = datetime.now().date()
             tomorrow_date = current_date + timedelta(days=1)
-            
+
             # Try to match target_date with available arrays
             if target_date == current_date and today_array:
                 return self._handle_dst_transitions(today_array)
             elif target_date == tomorrow_date and tomorrow_array:
                 return self._handle_dst_transitions(tomorrow_array)
-                
+
             return None
-            
+
         except Exception:
             return None
 
@@ -187,34 +199,34 @@ class HomeAssistantSource(PriceSource):
         """Parse raw data and return prices if it matches target_date."""
         if not raw_data or not isinstance(raw_data, list) or not raw_data:
             return None
-        
+
         try:
             # Parse first timestamp to determine the actual date
             first_entry = raw_data[0]
             start_time_str = first_entry.get("start")
             if not start_time_str:
                 return None
-            
+
             # Parse timestamp - handle timezone
             try:
-                if start_time_str.endswith(('+02:00', '+01:00')):
+                if start_time_str.endswith(("+02:00", "+01:00")):
                     start_time_str = start_time_str[:-6]
                 start_time = datetime.fromisoformat(start_time_str)
             except ValueError:
                 return None
-            
+
             actual_date = start_time.date()
-            
+
             # Only return prices if this raw data is for our target date
             if actual_date != target_date:
                 return None
-            
+
             # Extract prices
             prices = [float(entry["value"]) for entry in raw_data if "value" in entry]
-            
+
             # Handle DST transitions
             return self._handle_dst_transitions(prices)
-            
+
         except Exception:
             return None
 
@@ -222,7 +234,7 @@ class HomeAssistantSource(PriceSource):
         """Handle DST transitions to ensure we always have 24 hours."""
         if not prices:
             return []
-            
+
         if len(prices) == 24:
             return prices
         elif len(prices) == 23:
@@ -237,15 +249,17 @@ class HomeAssistantSource(PriceSource):
             return prices
         else:
             # Unexpected count - fail fast instead of guessing
-            raise ValueError(f"Unexpected price count: {len(prices)} hours. Expected 23, 24, or 25 for DST transitions.")
+            raise ValueError(
+                f"Unexpected price count: {len(prices)} hours. Expected 23, 24, or 25 for DST transitions."
+            )
 
     def _get_sensor_diagnostic_info(self, sensor_data, sensor_name):
         """Get diagnostic information about what data is available in a sensor."""
         if not sensor_data:
             return "no data"
-        
+
         info = []
-        
+
         # Check for raw data with timestamps
         if sensor_data.get("raw_today"):
             try:
@@ -254,7 +268,7 @@ class HomeAssistantSource(PriceSource):
                 info.append(f"raw_today({start_time[:10]})")
             except (IndexError, KeyError, TypeError, AttributeError) as e:
                 info.append(f"raw_today(invalid: {type(e).__name__})")
-        
+
         if sensor_data.get("raw_tomorrow"):
             try:
                 first_entry = sensor_data["raw_tomorrow"][0]
@@ -262,13 +276,13 @@ class HomeAssistantSource(PriceSource):
                 info.append(f"raw_tomorrow({start_time[:10]})")
             except (IndexError, KeyError, TypeError, AttributeError) as e:
                 info.append(f"raw_tomorrow(invalid: {type(e).__name__})")
-        
+
         # Check for regular arrays
         if sensor_data.get("today"):
             info.append("today array")
         if sensor_data.get("tomorrow"):
             info.append("tomorrow array")
-        
+
         return ", ".join(info) if info else "no price data"
 
 

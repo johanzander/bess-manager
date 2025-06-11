@@ -499,7 +499,7 @@ class HomeAssistantAPIController:
         """Get Nordpool prices from Home Assistant sensor - simplified to just fetch raw data.
 
         The HA controller is now a thin data layer that just fetches sensor data.
-        All complex logic (DST handling, timestamp validation, etc.) is handled 
+        All complex logic (DST handling, timestamp validation, etc.) is handled
         by the PriceManager layer.
 
         Args:
@@ -507,7 +507,7 @@ class HomeAssistantAPIController:
 
         Returns:
             list: List of hourly prices (may be 23, 24, or 25 hours for DST)
-            
+
         Raises:
             ValueError: If prices are not available for the date
         """
@@ -528,7 +528,9 @@ class HomeAssistantAPIController:
             entity_response = self._api_request("get", f"/api/states/{entity_id}")
 
             if not entity_response:
-                logger.error(f"Could not retrieve Nordpool sensor state for {time_label}")
+                logger.error(
+                    f"Could not retrieve Nordpool sensor state for {time_label}"
+                )
                 raise ValueError(f"Nordpool prices for {time_label} are unavailable")
 
             # Access attributes from the response
@@ -542,7 +544,9 @@ class HomeAssistantAPIController:
                 # Extract raw prices - let PriceManager handle DST and validation
                 try:
                     processed_prices = [hour_data["value"] for hour_data in raw_data]
-                    logger.debug(f"Successfully extracted {len(processed_prices)} hourly prices from {raw_data_key}")
+                    logger.debug(
+                        f"Successfully extracted {len(processed_prices)} hourly prices from {raw_data_key}"
+                    )
                     return processed_prices
                 except (KeyError, TypeError) as e:
                     logger.warning(f"Invalid raw data format in {raw_data_key}: {e}")
@@ -552,16 +556,22 @@ class HomeAssistantAPIController:
             regular_prices = attributes.get(regular_data_key)
 
             if regular_prices and isinstance(regular_prices, list):
-                logger.info(f"Using '{regular_data_key}' attribute with {len(regular_prices)} hourly prices")
+                logger.info(
+                    f"Using '{regular_data_key}' attribute with {len(regular_prices)} hourly prices"
+                )
                 return regular_prices
 
             # Check if tomorrow's prices are valid (for tomorrow only)
             if is_tomorrow and attributes.get("tomorrow_valid") is False:
-                logger.error("Tomorrow's prices are not yet available (tomorrow_valid=false)")
+                logger.error(
+                    "Tomorrow's prices are not yet available (tomorrow_valid=false)"
+                )
                 raise ValueError("Tomorrow's Nordpool prices are not yet available")
 
             # If we get here, no price data was found
-            logger.error(f"Could not find price data for {time_label} in Nordpool sensor attributes")
+            logger.error(
+                f"Could not find price data for {time_label} in Nordpool sensor attributes"
+            )
             logger.debug(f"Available attributes: {list(attributes.keys())}")
             raise ValueError(f"Nordpool prices for {time_label} are unavailable")
 

@@ -32,30 +32,36 @@ def test_controller_price_fetching():
     """Test price fetching from controller."""
     mock_controller = MagicMock()
     mock_controller.sensors = {
-        'nordpool_kwh_today': 'sensor.nordpool_kwh_se3_today',
-        'nordpool_kwh_tomorrow': 'sensor.nordpool_kwh_se3_tomorrow'
+        "nordpool_kwh_today": "sensor.nordpool_kwh_se3_today",
+        "nordpool_kwh_tomorrow": "sensor.nordpool_kwh_se3_tomorrow",
     }
-    
+
     today_date = datetime.now().date()
     tomorrow_date = today_date + timedelta(days=1)
-    
+
     # Create 24 hours of test data
     raw_today_data = [
-        {'start': f'{today_date.isoformat()}T{h:02d}:00:00+01:00', 'value': float(h + 1)} 
+        {
+            "start": f"{today_date.isoformat()}T{h:02d}:00:00+01:00",
+            "value": float(h + 1),
+        }
         for h in range(24)
     ]
     raw_tomorrow_data = [
-        {'start': f'{tomorrow_date.isoformat()}T{h:02d}:00:00+01:00', 'value': float(h + 25)} 
+        {
+            "start": f"{tomorrow_date.isoformat()}T{h:02d}:00:00+01:00",
+            "value": float(h + 25),
+        }
         for h in range(24)
     ]
-    
+
     def mock_api_request(method, path):
-        if 'nordpool_kwh_se3_today' in path:
-            return {'attributes': {'raw_today': raw_today_data}}
-        elif 'nordpool_kwh_se3_tomorrow' in path:
-            return {'attributes': {'raw_tomorrow': raw_tomorrow_data}}
+        if "nordpool_kwh_se3_today" in path:
+            return {"attributes": {"raw_today": raw_today_data}}
+        elif "nordpool_kwh_se3_tomorrow" in path:
+            return {"attributes": {"raw_tomorrow": raw_tomorrow_data}}
         return None
-    
+
     mock_controller._api_request = mock_api_request
 
     ha_source = HomeAssistantSource(mock_controller)

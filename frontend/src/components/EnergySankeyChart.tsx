@@ -32,50 +32,116 @@ export const EnergySankeyChart: React.FC<EnergySankeyChartProps> = ({
     }
   }, []);
 
-  // Calculate energy flows (ported from your Python code)
+  // Calculate energy flows from hourly data (NOT from totals)
   const calculateEnergyFlows = (data: any) => {
-    if (!data?.totals) {
+    if (!data?.hourlyData || !Array.isArray(data.hourlyData)) {
+      console.error('Missing or invalid hourly data:', data);
       return null;
     }
 
-    const totals = data.totals;
-    
-    // Calculate total energy values (exactly like your Python code)
-    const gridImports = totals.total_grid_import || 0;
-    const gridExports = totals.total_grid_export || 0;
+    // Use totals for basic values
+    const totals = data.totals || {};
     const solarProduction = totals.total_solar || 0;
     const homeConsumption = totals.total_consumption || 0;
-    const totalCharged = totals.total_battery_charge || 0;
+    const gridImports = totals.total_grid_import || 0;
+    const gridExports = totals.total_grid_export || 0;
+    const totalCharged = totals.total_battery_charged || 0; // Note: "charged" not "charge"
     const totalDischarged = totals.total_battery_discharged || 0;
 
-    // Use exact values from backend when available, otherwise calculate
-    const solarToBattery = totals.solar_to_battery !== undefined ? totals.solar_to_battery : 0;
-    const gridToBattery = totals.grid_to_battery !== undefined ? totals.grid_to_battery : 0;
-    
-    // For debugging purposes
-    console.log('Energy Flow Data:', {
-      totals,
-      solarProduction, 
-      homeConsumption,
-      totalCharged,
-      solarToBattery,
-      gridToBattery
+    // Calculate detailed flows from hourly data
+    let solarToBattery = 0;
+    let gridToBattery = 0;
+    let batteryToHome = 0;
+    let batteryToGrid = 0;
+    let solarToHome = 0;
+    let solarToGrid = 0;
+    let gridToHome = 0;
+
+    // Process each hour to calculate flows
+    data.hourlyData.forEach((hour: any) => {
+      const hourSolar = hour.solar_production || 0;
+      const hourConsumption = hour.home_consumption || 0;
+      const hourGridImport = hour.grid_import || 0;
+      const hourGridExport = hour.grid_export || 0;
+      const hourBatteryCharged = hour.battery_charged || 0;
+      const hourBatteryDischarged = hour.battery_discharged || 0;
+
+      // For each hour, determine energy flows based on energy balance
+      // Solar can go to: Home, Battery, Grid (export)
+      // Grid can go to: Home, Battery
+      // Battery can go to: Home, Grid (export)
+
+      // Calculate solar flows for this hour
+      if (hourSolar > 0) {
+        // Priority: 1) Home consumption, 2) Battery charging, 3) Grid export
+        const directSolarToHome = Math.min(hourSolar, hourConsumption);
+        const remainingSolar = hourSolar - directSolarToHome;
+        
+        const solarToBatteryThisHour = Math.min(remainingSolar, hourBatteryCharged);
+        const solarToGridThisHour = Math.max(0, remainingSolar - solarToBatteryThisHour);
+        
+        solarToHome += directSolarToHome;
+        solarToBattery += solarToBatteryThisHour;
+        solarToGrid += solarToGridThisHour;
+      }
+
+      // Calculate grid flows for this hour
+      if (hourGridImport > 0) {
+        // Grid can charge battery or supply home
+        const gridToBatteryThisHour = Math.max(0, hourBatteryCharged - (hourSolar - Math.min(hourSolar, hourConsumption)));
+        const gridToHomeThisHour = hourGridImport - gridToBatteryThisHour;
+        
+        gridToBattery += Math.max(0, gridToBatteryThisHour);
+        gridToHome += Math.max(0, gridToHomeThisHour);
+      }
+
+      // Calculate battery discharge flows
+      if (hourBatteryDischarged > 0) {
+        // Battery discharge can go to home or grid
+        const unmetHomeConsumption = Math.max(0, hourConsumption - (hourSolar + hourGridImport - hourBatteryCharged));
+        const batteryToHomeThisHour = Math.min(hourBatteryDischarged, unmetHomeConsumption);
+        const batteryToGridThisHour = hourBatteryDischarged - batteryToHomeThisHour;
+        
+        batteryToHome += batteryToHomeThisHour;
+        batteryToGrid += batteryToGridThisHour;
+      }
     });
-    
-    // Calculate other flows based on the known values
-    const solarToHome = Math.max(0, solarProduction - solarToBattery - (totals.export_to_grid || 0));
-    const solarToGrid = Math.max(0, solarProduction - solarToHome - solarToBattery);
-    
-    const gridToHome = Math.max(0, gridImports - gridToBattery);
 
-    const batteryToHome = Math.min(totalDischarged, Math.max(0, homeConsumption - solarToHome));
-    const batteryToGrid = Math.max(0, totalDischarged - batteryToHome);
+    // Validate and adjust flows to ensure energy balance
+    // Ensure solar flows don't exceed production
+    const totalSolarFlows = solarToHome + solarToBattery + solarToGrid;
+    if (totalSolarFlows > solarProduction && solarProduction > 0) {
+      const scale = solarProduction / totalSolarFlows;
+      solarToHome *= scale;
+      solarToBattery *= scale;
+      solarToGrid *= scale;
+    }
 
-    return {
-      gridImports,
-      gridExports,
+    // Ensure battery flows don't exceed totals
+    if (solarToBattery + gridToBattery > totalCharged && totalCharged > 0) {
+      const chargeScale = totalCharged / (solarToBattery + gridToBattery);
+      solarToBattery *= chargeScale;
+      gridToBattery *= chargeScale;
+    }
+
+    if (batteryToHome + batteryToGrid > totalDischarged && totalDischarged > 0) {
+      const dischargeScale = totalDischarged / (batteryToHome + batteryToGrid);
+      batteryToHome *= dischargeScale;
+      batteryToGrid *= dischargeScale;
+    }
+
+    // Ensure home consumption is met
+    const totalToHome = solarToHome + gridToHome + batteryToHome;
+    if (Math.abs(totalToHome - homeConsumption) > 0.1 && homeConsumption > 0) {
+      // Adjust grid to home to balance
+      gridToHome = Math.max(0, homeConsumption - solarToHome - batteryToHome);
+    }
+
+    const flows = {
       solarProduction,
       homeConsumption,
+      gridImports,
+      gridExports,
       totalCharged,
       totalDischarged,
       solarToHome,
@@ -86,9 +152,11 @@ export const EnergySankeyChart: React.FC<EnergySankeyChartProps> = ({
       batteryToHome,
       batteryToGrid,
       netGrid: gridImports - gridExports,
-      batteryCycles: totalCharged / 30, // Assuming 30kWh capacity
       selfConsumption: solarProduction > 0 ? ((solarToHome + solarToBattery) / solarProduction * 100) : 0
     };
+
+    console.log('Calculated Energy Flows:', flows);
+    return flows;
   };
 
   // Create Sankey diagram
@@ -98,7 +166,7 @@ export const EnergySankeyChart: React.FC<EnergySankeyChartProps> = ({
     const flows = calculateEnergyFlows(energyData);
     if (!flows) return;
 
-    // Define nodes (exactly like your Python code)
+    // Define nodes
     const nodes = ["Grid", "Solar", "Battery", "Home"];
     const nodeColors = ["#60a5fa", "#fbbf24", "#10b981", "#f87171"];
 
@@ -228,18 +296,28 @@ export const EnergySankeyChart: React.FC<EnergySankeyChartProps> = ({
 
   }, [plotlyLoaded, energyData]);
 
+  // Show loading or error states
+  if (!energyData) {
+    return (
+      <div className={`bg-white p-6 rounded-lg shadow ${className}`}>
+        <h2 className="text-xl font-semibold mb-4">Energy Flow Overview</h2>
+        <div className="flex items-center justify-center h-64 text-gray-500">
+          <Info className="h-8 w-8 mr-2" />
+          <span>No energy data available</span>
+        </div>
+      </div>
+    );
+  }
+
   const flows = calculateEnergyFlows(energyData);
 
   if (!flows) {
     return (
       <div className={`bg-white p-6 rounded-lg shadow ${className}`}>
-        <h2 className="text-xl font-semibold mb-4 flex items-center">
-          <Zap className="h-5 w-5 mr-2 text-blue-600" />
-          Energy Flow Diagram
-        </h2>
+        <h2 className="text-xl font-semibold mb-4">Energy Flow Overview</h2>
         <div className="flex items-center justify-center h-64 text-gray-500">
-          <Info className="h-5 w-5 mr-2" />
-          No energy data available for flow diagram
+          <Info className="h-8 w-8 mr-2" />
+          <span>Unable to calculate energy flows</span>
         </div>
       </div>
     );
@@ -247,209 +325,121 @@ export const EnergySankeyChart: React.FC<EnergySankeyChartProps> = ({
 
   return (
     <div className={`bg-white p-6 rounded-lg shadow ${className}`}>
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-xl font-semibold flex items-center">
-          <Zap className="h-5 w-5 mr-2 text-blue-600" />
-          Energy Flow Diagram
-        </h2>
-        <div className="text-sm text-gray-600">
-          Total flows for today
-        </div>
-      </div>
+      <h2 className="text-xl font-semibold mb-4">Energy Flow Overview</h2>
+      
+      {/* Sankey Diagram */}
+      <div ref={plotRef} className="w-full h-96 mb-6" />
 
-      {/* Sankey Plot Container */}
-      <div className="relative">
-        <div ref={plotRef} className="w-full" style={{ minHeight: '450px' }} />
-        
-        {!plotlyLoaded && (
-          <div className="absolute inset-0 flex items-center justify-center bg-gray-50 rounded">
-            <div className="text-center">
-              <div className="animate-spin h-8 w-8 border-4 border-blue-500 rounded-full border-t-transparent mx-auto mb-2"></div>
-              <p className="text-gray-600">Loading interactive diagram...</p>
+      {/* Detailed Breakdown */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {/* Home Energy Sources */}
+        <div className="bg-white p-3 rounded border">
+          <h5 className="font-medium text-gray-700 mb-2 flex items-center">
+            <Home className="h-4 w-4 mr-1 text-red-500" />
+            Home Energy Sources ({flows.homeConsumption.toFixed(1)} kWh total)
+          </h5>
+          <div className="space-y-1 text-sm">
+            <div className="flex justify-between items-center">
+              <span className="flex items-center">
+                <div className="w-3 h-3 bg-yellow-400 rounded mr-2"></div>
+                Direct Solar:
+              </span>
+              <span className="font-medium">{flows.solarToHome.toFixed(1)} kWh ({(flows.solarToHome / flows.homeConsumption * 100).toFixed(0)}%)</span>
             </div>
-          </div>
-        )}
-      </div>
-
-      {/* Detailed Flow Table */}
-      <div className="mt-6 bg-gray-50 p-4 rounded-lg">
-        <h4 className="font-medium text-gray-800 mb-3">Energy Flow Details</h4>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          
-          {/* Energy Sources to Home */}
-          <div className="bg-white p-3 rounded border">
-            <h5 className="font-medium text-gray-700 mb-2 flex items-center">
-              <Home className="h-4 w-4 mr-1 text-red-500" />
-              Home Energy Sources ({flows.homeConsumption.toFixed(1)} kWh total)
-            </h5>
-            <div className="space-y-1 text-sm">
-              <div className="flex justify-between items-center">
-                <span className="flex items-center">
-                  <div className="w-3 h-3 bg-yellow-400 rounded mr-2"></div>
-                  Direct Solar:
-                </span>
-                <span className="font-medium">{flows.solarToHome.toFixed(1)} kWh ({(flows.solarToHome / flows.homeConsumption * 100).toFixed(0)}%)</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="flex items-center">
-                  <div className="w-3 h-3 bg-green-500 rounded mr-2"></div>
-                  From Battery:
-                </span>
-                <span className="font-medium">{flows.batteryToHome.toFixed(1)} kWh ({(flows.batteryToHome / flows.homeConsumption * 100).toFixed(0)}%)</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="flex items-center">
-                  <div className="w-3 h-3 bg-blue-500 rounded mr-2"></div>
-                  From Grid:
-                </span>
-                <span className="font-medium">{flows.gridToHome.toFixed(1)} kWh ({(flows.gridToHome / flows.homeConsumption * 100).toFixed(0)}%)</span>
-              </div>
+            <div className="flex justify-between items-center">
+              <span className="flex items-center">
+                <div className="w-3 h-3 bg-green-500 rounded mr-2"></div>
+                From Battery:
+              </span>
+              <span className="font-medium">{flows.batteryToHome.toFixed(1)} kWh ({(flows.batteryToHome / flows.homeConsumption * 100).toFixed(0)}%)</span>
             </div>
-          </div>
-
-          {/* Solar Distribution */}
-          <div className="bg-white p-3 rounded border">
-            <h5 className="font-medium text-gray-700 mb-2 flex items-center">
-              <Sun className="h-4 w-4 mr-1 text-yellow-500" />
-              Solar Distribution ({flows.solarProduction.toFixed(1)} kWh total)
-            </h5>
-            <div className="space-y-1 text-sm">
-              <div className="flex justify-between items-center">
-                <span className="flex items-center">
-                  <div className="w-3 h-3 bg-red-400 rounded mr-2"></div>
-                  To Home:
-                </span>
-                <span className="font-medium">{flows.solarToHome.toFixed(1)} kWh ({flows.solarProduction > 0 ? (flows.solarToHome / flows.solarProduction * 100).toFixed(0) : 0}%)</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="flex items-center">
-                  <div className="w-3 h-3 bg-green-500 rounded mr-2"></div>
-                  To Battery:
-                </span>
-                <span className="font-medium">{flows.solarToBattery.toFixed(1)} kWh ({flows.solarProduction > 0 ? (flows.solarToBattery / flows.solarProduction * 100).toFixed(0) : 0}%)</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="flex items-center">
-                  <div className="w-3 h-3 bg-blue-500 rounded mr-2"></div>
-                  To Grid:
-                </span>
-                <span className="font-medium">{flows.solarToGrid.toFixed(1)} kWh ({flows.solarProduction > 0 ? (flows.solarToGrid / flows.solarProduction * 100).toFixed(0) : 0}%)</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Battery Operations */}
-          <div className="bg-white p-3 rounded border">
-            <h5 className="font-medium text-gray-700 mb-2 flex items-center">
-              <Battery className="h-4 w-4 mr-1 text-green-500" />
-              Battery Operations
-            </h5>
-            <div className="text-sm space-y-1">
-              {/* Charging Section */}
-              <div className="mb-1 font-medium text-green-600">Charging ({flows.totalCharged.toFixed(1)} kWh):</div>
-              <div className="flex justify-between items-center pl-3">
-                <span className="flex items-center">
-                  <div className="w-3 h-3 bg-yellow-400 rounded mr-2"></div>
-                  From Solar:
-                </span>
-                <span className="font-medium">{flows.solarToBattery.toFixed(1)} kWh ({flows.totalCharged > 0 ? (flows.solarToBattery / flows.totalCharged * 100).toFixed(0) : 0}%)</span>
-              </div>
-              <div className="flex justify-between items-center pl-3">
-                <span className="flex items-center">
-                  <div className="w-3 h-3 bg-blue-500 rounded mr-2"></div>
-                  From Grid:
-                </span>
-                <span className="font-medium">{flows.gridToBattery.toFixed(1)} kWh ({flows.totalCharged > 0 ? (flows.gridToBattery / flows.totalCharged * 100).toFixed(0) : 0}%)</span>
-              </div>
-              
-              {/* Discharging Section */}
-              <div className="mt-2 mb-1 font-medium text-red-600">Discharging ({flows.totalDischarged.toFixed(1)} kWh):</div>
-              <div className="flex justify-between items-center pl-3">
-                <span className="flex items-center">
-                  <div className="w-3 h-3 bg-red-400 rounded mr-2"></div>
-                  To Home:
-                </span>
-                <span className="font-medium">{flows.batteryToHome.toFixed(1)} kWh ({flows.totalDischarged > 0 ? (flows.batteryToHome / flows.totalDischarged * 100).toFixed(0) : 0}%)</span>
-              </div>
-              <div className="flex justify-between items-center pl-3">
-                <span className="flex items-center">
-                  <div className="w-3 h-3 bg-blue-400 rounded mr-2"></div>
-                  To Grid:
-                </span>
-                <span className="font-medium">{flows.batteryToGrid.toFixed(1)} kWh ({flows.totalDischarged > 0 ? (flows.batteryToGrid / flows.totalDischarged * 100).toFixed(0) : 0}%)</span>
-              </div>
-              
-              {/* Efficiency row */}
-              <div className="flex justify-between items-center border-t mt-2 pt-1">
-                <span>Round-trip Efficiency:</span>
-                <span className="font-medium">{flows.totalCharged > 0 ? (flows.totalDischarged / flows.totalCharged * 100).toFixed(0) : 0}%</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Grid Balance */}
-          <div className="bg-white p-3 rounded border">
-            <h5 className="font-medium text-gray-700 mb-2 flex items-center">
-              <Grid className="h-4 w-4 mr-1 text-blue-500" />
-              Grid Balance (Net: {flows.netGrid.toFixed(1)} kWh)
-            </h5>
-            <div className="space-y-1 text-sm">
-              <div className="flex justify-between items-center">
-                <span>Total Import:</span>
-                <span className="font-medium text-red-600">{flows.gridImports.toFixed(1)} kWh</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span>Total Export:</span>
-                <span className="font-medium text-green-600">{flows.gridExports.toFixed(1)} kWh</span>
-              </div>
-              <div className="flex justify-between items-center border-t pt-1">
-                <span>Net Consumption:</span>
-                <span className={`font-medium ${flows.netGrid > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                  {flows.netGrid.toFixed(1)} kWh
-                </span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span>Self-Sufficiency:</span>
-                <span className="font-medium">{flows.homeConsumption > 0 ? (100 - (flows.gridToHome / flows.homeConsumption * 100)).toFixed(0) : 0}%</span>
-              </div>
+            <div className="flex justify-between items-center">
+              <span className="flex items-center">
+                <div className="w-3 h-3 bg-blue-500 rounded mr-2"></div>
+                From Grid:
+              </span>
+              <span className="font-medium">{flows.gridToHome.toFixed(1)} kWh ({(flows.gridToHome / flows.homeConsumption * 100).toFixed(0)}%)</span>
             </div>
           </div>
         </div>
-      </div>
 
-      {/* Summary Statistics */}
-      <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="bg-blue-50 p-3 rounded-lg text-center">
-          <div className="text-2xl font-bold text-blue-600">{Math.abs(flows.netGrid).toFixed(1)}</div>
-          <div className="text-sm text-gray-600">Net Grid kWh</div>
-          <div className="text-xs text-gray-500">
-            {flows.netGrid > 0 ? `${flows.netGrid.toFixed(1)} consumed` : `${Math.abs(flows.netGrid).toFixed(1)} exported`}
+        {/* Solar Distribution */}
+        <div className="bg-white p-3 rounded border">
+          <h5 className="font-medium text-gray-700 mb-2 flex items-center">
+            <Sun className="h-4 w-4 mr-1 text-yellow-500" />
+            Solar Distribution ({flows.solarProduction.toFixed(1)} kWh total)
+          </h5>
+          <div className="space-y-1 text-sm">
+            <div className="flex justify-between items-center">
+              <span className="flex items-center">
+                <div className="w-3 h-3 bg-red-400 rounded mr-2"></div>
+                To Home:
+              </span>
+              <span className="font-medium">{flows.solarToHome.toFixed(1)} kWh ({flows.solarProduction > 0 ? (flows.solarToHome / flows.solarProduction * 100).toFixed(0) : 0}%)</span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="flex items-center">
+                <div className="w-3 h-3 bg-green-500 rounded mr-2"></div>
+                To Battery:
+              </span>
+              <span className="font-medium">{flows.solarToBattery.toFixed(1)} kWh ({flows.solarProduction > 0 ? (flows.solarToBattery / flows.solarProduction * 100).toFixed(0) : 0}%)</span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="flex items-center">
+                <div className="w-3 h-3 bg-blue-500 rounded mr-2"></div>
+                To Grid:
+              </span>
+              <span className="font-medium">{flows.solarToGrid.toFixed(1)} kWh ({flows.solarProduction > 0 ? (flows.solarToGrid / flows.solarProduction * 100).toFixed(0) : 0}%)</span>
+            </div>
           </div>
         </div>
 
-        <div className="bg-yellow-50 p-3 rounded-lg text-center">
-          <div className="text-2xl font-bold text-yellow-600">{flows.selfConsumption.toFixed(0)}%</div>
-          <div className="text-sm text-gray-600">Solar Self-Use</div>
-          <div className="text-xs text-gray-500">
-            {(flows.solarToHome + flows.solarToBattery).toFixed(1)} of {flows.solarProduction.toFixed(1)} kWh
-          </div>
-        </div>
-
-        <div className="bg-green-50 p-3 rounded-lg text-center">
-          <div className="text-2xl font-bold text-green-600">{flows.totalCharged.toFixed(1)}</div>
-          <div className="text-sm text-gray-600">Battery Activity</div>
-          <div className="text-xs text-gray-500">
-            {flows.totalDischarged.toFixed(1)} kWh discharged
-          </div>
-        </div>
-
-        <div className="bg-red-50 p-3 rounded-lg text-center">
-          <div className="text-2xl font-bold text-red-600">
-            {flows.homeConsumption > 0 ? (100 - (flows.gridToHome / flows.homeConsumption * 100)).toFixed(0) : 0}%
-          </div>
-          <div className="text-sm text-gray-600">Energy Independence</div>
-          <div className="text-xs text-gray-500">
-            {(flows.solarToHome + flows.batteryToHome).toFixed(1)} of {flows.homeConsumption.toFixed(1)} kWh
+        {/* Battery Operations */}
+        <div className="bg-white p-3 rounded border">
+          <h5 className="font-medium text-gray-700 mb-2 flex items-center">
+            <Battery className="h-4 w-4 mr-1 text-green-500" />
+            Battery Operations
+          </h5>
+          <div className="text-sm space-y-1">
+            {/* Charging Section */}
+            <div className="mb-1 font-medium text-green-600">Charging ({flows.totalCharged.toFixed(1)} kWh):</div>
+            <div className="flex justify-between items-center pl-3">
+              <span className="flex items-center">
+                <div className="w-3 h-3 bg-yellow-400 rounded mr-2"></div>
+                From Solar:
+              </span>
+              <span className="font-medium">{flows.solarToBattery.toFixed(1)} kWh ({flows.totalCharged > 0 ? (flows.solarToBattery / flows.totalCharged * 100).toFixed(0) : 0}%)</span>
+            </div>
+            <div className="flex justify-between items-center pl-3">
+              <span className="flex items-center">
+                <div className="w-3 h-3 bg-blue-500 rounded mr-2"></div>
+                From Grid:
+              </span>
+              <span className="font-medium">{flows.gridToBattery.toFixed(1)} kWh ({flows.totalCharged > 0 ? (flows.gridToBattery / flows.totalCharged * 100).toFixed(0) : 0}%)</span>
+            </div>
+            
+            {/* Discharging Section */}
+            <div className="mt-2 mb-1 font-medium text-red-600">Discharging ({flows.totalDischarged.toFixed(1)} kWh):</div>
+            <div className="flex justify-between items-center pl-3">
+              <span className="flex items-center">
+                <div className="w-3 h-3 bg-red-400 rounded mr-2"></div>
+                To Home:
+              </span>
+              <span className="font-medium">{flows.batteryToHome.toFixed(1)} kWh ({flows.totalDischarged > 0 ? (flows.batteryToHome / flows.totalDischarged * 100).toFixed(0) : 0}%)</span>
+            </div>
+            <div className="flex justify-between items-center pl-3">
+              <span className="flex items-center">
+                <div className="w-3 h-3 bg-blue-400 rounded mr-2"></div>
+                To Grid:
+              </span>
+              <span className="font-medium">{flows.batteryToGrid.toFixed(1)} kWh ({flows.totalDischarged > 0 ? (flows.batteryToGrid / flows.totalDischarged * 100).toFixed(0) : 0}%)</span>
+            </div>
+            
+            {/* Efficiency row */}
+            <div className="flex justify-between items-center border-t mt-2 pt-1">
+              <span>Round-trip Efficiency:</span>
+              <span className="font-medium">{flows.totalCharged > 0 ? (flows.totalDischarged / flows.totalCharged * 100).toFixed(0) : 0}%</span>
+            </div>
           </div>
         </div>
       </div>
@@ -458,7 +448,6 @@ export const EnergySankeyChart: React.FC<EnergySankeyChartProps> = ({
         <p>
           <strong>Interactive diagram:</strong> Node labels show totals, flow thickness represents energy amounts. 
           The detailed breakdown above shows exactly where every kWh came from and went to.
-          Self-sufficiency shows how much of your consumption came from renewable sources.
         </p>
       </div>
     </div>

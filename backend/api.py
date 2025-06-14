@@ -80,146 +80,156 @@ async def update_electricity_price_settings(settings: dict):
 ############################################################################################
 
 def get_enhanced_daily_view():
-    """Get enhanced daily view with optimized additional calculations."""
+    """Get enhanced daily view using centralized energy flow calculations."""
     from app import bess_controller
+    from core.bess.dp_battery_algorithm import calculate_detailed_energy_flows
 
     try:
         daily_view = bess_controller.system.get_current_daily_view()
 
-        actual_count = len([h for h in daily_view.hourly_data if h.data_source == "actual"])
-        predicted_count = len([h for h in daily_view.hourly_data if h.data_source == "predicted"])
-        logger.info(f"Returning {actual_count} actual + {predicted_count} predicted hours")
-
-        # Calculate additional data for summary
-        hourly_data = []
-        
-        # Initialize counters for summary calculations
+        # Initialize totals
         total_consumption = 0
         total_solar = 0
         total_grid_import = 0
         total_grid_export = 0
         total_battery_charge = 0
         total_battery_discharge = 0
-        total_base_cost = 0
-        total_cost = 0
-        total_savings = 0
-        price_sum = 0.0
         
-        # Get battery capacity from system for cycle calculations
+        # Initialize detailed flow totals
+        total_solar_to_home = 0
+        total_solar_to_battery = 0
+        total_solar_to_grid = 0
+        total_grid_to_home = 0
+        total_grid_to_battery = 0
+        total_battery_to_home = 0
+        total_battery_to_grid = 0
+        
         battery_capacity = bess_controller.system.battery_settings.total_capacity
-        
-        # Track strategic intent distribution
         intent_summary = {}
+        hourly_data = []
         
-        # Process each hour's data
+        # Process each hour using centralized flow calculations
         for h in daily_view.hourly_data:
-            # Calculate derived values
-            price = h.buy_price
-            consumption = h.home_consumed
-            solar_production = h.solar_generated
-            battery_action = h.battery_action
+            # Use centralized energy flow calculation
+            flows = calculate_detailed_energy_flows(
+                solar_production=h.solar_generated,
+                home_consumption=h.home_consumed,
+                grid_import=h.grid_imported,
+                grid_export=h.grid_exported,
+                battery_charged=h.battery_charged,
+                battery_discharged=h.battery_discharged
+            )
             
-            # Additional calculated fields
-            direct_solar = min(consumption, solar_production)
-            grid_import = h.grid_imported
-            grid_export = h.grid_exported
-            grid_cost = grid_import * price
-            base_cost = consumption * price
-                        
-            # Create hour data dictionary with all fields
+            # Accumulate basic totals
+            total_consumption += flows.home_consumption
+            total_solar += flows.solar_production
+            total_grid_import += flows.grid_import
+            total_grid_export += flows.grid_export
+            total_battery_charge += flows.battery_charged
+            total_battery_discharge += flows.battery_discharged
+            
+            # Accumulate detailed flow totals  
+            total_solar_to_home += flows.solar_to_home
+            total_solar_to_battery += flows.solar_to_battery
+            total_solar_to_grid += flows.solar_to_grid
+            total_grid_to_home += flows.grid_to_home
+            total_grid_to_battery += flows.grid_to_battery
+            total_battery_to_home += flows.battery_to_home
+            total_battery_to_grid += flows.battery_to_grid
+            
+            # Track strategic intents
+            strategic_intent = getattr(h, 'strategic_intent', 'IDLE')
+            intent_summary[strategic_intent] = intent_summary.get(strategic_intent, 0) + 1
+            
+            # Create hour data with centralized flow calculations
             hour_data = {
                 "hour": h.hour,
                 "data_source": h.data_source,
-                "price": price,
-                "electricity_price": price,
-                "consumption": consumption,
-                "home_consumption": consumption,
+                "home_consumption": flows.home_consumption,
+                "consumption": flows.home_consumption,
+                "solar_production": flows.solar_production,
+                "grid_import": flows.grid_import,
+                "grid_export": flows.grid_export,
+                "battery_charged": flows.battery_charged,
+                "battery_discharged": flows.battery_discharged,
                 "battery_level": h.battery_soc_end,
-                "battery_soc": h.battery_soc_end,
-                "action": battery_action,
-                "strategic_intent": getattr(h, 'strategic_intent', 'IDLE'),
-                
-                # Original fields
-                "solar_generated": h.solar_generated,
-                "home_consumed": h.home_consumed,
-                "grid_imported": h.grid_imported,
-                "grid_exported": h.grid_exported,
-                "battery_charged": h.battery_charged,
-                "battery_discharged": h.battery_discharged,
-                "battery_soc_start": h.battery_soc_start,
-                "battery_soc_end": h.battery_soc_end,
                 "buy_price": h.buy_price,
                 "sell_price": h.sell_price,
-                
-                # Cost fields
-                "grid_cost": grid_cost,
-                "battery_cost": 0.0,
-                "total_cost": h.hourly_cost,
-                "base_cost": base_cost,
-                "savings": h.hourly_savings,
                 "hourly_cost": h.hourly_cost,
                 "hourly_savings": h.hourly_savings,
+                "battery_action": h.battery_action,
+                "strategic_intent": strategic_intent,                
+                "battery_cycle_cost": h.battery_cycle_cost,
                 
-                # Energy flow fields
-                "solar_production": solar_production,
-                "direct_solar": direct_solar,
-                "export_solar": max(0, solar_production - direct_solar),
-                "import_from_grid": max(0, consumption - direct_solar),
-                "solar_charged": min(h.battery_charged, h.solar_generated),
-                "grid_to_battery": max(0, h.battery_charged - min(h.battery_charged, h.solar_generated)),
+                # All detailed flows from centralized calculation
+                "solar_to_home": flows.solar_to_home,
+                "solar_to_battery": flows.solar_to_battery,
+                "solar_to_grid": flows.solar_to_grid,
+                "grid_to_home": flows.grid_to_home,
+                "grid_to_battery": flows.grid_to_battery,
+                "battery_to_home": flows.battery_to_home,
+                "battery_to_grid": flows.battery_to_grid,
                 
-                # Additional compatibility fields
-                "effective_diff": (h.buy_price - h.buy_price * 0.6) * 0.85 - 0.4,
-                "opportunity_score": 0.8,
+                # Legacy field names for backward compatibility
+                "direct_solar": flows.solar_to_home,
+                "export_solar": flows.solar_to_grid,
+                "solar_charged": flows.solar_to_battery,
                 "is_actual": h.data_source == "actual",
                 "is_predicted": h.data_source == "predicted",
             }
-            
             hourly_data.append(hour_data)
-            
-            # Update totals for summary
-            total_consumption += consumption
-            total_solar += solar_production
-            total_grid_import += grid_import
-            total_grid_export += grid_export
-            total_battery_charge += h.battery_charged
-            total_battery_discharge += h.battery_discharged
-            total_base_cost += base_cost
-            total_cost += h.hourly_cost
-            total_savings += h.hourly_savings
-            price_sum += price
-            
-            # Update strategic intent summary
-            intent = getattr(h, 'strategic_intent', 'IDLE')
-            intent_summary[intent] = intent_summary.get(intent, 0) + 1
-        
-        # Calculate averages
-        avg_price = price_sum / len(hourly_data) if hourly_data else 1.0
-        
-        # Create enhanced summary
+
+        # Create summary and totals with centralized calculations
+        avg_buy_price = sum(h.buy_price for h in daily_view.hourly_data) / len(daily_view.hourly_data)
+        avg_sell_price = sum(h.sell_price for h in daily_view.hourly_data) / len(daily_view.hourly_data)        
+        # Calculate base cost (grid-only scenario cost for comparison)
+        base_cost = sum(h.home_consumed * h.buy_price for h in daily_view.hourly_data)
+
         summary = {
-            "base_cost": total_base_cost,
-            "optimized_cost": total_cost,
-            "grid_costs": total_grid_import * avg_price,
-            "battery_costs": 0,
-            "savings": total_savings,
-            "total_solar_production": total_solar,
-            "total_battery_charge": total_battery_charge,
-            "total_battery_discharge": total_battery_discharge,
+            "total_solar": total_solar,
             "total_grid_import": total_grid_import,
             "total_grid_export": total_grid_export,
-            "total_direct_solar": sum(h["direct_solar"] for h in hourly_data),
-            "total_excess_solar": sum(h["export_solar"] for h in hourly_data),
+            "total_battery_charge": total_battery_charge,
+            "total_battery_discharge": total_battery_discharge,
             "cycle_count": total_battery_discharge / battery_capacity,
-            "avg_buy_price": avg_price,
-            "avg_sell_price": avg_price * 0.6,
+            "avg_buy_price": avg_buy_price,
+            "avg_sell_price": avg_sell_price,
             "total_consumption": total_consumption,
-            "total_charge_from_solar": sum(h["solar_charged"] for h in hourly_data),
-            "total_charge_from_grid": sum(h["grid_to_battery"] for h in hourly_data),
+            "total_solar_to_home": total_solar_to_home,
+            "total_solar_to_battery": total_solar_to_battery,
+            "total_solar_to_grid": total_solar_to_grid,
+            "total_grid_to_home": total_grid_to_home,
+            "total_grid_to_battery": total_grid_to_battery,
+            "total_battery_to_home": total_battery_to_home,
+            "total_battery_to_grid": total_battery_to_grid,
+            "total_charge_from_solar": total_solar_to_battery,
+            "total_charge_from_grid": total_grid_to_battery,
+            "estimated_battery_cycles": total_battery_discharge / battery_capacity,
+            "base_cost": base_cost,
+        }
+
+        totals = {
+            "total_solar": total_solar,
+            "total_consumption": total_consumption,
+            "total_grid_import": total_grid_import,
+            "total_grid_export": total_grid_export,
+            "total_battery_charged": total_battery_charge,
+            "total_battery_discharged": total_battery_discharge,
+            "total_solar_to_home": total_solar_to_home,
+            "total_solar_to_battery": total_solar_to_battery,
+            "total_solar_to_grid": total_solar_to_grid,
+            "total_grid_to_home": total_grid_to_home,
+            "total_grid_to_battery": total_grid_to_battery,
+            "total_battery_to_home": total_battery_to_home,
+            "total_battery_to_grid": total_battery_to_grid,
+            "cycle_count": total_battery_discharge / battery_capacity,
+            "avg_buy_price": avg_buy_price,
+            "avg_sell_price": avg_sell_price,
+            "total_charge_from_solar": total_solar_to_battery,
+            "total_charge_from_grid": total_grid_to_battery,
             "estimated_battery_cycles": total_battery_discharge / battery_capacity,
         }
 
-        # Build final result
         result = {
             "date": daily_view.date.isoformat(),
             "current_hour": daily_view.current_hour,
@@ -232,7 +242,9 @@ def get_enhanced_daily_view():
             "hourly_data": hourly_data,
             "summary": summary,
             "enhanced_summary": summary,
+            "totals": totals,
             "strategic_intent_summary": intent_summary,
+            "battery_capacity": battery_capacity,
             "energy_profile": {
                 "consumption": [h["consumption"] for h in hourly_data],
                 "solar": [h["solar_production"] for h in hourly_data],
@@ -245,7 +257,8 @@ def get_enhanced_daily_view():
 
     except Exception as e:
         logger.error(f"Error getting daily view v2: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e    
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    
 
 @router.get("/api/schedule/detailed")
 async def get_detailed_schedule():
@@ -265,38 +278,6 @@ async def get_current_schedule():
 ############################################################################################
 # API Endpoints for Report(s)
 ############################################################################################
-
-@router.get("/api/energy/balance")
-async def get_energy_balance():
-    """Get energy balance for the day."""
-    from app import bess_controller
-
-    try:
-        hourly_data, totals = bess_controller.system.log_energy_flows_api()
-
-        # Convert to serializable format
-        hourly_data_serializable = []
-        for data in hourly_data:
-            serializable_item = {}
-            for k, v in data.items():
-                serializable_item[k] = float(v) if isinstance(v, float | int) else v
-            hourly_data_serializable.append(serializable_item)
-
-        totals_serializable = {}
-        for k, v in totals.items():
-            totals_serializable[k] = float(v) if isinstance(v, float | int) else v
-
-        result = {
-            "hourly_data": hourly_data_serializable,
-            "totals": totals_serializable,
-        }
-
-        return add_camel_case_keys(result)
-
-    except Exception as e:
-        logger.error(f"Error getting energy balance: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
-
 
 @router.get("/api/v2/daily_view")
 async def get_daily_view_v2():

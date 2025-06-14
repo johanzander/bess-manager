@@ -834,6 +834,14 @@ class BatterySystemManager:
                                 f"Hour {hour}: Corrected intent from IDLE to '{event.strategic_intent}'"
                             )
 
+            # FIXED: Store initial SOC in algorithm result for DailyViewBuilder
+            if self._initial_soc is not None:
+                result["initial_soc"] = self._initial_soc
+            elif not prepare_next_day:
+                current_soc = self._get_current_battery_soc()
+                if current_soc is not None:
+                    result["initial_soc"] = current_soc
+    
             # Store in schedule store
             self.schedule_store.store_schedule(
                 algorithm_result=result,

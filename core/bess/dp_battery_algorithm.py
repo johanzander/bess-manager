@@ -105,6 +105,97 @@ class CostScenarios:
     battery_wear_cost: float
 
 
+@dataclass
+class DetailedEnergyFlows:
+    """Detailed breakdown of where each kWh flows - single source of truth."""
+
+    # Basic totals
+    solar_production: float
+    home_consumption: float
+    grid_import: float
+    grid_export: float
+    battery_charged: float
+    battery_discharged: float
+
+    # Detailed flows - where energy actually goes
+    solar_to_home: float
+    solar_to_battery: float
+    solar_to_grid: float
+    grid_to_home: float
+    grid_to_battery: float
+    battery_to_home: float
+    battery_to_grid: float
+
+
+def calculate_detailed_energy_flows(
+    solar_production: float,
+    home_consumption: float,
+    grid_import: float,
+    grid_export: float,
+    battery_charged: float,
+    battery_discharged: float,
+) -> DetailedEnergyFlows:
+    """
+    Single source of truth for energy flow calculations.
+
+    This function determines exactly where each kWh of energy flows based on
+    the fundamental energy balance and priority ordering.
+
+    Energy flow priority:
+    1. Solar → Home (direct consumption)
+    2. Solar → Battery (storage of excess)
+    3. Solar → Grid (export remaining excess)
+    4. Battery → Home (support load)
+    5. Battery → Grid (arbitrage export)
+    6. Grid → Home (meet remaining load)
+    7. Grid → Battery (charging from grid)
+
+    Args:
+        solar_production: Total solar generated (kWh)
+        home_consumption: Total home consumption (kWh)
+        grid_import: Total imported from grid (kWh)
+        grid_export: Total exported to grid (kWh)
+        battery_charged: Total charged to battery (kWh)
+        battery_discharged: Total discharged from battery (kWh)
+
+    Returns:
+        DetailedEnergyFlows with all individual flow breakdowns
+    """
+
+    # Solar flows - priority order
+    solar_to_home = min(solar_production, home_consumption)
+    remaining_consumption = max(0, home_consumption - solar_to_home)
+    remaining_solar = max(0, solar_production - solar_to_home)
+
+    solar_to_battery = min(remaining_solar, battery_charged)
+    solar_to_grid = max(0, remaining_solar - solar_to_battery)
+
+    # Battery flows
+    battery_to_home = min(battery_discharged, remaining_consumption)
+    battery_to_grid = max(0, battery_discharged - battery_to_home)
+
+    # Grid flows
+    grid_to_battery = max(0, battery_charged - solar_to_battery)
+    final_remaining_consumption = max(0, remaining_consumption - battery_to_home)
+    grid_to_home = final_remaining_consumption
+
+    return DetailedEnergyFlows(
+        solar_production=solar_production,
+        home_consumption=home_consumption,
+        grid_import=grid_import,
+        grid_export=grid_export,
+        battery_charged=battery_charged,
+        battery_discharged=battery_discharged,
+        solar_to_home=solar_to_home,
+        solar_to_battery=solar_to_battery,
+        solar_to_grid=solar_to_grid,
+        grid_to_home=grid_to_home,
+        grid_to_battery=grid_to_battery,
+        battery_to_home=battery_to_home,
+        battery_to_grid=battery_to_grid,
+    )
+
+
 def calculate_hourly_costs(
     flows: EnergyFlows,
     buy_price: float,

@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react-router-dom';
 import DashboardPage from './pages/DashboardPage';
 import SavingsAnalysisPage from './pages/SavingsPage';
@@ -6,7 +6,7 @@ import InverterPage from './pages/InverterPage';
 import InsightsPage from './pages/InsightsPage';
 import SystemHealthPage from './pages/SystemHealthPage';
 import { useSettings } from './hooks/useSettings';
-import { Home, Activity, TrendingUp, Brain, Zap } from 'lucide-react';
+import { Home, Activity, TrendingUp, Brain, Zap, Sun, Moon } from 'lucide-react';
 
 // An ErrorBoundary component to catch rendering errors
 class ErrorBoundary extends React.Component<
@@ -29,10 +29,10 @@ class ErrorBoundary extends React.Component<
   render() {
     if (this.state.hasError) {
       return (
-        <div className="min-h-screen flex items-center justify-center bg-red-50">
-          <div className="max-w-md p-6 bg-white rounded-lg shadow-lg">
-            <h2 className="text-xl font-bold text-red-600 mb-4">Something went wrong</h2>
-            <p className="mb-4">{this.state.error?.message || "An unknown error occurred"}</p>
+        <div className="min-h-screen flex items-center justify-center bg-red-50 dark:bg-red-900">
+          <div className="max-w-md p-6 bg-white dark:bg-gray-800 rounded-lg shadow-lg">
+            <h2 className="text-xl font-bold text-red-600 dark:text-red-400 mb-4">Something went wrong</h2>
+            <p className="mb-4 dark:text-gray-300">{this.state.error?.message || "An unknown error occurred"}</p>
             <button
               className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
               onClick={() => window.location.reload()}
@@ -53,14 +53,26 @@ const Navigation = () => {
   const location = useLocation();
   
   const isActive = (path: string) => {
-    return location.pathname === path ? 'bg-gray-100 text-gray-900' : 'text-gray-700 hover:text-gray-900';
+    // FIXED: Dashboard should be active for both "/" and when no specific page is selected
+    if (path === '/') {
+      // Dashboard is active for root path OR if we're not on any of the other specific pages
+      const otherPages = ['/insights', '/savings', '/inverter', '/system-health'];
+      const isOnOtherPage = otherPages.some(page => location.pathname.startsWith(page));
+      const isDashboardActive = location.pathname === '/' || !isOnOtherPage;
+      
+      return isDashboardActive ? 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-gray-100' : 'text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100';
+    }
+    
+    // For other pages, check if current path starts with the target path
+    return location.pathname.startsWith(path) ? 
+      'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-gray-100' : 'text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100';
   };
-  
+    
   return (
     <div className="flex space-x-2">
       <Link 
         to="/" 
-        className={`p-2 hover:bg-gray-100 rounded flex items-center space-x-1 ${isActive('/')}`}
+        className={`p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center space-x-1 ${isActive('/')}`}
         title="Quick overview & live monitoring"
       >
         <Home className="h-5 w-5" />
@@ -68,7 +80,7 @@ const Navigation = () => {
       </Link>
       <Link 
         to="/savings" 
-        className={`p-2 hover:bg-gray-100 rounded flex items-center space-x-1 ${isActive('/savings')}`}
+        className={`p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center space-x-1 ${isActive('/savings')}`}
         title="Financial analysis & detailed reports"
       >
         <TrendingUp className="h-5 w-5" />
@@ -76,7 +88,7 @@ const Navigation = () => {
       </Link>
       <Link 
         to="/inverter" 
-        className={`p-2 hover:bg-gray-100 rounded flex items-center space-x-1 ${isActive('/inverter')}`}
+        className={`p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center space-x-1 ${isActive('/inverter')}`}
         title="Inverter status & battery schedule management"
       >
         <Zap className="h-5 w-5" />
@@ -84,7 +96,7 @@ const Navigation = () => {
       </Link>
       <Link 
         to="/insights" 
-        className={`p-2 hover:bg-gray-100 rounded flex items-center space-x-1 ${isActive('/insights')}`}
+        className={`p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center space-x-1 ${isActive('/insights')}`}
         title="Decision analysis & intelligence"
       >
         <Brain className="h-5 w-5" />
@@ -92,7 +104,7 @@ const Navigation = () => {
       </Link>
       <Link 
         to="/system-health" 
-        className={`p-2 hover:bg-gray-100 rounded flex items-center space-x-1 ${isActive('/system-health')}`}
+        className={`p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center space-x-1 ${isActive('/system-health')}`}
         title="System status & component health"
       >
         <Activity className="h-5 w-5" />
@@ -104,6 +116,18 @@ const Navigation = () => {
 
 function App() {
   console.log('App component rendering');
+  
+  // Dark mode state
+  const [darkMode, setDarkMode] = useState(false);
+
+  // Dark mode effect
+  useEffect(() => {
+    if (darkMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [darkMode]);
   
   try {
     const { 
@@ -153,11 +177,11 @@ function App() {
     if (settingsLoading) {
       console.log('Rendering loading state');
       return (
-        <div className="flex items-center justify-center min-h-screen">
-          <div className="p-6 max-w-sm bg-white rounded-lg shadow-lg">
+        <div className="flex items-center justify-center min-h-screen dark:bg-gray-900">
+          <div className="p-6 max-w-sm bg-white dark:bg-gray-800 rounded-lg shadow-lg">
             <div className="flex items-center space-x-4">
               <div className="animate-spin h-6 w-6 border-2 border-blue-500 rounded-full border-t-transparent"></div>
-              <div>Loading settings...</div>
+              <div className="dark:text-white">Loading settings...</div>
             </div>
           </div>
         </div>
@@ -167,16 +191,29 @@ function App() {
     // Main app render
     return (
       <Router>
-        <div className="min-h-screen flex flex-col bg-gray-50">
-          <header className="bg-white shadow sticky top-0 z-10">
+        <div className="min-h-screen flex flex-col bg-gray-50 dark:bg-gray-900">
+          <header className="bg-white dark:bg-gray-800 shadow sticky top-0 z-10">
             <div className="max-w-7xl mx-auto py-2 px-4 sm:px-6 lg:px-8">
               <div className="flex justify-between items-center">
                 <div className="flex items-center space-x-4">
-                  <h1 className="text-2xl font-bold text-gray-900">ChargeIQ</h1>
+                  <h1 className="text-2xl font-bold text-gray-900 dark:text-white">ChargeIQ</h1>
                 </div>
                 <div className="flex items-center space-x-4">                  
                   {/* Navigation Menu */}
                   <Navigation />
+                  
+                  {/* Dark Mode Toggle Button */}
+                  <button
+                    onClick={() => setDarkMode(!darkMode)}
+                    className="p-2 rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                    title={darkMode ? "Switch to light mode" : "Switch to dark mode"}
+                  >
+                    {darkMode ? (
+                      <Sun className="h-5 w-5 text-yellow-500" />
+                    ) : (
+                      <Moon className="h-5 w-5 text-gray-600 dark:text-gray-300" />
+                    )}
+                  </button>
                 </div>
               </div>
             </div>
@@ -184,9 +221,9 @@ function App() {
           
           <main className="flex-1 w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
             {settingsError && (
-              <div className="bg-red-50 p-6 rounded-lg shadow mb-6">
-                <h2 className="text-lg font-semibold text-red-700">Error loading settings</h2>
-                <p className="mt-2">{settingsError}</p>
+              <div className="bg-red-50 dark:bg-red-900/10 p-6 rounded-lg shadow mb-6">
+                <h2 className="text-lg font-semibold text-red-700 dark:text-red-400">Error loading settings</h2>
+                <p className="mt-2 dark:text-red-300">{settingsError}</p>
                 <button 
                   className="mt-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
                   onClick={() => window.location.reload()}
@@ -217,10 +254,10 @@ function App() {
   } catch (err) {
     console.error("Unhandled error in App:", err);
     return (
-      <div className="min-h-screen flex items-center justify-center bg-red-50">
-        <div className="max-w-md p-6 bg-white rounded-lg shadow-lg">
-          <h2 className="text-xl font-bold text-red-600 mb-4">Something went wrong</h2>
-          <p className="mb-4">{err instanceof Error ? err.message : "An unknown error occurred"}</p>
+      <div className="min-h-screen flex items-center justify-center bg-red-50 dark:bg-red-900">
+        <div className="max-w-md p-6 bg-white dark:bg-gray-800 rounded-lg shadow-lg">
+          <h2 className="text-xl font-bold text-red-600 dark:text-red-400 mb-4">Something went wrong</h2>
+          <p className="mb-4 dark:text-gray-300">{err instanceof Error ? err.message : "An unknown error occurred"}</p>
           <button
             className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
             onClick={() => window.location.reload()}

@@ -601,7 +601,7 @@ class DailyViewBuilder:
                 return latest_schedule.algorithm_result["initial_soc"]
             raise ValueError("Missing initial SOC for hour 0")
 
-        # For any other hour, try to get SOC from previous hour's actual data
+        # For any other hour, try to get SOC from previous hour's actual data first
         prev_hour = hour - 1
         prev_event = self.historical_store.get_hour_event(prev_hour)
 
@@ -612,62 +612,41 @@ class DailyViewBuilder:
             )
             return prev_event.battery_soc_end
 
-        # If no actual data for previous hour, this means we're in predicted territory
-        # and need to chain predicted hours together
+        # FIXED: If no actual data, use SOC from optimization schedule instead of complex bridging
+        latest_schedule = self.schedule_store.get_latest_schedule()
+        if not latest_schedule or "hourly_data" not in latest_schedule.algorithm_result:
+            logger.warning(
+                f"No schedule data available for hour {hour}, using fallback SOC"
+            )
+            return 20.0  # Fallback value
 
-        # Find the most recent actual hour before this one
-        last_actual_hour = prev_hour
-        while last_actual_hour >= 0:
-            actual_event = self.historical_store.get_hour_event(last_actual_hour)
-            if actual_event:
-                # Found the bridge point - this is our last known actual SOC
-                logger.debug(
-                    f"Found actual bridge at hour {last_actual_hour}: SOC={actual_event.battery_soc_end}%"
-                )
+        start_hour, _ = latest_schedule.get_optimization_range()
+        hourly_data = latest_schedule.algorithm_result["hourly_data"]
 
-                # Now we need to calculate forward from this actual hour to the previous hour
-                # using the optimization schedule
-                latest_schedule = self.schedule_store.get_latest_schedule()
-                if (
-                    not latest_schedule
-                    or "hourly_data" not in latest_schedule.algorithm_result
-                ):
-                    raise ValueError(
-                        f"Cannot determine SOC for hour {hour}: Missing schedule data"
-                    )
+        if "state_of_charge" not in hourly_data:
+            logger.warning(
+                f"No state_of_charge data in schedule for hour {hour}, using fallback SOC"
+            )
+            return 20.0  # Fallback value
 
-                start_hour, _ = latest_schedule.get_optimization_range()
-                hourly_data = latest_schedule.algorithm_result["hourly_data"]
+        # Calculate the index for the previous hour in the optimization results
+        prev_hour_index = prev_hour - start_hour
+        soc_list = hourly_data["state_of_charge"]
 
-                if "state_of_charge" not in hourly_data:
-                    raise ValueError(
-                        f"Cannot determine SOC for hour {hour}: Missing state_of_charge in schedule"
-                    )
+        if 0 <= prev_hour_index < len(soc_list):
+            # Get SOE from optimization and convert to SOC percentage
+            soe_kwh = soc_list[prev_hour_index]
+            soc_percent = (soe_kwh / self.battery_capacity) * 100
 
-                # Get the SOC from the optimization result for the previous hour
-                target_index = prev_hour - start_hour
-                soc_list = hourly_data["state_of_charge"]
-
-                if 0 <= target_index < len(soc_list):
-                    # The optimization returns SOE in kWh, convert to SOC in %
-                    soe_kwh = soc_list[target_index]
-                    soc_percent = (soe_kwh / self.battery_capacity) * 100
-
-                    logger.info(
-                        f"Using predicted SOC for hour {prev_hour}: SOE={soe_kwh:.1f}kWh → SOC={soc_percent:.1f}%"
-                    )
-                    return soc_percent
-                else:
-                    raise ValueError(
-                        f"Cannot determine SOC for hour {hour}: Index {target_index} out of range"
-                    )
-
-            last_actual_hour -= 1
-
-        # If we get here, we couldn't find any actual data
-        raise ValueError(
-            f"Cannot determine SOC for hour {hour}: No actual data found to bridge from"
-        )
+            logger.debug(
+                f"Using optimization SOC for hour {prev_hour}: SOE={soe_kwh:.1f}kWh → SOC={soc_percent:.1f}%"
+            )
+            return soc_percent
+        else:
+            logger.warning(
+                f"Hour {prev_hour} index {prev_hour_index} out of range for optimization data (length: {len(soc_list)})"
+            )
+            return 20.0  # Fallback value
 
     def _validate_energy_flows(self, hourly_data):
         """Validate energy flows - DP results already include efficiency losses."""

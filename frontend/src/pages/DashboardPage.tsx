@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
-import { EnhancedSummaryCards } from '../components/EnhancedSummaryCards';
 import { BatteryLevelChart } from '../components/BatteryLevelChart';
-import { EnhancedEnergyFlowChart } from '../components/EnhancedEnergyFlowChart';
+import { EnergyFlowChart } from '../components/EnergyFlowChart';
 import { EnergySankeyChart } from '../components/EnergySankeyChart';
 import { BatterySettings, ElectricitySettings, ScheduleData } from '../types';
 import { Clock, AlertCircle } from 'lucide-react';
+import ConsolidatedEnergyCards from '../components/ConsolidatedEnergyCards';
 import api from '../lib/api';
 
 interface DashboardProps {
@@ -17,99 +17,70 @@ export default function DashboardPage({
   settings
 }: DashboardProps) {
   const [scheduleData, setScheduleData] = useState<ScheduleData | null>(null);
-  const [energyData, setEnergyData] = useState<any | null>(null);
   const [dailyViewData, setDailyViewData] = useState<any | null>(null);
-  const [systemInfo, setSystemInfo] = useState<any | null>(null);
+  // REMOVED: energyData state - no longer needed
   const [error, setError] = useState<string | null>(null);
-  const [noDataAvailable, setNoDataAvailable] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
-  const [refreshing, setRefreshing] = useState(false);
   const [debugInfo, setDebugInfo] = useState<string[]>([]);
   const [showDebug, setShowDebug] = useState(false);
 
-  // Manual schedule creation function
-  const createSchedule = async () => {
-    try {
-      setRefreshing(true);
-      setDebugInfo(prev => [...prev, `🔄 Manually triggering schedule creation...`]);
-      
-      // Try to create a new schedule
-      const response = await api.get('/api/schedule?date=' + new Date().toISOString().split('T')[0]);
-      
-      if (response.data) {
-        setDebugInfo(prev => [...prev, `✅ Schedule created successfully`]);
-        // Refresh all data after creating schedule
-        await fetchData(true);
-      } else {
-        setDebugInfo(prev => [...prev, `❌ Schedule creation returned empty data`]);
-      }
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-      setDebugInfo(prev => [...prev, `❌ Schedule creation failed: ${errorMessage}`]);
-      setError(`Schedule creation failed: ${errorMessage}`);
-    } finally {
-      setRefreshing(false);
-    }
-  };
-
-  const fetchData = async (isRefresh = false) => {
-    if (!isRefresh) {
-      onLoadingChange(true);
-    }
-    
+  const fetchData = async (isManualRefresh = false) => {
+    onLoadingChange(true);
     setError(null);
+
     const debugMessages: string[] = [];
-    let scheduleResult = null;
-    let scheduleError = null;
+    debugMessages.push(`🔄 Fetching dashboard data... (${isManualRefresh ? 'manual' : 'auto'})`);
 
     try {
-      // Try multiple schedule endpoints
-      const scheduleEndpoints = ['/api/v2/daily_view', '/api/schedule/detailed', '/api/schedule/current'];
-      
+      // Clear existing data
+      setScheduleData(null);
+      setDailyViewData(null);
+
+      // Try multiple schedule endpoints with error handling
+      let scheduleResult = null;
+
+      // Try different schedule endpoints
+      const scheduleEndpoints = [
+        '/api/schedule/current',
+        '/api/schedule/detailed',
+        '/api/schedule'
+      ];
+
       for (const endpoint of scheduleEndpoints) {
         try {
           debugMessages.push(`🔍 Trying ${endpoint}...`);
-          const response = await api.get(endpoint);
-          scheduleResult = response.data;
-          debugMessages.push(`✅ ${endpoint} succeeded`);
-          break;
+          const scheduleResponse = await api.get(endpoint);
+          if (scheduleResponse?.data) {
+            scheduleResult = scheduleResponse.data;
+            debugMessages.push(`✅ ${endpoint} successful`);
+            break;
+          }
         } catch (err) {
           const errorMsg = err instanceof Error ? err.message : 'Unknown error';
           debugMessages.push(`❌ ${endpoint} failed: ${errorMsg}`);
-          scheduleError = err;
         }
       }
 
-      // Fetch other data in parallel  
-      const [energyResponse, dailyViewResponse, systemInfoResponse] = await Promise.allSettled([
-        api.get('/api/energy/balance'),
-        api.get('/api/v2/daily_view'),
-        api.get('/api/system/info')
+      // SIMPLIFIED: Only fetch daily view - schedule data provides everything we need
+      const [dailyViewResponse] = await Promise.allSettled([
+        api.get('/api/v2/daily_view')
       ]);
       
       // Handle schedule data
       if (scheduleResult) {
-        // Check if schedule data has the expected structure
         if (scheduleResult.schedule && scheduleResult.schedule.hourlyData) {
-          // Handle /api/schedule/current format
           setScheduleData(scheduleResult.schedule);
           debugMessages.push(`📊 Schedule data: ${scheduleResult.schedule.hourlyData.length} hours`);
         } else if (scheduleResult.hourlyData) {
-          // Handle /api/schedule/detailed format (camelCase)
           setScheduleData(scheduleResult);
           debugMessages.push(`📊 Schedule data: ${scheduleResult.hourlyData.length} hours`);
         } else if (scheduleResult.hourly_data) {
-          // Handle /api/schedule/detailed format (snake_case) - THIS IS THE ACTUAL FORMAT
           debugMessages.push(`🔧 Converting snake_case API response to camelCase...`);
-          debugMessages.push(`📋 Original keys: ${Object.keys(scheduleResult).join(', ')}`);
-          
-          // Make sure hour is properly formatted as a string in the hourly data
           const formattedHourlyData = scheduleResult.hourly_data.map((hourData: any) => {
-            // Check if the hour needs formatting
             if (typeof hourData.hour === 'number') {
               return {
                 ...hourData,
-                hour: `${hourData.hour}:00` // Format number as "hour:00"
+                hour: `${hourData.hour}:00`
               };
             }
             return hourData;
@@ -124,44 +95,24 @@ export default function DashboardPage({
           
           setScheduleData(convertedData);
           debugMessages.push(`📊 Schedule data: ${scheduleResult.hourly_data.length} hours (converted from snake_case)`);
-          debugMessages.push(`✅ Conversion complete - now has hourlyData field`);
-        } else {
-          debugMessages.push(`⚠️ Schedule data has unexpected format: ${JSON.stringify(Object.keys(scheduleResult))}`);
-          setNoDataAvailable(true);
         }
       } else {
         debugMessages.push(`❌ No schedule data from any endpoint`);
-        const errorMsg = scheduleError instanceof Error ? scheduleError.message : 'Unknown error';
-        setError(`Failed to load schedule data: ${errorMsg}`);
-        setNoDataAvailable(true);
       }
 
-      // Handle energy balance data
-      if (energyResponse.status === 'fulfilled') {
-        setEnergyData(energyResponse.value.data);
-        debugMessages.push(`📊 Energy balance data: ${energyResponse.value.data.hourlyData?.length || 0} hours`);
-      } else {
-        debugMessages.push(`❌ Energy balance failed: ${energyResponse.reason?.message || 'Unknown error'}`);
-      }
-
-      // Handle daily view data  
-      if (dailyViewResponse.status === 'fulfilled') {
+      // Handle daily view response
+      if (dailyViewResponse.status === 'fulfilled' && dailyViewResponse.value?.data) {
         setDailyViewData(dailyViewResponse.value.data);
-        debugMessages.push(`📊 Daily view data: ${dailyViewResponse.value.data.hourly_data?.length || 0} hours`);
+        debugMessages.push(`📅 Daily view data: ${dailyViewResponse.value.data.hourly_data?.length || 0} hours`);
       } else {
-        debugMessages.push(`❌ Daily view failed: ${dailyViewResponse.reason?.message || 'Unknown error'}`);
+        debugMessages.push(`❌ Daily view failed: ${dailyViewResponse.status === 'rejected' ? dailyViewResponse.reason : 'No data'}`);
       }
 
-      // Handle system info data
-      if (systemInfoResponse.status === 'fulfilled') {
-        setSystemInfo(systemInfoResponse.value.data);
-        debugMessages.push(`📊 System info loaded successfully`);
-      } else {
-        debugMessages.push(`❌ System info failed: ${systemInfoResponse.reason?.message || 'Unknown error'}`);
-      }
+      // REMOVED: Energy balance handling - no longer needed
 
       setLastUpdate(new Date());
-      
+      debugMessages.push(`✅ Data fetch completed at ${new Date().toLocaleTimeString()}`);
+
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
       setError(`Failed to load dashboard data: ${errorMessage}`);
@@ -176,19 +127,42 @@ export default function DashboardPage({
     fetchData();
   }, []);
 
-  // Determine what data we have available
+  // SIMPLIFIED: Only check for schedule data - it contains everything we need
   const hasScheduleData = scheduleData && scheduleData.hourlyData && scheduleData.hourlyData.length > 0;
-  const hasEnergyData = energyData && energyData.hourlyData && energyData.hourlyData.length > 0;
   const currentHour = new Date().getHours();
+
+  // Helper function to extract actual energy data from schedule data
+  const getActualEnergyData = () => {
+    if (!scheduleData?.hourlyData) return [];
+    
+    // Filter for actual data only and convert to energy balance format for compatibility
+    return scheduleData.hourlyData
+      .filter((hour: any) => hour.dataSource === 'actual' || hour.data_source === 'actual')
+      .map((hour: any) => ({
+        hour: typeof hour.hour === 'string' ? parseInt(hour.hour.split(':')[0]) : hour.hour,
+        system_production: hour.solarProduction || hour.solar_production || 0,
+        load_consumption: hour.homeConsumption || hour.home_consumption || 0,
+        import_from_grid: hour.gridImport || hour.grid_import || 0,
+        export_to_grid: hour.gridExport || hour.grid_export || 0,
+        battery_charge: hour.batteryCharged || hour.battery_charged || 0,
+        battery_discharge: hour.batteryDischarged || hour.battery_discharged || 0,
+      }));
+  };
+
+  // Create a synthetic energy data object for charts that expect it
+  const syntheticEnergyData = {
+    hourlyData: getActualEnergyData(),
+    totals: scheduleData?.totals || {}
+  };
 
   return (
     <div className="space-y-6">
       {/* System Status Header */}
-      <div className="bg-white p-4 rounded-lg shadow">
+      <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-4">
-            <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-            <div className="flex items-center text-sm text-gray-500">
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
+            <div className="flex items-center text-sm text-gray-500 dark:text-gray-400">
               <Clock className="h-4 w-4 mr-1" />
               Last updated: {lastUpdate.toLocaleTimeString()}
             </div>
@@ -197,9 +171,17 @@ export default function DashboardPage({
             {showDebug && (
               <button
                 onClick={() => setShowDebug(false)}
-                className="px-3 py-2 text-sm bg-gray-100 text-gray-700 rounded hover:bg-gray-200"
+                className="px-3 py-2 text-sm bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-200 dark:hover:bg-gray-600"
               >
                 Hide Debug
+              </button>
+            )}
+            {!showDebug && (
+              <button
+                onClick={() => setShowDebug(true)}
+                className="px-3 py-2 text-sm bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-200 dark:hover:bg-gray-600"
+              >
+                Show Debug
               </button>
             )}
           </div>
@@ -207,151 +189,97 @@ export default function DashboardPage({
 
         {/* Debug Information */}
         {showDebug && (
-          <div className="mt-4 p-3 bg-gray-50 rounded text-sm">
-            <h4 className="font-medium mb-2">Debug Information:</h4>
+          <div className="mt-4 p-3 bg-gray-50 dark:bg-gray-700 rounded text-sm">
+            <h4 className="font-medium mb-2 text-gray-900 dark:text-white">Debug Information:</h4>
             <div className="space-y-1 text-xs font-mono">
               {debugInfo.map((msg, idx) => (
-                <div key={idx}>{msg}</div>
+                <div key={idx} className="text-gray-700 dark:text-gray-300">{msg}</div>
               ))}
             </div>
           </div>
         )}
 
-        {/* System Status */}
-        {systemInfo && (
-          <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-            <div>System Status: <span className="font-medium text-green-600">Active</span></div>
-            <div>Data Sources: <span className="font-medium">{hasScheduleData && hasEnergyData ? 'Complete' : 'Partial'}</span></div>
-            <div>Controller Connected: <span className="font-medium">{systemInfo.controller_available ? 'Yes' : 'No'}</span></div>
-            {systemInfo.simple_system_info && (
-              <>
-                <div>Historical Events: <span className="font-medium">{systemInfo.simple_system_info.historical_events_count}</span></div>
-              </>
-            )}
-          </div>
-        )}
       </div>
 
       {/* Error Message */}
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+        <div className="bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-800 rounded-lg p-4">
           <div className="flex items-center">
-            <AlertCircle className="h-5 w-5 text-red-500 mr-2" />
-            <span className="text-red-700">{error}</span>
+            <AlertCircle className="h-5 w-5 text-red-500 dark:text-red-400 mr-2" />
+            <span className="text-red-700 dark:text-red-300">{error}</span>
           </div>
         </div>
       )}
 
-      {/* CHART 1: Enhanced Summary Cards - Financial overview & key metrics */}
-      {hasEnergyData && dailyViewData && (
-        <EnhancedSummaryCards 
-          dailyViewData={dailyViewData}
-          energyData={energyData}
-        />
+      {/* SIMPLIFIED: Data availability notice - only show for missing schedule data */}
+      {!hasScheduleData && (
+        <div className="bg-yellow-50 dark:bg-yellow-900/10 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4">
+          <div className="flex items-center">
+            <AlertCircle className="h-5 w-5 text-yellow-500 dark:text-yellow-400 mr-2" />
+            <div>
+              <span className="text-yellow-700 dark:text-yellow-300 font-medium">Schedule Data Missing</span>
+              <p className="text-yellow-600 dark:text-yellow-400 text-sm mt-1">
+                Dashboard needs schedule data to display charts and analytics.
+              </p>
+            </div>
+          </div>
+        </div>
       )}
-      
-      {/* CHART 2: Energy Sankey Diagram - Daily energy flow overview */}
-      {hasEnergyData && (
-        <EnergySankeyChart energyData={energyData} />
-      )}
-      
-      {/* CHART 3: Enhanced Energy Flow Chart - Hourly details + predictions vs actuals */}
-      {hasEnergyData && dailyViewData && dailyViewData.hourly_data && (
-        <EnhancedEnergyFlowChart 
+
+      {/* #1 Main Energy Cards */}
+      <ConsolidatedEnergyCards />
+            
+      {/* CHART 2: Enhanced Energy Flow Chart - SIMPLIFIED to use schedule data only */}
+      {hasScheduleData && dailyViewData && dailyViewData.hourly_data && (
+        <EnergyFlowChart 
           dailyViewData={dailyViewData.hourly_data}
-          energyBalanceData={energyData.hourlyData}
+          energyBalanceData={syntheticEnergyData.hourlyData} // Use actual data extracted from schedule
           currentHour={currentHour}
         />
       )}
-      
-      {/* CHART 4: Battery Level Chart - SOC + prices + actions */}
+
+      {/* CHART 3: Battery Level Chart - SOC + prices + actions */}
       {dailyViewData && dailyViewData.hourly_data && (
         <BatteryLevelChart hourlyData={dailyViewData.hourly_data} settings={settings} />
       )}
 
-      {/* Data availability notice */}
-      {(!hasScheduleData || !hasEnergyData) && (
-        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-          <div className="flex items-center">
-            <AlertCircle className="h-5 w-5 text-yellow-500 mr-2" />
-            <div>
-              <span className="text-yellow-700 font-medium">Partial Data Available</span>
-              <p className="text-yellow-600 text-sm mt-1">
-                {!hasScheduleData && "Schedule data is not available. "}
-                {!hasEnergyData && "Energy balance data is not available. "}
-                Some charts may not be displayed until all data sources are active.
-              </p>
-            </div>
-          </div>
-        </div>
+      {/* CHART 4: Energy Sankey Diagram - SIMPLIFIED to use schedule data */}
+      {hasScheduleData && (
+        <EnergySankeyChart energyData={scheduleData} />
       )}
       
       {/* Dashboard Overview */}
-      <div className="bg-white p-6 rounded-lg shadow">
-        <h2 className="text-xl font-semibold mb-4">Dashboard Overview</h2>
+      <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
+        <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-white">Dashboard Overview</h2>
         
         {hasScheduleData ? (
           <>
-            <p className="mb-3 text-gray-700">
+            <p className="mb-3 text-gray-700 dark:text-gray-300">
               Your dashboard provides a comprehensive overview of your battery system performance 
               with 4 essential charts covering all key metrics.
             </p>
-            
-            <div className="space-y-2">
-              <div className="flex items-start">
-                <div className="w-3 h-3 bg-green-500 rounded-full mt-1.5 mr-2"></div>
-                <p className="text-gray-700">
-                  <span className="font-medium">Summary Cards:</span> Financial overview with daily savings, 
-                  battery cycles, grid balance, and data quality metrics.
-                </p>
-              </div>
-              
-              <div className="flex items-start">
-                <div className="w-3 h-3 bg-blue-500 rounded-full mt-1.5 mr-2"></div>
-                <p className="text-gray-700">
-                  <span className="font-medium">Energy Flow Diagram:</span> Interactive overview showing 
-                  complete daily energy flows between grid, solar, battery, and home.
-                </p>
-              </div>
-              
-              <div className="flex items-start">
-                <div className="w-3 h-3 bg-purple-500 rounded-full mt-1.5 mr-2"></div>
-                <p className="text-gray-700">
-                  <span className="font-medium">Predictions vs Reality:</span> Hourly comparison of predicted 
-                  energy flows against actual measurements with accuracy indicators.
-                </p>
-              </div>
-              
-              <div className="flex items-start">
-                <div className="w-3 h-3 bg-yellow-500 rounded-full mt-1.5 mr-2"></div>
-                <p className="text-gray-700">
-                  <span className="font-medium">Battery Level:</span> Shows battery state of charge, 
-                  electricity prices, and battery actions throughout the day.
-                </p>
-              </div>
-            </div>
-            
-            <div className="mt-4 bg-blue-50 border border-blue-200 rounded-md p-3">
-              <p className="text-blue-800 text-sm">
-                <span className="font-medium">Navigation tip:</span> For detailed decision analysis, visit 
-                <span className="font-medium"> Insights</span>. For financial breakdown, visit 
-                <span className="font-medium"> Savings</span>. For system diagnostics, visit 
-                <span className="font-medium"> System Health</span>.
-              </p>
-            </div>
+            <ul className="space-y-2 text-sm text-gray-600 dark:text-gray-400">
+              <li>• <strong className="text-gray-900 dark:text-white">Energy Cards:</strong> Real-time cost, solar, consumption, battery, and grid data</li>
+              <li>• <strong className="text-gray-900 dark:text-white">Energy Flow Chart:</strong> Hourly energy flows with predictions vs actual data</li>
+              <li>• <strong className="text-gray-900 dark:text-white">Battery Chart:</strong> SOC levels, electricity prices, and battery actions</li>
+              <li>• <strong className="text-gray-900 dark:text-white">Sankey Diagram:</strong> Visual overview of daily energy flows between sources</li>
+            </ul>
+            <p className="text-sm text-blue-600 dark:text-blue-400 mt-3">
+              📊 Using unified schedule data for all charts - actual data marked as completed hours.
+            </p>
           </>
         ) : (
           <div className="text-center py-8">
-            <AlertCircle className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-gray-900 mb-2">No Data Available</h3>
-            <p className="text-gray-600 mb-4">
-              Dashboard data is not currently available. This could be due to system initialization or connectivity issues.
+            <AlertCircle className="h-12 w-12 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
+            <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">No Schedule Data</h3>
+            <p className="text-gray-600 dark:text-gray-400 mb-4">
+              The dashboard needs schedule data to display charts and analytics.
             </p>
             <button
-              onClick={fetchData}
-              className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+              onClick={() => fetchData(true)}
+              className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
             >
-              Try Again
+              Retry Loading Data
             </button>
           </div>
         )}

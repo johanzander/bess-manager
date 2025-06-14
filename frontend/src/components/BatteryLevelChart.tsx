@@ -3,108 +3,147 @@ import { XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Refe
 import { BatterySettings } from '../types';
 
 interface BatteryLevelChartProps {
-  hourlyData: any[]; // Daily view hourly data
+  hourlyData: any[];
   settings: BatterySettings;
 }
 
 export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData, settings }) => {
+  // Dark mode detection for chart colors only
+  const isDarkMode = document.documentElement.classList.contains('dark');
+  
+  const colors = {
+    grid: isDarkMode ? '#374151' : '#e5e7eb',
+    text: isDarkMode ? '#d1d5db' : '#374151',
+    background: isDarkMode ? '#1f2937' : '#ffffff',
+    tooltip: isDarkMode ? '#374151' : '#ffffff',
+    tooltipBorder: isDarkMode ? '#4b5563' : '#d1d5db'
+  };
+
   // Transform daily view data to chart format
   const chartData = hourlyData.map((hour, index) => {
-    // Map daily view fields to chart fields
     const batteryAction = hour.battery_action || 0;
-    const batteryLevel = hour.battery_soc_end || hour.batteryLevel || 0;
+    const batterySocPercent = hour.battery_soc_end || hour.batteryLevel || 0;
     const price = hour.electricity_price || hour.buy_price || hour.price || 0;
     const hourNum = typeof hour.hour === 'number' ? hour.hour : index;
     
     return {
       hour: `${hourNum}:00`,
       hourNum,
-      batteryLevel: batteryLevel,
+      batterySocPercent: batterySocPercent,
       action: batteryAction,
       price: price,
-      // Split action into charge and discharge for visualization
-      batteryCharge: batteryAction > 0 ? batteryAction : 0,
-      batteryDischarge: batteryAction < 0 ? -batteryAction : 0,
-      // Additional fields from daily view
-      dataSource: hour.data_source || 'unknown'
+      dataSource: hour.data_source || 'unknown',
+      isActual: hour.data_source === 'actual',
+      isPredicted: hour.data_source === 'predicted'
     };
   });
     
-  // Calculate max charge/discharge value for y-axis scaling
-  const maxAction = Math.max(
-    ...chartData.map(d => Math.max(
-      Math.abs(d.batteryCharge || 0), 
-      Math.abs(d.batteryDischarge || 0)
-    )),
-    1
-  );
-
-  // Calculate max price for y-axis scaling
+  const maxAction = Math.max(...chartData.map(d => Math.abs(d.action || 0)), 1);
   const maxPrice = Math.max(...chartData.map(h => h.price), 1);
 
   return (
-    <div className="bg-white p-6 rounded-lg shadow">
-      <h2 className="text-xl font-semibold mb-4">Battery SOC and Actions</h2>
+    <div className="bg-green-50 dark:bg-green-900/10 border-green-200 dark:border-green-800 border-2 rounded-xl p-6 transition-all duration-200 hover:shadow-lg">
+      <h2 className="text-xl font-semibold mb-4 text-green-900 dark:text-green-100">
+        Battery SOC and Actions
+      </h2>
       <div className="h-80">
         <ResponsiveContainer width="100%" height="100%">
           <ComposedChart data={chartData}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="hour" interval={2} />
+            <CartesianGrid strokeDasharray="3 3" stroke={colors.grid} />
+            <XAxis 
+              dataKey="hour" 
+              interval={2} 
+              tick={{ fill: colors.text, fontSize: 12 }}
+              axisLine={{ stroke: colors.text }}
+              tickLine={{ stroke: colors.text }}
+            />
+            
+            {/* Left Y-axis for Battery SOC (%) */}
             <YAxis 
               yAxisId="left" 
-              domain={[0, Math.min(settings.totalCapacity + 5, Math.ceil(settings.totalCapacity * 1.15))]} 
-              tickFormatter={(value) => value.toFixed(0)}
-              label={{ value: 'Battery SOC (kWh)', angle: -90, position: 'insideLeft', dy: 50 }}
+              domain={[0, 100]} 
+              tickFormatter={(value) => `${value.toFixed(0)}%`}
+              label={{ 
+                value: 'Battery SOC (%)', 
+                angle: -90, 
+                position: 'insideLeft', 
+                style: { textAnchor: 'middle', fill: colors.text } 
+              }}
+              tick={{ fill: colors.text, fontSize: 12 }}
+              axisLine={{ stroke: colors.text }}
+              tickLine={{ stroke: colors.text }}
             />
+            
+            {/* Right Y-axis for Electricity Price (SEK/kWh) */}
             <YAxis 
               yAxisId="right" 
               orientation="right" 
               domain={[0, Math.ceil(maxPrice * 1.2 * 10) / 10]}
-              tickFormatter={(value) => value.toFixed(2)}
-              label={{ value: 'Price (SEK/kWh)', angle: 90, position: 'insideRight', dx: 0, dy: -50 }}
+              tickFormatter={(value) => `${value.toFixed(2)}`}
+              label={{ 
+                value: 'Price (SEK/kWh)', 
+                angle: 90, 
+                position: 'insideRight', 
+                style: { textAnchor: 'middle', fill: colors.text } 
+              }}
+              tick={{ fill: colors.text, fontSize: 12 }}
+              axisLine={{ stroke: colors.text }}
+              tickLine={{ stroke: colors.text }}
             />
+            
+            {/* Third Y-axis for Battery Actions (kWh) */}
             <YAxis 
               yAxisId="action"
               orientation="right"
-              axisLine={false}
-              tickLine={false}
-              tick={false}
               domain={[-maxAction * 1.2, maxAction * 1.2]}
+              tickFormatter={(value) => `${value.toFixed(1)}`}
+              axisLine={{ stroke: '#8884d8', strokeWidth: 2 }}
+              tickLine={{ stroke: '#8884d8' }}
+              tick={{ fill: '#8884d8', fontSize: 12 }}
+              label={{ 
+                value: 'Battery Action (kWh)', 
+                angle: 90, 
+                position: 'outside',
+                offset: 40,
+                style: { textAnchor: 'middle', fill: '#8884d8' } 
+              }}
             />
             
             <Tooltip 
+              contentStyle={{
+                backgroundColor: colors.tooltip,
+                border: `1px solid ${colors.tooltipBorder}`,
+                borderRadius: '8px',
+                color: colors.text
+              }}
               formatter={(value, name) => {
                 if (name === 'price') return [`${Number(value).toFixed(2)} SEK/kWh`, 'Electricity Price'];
-                if (name === 'batteryLevel') return [`${Number(value).toFixed(2)} kWh`, 'Battery SOC'];
-                if (name === 'action') return [`${Number(value).toFixed(2)} kWh`, 'Battery Action'];
+                if (name === 'batterySocPercent') return [`${Number(value).toFixed(1)}%`, 'Battery SOC'];
+                if (name === 'action') {
+                  const actionValue = Number(value);
+                  const actionType = actionValue >= 0 ? 'Charging' : 'Discharging';
+                  return [`${Math.abs(actionValue).toFixed(2)} kWh ${actionType}`, 'Battery Action'];
+                }
                 return [Number(value).toFixed(2), name];
               }}
               labelFormatter={(label) => `Hour: ${label}`}
+              labelStyle={{ color: colors.text }}
             />
-            <Legend />
+            <Legend wrapperStyle={{ color: colors.text }} />
             
-            {/* Add reference lines for battery limits */}
             <ReferenceLine 
               yAxisId="left" 
-              y={settings.reservedCapacity || 0} 
+              y={(settings.reservedCapacity || 0) / (settings.totalCapacity || 30) * 100} 
               stroke="#ef4444" 
               strokeDasharray="3 3" 
-              label={`Min (${(settings.reservedCapacity || 0).toFixed(1)} kWh)`}
+              label={{ value: "Min SOC", style: { fill: colors.text } }}
             />
-            <ReferenceLine 
-              yAxisId="left" 
-              y={settings.totalCapacity || 30} 
-              stroke="#ef4444" 
-              strokeDasharray="3 3" 
-              label={`Max (${(settings.totalCapacity || 30).toFixed(1)} kWh)`}
-            />
-            <ReferenceLine yAxisId="action" y={0} stroke="#666666" />
+            <ReferenceLine yAxisId="action" y={0} stroke={colors.grid} strokeDasharray="2 2" />
             
-            {/* Battery SOC as filled area */}
             <Area
               yAxisId="left"
               type="monotone"
-              dataKey="batteryLevel"
+              dataKey="batterySocPercent"
               stroke="#16a34a"
               strokeWidth={2}
               fill="#16a34a"
@@ -112,7 +151,6 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
               name="Battery SOC"
             />
             
-            {/* Price as line */}
             <Line
               yAxisId="right"
               type="monotone"
@@ -123,58 +161,45 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
               dot={{ fill: '#2563eb', r: 1 }}
             />
             
-            {/* Battery actions as bars */}
             <Bar 
               yAxisId="action" 
               dataKey="action" 
               name="Battery Action" 
               radius={[2, 2, 2, 2]}
-            >
-              {chartData.map((entry, index) => {
-                // Color based on charge/discharge and data source
-                let fillColor;
-                if (entry.action >= 0) {
-                  fillColor = '#16a34a'; // Green for charging
-                } else {
-                  fillColor = '#dc2626'; // Red for discharging
-                }
+              shape={(props: any) => {
+                const { payload, x, y, width, height } = props;
+                const action = payload.action || 0;
+                const isActual = payload.isActual;
                 
-                // Adjust opacity based on data source
-                const opacity = entry.dataSource === 'actual' ? 0.9 : 0.6;
+                const fillColor = action >= 0 ? '#16a34a' : '#dc2626';
+                const opacity = isActual ? 0.9 : 0.6;
                 
                 return (
                   <rect 
-                    key={`cell-${index}`} 
+                    x={x} 
+                    y={action >= 0 ? y : y + height} 
+                    width={width} 
+                    height={Math.abs(height)} 
                     fill={fillColor}
                     fillOpacity={opacity}
+                    rx={2}
+                    ry={2}
                   />
                 );
-              })}
-            </Bar>
+              }}
+            />
           </ComposedChart>
         </ResponsiveContainer>
       </div>
       
-      {/* Legend for data types */}
-      <div className="mt-4 flex items-center justify-center space-x-6 text-sm">
-        <div className="flex items-center">
-          <div className="w-4 h-4 bg-green-600 mr-2"></div>
-          <span>Charging (Actual)</span>
-        </div>
-        <div className="flex items-center">
-          <div className="w-4 h-4 bg-green-600 opacity-60 mr-2"></div>
-          <span>Charging (Predicted)</span>
-        </div>
-        <div className="flex items-center">
-          <div className="w-4 h-4 bg-red-600 mr-2"></div>
-          <span>Discharging (Actual)</span>
-        </div>
-        <div className="flex items-center">
-          <div className="w-4 h-4 bg-red-600 opacity-60 mr-2"></div>
-          <span>Discharging (Predicted)</span>
-        </div>
+      <div className="mt-3 text-sm text-green-800 dark:text-green-200 opacity-70">
+        <p>
+          <strong>Green area:</strong> Battery state of charge (SOC) throughout the day.
+          <strong>Blue line:</strong> Electricity price variations.
+          <strong>Bars:</strong> Battery charging (green) and discharging (red) actions. 
+          Solid bars show actual data, semi-transparent bars show predicted actions.
+        </p>
       </div>
-
     </div>
   );
 };

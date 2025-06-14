@@ -60,7 +60,7 @@ class BESSController:
 
         # Initialize Home Assistant API Controller
         self.ha_controller = self._init_ha_controller()
-        self.ha_controller.set_test_mode(True)
+        self.ha_controller.set_test_mode(False)
 
         # Create Battery System Manager
         price_source = HomeAssistantSource(self.ha_controller)

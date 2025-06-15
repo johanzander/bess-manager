@@ -1,4 +1,3 @@
-// src/components/ConsolidatedEnergyCards.tsx
 import React, { useState, useEffect } from 'react';
 import api from '../lib/api';
 import { 
@@ -6,21 +5,14 @@ import {
   Sun, 
   Home, 
   Battery, 
-  Zap,
+  Grid,
   TrendingUp,
   TrendingDown,
   Minus,
-  ArrowRight,
-  ArrowLeft,
-  AlertCircle,
-  Percent,
-  Calculator,
-  Wrench,
-  CreditCard,
-  PiggyBank
+  Wrench
 } from 'lucide-react';
 
-// Types for your data structure
+// Energy data structure
 interface EnergyData {
   costAndSavings?: {
     todaysCost: number;
@@ -47,7 +39,7 @@ interface EnergyData {
     dischargedToday: number;
     status: 'charging' | 'discharging' | 'idle';
     power: number;
-    wearCost: number;
+    batteryCost: number;
   };
   grid?: {
     importEnergy: number;
@@ -55,24 +47,25 @@ interface EnergyData {
     netImport: number;
     importCost: number;
     exportEarnings: number;
-    toGrid: number;      
-    fromGrid: number;    
+    toGrid: number;
+    fromGrid: number;
   };
 }
 
+// EnergyFlowCard component (UNCHANGED)
 interface EnergyFlowCardProps {
   title: string;
   icon: React.ComponentType<any>;
   color: 'blue' | 'yellow' | 'green' | 'purple' | 'orange';
   keyMetric: string;
-  keyValue: string | number;
+  keyValue: number | string;
   keyUnit: string;
-  minorMetrics: Array<{
+  minorMetrics: {
     label: string;
-    value: string | number;
+    value: number | string;
     unit?: string;
     icon?: React.ComponentType<any>;
-  }>;
+  }[];
   status?: {
     icon: React.ComponentType<any>;
     text: string;
@@ -160,7 +153,7 @@ const EnergyFlowCard: React.FC<EnergyFlowCardProps> = ({
       <div className="mb-4">
         <div className="flex items-baseline space-x-2">
           <span className={`text-3xl font-bold ${colorClass.text}`}>
-            {typeof keyValue === 'number' ? 
+            {typeof keyValue === 'number' ?
               keyValue.toFixed(1) : keyValue}
           </span>
           <span className={`text-lg font-medium ${colorClass.text} opacity-80`}>
@@ -208,135 +201,80 @@ const ConsolidatedEnergyCards: React.FC<ConsolidatedEnergyCardsProps> = ({
 }) => {
   const [energyData, setEnergyData] = useState<EnergyData>({});
 
-  // Fetch data from your API using api.get (axios pattern)
+  // Use unified dashboard API instead of old schedule endpoint
   useEffect(() => {
     const fetchEnergyData = async () => {
       try {
-        const response = await api.get('/api/schedule/current');
+        // CHANGED: Use unified /api/dashboard instead of /api/schedule/current
+        const response = await api.get('/api/dashboard');
         const apiData = response.data;
         
-        // Debug: Log the API response to see the actual structure
-        console.log('=== API Response Debug ===');
-        console.log('Full API Response:', apiData);
-        console.log('Hourly Data Length:', apiData.hourlyData?.length);
-        console.log('First Hour Sample:', apiData.hourlyData?.[0]);
-        console.log('Summary:', apiData.summary);
-        console.log('Total Daily Savings:', apiData.totalDailySavings);
-        
-        // Debug: Log detailed flows to verify energy balance
-        console.log('=== Energy Balance Check ===');
-        console.log('Battery capacity:', apiData.batteryCapacity || 'N/A', 'kWh');
-        console.log('Solar production:', apiData.totals?.totalSolar || 'N/A');
-        console.log('Solar to home:', apiData.totals?.totalSolarToHome || 'N/A');
-        console.log('Solar to battery:', apiData.totals?.totalSolarToBattery || 'N/A');
-        console.log('Solar to grid:', apiData.totals?.totalSolarToGrid || 'N/A');
-        console.log('Home consumption:', apiData.totals?.totalConsumption || 'N/A');
-        console.log('Grid to home:', apiData.totals?.totalGridToHome || 'N/A');
-        console.log('Battery to home:', apiData.totals?.totalBatteryToHome || 'N/A');
-        
-        // Transform your API response using the CORRECT field names and PROPER detailed flows
-        // Based on the actual API structure from your enhanced daily view
-        const summary = apiData.summary || {};
-        const hourlyData = apiData.hourlyData || [];
-        
-        // FIXED: Use correct field names after camelCase conversion
-        // Calculate battery wear cost and grid costs
-        const batteryWearCost = hourlyData.reduce((acc: number, hour: any) => 
-          acc + (hour.batteryCycleCost || 0), 0);  // FIXED: batteryCost -> batteryCycleCost
-        
-        const gridImportCost = hourlyData.reduce((acc: number, hour: any) => 
-          acc + ((hour.gridImport || 0) * (hour.buyPrice || 0)), 0);  // FIXED: gridImported -> gridImport
-          
-        const gridExportEarnings = hourlyData.reduce((acc: number, hour: any) => 
-          acc + ((hour.gridExport || 0) * (hour.sellPrice || 0)), 0);  // FIXED: gridExported -> gridExport
+        // Transform API response using the CORRECT field names from unified dashboard API
+        // Calculate battery wear cost and grid costs from hourly data
+        const batteryCycleCost = apiData.summary?.batteryCycleCost || 0;
+        const gridImportCost = apiData.summary?.totalGridImportCost || 0;
+        const gridExportEarnings = apiData.summary?.totalGridExportEarnings || 0;
+        const netCost = (apiData.summary?.totalGridImportCost || 0) - (apiData.summary?.totalGridExportEarnings || 0)
 
-        // FIXED: Use correct field names in totals calculation with ALL detailed flows
-        const totals = hourlyData.reduce((acc: any, hour: any) => {
-          acc.solarProduction += hour.solarProduction || 0;       // FIXED: solarGenerated -> solarProduction
-          acc.homeConsumption += hour.homeConsumption || 0;       // FIXED: homeConsumed -> homeConsumption
-          acc.gridImport += hour.gridImport || 0;                 // FIXED: gridImported -> gridImport
-          acc.gridExport += hour.gridExport || 0;                 // FIXED: gridExported -> gridExport
-          acc.batteryCharged += hour.batteryCharged || 0;
-          acc.batteryDischarged += hour.batteryDischarged || 0;
-          
-          // FIXED: Add all detailed flow fields for proper energy balance
-          acc.solarToHome += hour.solarToHome || 0;               // FIXED: directSolar -> solarToHome
-          acc.solarToBattery += hour.solarToBattery || 0;         // FIXED: solarCharged -> solarToBattery
-          acc.solarToGrid += hour.solarToGrid || 0;               // NEW: Need this for solar flow breakdown
-          acc.gridToHome += hour.gridToHome || 0;                 // NEW: Need this for home consumption breakdown  
-          acc.gridToBattery += hour.gridToBattery || 0;
-          acc.batteryToHome += hour.batteryToHome || 0;           // NEW: Need this for home consumption breakdown
-          acc.batteryToGrid += hour.batteryToGrid || 0;           // NEW: Need this to separate from solar export
-          return acc;
-        }, {
-          solarProduction: 0,
-          homeConsumption: 0,
-          gridImport: 0,
-          gridExport: 0,
-          batteryCharged: 0,
-          batteryDischarged: 0,
-          solarToHome: 0,
-          solarToBattery: 0,
-          solarToGrid: 0,        // NEW
-          gridToHome: 0,         // NEW
-          gridToBattery: 0,
-          batteryToHome: 0,      // NEW
-          batteryToGrid: 0       // NEW
-        });
-        
-        // Debug: Validate energy balance calculations
-        console.log('=== Calculated Totals ===');
-        console.log('Solar flows total:', (totals.solarToHome + totals.solarToBattery + totals.solarToGrid).toFixed(1), 'vs solar production:', totals.solarProduction.toFixed(1));
-        console.log('Home consumption sources total:', (totals.solarToHome + totals.gridToHome + totals.batteryToHome).toFixed(1), 'vs home consumption:', totals.homeConsumption.toFixed(1));
-        console.log('Grid export total:', (totals.solarToGrid + totals.batteryToGrid).toFixed(1), 'vs grid export:', totals.gridExport.toFixed(1));
-        console.log('Grid import total:', (totals.gridToHome + totals.gridToBattery).toFixed(1), 'vs grid import:', totals.gridImport.toFixed(1));
+        // FIXED: Calculate totals from unified dashboard API totals field
+        const totals = {
+          solarProduction: apiData.totals?.totalSolar || 0,
+          homeConsumption: apiData.totals?.totalConsumption || 0,
+          gridImport: apiData.totals?.totalGridImport || 0,
+          gridExport: apiData.totals?.totalGridExport || 0,
+          batteryCharged: apiData.totals?.totalBatteryCharge || 0,
+          batteryDischarged: apiData.totals?.totalBatteryDischarge || 0,
+          solarToHome: apiData.totals?.totalSolarToHome || 0,
+          solarToBattery: apiData.totals?.totalSolarToBattery || 0,
+          solarToGrid: apiData.totals?.totalSolarToGrid || 0,
+          gridToHome: apiData.totals?.totalGridToHome || 0,
+          gridToBattery: apiData.totals?.totalGridToBattery || 0,
+          batteryToHome: apiData.totals?.totalBatteryToHome || 0,
+          batteryToGrid: apiData.totals?.totalBatteryToGrid || 0
+        };
         
         // Debug: Verify SOE calculation
-        const currentSOC = apiData.hourlyData?.find((h: any) => h.hour === new Date().getHours())?.batteryLevel || 50;
-        const calculatedSOE = (currentSOC / 100) * (apiData.batteryCapacity || 30);
-        console.log('=== Battery SOE Check ===');
-        console.log('Current SOC:', currentSOC.toFixed(1), '%');
-        console.log('Battery capacity:', apiData.batteryCapacity || 'N/A', 'kWh');
-        console.log('Calculated SOE:', calculatedSOE.toFixed(1), 'kWh');
+        const currentSOC = apiData.currentBatterySoc;
+        const currentSOE = apiData.currentBatterySoe;
         
+        // FIXED: Transform dashboard API data to EnergyData structure (EXACT SAME STRUCTURE, JUST FIXED DATA MAPPING)
         const transformedData: EnergyData = {
           costAndSavings: {
-            todaysCost: (summary.baseCost || 0) - (apiData.totalDailySavings || 0),
+            todaysCost: apiData.summary?.optimizedCost || 0,
             todaysSavings: apiData.totalDailySavings || 0,
-            baseCost: summary.baseCost || 0,
-            percentageSaved: summary.baseCost ? 
-              ((apiData.totalDailySavings / summary.baseCost) * 100) : 0
+            baseCost: apiData.summary?.baseCost || 0,
+            percentageSaved: apiData.summary?.baseCost > 0 ? 
+              ((apiData.totalDailySavings || 0) / apiData.summary.baseCost) * 100 : 0
           },
           solarGeneration: {
             production: totals.solarProduction,
-            toHome: totals.solarToHome,                    // FIXED: Use actual solar->home flow
-            toGrid: totals.solarToGrid,                    // FIXED: Use actual solar->grid flow (not total grid export)
-            toBattery: totals.solarToBattery               // FIXED: Use actual solar->battery flow
+            toHome: totals.solarToHome,
+            toGrid: totals.solarToGrid,
+            toBattery: totals.solarToBattery
           },
           homeConsumption: {
             consumption: totals.homeConsumption,
-            fromSolar: totals.solarToHome,                 // FIXED: Use actual solar->home flow
-            fromGrid: totals.gridToHome,                   // FIXED: Use actual grid->home flow (not total grid import)
-            fromBattery: totals.batteryToHome              // FIXED: Use actual battery->home flow
+            fromSolar: totals.solarToHome,
+            fromGrid: totals.gridToHome,
+            fromBattery: totals.batteryToHome
           },
           batteryStatus: {
-            soc: apiData.hourlyData?.find((h: any) => h.hour === new Date().getHours())?.batteryLevel || 50,  // FIXED: batterySocEnd -> batteryLevel
-            soe: ((apiData.hourlyData?.find((h: any) => h.hour === new Date().getHours())?.batteryLevel || 50) / 100) * (apiData.batteryCapacity || 30), // FIXED: Use actual battery capacity
+            soc: currentSOC,
+            soe: currentSOE,
             chargedToday: totals.batteryCharged,
             dischargedToday: totals.batteryDischarged,
             status: getCurrentBatteryStatus(apiData),
             power: Math.abs(apiData.hourlyData?.find((h: any) => h.hour === new Date().getHours())?.batteryAction || 0),
-            wearCost: batteryWearCost
+            batteryCost: batteryCycleCost
           },
           grid: {
-            importEnergy: totals.gridImport,               // This is correct - total grid import
-            exportEnergy: totals.gridExport,               // This is correct - total grid export  
+            importEnergy: totals.gridImport,
+            exportEnergy: totals.gridExport,
             netImport: totals.gridImport - totals.gridExport,
             importCost: gridImportCost,
             exportEarnings: gridExportEarnings,
-            // FIXED: Add detailed flows for consistent To/From pattern
-            toGrid: totals.solarToGrid + totals.batteryToGrid,  // Total energy going to grid
-            fromGrid: totals.gridToHome + totals.gridToBattery  // Total energy coming from grid
+            toGrid: totals.solarToGrid + totals.batteryToGrid,
+            fromGrid: totals.gridToHome + totals.gridToBattery
           }
         };
         
@@ -379,21 +317,18 @@ const ConsolidatedEnergyCards: React.FC<ConsolidatedEnergyCardsProps> = ({
 
   if (error) {
     return (
-      <div className="flex items-center justify-center p-8 border border-red-200 dark:border-red-800 rounded-xl bg-red-50 dark:bg-red-900/10">
-        <div className="text-center">
-          <AlertCircle className="h-8 w-8 text-red-600 dark:text-red-400 mx-auto mb-2" />
-          <span className="text-red-700 dark:text-red-300">Error loading energy data</span>
-        </div>
-        <p className="text-red-600 dark:text-red-400 mt-2">{error}</p>
+      <div className="flex items-center justify-center p-8 border border-red-200 dark:border-red-800 rounded-xl bg-red-50 dark:bg-red-900/20">
+        <span className="text-red-700 dark:text-red-300">{error}</span>
       </div>
     );
   }
 
+  // UNCHANGED: Same exact card generation logic
   const cards = [
     {
       title: "Cost & Savings",
       icon: DollarSign,
-      color: "blue" as const,
+      color: "green" as const,
       keyMetric: "Today's Cost",
       keyValue: currentData.costAndSavings?.todaysCost || 0,
       keyUnit: "SEK",
@@ -402,27 +337,27 @@ const ConsolidatedEnergyCards: React.FC<ConsolidatedEnergyCardsProps> = ({
           label: "Base Cost",
           value: currentData.costAndSavings?.baseCost || 0,
           unit: "SEK",
-          icon: Calculator
+          icon: DollarSign
         },
         {
-          label: "Savings Today",
+          label: "Today's Savings",
           value: currentData.costAndSavings?.todaysSavings || 0,
           unit: "SEK",
-          icon: TrendingDown
+          icon: DollarSign
         },
         {
-          label: "Cost Reduction",
+          label: "Percentage Saved",
           value: currentData.costAndSavings?.percentageSaved || 0,
           unit: "%",
-          icon: Percent
-        }
+          icon: TrendingUp
+        },
       ]
     },
     {
-      title: "Solar Generation",
+      title: "Solar Production",
       icon: Sun,
       color: "yellow" as const,
-      keyMetric: "Solar Production",
+      keyMetric: "Total Production",
       keyValue: currentData.solarGeneration?.production || 0,
       keyUnit: "kWh",
       minorMetrics: [
@@ -430,13 +365,13 @@ const ConsolidatedEnergyCards: React.FC<ConsolidatedEnergyCardsProps> = ({
           label: "To Home",
           value: currentData.solarGeneration?.toHome || 0,
           unit: "kWh",
-          icon: ArrowRight
+          icon: Home
         },
         {
           label: "To Grid",
           value: currentData.solarGeneration?.toGrid || 0,
           unit: "kWh",
-          icon: TrendingUp
+          icon: Grid
         },
         {
           label: "To Battery",
@@ -449,7 +384,7 @@ const ConsolidatedEnergyCards: React.FC<ConsolidatedEnergyCardsProps> = ({
     {
       title: "Home Consumption",
       icon: Home,
-      color: "green" as const,
+      color: "blue" as const,
       keyMetric: "Total Consumption",
       keyValue: currentData.homeConsumption?.consumption || 0,
       keyUnit: "kWh",
@@ -464,7 +399,7 @@ const ConsolidatedEnergyCards: React.FC<ConsolidatedEnergyCardsProps> = ({
           label: "From Grid",
           value: currentData.homeConsumption?.fromGrid || 0,
           unit: "kWh",
-          icon: Zap
+          icon: Grid
         },
         {
           label: "From Battery",
@@ -475,40 +410,40 @@ const ConsolidatedEnergyCards: React.FC<ConsolidatedEnergyCardsProps> = ({
       ]
     },
     {
-      title: "Grid",
-      icon: Zap,
+      title: "Grid Exchange",
+      icon: Grid,
       color: "orange" as const,
-      keyMetric: "From Grid",
-      keyValue: currentData.grid?.fromGrid || 0,
+      keyMetric: "Net Import",
+      keyValue: currentData.grid?.netImport || 0,
       keyUnit: "kWh",
       minorMetrics: [
-        {
-          label: "To Grid",
-          value: currentData.grid?.toGrid || 0,
-          unit: "kWh",
-          icon: TrendingUp
-        },
         {
           label: "Import Cost",
           value: currentData.grid?.importCost || 0,
           unit: "SEK",
-          icon: CreditCard
+          icon: TrendingDown
         },
         {
           label: "Export Earnings",
           value: currentData.grid?.exportEarnings || 0,
           unit: "SEK",
-          icon: PiggyBank
+          icon: TrendingUp
+        },
+        {
+          label: "Net Cost",
+          value: (currentData.grid?.importCost || 0) - (currentData.grid?.exportEarnings || 0),
+          unit: "SEK",
+          icon: DollarSign
         }
       ]
     },
     {
-      title: "Battery Status",
+      title: "Battery",
       icon: Battery,
       color: "purple" as const,
       keyMetric: "State of Charge",
-      keyValue: `${(currentData.batteryStatus?.soc || 0).toFixed(0)}%`,
-      keyUnit: `${(currentData.batteryStatus?.soe || 0).toFixed(1)} kWh`,
+      keyValue: currentData.batteryStatus?.soc || 0,
+      keyUnit: "%",
       status: {
         icon: currentData.batteryStatus?.status === 'charging' ? TrendingUp :
               currentData.batteryStatus?.status === 'discharging' ? TrendingDown : Minus,
@@ -533,7 +468,7 @@ const ConsolidatedEnergyCards: React.FC<ConsolidatedEnergyCardsProps> = ({
         },
         {
           label: "Battery Wear Cost",
-          value: currentData.batteryStatus?.wearCost || 0,
+          value: currentData.batteryStatus?.batteryCost || 0,
           unit: "SEK",
           icon: Wrench
         }

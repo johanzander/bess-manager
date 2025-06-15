@@ -105,7 +105,7 @@ export const EnergyFlowChart: React.FC<{
       actualData,
       predictedData,
       accuracy,
-      price: dailyViewHour?.electricity_price || dailyViewHour?.buy_price || 0,
+      price: dailyViewHour?.buy_price || 0,
       hasEnergyBalance: hasEnergyBalanceData,
       dailyViewSource: dailyViewHour?.data_source || 'none'
     };

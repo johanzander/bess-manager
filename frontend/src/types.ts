@@ -33,19 +33,8 @@ export interface HourlyData {
   // Legacy field for compatibility
   solarCharged?: number;
   
-  // API snake_case alternatives
-  battery_level?: number;
-  battery_action?: number;
-  battery_soc?: number;
-  grid_cost?: number;
-  battery_cost?: number;
-  total_cost?: number;
-  base_cost?: number;
-  solar_production?: number;
-  electricity_price?: number;
-  
   // API camelCase alternatives
-  electricityPrice?: number;
+  buyPrice?: number;
   batteryAction?: number;
   batterySoc?: number;
   homeConsumption?: number;
@@ -93,45 +82,9 @@ export interface ElectricitySettings {
   area: 'SE1' | 'SE2' | 'SE3' | 'SE4';
 }
 
-export interface EnhancedSummary {
-  gridOnlyCost: number;
-  solarOnlyCost: number;
-  batterySolarCost: number;
-  solarSavings: number;
-  solarOnlySavings?: number;  // Added field for solar-only savings
-  arbitrageSavings?: number;  // Added field for arbitrage savings
-  batterySavings: number;
-  totalSavings: number;
-  solarProduction: number;
-  directSolarUse: number;
-  solarExcess: number;
-  totalCharged: number;
-  totalDischarged: number;
-  totalChargeFromSolar?: number;  // Added field for battery charging from solar
-  totalChargeFromGrid?: number;   // Added field for battery charging from grid
-  totalGridExport?: number;       // Added field for total grid export
-  totalGridImport?: number;       // Added field for total grid import
-  totalBatteryGridConsumption?: number; // Added field for battery grid consumption
-  estimatedBatteryCycles: number;
-  totalConsumption?: number;
-  avgBuyPrice?: number;          // Added field for average buy price
-  avgSellPrice?: number;         // Added field for average sell price
-  totalImport?: number;
-}
-
-export interface EnergyProfile {
-  consumption: number[];
-  solar: number[];
-  battery_soc: number[];
-  battery_soe?: number[];
-  actualHours: number;
-}
-
 export interface ScheduleData {
   hourlyData: HourlyData[];
   summary: ScheduleSummary;
-  energyProfile?: EnergyProfile;
-  enhancedSummary?: EnhancedSummary;
 }
 
 export type HealthStatus = "OK" | "WARNING" | "ERROR" | "UNKNOWN";

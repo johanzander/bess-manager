@@ -19,9 +19,15 @@ def test_direct_price_initialization():
         tax_reduction=0.2,
     )
 
-    # Check calculations
-    assert pm.buy_prices[0] == (1.0 + 0.1) * 1.25 + 0.5
-    assert pm.sell_prices[0] == 1.0 + 0.2
+    # Check calculations with the updated formula:
+    # - Base price is now VAT-exclusive
+    # - Apply markup, then apply VAT, and add costs
+    expected_buy_price = (1.0 + 0.1) * 1.25 + 0.5
+    assert pm.buy_prices[0] == expected_buy_price
+    
+    # For sell price: add tax reduction to base price (VAT-exclusive)
+    expected_sell_price = 1.0 + 0.2
+    assert pm.sell_prices[0] == expected_sell_price
 
     # Check compatibility methods
     assert pm.get_buy_prices() == pm.buy_prices
@@ -76,16 +82,32 @@ def test_controller_price_fetching():
     # Get today's prices
     today_prices = pm.get_today_prices()
     assert len(today_prices) == 24
-    assert today_prices[0]["price"] == 1.0
-    assert today_prices[0]["buyPrice"] == (1.0 + 0.1) * 1.25 + 0.5
-    assert today_prices[0]["sellPrice"] == 1.0 + 0.2
+    # Note: HomeAssistantSource now removes VAT from prices before returning them
+    assert today_prices[0]["price"] == 1.0 / 1.25
+    
+    # Check calculations with the updated formula:
+    base_price = 1.0 / 1.25  # Price after VAT removal in HomeAssistantSource
+    expected_buy_price = (base_price + 0.1) * 1.25 + 0.5
+    assert today_prices[0]["buyPrice"] == expected_buy_price
+    
+    # For sell price: add tax reduction to base price (VAT-exclusive)
+    expected_sell_price = base_price + 0.2
+    assert today_prices[0]["sellPrice"] == expected_sell_price
 
     # Get tomorrow's prices
     tomorrow_prices = pm.get_tomorrow_prices()
     assert len(tomorrow_prices) == 24
-    assert tomorrow_prices[0]["price"] == 25.0
-    assert tomorrow_prices[0]["buyPrice"] == (25.0 + 0.1) * 1.25 + 0.5
-    assert tomorrow_prices[0]["sellPrice"] == 25.0 + 0.2
+    # Note: HomeAssistantSource now removes VAT from prices before returning them
+    assert tomorrow_prices[0]["price"] == 25.0 / 1.25
+    
+    # Calculate buy price with the updated formula
+    tomorrow_base_price = 25.0 / 1.25  # Price after VAT removal in HomeAssistantSource
+    tomorrow_expected_buy_price = (tomorrow_base_price + 0.1) * 1.25 + 0.5
+    assert tomorrow_prices[0]["buyPrice"] == tomorrow_expected_buy_price
+    
+    # For sell price: add tax reduction to base price (VAT-exclusive)
+    tomorrow_expected_sell_price = tomorrow_base_price + 0.2
+    assert tomorrow_prices[0]["sellPrice"] == tomorrow_expected_sell_price
 
 
 def test_mock_source():
@@ -104,5 +126,47 @@ def test_mock_source():
     today_prices = pm.get_today_prices()
     assert len(today_prices) == 4
     assert today_prices[0]["price"] == 1.0
-    assert today_prices[0]["buyPrice"] == (1.0 + 0.1) * 1.25 + 0.5
-    assert today_prices[0]["sellPrice"] == 1.0 + 0.2
+    
+    # Check calculations with the updated formula:
+    # MockSource prices are already VAT-exclusive, so no need to divide
+    expected_buy_price = (1.0 + 0.1) * 1.25 + 0.5
+    assert today_prices[0]["buyPrice"] == expected_buy_price
+    
+    # For sell price: add tax reduction to base price (VAT-exclusive)
+    expected_sell_price = 1.0 + 0.2
+    assert today_prices[0]["sellPrice"] == expected_sell_price
+
+
+def test_home_assistant_source_vat_parameter():
+    """Test that the VAT multiplier parameter in HomeAssistantSource works correctly."""
+    mock_controller = MagicMock()
+    mock_controller.sensors = {
+        "nordpool_kwh_today": "sensor.nordpool_kwh_se3_today",
+    }
+
+    today_date = datetime.now().date()
+
+    # Create test data with 24 hours, all with price value of 2.0
+    raw_today_data = []
+    for hour in range(24):
+        raw_today_data.append({
+            "start": f"{today_date.isoformat()}T{hour:02d}:00:00+01:00",
+            "value": 2.0,  # VAT-inclusive price
+        })
+
+    def mock_api_request(method, path):
+        if "nordpool_kwh_se3_today" in path:
+            return {"attributes": {"raw_today": raw_today_data}}
+        return None
+
+    mock_controller._api_request = mock_api_request
+
+    # Test with default VAT multiplier (1.25)
+    ha_source_default = HomeAssistantSource(mock_controller)
+    prices_default = ha_source_default.get_prices_for_date(today_date)
+    assert prices_default[0] == 1.6  # 2.0 / 1.25 = 1.6
+
+    # Test with custom VAT multiplier (1.20 for 20% VAT)
+    ha_source_custom = HomeAssistantSource(mock_controller, vat_multiplier=1.20)
+    prices_custom = ha_source_custom.get_prices_for_date(today_date)
+    assert round(prices_custom[0], 4) == round(2.0 / 1.20, 4)  # ~1.6667

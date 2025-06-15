@@ -79,7 +79,11 @@ class BatterySystemManager:
 
         # Initialize price manager
         if not price_source:
-            price_source = HomeAssistantSource(controller)
+            # Create HomeAssistantSource with the same VAT multiplier as used in PriceManager
+            price_source = HomeAssistantSource(
+                controller, 
+                vat_multiplier=self.price_settings.vat_multiplier
+            )
 
         self._price_manager = PriceManager(
             price_source=price_source,

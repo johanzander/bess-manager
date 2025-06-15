@@ -23,7 +23,7 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
   const chartData = hourlyData.map((hour, index) => {
     const batteryAction = hour.battery_action || 0;
     const batterySocPercent = hour.battery_soc_end || hour.batteryLevel || 0;
-    const price = hour.electricity_price || hour.buy_price || hour.price || 0;
+    const price = hour.buy_price || 0;
     const hourNum = typeof hour.hour === 'number' ? hour.hour : index;
     
     return {

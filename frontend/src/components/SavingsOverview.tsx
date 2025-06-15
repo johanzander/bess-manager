@@ -2,77 +2,59 @@ import React, { useState, useEffect } from 'react';
 import { BatterySettings } from '../types';
 import api from '../lib/api';
 
-// Interface for the new DailyView API response
-interface DailyViewHourlyData {
+  // Updated interface based on consolidated dashboard API
+interface DashboardHourlyData {
   hour: number;
-  data_source: 'actual' | 'predicted';
-  solar_generated: number;
-  home_consumed: number;
-  grid_imported: number;
-  grid_exported: number;
-  battery_charged: number;
-  battery_discharged: number;
-  battery_soc_start: number;
-  battery_soc_end: number;
-  electricity_price: number;
-  hourly_cost: number;
-  hourly_savings: number;
-  battery_action: number | null;
-  battery_cycle_cost: number;
-  is_actual: boolean;
-  is_predicted: boolean;
+  dataSource: 'actual' | 'predicted';
+  solarGenerated: number;
+  homeConsumed: number;
+  gridImported: number;
+  gridExported: number;
+  batteryCharged: number;
+  batteryDischarged: number;
+  batterySocStart: number;
+  batterySocEnd: number;
+  buyPrice: number;
+  hourlyCost: number;
+  hourlySavings: number;
+  batteryAction: number | string; // Can be numeric or string
+  isActual: boolean;
+  isPredicted: boolean;
 }
 
-interface DailyViewResponse {
+interface DashboardResponse {
   date: string;
-  current_hour: number;
-  total_daily_savings: number;
-  actual_savings_so_far: number;
-  predicted_remaining_savings: number;
-  actual_hours_count: number;
-  predicted_hours_count: number;
-  hourly_data: DailyViewHourlyData[];
-  battery_capacity?: number; // Optional battery capacity from backend
+  currentHour: number;
+  totalDailySavings: number;
+  actualSavingsSoFar: number;
+  predictedRemainingSavings: number;
+  actualHoursCount: number;
+  predictedHoursCount: number;
+  hourlyData: DashboardHourlyData[];
+  batteryCapacity: number;
 }
 
-interface SimplifiedSavingsTableProps {
+interface SavingsOverviewProps {
   settings: BatterySettings;
 }
 
-export const SavingsOverview: React.FC<SimplifiedSavingsTableProps> = ({
+export const SavingsOverview: React.FC<SavingsOverviewProps> = ({
   settings
 }) => {
-  const [dailyView, setDailyView] = useState<DailyViewResponse | null>(null);
-  const [batterySettings, setBatterySettings] = useState<any>(null);
+  const [dashboardData, setDashboardData] = useState<DashboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Helper function to calculate SOE from SOC
-  const calculateSOE = (socPercent: number, batteryCapacity: number = 30.0): number => {
-    return (socPercent / 100) * batteryCapacity;
-  };
-
-  // Get battery capacity from API response (snake_case), settings prop (camelCase), or use default
-  const batteryCapacity = batterySettings?.total_capacity || batterySettings?.totalCapacity || settings?.totalCapacity || 30.0;
-
-  // Fetch battery settings and daily view data
+  // Fetch data using the new consolidated dashboard API
   useEffect(() => {
     const fetchData = async () => {
       try {
         setLoading(true);
-        
-        // Fetch battery settings
-        const batteryResponse = await api.get('/api/settings/battery');
-        setBatterySettings(batteryResponse.data);
-        
-        // Fetch daily view
-        const dailyResponse = await api.get('/api/v2/daily_view');
-        setDailyView(dailyResponse.data);
-
+        const response = await api.get('/api/dashboard');
+        setDashboardData(response.data);
         setError(null);
-        
       } catch (err) {
-        console.error('Error fetching data:', err);
+        console.error('Error fetching dashboard data:', err);
         setError(err instanceof Error ? err.message : 'Unknown error');
       } finally {
         setLoading(false);
@@ -110,7 +92,7 @@ export const SavingsOverview: React.FC<SimplifiedSavingsTableProps> = ({
     );
   }
 
-  if (!dailyView) {
+  if (!dashboardData) {
     return (
       <div className="bg-white p-6 rounded-lg shadow">
         <div className="text-center text-gray-500">No schedule data available</div>
@@ -118,26 +100,28 @@ export const SavingsOverview: React.FC<SimplifiedSavingsTableProps> = ({
     );
   }
 
+  //
+
   // Calculate summary data from the hourly data
-  const totalConsumption = dailyView.hourly_data.reduce((sum, h) => sum + h.home_consumed, 0);
-  const totalSolar = dailyView.hourly_data.reduce((sum, h) => sum + h.solar_generated, 0);
-  const totalGridImport = dailyView.hourly_data.reduce((sum, h) => sum + h.grid_imported, 0);
-  const totalGridExport = dailyView.hourly_data.reduce((sum, h) => sum + h.grid_exported, 0);
-  const totalBatteryCharged = dailyView.hourly_data.reduce((sum, h) => sum + h.battery_charged, 0);
-  const totalBatteryDischarged = dailyView.hourly_data.reduce((sum, h) => sum + h.battery_discharged, 0);
+  const totalConsumption = dashboardData.hourlyData.reduce((sum, h) => sum + h.homeConsumed, 0);
+  const totalSolar = dashboardData.hourlyData.reduce((sum, h) => sum + h.solarGenerated, 0);
+  const totalGridImport = dashboardData.hourlyData.reduce((sum, h) => sum + h.gridImported, 0);
+  const totalGridExport = dashboardData.hourlyData.reduce((sum, h) => sum + h.gridExported, 0);
+  const totalBatteryCharged = dashboardData.hourlyData.reduce((sum, h) => sum + h.batteryCharged, 0);
+  const totalBatteryDischarged = dashboardData.hourlyData.reduce((sum, h) => sum + h.batteryDischarged, 0);
   const netBatteryAction = totalBatteryCharged - totalBatteryDischarged;
   
   // Calculate base cost (grid-only scenario)
-  const baseCost = dailyView.hourly_data.reduce((sum, h) => sum + (h.home_consumed * h.electricity_price), 0);
+  const baseCost = dashboardData.hourlyData.reduce((sum, h) => sum + (h.homeConsumed * h.buyPrice), 0);
   
   // Actual optimized cost
-  const optimizedCost = dailyView.hourly_data.reduce((sum, h) => sum + h.hourly_cost, 0);
+  const optimizedCost = dashboardData.hourlyData.reduce((sum, h) => sum + h.hourlyCost, 0);
   
   // Total savings from optimization
-  const totalSavings = dailyView.total_daily_savings;
+  const totalSavings = dashboardData.totalDailySavings;
 
   // Average price
-  const avgPrice = dailyView.hourly_data.reduce((sum, h) => sum + h.electricity_price, 0) / dailyView.hourly_data.length;
+  const avgPrice = dashboardData.hourlyData.reduce((sum, h) => sum + h.buyPrice, 0) / dashboardData.hourlyData.length;
 
   const summary = {
     baseCost,
@@ -146,90 +130,84 @@ export const SavingsOverview: React.FC<SimplifiedSavingsTableProps> = ({
   };
 
   // Calculate final SOE for the totals row
-  const finalHour = dailyView.hourly_data[dailyView.hourly_data.length - 1];
-  const finalSOE = finalHour ? calculateSOE(finalHour.battery_soc_end, batteryCapacity) : 0;
-
-  // Debug logging
-  console.log('Battery capacity being used:', batteryCapacity);
-  console.log('batterySettings?.total_capacity:', batterySettings?.total_capacity);
-  console.log('batterySettings?.totalCapacity:', batterySettings?.totalCapacity);
-  console.log('settings?.totalCapacity:', settings?.totalCapacity);
+  const finalHour = dashboardData.hourlyData[dashboardData.hourlyData.length - 1];
+  const finalSOE = finalHour ? (finalHour.batterySocEnd / 100) * (dashboardData.batteryCapacity || 30) : 0;
 
   return (
-    <div className="bg-white p-6 rounded-lg shadow overflow-x-auto">
-      {/* Summary Cards at Top */}
+    <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow overflow-x-auto">
+      <div className="mb-6">
+        <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">Simple Energy Overview</h2>
+        <p className="text-sm text-gray-600 dark:text-gray-300">
+          Hourly breakdown showing energy flows, battery actions, and savings. Current hour highlighted in blue.
+        </p>
+      </div>
+
+      {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-        <div className="bg-red-50 p-4 rounded-lg text-center border">
-          <div className="text-2xl font-bold text-red-600">{summary.baseCost.toFixed(2)}</div>
-          <div className="text-sm text-gray-600">Grid-Only Cost (SEK)</div>
-          <div className="text-xs text-gray-500">What you would have paid</div>
+        <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg text-center border dark:border-gray-600">
+          <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">{baseCost.toFixed(2)}</div>
+          <div className="text-sm text-gray-600 dark:text-gray-300">Base Cost (SEK)</div>
+          <div className="text-xs text-gray-500 dark:text-gray-400">Grid-only scenario</div>
         </div>
         
-        <div className="bg-blue-50 p-4 rounded-lg text-center border">
-          <div className="text-2xl font-bold text-blue-600">{summary.optimizedCost.toFixed(2)}</div>
-          <div className="text-sm text-gray-600">Actual Cost (SEK)</div>
-          <div className="text-xs text-gray-500">With solar + battery</div>
+        <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-lg text-center border dark:border-gray-600">
+          <div className="text-2xl font-bold text-green-600 dark:text-green-400">{optimizedCost.toFixed(2)}</div>
+          <div className="text-sm text-gray-600 dark:text-gray-300">Actual Cost (SEK)</div>
+          <div className="text-xs text-gray-500 dark:text-gray-400">With optimization</div>
         </div>
-        
-        <div className="bg-green-50 p-4 rounded-lg text-center border">
-          <div className="text-2xl font-bold text-green-600">{summary.savings.toFixed(2)}</div>
-          <div className="text-sm text-gray-600">Total Savings (SEK)</div>
-          <div className="text-xs text-gray-500">{((summary.savings / summary.baseCost) * 100).toFixed(1)}% saved</div>
+
+        <div className="bg-purple-50 dark:bg-purple-900/20 p-4 rounded-lg text-center border dark:border-gray-600">
+          <div className="text-2xl font-bold text-purple-600 dark:text-purple-400">{totalSavings.toFixed(2)}</div>
+          <div className="text-sm text-gray-600 dark:text-gray-300">Savings (SEK)</div>
+          <div className="text-xs text-gray-500 dark:text-gray-400">{((totalSavings / baseCost) * 100).toFixed(1)}% saved</div>
         </div>
       </div>
 
       {/* Simplified Hourly Table */}
-      <table className="min-w-full divide-y divide-gray-200">
-        <thead className="bg-gray-50">
+      <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+        <thead className="bg-gray-50 dark:bg-gray-700">
           <tr>
-            <th className="px-3 py-2 text-left text-xs font-medium text-gray-800 uppercase tracking-wider border">
+            <th className="px-3 py-2 text-left text-xs font-medium text-gray-800 dark:text-gray-200 uppercase tracking-wider border dark:border-gray-600">
               Hour
             </th>
-            <th className="px-3 py-2 text-center text-xs font-medium text-gray-800 uppercase tracking-wider border">
+            <th className="px-3 py-2 text-center text-xs font-medium text-gray-800 dark:text-gray-200 uppercase tracking-wider border dark:border-gray-600">
               Price
             </th>
-            <th className="px-3 py-2 text-center text-xs font-medium text-gray-800 uppercase tracking-wider border">
+            <th className="px-3 py-2 text-center text-xs font-medium text-gray-800 dark:text-gray-200 uppercase tracking-wider border dark:border-gray-600">
               Solar
             </th>
-            <th className="px-3 py-2 text-center text-xs font-medium text-gray-800 uppercase tracking-wider border">
+            <th className="px-3 py-2 text-center text-xs font-medium text-gray-800 dark:text-gray-200 uppercase tracking-wider border dark:border-gray-600">
               Consumption
             </th>
-            <th className="px-3 py-2 text-center text-xs font-medium text-gray-800 uppercase tracking-wider border">
+            <th className="px-3 py-2 text-center text-xs font-medium text-gray-800 dark:text-gray-200 uppercase tracking-wider border dark:border-gray-600">
               Battery Action
             </th>
-            <th className="px-3 py-2 text-center text-xs font-medium text-gray-800 uppercase tracking-wider border">
+            <th className="px-3 py-2 text-center text-xs font-medium text-gray-800 dark:text-gray-200 uppercase tracking-wider border dark:border-gray-600">
               Battery Level
             </th>
-            <th className="px-3 py-2 text-center text-xs font-medium text-gray-800 uppercase tracking-wider border">
+            <th className="px-3 py-2 text-center text-xs font-medium text-gray-800 dark:text-gray-200 uppercase tracking-wider border dark:border-gray-600">
               Grid Import
             </th>
-            <th className="px-3 py-2 text-center text-xs font-medium text-gray-800 uppercase tracking-wider border">
+            <th className="px-3 py-2 text-center text-xs font-medium text-gray-800 dark:text-gray-200 uppercase tracking-wider border dark:border-gray-600">
               Grid Export
             </th>
-            <th className="px-3 py-2 text-center text-xs font-medium text-gray-800 uppercase tracking-wider border">
+            <th className="px-3 py-2 text-center text-xs font-medium text-gray-800 dark:text-gray-200 uppercase tracking-wider border dark:border-gray-600">
               Actual Cost
             </th>
-            <th className="px-3 py-2 text-center text-xs font-medium text-gray-800 uppercase tracking-wider border">
+            <th className="px-3 py-2 text-center text-xs font-medium text-gray-800 dark:text-gray-200 uppercase tracking-wider border dark:border-gray-600">
               Savings
             </th>
           </tr>
         </thead>
-        <tbody className="bg-white divide-y divide-gray-200">
-          {dailyView.hourly_data.map((hour, index) => {
-            const isActual = hour.data_source === 'actual';
-            const isCurrent = hour.hour === dailyView.current_hour;
+        <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+          {dashboardData.hourlyData.map((hour, index) => {
+            const isCurrentHour = hour.hour === dashboardData.currentHour;
             
-            // Calculate base cost for this hour (grid-only scenario)
-            const gridOnlyCost = hour.home_consumed * hour.electricity_price;
-            
-            // Calculate SOE for this hour
-            const soeKwh = calculateSOE(hour.battery_soc_end, batteryCapacity);
-            
-            // Row styling based on actual/predicted/current
+            // Row styling based on actual/predicted/current (restored original)
             let rowClass = 'border-l-4 ';
-            if (isCurrent) {
+            if (isCurrentHour) {
               rowClass += 'bg-purple-50 border-purple-400';
-            } else if (isActual) {
+            } else if (hour.isActual) {
               rowClass += 'bg-gray-50 border-green-400';
             } else {
               rowClass += 'bg-white border-gray-200';
@@ -237,20 +215,20 @@ export const SavingsOverview: React.FC<SimplifiedSavingsTableProps> = ({
             
             return (
               <tr key={index} className={rowClass}>
-                <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900 border">
+                <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white border dark:border-gray-600">
                   <div className="flex items-center">
-                    {hour.hour.toString().padStart(2, '0')}
-                    {isActual && (
+                    {hour.hour.toString().padStart(2, '0')}:00
+                    {hour.isActual && (
                       <span className="ml-2 text-xs bg-green-100 text-green-700 px-2 py-1 rounded">
                         Actual
                       </span>
                     )}
-                    {!isActual && !isCurrent && (
+                    {!hour.isActual && !isCurrentHour && (
                       <span className="ml-2 text-xs bg-gray-100 text-gray-700 px-2 py-1 rounded">
                         Predicted
                       </span>
                     )}
-                    {isCurrent && (
+                    {isCurrentHour && (
                       <span className="ml-2 text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded">
                         Current
                       </span>
@@ -258,72 +236,73 @@ export const SavingsOverview: React.FC<SimplifiedSavingsTableProps> = ({
                   </div>
                 </td>
                 
-                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border text-center">
-                  <div>{hour.electricity_price.toFixed(2)}</div>
-                  <div className="text-xs text-gray-500">
-                    {(hour.electricity_price * 0.6).toFixed(2)} sell
+                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border dark:border-gray-600 text-center">
+                  <div className="font-medium">{hour.buyPrice.toFixed(2)}</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">öre/kWh</div>
+                </td>
+                
+                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border dark:border-gray-600 text-center">
+                  <div className="font-medium text-yellow-600 dark:text-yellow-400">
+                    {hour.solarGenerated.toFixed(1)}
                   </div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">kWh</div>
                 </td>
                 
-                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border text-center">
-                  <div className="font-medium text-yellow-600">{hour.solar_generated.toFixed(1)}</div>
-                  <div className="text-xs text-gray-500">kWh</div>
+                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border dark:border-gray-600 text-center">
+                  <div className="font-medium">{hour.homeConsumed.toFixed(1)}</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">kWh</div>
                 </td>
                 
-                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border text-center">
-                  <div className="font-medium">{hour.home_consumed.toFixed(1)}</div>
-                  <div className="text-xs text-gray-500">kWh</div>
-                </td>
-                
-                <td className="px-3 py-2 whitespace-nowrap border text-center">
-                  <span className={`px-2 py-1 inline-flex text-sm leading-5 font-semibold rounded-full ${
-                    (hour.battery_action || 0) > 0.1
-                      ? 'bg-green-100 text-green-800'
-                      : (hour.battery_action || 0) < -0.1
-                      ? 'bg-red-100 text-red-800'
-                      : 'bg-gray-100 text-gray-800'
-                  }`}>
-                    {(hour.battery_action || 0) > 0.1 ? '+' : ''}{(hour.battery_action || 0).toFixed(1)}
-                  </span>
-                  <div className="text-xs text-gray-500">kWh</div>
-                </td>
-                
-                {/* Updated Battery Level cell with both SOC and SOE */}
-                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border text-center">
-                  <div className="font-medium">{hour.battery_soc_end.toFixed(0)}%</div>
-                  <div className="text-xs text-gray-500">
-                    {soeKwh.toFixed(1)} kWh
-                  </div>
-                </td>
-                
-                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border text-center">
-                  <div className={`font-medium ${hour.grid_imported > 0 ? 'text-red-600' : 'text-gray-400'}`}>
-                    {hour.grid_imported.toFixed(1)}
-                  </div>
-                  <div className="text-xs text-gray-500">kWh</div>
-                </td>
-                
-                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border text-center">
-                  <div className={`font-medium ${hour.grid_exported > 0 ? 'text-green-600' : 'text-gray-400'}`}>
-                    {hour.grid_exported.toFixed(1)}
-                  </div>
-                  <div className="text-xs text-gray-500">kWh</div>
-                </td>
-                
-                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border text-center">
-                  <div className="font-medium">{hour.hourly_cost.toFixed(2)}</div>
-                  <div className="text-xs text-gray-500">SEK</div>
-                </td>
-                
-                <td className="px-3 py-2 whitespace-nowrap text-sm border text-center">
+                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border dark:border-gray-600 text-center">
                   <div className={`font-medium ${
-                    Math.abs(hour.hourly_savings) < 0.01 ? 'text-gray-900' : 
-                    hour.hourly_savings > 0 ? 'text-green-600' : 'text-red-600'
+                    typeof hour.batteryAction === 'number' && hour.batteryAction > 0.01 ? 'text-green-600 dark:text-green-400' :
+                    typeof hour.batteryAction === 'number' && hour.batteryAction < -0.01 ? 'text-red-600 dark:text-red-400' :
+                    'text-gray-600 dark:text-gray-400'
                   }`}>
-                    {Math.abs(hour.hourly_savings) < 0.01 ? '0.00' : 
-                     hour.hourly_savings > 0 ? `+${hour.hourly_savings.toFixed(2)}` : hour.hourly_savings.toFixed(2)}
+                    {typeof hour.batteryAction === 'number' ? 
+                      (Math.abs(hour.batteryAction) < 0.01 ? '0.0' :
+                       hour.batteryAction > 0 ? `+${hour.batteryAction.toFixed(1)}` : 
+                       hour.batteryAction.toFixed(1)) : 
+                      hour.batteryAction || '0.0'}
                   </div>
-                  <div className="text-xs text-gray-500">SEK</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">kWh</div>
+                </td>
+                
+                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border dark:border-gray-600 text-center">
+                  <div className="font-medium">{hour.batterySocEnd.toFixed(0)}%</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">
+                    {((hour.batterySocEnd / 100) * (dashboardData.batteryCapacity || 30)).toFixed(1)} kWh
+                  </div>
+                </td>
+                
+                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border dark:border-gray-600 text-center">
+                  <div className={`font-medium ${hour.gridImported > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-400 dark:text-gray-500'}`}>
+                    {hour.gridImported.toFixed(1)}
+                  </div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">kWh</div>
+                </td>
+                
+                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border dark:border-gray-600 text-center">
+                  <div className={`font-medium ${hour.gridExported > 0 ? 'text-green-600 dark:text-green-400' : 'text-gray-400 dark:text-gray-500'}`}>
+                    {hour.gridExported.toFixed(1)}
+                  </div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">kWh</div>
+                </td>
+                
+                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border dark:border-gray-600 text-center">
+                  <div className="font-medium">{hour.hourlyCost.toFixed(2)}</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">SEK</div>
+                </td>
+                
+                <td className="px-3 py-2 whitespace-nowrap text-sm border dark:border-gray-600 text-center">
+                  <div className={`font-medium ${
+                    Math.abs(hour.hourlySavings) < 0.01 ? 'text-gray-900 dark:text-white' : 
+                    hour.hourlySavings > 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
+                  }`}>
+                    {Math.abs(hour.hourlySavings) < 0.01 ? '0.00' : 
+                     hour.hourlySavings > 0 ? `+${hour.hourlySavings.toFixed(2)}` : hour.hourlySavings.toFixed(2)}
+                  </div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">SEK</div>
                 </td>
               </tr>
             );
@@ -363,7 +342,7 @@ export const SavingsOverview: React.FC<SimplifiedSavingsTableProps> = ({
             <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border text-center">
               <div className="text-xs text-gray-500">Final</div>
               <div className="font-medium">
-                {finalHour?.battery_soc_end.toFixed(0) || '-'}%
+                {finalHour?.batterySocEnd.toFixed(0) || '-'}%
               </div>
               <div className="text-xs text-gray-500">
                 {finalSOE.toFixed(1)} kWh
@@ -398,148 +377,10 @@ export const SavingsOverview: React.FC<SimplifiedSavingsTableProps> = ({
           </tr>
         </tbody>
       </table>
-      
-      {/* Key Insights */}
-      <div className="mt-6 bg-gray-50 p-4 rounded-lg">
-        <h3 className="text-lg font-semibold mb-3 text-gray-800">Daily Summary</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
-          <div className="bg-white p-3 rounded border">
-            <div className="font-medium text-gray-700 mb-1">Energy Independence</div>
-            <div className="text-lg font-bold text-green-600">
-              {totalConsumption > 0 ? 
-                (((totalSolar + totalBatteryDischarged) / totalConsumption) * 100).toFixed(0) : '0'}%
-            </div>
-            <div className="text-xs text-gray-500">
-              From renewable sources
-            </div>
-          </div>
-          
-          <div className="bg-white p-3 rounded border">
-            <div className="font-medium text-gray-700 mb-1">Solar Production</div>
-            <div className="text-lg font-bold text-yellow-600">
-              {totalSolar.toFixed(1)} kWh
-            </div>
-            <div className="text-xs text-gray-500">
-              {totalSolar > 0 ? 
-                (((totalSolar - totalGridExport) / totalSolar) * 100).toFixed(0) + '% self-consumed'
-                : 'No solar today'}
-            </div>
-          </div>
-          
-          <div className="bg-white p-3 rounded border">
-            <div className="font-medium text-gray-700 mb-1">Battery Activity</div>
-            <div className="text-lg font-bold text-blue-600">
-              {totalBatteryCharged.toFixed(1)} / {totalBatteryDischarged.toFixed(1)}
-            </div>
-            <div className="text-xs text-gray-500">
-              kWh charged / discharged
-            </div>
-          </div>
-          
-          <div className="bg-white p-3 rounded border">
-            <div className="font-medium text-gray-700 mb-1">Cost Efficiency</div>
-            <div className="text-lg font-bold text-purple-600">
-              {((summary.savings / summary.baseCost) * 100).toFixed(1)}%
-            </div>
-            <div className="text-xs text-gray-500">
-              {summary.savings.toFixed(1)} SEK saved today
-            </div>
-          </div>
-        </div>
-        
-        {/* Additional Energy Breakdown */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 text-sm">
-          <div className="bg-white p-3 rounded border">
-            <div className="font-medium text-gray-700 mb-2">Home Consumption</div>
-            <div className="flex justify-between items-center">
-              <span>Total:</span>
-              <span className="font-medium">{totalConsumption.toFixed(1)} kWh</span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span>Average:</span>
-              <span className="font-medium">{(totalConsumption / dailyView.hourly_data.length).toFixed(1)} kWh/h</span>
-            </div>
-          </div>
-          
-          <div className="bg-white p-3 rounded border">
-            <div className="font-medium text-gray-700 mb-2">Grid Exchange</div>
-            <div className="flex justify-between items-center">
-              <span>Import:</span>
-              <span className="font-medium text-red-600">{totalGridImport.toFixed(1)} kWh</span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span>Export:</span>
-              <span className="font-medium text-green-600">{totalGridExport.toFixed(1)} kWh</span>
-            </div>
-            <div className="flex justify-between items-center border-t pt-1">
-              <span>Net:</span>
-              <span className={`font-medium ${
-                (totalGridImport - totalGridExport) > 0 ? 'text-red-600' : 'text-green-600'
-              }`}>
-                {(totalGridImport - totalGridExport).toFixed(1)} kWh
-              </span>
-            </div>
-          </div>
-        </div>
 
-        {/* Battery Capacity Info */}
-        <div className="bg-white p-3 rounded border mt-4">
-          <div className="font-medium text-gray-700 mb-2">Battery Information</div>
-          <div className="flex justify-between items-center">
-            <span>Total Capacity:</span>
-            <span className="font-medium">{batteryCapacity.toFixed(1)} kWh</span>
-          </div>
-          <div className="flex justify-between items-center">
-            <span>Current Level:</span>
-            <span className="font-medium">
-              {finalHour?.battery_soc_end.toFixed(0) || '0'}% ({finalSOE.toFixed(1)} kWh)
-            </span>
-          </div>
-        </div>
-      </div>
-      
-      {/* Data Quality Info */}
-      <div className="mt-4 bg-blue-50 border border-blue-200 rounded-md p-3">
-        <h4 className="font-medium text-blue-800 mb-2">📊 Data Overview</h4>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm text-blue-700">
-          <div>
-            <span className="font-medium">Actual Hours:</span> {dailyView.actual_hours_count}
-          </div>
-          <div>
-            <span className="font-medium">Predicted Hours:</span> {dailyView.predicted_hours_count}
-          </div>
-          <div>
-            <span className="font-medium">Total Savings:</span> {dailyView.total_daily_savings.toFixed(2)} SEK
-          </div>
-          <div>
-            <span className="font-medium">Current Hour:</span> {dailyView.current_hour}
-          </div>
-        </div>
-      </div>
-      
-      {/* Legend for row styling */}
-      <div className="mt-4 bg-blue-50 border border-blue-200 rounded-md p-3">
-        <h4 className="font-medium text-blue-800 mb-2">Row Styling Legend</h4>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-          <div className="flex items-center">
-            <div className="w-4 h-4 bg-gray-50 border-l-4 border-green-400 mr-2"></div>
-            <span className="text-blue-700">Actual data (completed hours)</span>
-          </div>
-          <div className="flex items-center">
-            <div className="w-4 h-4 bg-white border-l-4 border-gray-200 mr-2"></div>
-            <span className="text-blue-700">Predicted data (future hours)</span>
-          </div>
-          <div className="flex items-center">
-            <div className="w-4 h-4 bg-purple-50 border-l-4 border-purple-400 mr-2"></div>
-            <span className="text-blue-700">Current hour</span>
-          </div>
-        </div>
-      </div>
-      
-      {/* Usage Tips */}
-      <div className="mt-4 bg-blue-50 border border-blue-200 rounded-md p-3">
-        <p className="text-blue-800 text-sm">
-          <strong>Reading the table:</strong> Battery Level shows both percentage and energy amount (kWh). 
+      {/* Explanation */}
+      <div className="mt-4 p-3 bg-gray-50 rounded-lg text-sm">
+        <p className="text-gray-600">
           Battery actions: <span className="bg-green-100 text-green-800 px-1 rounded">green = charging</span>, 
           <span className="bg-red-100 text-red-800 px-1 rounded">red = discharging</span>.
           The "Savings" column shows hourly optimization: positive (green) = money saved, 

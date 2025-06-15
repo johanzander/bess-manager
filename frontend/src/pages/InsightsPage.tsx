@@ -16,29 +16,28 @@ const InsightsPage: React.FC = () => {
         setLoading(true);
         setError(null);
         
-        const [dailyViewResponse, energyResponse] = await Promise.allSettled([
-          api.get('/api/v2/daily_view'),
-          api.get('/api/energy/balance')
-        ]);
+        // Use the unified dashboard API instead of multiple endpoints
+        const response = await api.get('/api/dashboard');
+        setDailyViewData(response.data);
         
-        if (dailyViewResponse.status === 'fulfilled') {
-          setDailyViewData(dailyViewResponse.value.data);
-        } else {
-          console.error('Failed to fetch daily view:', dailyViewResponse.reason);
-        }
+        // For backward compatibility, format energy balance data from dashboard API
+        // Create a compatible energyBalanceData structure from the same response
+        const hourlyData = response.data.hourlyData || [];
+        const formattedEnergyBalance = {
+          hourlyData: hourlyData.map((hour: any) => ({
+            hour: hour.hour,
+            system_production: hour.solarGenerated || hour.solarProduction || 0,
+            load_consumption: hour.homeConsumed || hour.consumption || 0,
+            battery_level: hour.batterySocEnd || hour.batteryLevel || 0,
+            battery_power: hour.batteryAction || 0,
+            is_actual: hour.dataSource === "actual" || hour.isActual || false
+          }))
+        };
         
-        if (energyResponse.status === 'fulfilled') {
-          setEnergyBalanceData(energyResponse.value.data);
-        } else {
-          console.error('Failed to fetch energy balance:', energyResponse.reason);
-        }
-        
-        if (dailyViewResponse.status === 'rejected' && energyResponse.status === 'rejected') {
-          setError('Failed to fetch both daily view and energy balance data');
-        }
-        
+        setEnergyBalanceData(formattedEnergyBalance);
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Unknown error occurred');
+        console.error('Failed to fetch dashboard data:', err);
+        setError(err instanceof Error ? err.message : 'Failed to fetch dashboard data');
       } finally {
         setLoading(false);
       }
@@ -55,7 +54,7 @@ const InsightsPage: React.FC = () => {
   const calculateAccuracyStats = () => {
     if (!dailyViewData || !energyBalanceData) return null;
 
-    const currentHour = dailyViewData.current_hour || 0;
+    const currentHour = dailyViewData.currentHour || 0;
     const actualHours = Math.max(0, currentHour);
     const totalHours = 24;
     const predictedHours = totalHours - actualHours;
@@ -65,17 +64,17 @@ const InsightsPage: React.FC = () => {
     let accuracyCount = 0;
     
     for (let hour = 0; hour < actualHours; hour++) {
-      const dailyHour = dailyViewData.hourly_data?.find((h: any) => h.hour === hour);
+      const dailyHour = dailyViewData.hourlyData?.find((h: any) => h.hour === hour);
       const energyHour = energyBalanceData.hourlyData?.find((h: any) => h.hour === hour);
       
       if (dailyHour && energyHour) {
         // Simple accuracy calculation based on solar and consumption predictions
         const solarError = energyHour.system_production > 0 
-          ? Math.abs(energyHour.system_production - (dailyHour.solar_generated || 0)) / energyHour.system_production * 100
+          ? Math.abs(energyHour.system_production - (dailyHour.solarGenerated || dailyHour.solarProduction || 0)) / energyHour.system_production * 100
           : 0;
         
         const consumptionError = energyHour.load_consumption > 0
-          ? Math.abs(energyHour.load_consumption - (dailyHour.home_consumed || 0)) / energyHour.load_consumption * 100
+          ? Math.abs(energyHour.load_consumption - (dailyHour.homeConsumed || dailyHour.consumption || 0)) / energyHour.load_consumption * 100
           : 0;
           
         const hourAccuracy = Math.max(0, 100 - (solarError + consumptionError) / 2);

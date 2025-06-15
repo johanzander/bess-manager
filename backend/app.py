@@ -58,12 +58,23 @@ class BESSController:
         # Load environment variables
         load_dotenv("/data/options.env")
 
-        # Initialize Home Assistant API Controller
-        self.ha_controller = self._init_ha_controller()
-        self.ha_controller.set_test_mode(False)
+        # Load all settings as early as possible
+        options = self._load_options()
+        if not options:
+            logger.warning("No configuration options found, using defaults")
+            options = {}
 
-        # Create Battery System Manager
-        price_source = HomeAssistantSource(self.ha_controller)
+        # Initialize Home Assistant API Controller with sensor config from options
+        sensor_config = options.get("sensors", {})
+        self.ha_controller = self._init_ha_controller(sensor_config)
+        self.ha_controller.set_test_mode(True)
+
+        # Extract settings for price manager
+        price_settings = options.get("electricity_price", {})
+        vat_multiplier = price_settings.get("vat_multiplier", 1.25)
+
+        # Create Battery System Manager with configured VAT multiplier
+        price_source = HomeAssistantSource(self.ha_controller, vat_multiplier=vat_multiplier)
         self.system = BatterySystemManager(self.ha_controller, price_source)
 
         # Create scheduler with increased misfire grace time to avoid unnecessary warnings
@@ -79,23 +90,23 @@ class BESSController:
             }
         )
 
-        # Load and apply settings
-        self._load_and_apply_settings()
+        # Apply all settings to the system immediately
+        self._apply_settings(options)
 
-        logger.info("BESS Controller initialized")
+        logger.info("BESS Controller initialized with early settings loading")
 
-    def _init_ha_controller(self):
-        """Initialize Home Assistant API controller based on environment."""
+    def _init_ha_controller(self, sensor_config):
+        """Initialize Home Assistant API controller based on environment.
+        
+        Args:
+            sensor_config: Sensor configuration dictionary to use for the controller.
+        """
         ha_token = os.getenv("HASSIO_TOKEN")
         if ha_token:
             ha_url = "http://supervisor/core"
         else:
             ha_token = os.environ.get("HA_TOKEN", "")
             ha_url = os.environ.get("HA_URL", "http://supervisor/core")
-
-        # Get sensor configuration from options
-        options = self._load_options()
-        sensor_config = options.get("sensors", {}) if options else {}
 
         logger.info(
             f"Initializing HA controller with {len(sensor_config)} sensor configurations"
@@ -106,40 +117,20 @@ class BESSController:
         )
 
     def _load_and_apply_settings(self):
-        """Load options and apply settings."""
+        """Load options and apply settings.
+        
+        This method is kept for backwards compatibility, but all settings should now be
+        applied early during initialization using _apply_settings().
+        """
         try:
             options = self._load_options()
-            logger.debug(
-                f"Options loaded for settings: {json.dumps(options, indent=2)}"
-            )
             if options:
-                settings = {
-                    "battery": {
-                        "totalCapacity": options["battery"]["total_capacity"],
-                        "chargeCycleCost": options["battery"]["cycle_cost"],
-                        "maxChargeDischargePower": options["battery"][
-                            "max_charge_discharge_power"
-                        ],
-                        "estimatedConsumption": options["home"]["consumption"],
-                    },
-                    "consumption": {"defaultHourly": options["home"]["consumption"]},
-                    "price": {
-                        "area": options["electricity_price"]["area"],
-                        "markupRate": options["electricity_price"]["markup_rate"],
-                        "vatMultiplier": options["electricity_price"]["vat_multiplier"],
-                        "additionalCosts": options["electricity_price"][
-                            "additional_costs"
-                        ],
-                        "taxReduction": options["electricity_price"]["tax_reduction"],
-                        "minProfit": options["electricity_price"].get(
-                            "min_profit", 0.05
-                        ),
-                    },
-                }
-                logger.debug(f"Loaded settings: {json.dumps(settings, indent=2)}")
-                self.system.update_settings(settings)
+                logger.debug("Reapplying settings from _load_and_apply_settings (redundant)")
+                self._apply_settings(options)
+            else:
+                logger.warning("No options found when reapplying settings")
         except Exception as e:
-            logger.error(f"Error loading settings: {e}", exc_info=True)
+            logger.error(f"Error reloading settings: {e}", exc_info=True)
 
     def _load_options(self):
         """Load options from Home Assistant add-on config or environment vars."""
@@ -204,6 +195,49 @@ class BESSController:
         )
 
         self.scheduler.start()
+
+    def _apply_settings(self, options):
+        """Apply all settings from the provided options dictionary.
+        
+        This consolidates settings application in one place, ensuring settings
+        are applied as early as possible in the initialization process.
+        
+        Args:
+            options: Dictionary containing all configuration options
+        """
+        try:
+            if not options:
+                logger.warning("No options provided for settings application")
+                return
+                
+            logger.debug(f"Applying settings: {json.dumps(options, indent=2)}")
+            
+            settings = {
+                "battery": {
+                    "totalCapacity": options.get("battery", {}).get("total_capacity", 30.0),
+                    "chargeCycleCost": options.get("battery", {}).get("cycle_cost", 0.50),
+                    "maxChargeDischargePower": options.get("battery", {}).get("max_charge_discharge_power", 15.0),
+                    "estimatedConsumption": options.get("home", {}).get("consumption", 3.5),
+                },
+                "consumption": {
+                    "defaultHourly": options.get("home", {}).get("consumption", 3.5)
+                },
+                "price": {
+                    "area": options.get("electricity_price", {}).get("area", "SE4"),
+                    "markupRate": options.get("electricity_price", {}).get("markup_rate", 0.08),
+                    "vatMultiplier": options.get("electricity_price", {}).get("vat_multiplier", 1.25),
+                    "additionalCosts": options.get("electricity_price", {}).get("additional_costs", 1.03),
+                    "taxReduction": options.get("electricity_price", {}).get("tax_reduction", 0.6518),
+                    "minProfit": options.get("electricity_price", {}).get("min_profit", 0.05),
+                },
+            }
+            
+            logger.debug(f"Formatted settings: {json.dumps(settings, indent=2)}")
+            self.system.update_settings(settings)
+            logger.info("All settings applied successfully")
+            
+        except Exception as e:
+            logger.error(f"Error applying settings: {e}", exc_info=True)
 
     def start(self):
         """Start the scheduler."""

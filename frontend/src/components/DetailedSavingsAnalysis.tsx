@@ -2,36 +2,36 @@ import React, { useState, useEffect } from 'react';
 import { BatterySettings } from '../types';
 import api from '../lib/api';
 
-// New interface based on DailyView API
-interface DailyViewHourlyData {
+// Updated interface based on consolidated dashboard API
+interface DashboardHourlyData {
   hour: number;
-  data_source: 'actual' | 'predicted';
-  solar_generated: number;
-  home_consumed: number;
-  grid_imported: number;
-  grid_exported: number;
-  battery_charged: number;
-  battery_discharged: number;
-  battery_soc_start: number;
-  battery_soc_end: number;
-  electricity_price: number;
-  hourly_cost: number;
-  hourly_savings: number;
-  battery_action: number | null;
-  battery_cycle_cost: number;
-  is_actual: boolean;
-  is_predicted: boolean;
+  dataSource: 'actual' | 'predicted';
+  solarGenerated: number;
+  homeConsumed: number;
+  gridImported: number;
+  gridExported: number;
+  batteryCharged: number;
+  batteryDischarged: number;
+  batterySocStart: number;
+  batterySocEnd: number;
+  buyPrice: number;
+  sellPrice: number;
+  hourlyCost: number;
+  hourlySavings: number;
+  batteryAction: number | string;
+  isActual: boolean;
+  isPredicted: boolean;
 }
 
-interface DailyViewResponse {
+interface DashboardResponse {
   date: string;
-  current_hour: number;
-  total_daily_savings: number;
-  actual_savings_so_far: number;
-  predicted_remaining_savings: number;
-  actual_hours_count: number;
-  predicted_hours_count: number;
-  hourly_data: DailyViewHourlyData[];
+  currentHour: number;
+  totalDailySavings: number;
+  actualSavingsSoFar: number;
+  predictedRemainingSavings: number;
+  actualHoursCount: number;
+  predictedHoursCount: number;
+  hourlyData: DashboardHourlyData[];
 }
 
 interface BatteryScheduleTableProps {
@@ -40,27 +40,27 @@ interface BatteryScheduleTableProps {
 
 export const DetailedSavingsAnalysis: React.FC<BatteryScheduleTableProps> = ({
 }) => {
-  const [dailyView, setDailyView] = useState<DailyViewResponse | null>(null);
+  const [dashboardData, setDashboardData] = useState<DashboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch data using the new DailyView API
+  // Fetch data using the new consolidated dashboard API
   useEffect(() => {
-    const fetchDailyView = async () => {
+    const fetchDashboardData = async () => {
       try {
         setLoading(true);
-        const response = await api.get('/api/v2/daily_view');
-        setDailyView(response.data);
+        const response = await api.get('/api/dashboard');
+        setDashboardData(response.data);
         setError(null);
       } catch (err) {
-        console.error('Error fetching daily view:', err);
+        console.error('Error fetching dashboard data:', err);
         setError(err instanceof Error ? err.message : 'Unknown error');
       } finally {
         setLoading(false);
       }
     };
 
-    fetchDailyView();
+    fetchDashboardData();
   }, []);
 
   // Helper function to safely display values
@@ -75,23 +75,24 @@ export const DetailedSavingsAnalysis: React.FC<BatteryScheduleTableProps> = ({
   };
 
   // Calculate derived values for each hour
-  const calculateHourData = (hour: DailyViewHourlyData) => {
-    const basePrice = hour.electricity_price;
-    const sellPrice = basePrice * 0.6; // Standard sell price calculation
+  const calculateHourData = (hour: DashboardHourlyData) => {
+    // Use actual prices from backend (no frontend calculation!)
+    const basePrice = hour.buyPrice;
+    const sellPrice = hour.sellPrice ; // fallback only if missing
     
     // Calculate base cost (grid-only scenario)
-    const baseCost = hour.home_consumed * basePrice;
+    const baseCost = hour.homeConsumed * basePrice;
     
     // Calculate solar-only scenario
-    const directSolar = Math.min(hour.home_consumed, hour.solar_generated);
-    const solarExcess = Math.max(0, hour.solar_generated - directSolar);
-    const gridImportNeeded = Math.max(0, hour.home_consumed - directSolar);
+    const directSolar = Math.min(hour.homeConsumed, hour.solarGenerated);
+    const solarExcess = Math.max(0, hour.solarGenerated - directSolar);
+    const gridImportNeeded = Math.max(0, hour.homeConsumed - directSolar);
     const solarOnlyCost = gridImportNeeded * basePrice - solarExcess * sellPrice;
     const solarSavings = baseCost - solarOnlyCost;
     
     // Battery+Solar scenario (actual costs from optimization)
-    const batterySolarCost = hour.hourly_cost;
-    const totalSavings = hour.hourly_savings;
+    const batterySolarCost = hour.hourlyCost;
+    const totalSavings = hour.hourlySavings;
     
     return {
       basePrice,
@@ -112,7 +113,7 @@ export const DetailedSavingsAnalysis: React.FC<BatteryScheduleTableProps> = ({
       <div className="bg-white p-6 rounded-lg shadow">
         <div className="flex items-center justify-center h-32">
           <div className="animate-spin h-8 w-8 border-2 border-blue-500 rounded-full border-t-transparent"></div>
-          <span className="ml-2">Loading schedule...</span>
+          <span className="ml-2">Loading detailed analysis...</span>
         </div>
       </div>
     );
@@ -122,7 +123,7 @@ export const DetailedSavingsAnalysis: React.FC<BatteryScheduleTableProps> = ({
     return (
       <div className="bg-white p-6 rounded-lg shadow">
         <div className="bg-red-50 border border-red-200 rounded-md p-4">
-          <h3 className="text-red-800 font-medium">Error Loading Schedule</h3>
+          <h3 className="text-red-800 font-medium">Error Loading Data</h3>
           <p className="text-red-600 mt-1">{error}</p>
           <button 
             onClick={() => window.location.reload()} 
@@ -135,65 +136,61 @@ export const DetailedSavingsAnalysis: React.FC<BatteryScheduleTableProps> = ({
     );
   }
 
-  if (!dailyView) {
+  if (!dashboardData) {
     return (
       <div className="bg-white p-6 rounded-lg shadow">
-        <div className="text-center text-gray-500">No schedule data available</div>
+        <div className="text-center text-gray-500">No data available</div>
       </div>
     );
   }
 
-  // Calculate totals
-  const totals = dailyView.hourly_data.reduce(
-    (acc, hour) => {
-      const derived = calculateHourData(hour);
-      acc.totalConsumption += hour.home_consumed;
-      acc.totalSolar += hour.solar_generated;
-      acc.totalBaseCost += derived.baseCost;
-      acc.totalSolarOnlyCost += derived.solarOnlyCost;
-      acc.totalBatterySolarCost += hour.hourly_cost;
-      acc.totalSolarSavings += derived.solarSavings;
-      acc.totalSavings += hour.hourly_savings;
-      acc.totalBatteryCharged += hour.battery_charged;
-      acc.totalBatteryDischarged += hour.battery_discharged;
-      acc.totalDirectSolar += derived.directSolar;
-      acc.totalSolarExcess += derived.solarExcess;
-      acc.totalGridImport += hour.grid_imported;
-      acc.totalGridExport += hour.grid_exported;
-      return acc;
-    },
-    {
-      totalConsumption: 0,
-      totalSolar: 0,
-      totalBaseCost: 0,
-      totalSolarOnlyCost: 0,
-      totalBatterySolarCost: 0,
-      totalSolarSavings: 0,
-      totalSavings: 0,
-      totalBatteryCharged: 0,
-      totalBatteryDischarged: 0,
-      totalDirectSolar: 0,
-      totalSolarExcess: 0,
-      totalGridImport: 0,
-      totalGridExport: 0
-    }
-  );
-
-  const avgPrice = totals.totalBaseCost / totals.totalConsumption;
+  // Calculate totals for summary row
+  const totals = dashboardData.hourlyData.reduce((acc, hour) => {
+    const derived = calculateHourData(hour);
+    return {
+      totalConsumption: acc.totalConsumption + hour.homeConsumed,
+      totalSolar: acc.totalSolar + hour.solarGenerated,
+      totalGridImport: acc.totalGridImport + hour.gridImported,
+      totalGridExport: acc.totalGridExport + hour.gridExported,
+      totalBaseCost: acc.totalBaseCost + derived.baseCost,
+      totalSolarOnlyCost: acc.totalSolarOnlyCost + derived.solarOnlyCost,
+      totalSolarSavings: acc.totalSolarSavings + derived.solarSavings,
+      totalBatterySolarCost: acc.totalBatterySolarCost + derived.batterySolarCost,
+      totalOptimizationSavings: acc.totalOptimizationSavings + derived.totalSavings,
+    };
+  }, {
+    totalConsumption: 0,
+    totalSolar: 0,
+    totalGridImport: 0,
+    totalGridExport: 0,
+    totalBaseCost: 0,
+    totalSolarOnlyCost: 0,
+    totalSolarSavings: 0,
+    totalBatterySolarCost: 0,
+    totalOptimizationSavings: 0,
+  });
 
   return (
     <div className="bg-white p-6 rounded-lg shadow overflow-x-auto">
-      {/* Summary Cards at Top */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <div className="bg-red-50 p-4 rounded-lg text-center border">
-          <div className="text-2xl font-bold text-red-600">{displayValue(totals.totalBaseCost)}</div>
+      <div className="mb-6">
+        <h2 className="text-xl font-semibold text-gray-900 mb-4">Detailed Financial Analysis</h2>
+        <p className="text-sm text-gray-600 mb-4">
+          Comprehensive comparison of three scenarios: Grid-only (baseline), Solar-only (without battery), and Solar+Battery (optimized).
+          All monetary values in SEK. Energy values in kWh.
+        </p>
+      </div>
+
+      {/* Summary Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+        <div className="bg-gray-50 p-4 rounded-lg text-center border">
+          <div className="text-2xl font-bold text-gray-600">{displayValue(totals.totalBaseCost)}</div>
           <div className="text-sm text-gray-600">Grid-Only Cost (SEK)</div>
-          <div className="text-xs text-gray-500">What you would have paid</div>
+          <div className="text-xs text-gray-500">Baseline without solar</div>
         </div>
         
         <div className="bg-yellow-50 p-4 rounded-lg text-center border">
-          <div className="text-2xl font-bold text-yellow-600">{displayValue(totals.totalSolar, "0", 1)}</div>
-          <div className="text-sm text-gray-600">Solar Production (kWh)</div>
+          <div className="text-2xl font-bold text-yellow-600">{displayValue(totals.totalSolarOnlyCost)}</div>
+          <div className="text-sm text-gray-600">Solar-Only Cost (SEK)</div>
           <div className="text-xs text-gray-500">
             {totals.totalSolar > 0 ? 
               `${displayValue(((totals.totalSolar - totals.totalGridExport) / totals.totalSolar) * 100, "0", 0)}% self-consumed` 
@@ -208,9 +205,9 @@ export const DetailedSavingsAnalysis: React.FC<BatteryScheduleTableProps> = ({
         </div>
 
         <div className="bg-green-50 p-4 rounded-lg text-center border">
-          <div className="text-2xl font-bold text-green-600">{displayValue(dailyView.total_daily_savings)}</div>
+          <div className="text-2xl font-bold text-green-600">{displayValue(dashboardData.totalDailySavings)}</div>
           <div className="text-sm text-gray-600">Total Savings (SEK)</div>
-          <div className="text-xs text-gray-500">{displayValue((dailyView.total_daily_savings / totals.totalBaseCost) * 100, "0", 1)}% saved</div>
+          <div className="text-xs text-gray-500">{displayValue((dashboardData.totalDailySavings / totals.totalBaseCost) * 100, "0", 1)}% saved</div>
         </div>
       </div>
 
@@ -279,49 +276,28 @@ export const DetailedSavingsAnalysis: React.FC<BatteryScheduleTableProps> = ({
               Import
             </th>
             <th className="px-3 py-2 text-center text-xs font-medium text-gray-800 uppercase tracking-wider border bg-green-100">
-              Cost
+              Export
             </th>
             <th className="px-3 py-2 text-center text-xs font-medium text-gray-800 uppercase tracking-wider border bg-green-100">
-              Savings
+              Cost
             </th>
           </tr>
         </thead>
         <tbody className="bg-white divide-y divide-gray-200">
-          {dailyView.hourly_data.map((hour, index) => {
+          {dashboardData.hourlyData.map((hour, index) => {
             const derived = calculateHourData(hour);
-            const isActual = hour.data_source === 'actual';
-            const isCurrent = hour.hour === dailyView.current_hour;
-            
-            // Row styling based on data source
-            let rowClass = 'border-l-4 ';
-            if (isCurrent) {
-              rowClass += 'bg-purple-50 border-purple-400';
-            } else if (isActual) {
-              rowClass += 'bg-gray-50 border-green-400';
-            } else {
-              rowClass += 'bg-white border-gray-200';
-            }
+            const isCurrentHour = hour.hour === dashboardData.currentHour;
             
             return (
-              <tr key={index} className={rowClass}>
-                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border text-center">
-                  <div className="flex flex-col items-center">
-                    <div>{hour.hour.toString().padStart(2, '0')}</div>
-                    {isActual && (
-                      <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded mt-1">
-                        Actual
-                      </span>
-                    )}
-                    {!isActual && !isCurrent && (
-                      <span className="text-xs bg-gray-100 text-gray-700 px-2 py-1 rounded mt-1">
-                        Predicted
-                      </span>
-                    )}
-                    {isCurrent && (
-                      <span className="text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded mt-1">
-                        Current
-                      </span>
-                    )}
+              <tr key={index} className={`${
+                isCurrentHour ? 'bg-blue-100' : 
+                hour.isActual ? 'bg-gray-100' : 'bg-white'
+              }`}>
+                <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900 border text-center">
+                  <div>
+                    {hour.hour.toString().padStart(2, '0')}:00
+                    {isCurrentHour && <span className="block text-xs text-blue-600 font-normal">Current</span>}
+                    {!isCurrentHour && !hour.isActual && <span className="block text-xs text-gray-500 font-normal">Pred.</span>}
                   </div>
                 </td>
                 
@@ -333,7 +309,7 @@ export const DetailedSavingsAnalysis: React.FC<BatteryScheduleTableProps> = ({
                   </div>
                 </td>
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-gray-50 text-center">
-                  <div className="font-medium">{displayValue(hour.home_consumed, "N/A", 1)}</div>
+                  <div className="font-medium">{displayValue(hour.homeConsumed, "N/A", 1)}</div>
                   <div className="text-xs text-gray-500">kWh</div>
                 </td>
                 
@@ -345,7 +321,7 @@ export const DetailedSavingsAnalysis: React.FC<BatteryScheduleTableProps> = ({
                 
                 {/* Solar-Only Data */}
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-yellow-50 text-center">
-                  <div className="font-medium text-yellow-600">{displayValue(hour.solar_generated, "N/A", 1)}</div>
+                  <div className="font-medium text-yellow-600">{displayValue(hour.solarGenerated, "N/A", 1)}</div>
                   <div className="text-xs text-gray-500">kWh</div>
                 </td>
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-yellow-50 text-center">
@@ -369,42 +345,48 @@ export const DetailedSavingsAnalysis: React.FC<BatteryScheduleTableProps> = ({
                   <div className="text-xs text-gray-500">SEK</div>
                 </td>
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-yellow-50 text-center">
-                  <div className={`font-medium ${derived.solarSavings > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                    {displayValue(derived.solarSavings)}
+                  <div className={`font-medium ${
+                    derived.solarSavings > 0 ? 'text-green-600' : 
+                    derived.solarSavings < 0 ? 'text-red-600' : 'text-gray-600'
+                  }`}>
+                    {derived.solarSavings > 0 ? '+' : ''}{displayValue(derived.solarSavings)}
                   </div>
                   <div className="text-xs text-gray-500">SEK</div>
                 </td>
                 
                 {/* Solar+Battery Data */}
-                <td className="px-3 py-2 whitespace-nowrap border bg-green-50 text-center">
-                  <span className={`px-2 py-1 inline-flex text-sm leading-5 font-semibold rounded-full ${
-                    (hour.battery_action || 0) > 0
-                      ? 'bg-green-100 text-green-800'
-                      : (hour.battery_action || 0) < 0
-                      ? 'bg-red-100 text-red-800'
-                      : 'bg-gray-100 text-gray-800'
+                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-green-50 text-center">
+                  <div className={`font-medium ${
+                    typeof hour.batteryAction === 'number' && hour.batteryAction > 0.01 ? 'text-green-600' :
+                    typeof hour.batteryAction === 'number' && hour.batteryAction < -0.01 ? 'text-red-600' :
+                    'text-gray-600'
                   }`}>
-                    {displayValue(hour.battery_action, "0.0", 1)}
-                    {(hour.battery_action || 0) > 0 ? '↑' : (hour.battery_action || 0) < 0 ? '↓' : '-'}
-                  </span>
-                  <div className="text-xs text-gray-500">kWh</div>
-                </td>
-                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-green-50 text-center">
-                  <div className="font-medium">{displayValue(hour.battery_soc_end, "N/A", 0)}</div>
-                  <div className="text-xs text-gray-500">%</div>
-                </td>
-                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-green-50 text-center">
-                  <div className="font-medium">{displayValue(hour.grid_imported, "N/A", 1)}</div>
-                  <div className="text-xs text-gray-500">kWh</div>
-                </td>
-                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-green-50 text-center">
-                  <div className="font-medium">{displayValue(hour.hourly_cost)}</div>
-                  <div className="text-xs text-gray-500">SEK</div>
-                </td>
-                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-green-50 text-center">
-                  <div className={`font-medium ${hour.hourly_savings > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                    {displayValue(hour.hourly_savings)}
+                    {typeof hour.batteryAction === 'number' ? 
+                      (Math.abs(hour.batteryAction) < 0.01 ? '0.0' :
+                       hour.batteryAction > 0 ? `+${hour.batteryAction.toFixed(1)}` : 
+                       hour.batteryAction.toFixed(1)) : 
+                      hour.batteryAction || '0.0'}
                   </div>
+                  <div className="text-xs text-gray-500">kWh</div>
+                </td>
+                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-green-50 text-center">
+                  <div className="font-medium">{displayValue(hour.batterySocEnd, "N/A", 0)}%</div>
+                  <div className="text-xs text-gray-500">SOC</div>
+                </td>
+                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-green-50 text-center">
+                  <div className={`font-medium ${hour.gridImported > 0 ? 'text-red-600' : 'text-gray-400'}`}>
+                    {displayValue(hour.gridImported, "N/A", 1)}
+                  </div>
+                  <div className="text-xs text-gray-500">kWh</div>
+                </td>
+                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-green-50 text-center">
+                  <div className={`font-medium ${hour.gridExported > 0 ? 'text-green-600' : 'text-gray-400'}`}>
+                    {displayValue(hour.gridExported, "N/A", 1)}
+                  </div>
+                  <div className="text-xs text-gray-500">kWh</div>
+                </td>
+                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-green-50 text-center">
+                  <div className="font-medium">{displayValue(derived.batterySolarCost)}</div>
                   <div className="text-xs text-gray-500">SEK</div>
                 </td>
               </tr>
@@ -412,186 +394,68 @@ export const DetailedSavingsAnalysis: React.FC<BatteryScheduleTableProps> = ({
           })}
           
           {/* Totals Row */}
-          <tr className="bg-gray-100 font-semibold">
+          <tr className="bg-gray-200 font-bold border-t-2">
             <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border text-center">
               TOTAL
             </td>
-            
-            {/* Common Data Totals */}
-            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-gray-50 text-center">
-              <span className="text-xs text-gray-500">AVG:</span> {displayValue(avgPrice)} <span className="text-xs">SEK</span>
+            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-gray-100 text-center">
+              -
             </td>
-            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-gray-50 text-center">
-              {displayValue(totals.totalConsumption, "N/A", 1)} <span className="text-xs">kWh</span>
+            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-gray-100 text-center">
+              {displayValue(totals.totalConsumption, "N/A", 1)}
             </td>
-            
-            {/* Grid-Only Totals */}
-            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-blue-50 text-center">
-              {displayValue(totals.totalBaseCost)} <span className="text-xs">SEK</span>
+            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-blue-100 text-center">
+              {displayValue(totals.totalBaseCost)}
             </td>
-            
-            {/* Solar-Only Totals */}
-            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-yellow-50 text-center">
-              {displayValue(totals.totalSolar, "N/A", 1)} <span className="text-xs">kWh</span>
+            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-yellow-100 text-center">
+              {displayValue(totals.totalSolar, "N/A", 1)}
             </td>
-            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-yellow-50 text-center">
-              {displayValue(totals.totalDirectSolar, "N/A", 1)} <span className="text-xs">kWh</span>
+            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-yellow-100 text-center">
+              -
             </td>
-            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-yellow-50 text-center">
-              {displayValue(totals.totalGridImport, "N/A", 1)} <span className="text-xs">kWh</span>
+            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-yellow-100 text-center">
+              {displayValue(totals.totalGridImport, "N/A", 1)}
             </td>
-            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-yellow-50 text-center">
-              {displayValue(totals.totalSolarExcess, "N/A", 1)} <span className="text-xs">kWh</span>
+            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-yellow-100 text-center">
+              {displayValue(totals.totalGridExport, "N/A", 1)}
             </td>
-            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-yellow-50 text-center">
-              {displayValue(totals.totalSolarOnlyCost)} <span className="text-xs">SEK</span>
+            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-yellow-100 text-center">
+              {displayValue(totals.totalSolarOnlyCost)}
             </td>
-            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-yellow-50 text-center">
-              {displayValue(totals.totalSolarSavings)} <span className="text-xs">SEK</span>
+            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-yellow-100 text-center">
+              <span className={totals.totalSolarSavings > 0 ? 'text-green-600' : 'text-red-600'}>
+                {totals.totalSolarSavings > 0 ? '+' : ''}{displayValue(totals.totalSolarSavings)}
+              </span>
             </td>
-            
-            {/* Solar+Battery Totals */}
-            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-green-50 text-center">
-              C: {displayValue(totals.totalBatteryCharged, "N/A", 1)} <span className="text-xs">kWh</span>
-              <br />
-              D: {displayValue(totals.totalBatteryDischarged, "N/A", 1)} <span className="text-xs">kWh</span>
+            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-green-100 text-center">
+              -
             </td>
-            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-green-50 text-center">
-              {displayValue(dailyView.hourly_data[dailyView.hourly_data.length-1]?.battery_soc_end, "-", 0)} <span className="text-xs">%</span>
+            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-green-100 text-center">
+              -
             </td>
-            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-green-50 text-center">
-              {displayValue(totals.totalGridImport, "N/A", 1)} <span className="text-xs">kWh</span>
+            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-green-100 text-center">
+              {displayValue(totals.totalGridImport, "N/A", 1)}
             </td>
-            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-green-50 text-center">
-              <div className="font-medium">{displayValue(totals.totalBatterySolarCost)}</div>
-              <div className="text-xs text-gray-500">SEK</div>
+            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-green-100 text-center">
+              {displayValue(totals.totalGridExport, "N/A", 1)}
             </td>
-            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-green-50 text-center">
-              <div className={`font-medium ${totals.totalSavings > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                {displayValue(totals.totalSavings)}
-              </div>
-              <div className="text-xs text-gray-500">SEK</div>
+            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border bg-green-100 text-center">
+              {displayValue(totals.totalBatterySolarCost)}
             </td>
           </tr>
         </tbody>
       </table>
-      
-      {/* Summary */}
-      <div className="mt-6 bg-gray-50 p-6 rounded-lg">
-        <h3 className="text-xl font-semibold mb-4">Daily Summary</h3>
-        
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Grid-Only Case Summary */}
-          <div className="bg-white p-4 rounded-lg shadow">
-            <h4 className="text-lg font-semibold mb-3 text-gray-700 flex items-center">
-              <span className="w-3 h-3 bg-blue-400 rounded-full mr-2"></span>
-              Grid-Only Case
-            </h4>
-            <div className="space-y-3">
-              <div className="flex justify-between items-center">
-                <span className="text-gray-600">Total Consumption:</span>
-                <span className="font-semibold">{displayValue(totals.totalConsumption, "N/A", 1)} kWh</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-gray-600">Total Cost:</span>
-                <span className="font-semibold">{displayValue(totals.totalBaseCost)} SEK</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-gray-600">Average Price:</span>
-                <span className="font-semibold">{displayValue(avgPrice)} SEK/kWh</span>
-              </div>
-            </div>
-          </div>
-          
-          {/* Solar-Only Case Summary */}
-          <div className="bg-white p-4 rounded-lg shadow">
-            <h4 className="text-lg font-semibold mb-3 text-gray-700 flex items-center">
-              <span className="w-3 h-3 bg-yellow-400 rounded-full mr-2"></span>
-              Solar-Only Case
-            </h4>
-            <div className="space-y-3">
-              <div className="flex justify-between items-center">
-                <span className="text-gray-600">Solar Produced:</span>
-                <span className="font-semibold text-yellow-600">{displayValue(totals.totalSolar, "N/A", 1)} kWh</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-gray-600">Direct Solar Use:</span>
-                <span className="font-semibold text-green-600">{displayValue(totals.totalDirectSolar, "N/A", 1)} kWh</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-gray-600">Solar Excess:</span>
-                <span className="font-semibold text-blue-600">{displayValue(totals.totalSolarExcess, "N/A", 1)} kWh</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-gray-600">Net Cost:</span>
-                <span className="font-semibold">{displayValue(totals.totalSolarOnlyCost)} SEK</span>
-              </div>
-              <div className="flex justify-between items-center border-t pt-2">
-                <span className="text-gray-600">Solar Savings:</span>
-                <span className="font-semibold text-green-700">{displayValue(totals.totalSolarSavings)} SEK</span>
-              </div>
-            </div>
-          </div>
-          
-          {/* Solar+Battery Case Summary */}
-          <div className="bg-white p-4 rounded-lg shadow">
-            <h4 className="text-lg font-semibold mb-3 text-gray-700 flex items-center">
-              <span className="w-3 h-3 bg-green-400 rounded-full mr-2"></span>
-              Solar+Battery Case
-            </h4>
-            <div className="space-y-3">
-              <div className="flex justify-between items-center">
-                <span className="text-gray-600">Battery Charged:</span>
-                <span className="font-semibold text-blue-600">{displayValue(totals.totalBatteryCharged, "N/A", 1)} kWh</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-gray-600">Battery Discharged:</span>
-                <span className="font-semibold text-purple-600">{displayValue(totals.totalBatteryDischarged, "N/A", 1)} kWh</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-gray-600">Net Cost:</span>
-                <span className="font-semibold">{displayValue(totals.totalBatterySolarCost)} SEK</span>
-              </div>
-              <div className="flex justify-between items-center border-t pt-2">
-                <span className="text-gray-600">Total Savings:</span>
-                <span className="font-semibold text-green-700">{displayValue(totals.totalSavings)} SEK</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-gray-600">Savings %:</span>
-                <span className="font-semibold text-green-700">{displayValue((totals.totalSavings / totals.totalBaseCost) * 100, "0", 1)}%</span>
-              </div>
-            </div>
-          </div>
-        </div>
-        
-        {/* Data Quality Info */}
-        <div className="mt-6 bg-blue-50 border border-blue-200 rounded-md p-4">
-          <h4 className="font-medium text-blue-800 mb-2">📊 Data Quality Information</h4>
-          <div className="text-sm text-blue-700">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div>
-                <span className="font-medium">Actual Hours:</span> {dailyView.actual_hours_count}
-              </div>
-              <div>
-                <span className="font-medium">Predicted Hours:</span> {dailyView.predicted_hours_count}
-              </div>
-              <div>
-                <span className="font-medium">Total Savings:</span> {displayValue(dailyView.total_daily_savings)} SEK
-              </div>
-              <div>
-                <span className="font-medium">Current Hour:</span> {dailyView.current_hour}
-              </div>
-            </div>
-            <div className="mt-2 text-xs">
-              <span className="inline-block w-3 h-3 bg-green-400 rounded-full mr-1"></span>
-              <span className="mr-4">Actual (historical data)</span>
-              <span className="inline-block w-3 h-3 bg-gray-400 rounded-full mr-1"></span>
-              <span className="mr-4">Predicted (optimization forecast)</span>
-              <span className="inline-block w-3 h-3 bg-purple-400 rounded-full mr-1"></span>
-              <span>Current hour</span>
-            </div>
-          </div>
-        </div>
+
+      {/* Explanation */}
+      <div className="mt-4 p-4 bg-gray-50 rounded-lg text-sm">
+        <h4 className="font-medium text-gray-900 mb-2">Table Explanation:</h4>
+        <p className="text-gray-600">
+          <strong>Grid-Only:</strong> Cost if using only grid power without solar panels. 
+          <strong>Solar-Only:</strong> Cost with solar panels but no battery optimization - excess solar is exported at lower price.
+          <strong>Solar+Battery:</strong> Actual optimized system with battery charging/discharging to minimize costs.
+          Battery actions: <span className="bg-green-100 text-green-800 px-1 rounded">green = charging</span>, 
+          <span className="bg-red-100 text-red-800 px-1 rounded">red = discharging</span>.
+        </p>
       </div>
     </div>
   );

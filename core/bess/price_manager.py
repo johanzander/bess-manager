@@ -5,7 +5,7 @@ inversion.
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 
@@ -15,7 +15,7 @@ class PriceSource:
     This defines the interface that all price sources must implement.
     """
 
-    def get_prices_for_date(self, target_date: datetime.date) -> list:
+    def get_prices_for_date(self, target_date: date) -> list:
         """Get prices for a specific date.
 
         Args:
@@ -41,7 +41,7 @@ class MockSource(PriceSource):
         """
         self.test_prices = test_prices
 
-    def get_prices_for_date(self, target_date: datetime.date) -> list:
+    def get_prices_for_date(self, target_date: date) -> list:
         """Get prices for the specified date.
 
         Args:
@@ -54,17 +54,25 @@ class MockSource(PriceSource):
 
 
 class HomeAssistantSource(PriceSource):
-    """Home Assistant Nordpool sensor price source with robust timestamp-based parsing."""
+    """Home Assistant Nordpool sensor price source with robust timestamp-based parsing.
+    
+    This source handles Nordpool prices from Home Assistant, which include VAT.
+    It removes VAT from prices before returning them, ensuring all price sources
+    consistently return VAT-exclusive prices.
+    """
 
-    def __init__(self, ha_controller) -> None:
+    def __init__(self, ha_controller, vat_multiplier: float = 1.25) -> None:
         """Initialize with Home Assistant controller.
 
         Args:
             ha_controller: Controller with access to Home Assistant
+            vat_multiplier: VAT multiplier used to convert VAT-inclusive prices to VAT-exclusive
+                            (default: 1.25 for 25% Swedish VAT)
         """
         self.ha_controller = ha_controller
+        self.vat_multiplier = vat_multiplier
 
-    def get_prices_for_date(self, target_date: datetime.date) -> list:
+    def get_prices_for_date(self, target_date: date) -> list:
         """Get prices from Home Assistant for the specified date using timestamp validation.
 
         This method fetches both today and tomorrow sensors, parses their actual timestamps,
@@ -223,6 +231,10 @@ class HomeAssistantSource(PriceSource):
 
             # Extract prices
             prices = [float(entry["value"]) for entry in raw_data if "value" in entry]
+            
+            # Nordpool prices from Home Assistant include VAT - remove it
+            # to standardize all price sources to return VAT-exclusive prices
+            prices = [price / self.vat_multiplier for price in prices]
 
             # Handle DST transitions
             return self._handle_dst_transitions(prices)
@@ -328,7 +340,7 @@ class PriceManager:
         """Calculate retail buy price from Nordpool base price.
 
         Args:
-            base_price: Raw Nordpool price
+            base_price: Raw Nordpool price (VAT-exclusive)
 
         Returns:
             Calculated retail price
@@ -340,7 +352,7 @@ class PriceManager:
         """Calculate sell-back price from Nordpool base price.
 
         Args:
-            base_price: Raw Nordpool price
+            base_price: Raw Nordpool price (VAT-exclusive)
 
         Returns:
             Calculated sell-back price
@@ -348,7 +360,7 @@ class PriceManager:
         return base_price + self.tax_reduction
 
     def get_price_data(
-        self, target_date: Optional[datetime.date] = None  # noqa: UP007
+        self, target_date: Optional[date] = None  # noqa: UP007
     ) -> list:
         """Get formatted price data for the specified date.
 
@@ -415,7 +427,7 @@ class PriceManager:
         return self.get_price_data(tomorrow)
 
     def get_prices(
-        self, target_date: Optional[datetime.date] = None  # noqa: UP007
+        self, target_date: Optional[date] = None  # noqa: UP007
     ) -> list:
         """Get raw price data for a specified date.
 
@@ -431,7 +443,7 @@ class PriceManager:
 
     def get_buy_prices(
         self,
-        target_date: Optional[datetime.date] = None,  # noqa: UP007
+        target_date: Optional[date] = None,  # noqa: UP007
         raw_prices: list | None = None,
     ) -> list:
         """Get buy prices for the specified date or from raw prices.
@@ -453,7 +465,7 @@ class PriceManager:
 
     def get_sell_prices(
         self,
-        target_date: Optional[datetime.date] = None,  # noqa: UP007
+        target_date: Optional[date] = None,  # noqa: UP007
         raw_prices: list | None = None,
     ) -> list:
         """Get sell prices for the specified date or from raw prices.

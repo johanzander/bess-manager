@@ -4,20 +4,9 @@ import {
   Zap, 
   Power, 
   Settings, 
-  Clock, 
-  ArrowUp, 
-  ArrowDown, 
-  Minus,
   RefreshCw,
   AlertTriangle,
-  CheckCircle,
-  XCircle,
-  Calendar,
-  Activity,
   Target,
-  DollarSign,
-  List,
-  BarChart3
 } from 'lucide-react';
 import api from '../lib/api';
 
@@ -36,84 +25,65 @@ interface InverterStatus {
   timestamp: string;
 }
 
-interface TOUInterval {
-  segment_id: number;
-  start_time: string;
-  end_time: string;
-  batt_mode: string;
-  enabled: boolean;
-  grid_charge?: boolean;
-  discharge_rate?: number;
-  strategic_intent?: string;
-  action?: string;
-  action_color?: string;
-}
-
+// Updated to use dashboard data structure
 interface ScheduleHour {
   hour: number;
-  mode: string;
-  battery_mode: string;
-  grid_charge: boolean;
-  discharge_rate: number;
-  state: string;
-  strategic_intent: string;
-  action: string;
-  action_color: string;
-  battery_action: number;
-  soc: number;
-  price: number;
-  grid_power: number;
-  is_current: boolean;
+  batteryAction: number;
+  strategicIntent?: string;
+  batterySocEnd: number;
+  buyPrice: number;
+  isActual: boolean;
+  isPredicted: boolean;
+  dataSource: string;
+}
+
+interface DashboardData {
+  currentHour: number;
+  hourlyData: ScheduleHour[];
+  strategicIntentSummary: Record<string, number>;
+  date: string;
 }
 
 interface GrowattSchedule {
   current_hour: number;
   tou_intervals: TOUInterval[];
   schedule_data: ScheduleHour[];
+  strategic_intent_periods: StrategicPeriod[];
   last_updated: string;
-  summary: {
-    charge_hours: number;
-    discharge_hours: number;
-    idle_hours: number;
-    active_hours: number;
-    mode_distribution: Record<string, number>;
-    intent_distribution: Record<string, number>;
-    efficiency_metrics: {
-      utilization_rate: number;
-      charge_discharge_ratio: number;
-    };
-  };
 }
 
-// Consolidated schedule period interface
-interface SchedulePeriod {
-  id: string;
+interface StrategicPeriod {
   start_time: string;
   end_time: string;
-  hours_span: number;
-  battery_mode: string;
   strategic_intent: string;
+  battery_mode: string;
   grid_charge: boolean;
-  discharge_rate: number;
-  is_active: boolean;
+  charge_power_rate: number;
+  discharge_power_rate: number;
+  hours_span: number;
   description: string;
-  action_summary: string;
 }
 
 const InverterStatusDashboard: React.FC = () => {
   const [inverterStatus, setInverterStatus] = useState<InverterStatus | null>(null);
+  const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   const [growattSchedule, setGrowattSchedule] = useState<GrowattSchedule | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
 
-  // Fetch inverter status
+  // Fetch inverter status (use real API call)
   const fetchInverterStatus = async (): Promise<InverterStatus> => {
     const response = await api.get('/api/growatt/inverter_status');
     return response.data;
   };
 
-  // Fetch Growatt schedule
+  // Updated to use consolidated dashboard endpoint and detailed schedule
+  const fetchDashboardData = async (): Promise<DashboardData> => {
+    const response = await api.get('/api/dashboard');
+    return response.data;
+  };
+
   const fetchGrowattSchedule = async (): Promise<GrowattSchedule> => {
     const response = await api.get('/api/growatt/detailed_schedule');
     return response.data;
@@ -123,12 +93,22 @@ const InverterStatusDashboard: React.FC = () => {
   const loadData = async (): Promise<void> => {
     try {
       setError(null);
-      const [statusData, scheduleData] = await Promise.all([
+      const [statusData, scheduleDashboard] = await Promise.all([
         fetchInverterStatus(),
-        fetchGrowattSchedule()
+        fetchDashboardData()
       ]);
       setInverterStatus(statusData);
-      setGrowattSchedule(scheduleData);
+      setDashboardData(scheduleDashboard);
+      
+      // Mock growatt schedule until backend endpoint exists
+      setGrowattSchedule({
+        current_hour: scheduleDashboard.currentHour,
+        tou_intervals: [],
+        schedule_data: [],
+        strategic_intent_periods: [],
+        last_updated: new Date().toISOString()
+      });
+      
       setLastUpdate(new Date());
     } catch (err) {
       console.error('Error loading data:', err);
@@ -138,218 +118,86 @@ const InverterStatusDashboard: React.FC = () => {
     }
   };
 
-  // Initial load
   useEffect(() => {
     loadData();
-  }, []);
-
-  // Auto-refresh every 30 seconds
-  useEffect(() => {
-    const interval = setInterval(() => {
-      loadData();
-    }, 30000);
+    const interval = setInterval(loadData, 60000); // Refresh every minute
     return () => clearInterval(interval);
   }, []);
 
-  // Manual refresh
-  const handleRefresh = async (): Promise<void> => {
-    setLoading(true);
-    await loadData();
-  };
-
-  // Helper functions
-  const formatPower = (power: number): string => {
-    if (Math.abs(power) >= 1000) {
-      return `${(power / 1000).toFixed(1)} kW`;
-    }
-    return `${power.toFixed(0)} W`;
-  };
-
-  const getBatteryColor = (soc: number): string => {
-    if (soc >= 80) return 'text-green-600';
-    if (soc >= 50) return 'text-yellow-600';
-    if (soc >= 20) return 'text-orange-600';
-    return 'text-red-600';
-  };
-
-  const getStrategicIntentIcon = (intent: string): React.ReactNode => {
-    switch (intent) {
-      case 'GRID_CHARGING':
-        return <Power className="h-4 w-4 text-blue-600" />;
-      case 'SOLAR_STORAGE':
-        return <Battery className="h-4 w-4 text-green-600" />;
-      case 'LOAD_SUPPORT':
-        return <Activity className="h-4 w-4 text-orange-600" />;
-      case 'EXPORT_ARBITRAGE':
-        return <DollarSign className="h-4 w-4 text-red-600" />;
-      default:
-        return <Target className="h-4 w-4 text-gray-600" />;
-    }
-  };
-
-  const getStrategicIntentColor = (intent: string): string => {
-    switch (intent) {
-      case 'GRID_CHARGING':
-        return 'bg-blue-100 text-blue-800 border-blue-200';
-      case 'SOLAR_STORAGE':
-        return 'bg-green-100 text-green-800 border-green-200';
-      case 'LOAD_SUPPORT':
-        return 'bg-orange-100 text-orange-800 border-orange-200';
-      case 'EXPORT_ARBITRAGE':
-        return 'bg-red-100 text-red-800 border-red-200';
-      default:
-        return 'bg-gray-100 text-gray-800 border-gray-200';
-    }
-  };
-
-  const getStrategicIntentDescription = (intent: string): string => {
-    switch (intent) {
-      case 'GRID_CHARGING':
-        return 'Storing cheap grid energy for later use';
-      case 'SOLAR_STORAGE':
-        return 'Storing excess solar energy';
-      case 'LOAD_SUPPORT':
-        return 'Supporting home consumption';
-      case 'EXPORT_ARBITRAGE':
-        return 'Exporting for profit';
-      default:
-        return 'No significant activity';
-    }
-  };
-
-  const getModeColor = (mode: string): string => {
-    switch (mode.toLowerCase()) {
-      case 'battery-first':
-        return 'bg-blue-100 text-blue-800 border-blue-200';
-      case 'grid-first':
-        return 'bg-purple-100 text-purple-800 border-purple-200';
-      case 'load-first':
-        return 'bg-green-100 text-green-800 border-green-200';
-      default:
-        return 'bg-gray-100 text-gray-800 border-gray-200';
-    }
-  };
-
-  // Convert schedule data to consolidated periods
-  const getConsolidatedPeriods = (): SchedulePeriod[] => {
-    if (!growattSchedule) return [];
-
-    const periods: SchedulePeriod[] = [];
-    const currentHour = growattSchedule.current_hour;
-
-    // Group consecutive hours with same settings
-    let currentPeriod: SchedulePeriod | null = null;
+  // Handle grid charge toggle
+  const handleGridChargeToggle = async () => {
+    if (!inverterStatus) return;
     
-    for (const hourData of growattSchedule.schedule_data) {
-      const needsNewPeriod = !currentPeriod || 
-        currentPeriod.battery_mode !== hourData.battery_mode ||
-        currentPeriod.strategic_intent !== hourData.strategic_intent ||
-        currentPeriod.grid_charge !== hourData.grid_charge ||
-        currentPeriod.discharge_rate !== hourData.discharge_rate;
-
-      if (needsNewPeriod) {
-        // Save previous period
-        if (currentPeriod) {
-          periods.push(currentPeriod);
-        }
-
-        // Start new period
-        const startHour = hourData.hour;
-        const isActive = startHour <= currentHour;
-        
-        // Determine action summary - distinguish between programmed actions and natural behavior
-        let actionSummary = 'Natural Operation';
-        if (hourData.grid_charge) {
-          actionSummary = 'Forced Grid Charging';
-        } else if (hourData.discharge_rate > 0) {
-          actionSummary = `Forced Discharge (${hourData.discharge_rate}%)`;
-        } else if (hourData.strategic_intent === 'SOLAR_STORAGE') {
-          actionSummary = 'Solar Priority';
-        } else if (hourData.strategic_intent === 'LOAD_SUPPORT') {
-          actionSummary = 'Load Support Priority';
-        } else if (hourData.strategic_intent === 'EXPORT_ARBITRAGE') {
-          actionSummary = 'Export Priority';
-        } else if (hourData.strategic_intent === 'GRID_CHARGING') {
-          actionSummary = 'Grid Charge Priority';
-        }
-
-        currentPeriod = {
-          id: `period-${periods.length}`,
-          start_time: `${startHour.toString().padStart(2, '0')}:00`,
-          end_time: `${startHour.toString().padStart(2, '0')}:59`, // Will be updated
-          hours_span: 1,
-          battery_mode: hourData.battery_mode,
-          strategic_intent: hourData.strategic_intent,
-          grid_charge: hourData.grid_charge,
-          discharge_rate: hourData.discharge_rate,
-          is_active: isActive,
-          description: getStrategicIntentDescription(hourData.strategic_intent),
-          action_summary: actionSummary
-        };
-      } else {
-        // Extend current period
-        if (currentPeriod) {
-          currentPeriod.end_time = `${hourData.hour.toString().padStart(2, '0')}:59`;
-          currentPeriod.hours_span += 1;
-          
-          // Update active status if any hour in period is current/past
-          if (hourData.hour <= currentHour) {
-            currentPeriod.is_active = true;
-          }
-        }
-      }
+    try {
+      const newState = !inverterStatus.grid_charge_enabled;
+      await api.post('/api/growatt/grid_charge', { enabled: newState });
+      
+      // Update local state immediately for responsiveness
+      setInverterStatus(prev => prev ? { ...prev, grid_charge_enabled: newState } : null);
+      
+      // Refresh data after a short delay
+      setTimeout(loadData, 1000);
+    } catch (err) {
+      console.error('Error toggling grid charge:', err);
+      setError('Failed to toggle grid charge');
     }
-
-    // Add final period
-    if (currentPeriod) {
-      periods.push(currentPeriod);
-    }
-
-    return periods;
   };
 
-  const consolidatedPeriods = getConsolidatedPeriods();
+  const currentHour = new Date().getHours();
+  const currentHourData = dashboardData?.hourlyData?.find(h => h.hour === currentHour);
 
-  if (loading && !inverterStatus && !growattSchedule) {
+  if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-6">
-        <div className="max-w-7xl mx-auto">
-          <div className="bg-white rounded-xl shadow-lg p-8 text-center">
-            <div className="animate-spin h-12 w-12 border-4 border-blue-500 rounded-full border-t-transparent mx-auto mb-4"></div>
-            <h2 className="text-xl font-semibold text-gray-900 mb-2">Loading Inverter Data</h2>
-            <p className="text-gray-600">Fetching real-time status and schedule with strategic intents...</p>
-          </div>
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center bg-white rounded-lg p-8 shadow-sm">
+          <RefreshCw className="h-8 w-8 animate-spin text-gray-600 mx-auto mb-4" />
+          <p className="text-gray-600">Loading inverter status...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error && !inverterStatus) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center bg-white rounded-lg p-8 shadow-sm">
+          <AlertTriangle className="h-8 w-8 text-red-500 mx-auto mb-4" />
+          <p className="text-red-600 mb-4">{error}</p>
+          <button
+            onClick={loadData}
+            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+          >
+            Retry
+          </button>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-6">
+    <div className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-7xl mx-auto space-y-6">
         
         {/* Header */}
-        <div className="bg-white rounded-xl shadow-lg p-6">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
-            <div className="mb-4 sm:mb-0">
-              <h1 className="text-3xl font-bold text-gray-900 flex items-center">
-                <Zap className="h-8 w-8 text-blue-600 mr-3" />
-                Inverter Control Center
+        <div className="bg-white rounded-lg p-6 shadow-sm">
+          <div className="flex justify-between items-center">
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900 flex items-center">
+                <Zap className="h-6 w-6 mr-2 text-blue-600" />
+                Inverter Status Dashboard
               </h1>
-              <p className="text-gray-600 mt-1">Real-time inverter status and strategic battery management</p>
+              <p className="text-gray-600 mt-1">Real-time battery and inverter monitoring</p>
             </div>
-            
-            <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-3">
               <div className="text-sm text-gray-500">
                 Last updated: {lastUpdate.toLocaleTimeString()}
               </div>
               <button
-                onClick={handleRefresh}
-                disabled={loading}
-                className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                onClick={loadData}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center space-x-2"
               >
-                <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-                Refresh
+                <RefreshCw className="h-4 w-4" />
+                <span>Refresh</span>
               </button>
             </div>
           </div>
@@ -357,419 +205,325 @@ const InverterStatusDashboard: React.FC = () => {
 
         {/* Error Display */}
         {error && (
-          <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4">
             <div className="flex items-center">
-              <AlertTriangle className="h-5 w-5 text-red-600 mr-2" />
-              <span className="text-red-800 font-medium">Error: {error}</span>
+              <AlertTriangle className="h-5 w-5 text-red-500 mr-2" />
+              <span className="text-red-700">{error}</span>
             </div>
           </div>
         )}
 
-        {/* Real-time Inverter Status */}
-        <div className="bg-white rounded-xl shadow-lg overflow-hidden">
-          <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-4">
-            <h2 className="text-xl font-bold text-white flex items-center">
-              <Activity className="h-6 w-6 mr-2" />
-              Real-time Inverter Status
-            </h2>
-          </div>
+        {/* Main Status Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           
-          {inverterStatus ? (
-            <div className="p-6">
-              {/* Battery Status Row */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-xl p-6 border border-green-200">
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-semibold text-gray-900">Battery Status</h3>
-                    <Battery className={`h-8 w-8 ${getBatteryColor(inverterStatus.battery_soc)}`} />
-                  </div>
-                  <div className="space-y-3">
-                    <div className="flex justify-between items-center">
-                      <span className="text-gray-600">State of Charge:</span>
-                      <span className={`text-2xl font-bold ${getBatteryColor(inverterStatus.battery_soc)}`}>
-                        {inverterStatus.battery_soc.toFixed(1)}%
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-gray-600">State of Energy:</span>
-                      <span className="text-lg font-semibold text-gray-900">
-                        {inverterStatus.battery_soe.toFixed(1)} kWh
-                      </span>
-                    </div>
-                    <div className="w-full bg-gray-200 rounded-full h-3">
-                      <div 
-                        className={`h-3 rounded-full transition-all duration-300 ${
-                          inverterStatus.battery_soc >= 80 ? 'bg-green-500' :
-                          inverterStatus.battery_soc >= 50 ? 'bg-yellow-500' :
-                          inverterStatus.battery_soc >= 20 ? 'bg-orange-500' : 'bg-red-500'
-                        }`}
-                        style={{ width: `${Math.max(0, Math.min(100, inverterStatus.battery_soc))}%` }}
-                      ></div>
-                    </div>
-                  </div>
-                </div>
+          {/* Battery SOC */}
+          <div className="bg-white rounded-lg p-6 shadow-sm">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">Battery SOC</h3>
+              <Battery className={`h-6 w-6 ${
+                (inverterStatus?.battery_soc || 0) > 80 ? 'text-green-600' :
+                (inverterStatus?.battery_soc || 0) > 40 ? 'text-yellow-600' : 'text-red-600'
+              }`} />
+            </div>
+            <div className="text-3xl font-bold text-gray-900 mb-2">
+              {inverterStatus?.battery_soc?.toFixed(1) || 'N/A'}%
+            </div>
+            <div className="text-sm text-gray-600">
+              SOE: {inverterStatus?.battery_soe?.toFixed(1) || 'N/A'} kWh
+            </div>
+          </div>
 
-                <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl p-6 border border-blue-200">
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-semibold text-gray-900">Power Flow</h3>
-                    <Power className="h-8 w-8 text-blue-600" />
-                  </div>
-                  <div className="space-y-3">
-                    <div className="flex justify-between items-center">
-                      <span className="text-gray-600">Charge Power:</span>
-                      <span className="text-lg font-semibold text-green-600">
-                        {formatPower(inverterStatus.battery_charge_power)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-gray-600">Discharge Power:</span>
-                      <span className="text-lg font-semibold text-red-600">
-                        {formatPower(inverterStatus.battery_discharge_power)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-gray-600">Grid Charging:</span>
-                      <span className={`text-lg font-semibold ${inverterStatus.grid_charge_enabled ? 'text-green-600' : 'text-gray-400'}`}>
-                        {inverterStatus.grid_charge_enabled ? 'Enabled' : 'Disabled'}
-                      </span>
-                    </div>
-                  </div>
-                </div>
+          {/* Battery Power */}
+          <div className="bg-white rounded-lg p-6 shadow-sm">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">Battery Power</h3>
+              <Power className="h-6 w-6 text-blue-600" />
+            </div>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-600">Charging:</span>
+                <span className="text-green-600 font-medium">
+                  {inverterStatus?.battery_charge_power?.toFixed(1) || '0'} kW
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-600">Discharging:</span>
+                <span className="text-red-600 font-medium">
+                  {inverterStatus?.battery_discharge_power?.toFixed(1) || '0'} kW
+                </span>
+              </div>
+            </div>
+          </div>
 
-                <div className="bg-gradient-to-br from-purple-50 to-purple-100 rounded-xl p-6 border border-purple-200">
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-semibold text-gray-900">Limits & Rates</h3>
-                    <Settings className="h-8 w-8 text-purple-600" />
-                  </div>
-                  <div className="space-y-3">
-                    <div className="flex justify-between items-center">
-                      <span className="text-gray-600">Charge Stop:</span>
-                      <span className="text-lg font-semibold text-gray-900">
-                        {inverterStatus.charge_stop_soc.toFixed(0)}%
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-gray-600">Discharge Stop:</span>
-                      <span className="text-lg font-semibold text-gray-900">
-                        {inverterStatus.discharge_stop_soc.toFixed(0)}%
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-gray-600">Discharge Rate:</span>
-                      <span className="text-lg font-semibold text-gray-900">
-                        {inverterStatus.discharge_power_rate.toFixed(0)}%
-                      </span>
-                    </div>
-                  </div>
+          {/* Grid Charge Status */}
+          <div className="bg-white rounded-lg p-6 shadow-sm">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">Grid Charge</h3>
+              <Settings className="h-6 w-6 text-gray-600" />
+            </div>
+            <div className="flex items-center justify-between">
+              <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                inverterStatus?.grid_charge_enabled ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+              }`}>
+                {inverterStatus?.grid_charge_enabled ? 'Enabled' : 'Disabled'}
+              </span>
+              <button
+                onClick={handleGridChargeToggle}
+                className={`px-4 py-2 rounded text-sm font-medium transition-colors ${
+                  inverterStatus?.grid_charge_enabled
+                    ? 'bg-red-600 hover:bg-red-700 text-white'
+                    : 'bg-green-600 hover:bg-green-700 text-white'
+                }`}
+              >
+                {inverterStatus?.grid_charge_enabled ? 'Disable' : 'Enable'}
+              </button>
+            </div>
+          </div>
+
+          {/* Current Strategy */}
+          <div className="bg-white rounded-lg p-6 shadow-sm">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">Current Strategy</h3>
+              <Target className="h-6 w-6 text-purple-600" />
+            </div>
+            {currentHourData ? (
+              <div className="space-y-2">
+                <div className="px-3 py-1 rounded text-sm font-medium bg-gray-100 text-gray-800">
+                  {typeof currentHourData.batteryAction === 'number' ? 
+                    (currentHourData.batteryAction > 0 ? 'CHARGE' : 
+                     currentHourData.batteryAction < 0 ? 'DISCHARGE' : 'IDLE') :
+                    currentHourData.batteryAction || 'IDLE'}
+                </div>
+                <div className="px-3 py-1 rounded text-xs bg-gray-100 text-gray-800">
+                  {currentHourData.strategicIntent || 'NO_INTENT'}
                 </div>
               </div>
+            ) : (
+              <div className="text-gray-500 text-sm">No strategy data</div>
+            )}
+          </div>
+        </div>
 
-              {/* Power Limits */}
-              <div className="bg-gray-50 rounded-xl p-6">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">Maximum Power Capabilities</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="flex justify-between items-center p-4 bg-white rounded-lg shadow-sm">
-                    <span className="text-gray-600 flex items-center">
-                      <ArrowUp className="h-5 w-5 text-green-600 mr-2" />
-                      Max Charging Power:
-                    </span>
-                    <span className="text-xl font-bold text-green-600">
-                      {formatPower(inverterStatus.max_charging_power)}
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center p-4 bg-white rounded-lg shadow-sm">
-                    <span className="text-gray-600 flex items-center">
-                      <ArrowDown className="h-5 w-5 text-red-600 mr-2" />
-                      Max Discharging Power:
-                    </span>
-                    <span className="text-xl font-bold text-red-600">
-                      {formatPower(inverterStatus.max_discharging_power)}
-                    </span>
-                  </div>
-                </div>
+        {/* Detailed Settings and Schedules */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          
+          {/* Battery Settings */}
+          <div className="bg-white rounded-lg p-6 shadow-sm">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Battery Settings</h3>
+            <div className="space-y-3">
+              <div className="flex justify-between">
+                <span className="text-gray-600">Charge Stop SOC:</span>
+                <span className="font-medium">{inverterStatus?.charge_stop_soc || 'N/A'}%</span>
               </div>
+              <div className="flex justify-between">
+                <span className="text-gray-600">Discharge Stop SOC:</span>
+                <span className="font-medium">{inverterStatus?.discharge_stop_soc || 'N/A'}%</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-600">Discharge Power Rate:</span>
+                <span className="font-medium">{inverterStatus?.discharge_power_rate || 'N/A'}%</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-600">Max Charging Power:</span>
+                <span className="font-medium">{inverterStatus?.max_charging_power || 'N/A'} kW</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-600">Max Discharging Power:</span>
+                <span className="font-medium">{inverterStatus?.max_discharging_power || 'N/A'} kW</span>
+              </div>
+            </div>
+          </div>
+
+          {/* TOU Settings */}
+          <div className="bg-white rounded-lg p-6 shadow-sm">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">TOU Settings</h3>
+            {growattSchedule?.tou_intervals ? (
+              <div className="space-y-2">
+                {growattSchedule.tou_intervals.map((interval, index) => (
+                  <div key={index} className="flex justify-between items-center p-2 bg-gray-50 rounded">
+                    <div>
+                      <span className="font-medium">#{interval.segment_id}</span>
+                      <span className="ml-2 text-sm text-gray-600">
+                        {interval.start_time} - {interval.end_time}
+                      </span>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <span className="px-2 py-1 rounded text-xs bg-blue-100 text-blue-800">
+                        {interval.batt_mode}
+                      </span>
+                      <span className="px-2 py-1 rounded text-xs bg-green-100 text-green-800">
+                        {interval.enabled ? 'Active' : 'Disabled'}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-gray-500 text-sm">No TOU intervals configured</div>
+            )}
+          </div>
+        </div>
+
+        {/* Strategic Intent Intervals */}
+        <div className="bg-white rounded-lg p-6 shadow-sm">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">Strategic Intent Intervals</h3>
+          {growattSchedule?.strategic_intent_periods ? (
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Time</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Intent</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Mode</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Grid Charge</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Charge Power</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Discharge Power</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {growattSchedule.strategic_intent_periods.map((period, index) => (
+                    <tr key={index}>
+                      <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {period.start_time} - {period.end_time} ({period.hours_span}h)
+                      </td>
+                      <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {period.strategic_intent}
+                      </td>
+                      <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {period.battery_mode}
+                      </td>
+                      <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {period.grid_charge ? 'Yes' : 'No'}
+                      </td>
+                      <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {period.charge_power_rate}%
+                      </td>
+                      <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {period.discharge_power_rate}%
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           ) : (
-            <div className="p-6 text-center text-gray-500">
-              <XCircle className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-              <p>Inverter status data not available</p>
-            </div>
+            <div className="text-gray-500 text-sm">No strategic intent periods available</div>
           )}
         </div>
 
-        {/* Strategic Battery Schedule - List View */}
-        <div className="bg-white rounded-xl shadow-lg overflow-hidden">
-          <div className="bg-gradient-to-r from-green-600 to-green-700 px-6 py-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-xl font-bold text-white flex items-center">
-                <List className="h-6 w-6 mr-2" />
-                Strategic Battery Schedule & TOU Settings
-              </h2>
-              {growattSchedule && (
-                <div className="text-green-100 text-sm">
-                  Current Hour: {growattSchedule.current_hour}:00
-                </div>
-              )}
-            </div>
-          </div>
-          
-          {growattSchedule ? (
-            <div className="p-6">
-              {/* Schedule Summary */}
-              <div className="mb-6 grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="bg-green-50 p-4 rounded-lg text-center border border-green-200">
-                  <div className="text-2xl font-bold text-green-600">{growattSchedule.summary.charge_hours}</div>
-                  <div className="text-sm text-gray-600">Charge Hours</div>
-                </div>
-                <div className="bg-red-50 p-4 rounded-lg text-center border border-red-200">
-                  <div className="text-2xl font-bold text-red-600">{growattSchedule.summary.discharge_hours}</div>
-                  <div className="text-sm text-gray-600">Discharge Hours</div>
-                </div>
-                <div className="bg-gray-50 p-4 rounded-lg text-center border border-gray-200">
-                  <div className="text-2xl font-bold text-gray-600">{growattSchedule.summary.idle_hours}</div>
-                  <div className="text-sm text-gray-600">Idle Hours</div>
-                </div>
-                <div className="bg-blue-50 p-4 rounded-lg text-center border border-blue-200">
-                  <div className="text-2xl font-bold text-blue-600">{growattSchedule.summary.efficiency_metrics.utilization_rate.toFixed(1)}%</div>
-                  <div className="text-sm text-gray-600">Utilization Rate</div>
-                </div>
-              </div>
-
-              {/* Strategic Intent Distribution */}
-              {growattSchedule.summary.intent_distribution && (
-                <div className="mb-6 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-xl p-6 border border-indigo-200">
-                  <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-                    <Target className="h-5 w-5 mr-2 text-indigo-600" />
-                    Strategic Intent Distribution
-                  </h3>
-                  <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-                    {Object.entries(growattSchedule.summary.intent_distribution).map(([intent, count]) => (
-                      <div key={intent} className={`p-3 rounded-lg border text-center ${getStrategicIntentColor(intent)}`}>
-                        <div className="flex items-center justify-center mb-1">
-                          {getStrategicIntentIcon(intent)}
-                          <span className="ml-1 text-lg font-bold">{count}</span>
-                        </div>
-                        <div className="text-xs font-medium">{intent.replace('_', ' ')}</div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Consolidated Schedule Periods - List View */}
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-                  <BarChart3 className="h-5 w-5 mr-2" />
-                  Schedule Periods ({consolidatedPeriods.length} periods)
-                </h3>
-                
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Time Period
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Duration
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Strategic Intent
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Battery Mode
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Programmed Action
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Current Reality
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Grid Charge
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Discharge Rate
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Status
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                      {consolidatedPeriods.map((period) => (
-                        <tr 
-                          key={period.id} 
-                          className={`${period.is_active ? 'bg-blue-50' : 'bg-white'} hover:bg-gray-50`}
-                        >
-                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                            <div className="flex items-center">
-                              <Clock className="h-4 w-4 text-gray-400 mr-2" />
-                              {period.start_time} - {period.end_time}
-                            </div>
-                          </td>
-                          
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            <span className="bg-gray-100 text-gray-800 px-2 py-1 rounded text-xs font-medium">
-                              {period.hours_span}h
-                            </span>
-                          </td>
-                          
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="flex flex-col">
-                              <span className={`inline-flex items-center px-2 py-1 text-xs font-semibold rounded-full border ${getStrategicIntentColor(period.strategic_intent)}`}>
-                                {getStrategicIntentIcon(period.strategic_intent)}
-                                <span className="ml-1">{period.strategic_intent.replace('_', ' ')}</span>
-                              </span>
-                              <span className="text-xs text-gray-500 mt-1 italic">
-                                {period.description}
-                              </span>
-                            </div>
-                          </td>
-                          
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded border ${getModeColor(period.battery_mode)}`}>
-                              {period.battery_mode}
-                            </span>
-                          </td>
-                          
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            <div className="font-medium">
-                              {period.action_summary}
-                            </div>
-                          </td>
-                          
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {period.is_active && period.start_time.startsWith(growattSchedule.current_hour.toString().padStart(2, '0')) ? (
-                              <div className="flex flex-col">
-                                <div className="flex items-center">
-                                  {(inverterStatus?.battery_charge_power ?? 0) > 100 ? (
-                                    <ArrowUp className="h-4 w-4 text-green-600 mr-1" />
-                                  ) : (inverterStatus?.battery_discharge_power ?? 0) > 100 ? (
-                                    <ArrowDown className="h-4 w-4 text-red-600 mr-1" />
-                                  ) : (
-                                    <Minus className="h-4 w-4 text-gray-600 mr-1" />
-                                  )}
-                                  <span className={`font-medium ${
-                                    (inverterStatus?.battery_charge_power ?? 0) > 100 ? 'text-green-600' :
-                                    (inverterStatus?.battery_discharge_power ?? 0) > 100 ? 'text-red-600' :
-                                    'text-gray-600'
-                                  }`}>
-                                    {(inverterStatus?.battery_charge_power ?? 0) > 100 ? (
-                                      `Charging ${formatPower(inverterStatus?.battery_charge_power ?? 0)}`
-                                    ) : (inverterStatus?.battery_discharge_power ?? 0) > 100 ? (
-                                      `Discharging ${formatPower(inverterStatus?.battery_discharge_power ?? 0)}`
-                                    ) : (
-                                      'Idle'
-                                    )}
-                                  </span>
-                                </div>
-                                <div className="text-xs text-gray-500">
-                                  Real-time: {inverterStatus?.grid_charge_enabled ? 'Grid charging enabled' : 'Natural operation'}
-                                </div>
-                              </div>
-                            ) : (
-                              <span className="text-gray-400 text-sm">
-                                {period.is_active ? 'Different hour' : 'Not active'}
+        {/* Hourly Schedule Table */}
+        {dashboardData?.hourlyData && (
+          <div className="bg-white rounded-lg p-6 shadow-sm">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">24-Hour Schedule</h3>
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Hour</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Strategic Intent</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Energy Action</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Power Rate</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Grid Charge</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">SOC</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {dashboardData.hourlyData.map((hour, index) => {
+                    const isCurrentHour = hour.hour === dashboardData.currentHour;
+                    
+                    // Row styling based on actual/predicted/current (restored original)
+                    let rowClass = 'border-l-4 ';
+                    if (isCurrentHour) {
+                      rowClass += 'bg-purple-50 border-purple-400';
+                    } else if (hour.isActual) {
+                      rowClass += 'bg-gray-50 border-green-400';
+                    } else {
+                      rowClass += 'bg-white border-gray-200';
+                    }
+                    
+                    return (
+                      <tr key={index} className={rowClass}>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                          <div className="flex items-center">
+                            {hour.hour.toString().padStart(2, '0')}:00
+                            {hour.isActual && (
+                              <span className="ml-2 text-xs bg-green-100 text-green-700 px-2 py-1 rounded">
+                                Actual
                               </span>
                             )}
-                          </td>
-                          
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            <span className={`flex items-center ${period.grid_charge ? 'text-green-600' : 'text-gray-400'}`}>
-                              {period.grid_charge ? <CheckCircle className="h-4 w-4 mr-1" /> : <XCircle className="h-4 w-4 mr-1" />}
-                              {period.grid_charge ? 'Enabled' : 'Disabled'}
-                            </span>
-                          </td>
-                          
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            <span className={`font-medium ${period.discharge_rate > 0 ? 'text-red-600' : 'text-gray-400'}`}>
-                              {period.discharge_rate}%
-                            </span>
-                          </td>
-                          
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                              period.is_active 
-                                ? 'bg-blue-100 text-blue-800' 
-                                : 'bg-gray-100 text-gray-800'
-                            }`}>
-                              {period.is_active ? 'Active' : 'Upcoming'}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                
-                {/* Current Period Highlight */}
-                {consolidatedPeriods.length > 0 && (
-                  <div className="mt-4 bg-blue-50 border border-blue-200 rounded-lg p-4">
-                    <h4 className="font-medium text-blue-800 mb-2 flex items-center">
-                      <Activity className="h-4 w-4 mr-2" />
-                      Current Status Summary
-                    </h4>
-                    {(() => {
-                      const currentPeriod = consolidatedPeriods.find(p => 
-                        p.is_active && p.start_time.startsWith(growattSchedule.current_hour.toString().padStart(2, '0'))
-                      );
-                      return (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div>
-                            <h5 className="font-medium text-blue-800 text-sm mb-1">Programmed Strategy:</h5>
-                            <div className="text-sm text-blue-700">
-                              {currentPeriod ? (
-                                <>
-                                  <span className="font-medium">{currentPeriod.start_time} - {currentPeriod.end_time}</span>
-                                  {' • '}
-                                  <span>{currentPeriod.strategic_intent.replace('_', ' ')}</span>
-                                  {' • '}
-                                  <span>{currentPeriod.action_summary}</span>
-                                </>
-                              ) : (
-                                'No matching period found'
-                              )}
-                            </div>
-                          </div>
-                          <div>
-                            <h5 className="font-medium text-blue-800 text-sm mb-1">Actual Performance:</h5>
-                            <div className="text-sm text-blue-700">
-                              <span className="font-medium">
-                                {inverterStatus && (inverterStatus.battery_charge_power ?? 0) > 100 ? (
-                                  `⚡ Charging at ${formatPower(inverterStatus.battery_charge_power ?? 0)}`
-                                ) : inverterStatus && (inverterStatus.battery_discharge_power ?? 0) > 100 ? (
-                                  `⚡ Discharging at ${formatPower(inverterStatus.battery_discharge_power ?? 0)}`
-                                ) : (
-                                  '😴 Battery idle'
-                                )}
+                            {!hour.isActual && !isCurrentHour && (
+                              <span className="ml-2 text-xs bg-gray-100 text-gray-700 px-2 py-1 rounded">
+                                Predicted
                               </span>
-                              <br />
-                              <span>
-                                SOC: {inverterStatus?.battery_soc.toFixed(1)}% • 
-                                Grid Charge: {inverterStatus?.grid_charge_enabled ? 'ON' : 'OFF'}
+                            )}
+                            {isCurrentHour && (
+                              <span className="ml-2 text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded">
+                                Current
                               </span>
-                            </div>
+                            )}
                           </div>
-                        </div>
-                      );
-                    })()}
-                  </div>
-                )}
-              </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          <div className={`px-3 py-1 rounded-full text-sm ${
+                            hour.strategicIntent === 'SOLAR_STORAGE' ? 'bg-yellow-100 text-yellow-800' :
+                            hour.strategicIntent === 'LOAD_SUPPORT' ? 'bg-blue-100 text-blue-800' :
+                            hour.strategicIntent === 'EXPORT_ARBITRAGE' ? 'bg-green-100 text-green-800' :
+                            hour.strategicIntent === 'GRID_CHARGING' ? 'bg-purple-100 text-purple-800' :
+                            'bg-gray-100 text-gray-800'
+                          }`}>
+                            {hour.strategicIntent?.replace('_', ' ') || 'IDLE'}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {hour.batteryCharged > 0 && (
+                            <div className="flex items-center text-green-600">
+                              <span className="text-xs mr-1">⚡</span>
+                              <span className="font-medium">Charge {hour.batteryCharged.toFixed(1)}kWh</span>
+                            </div>
+                          )}
+                          {hour.batteryDischarged > 0 && (
+                            <div className="flex items-center text-orange-600">
+                              <span className="text-xs mr-1">⚡</span>
+                              <span className="font-medium">Discharge {hour.batteryDischarged.toFixed(1)}kWh</span>
+                            </div>
+                          )}
+                          {hour.batteryCharged === 0 && hour.batteryDischarged === 0 && (
+                            <div className="flex items-center text-gray-500">
+                              <span className="text-xs mr-1">⏸️</span>
+                              <span>Idle</span>
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {hour.batteryCharged > 0 ? `${hour.batteryCharged.toFixed(1)}kW` : ''}
+                          {hour.batteryDischarged > 0 ? `${hour.batteryDischarged.toFixed(1)}kW` : ''}
+                          {hour.batteryCharged === 0 && hour.batteryDischarged === 0 ? '0kW' : ''}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          <div className={`px-2 py-1 rounded text-xs font-medium ${
+                            hour.gridCharge ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800'
+                          }`}>
+                            {hour.gridCharge ? '✓ Enabled' : '✗ Disabled'}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          <div className="flex items-center">
+                            <div className={`w-3 h-3 rounded-full mr-2 ${
+                              (hour.batterySocEnd || 0) > 80 ? 'bg-green-500' :
+                              (hour.batterySocEnd || 0) > 40 ? 'bg-yellow-500' : 'bg-red-500'
+                            }`}></div>
+                            <span className="font-medium">{hour.batterySocEnd?.toFixed(1) || 'N/A'}%</span>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
-          ) : (
-            <div className="p-6 text-center text-gray-500">
-              <Calendar className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-              <p>Schedule data not available</p>
-            </div>
-          )}
-        </div>
+          </div>
+        )}
 
-        {/* Footer */}
-        <div className="text-center text-gray-500 text-sm">
-          Data refreshes automatically every 30 seconds • Strategic intents captured at optimization time
-        </div>
       </div>
     </div>
   );

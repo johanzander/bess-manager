@@ -290,7 +290,6 @@ class EnergyFlowCalculator:
             energy_out = (
                 validated.get("load_consumption", 0)
                 + validated.get("export_to_grid", 0)
-                + validated.get("aux_load", 0)
                 + battery_charged
                 - battery_discharge
             )

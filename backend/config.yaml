@@ -58,7 +58,7 @@ options:
     load_consumption_today: "sensor.rkm0d7n04x_load_consumption_today"
     import_from_grid_today: "sensor.rkm0d7n04x_import_from_grid_today"
     batteries_charged_from_grid_today: "sensor.rkm0d7n04x_batteries_charged_from_grid_today"
-    ev_energy_today: "sensor.zap263668_energy_today"
+    ev_energy_today: "sensor.zap263668_energy_meter"
     current_l1: "sensor.current_l1_gustavsgatan_32a"
     current_l2: "sensor.current_l2_gustavsgatan_32a"
     current_l3: "sensor.current_l3_gustavsgatan_32a"
@@ -70,7 +70,6 @@ options:
     lifetime_import_from_grid: "sensor.rkm0d7n04x_lifetime_total_import_from_grid"
     lifetime_system_production: "sensor.rkm0d7n04x_lifetime_system_production"
     lifetime_self_consumption: "sensor.rkm0d7n04x_lifetime_self_consumption"
-    zap_energy_meter: "sensor.zap263668_energy_meter"
     nordpool_kwh_today: "sensor.nordpool_kwh_se4_sek_2_10_025"
     nordpool_kwh_tomorrow: "sensor.nordpool_kwh_se4_sek_2_10_025"
     48h_avg_grid_import: "sensor.48h_average_grid_import_power"
@@ -125,7 +124,6 @@ schema:
     lifetime_import_from_grid: str
     lifetime_system_production: str
     lifetime_self_consumption: str
-    zap_energy_meter: str
     nordpool_kwh_today: str
     nordpool_kwh_tomorrow: str
     48h_avg_grid_import: str

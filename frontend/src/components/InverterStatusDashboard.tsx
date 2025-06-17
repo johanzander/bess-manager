@@ -44,6 +44,14 @@ interface DashboardData {
   date: string;
 }
 
+interface TOUInterval {
+  segment_id: number;
+  start_time: string;
+  end_time: string;
+  batt_mode: string;
+  enabled: boolean;
+}
+
 interface GrowattSchedule {
   current_hour: number;
   tou_intervals: TOUInterval[];

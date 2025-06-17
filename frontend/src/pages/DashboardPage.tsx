@@ -2,9 +2,10 @@ import { useState, useEffect } from 'react';
 import { BatteryLevelChart } from '../components/BatteryLevelChart';
 import { EnergyFlowChart } from '../components/EnergyFlowChart';
 import { EnergySankeyChart } from '../components/EnergySankeyChart';
-import { BatterySettings, ElectricitySettings, ScheduleData } from '../types';
+import { BatterySettings, ElectricitySettings } from '../types';
 import { Clock, AlertCircle } from 'lucide-react';
-import ConsolidatedEnergyCards from '../components/ConsolidatedEnergyCards';
+import EnergyFlowCards from '../components/EnergyFlowCards';
+import SystemStatusCard from '../components/SystemStatusCard';
 import api from '../lib/api';
 
 interface DashboardProps {
@@ -21,19 +22,22 @@ export default function DashboardPage({
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
   const [debugInfo, setDebugInfo] = useState<string[]>([]);
   const [showDebug, setShowDebug] = useState(false);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
 
   const fetchData = async (isManualRefresh = false) => {
-    onLoadingChange(true);
+    // Don't show loading state on background refreshes
+    if (isInitialLoad || isManualRefresh) {
+      onLoadingChange(true);
+    }
     setError(null);
 
     const debugMessages: string[] = [];
     debugMessages.push(`🔄 Fetching dashboard data... (${isManualRefresh ? 'manual' : 'auto'})`);
 
     try {
-      // Clear existing data
-      setDashboardData(null);
+      // ✅ CRITICAL FIX: Don't clear data to prevent blinking
+      // setDashboardData(null); // ← REMOVED THIS LINE
 
-      // Single unified API call (was already correct)
       debugMessages.push(`📡 Calling unified /api/dashboard endpoint...`);
       const response = await api.get('/api/dashboard');
       
@@ -64,17 +68,21 @@ export default function DashboardPage({
       debugMessages.push(`✅ Data fetch completed at ${new Date().toLocaleTimeString()}`);
 
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-      setError(`Failed to load dashboard data: ${errorMessage}`);
-      debugMessages.push(`❌ Critical error: ${errorMessage}`);
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
+      debugMessages.push(`❌ Error: ${errorMessage}`);
+      setError(errorMessage);
+      console.error('Dashboard data fetch failed:', err);
     } finally {
       setDebugInfo(debugMessages);
       onLoadingChange(false);
+      setIsInitialLoad(false);
     }
   };
 
   useEffect(() => {
     fetchData();
+    const interval = setInterval(() => fetchData(), 60000); // Auto-refresh every minute
+    return () => clearInterval(interval);
   }, []);
 
   // Check if we have valid dashboard data
@@ -104,6 +112,14 @@ export default function DashboardPage({
       })),
     totals: dashboardData.totals || {}
   } : { hourlyData: [], totals: {} };
+
+  // Create Sankey data
+  const sankeyData = hasValidData ? {
+    hourlyData: dashboardData.hourlyData,
+    currentHour: dashboardData.currentHour,
+    dataSources: dashboardData.dataSources,
+    totals: dashboardData.totals
+  } : null;
 
   return (
     <div className="space-y-6">
@@ -161,24 +177,50 @@ export default function DashboardPage({
       {/* Main Content */}
       {hasValidData ? (
         <>
-          {/* Energy Cards */}
-          <ConsolidatedEnergyCards />
+          {/* System Status Cards - New section at the top */}
+          <div className="space-y-6">
+            <div>
+              <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">System Status</h2>
+              <SystemStatusCard />
+            </div>
+          </div>
+
+          {/* Energy Flow Cards - Restructured section */}
+          <div className="space-y-6">
+            <div>
+              <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">Energy Flows</h2>
+              <EnergyFlowCards />
+            </div>
+          </div>
           
-          {/* Energy Flow Chart */}
-          <EnergyFlowChart 
-            dailyViewData={dashboardData.hourlyData}
-            energyBalanceData={syntheticEnergyData.hourlyData}
-            currentHour={currentHour}
-          />
+          {/* Charts Section */}
+          <div className="space-y-8">
+            <div>
+              <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">Performance Charts</h2>
+              
+              {/* Energy Flow Chart */}
+              <div className="mb-8">
+                <EnergyFlowChart 
+                  dailyViewData={dashboardData.hourlyData}
+                  energyBalanceData={syntheticEnergyData.hourlyData}
+                  currentHour={currentHour}
+                />
+              </div>
 
-          {/* Battery Level Chart */}
-          <BatteryLevelChart 
-            hourlyData={dashboardData.hourlyData} 
-            settings={settings} 
-          />
+              {/* Battery Level Chart */}
+              <div className="mb-8">
+                <BatteryLevelChart 
+                  hourlyData={dashboardData.hourlyData} 
+                  settings={settings} 
+                />
+              </div>
 
-          {/* Energy Sankey Diagram */}
-          <EnergySankeyChart energyData={scheduleData} />
+              {/* Energy Sankey Diagram */}
+              <div className="mb-8">
+                <EnergySankeyChart energyData={sankeyData} />
+              </div>
+            </div>
+          </div>
           
           {/* Dashboard Overview */}
           <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
@@ -186,13 +228,12 @@ export default function DashboardPage({
             
             <p className="mb-3 text-gray-700 dark:text-gray-300">
               Your dashboard provides a comprehensive overview of your battery system performance 
-              with 4 essential charts covering all key metrics.
+              with dedicated sections for status monitoring, energy flows, and detailed analytics.
             </p>
             <ul className="space-y-2 text-sm text-gray-600 dark:text-gray-400">
-              <li>• <strong className="text-gray-900 dark:text-white">Energy Cards:</strong> Real-time cost, solar, consumption, battery, and grid data</li>
-              <li>• <strong className="text-gray-900 dark:text-white">Energy Flow Chart:</strong> Hourly energy flows with predictions vs actual data</li>
-              <li>• <strong className="text-gray-900 dark:text-white">Battery Chart:</strong> SOC levels, electricity prices, and battery actions</li>
-              <li>• <strong className="text-gray-900 dark:text-white">Sankey Diagram:</strong> Visual overview of daily energy flows between sources</li>
+              <li>• <strong className="text-gray-900 dark:text-white">System Status:</strong> Cost savings, battery state, and system health monitoring</li>
+              <li>• <strong className="text-gray-900 dark:text-white">Energy Flows:</strong> Pure energy flow data across solar, consumption, grid, battery, and balance</li>
+              <li>• <strong className="text-gray-900 dark:text-white">Performance Charts:</strong> Detailed visualizations of energy flows, battery levels, and system flows</li>
             </ul>
             
             {/* Data Source Summary */}
@@ -217,9 +258,9 @@ export default function DashboardPage({
           </p>
           <button
             onClick={() => fetchData(true)}
-            className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
           >
-            Retry Loading
+            Try Again
           </button>
         </div>
       )}

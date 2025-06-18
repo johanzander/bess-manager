@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { BatteryLevelChart } from '../components/BatteryLevelChart';
 import { EnergyFlowChart } from '../components/EnergyFlowChart';
 import { EnergySankeyChart } from '../components/EnergySankeyChart';
@@ -17,14 +17,58 @@ export default function DashboardPage({
   onLoadingChange,
   settings
 }: DashboardProps) {
-  const [dashboardData, setDashboardData] = useState<any | null>(null);
+  // Define a proper type for dashboard data
+  interface DashboardData {
+    hourlyData: Array<{
+      hour: number;
+      batterySocEnd?: number;
+      batteryLevel?: number;
+      batteryAction?: number;
+      solarProduction?: number;
+      solar_production?: number;
+      solarGenerated?: number;
+      homeConsumption?: number;
+      home_consumption?: number;
+      homeConsumed?: number;
+      gridImport?: number;
+      grid_import?: number;
+      gridImported?: number;
+      gridExport?: number;
+      grid_export?: number;
+      gridExported?: number;
+      batteryCharged?: number;
+      battery_charged?: number;
+      batteryDischarged?: number;
+      battery_discharged?: number;
+      dataSource?: string;
+      data_source?: string;
+      isActual?: boolean;
+      buyPrice?: number;
+      sellPrice?: number;
+    }>;
+    currentHour?: number;
+    dataSources?: Record<string, any>;
+    totals?: Record<string, number>;
+    strategicIntentSummary?: Record<string, number>;
+    actualHoursCount?: number;
+    predictedHoursCount?: number;
+    totalDailySavings?: number;
+    actual_savings_so_far?: number;
+    actual_hours_count?: number;
+    predicted_remaining_savings?: number;
+    predicted_hours_count?: number;
+    batteryCapacity?: number;
+  }
+
+  const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
   const [debugInfo, setDebugInfo] = useState<string[]>([]);
   const [showDebug, setShowDebug] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
 
-  const fetchData = async (isManualRefresh = false) => {
+  // Memoize the fetchData function to avoid recreation on each render
+  const fetchData = useCallback(async (isManualRefresh = false) => {
     // Don't show loading state on background refreshes
     if (isInitialLoad || isManualRefresh) {
       onLoadingChange(true);
@@ -77,25 +121,17 @@ export default function DashboardPage({
       onLoadingChange(false);
       setIsInitialLoad(false);
     }
-  };
+  }, [isInitialLoad, onLoadingChange]); // Add dependencies
 
   useEffect(() => {
     fetchData();
     const interval = setInterval(() => fetchData(), 60000); // Auto-refresh every minute
     return () => clearInterval(interval);
-  }, []);
+  }, [fetchData]); // Add fetchData dependency (which includes onLoadingChange)
 
   // Check if we have valid dashboard data
   const hasValidData = dashboardData && dashboardData.hourlyData && dashboardData.hourlyData.length > 0;
   const currentHour = new Date().getHours();
-
-  // Create compatible data structures for existing charts
-  const scheduleData = hasValidData ? {
-    hourlyData: dashboardData.hourlyData,
-    currentHour: dashboardData.currentHour,
-    dataSources: dashboardData.dataSources,
-    totals: dashboardData.totals
-  } : null;
 
   // Create synthetic energy data for charts that expect it
   const syntheticEnergyData = hasValidData ? {
@@ -155,7 +191,7 @@ export default function DashboardPage({
         {showDebug && (
           <div className="mt-4 p-3 bg-gray-50 dark:bg-gray-700 rounded text-xs font-mono">
             {debugInfo.map((msg, i) => (
-              <div key={i} className="text-gray-600 dark:text-gray-300">{msg}</div>
+              <div key={`debug-${i}`} className="text-gray-600 dark:text-gray-300">{msg}</div>
             ))}
           </div>
         )}

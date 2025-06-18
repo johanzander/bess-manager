@@ -315,22 +315,95 @@ async def get_inverter_status():
 
 @router.get("/api/growatt/detailed_schedule")
 async def get_growatt_detailed_schedule():
-    """Get detailed Growatt-specific schedule information."""
+    """Get detailed Growatt-specific schedule information with hourly inverter settings."""
     from app import bess_controller
     
     try:
-        # Get basic system info
-        settings = bess_controller.system.get_settings()
+        system = bess_controller.system
+        schedule_manager = system._schedule_manager
         current_hour = datetime.now().hour
         
-        return add_camel_case_keys({
+        # Get TOU intervals (what's actually programmed in the inverter)
+        tou_intervals = []
+        daily_tou = schedule_manager.get_daily_TOU_settings()
+        for interval in daily_tou:
+            tou_intervals.append({
+                "segment_id": interval.get("segment_id", 0),
+                "start_time": interval.get("start_time", ""),
+                "end_time": interval.get("end_time", ""),
+                "batt_mode": interval.get("batt_mode", "load-first"),
+                "enabled": interval.get("enabled", True)
+            })
+        
+        # Get detailed hourly schedule data
+        schedule_data = []
+        for hour in range(24):
+            hourly_settings = schedule_manager.get_hourly_settings(hour)
+            
+            # Get battery action from current schedule
+            battery_action = 0.0
+            if (system._current_schedule and 
+                system._current_schedule.actions and 
+                hour < len(system._current_schedule.actions)):
+                battery_action = system._current_schedule.actions[hour]
+            
+            # Calculate charged/discharged amounts
+            battery_charged = max(0, battery_action)
+            battery_discharged = max(0, -battery_action)
+            
+            # Get SOC from current schedule state_of_energy
+            battery_soc_end = 50.0  # Default
+            if (system._current_schedule and 
+                system._current_schedule.state_of_energy and 
+                hour < len(system._current_schedule.state_of_energy)):
+                # Convert kWh to percentage
+                soe_kwh = system._current_schedule.state_of_energy[hour]
+                battery_capacity = system.battery_settings.total_capacity
+                battery_soc_end = (soe_kwh / battery_capacity) * 100
+            
+            schedule_data.append({
+                "hour": hour,
+                "strategic_intent": hourly_settings.get("strategic_intent", "IDLE"),
+                "battery_action": battery_action,
+                "battery_charged": battery_charged,
+                "battery_discharged": battery_discharged,
+                "battery_soc_end": battery_soc_end,
+                "battery_mode": hourly_settings.get("batt_mode", "load-first"),
+                "charge_power_rate": hourly_settings.get("charge_rate", 0),
+                "discharge_power_rate": hourly_settings.get("discharge_rate", 0),
+                "grid_charge": hourly_settings.get("grid_charge", False),
+                "state": hourly_settings.get("state", "idle"),
+                "is_actual": hour < current_hour,
+                "is_predicted": hour >= current_hour,
+                "data_source": "actual" if hour < current_hour else "predicted"
+            })
+        
+        # Get strategic intent summary
+        strategic_intent_summary = schedule_manager.get_strategic_intent_summary()
+        
+        # Get system settings
+        settings = system.get_settings()
+        
+        response = {
             "current_time": datetime.now().isoformat(),
             "current_hour": current_hour,
             "battery_capacity": settings["battery"]["total_capacity"],
             "system_status": "online",
             "last_optimization": current_hour,
-        })
+            "last_updated": datetime.now().isoformat(),
+            
+            # TOU intervals (actual inverter programming)
+            "tou_intervals": tou_intervals,
+            
+            # Detailed hourly schedule with inverter settings
+            "schedule_data": schedule_data,
+            
+            # Strategic intent summary
+            "strategic_intent_summary": strategic_intent_summary,
+        }
+        
+        return add_camel_case_keys(response)
     
     except Exception as e:
-        logger.error(f"Error getting system info: {e}")
+        logger.error(f"Error getting detailed schedule: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e

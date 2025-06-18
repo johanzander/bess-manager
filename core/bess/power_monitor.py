@@ -298,7 +298,10 @@ class HomePowerMonitor:
             )
             percentage = min(100, max(0, percentage))
 
-        logger.info(
-            f"Updating target charging power from {self.target_charging_power_pct:.1f}% to {percentage:.1f}%"
-        )
+        # Only log when there's an actual change
+        if abs(self.target_charging_power_pct - percentage) > 0.01:  # Use small tolerance for float comparison
+            logger.info(
+                f"Updating target charging power from {self.target_charging_power_pct:.1f}% to {percentage:.1f}%"
+            )
+        
         self.target_charging_power_pct = percentage

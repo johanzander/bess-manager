@@ -1,54 +1,85 @@
 // src/pages/InsightsPage.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { TableBatteryDecisionExplorer } from '../components/TableBatteryDecisionExplorer';
 import { Brain, TrendingUp, AlertCircle, CheckCircle, Activity } from 'lucide-react';
 import api from '../lib/api';
 
+interface DashboardResponse {
+  hourlyData: Array<{
+    hour: number;
+    dataSource?: string;
+    isActual?: boolean;
+    solarGenerated?: number;
+    solarProduction?: number;
+    homeConsumed?: number;
+    consumption?: number;
+    batterySocEnd?: number;
+    batteryLevel?: number;
+    batteryAction?: number;
+  }>;
+  currentHour?: number;
+  totalDailySavings?: number;
+  actualSavingsSoFar?: number;
+  predictedRemainingSavings?: number;
+  actualHoursCount?: number;
+  predictedHoursCount?: number;
+  dataSources?: Record<string, any>;
+}
+
 const InsightsPage: React.FC = () => {
-  const [dailyViewData, setDailyViewData] = useState<any>(null);
-  const [energyBalanceData, setEnergyBalanceData] = useState<any>(null);
+  const [dailyViewData, setDailyViewData] = useState<DashboardResponse | null>(null);
+  const [energyBalanceData, setEnergyBalanceData] = useState<{
+    hourlyData: Array<{
+      hour: number;
+      system_production: number;
+      load_consumption: number;
+      battery_level: number;
+      battery_power: number;
+      is_actual: boolean;
+    }>;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        
-        // Use the unified dashboard API instead of multiple endpoints
-        const response = await api.get('/api/dashboard');
-        setDailyViewData(response.data);
-        
-        // For backward compatibility, format energy balance data from dashboard API
-        // Create a compatible energyBalanceData structure from the same response
-        const hourlyData = response.data.hourlyData || [];
-        const formattedEnergyBalance = {
-          hourlyData: hourlyData.map((hour: any) => ({
-            hour: hour.hour,
-            system_production: hour.solarGenerated || hour.solarProduction || 0,
-            load_consumption: hour.homeConsumed || hour.consumption || 0,
-            battery_level: hour.batterySocEnd || hour.batteryLevel || 0,
-            battery_power: hour.batteryAction || 0,
-            is_actual: hour.dataSource === "actual" || hour.isActual || false
-          }))
-        };
-        
-        setEnergyBalanceData(formattedEnergyBalance);
-      } catch (err) {
-        console.error('Failed to fetch dashboard data:', err);
-        setError(err instanceof Error ? err.message : 'Failed to fetch dashboard data');
-      } finally {
-        setLoading(false);
-      }
-    };
+  const fetchData = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      // Use the unified dashboard API instead of multiple endpoints
+      const response = await api.get('/api/dashboard');
+      setDailyViewData(response.data);
+      
+      // For backward compatibility, format energy balance data from dashboard API
+      // Create a compatible energyBalanceData structure from the same response
+      const hourlyData = response.data.hourlyData || [];
+      const formattedEnergyBalance = {
+        hourlyData: hourlyData.map((hour: any) => ({
+          hour: hour.hour,
+          system_production: hour.solarGenerated || hour.solarProduction || 0,
+          load_consumption: hour.homeConsumed || hour.consumption || 0,
+          battery_level: hour.batterySocEnd || hour.batteryLevel || 0,
+          battery_power: hour.batteryAction || 0,
+          is_actual: hour.dataSource === "actual" || hour.isActual || false
+        }))
+      };
+      
+      setEnergyBalanceData(formattedEnergyBalance);
+    } catch (err) {
+      console.error('Failed to fetch dashboard data:', err);
+      setError(err instanceof Error ? err.message : 'Failed to fetch dashboard data');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
+  useEffect(() => {
     fetchData();
     
     // Refresh every 2 minutes
     const interval = setInterval(fetchData, 2 * 60 * 1000);
     return () => clearInterval(interval);
-  }, []);
+  }, [fetchData]);
 
   // Calculate prediction accuracy stats
   const calculateAccuracyStats = () => {
@@ -168,7 +199,7 @@ const InsightsPage: React.FC = () => {
                 <h3 className="text-sm font-medium text-gray-600">Decision Quality</h3>
                 <p className="text-2xl font-bold text-purple-600">
                   {dailyViewData ? 
-                    ((dailyViewData.total_daily_savings / Math.max(dailyViewData.total_daily_savings + 50, 100)) * 100).toFixed(0) + '%'
+                    ((dailyViewData.totalDailySavings || 0) / Math.max((dailyViewData.totalDailySavings || 0) + 50, 100) * 100).toFixed(0) + '%'
                     : 'N/A'}
                 </p>
                 <p className="text-xs text-gray-500">optimization effectiveness</p>
@@ -182,7 +213,7 @@ const InsightsPage: React.FC = () => {
               <div>
                 <h3 className="text-sm font-medium text-gray-600">Daily Savings</h3>
                 <p className="text-2xl font-bold text-yellow-600">
-                  {dailyViewData ? `${dailyViewData.total_daily_savings.toFixed(1)} SEK` : 'N/A'}
+                  {dailyViewData ? `${(dailyViewData.totalDailySavings || 0).toFixed(1)} SEK` : 'N/A'}
                 </p>
                 <p className="text-xs text-gray-500">total optimization value</p>
               </div>
@@ -195,8 +226,8 @@ const InsightsPage: React.FC = () => {
       {/* Table-Based Battery Decision Explorer */}
       {dailyViewData && (
         <TableBatteryDecisionExplorer 
-          dailyViewData={dailyViewData.hourly_data || []}
-          currentHour={dailyViewData.current_hour || 0}
+          dailyViewData={dailyViewData.hourlyData || []}
+          currentHour={dailyViewData.currentHour || 0}
         />
       )}
 
@@ -212,19 +243,19 @@ const InsightsPage: React.FC = () => {
                 <ul className="space-y-2 text-sm text-gray-700">
                   <li className="flex items-center">
                     <CheckCircle className="h-4 w-4 text-green-500 mr-2" />
-                    Total savings: {dailyViewData.total_daily_savings.toFixed(2)} SEK
+                    Total savings: {(dailyViewData.totalDailySavings || 0).toFixed(2)} SEK
                   </li>
                   <li className="flex items-center">
                     <CheckCircle className="h-4 w-4 text-green-500 mr-2" />
-                    Actual savings so far: {dailyViewData.actual_savings_so_far.toFixed(2)} SEK
+                    Actual savings so far: {(dailyViewData.actualSavingsSoFar || 0).toFixed(2)} SEK
                   </li>
                   <li className="flex items-center">
                     <Activity className="h-4 w-4 text-blue-500 mr-2" />
-                    Predicted remaining: {dailyViewData.predicted_remaining_savings.toFixed(2)} SEK
+                    Predicted remaining: {(dailyViewData.predictedRemainingSavings || 0).toFixed(2)} SEK
                   </li>
                   <li className="flex items-center">
                     <Brain className="h-4 w-4 text-purple-500 mr-2" />
-                    Data sources: {Object.keys(dailyViewData.data_sources || {}).join(", ")}
+                    Data sources: {Object.keys(dailyViewData.dataSources || {}).join(", ")}
                   </li>
                 </ul>
               </div>
@@ -234,11 +265,11 @@ const InsightsPage: React.FC = () => {
                 <ul className="space-y-2 text-sm text-gray-700">
                   <li className="flex items-center">
                     <Activity className="h-4 w-4 text-blue-500 mr-2" />
-                    Making decisions for {dailyViewData.predicted_hours_count} future hours
+                    Making decisions for {dailyViewData.predictedHoursCount || 0} future hours
                   </li>
                   <li className="flex items-center">
                     <CheckCircle className="h-4 w-4 text-green-500 mr-2" />
-                    Learning from {dailyViewData.actual_hours_count} completed hours
+                    Learning from {dailyViewData.actualHoursCount || 0} completed hours
                   </li>
                   {accuracyStats && (
                     <li className="flex items-center">

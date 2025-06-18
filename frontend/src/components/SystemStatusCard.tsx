@@ -50,12 +50,12 @@ interface StatusCardProps {
     value: number | string;
     unit?: string;
     icon?: React.ComponentType<any>;
-    color?: 'green' | 'red' | 'yellow' | 'blue';
+    color?: string;
   }[];
   status?: {
     icon: React.ComponentType<any>;
     text: string;
-    color?: 'green' | 'red' | 'yellow';
+    color?: string;
   };
   className?: string;
 }
@@ -87,7 +87,7 @@ const StatusCard: React.FC<StatusCardProps> = ({
     purple: 'text-purple-600 dark:text-purple-400'
   };
 
-  const metricColorClasses = {
+  const metricColorClasses: Record<string, string> = {
     green: 'text-green-600 dark:text-green-400',
     red: 'text-red-600 dark:text-red-400',
     yellow: 'text-yellow-600 dark:text-yellow-400',
@@ -279,9 +279,9 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "" }) =
       keyValue: statusData.costAndSavings?.todaysSavings || 0,
       keyUnit: "SEK",
       status: {
-        icon: statusData.costAndSavings?.todaysSavings >= 0 ? TrendingUp : TrendingDown,
-        text: `${(statusData.costAndSavings?.percentageSaved || 0).toFixed(1)}% saved`,
-        color: statusData.costAndSavings?.todaysSavings >= 0 ? 'green' : 'red' as const
+        icon: (statusData.costAndSavings?.todaysSavings || 0) >= 0 ? TrendingUp : TrendingDown,
+        text: `${((statusData.costAndSavings?.percentageSaved || 0)).toFixed(1)}% saved`,
+        color: (statusData.costAndSavings?.todaysSavings || 0) >= 0 ? 'green' : 'red' as const
       },
       metrics: [
         {
@@ -302,7 +302,7 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "" }) =
           value: statusData.costAndSavings?.percentageSaved || 0,
           unit: "%",
           icon: TrendingUp,
-          color: statusData.costAndSavings?.percentageSaved >= 0 ? 'green' : 'red' as const
+          color: (statusData.costAndSavings?.percentageSaved || 0) >= 0 ? 'green' : 'red'
         }
       ]
     },
@@ -350,8 +350,8 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "" }) =
           value: statusData.batteryStatus?.health || 0,
           unit: "%",
           icon: Heart,
-          color: statusData.batteryStatus?.health >= 90 ? 'green' : 
-                 statusData.batteryStatus?.health >= 70 ? 'yellow' : 'red' as const
+          color: (statusData.batteryStatus?.health || 0) >= 90 ? 'green' : 
+                 (statusData.batteryStatus?.health || 0) >= 70 ? 'yellow' : 'red'
         }
       ]
     },
@@ -359,7 +359,7 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "" }) =
       title: "System Health",
       icon: Heart,
       color: statusData.systemHealth?.status === 'healthy' ? "green" : 
-             statusData.systemHealth?.status === 'warning' ? "yellow" : "red",
+             statusData.systemHealth?.status === 'warning' ? "yellow" : "red" as 'blue' | 'green' | 'red' | 'yellow' | 'purple',
       keyMetric: "System Uptime",
       keyValue: statusData.systemHealth?.uptime || 0,
       keyUnit: "%",
@@ -369,7 +369,7 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "" }) =
         text: statusData.systemHealth?.status === 'healthy' ? 'Healthy' :
               statusData.systemHealth?.status === 'warning' ? 'Warning' : 'Error',
         color: statusData.systemHealth?.status === 'healthy' ? 'green' :
-               statusData.systemHealth?.status === 'warning' ? 'yellow' : 'red' as const
+               statusData.systemHealth?.status === 'warning' ? 'yellow' : 'red'
       },
       metrics: [
         {

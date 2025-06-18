@@ -4,11 +4,7 @@ import {
   Sun, 
   Home, 
   Battery, 
-  Grid,
-  TrendingUp,
-  TrendingDown,
-  Minus,
-  Zap
+  Grid
 } from 'lucide-react';
 
 // Pure energy flow data structure
@@ -486,15 +482,15 @@ const EnergyFlowCards: React.FC<EnergyFlowCardsProps> = ({ className = "" }) => 
             {
               label: "To Home",
               value: energyData.gridFlow?.gridToHome || 0,
-              percentage: energyData.gridFlow?.importEnergy > 0 ? 
-                (energyData.gridFlow.gridToHome / energyData.gridFlow.importEnergy) * 100 : 0,
+              percentage: (energyData.gridFlow?.importEnergy || 0) > 0 ? 
+                ((energyData.gridFlow?.gridToHome || 0) / (energyData.gridFlow?.importEnergy || 1)) * 100 : 0,
               icon: Home
             },
             {
               label: "To Battery",
               value: energyData.gridFlow?.gridToBattery || 0,
-              percentage: energyData.gridFlow?.importEnergy > 0 ? 
-                (energyData.gridFlow.gridToBattery / energyData.gridFlow.importEnergy) * 100 : 0,
+              percentage: (energyData.gridFlow?.importEnergy || 0) > 0 ? 
+                ((energyData.gridFlow?.gridToBattery || 0) / (energyData.gridFlow?.importEnergy || 1)) * 100 : 0,
               icon: Battery
             }
           ]
@@ -508,15 +504,15 @@ const EnergyFlowCards: React.FC<EnergyFlowCardsProps> = ({ className = "" }) => 
             {
               label: "From Solar",
               value: energyData.gridFlow?.solarToGrid || 0,
-              percentage: energyData.gridFlow?.exportEnergy > 0 ? 
-                (energyData.gridFlow.solarToGrid / energyData.gridFlow.exportEnergy) * 100 : 0,
+              percentage: (energyData.gridFlow?.exportEnergy || 0) > 0 ? 
+                ((energyData.gridFlow?.solarToGrid || 0) / (energyData.gridFlow?.exportEnergy || 1)) * 100 : 0,
               icon: Sun
             },
             {
               label: "From Battery",
               value: energyData.gridFlow?.batteryToGrid || 0,
-              percentage: energyData.gridFlow?.exportEnergy > 0 ? 
-                (energyData.gridFlow.batteryToGrid / energyData.gridFlow.exportEnergy) * 100 : 0,
+              percentage: (energyData.gridFlow?.exportEnergy || 0) > 0 ? 
+                ((energyData.gridFlow?.batteryToGrid || 0) / (energyData.gridFlow?.exportEnergy || 1)) * 100 : 0,
               icon: Battery
             }
           ]

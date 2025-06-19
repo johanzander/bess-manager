@@ -26,23 +26,23 @@ const SavingsPage: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <div className="bg-white p-6 rounded-lg shadow">
+      <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
           <div className="mb-4 sm:mb-0">
-            <h1 className="text-2xl font-bold text-gray-900 mb-2">Financial Analysis & Savings Report</h1>
-            <p className="text-gray-600">
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Financial Analysis & Savings Report</h1>
+            <p className="text-gray-600 dark:text-gray-300">
               Detailed breakdown of energy costs across three scenarios: grid-only, solar-only, and optimized solar+battery.
             </p>
           </div>
           
           {/* View Mode Switcher */}
-          <div className="flex bg-gray-100 rounded-lg p-1">
+          <div className="flex bg-gray-100 dark:bg-gray-700 rounded-lg p-1">
             <button
               onClick={() => setViewMode('simple')}
               className={`flex items-center px-4 py-2 rounded-md text-sm font-medium transition-colors ${
                 viewMode === 'simple'
-                  ? 'bg-white text-gray-900 shadow-sm'
-                  : 'text-gray-600 hover:text-gray-900'
+                  ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm'
+                  : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
               }`}
             >
               <Eye className="h-4 w-4 mr-2" />
@@ -52,8 +52,8 @@ const SavingsPage: React.FC = () => {
               onClick={() => setViewMode('detailed')}
               className={`flex items-center px-4 py-2 rounded-md text-sm font-medium transition-colors ${
                 viewMode === 'detailed'
-                  ? 'bg-white text-gray-900 shadow-sm'
-                  : 'text-gray-600 hover:text-gray-900'
+                  ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm'
+                  : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
               }`}
             >
               <Table2 className="h-4 w-4 mr-2" />
@@ -63,8 +63,8 @@ const SavingsPage: React.FC = () => {
         </div>
         
         {/* View Mode Description */}
-        <div className="mt-4 p-3 bg-blue-50 rounded-lg">
-          <p className="text-sm text-blue-800">
+        <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+          <p className="text-sm text-blue-800 dark:text-blue-200">
             {viewMode === 'simple' ? (
               <>
                 <strong>Simple View:</strong> Clean overview showing key energy flows, battery actions, and savings per hour. 

@@ -537,15 +537,15 @@ const EnergyFlowCards: React.FC<EnergyFlowCardsProps> = ({ className = "" }) => 
             {
               label: "From Solar",
               value: energyData.batteryFlow?.solarToBattery || 0,
-              percentage: energyData.batteryFlow?.chargedToday > 0 ? 
-                (energyData.batteryFlow.solarToBattery / energyData.batteryFlow.chargedToday) * 100 : 0,
+              percentage: (energyData.batteryFlow?.chargedToday || 0) > 0 ? 
+                ((energyData.batteryFlow?.solarToBattery || 0) / (energyData.batteryFlow?.chargedToday || 1)) * 100 : 0,
               icon: Sun
             },
             {
               label: "From Grid",
               value: energyData.batteryFlow?.gridToBattery || 0,
-              percentage: energyData.batteryFlow?.chargedToday > 0 ? 
-                (energyData.batteryFlow.gridToBattery / energyData.batteryFlow.chargedToday) * 100 : 0,
+              percentage: (energyData.batteryFlow?.chargedToday || 0) > 0 ? 
+                ((energyData.batteryFlow?.gridToBattery || 0) / (energyData.batteryFlow?.chargedToday || 1)) * 100 : 0,
               icon: Grid
             }
           ]
@@ -559,15 +559,15 @@ const EnergyFlowCards: React.FC<EnergyFlowCardsProps> = ({ className = "" }) => 
             {
               label: "To Home",
               value: energyData.batteryFlow?.batteryToHome || 0,
-              percentage: energyData.batteryFlow?.dischargedToday > 0 ? 
-                (energyData.batteryFlow.batteryToHome / energyData.batteryFlow.dischargedToday) * 100 : 0,
+              percentage: (energyData.batteryFlow?.dischargedToday || 0) > 0 ? 
+                ((energyData.batteryFlow?.batteryToHome || 0) / (energyData.batteryFlow?.dischargedToday || 1)) * 100 : 0,
               icon: Home
             },
             {
               label: "To Grid",
               value: energyData.batteryFlow?.batteryToGrid || 0,
-              percentage: energyData.batteryFlow?.dischargedToday > 0 ? 
-                (energyData.batteryFlow.batteryToGrid / energyData.batteryFlow.dischargedToday) * 100 : 0,
+              percentage: (energyData.batteryFlow?.dischargedToday || 0) > 0 ? 
+                ((energyData.batteryFlow?.batteryToGrid || 0) / (energyData.batteryFlow?.dischargedToday || 1)) * 100 : 0,
               icon: Grid
             }
           ]
@@ -590,7 +590,6 @@ const EnergyFlowCards: React.FC<EnergyFlowCardsProps> = ({ className = "" }) => 
           keyUnit={card.keyUnit}
           flows={card.flows}
           sections={card.sections}
-          status={card.status}
         />
       ))}
     </div>

@@ -1,187 +1,79 @@
-import React, { useState, useEffect } from 'react';
-import { TableBatteryDecisionExplorer } from '../components/TableBatteryDecisionExplorer';
-import { Brain } from 'lucide-react';
-import api from '../lib/api';
+// frontend/src/pages/InsightsPage.tsx
 
-interface DashboardResponse {
-  // Error handling fields
-  error?: string;
-  message?: string;
-  detail?: string;
-  
-  hourlyData: Array<{
-    hour: number;
-    dataSource?: string;
-    isActual?: boolean;
-    solarGenerated?: number;
-    solarProduction?: number;
-    homeConsumed?: number;
-    consumption?: number;
-    batterySocEnd?: number;
-    batteryLevel?: number;
-    batteryAction?: number;
-  }>;
-  currentHour?: number;
-  totalDailySavings?: number;
-  actualSavingsSoFar?: number;
-  predictedRemainingSavings?: number;
-  actualHoursCount?: number;
-  predictedHoursCount?: number;
-  dataSources?: Record<string, any>;
-}
+import React from 'react';
+import DecisionFramework from '../components/DecisionFramework';
+import { Brain, Info } from 'lucide-react';
 
 const InsightsPage: React.FC = () => {
-  const [dashboardData, setDashboardData] = useState<DashboardResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        
-        const response = await api.get('/api/dashboard');
-        
-        // Handle partial/incomplete data gracefully
-        if (response.data && response.data.error === 'incomplete_data') {
-          setDashboardData(response.data); // Still set what data we have
-          setError(`Warning: ${response.data.message || 'Incomplete data available'}`);
-        } else {
-          setDashboardData(response.data);
-        }
-      } catch (err) {
-        console.error('Failed to fetch dashboard data:', err);
-        setError(err instanceof Error ? err.message : 'Unknown error');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchData();
-  }, []);
-
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
-        <div className="mb-4">
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Decision Intelligence & Analysis</h1>
-          <p className="text-gray-600 dark:text-gray-300">
-            Deep insights into battery optimization decisions, showing the economic reasoning and strategic thinking behind each action.
-          </p>
-          
-          {/* Error/Warning Display */}
-          {error && dashboardData?.error === 'incomplete_data' && (
-            <div className="bg-yellow-50 border-l-4 border-yellow-400 p-3 mt-4">
-              <div className="flex">
-                <div className="ml-3">
-                  <p className="text-sm text-yellow-700">{error}</p>
-                  {dashboardData?.detail && (
-                    <p className="text-xs text-yellow-600 mt-1">{dashboardData.detail}</p>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-        
-        <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-          <p className="text-sm text-blue-800 dark:text-blue-200">
-            <strong>Understanding Battery Decisions:</strong> Each hour's battery action is the result of sophisticated optimization 
-            algorithms that consider electricity prices, solar forecasts, consumption patterns, and battery constraints. 
-            High scores (80-100%) indicate optimal timing, while lower scores may reflect constraints or missed opportunities. 
-            The system learns from actual vs predicted outcomes to improve future decisions.
-          </p>
-        </div>
+    <div className="p-6 space-y-6 bg-gray-50 dark:bg-gray-900 min-h-screen">
+      {/* Page Header */}
+      <div className="mb-6">
+        <h1 className="text-3xl font-bold text-gray-900 dark:text-white flex items-center">
+          <Brain className="h-8 w-8 mr-3 text-purple-600 dark:text-purple-400" />
+          Insights & Decision Intelligence
+        </h1>
+        <p className="text-gray-600 dark:text-gray-300 mt-2">
+          Deep insights into your battery system's decision-making process and optimization strategies
+        </p>
       </div>
 
-      {/* Decision Explorer Table */}
-      <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
-        <div className="mb-6">
-          <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">Battery Decision Explorer</h2>
-          <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">
-            Detailed breakdown of each hour's battery decision with economic context, optimization scores, and strategic reasoning.
-          </p>
-        </div>
+      {/* Decision Framework Component */}
+      <DecisionFramework />
 
-        {loading ? (
-          <div className="text-center py-8">
-            <div className="animate-spin h-8 w-8 border-4 border-blue-500 border-t-transparent rounded-full mx-auto mb-4"></div>
-            <p className="text-gray-600 dark:text-gray-300">Loading decision analysis...</p>
-          </div>
-        ) : error ? (
-          <div className="text-center py-8">
-            <Brain className="h-12 w-12 text-red-400 mx-auto mb-4" />
-            <p className="text-red-600 dark:text-red-400">Error loading decision data</p>
-            <p className="text-sm text-gray-500 dark:text-gray-400">{error}</p>
-          </div>
-        ) : dashboardData ? (
+      {/* Educational Information */}
+      <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow border">
+        <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4 flex items-center">
+          <Info className="h-5 w-5 mr-2" />
+          About Decision Intelligence
+        </h2>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm text-gray-700 dark:text-gray-300">
           <div>
-            <div className="mb-4 p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
-              <p className="text-sm text-gray-700 dark:text-gray-300">
-                <strong>Today's Performance Summary:</strong> 
-                {dashboardData.hourlyData.filter((h: any) => h.isActual).length} hours completed, 
-                {dashboardData.hourlyData.filter((h: any) => !h.isActual).length} hours predicted. 
-                Total daily savings: <span className="font-medium text-green-600 dark:text-green-400">
-                  {dashboardData.totalDailySavings?.toFixed(2)} SEK
-                </span>
-              </p>
-            </div>
+            <h3 className="font-medium mb-2 text-gray-900 dark:text-white">How It Works</h3>
+            <p className="mb-3">
+              The Decision Intelligence framework analyzes every battery decision using sophisticated 
+              Dynamic Programming optimization. Each action is evaluated based on current conditions, 
+              future price forecasts, and multi-hour arbitrage opportunities.
+            </p>
             
-            <TableBatteryDecisionExplorer />
-            
-            <div className="mt-4 text-xs text-gray-500 dark:text-gray-400">
-              High scores (80-100%) indicate optimal timing, while lower scores may reflect constraints or missed opportunities. 
-              The system learns from actual vs predicted outcomes to improve future decisions.
-            </div>
-          </div>
-        ) : (
-          <div className="text-center py-8">
-            <Brain className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-            <p className="text-gray-600 dark:text-gray-300">No decision data available</p>
-            <p className="text-sm text-gray-500 dark:text-gray-400">Decision intelligence will appear once the system is active</p>
-          </div>
-        )}
-      </div>
-
-      {/* About Insights */}
-      <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
-        <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">About Decision Intelligence</h2>
-        <p className="mb-3 text-gray-700 dark:text-gray-300">
-          This page provides deep insights into your battery system's decision-making process, 
-          helping you understand why each charging and discharging action was taken.
-        </p>
-        
-        <div className="space-y-2">
-          <div className="flex items-start">
-            <div className="w-3 h-3 bg-purple-500 rounded-full mt-1.5 mr-2"></div>
-            <p className="text-gray-700 dark:text-gray-300">
-              <span className="font-medium">Decision Cards:</span> Show the reasoning behind each hour's battery action, 
-              including economic context, constraints, and opportunity scores.
+            <h3 className="font-medium mb-2 text-gray-900 dark:text-white">Energy Flow Analysis</h3>
+            <p>
+              The system tracks all energy movements between solar panels, grid, home consumption, 
+              and battery storage, calculating the economic value of each flow to maximize savings.
             </p>
           </div>
           
-          <div className="flex items-start">
-            <div className="w-3 h-3 bg-green-500 rounded-full mt-1.5 mr-2"></div>
-            <p className="text-gray-700 dark:text-gray-300">
-              <span className="font-medium">Prediction Quality:</span> Track how accurate the system's predictions are 
-              compared to actual energy flows and consumption patterns.
+          <div>
+            <h3 className="font-medium mb-2 text-gray-900 dark:text-white">Economic Strategies</h3>
+            <p className="mb-3">
+              Economic chains show how current decisions enable future opportunities. For example, 
+              charging at cheap night rates to discharge during expensive peak hours, creating 
+              profitable arbitrage strategies.
             </p>
-          </div>
-          
-          <div className="flex items-start">
-            <div className="w-3 h-3 bg-blue-500 rounded-full mt-1.5 mr-2"></div>
-            <p className="text-gray-700 dark:text-gray-300">
-              <span className="font-medium">Optimization Scores:</span> Each decision gets a score based on how well 
-              it exploits market opportunities while respecting system constraints.
+            
+            <h3 className="font-medium mb-2 text-gray-900 dark:text-white">Future Opportunities</h3>
+            <p>
+              Each decision includes forward-looking analysis showing what future opportunities 
+              it enables, with expected values and dependency analysis to build trust in the 
+              system's sophisticated optimization logic.
             </p>
           </div>
         </div>
-        
-        <p className="mt-4 text-gray-700 dark:text-gray-300">
-          Use these insights to understand your system's performance and identify opportunities for improved settings or operation.
-        </p>
+
+        <div className="mt-6 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-700">
+          <h3 className="font-medium text-blue-900 dark:text-blue-100 mb-2">Understanding the Columns</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-blue-800 dark:text-blue-200">
+            <div>
+              <p><strong>Battery Actions:</strong> What the algorithm controls - charge, discharge, or idle</p>
+              <p><strong>Rationale:</strong> Why this decision makes economic sense</p>
+            </div>
+            <div>
+              <p><strong>Energy Flows:</strong> Resulting movements between solar, grid, home, and battery</p>
+              <p><strong>Strategy Value:</strong> Economic outcome with immediate and future value breakdown</p>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );

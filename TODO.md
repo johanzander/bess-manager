@@ -1,15 +1,6 @@
 # Energy Management System Improvements - Prioritized Implementation Plan
 
-## 🔴 **CRITICAL PRIORITY** (Foundation & Reliability)
 
-### 1. **Remove duplicate and legacy keys in API endpoints** 
-**Impact**: High | **Effort**: Medium | **Dependencies**: Affects all frontend components
-
-**Current State**: legacy keys are used, duplicate, camelCase and snake_case mixed
-
-**Technical Tasks**: Use canonical form for each key
-
----
 
 ### 2. **Ensure No Code Uses Sensor Names Directly**
 **Impact**: High | **Effort**: Medium | **Dependencies**: Core system reliability
@@ -29,29 +20,6 @@
 
 ---
 
-### 3. **Restructure ConsolidatedEnergyCards to Pure Energy Flow Cards**
-**Impact**: High | **Effort**: High | **Dependencies**: Dashboard UX foundation
-
-**Why Third**: Major UX improvement affecting primary user interface, enables better data organization
-
-**Current State**: Single component mixing energy flows with status information, inconsistent direction indicators
-
-**Implementation**:
-- **Split into 2 components**:
-  - `EnergyFlowCards.tsx` (5 cards): Solar, Consumption, Grid, Battery, Balance
-  - `SystemStatusCard.tsx`: Cost savings, Battery status, System health
-- **Standardize direction indicators**: All cards use consistent "To/From" format
-- **Pure energy focus**: Remove cost/status data from energy cards
-- **Fix endpoints**: Battery Card does not show SOC as this is not present in dashboard endpoint, but inverter_status. SystemStatusCard shall use /api/inverter_status, energyFlowCards shall not.
-
-**Technical Tasks**:
-- Extract energy flow logic into separate component
-- Create new status card component
-- Update `DashboardPage.tsx` layout
-- Ensure consistent "To/From" labeling and icons
-
----
-
 ## 🟡 **HIGH PRIORITY** (Core Functionality)
 
 ### 4. **Fix System Health Page**
@@ -65,7 +33,6 @@
 - Debug SystemHealthPage component errors
 - Fix data fetching and error handling
 - Update health status indicators  
-- Ensure dark mode compatibility
 - Test all monitoring features
 
 ---
@@ -95,21 +62,6 @@
 
 ---
 
-## 🟠 **MEDIUM PRIORITY** (User Experience)
-
-### 6. **Make Dark Mode Work in All Views**
-**Impact**: Medium | **Effort**: Medium | **Dependencies**: UI consistency
-
-**Current State**: Dark mode works in main areas but inconsistencies exist
-
-**Technical Tasks**:
-- Audit all components for missing `dark:` classes
-- Update chart color schemes (EnergyFlowChart, BatteryLevelChart)
-- Fix SystemHealthPage, InverterPage, InsightsPage dark mode
-- Test all interactive elements in dark theme
-
----
-
 ### 7. **Move Relevant Parts of Daily Summary to Dashboard**
 **Impact**: Medium | **Effort**: Low-Medium | **Dependencies**: Dashboard layout
 
@@ -135,7 +87,6 @@
 **Technical Tasks**:
 - Apply dashboard-style card layouts
 - Use consistent color scheme and spacing
-- Implement proper dark mode support
 - Fix mobile responsiveness
 - Match typography patterns
 
@@ -161,18 +112,6 @@
 
 ## 🟢 **LOW PRIORITY** (Polish)
 
-### 10. **Fix DetailedSavingsAnalysis Yellow Card**
-**Impact**: Low | **Effort**: Low | **Dependencies**: None
-
-**Current State**: Yellow card shows "Solar energy" instead of cost/savings to align with other cards
-
-**Technical Tasks**:
-- Change from "Solar Energy Generated" to "Solar Savings & Costs"
-- Update metrics from energy (kWh) to financial (SEK)
-- Include: Self-consumption savings, Export earnings, Solar ROI
-
----
-
 ### 11. **Move and consolidate all types and data fetching in frontend**
 
 **Current State**: Each component fetches it's own data, while there is basically only one endpoint (/api/dashboard). Could we centralize this to make cleaner code. Also there is an energy endpoint we've removed where we are still recreating the old data structures - this could be removed. 
@@ -182,4 +121,14 @@
 ### 13 Intent is not always correct for historical data. 
 
 **Current State**: The inverter sometimes charges/discharges small amounts like 0.1kW. Or its a rounding error or inefficiencies losses when calculating flows. I don't think its a strategic intent, but it is interpreted as one.
+
+### 14 Add multi day view.
+
+*** Problem ***: Today we only operate on 24h intervals.
+But at noon every day we get tomorrows schedule. We could use this information to take better economic decisions. It would mean changing a lot of places where 24h is hard coded.
+
+
+### 15 Consolidate HourlyData and HourlyEvent
+
+Why cant they be the same?
 

@@ -428,3 +428,329 @@ async def get_growatt_detailed_schedule():
     except Exception as e:
         logger.error(f"Error getting detailed schedule: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
+    
+
+############################################################################################
+# API Endpoints for Decision Insights
+############################################################################################
+
+@router.get("/api/decision-intelligence")
+async def get_decision_intelligence():
+    """
+    Get decision intelligence data with detailed flow patterns and economic reasoning.
+    
+    Returns comprehensive energy flow analysis for each hour showing:
+    - Battery actions (charge/discharge decisions)
+    - Energy flow patterns between solar, grid, home, and battery
+    - Economic context and future opportunities
+    - Multi-hour strategy explanations
+    """
+    try:
+        from datetime import datetime
+        
+        current_hour = datetime.now().hour
+        patterns = []
+        
+        # Real historical prices from 2024-08-16 (extreme volatility day)
+        prices = [
+            0.9827, 0.8419, 0.0321, 0.0097, 0.0098, 0.9136, 1.4433, 1.5162,  # 00-07: High→Low→High
+            1.4029, 1.1346, 0.8558, 0.6485, 0.2895, 0.1363, 0.1253, 0.62,    # 08-15: Morning high, midday drop
+            0.888, 1.1662, 1.5163, 2.5908, 2.7325, 1.9312, 1.5121, 1.3056   # 16-23: Evening extreme peak
+        ]
+
+        # Realistic solar pattern for summer day
+        solar = [
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.8,    # 00-07: No solar
+            2.3, 3.7, 4.8, 5.5, 5.8, 5.8, 5.3, 4.4,   # 08-15: Solar ramp up to peak
+            3.3, 1.9, 0.9, 0.1, 0.0, 0.0, 0.0, 0.0    # 16-23: Solar declining
+        ]
+
+        home_consumption = 5.2  # Constant consumption from test data
+
+        for hour in range(24):
+            price = prices[hour]
+            solar_production = solar[hour]
+            is_actual = hour < current_hour
+            is_current = hour == current_hour
+            
+            if hour >= 0 and hour <= 4:
+                # Night/Early morning: Different strategies based on price extremes
+                if price < 0.05:
+                    # Ultra-cheap hours (03:00-04:00): Massive arbitrage opportunity
+                    pattern = {
+                        "hour": hour,
+                        "pattern_name": "GRID_TO_HOME_AND_BATTERY",
+                        "flow_description": f"Grid 11.2kWh: 5.2kWh→Home, 6.0kWh→Battery",
+                        "economic_context_description": "Ultra-cheap electricity at 0.01 SEK/kWh - maximum charging for extreme evening arbitrage",
+                        "flows": {
+                            "solar_to_home": 0, "solar_to_battery": 0, "solar_to_grid": 0,
+                            "grid_to_home": home_consumption, "grid_to_battery": 6.0, 
+                            "battery_to_home": 0, "battery_to_grid": 0
+                        },
+                        "immediate_flow_values": {
+                            "grid_to_home": -home_consumption * price,
+                            "grid_to_battery": -6.0 * price
+                        },
+                        "immediate_total_value": -(home_consumption + 6.0) * price,
+                        "future_opportunity": {
+                            "description": "Peak arbitrage during extreme evening prices at 2.73 SEK/kWh",
+                            "target_hours": [20, 21],
+                            "expected_value": 6.0 * 2.73,
+                            "dependencies": ["Battery capacity available", "Peak price realization", "No grid export limits"]
+                        },
+                        "economic_chain": f"Hour {hour:02d}: Import 11.2kWh at ultra-cheap {price:.4f} SEK/kWh (-{((home_consumption + 6.0) * price):.2f} SEK) → Peak discharge 20:00-21:00 at 2.73 SEK/kWh (+{(6.0 * 2.73):.2f} SEK) → Net arbitrage profit: +{(6.0 * 2.73 - (home_consumption + 6.0) * price):.2f} SEK",
+                        "net_strategy_value": 6.0 * 2.73 - (home_consumption + 6.0) * price,
+                        "risk_factors": ["Battery capacity available", "Peak price realization", "No grid export limits"],
+                        "electricity_price": price,
+                        "is_current_hour": is_current,
+                        "is_actual": is_actual
+                    }
+                else:
+                    # Expensive night hours: Conservative operation
+                    pattern = {
+                        "hour": hour,
+                        "pattern_name": "GRID_TO_HOME",
+                        "flow_description": f"Grid 5.2kWh→Home",
+                        "economic_context_description": "High night prices prevent arbitrage charging - wait for cheaper periods",
+                        "flows": {
+                            "solar_to_home": 0, "solar_to_battery": 0, "solar_to_grid": 0,
+                            "grid_to_home": home_consumption, "grid_to_battery": 0, 
+                            "battery_to_home": 0, "battery_to_grid": 0
+                        },
+                        "immediate_flow_values": {
+                            "grid_to_home": -home_consumption * price
+                        },
+                        "immediate_total_value": -home_consumption * price,
+                        "future_opportunity": {
+                            "description": "Wait for ultra-cheap periods at 03:00-04:00 for arbitrage charging",
+                            "target_hours": [3, 4],
+                            "expected_value": 0,
+                            "dependencies": ["Price drop realization"]
+                        },
+                        "economic_chain": f"Hour {hour:02d}: Standard consumption at {price:.2f} SEK/kWh (-{(home_consumption * price):.2f} SEK) → Avoid charging until ultra-cheap 03:00-04:00 periods",
+                        "net_strategy_value": -home_consumption * price,
+                        "risk_factors": ["Price drop realization"],
+                        "electricity_price": price,
+                        "is_current_hour": is_current,
+                        "is_actual": is_actual
+                    }
+            elif hour >= 5 and hour <= 7:
+                # Morning: Price rising, prepare for peak
+                pattern = {
+                    "hour": hour,
+                    "pattern_name": "GRID_TO_HOME_AND_BATTERY",
+                    "flow_description": f"Grid 8.2kWh: 5.2kWh→Home, 3.0kWh→Battery",
+                    "economic_context_description": "Rising morning prices but still profitable vs extreme evening peak - final charging window",
+                    "flows": {
+                        "solar_to_home": 0, "solar_to_battery": 0, "solar_to_grid": 0,
+                        "grid_to_home": home_consumption, "grid_to_battery": 3.0, 
+                        "battery_to_home": 0, "battery_to_grid": 0
+                    },
+                    "immediate_flow_values": {
+                        "grid_to_home": -home_consumption * price,
+                        "grid_to_battery": -3.0 * price
+                    },
+                    "immediate_total_value": -(home_consumption + 3.0) * price,
+                    "future_opportunity": {
+                        "description": "Evening arbitrage at 2.59-2.73 SEK/kWh peak",
+                        "target_hours": [19, 20, 21],
+                        "expected_value": 3.0 * 2.6,
+                        "dependencies": ["Evening peak price accuracy", "Battery availability"]
+                    },
+                    "economic_chain": f"Hour {hour:02d}: Import 8.2kWh at {price:.2f} SEK/kWh (-{((home_consumption + 3.0) * price):.2f} SEK) → Evening peak discharge at 2.60 SEK/kWh (+{(3.0 * 2.6):.2f} SEK) → Net profit: +{(3.0 * 2.6 - (home_consumption + 3.0) * price):.2f} SEK",
+                    "net_strategy_value": 3.0 * 2.6 - (home_consumption + 3.0) * price,
+                    "risk_factors": ["Evening peak price accuracy", "Battery availability"],
+                    "electricity_price": price,
+                    "is_current_hour": is_current,
+                    "is_actual": is_actual
+                }
+            elif hour >= 8 and hour <= 15:
+                # Daytime: Solar available, complex optimization
+                if solar_production > home_consumption:
+                    # Excess solar available
+                    pattern = {
+                        "hour": hour,
+                        "pattern_name": "SOLAR_TO_HOME_AND_BATTERY_AND_GRID",
+                        "flow_description": f"Solar {solar_production:.1f}kWh: {home_consumption:.1f}kWh→Home, {min(2.5, solar_production - home_consumption):.1f}kWh→Battery, {max(0, solar_production - home_consumption - 2.5):.1f}kWh→Grid",
+                        "economic_context_description": "Peak solar optimally distributed - prioritize battery storage over immediate export for evening arbitrage",
+                        "flows": {
+                            "solar_to_home": home_consumption, 
+                            "solar_to_battery": min(2.5, solar_production - home_consumption), 
+                            "solar_to_grid": max(0, solar_production - home_consumption - 2.5),
+                            "grid_to_home": 0, "grid_to_battery": 0, "battery_to_home": 0, "battery_to_grid": 0
+                        },
+                        "immediate_flow_values": {
+                            "solar_to_home": home_consumption * price,
+                            "solar_to_battery": 0,
+                            "solar_to_grid": max(0, solar_production - home_consumption - 2.5) * 0.08
+                        },
+                        "immediate_total_value": home_consumption * price + max(0, solar_production - home_consumption - 2.5) * 0.08,
+                        "future_opportunity": {
+                            "description": "Stored solar enables evening peak arbitrage worth 2.59 SEK/kWh",
+                            "target_hours": [19, 20, 21],
+                            "expected_value": min(2.5, solar_production - home_consumption) * 2.59,
+                            "dependencies": ["Evening peak prices", "Battery SOC management", "Home consumption accuracy"]
+                        },
+                        "economic_chain": f"Hour {hour:02d}: Solar saves {(home_consumption * price):.2f} SEK + export {(max(0, solar_production - home_consumption - 2.5) * 0.08):.2f} SEK → Stored solar discharge 19:00-21:00 at 2.59 SEK/kWh (+{(min(2.5, solar_production - home_consumption) * 2.59):.2f} SEK) → Total value: +{(home_consumption * price + max(0, solar_production - home_consumption - 2.5) * 0.08 + min(2.5, solar_production - home_consumption) * 2.59):.2f} SEK",
+                        "net_strategy_value": home_consumption * price + max(0, solar_production - home_consumption - 2.5) * 0.08 + min(2.5, solar_production - home_consumption) * 2.59,
+                        "risk_factors": ["Evening peak prices", "Battery SOC management", "Home consumption accuracy"],
+                        "electricity_price": price,
+                        "is_current_hour": is_current,
+                        "is_actual": is_actual
+                    }
+                else:
+                    # Insufficient solar
+                    pattern = {
+                        "hour": hour,
+                        "pattern_name": "SOLAR_TO_HOME_PLUS_GRID_TO_HOME",
+                        "flow_description": f"Solar {solar_production:.1f}kWh→Home, Grid {(home_consumption - solar_production):.1f}kWh→Home",
+                        "economic_context_description": "Partial solar coverage - grid supplement needed but avoid charging during moderate prices",
+                        "flows": {
+                            "solar_to_home": solar_production, "solar_to_battery": 0, "solar_to_grid": 0,
+                            "grid_to_home": home_consumption - solar_production, "grid_to_battery": 0, 
+                            "battery_to_home": 0, "battery_to_grid": 0
+                        },
+                        "immediate_flow_values": {
+                            "solar_to_home": solar_production * price,
+                            "grid_to_home": -(home_consumption - solar_production) * price
+                        },
+                        "immediate_total_value": solar_production * price - (home_consumption - solar_production) * price,
+                        "future_opportunity": {
+                            "description": "Wait for evening peak to discharge stored energy from night charging",
+                            "target_hours": [19, 20, 21],
+                            "expected_value": 0,
+                            "dependencies": ["Previously stored battery energy availability"]
+                        },
+                        "economic_chain": f"Hour {hour:02d}: Solar saves {(solar_production * price):.2f} SEK, Grid costs {((home_consumption - solar_production) * price):.2f} SEK → Net: {(solar_production * price - (home_consumption - solar_production) * price):.2f} SEK",
+                        "net_strategy_value": solar_production * price - (home_consumption - solar_production) * price,
+                        "risk_factors": ["Previously stored battery energy availability"],
+                        "electricity_price": price,
+                        "is_current_hour": is_current,
+                        "is_actual": is_actual
+                    }
+            elif hour >= 16 and hour <= 18:
+                # Early evening: Price rising, transition strategy
+                pattern = {
+                    "hour": hour,
+                    "pattern_name": "SOLAR_TO_HOME_PLUS_BATTERY_TO_HOME",
+                    "flow_description": f"Solar {solar_production:.1f}kWh→Home, Battery {max(0, home_consumption - solar_production):.1f}kWh→Home",
+                    "economic_context_description": "Rising prices trigger battery discharge - preserve remaining charge for extreme peak hours",
+                    "flows": {
+                        "solar_to_home": min(solar_production, home_consumption), "solar_to_battery": 0, "solar_to_grid": 0,
+                        "grid_to_home": 0, "grid_to_battery": 0, 
+                        "battery_to_home": max(0, home_consumption - solar_production), "battery_to_grid": 0
+                    },
+                    "immediate_flow_values": {
+                        "solar_to_home": min(solar_production, home_consumption) * price,
+                        "battery_to_home": max(0, home_consumption - solar_production) * price
+                    },
+                    "immediate_total_value": home_consumption * price,
+                    "future_opportunity": {
+                        "description": "Preserve remaining battery charge for extreme peak at 2.73 SEK/kWh",
+                        "target_hours": [20, 21],
+                        "expected_value": 3.0 * 2.73,
+                        "dependencies": ["Peak price realization", "Battery SOC sufficient"]
+                    },
+                    "economic_chain": f"Hour {hour:02d}: Avoid grid at {price:.2f} SEK/kWh (+{(home_consumption * price):.2f} SEK saved) → Reserve charge for 20:00-21:00 peak at 2.73 SEK/kWh (+{(3.0 * 2.73):.2f} SEK potential)",
+                    "net_strategy_value": home_consumption * price + 3.0 * 2.73,
+                    "risk_factors": ["Peak price realization", "Battery SOC sufficient"],
+                    "electricity_price": price,
+                    "is_current_hour": is_current,
+                    "is_actual": is_actual
+                }
+            elif hour >= 19 and hour <= 21:
+                # Peak hours: Maximum arbitrage execution
+                pattern = {
+                    "hour": hour,
+                    "pattern_name": "BATTERY_TO_HOME_AND_GRID",
+                    "flow_description": f"Battery 6.0kWh: 5.2kWh→Home, 0.8kWh→Grid",
+                    "economic_context_description": "Extreme peak prices - full arbitrage execution with both home supply and grid export",
+                    "flows": {
+                        "solar_to_home": 0, "solar_to_battery": 0, "solar_to_grid": 0,
+                        "grid_to_home": 0, "grid_to_battery": 0, 
+                        "battery_to_home": home_consumption, "battery_to_grid": 0.8
+                    },
+                    "immediate_flow_values": {
+                        "battery_to_home": home_consumption * price,
+                        "battery_to_grid": 0.8 * 0.08
+                    },
+                    "immediate_total_value": home_consumption * price + 0.8 * 0.08,
+                    "future_opportunity": {
+                        "description": "Peak arbitrage strategy execution - realizing value from night charging at 0.01 SEK/kWh",
+                        "target_hours": [],
+                        "expected_value": 0,
+                        "dependencies": []
+                    },
+                    "economic_chain": f"Hour {hour:02d}: Battery arbitrage execution (+{(home_consumption * price + 0.8 * 0.08):.2f} SEK) ← Sourced from ultra-cheap night charging at 0.01 SEK/kWh → Net arbitrage profit: +{((home_consumption + 0.8) * price - (home_consumption + 0.8) * 0.01):.2f} SEK",
+                    "net_strategy_value": (home_consumption + 0.8) * price - (home_consumption + 0.8) * 0.01,
+                    "risk_factors": ["Grid export capacity limits", "Battery discharge rate limits"],
+                    "electricity_price": price,
+                    "is_current_hour": is_current,
+                    "is_actual": is_actual
+                }
+            else:
+                # Late evening: Post-peak wind down
+                pattern = {
+                    "hour": hour,
+                    "pattern_name": "BATTERY_TO_HOME",
+                    "flow_description": f"Battery 5.2kWh→Home",
+                    "economic_context_description": "Post-peak period - continue battery discharge while prices remain elevated above charging cost",
+                    "flows": {
+                        "solar_to_home": 0, "solar_to_battery": 0, "solar_to_grid": 0,
+                        "grid_to_home": 0, "grid_to_battery": 0, 
+                        "battery_to_home": home_consumption, "battery_to_grid": 0
+                    },
+                    "immediate_flow_values": {
+                        "battery_to_home": home_consumption * price
+                    },
+                    "immediate_total_value": home_consumption * price,
+                    "future_opportunity": {
+                        "description": "Continue arbitrage until prices drop below charging costs - prepare for next cycle",
+                        "target_hours": [],
+                        "expected_value": 0,
+                        "dependencies": ["Next day price forecast", "Battery SOC management"]
+                    },
+                    "economic_chain": f"Hour {hour:02d}: Continue discharge at {price:.2f} SEK/kWh (+{(home_consumption * price):.2f} SEK) ← Sourced from 0.01 SEK/kWh charging → Arbitrage profit: +{(home_consumption * (price - 0.01)):.2f} SEK",
+                    "net_strategy_value": home_consumption * (price - 0.01),
+                    "risk_factors": ["Next day price forecast", "Battery SOC management"],
+                    "electricity_price": price,
+                    "is_current_hour": is_current,
+                    "is_actual": is_actual
+                }
+
+            patterns.append(pattern)
+
+        # Calculate summary statistics
+        total_net_value = sum(p["net_strategy_value"] for p in patterns)
+        actual_patterns = [p for p in patterns if p["is_actual"]]
+        predicted_patterns = [p for p in patterns if not p["is_actual"]]
+        best_decision = max(patterns, key=lambda p: p["net_strategy_value"])
+
+        response = {
+            "patterns": patterns,
+            "summary": {
+                "total_net_value": total_net_value,
+                "best_decision_hour": best_decision["hour"],
+                "best_decision_value": best_decision["net_strategy_value"],
+                "actual_hours_count": len(actual_patterns),
+                "predicted_hours_count": len(predicted_patterns)
+            }
+        }
+
+        # Deep conversion for future_opportunity objects
+        for pattern in patterns:
+            opportunity = pattern.get("future_opportunity")
+            if opportunity:
+                pattern["future_opportunity"] = {
+                    "description": opportunity["description"],
+                    "targetHours": opportunity["target_hours"],
+                    "expectedValue": opportunity["expected_value"],
+                    "dependencies": opportunity["dependencies"]
+                }
+                
+        # Convert all other snake_case to camelCase
+        return convert_snake_to_camel_case(response)
+
+    except Exception as e:
+        logger.error(f"Error generating decision intelligence data: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e

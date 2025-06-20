@@ -21,10 +21,25 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
 
   // Transform daily view data to chart format
   const chartData = hourlyData.map((hour, index) => {
-    const batteryAction = hour.battery_action || 0;
-    const batterySocPercent = hour.battery_soc_end || hour.batteryLevel || 0;
-    const price = hour.buy_price || 0;
+    // Check for missing keys and provide warnings
+    if (hour.batteryAction === undefined) {
+      console.warn(`Missing key: batteryAction at index ${index}`);
+    }
+    if (hour.batterySocEnd === undefined && hour.batteryLevel === undefined) {
+      console.warn(`Missing keys: batterySocEnd and batteryLevel at index ${index}`);
+    }
+    if (hour.buyPrice === undefined) {
+      console.warn(`Missing key: buyPrice at index ${index}`);
+    }
+    if (hour.dataSource === undefined) {
+      console.warn(`Missing key: dataSource at index ${index}`);
+    }
+    
+    const batteryAction = hour.batteryAction ?? 0;
+    const batterySocPercent = hour.batterySocEnd ?? hour.batteryLevel ?? 0;
+    const price = hour.buyPrice ?? 0;
     const hourNum = typeof hour.hour === 'number' ? hour.hour : index;
+    const dataSource = hour.dataSource ?? 'unknown';
     
     return {
       hour: `${hourNum}:00`,
@@ -32,9 +47,9 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
       batterySocPercent: batterySocPercent,
       action: batteryAction,
       price: price,
-      dataSource: hour.data_source || 'unknown',
-      isActual: hour.data_source === 'actual',
-      isPredicted: hour.data_source === 'predicted'
+      dataSource: dataSource,
+      isActual: dataSource === 'actual',
+      isPredicted: dataSource === 'predicted'
     };
   });
     

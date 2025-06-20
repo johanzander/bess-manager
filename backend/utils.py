@@ -1,3 +1,4 @@
+
 """Utility functions for API compatibility."""
 
 import re
@@ -30,22 +31,21 @@ def convert_keys_to_snake(data):
         return data
 
 
-def add_camel_case_keys(data):
-    """Add camelCase versions of all snake_case keys for API compatibility."""
+def convert_snake_to_camel_case(data):
+    """Convert all snake_case keys to camelCase for API - ONLY expose camelCase to frontend."""
     if isinstance(data, dict):
         result = {}
         for key, value in data.items():
-            # Add original key
-            result[key] = add_camel_case_keys(value)
-            
-            # Add camelCase version if key contains underscores
+            # Convert snake_case keys to camelCase
             if '_' in key:
                 camel_key = to_camel_case(key)
-                if camel_key != key:  # Avoid duplicates
-                    result[camel_key] = add_camel_case_keys(value)
+                result[camel_key] = convert_snake_to_camel_case(value)
+            else:
+                # Keep keys that are already camelCase or single words
+                result[key] = convert_snake_to_camel_case(value)
         
         return result
     elif isinstance(data, list):
-        return [add_camel_case_keys(item) for item in data]
+        return [convert_snake_to_camel_case(item) for item in data]
     else:
         return data

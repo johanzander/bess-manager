@@ -8,7 +8,6 @@ import {
   TrendingDown,
   AlertTriangle,
   CheckCircle,
-  Wrench,
   Zap
 } from 'lucide-react';
 
@@ -23,17 +22,17 @@ interface SystemStatusData {
   batteryStatus?: {
     soc: number;
     soe: number;
-    capacity: number;
     power: number;
     status: 'charging' | 'discharging' | 'idle';
-    batteryCost: number;
-    health: number;
+    batteryMode?: string; // Current operating mode (e.g., "load-first", "battery-first")
   };
   systemHealth?: {
     status: 'healthy' | 'warning' | 'error';
     uptime: number;
     lastOptimization: string;
     activeSessions: number;
+    actualHours: number;
+    totalHours: number;
   };
 }
 
@@ -135,7 +134,11 @@ const StatusCard: React.FC<StatusCardProps> = ({
             <span className={`text-sm font-semibold ${
               metric.color ? metricColorClasses[metric.color] : 'text-gray-900 dark:text-gray-100'
             }`}>
-              {typeof metric.value === 'number' ? metric.value.toFixed(2) : metric.value}
+              {typeof metric.value === 'number' 
+                ? metric.label === "Percentage Saved" 
+                  ? metric.value.toFixed(1) 
+                  : metric.value.toFixed(2) 
+                : metric.value}
               {metric.unit && <span className="opacity-70 ml-1">{metric.unit}</span>}
             </span>
           </div>
@@ -149,6 +152,20 @@ interface SystemStatusCardProps {
   className?: string;
 }
 
+// Helper functions for battery mode formatting
+const formatBatteryMode = (mode: string): string => {
+  switch (mode.toLowerCase()) {
+    case 'load-first':
+      return 'Load First';
+    case 'battery-first':
+      return 'Battery First';
+    case 'grid-first':
+      return 'Grid First';
+    default:
+      return mode.charAt(0).toUpperCase() + mode.slice(1);
+  }
+};
+
 const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "" }) => {
   const [statusData, setStatusData] = useState<SystemStatusData>({});
   const [isLoading, setIsLoading] = useState(true);
@@ -159,43 +176,74 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "" }) =
       try {
         setIsLoading(true);
         
-        // Fetch dashboard data first (required)
+        // Fetch dashboard data (now includes battery state)
         const dashboardResponse = await api.get('/api/dashboard');
         const dashboardData = dashboardResponse.data;
         
-        // Try to fetch inverter data (optional, fallback to dashboard if fails)
-        let inverterData = null;
-        try {
-          const inverterResponse = await api.get('/api/growatt/inverter_status');
-          inverterData = inverterResponse.data;
-        } catch (inverterError) {
-          console.warn('Could not fetch inverter status, using dashboard data only:', inverterError);
-          // Will use dashboard data for SOC instead
+        // Check for required battery data
+        if (dashboardData.batterySoc === undefined) {
+          console.warn('BACKEND ISSUE: Missing batterySoc in dashboardData');
+        }
+        if (dashboardData.batterySoe === undefined) {
+          console.warn('BACKEND ISSUE: Missing batterySoe in dashboardData');
+        }
+        if (dashboardData.batteryCapacity === undefined) {
+          console.warn('BACKEND ISSUE: Missing batteryCapacity in dashboardData');
         }
         
-        // Get current battery SOC from inverter endpoint (preferred) or dashboard (fallback)
-        const currentSOC = inverterData?.battery_soc || dashboardData.currentBatterySoc || 0;
-        const currentSOE = inverterData?.battery_soe || 
-                          dashboardData.currentBatterySoe || 
-                          (currentSOC / 100) * (dashboardData.batteryCapacity || 0);
-        const batteryCapacity = dashboardData.batteryCapacity || 0;
+        // Simply use the values from the backend without calculation
+        const currentSOC = dashboardData.batterySoc ?? 0;
+        const currentSOE = dashboardData.batterySoe ?? 0;
+        const batteryCapacity = dashboardData.batteryCapacity ?? 0;
+        
+        // Check for missing keys in summary data
+        if (dashboardData.summary?.batteryCycleCost === undefined) {
+          console.warn('Missing key: summary.batteryCycleCost in dashboardData');
+        }
+        if (dashboardData.summary?.baseCost === undefined) {
+          console.warn('Missing key: summary.baseCost in dashboardData');
+        }
+        if (dashboardData.summary?.optimizedCost === undefined) {
+          console.warn('Missing key: summary.optimizedCost in dashboardData');
+        }
+        if (dashboardData.totalDailySavings === undefined) {
+          console.warn('Missing key: totalDailySavings in dashboardData');
+        }
         
         // Calculate costs from dashboard data
-        const batteryCycleCost = dashboardData.summary?.batteryCycleCost || 0;
-        const baseCost = dashboardData.summary?.baseCost || 0;
-        const optimizedCost = dashboardData.summary?.optimizedCost || 0;
-        const dailySavings = dashboardData.totalDailySavings || 0;
+        const baseCost = dashboardData.summary?.baseCost ?? 0;
+        const optimizedCost = dashboardData.summary?.optimizedCost ?? 0;
+        const dailySavings = dashboardData.totalDailySavings ?? 0;
         
         // Get current battery power and status
         const currentHour = new Date().getHours();
         const currentHourData = dashboardData.hourlyData?.find((h: any) => h.hour === currentHour);
-        const batteryPower = Math.abs(currentHourData?.batteryAction || 0);
+        
+        // Debug log to see all available fields in the currentHourData
+        if (currentHourData) {
+          console.log("Current hour data fields:", Object.keys(currentHourData));
+        }
+        
+        // Check for missing keys in hourly data
+        if (currentHourData && currentHourData.batteryAction === undefined) {
+          console.warn('Missing key: batteryAction in currentHourData');
+        }
+        
+        const batteryPower = Math.abs(currentHourData?.batteryAction ?? 0);
         const batteryStatus = currentHourData?.batteryAction > 0.1 ? 'charging' : 
                             currentHourData?.batteryAction < -0.1 ? 'discharging' : 'idle';
         
+        // Check for missing keys in system health data
+        if (dashboardData.actualHoursCount === undefined) {
+          console.warn('Missing key: actualHoursCount in dashboardData');
+        }
+        if (dashboardData.hourlyData === undefined) {
+          console.warn('Missing key: hourlyData in dashboardData');
+        }
+        
         // System health indicators
-        const actualHours = dashboardData.actualHoursCount || 0;
-        const totalHours = dashboardData.hourlyData?.length || 24;
+        const actualHours = dashboardData.actualHoursCount ?? 0;
+        const totalHours = dashboardData.hourlyData?.length ?? 24;
         const systemUptime = (actualHours / totalHours) * 100;
         
         const transformedData: SystemStatusData = {
@@ -208,25 +256,29 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "" }) =
           batteryStatus: {
             soc: currentSOC,
             soe: currentSOE,
-            capacity: batteryCapacity,
             power: batteryPower,
             status: batteryStatus,
-            batteryCost: batteryCycleCost,
-            health: 95 // TODO: Get actual battery health from system
+            // The backend "battery_mode" is converted to "batteryMode" by the API
+            batteryMode: currentHourData?.batteryMode || 'load-first'
           },
           systemHealth: {
             status: systemUptime > 90 ? 'healthy' : systemUptime > 70 ? 'warning' : 'error',
             uptime: systemUptime,
-            lastOptimization: dashboardData.lastOptimization || 'Unknown',
-            activeSessions: 1 // TODO: Get actual session count
+            lastOptimization: dashboardData.lastOptimization ?? 'Unknown',
+            activeSessions: 1, // TODO: Get actual session count
+            actualHours: actualHours,
+            totalHours: totalHours
           }
         };
+        
+        // Debug log to check hourly data structure
+        console.log('SystemStatusCard: Current hour data', currentHourData);
         
         setStatusData(transformedData);
         setError(null);
         console.log('SystemStatusCard: Data loaded successfully', {
           dashboardAvailable: !!dashboardData,
-          inverterAvailable: !!inverterData,
+          batteryDataAvailable: !!dashboardData.batterySoc,
           currentSOC,
           currentSOE,
           batteryCapacity
@@ -274,9 +326,9 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "" }) =
     {
       title: "Cost & Savings",
       icon: DollarSign,
-      color: "green" as const,
-      keyMetric: "Today's Savings",
-      keyValue: statusData.costAndSavings?.todaysSavings || 0,
+      color: "blue" as const, // Changed to blue to match the cost theme
+      keyMetric: "Today's Costs",
+      keyValue: statusData.costAndSavings?.todaysCost || 0,
       keyUnit: "SEK",
       status: {
         icon: (statusData.costAndSavings?.todaysSavings || 0) >= 0 ? TrendingUp : TrendingDown,
@@ -285,17 +337,17 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "" }) =
       },
       metrics: [
         {
-          label: "Optimized Cost",
-          value: statusData.costAndSavings?.todaysCost || 0,
-          unit: "SEK",
-          icon: DollarSign,
-          color: 'blue' as const
-        },
-        {
           label: "Base Cost",
           value: statusData.costAndSavings?.baseCost || 0,
           unit: "SEK",
           icon: DollarSign
+        },
+        {
+          label: "Today's Savings",
+          value: statusData.costAndSavings?.todaysSavings || 0,
+          unit: "SEK",
+          icon: DollarSign,
+          color: (statusData.costAndSavings?.todaysSavings || 0) >= 0 ? 'green' : 'red'
         },
         {
           label: "Percentage Saved",
@@ -329,29 +381,25 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "" }) =
           label: "State of Energy",
           value: statusData.batteryStatus?.soe || 0,
           unit: "kWh",
-          icon: Zap,
-          color: 'blue' as const
+          icon: Zap
+          // Removed color to use default (black)
         },
         {
-          label: "Capacity",
-          value: statusData.batteryStatus?.capacity || 0,
-          unit: "kWh",
+          label: "Current Mode",
+          value: formatBatteryMode(statusData.batteryStatus?.batteryMode || 'Unknown'),
+          unit: "",
           icon: Battery
+          // Removed color to use default (black)
         },
         {
-          label: "Battery Wear Cost",
-          value: statusData.batteryStatus?.batteryCost || 0,
-          unit: "SEK",
-          icon: Wrench,
-          color: 'yellow' as const
-        },
-        {
-          label: "Battery Health",
-          value: statusData.batteryStatus?.health || 0,
-          unit: "%",
-          icon: Heart,
-          color: (statusData.batteryStatus?.health || 0) >= 90 ? 'green' : 
-                 (statusData.batteryStatus?.health || 0) >= 70 ? 'yellow' : 'red'
+          label: statusData.batteryStatus?.status === 'charging' ? 'Charging' :
+                 statusData.batteryStatus?.status === 'discharging' ? 'Discharging' : 'Power',
+          value: Math.abs(statusData.batteryStatus?.power || 0),
+          unit: "kW",
+          icon: statusData.batteryStatus?.status === 'charging' ? TrendingUp :
+                statusData.batteryStatus?.status === 'discharging' ? TrendingDown : Zap,
+          color: statusData.batteryStatus?.status === 'charging' ? 'green' :
+                 statusData.batteryStatus?.status === 'discharging' ? 'yellow' : 'blue' as const
         }
       ]
     },
@@ -360,7 +408,7 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "" }) =
       icon: Heart,
       color: statusData.systemHealth?.status === 'healthy' ? "green" : 
              statusData.systemHealth?.status === 'warning' ? "yellow" : "red" as 'blue' | 'green' | 'red' | 'yellow' | 'purple',
-      keyMetric: "System Uptime",
+      keyMetric: "Hours With Actual Data",
       keyValue: statusData.systemHealth?.uptime || 0,
       keyUnit: "%",
       status: {
@@ -373,16 +421,11 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "" }) =
       },
       metrics: [
         {
-          label: "Last Optimization",
-          value: statusData.systemHealth?.lastOptimization || 'Unknown',
-          icon: TrendingUp
+          label: "Data Available",
+          value: `${statusData.systemHealth?.actualHours || 0} of ${statusData.systemHealth?.totalHours || 24}`,
+          unit: "hours",
+          icon: CheckCircle
         },
-        {
-          label: "Active Sessions",
-          value: statusData.systemHealth?.activeSessions || 0,
-          icon: Zap,
-          color: 'blue' as const
-        }
       ]
     }
   ];

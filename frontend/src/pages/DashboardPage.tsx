@@ -19,11 +19,17 @@ export default function DashboardPage({
 }: DashboardProps) {
   // Define a proper type for dashboard data
   interface DashboardData {
+    // Error handling fields
+    error?: string;
+    message?: string;
+    detail?: string;
+    
     hourlyData: Array<{
       hour: number;
       batterySocEnd?: number;
       batteryLevel?: number;
       batteryAction?: number;
+      batteryMode?: string;
       solarProduction?: number;
       solar_production?: number;
       solarGenerated?: number;
@@ -86,23 +92,37 @@ export default function DashboardPage({
       const response = await api.get('/api/dashboard');
       
       if (response?.data) {
-        setDashboardData(response.data);
-        
-        const hourlyDataCount = response.data.hourlyData?.length || 0;
-        const actualCount = response.data.actualHoursCount || 0;
-        const predictedCount = response.data.predictedHoursCount || 0;
-        
-        debugMessages.push(`✅ Dashboard data loaded successfully`);
-        debugMessages.push(`📊 Total hours: ${hourlyDataCount} (${actualCount} actual + ${predictedCount} predicted)`);
-        debugMessages.push(`💰 Daily savings: ${response.data.totalDailySavings?.toFixed(2) || 'N/A'} SEK`);
-        debugMessages.push(`🔋 Battery capacity: ${response.data.batteryCapacity || 'N/A'} kWh`);
-        
-        // Log strategic intent summary if available
-        if (response.data.strategicIntentSummary) {
-          const intents = Object.entries(response.data.strategicIntentSummary)
-            .map(([intent, count]) => `${intent}: ${count}`)
-            .join(', ');
-          debugMessages.push(`🎯 Strategic intents: ${intents}`);
+        // Check if this is an error response with incomplete data
+        if (response.data.error === 'incomplete_data') {
+          // Still set the data to what we have (may be partial or empty)
+          setDashboardData(response.data);
+          
+          // Log the error but don't treat it as a fatal error
+          debugMessages.push(`⚠️ WARNING: ${response.data.message}`);
+          debugMessages.push(`⚠️ Detail: ${response.data.detail}`);
+          
+          // Show a warning but continue loading the page
+          setError(`Warning: ${response.data.message} Some dashboard features might not display correctly.`);
+        } else {
+          // Normal successful response
+          setDashboardData(response.data);
+          
+          const hourlyDataCount = response.data.hourlyData?.length || 0;
+          const actualCount = response.data.actualHoursCount || 0;
+          const predictedCount = response.data.predictedHoursCount || 0;
+          
+          debugMessages.push(`✅ Dashboard data loaded successfully`);
+          debugMessages.push(`📊 Total hours: ${hourlyDataCount} (${actualCount} actual + ${predictedCount} predicted)`);
+          debugMessages.push(`💰 Daily savings: ${response.data.totalDailySavings?.toFixed(2) || 'N/A'} SEK`);
+          debugMessages.push(`🔋 Battery capacity: ${response.data.batteryCapacity || 'N/A'} kWh`);
+          
+          // Log strategic intent summary if available
+          if (response.data.strategicIntentSummary) {
+            const intents = Object.entries(response.data.strategicIntentSummary)
+              .map(([intent, count]) => `${intent}: ${count}`)
+              .join(', ');
+            debugMessages.push(`🎯 Strategic intents: ${intents}`);
+          }
         }
       } else {
         throw new Error('No data received from dashboard endpoint');
@@ -131,23 +151,8 @@ export default function DashboardPage({
 
   // Check if we have valid dashboard data
   const hasValidData = dashboardData && dashboardData.hourlyData && dashboardData.hourlyData.length > 0;
+  const hasPartialData = dashboardData && dashboardData.error === 'incomplete_data';
   const currentHour = new Date().getHours();
-
-  // Create synthetic energy data for charts that expect it
-  const syntheticEnergyData = hasValidData ? {
-    hourlyData: dashboardData.hourlyData
-      .filter((hour: any) => hour.dataSource === 'actual' || hour.data_source === 'actual')
-      .map((hour: any) => ({
-        hour: typeof hour.hour === 'string' ? parseInt(hour.hour.split(':')[0]) : hour.hour,
-        system_production: hour.solarProduction || hour.solar_production || hour.solarGenerated || 0,
-        load_consumption: hour.homeConsumption || hour.home_consumption || hour.homeConsumed || 0,
-        import_from_grid: hour.gridImport || hour.grid_import || hour.gridImported || 0,
-        export_to_grid: hour.gridExport || hour.grid_export || hour.gridExported || 0,
-        battery_charge: hour.batteryCharged || hour.battery_charged || 0,
-        battery_discharge: hour.batteryDischarged || hour.battery_discharged || 0,
-      })),
-    totals: dashboardData.totals || {}
-  } : { hourlyData: [], totals: {} };
 
   // Create Sankey data
   const sankeyData = hasValidData ? {
@@ -159,6 +164,22 @@ export default function DashboardPage({
 
   return (
     <div className="space-y-6">
+      {/* Warning Banner for Incomplete Data */}
+      {hasPartialData && (
+        <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-4 rounded">
+          <div className="flex items-center">
+            <div className="flex-shrink-0">
+              <AlertCircle className="h-5 w-5 text-yellow-400" aria-hidden="true" />
+            </div>
+            <div className="ml-3">
+              <p className="text-sm text-yellow-700">
+                {dashboardData?.message || "Some data is missing. The dashboard may display incomplete information."}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+      
       {/* System Status Header */}
       <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
         <div className="flex items-center justify-between">
@@ -238,7 +259,6 @@ export default function DashboardPage({
               <div className="mb-8">
                 <EnergyFlowChart 
                   dailyViewData={dashboardData.hourlyData}
-                  energyBalanceData={syntheticEnergyData.hourlyData}
                   currentHour={currentHour}
                 />
               </div>

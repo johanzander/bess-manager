@@ -166,13 +166,19 @@ class DailyViewBuilder:
                 if not (schedule_start_hour <= hour <= schedule_end_hour):
                     missing_predicted_hours.append(hour)
 
-        # FAIL FAST if any data is missing
+        # Log warning about missing data, but don't fail completely
         if missing_actual_hours:
-            raise ValueError(
+            # Convert to warning instead of hard failure
+            missing_data_message = (
                 f"Missing historical data for hours {missing_actual_hours}. "
                 f"System cannot provide reliable daily view. "
                 f"Check sensor data collection and InfluxDB connectivity."
             )
+            logger.warning(missing_data_message)
+            
+            # Still raise the exception for now, but the API endpoint will catch it
+            # This allows API to provide a graceful degradation
+            raise ValueError(missing_data_message)
 
         if missing_predicted_hours:
             raise ValueError(

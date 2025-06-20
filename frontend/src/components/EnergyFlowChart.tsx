@@ -1,11 +1,24 @@
 import React from 'react';
 import { Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Line, ComposedChart, Cell } from 'recharts';
 
+// Define type for hourly data coming from API
+interface HourlyData {
+  hour: number;
+  dataSource?: string; // Make it optional and more flexible
+  solarGenerated?: number;
+  homeConsumed?: number;
+  gridImported?: number;
+  gridExported?: number;
+  batteryCharged?: number;
+  batteryDischarged?: number;
+  buyPrice?: number;
+  [key: string]: any; // Allow for other properties
+}
+
 export const EnergyFlowChart: React.FC<{
-  dailyViewData: any[];
-  energyBalanceData: any[];
+  dailyViewData: HourlyData[];
   currentHour: number;
-}> = ({ dailyViewData, energyBalanceData, currentHour }) => {
+}> = ({ dailyViewData, currentHour }) => {
   
   // Dark mode detection for chart colors
   const isDarkMode = document.documentElement.classList.contains('dark');
@@ -22,82 +35,77 @@ export const EnergyFlowChart: React.FC<{
 
   const chartData = Array.from({ length: 24 }, (_, hour) => {
     const dailyViewHour = dailyViewData?.find(h => h.hour === hour);
-    const energyBalanceHour = energyBalanceData?.find(h => h.hour === hour);
     
-    // Determine if we have actual data - check both sources
-    const hasEnergyBalanceData = energyBalanceHour && (
-      energyBalanceHour.system_production > 0 || 
-      energyBalanceHour.load_consumption > 0 || 
-      energyBalanceHour.import_from_grid > 0 ||
-      energyBalanceHour.export_to_grid > 0 ||
-      energyBalanceHour.battery_charge > 0 ||
-      energyBalanceHour.battery_discharge > 0
-    );
+    // Check for missing keys and log warnings if needed
+    if (dailyViewHour && dailyViewHour.dataSource === undefined) {
+      console.warn(`Missing key: dataSource in dailyViewHour at hour ${hour}`);
+    }
     
-    const dailyViewIsActual = dailyViewHour?.data_source === 'actual';
+    const isActual = dailyViewHour?.dataSource === 'actual';
+    const isPredicted = hour >= currentHour || (dailyViewHour?.dataSource === 'predicted');
     
-    // isActual should be true if we have energy balance data OR if daily view says it's actual
-    const isActual = hasEnergyBalanceData || dailyViewIsActual;
-    const isPredicted = hour >= currentHour || (dailyViewHour?.data_source === 'predicted');
-    
-    // Use actual data from energy balance for past hours, or daily view if marked as actual
     let actualData = null;
     let predictedData = null;
     
-    // Priority 1: Use energy balance data if available (most reliable for actual data)
-    if (energyBalanceHour && hasEnergyBalanceData) {
+    // Use dailyViewData for actual data if marked as actual
+    if (dailyViewHour && isActual) {
+      // Check for missing keys and log warnings
+      if (dailyViewHour.solarGenerated === undefined) {
+        console.warn(`Missing key: solarGenerated in dailyViewHour at hour ${hour}`);
+      }
+      if (dailyViewHour.homeConsumed === undefined) {
+        console.warn(`Missing key: homeConsumed in dailyViewHour at hour ${hour}`);
+      }
+      if (dailyViewHour.gridImported === undefined) {
+        console.warn(`Missing key: gridImported in dailyViewHour at hour ${hour}`);
+      }
+      if (dailyViewHour.gridExported === undefined) {
+        console.warn(`Missing key: gridExported in dailyViewHour at hour ${hour}`);
+      }
+      if (dailyViewHour.batteryCharged === undefined) {
+        console.warn(`Missing key: batteryCharged in dailyViewHour at hour ${hour}`);
+      }
+      if (dailyViewHour.batteryDischarged === undefined) {
+        console.warn(`Missing key: batteryDischarged in dailyViewHour at hour ${hour}`);
+      }
+      
       actualData = {
-        solar: energyBalanceHour.system_production || 0,
-        consumption: energyBalanceHour.load_consumption || 0,
-        gridImport: energyBalanceHour.import_from_grid || 0,
-        gridExport: energyBalanceHour.export_to_grid || 0,
-        batteryCharge: energyBalanceHour.battery_charge || 0,
-        batteryDischarge: energyBalanceHour.battery_discharge || 0,
+        solar: dailyViewHour.solarGenerated ?? 0,
+        consumption: dailyViewHour.homeConsumed ?? 0,
+        gridImport: dailyViewHour.gridImported ?? 0,
+        gridExport: dailyViewHour.gridExported ?? 0,
+        batteryCharge: dailyViewHour.batteryCharged ?? 0,
+        batteryDischarge: dailyViewHour.batteryDischarged ?? 0,
       };
     }
-    // Priority 2: Use daily view data if marked as actual and no energy balance data
-    else if (dailyViewHour && dailyViewIsActual) {
-      actualData = {
-        solar: dailyViewHour.solar_generated || 0,
-        consumption: dailyViewHour.home_consumed || 0,
-        gridImport: dailyViewHour.grid_imported || 0,
-        gridExport: dailyViewHour.grid_exported || 0,
-        batteryCharge: dailyViewHour.battery_charged || 0,
-        batteryDischarge: dailyViewHour.battery_discharged || 0,
-      };
-    }
+    // This section is now handled above
     
     // Handle predicted data from daily view
     if (dailyViewHour) {
       const data = {
-        solar: dailyViewHour.solar_generated || 0,
-        consumption: dailyViewHour.home_consumed || 0,
-        gridImport: dailyViewHour.grid_imported || 0,
-        gridExport: dailyViewHour.grid_exported || 0,
-        batteryCharge: dailyViewHour.battery_charged || 0,
-        batteryDischarge: dailyViewHour.battery_discharged || 0,
+        solar: dailyViewHour.solarGenerated ?? 0,
+        consumption: dailyViewHour.homeConsumed ?? 0,
+        gridImport: dailyViewHour.gridImported ?? 0,
+        gridExport: dailyViewHour.gridExported ?? 0,
+        batteryCharge: dailyViewHour.batteryCharged ?? 0,
+        batteryDischarge: dailyViewHour.batteryDischarged ?? 0,
       };
       
       // If this is predicted data OR if we don't have actual data, use as predicted
-      if (dailyViewHour.data_source === 'predicted' || hour >= currentHour) {
+      if (dailyViewHour.dataSource === 'predicted' || hour >= currentHour) {
         predictedData = data;
       }
     }
     
-    // Calculate prediction accuracy for past hours where we have both actual and predicted
+    // Calculate prediction accuracy is no longer needed since we only use daily view data
     let accuracy = null;
-    if (actualData && dailyViewHour && isActual && dailyViewHour.data_source === 'actual') {
-      const solarError = actualData.solar > 0 
-        ? Math.abs(actualData.solar - (dailyViewHour.solar_generated || 0)) / actualData.solar * 100
-        : 0;
-      
-      const consumptionError = actualData.consumption > 0
-        ? Math.abs(actualData.consumption - (dailyViewHour.home_consumed || 0)) / actualData.consumption * 100
-        : 0;
-        
-      accuracy = Math.max(0, 100 - (solarError + consumptionError) / 2);
-    }
+    // We can still calculate accuracy in the future if needed
+    // For now, just setting to null as we don't have predicted vs actual to compare
     
+    if (dailyViewHour && dailyViewHour.buyPrice === undefined) {
+      console.warn(`Missing key: buyPrice in dailyViewHour at hour ${hour}`);
+    }
+
     return {
       hour,
       isActual,
@@ -105,9 +113,9 @@ export const EnergyFlowChart: React.FC<{
       actualData,
       predictedData,
       accuracy,
-      price: dailyViewHour?.buy_price || 0,
-      hasEnergyBalance: hasEnergyBalanceData,
-      dailyViewSource: dailyViewHour?.data_source || 'none'
+      price: dailyViewHour?.buyPrice ?? 0,
+      hasEnergyBalance: isActual, // using isActual instead of hasEnergyBalanceData
+      dailyViewSource: dailyViewHour?.dataSource ?? 'none'
     };
   });
 
@@ -172,9 +180,14 @@ export const EnergyFlowChart: React.FC<{
     else if (data.predictedConsumption === null && data.hour > (lastActualHour ?? -1)) {
       // Find the daily view data for this hour to get predicted consumption
       const dailyViewHour = dailyViewData?.find(h => h.hour === data.hour);
+      
+      if (dailyViewHour && dailyViewHour.homeConsumed === undefined) {
+        console.warn(`Missing key: homeConsumed in dailyViewHour at hour ${data.hour}`);
+      }
+      
       return {
         ...data,
-        predictedConsumption: dailyViewHour?.home_consumed || 0
+        predictedConsumption: dailyViewHour?.homeConsumed ?? 0
       };
     }
     return data;

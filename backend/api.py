@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, Query
 from loguru import logger
 
 # Import centralized utilities
-from utils import add_camel_case_keys, convert_keys_to_snake
+from utils import convert_keys_to_snake, convert_snake_to_camel_case
 
 # Create API router
 router = APIRouter()
@@ -24,7 +24,7 @@ async def get_battery_settings():
         battery_settings["estimated_consumption"] = settings["home"]["default_hourly"]
         
         # Apply camelCase conversion for API
-        return add_camel_case_keys(battery_settings)
+        return convert_snake_to_camel_case(battery_settings)
     except Exception as e:
         logger.error(f"Error getting battery settings: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -55,7 +55,7 @@ async def get_electricity_price_settings():
         price_settings = settings["price"]
         
         # Apply camelCase conversion
-        return add_camel_case_keys(price_settings)
+        return convert_snake_to_camel_case(price_settings)
     except Exception as e:
         logger.error(f"Error getting electricity settings: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -139,7 +139,7 @@ async def get_dashboard_data(date: str = Query(None)):
                 "is_actual": h.data_source == "actual",
                 "is_predicted": h.data_source == "predicted",
                 
-                # Core energy flows (primary field names)
+                # Energy flows
                 "solar_generated": h.solar_generated,
                 "home_consumed": h.home_consumed,
                 "grid_imported": h.grid_imported,
@@ -147,13 +147,7 @@ async def get_dashboard_data(date: str = Query(None)):
                 "battery_charged": h.battery_charged,
                 "battery_discharged": h.battery_discharged,
                 
-                # Energy flow aliases for compatibility
-                "solar_production": h.solar_generated,
-                "consumption": h.home_consumed,
-                "grid_import": h.grid_imported,
-                "grid_export": h.grid_exported,
-                
-                # Enhanced energy flows
+                # Detailed energy flows
                 "solar_to_home": solar_to_home,
                 "solar_to_battery": solar_to_battery,
                 "solar_to_grid": solar_to_grid,
@@ -165,7 +159,6 @@ async def get_dashboard_data(date: str = Query(None)):
                 # Battery state
                 "battery_soc_start": h.battery_soc_start,
                 "battery_soc_end": h.battery_soc_end,
-                "battery_level": h.battery_soc_end,  # Alias for compatibility
                 
                 # Pricing & costs
                 "buy_price": h.buy_price,
@@ -196,7 +189,7 @@ async def get_dashboard_data(date: str = Query(None)):
         avg_buy_price = sum(buy_prices) / len(buy_prices) if buy_prices else 0
         avg_sell_price = sum(sell_prices) / len(sell_prices) if sell_prices else 0
         
-        # Create comprehensive summary
+        # Create comprehensive summary - only include values we actually calculate
         summary = {
             "base_cost": sum(h.home_consumed * h.buy_price for h in daily_view.hourly_data),
             "optimized_cost": sum(h.hourly_cost for h in daily_view.hourly_data),
@@ -205,14 +198,9 @@ async def get_dashboard_data(date: str = Query(None)):
             "total_grid_export_earnings": sum((h.grid_exported * h.sell_price) for h in daily_view.hourly_data),
             "battery_costs": total_battery_charge * bess_controller.system.battery_settings.cycle_cost_per_kwh,
             "savings": daily_view.total_daily_savings,
-            "solar_only_cost": 0,  # Calculate if needed
-            "solar_only_savings": 0,  # Calculate if needed
-            "battery_savings": 0,  # Calculate if needed
-            "solar_savings": 0,  # Calculate if needed
-            "arbitrage_savings": 0,  # Calculate if needed
             "avg_buy_price": avg_buy_price,
             "avg_sell_price": avg_sell_price,
-            "battery_cycle_cost": total_battery_charge * bess_controller.system.battery_settings.cycle_cost_per_kwh, 
+            "battery_cycle_cost": total_battery_charge * bess_controller.system.battery_settings.cycle_cost_per_kwh,
         }
         
         # Create comprehensive totals
@@ -233,6 +221,16 @@ async def get_dashboard_data(date: str = Query(None)):
             "total_charge_from_solar": total_solar_to_battery,
             "total_charge_from_grid": total_grid_to_battery,
         }
+        
+        # Get current battery state from controller if available
+        battery_soc = 0
+        battery_soe = 0
+        try:
+            controller = bess_controller.system.controller
+            battery_soc = controller.get_battery_soc()
+            battery_soe = (battery_soc / 100.0) * battery_capacity
+        except Exception as e:
+            logger.warning(f"Could not get current battery state: {e}")
         
         # Unified response structure
         result = {
@@ -256,11 +254,33 @@ async def get_dashboard_data(date: str = Query(None)):
             # Enhanced summaries
             "summary": summary,
             "totals": totals,
-            "battery_capacity": battery_capacity,            
+            
+            # Battery info - include current state to reduce API calls
+            "battery_capacity": battery_capacity,
+            "battery_soc": battery_soc,
+            "battery_soe": battery_soe,
         }
         
-        return add_camel_case_keys(result)
+        return convert_snake_to_camel_case(result)
         
+    except ValueError as e:
+        # Check if this is the specific error about missing historical data
+        error_msg = str(e)
+        if "Missing historical data for hours" in error_msg:
+            logger.warning(f"Missing historical data in dashboard request: {error_msg}")
+            # Return a graceful failure response
+            return {
+                "error": "incomplete_data",
+                "message": "Some historical data is missing. The dashboard may display incomplete information.",
+                "detail": error_msg,
+                "current_hour": datetime.now().hour,
+                "date": datetime.now().date().isoformat(),
+                "hourly_data": []  # Return empty dataset that frontend can handle
+            }
+        else:
+            # Other ValueError errors still result in 500
+            logger.error(f"ValueError in dashboard data: {e}")
+            raise HTTPException(status_code=500, detail=str(e)) from e
     except Exception as e:
         logger.error(f"Error getting dashboard data: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -303,10 +323,11 @@ async def get_inverter_status():
             "charge_power_rate": charge_power_rate, # percentage
             "discharge_power_rate": discharge_power_rate, # percentage
             "grid_charge_enabled": grid_charge_enabled, # boolean
+            "cycle_cost": battery_settings.cycle_cost_per_kwh, # SEK/kWh
             "timestamp": datetime.now().isoformat(),
         }
 
-        return add_camel_case_keys(response)
+        return convert_snake_to_camel_case(response)
 
     except Exception as e:
         logger.error(f"Error updating battery control settings: {e}")
@@ -402,7 +423,7 @@ async def get_growatt_detailed_schedule():
             "strategic_intent_summary": strategic_intent_summary,
         }
         
-        return add_camel_case_keys(response)
+        return convert_snake_to_camel_case(response)
     
     except Exception as e:
         logger.error(f"Error getting detailed schedule: {e}")

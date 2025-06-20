@@ -1,13 +1,41 @@
 import React, { useState, useEffect } from 'react';
+import { Sun, Grid, Home, Battery, TrendingUp, TrendingDown } from 'lucide-react';
 import api from '../lib/api';
-import { 
-  Sun, 
-  Home, 
-  Battery, 
-  Grid
-} from 'lucide-react';
 
-// Pure energy flow data structure
+interface FlowItem {
+  label: string;
+  value: number;
+  unit: string;
+  direction: 'to' | 'from';
+  icon: React.ElementType;
+}
+
+interface SectionItem {
+  label: string;
+  value: number;
+  percentage: number;
+  icon: React.ElementType;
+}
+
+interface FlowSection {
+  title: string;
+  total: number;
+  unit: string;
+  color: 'blue' | 'green' | 'red' | 'yellow' | 'purple';
+  items: SectionItem[];
+}
+
+interface EnergyFlowCard {
+  title: string;
+  icon: React.ElementType;
+  color: 'blue' | 'green' | 'red' | 'yellow' | 'purple';
+  keyMetric: string;
+  keyValue: number | string;
+  keyUnit: string;
+  flows?: FlowItem[];
+  sections?: FlowSection[];
+}
+
 interface EnergyFlowData {
   solarGeneration?: {
     production: number;
@@ -24,10 +52,6 @@ interface EnergyFlowData {
   gridFlow?: {
     importEnergy: number;
     exportEnergy: number;
-    netImport: number;
-    toGrid: number;
-    fromGrid: number;
-    // Detailed breakdown
     gridToHome: number;
     gridToBattery: number;
     solarToGrid: number;
@@ -36,178 +60,57 @@ interface EnergyFlowData {
   batteryFlow?: {
     chargedToday: number;
     dischargedToday: number;
-    netFlow: number;
-    power: number;
-    status: 'charging' | 'discharging' | 'idle';
-    // Detailed breakdown
     solarToBattery: number;
     gridToBattery: number;
     batteryToHome: number;
     batteryToGrid: number;
   };
-  balance?: {
+  efficiency?: {
     solarUtilization: number;
     gridIndependence: number;
     batteryEfficiency: number;
   };
 }
 
-// Reusable EnergyFlowCard component with support for nested flows
-interface EnergyFlowCardProps {
-  title: string;
-  icon: React.ComponentType<any>;
-  color: 'blue' | 'yellow' | 'green' | 'purple' | 'orange';
-  keyMetric: string;
-  keyValue: number | string;
-  keyUnit: string;
-  flows?: {
-    label: string;
-    value: number;
-    unit: string;
-    direction: 'to' | 'from';
-    icon?: React.ComponentType<any>;
-  }[];
-  sections?: {
-    title: string;
-    total: number;
-    unit: string;
-    color: 'green' | 'red' | 'blue' | 'yellow';
-    items: {
-      label: string;
-      value: number;
-      percentage: number;
-      icon?: React.ComponentType<any>;
-    }[];
-  }[];
-  status?: {
-    icon: React.ComponentType<any>;
-    text: string;
-  };
-  className?: string;
-}
-
-const colorVariants = {
-  blue: {
-    border: 'border-blue-200 dark:border-blue-800',
-    bg: 'bg-blue-50 dark:bg-blue-900/10',
-    icon: 'text-blue-600 dark:text-blue-400',
-    title: 'text-blue-900 dark:text-blue-100'
-  },
-  yellow: {
-    border: 'border-yellow-200 dark:border-yellow-800',
-    bg: 'bg-yellow-50 dark:bg-yellow-900/10',
-    icon: 'text-yellow-600 dark:text-yellow-400',
-    title: 'text-yellow-900 dark:text-yellow-100'
-  },
-  green: {
-    border: 'border-green-200 dark:border-green-800',
-    bg: 'bg-green-50 dark:bg-green-900/10',
-    icon: 'text-green-600 dark:text-green-400',
-    title: 'text-green-900 dark:text-green-100'
-  },
-  purple: {
-    border: 'border-purple-200 dark:border-purple-800',
-    bg: 'bg-purple-50 dark:bg-purple-900/10',
-    icon: 'text-purple-600 dark:text-purple-400',
-    title: 'text-purple-900 dark:text-purple-100'
-  },
-  orange: {
-    border: 'border-orange-200 dark:border-orange-800',
-    bg: 'bg-orange-50 dark:bg-orange-900/10',
-    icon: 'text-orange-600 dark:text-orange-400',
-    title: 'text-orange-900 dark:text-orange-100'
-  }
+const colorClasses = {
+  blue: 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20',
+  green: 'text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/20',
+  red: 'text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20',
+  yellow: 'text-yellow-600 dark:text-yellow-400 bg-yellow-50 dark:bg-yellow-900/20',
+  purple: 'text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/20'
 };
 
-const EnergyFlowCard: React.FC<EnergyFlowCardProps> = ({
-  title,
-  icon: Icon,
-  color,
-  keyMetric,
-  keyValue,
-  keyUnit,
-  flows,
-  sections,
-  status,
-  className = ""
-}) => {
-  const styles = colorVariants[color];
-
+const EnergyFlowCard: React.FC<{ card: EnergyFlowCard }> = ({ card }) => {
+  const IconComponent = card.icon;
+  
   return (
-    <div className={`${styles.border} ${styles.bg} border-2 rounded-xl p-4 transition-all duration-200 hover:shadow-lg ${className}`}>
-      {/* Header */}
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center">
-          <Icon className={`h-5 w-5 mr-2 ${styles.icon}`} />
-          <h3 className={`font-semibold ${styles.title}`}>{title}</h3>
+    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4">
+      <div className="flex items-center gap-3 mb-4">
+        <div className={`p-2 rounded-lg ${colorClasses[card.color]}`}>
+          <IconComponent className="w-5 h-5" />
         </div>
-        {status && (
-          <div className="flex items-center text-xs text-gray-600 dark:text-gray-400">
-            <status.icon className="h-3 w-3 mr-1" />
-            <span>{status.text}</span>
-          </div>
-        )}
+        <div>
+          <h3 className="font-semibold text-gray-900 dark:text-white">{card.title}</h3>
+          <p className="text-sm text-gray-600 dark:text-gray-300">{card.keyMetric}</p>
+        </div>
       </div>
-
-      {/* Key Metric */}
+      
       <div className="mb-4">
-        <p className="text-xs text-gray-600 dark:text-gray-400 mb-1">{keyMetric}</p>
-        <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-          {typeof keyValue === 'number' ? keyValue.toFixed(1) : keyValue}
-          <span className="text-sm font-normal text-gray-600 dark:text-gray-400 ml-1">{keyUnit}</span>
-        </p>
+        <div className="text-2xl font-bold text-gray-900 dark:text-white">
+          {typeof card.keyValue === 'number' ? card.keyValue.toFixed(1) : card.keyValue}
+          <span className="text-sm font-normal text-gray-500 dark:text-gray-400 ml-1">
+            {card.keyUnit}
+          </span>
+        </div>
       </div>
 
-      {/* Special sections for Battery and Grid */}
-      {(title === "Battery" || title === "Grid") && sections && (
-        <div className="space-y-3 text-sm">
-          <div>
-            <div className="font-medium text-gray-700 dark:text-gray-300 mb-1 text-xs">
-              {sections[0]?.title}
-            </div>
-            <div className="space-y-1 pl-3">
-              {sections[0]?.items?.map((item, index) => (
-                <div key={index} className="flex justify-between">
-                  <div className="flex items-center">
-                    {item.icon && <item.icon className="h-3 w-3 mr-1 text-gray-500 dark:text-gray-400" />}
-                    <span className="text-gray-700 dark:text-gray-300">{item.label}</span>
-                  </div>
-                  <span className="font-medium text-gray-900 dark:text-gray-100">
-                    {item.value?.toFixed(1) || '0.0'} kWh
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-          <div>
-            <div className="font-medium text-gray-700 dark:text-gray-300 mb-1 text-xs">
-              {sections[1]?.title}
-            </div>
-            <div className="space-y-1 pl-3">
-              {sections[1]?.items?.map((item, index) => (
-                <div key={index} className="flex justify-between">
-                  <div className="flex items-center">
-                    {item.icon && <item.icon className="h-3 w-3 mr-1 text-gray-500 dark:text-gray-400" />}
-                    <span className="text-gray-700 dark:text-gray-300">{item.label}</span>
-                  </div>
-                  <span className="font-medium text-gray-900 dark:text-gray-100">
-                    {item.value?.toFixed(1) || '0.0'} kWh
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Normal flows for other cards */}
-      {title !== "Battery" && title !== "Grid" && flows && (
+      {card.flows && (
         <div className="space-y-2">
-          {flows.map((flow, index) => (
-            <div key={index} className="flex items-center justify-between text-sm">
-              <div className="flex items-center">
-                {flow.icon && <flow.icon className="h-3 w-3 mr-1 text-gray-500 dark:text-gray-400" />}
-                <span className="text-gray-700 dark:text-gray-300">
+          {card.flows.map((flow, index) => (
+            <div key={index} className="flex items-center justify-between py-1">
+              <div className="flex items-center gap-2">
+                <flow.icon className="w-4 h-4 text-gray-400 dark:text-gray-500" />
+                <span className="text-sm text-gray-600 dark:text-gray-300">
                   {flow.direction === 'to' ? 'To' : 'From'} {flow.label}
                 </span>
               </div>
@@ -215,6 +118,41 @@ const EnergyFlowCard: React.FC<EnergyFlowCardProps> = ({
                 {flow.value.toFixed(1)}
                 <span className="opacity-70 ml-1">{flow.unit}</span>
               </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {card.sections && (
+        <div className="space-y-3">
+          {card.sections.map((section, sectionIndex) => (
+            <div key={sectionIndex}>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {section.title}
+                </span>
+                <span className="text-sm font-bold text-gray-900 dark:text-gray-100">
+                  {section.total.toFixed(1)} {section.unit}
+                </span>
+              </div>
+              <div className="space-y-1">
+                {section.items.map((item, itemIndex) => (
+                  <div key={itemIndex} className="flex items-center justify-between text-sm">
+                    <div className="flex items-center gap-2">
+                      <item.icon className="w-3 h-3 text-gray-400" />
+                      <span className="text-gray-600 dark:text-gray-300">{item.label}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-gray-500 dark:text-gray-400">
+                        {item.percentage.toFixed(0)}%
+                      </span>
+                      <span className="font-medium text-gray-900 dark:text-gray-100">
+                        {item.value.toFixed(1)}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           ))}
         </div>
@@ -239,52 +177,32 @@ const EnergyFlowCards: React.FC<EnergyFlowCardsProps> = ({ className = "" }) => 
         const response = await api.get('/api/dashboard');
         const apiData = response.data;
         
-        // 🔍 DEBUGGING: Log what we actually receive
         console.log('=== ENERGYFLOWCARDS DEBUG ===');
         console.log('Full API Response:', apiData);
         console.log('apiData.totals:', apiData.totals);
         if (apiData.totals) {
           console.log('Available totals keys:', Object.keys(apiData.totals));
-          
-          // Check specific battery fields
-          const batteryFieldsToCheck = [
-            'totalBatteryCharge', 'total_battery_charge',
-            'totalBatteryDischarge', 'total_battery_discharge',
-            'totalSolarToBattery', 'total_solar_to_battery',
-            'totalGridToBattery', 'total_grid_to_battery',
-            'totalBatteryToHome', 'total_battery_to_home',
-            'totalBatteryToGrid', 'total_battery_to_grid'
-          ];
-          
-          batteryFieldsToCheck.forEach(field => {
-            const value = apiData.totals[field];
-            if (value !== undefined) {
-              console.log(`✅ ${field}: ${value}`);
-            } else {
-              console.log(`❌ ${field}: undefined`);
-            }
-          });
         }
 
-        // ✅ Use correct field names (try both camelCase and snake_case)
+        // ✅ Use only camelCase field names (no fallbacks)
         const totals = {
-          solarProduction: apiData.totals?.totalSolar || apiData.totals?.total_solar || 0,
-          homeConsumption: apiData.totals?.totalConsumption || apiData.totals?.total_consumption || 0,
-          gridImport: apiData.totals?.totalGridImport || apiData.totals?.total_grid_import || 0,
-          gridExport: apiData.totals?.totalGridExport || apiData.totals?.total_grid_export || 0,
+          solarProduction: apiData.totals?.totalSolar || 0,
+          homeConsumption: apiData.totals?.totalConsumption || 0,
+          gridImport: apiData.totals?.totalGridImport || 0,
+          gridExport: apiData.totals?.totalGridExport || 0,
           
-          // ✅ Battery totals - key fix with fallbacks
-          batteryCharged: apiData.totals?.totalBatteryCharge || apiData.totals?.total_battery_charge || 0,
-          batteryDischarged: apiData.totals?.totalBatteryDischarge || apiData.totals?.total_battery_discharge || 0,
+          // ✅ Battery totals - camelCase only
+          batteryCharged: apiData.totals?.totalBatteryCharge || 0,
+          batteryDischarged: apiData.totals?.totalBatteryDischarge || 0,
           
-          // ✅ Battery flow details  
-          solarToHome: apiData.totals?.totalSolarToHome || apiData.totals?.total_solar_to_home || 0,
-          solarToBattery: apiData.totals?.totalSolarToBattery || apiData.totals?.total_solar_to_battery || 0,
-          solarToGrid: apiData.totals?.totalSolarToGrid || apiData.totals?.total_solar_to_grid || 0,
-          gridToHome: apiData.totals?.totalGridToHome || apiData.totals?.total_grid_to_home || 0,
-          gridToBattery: apiData.totals?.totalGridToBattery || apiData.totals?.total_grid_to_battery || 0,
-          batteryToHome: apiData.totals?.totalBatteryToHome || apiData.totals?.total_battery_to_home || 0,
-          batteryToGrid: apiData.totals?.totalBatteryToGrid || apiData.totals?.total_battery_to_grid || 0
+          // ✅ Battery flow details - camelCase only
+          solarToHome: apiData.totals?.totalSolarToHome || 0,
+          solarToBattery: apiData.totals?.totalSolarToBattery || 0,
+          solarToGrid: apiData.totals?.totalSolarToGrid || 0,
+          gridToHome: apiData.totals?.totalGridToHome || 0,
+          gridToBattery: apiData.totals?.totalGridToBattery || 0,
+          batteryToHome: apiData.totals?.totalBatteryToHome || 0,
+          batteryToGrid: apiData.totals?.totalBatteryToGrid || 0
         };
         
         console.log('✅ Final totals used:', totals);
@@ -305,17 +223,6 @@ const EnergyFlowCards: React.FC<EnergyFlowCardsProps> = ({ className = "" }) => 
         const batteryStatus = currentHourData?.batteryAction > 0.1 ? 'charging' : 
                             currentHourData?.batteryAction < -0.1 ? 'discharging' : 'idle';
 
-        // ✅ Calculate battery totals from flows since the direct totals are 0
-        const calculatedChargedToday = totals.solarToBattery + totals.gridToBattery;
-        const calculatedDischargedToday = totals.batteryToHome + totals.batteryToGrid;
-
-        console.log('Battery calculations:', {
-          directCharged: totals.batteryCharged,
-          directDischarged: totals.batteryDischarged,
-          calculatedCharged: calculatedChargedToday,
-          calculatedDischarged: calculatedDischargedToday
-        });
-
         const transformedData: EnergyFlowData = {
           solarGeneration: {
             production: totals.solarProduction,
@@ -332,26 +239,20 @@ const EnergyFlowCards: React.FC<EnergyFlowCardsProps> = ({ className = "" }) => 
           gridFlow: {
             importEnergy: totals.gridImport,
             exportEnergy: totals.gridExport,
-            netImport: totals.gridImport - totals.gridExport,
-            toGrid: totals.solarToGrid + totals.batteryToGrid,
-            fromGrid: totals.gridToHome + totals.gridToBattery,
             gridToHome: totals.gridToHome,
             gridToBattery: totals.gridToBattery,
             solarToGrid: totals.solarToGrid,
             batteryToGrid: totals.batteryToGrid
           },
           batteryFlow: {
-            chargedToday: calculatedChargedToday, // Use calculated value
-            dischargedToday: calculatedDischargedToday, // Use calculated value
-            netFlow: calculatedChargedToday - calculatedDischargedToday,
-            power: batteryPower,
-            status: batteryStatus,
+            chargedToday: totals.batteryCharged,
+            dischargedToday: totals.batteryDischarged,
             solarToBattery: totals.solarToBattery,
             gridToBattery: totals.gridToBattery,
             batteryToHome: totals.batteryToHome,
             batteryToGrid: totals.batteryToGrid
           },
-          balance: {
+          efficiency: {
             solarUtilization: totals.solarProduction > 0 ? 
               ((totals.solarToHome + totals.solarToBattery) / totals.solarProduction) * 100 : 0,
             gridIndependence: totals.homeConsumption > 0 ? 
@@ -573,24 +474,13 @@ const EnergyFlowCards: React.FC<EnergyFlowCardsProps> = ({ className = "" }) => 
           ]
         }
       ]
-      // ✅ Removed status completely
     }
   ];
 
   return (
     <div className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 ${className}`}>
       {cards.map((card, index) => (
-        <EnergyFlowCard
-          key={index}
-          title={card.title}
-          icon={card.icon}
-          color={card.color}
-          keyMetric={card.keyMetric}
-          keyValue={card.keyValue}
-          keyUnit={card.keyUnit}
-          flows={card.flows}
-          sections={card.sections}
-        />
+        <EnergyFlowCard key={index} card={card} />
       ))}
     </div>
   );

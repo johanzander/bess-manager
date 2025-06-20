@@ -25,6 +25,7 @@ interface InverterStatus {
   maxDischargingPower: number;
   batteryMode: string;
   gridChargeEnabled: boolean;
+  cycleCost: number;
   systemStatus: string;
   lastUpdated: string;
 }
@@ -57,7 +58,6 @@ interface GrowattSchedule {
   touIntervals: TOUInterval[];
   scheduleData: ScheduleHour[];
   batteryCapacity: number;
-  cycleCost: number;
   lastUpdated: string;
 }
 
@@ -589,7 +589,7 @@ const InverterStatusDashboard: React.FC = () => {
               <div className="flex justify-between">
                 <span className="text-gray-600 dark:text-gray-400">Cycle Cost:</span>
                 <span className="font-medium text-gray-900 dark:text-white">
-                  {growattSchedule?.cycleCost ? `${growattSchedule.cycleCost} SEK/kWh` : 'N/A'}
+                  {inverterStatus?.cycleCost ? `${inverterStatus.cycleCost} SEK/kWh` : 'N/A'}
                 </span>
               </div>
             </div>

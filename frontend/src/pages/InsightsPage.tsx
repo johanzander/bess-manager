@@ -4,6 +4,11 @@ import { Brain } from 'lucide-react';
 import api from '../lib/api';
 
 interface DashboardResponse {
+  // Error handling fields
+  error?: string;
+  message?: string;
+  detail?: string;
+  
   hourlyData: Array<{
     hour: number;
     dataSource?: string;
@@ -37,7 +42,14 @@ const InsightsPage: React.FC = () => {
         setError(null);
         
         const response = await api.get('/api/dashboard');
-        setDashboardData(response.data);
+        
+        // Handle partial/incomplete data gracefully
+        if (response.data && response.data.error === 'incomplete_data') {
+          setDashboardData(response.data); // Still set what data we have
+          setError(`Warning: ${response.data.message || 'Incomplete data available'}`);
+        } else {
+          setDashboardData(response.data);
+        }
       } catch (err) {
         console.error('Failed to fetch dashboard data:', err);
         setError(err instanceof Error ? err.message : 'Unknown error');
@@ -58,6 +70,20 @@ const InsightsPage: React.FC = () => {
           <p className="text-gray-600 dark:text-gray-300">
             Deep insights into battery optimization decisions, showing the economic reasoning and strategic thinking behind each action.
           </p>
+          
+          {/* Error/Warning Display */}
+          {error && dashboardData?.error === 'incomplete_data' && (
+            <div className="bg-yellow-50 border-l-4 border-yellow-400 p-3 mt-4">
+              <div className="flex">
+                <div className="ml-3">
+                  <p className="text-sm text-yellow-700">{error}</p>
+                  {dashboardData?.detail && (
+                    <p className="text-xs text-yellow-600 mt-1">{dashboardData.detail}</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
         
         <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">

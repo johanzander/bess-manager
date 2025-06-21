@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Sun, Grid, Home, Battery, TrendingUp, TrendingDown } from 'lucide-react';
+import { Sun, Grid, Home, Battery } from 'lucide-react';
 import api from '../lib/api';
 
 interface FlowItem {
@@ -97,10 +97,7 @@ const EnergyFlowCard: React.FC<{ card: EnergyFlowCard }> = ({ card }) => {
       
       <div className="mb-4">
         <div className="text-2xl font-bold text-gray-900 dark:text-white">
-          {typeof card.keyValue === 'number' ? card.keyValue.toFixed(1) : card.keyValue}
-          <span className="text-sm font-normal text-gray-500 dark:text-gray-400 ml-1">
-            {card.keyUnit}
-          </span>
+          {typeof card.keyValue === 'number' ? `${card.keyValue.toFixed(1)} ${card.keyUnit}` : `${card.keyValue} ${card.keyUnit}`}
         </div>
       </div>
 
@@ -115,8 +112,7 @@ const EnergyFlowCard: React.FC<{ card: EnergyFlowCard }> = ({ card }) => {
                 </span>
               </div>
               <span className="font-medium text-gray-900 dark:text-gray-100">
-                {flow.value.toFixed(1)}
-                <span className="opacity-70 ml-1">{flow.unit}</span>
+                {flow.value.toFixed(1)} {flow.unit}
               </span>
             </div>
           ))}
@@ -215,13 +211,6 @@ const EnergyFlowCards: React.FC<EnergyFlowCardsProps> = ({ className = "" }) => 
           batteryToGrid: totals.batteryToGrid
         });
         console.log('=== END DEBUG ===');
-
-        // Get current battery power and status from hourly data
-        const currentHour = new Date().getHours();
-        const currentHourData = apiData.hourlyData?.find((h: any) => h.hour === currentHour);
-        const batteryPower = Math.abs(currentHourData?.batteryAction || 0);
-        const batteryStatus = currentHourData?.batteryAction > 0.1 ? 'charging' : 
-                            currentHourData?.batteryAction < -0.1 ? 'discharging' : 'idle';
 
         const transformedData: EnergyFlowData = {
           solarGeneration: {

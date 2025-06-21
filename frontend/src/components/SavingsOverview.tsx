@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Zap, CheckCircle, AlertCircle } from 'lucide-react';
+import { Zap } from 'lucide-react';
 import api from '../lib/api';
 
 interface SavingsOverviewProps {
-  settings: any;
+  // Empty props interface for future extensions if needed
 }
 
 interface DashboardResponse {
@@ -27,7 +27,7 @@ interface DashboardResponse {
   }>;
 }
 
-export const SavingsOverview: React.FC<SavingsOverviewProps> = ({ settings }) => {
+export const SavingsOverview: React.FC<SavingsOverviewProps> = () => {
   const [dashboardData, setDashboardData] = useState<DashboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -120,29 +120,29 @@ export const SavingsOverview: React.FC<SavingsOverviewProps> = ({ settings }) =>
   return (
     <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow overflow-x-auto">
       <div className="mb-6">
-        <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">Simple Energy Overview</h2>
+        <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">Hourly Battery Actions & Savings</h2>
         <p className="text-sm text-gray-600 dark:text-gray-300">
-          Hourly breakdown showing energy flows, battery actions, and savings. Current hour highlighted in blue.
+          Current hour highlighted in purple.
         </p>
       </div>
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
         <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg text-center border border-blue-200 dark:border-blue-800">
-          <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">{baseCost.toFixed(2)}</div>
-          <div className="text-sm text-gray-600 dark:text-gray-300">Base Cost (SEK)</div>
-          <div className="text-xs text-gray-500 dark:text-gray-400">Grid-only scenario</div>
+          <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">{baseCost.toFixed(2)} SEK</div>
+          <div className="text-sm text-gray-600 dark:text-gray-300">Grid-Only Cost</div>
+          <div className="text-xs text-gray-500 dark:text-gray-400">Without solar or battery</div>
         </div>
         
         <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-lg text-center border border-green-200 dark:border-green-800">
-          <div className="text-2xl font-bold text-green-600 dark:text-green-400">{optimizedCost.toFixed(2)}</div>
-          <div className="text-sm text-gray-600 dark:text-gray-300">Actual Cost (SEK)</div>
-          <div className="text-xs text-gray-500 dark:text-gray-400">With optimization</div>
+          <div className="text-2xl font-bold text-green-600 dark:text-green-400">{optimizedCost.toFixed(2)} SEK</div>
+          <div className="text-sm text-gray-600 dark:text-gray-300">Optimized Cost</div>
+          <div className="text-xs text-gray-500 dark:text-gray-400">With solar & battery</div>
         </div>
 
         <div className="bg-purple-50 dark:bg-purple-900/20 p-4 rounded-lg text-center border border-purple-200 dark:border-purple-800">
-          <div className="text-2xl font-bold text-purple-600 dark:text-purple-400">{totalSavings.toFixed(2)}</div>
-          <div className="text-sm text-gray-600 dark:text-gray-300">Savings (SEK)</div>
+          <div className="text-2xl font-bold text-purple-600 dark:text-purple-400">{totalSavings.toFixed(2)} SEK</div>
+          <div className="text-sm text-gray-600 dark:text-gray-300">Total Savings</div>
           <div className="text-xs text-gray-500 dark:text-gray-400">{((totalSavings / baseCost) * 100).toFixed(1)}% saved</div>
         </div>
       </div>
@@ -278,7 +278,12 @@ export const SavingsOverview: React.FC<SavingsOverviewProps> = ({ settings }) =>
                 </td>
                 
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
-                  <div className="font-medium">{hour.hourlyCost.toFixed(2)}</div>
+                  <div className={`font-medium ${
+                    Math.abs(hour.hourlyCost) < 0.01 ? 'text-gray-900 dark:text-white' : 
+                    hour.hourlyCost > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'
+                  }`}>
+                    {hour.hourlyCost.toFixed(2)}
+                  </div>
                   <div className="text-xs text-gray-500 dark:text-gray-400">SEK</div>
                 </td>
                 
@@ -320,9 +325,16 @@ export const SavingsOverview: React.FC<SavingsOverviewProps> = ({ settings }) =>
             </td>
             
             <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
-              <div className="text-xs text-gray-500 dark:text-gray-400">Net</div>
-              <div className="font-medium">
-                {netBatteryAction.toFixed(1)}
+              <div className="flex flex-col items-center">
+                <div className="text-xs mb-1 text-blue-600 dark:text-blue-400">
+                  +{totalBatteryCharged.toFixed(1)} kWh
+                </div>
+                <div className="text-xs text-orange-600 dark:text-orange-400">
+                  -{totalBatteryDischarged.toFixed(1)} kWh
+                </div>
+                <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Net: {netBatteryAction.toFixed(1)} kWh
+                </div>
               </div>
             </td>
             
@@ -340,16 +352,24 @@ export const SavingsOverview: React.FC<SavingsOverviewProps> = ({ settings }) =>
               <div className="font-medium text-red-600 dark:text-red-400">
                 {totalGridImport.toFixed(1)}
               </div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">kWh</div>
             </td>
             
             <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
               <div className="font-medium text-green-600 dark:text-green-400">
                 {totalGridExport.toFixed(1)}
               </div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">kWh</div>
             </td>
             
             <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
-              <div className="font-medium">{summary.optimizedCost.toFixed(2)}</div>
+              <div className={`font-medium ${
+                Math.abs(summary.optimizedCost) < 0.01 ? 'text-gray-900 dark:text-white' : 
+                summary.optimizedCost > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'
+              }`}>
+                {summary.optimizedCost.toFixed(2)}
+              </div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">SEK</div>
             </td>
             
             <td className="px-3 py-2 whitespace-nowrap text-sm border border-gray-300 dark:border-gray-600 text-center">
@@ -360,6 +380,7 @@ export const SavingsOverview: React.FC<SavingsOverviewProps> = ({ settings }) =>
                 {Math.abs(summary.savings) < 0.01 ? '0.00' : 
                  summary.savings > 0 ? `+${summary.savings.toFixed(2)}` : summary.savings.toFixed(2)}
               </div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">SEK</div>
             </td>
           </tr>
         </tbody>

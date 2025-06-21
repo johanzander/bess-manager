@@ -31,7 +31,7 @@ const SavingsPage: React.FC = () => {
           <div className="mb-4 sm:mb-0">
             <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Financial Analysis & Savings Report</h1>
             <p className="text-gray-600 dark:text-gray-300">
-              Detailed breakdown of energy costs across three scenarios: grid-only, solar-only, and optimized solar+battery.
+              Compare how your battery system optimizes energy costs and increases solar utilization.
             </p>
           </div>
           
@@ -46,7 +46,7 @@ const SavingsPage: React.FC = () => {
               }`}
             >
               <Eye className="h-4 w-4 mr-2" />
-              Simple View
+              Standard View
             </button>
             <button
               onClick={() => setViewMode('detailed')}
@@ -62,27 +62,17 @@ const SavingsPage: React.FC = () => {
           </div>
         </div>
         
-        {/* View Mode Description */}
-        <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-          <p className="text-sm text-blue-800 dark:text-blue-200">
-            {viewMode === 'simple' ? (
-              <>
-                <strong>Simple View:</strong> Clean overview showing key energy flows, battery actions, and savings per hour. 
-                Perfect for daily monitoring and quick insights.
-              </>
-            ) : (
-              <>
-                <strong>Detailed View:</strong> Complete breakdown comparing grid-only, solar-only, and solar+battery scenarios. 
-                Shows all economic calculations and energy allocations for in-depth analysis.
-              </>
-            )}
-          </p>
+        {/* Current view indicator */}
+        <div className="mt-4 text-right">
+          <span className="text-sm text-gray-500 dark:text-gray-400">
+            Currently viewing: <strong>{viewMode === 'simple' ? 'Standard' : 'Detailed'}</strong>
+          </span>
         </div>
       </div>
 
       {/* Render the appropriate table based on view mode */}
       {viewMode === 'simple' ? (
-        <SavingsOverview settings={mergedSettings} />
+        <SavingsOverview />
       ) : (
         <DetailedSavingsAnalysis settings={mergedSettings} />
       )}

@@ -90,6 +90,23 @@ class StoredSchedule:
             f"savings: {savings:.2f} SEK"
         )
 
+    def get_enhanced_flows(self) -> list:
+        """Get enhanced flows with decision intelligence."""
+        try:
+            return self.algorithm_result.get("enhanced_flows", [])
+        except (KeyError, AttributeError):
+            return []
+    
+    def get_decision_for_hour(self, target_hour: int):
+        """Get the decision that was made for a specific hour."""
+        enhanced_flows = self.get_enhanced_flows()
+        start_hour, end_hour = self.get_optimization_range()
+        
+        if start_hour <= target_hour <= end_hour:
+            flow_index = target_hour - start_hour
+            if 0 <= flow_index < len(enhanced_flows):
+                return enhanced_flows[flow_index]
+        return None
 
 class ScheduleStore:
     """Storage for all optimization results created during the day.
@@ -239,6 +256,32 @@ class ScheduleStore:
         """
         return self._current_date
 
+    def get_decision_for_hour(self, target_hour: int):
+        """Get the actual decision that was made for a specific hour."""
+        # Find the most recent schedule that planned this hour
+        for schedule in reversed(self._schedules):
+            start_hour, end_hour = schedule.get_optimization_range()
+            if start_hour <= target_hour <= end_hour:
+                return schedule.get_decision_for_hour(target_hour)
+        return None
+    
+    def get_24h_decisions(self, current_hour: int) -> list:
+        """Get decisions from stored optimizations only (no reconstruction)."""
+        decisions = []
+        
+        for hour in range(24):
+            if hour < current_hour:
+                # Historical: Only from stored optimizations
+                decision = self.get_decision_for_hour(hour)
+            else:
+                # Current/Future: Get from latest optimization
+                latest = self.get_latest_schedule()
+                decision = latest.get_decision_for_hour(hour) if latest else None
+            
+            decisions.append(decision)
+        
+        return decisions
+    
     def log_daily_summary(self) -> None:
         """Log a summary of all stored schedules for the day."""
         if not self._schedules:
@@ -283,3 +326,4 @@ class ScheduleStore:
                 schedule.get_summary_info(),
                 schedule.timestamp.strftime("%H:%M:%S"),
             )
+

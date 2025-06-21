@@ -11,10 +11,12 @@ import {
 } from 'lucide-react';
 import api from '../lib/api';
 
+// FIXED: Updated interface to match actual API response
 interface InverterStatus {
   batterySoc: number;
   batterySoe: number;
-  batteryPower: number;
+  batteryChargePower: number;    // ✅ Separate charge power (kW)
+  batteryDischargePower: number; // ✅ Separate discharge power (kW)
   pvPower: number;
   consumption: number;
   gridPower: number;
@@ -23,11 +25,11 @@ interface InverterStatus {
   dischargePowerRate: number;
   maxChargingPower: number;
   maxDischargingPower: number;
-  batteryMode: string;
   gridChargeEnabled: boolean;
   cycleCost: number;
   systemStatus: string;
   lastUpdated: string;
+  // ❌ Removed: batteryMode (not provided by this API)
 }
 
 interface TOUInterval {
@@ -45,7 +47,7 @@ interface ScheduleHour {
   batteryCharged: number;
   batteryDischarged: number;
   batterySocEnd: number;
-  batteryMode: string;
+  batteryMode: string;           // ✅ Battery mode comes from schedule data
   chargePowerRate: number;
   dischargePowerRate: number;
   gridCharge: boolean;
@@ -102,9 +104,7 @@ const InverterStatusDashboard: React.FC = () => {
       console.error('Error loading data:', err);
       setError(err instanceof Error ? err.message : 'Failed to load data');
     } finally {
-      if (isInitialLoad || isManualRefresh) {
-        setLoading(false);
-      }
+      setLoading(false);
     }
   };
 
@@ -197,16 +197,41 @@ const InverterStatusDashboard: React.FC = () => {
     });
   };
 
-  useEffect(() => {
-    loadData(false);
-    // Removed automatic refresh - only manual refresh now
-  }, []);
+  // ✅ FIX 1: Calculate net battery power from separate charge/discharge values
+  const calculateBatteryPower = (chargePower: number, dischargePower: number): number => {
+    // If discharging, return negative value; if charging, return positive value
+    if (dischargePower > 0.01) {
+      return -dischargePower; // Discharging (negative)
+    } else if (chargePower > 0.01) {
+      return chargePower; // Charging (positive)
+    }
+    return 0; // Idle
+  };
 
+  // ✅ FIX 2: Get current battery mode from schedule data instead of inverter status
+  const getCurrentBatteryMode = (): string => {
+    if (!growattSchedule?.scheduleData) return 'load-first';
+    
+    const currentHour = new Date().getHours();
+    const currentHourData = growattSchedule.scheduleData.find(h => h.hour === currentHour);
+    return currentHourData?.batteryMode || 'load-first';
+  };
+
+  // ✅ Calculate actual values from the API response
+  const netBatteryPower = inverterStatus ? 
+    calculateBatteryPower(
+      inverterStatus.batteryChargePower || 0, 
+      inverterStatus.batteryDischargePower || 0
+    ) : 0;
+
+  const currentBatteryMode = getCurrentBatteryMode();
+
+  // Rest of existing functions...
   const getBatteryModeDisplay = (mode: string) => {
     const modes: Record<string, { label: string; color: string }> = {
       'load-first': { label: 'Load First', color: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300' },
       'battery-first': { label: 'Battery First', color: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300' },
-      'grid-first': { label: 'Grid First', color: 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300' },
+      'grid-first': { label: 'Grid First', color: 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300' }
     };
     
     const modeInfo = modes[mode] || { label: mode, color: 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300' };
@@ -227,6 +252,10 @@ const InverterStatusDashboard: React.FC = () => {
     };
     return colors[intent] || colors['IDLE'];
   };
+
+  useEffect(() => {
+    loadData(false);
+  }, []);
 
   if (loading) {
     return (
@@ -249,40 +278,27 @@ const InverterStatusDashboard: React.FC = () => {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Inverter Status</h1>
-              <p className="text-gray-600 dark:text-gray-400 mt-1">
-                System monitoring and schedule overview
-              </p>
+              <p className="text-gray-600 dark:text-gray-400">Real-time system monitoring and control</p>
             </div>
-            <div className="flex items-center space-x-4">
-              <div className="text-right">
-                <p className="text-sm text-gray-500 dark:text-gray-400">Last updated</p>
-                <p className="text-sm font-medium text-gray-900 dark:text-white">
-                  {lastUpdate.toLocaleTimeString()}
-                </p>
-              </div>
-            </div>
+            <button
+              onClick={() => loadData(true)}
+              disabled={loading}
+              className="flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg transition-colors"
+            >
+              <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+              {loading ? 'Refreshing...' : 'Refresh'}
+            </button>
           </div>
         </div>
       </div>
 
-      {/* Error Display */}
-      {error && (
-        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-4">
-          <div className="flex items-center">
-            <AlertTriangle className="h-5 w-5 text-red-500 mr-2" />
-            <span className="text-red-700 dark:text-red-400">{error}</span>
-          </div>
-        </div>
-      )}
-
-      {/* Main Status Cards */}
+      {/* ✅ FIXED: First 4 Cards using calculated values */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        
         {/* Current Strategy */}
         <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Current Strategy</h3>
-            <TrendingUp className="h-6 w-6 text-purple-600" />
+            <TrendingUp className="h-6 w-6 text-green-600" />
           </div>
           {currentHourData ? (
             <div className="space-y-2">
@@ -298,7 +314,7 @@ const InverterStatusDashboard: React.FC = () => {
           )}
         </div>
 
-        {/* System Status */}
+        {/* ✅ FIXED: System Status using calculated battery mode */}
         <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold text-gray-900 dark:text-white">System Status</h3>
@@ -309,7 +325,7 @@ const InverterStatusDashboard: React.FC = () => {
               {inverterStatus?.systemStatus || 'Online'}
             </div>
             <div className="text-sm text-gray-600 dark:text-gray-400">
-              Mode: {getBatteryModeDisplay(inverterStatus?.batteryMode || 'load-first')}
+              Mode: {getBatteryModeDisplay(currentBatteryMode)}
             </div>
           </div>
         </div>
@@ -344,7 +360,7 @@ const InverterStatusDashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* Current Power Flow */}
+        {/* ✅ FIXED: Battery Power using calculated net power */}
         <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Battery Power</h3>
@@ -353,18 +369,18 @@ const InverterStatusDashboard: React.FC = () => {
           <div className="space-y-3">
             <div>
               <div className="text-3xl font-bold text-gray-900 dark:text-white">
-                {Math.abs(inverterStatus?.batteryPower || 0).toFixed(1)}kW
+                {Math.abs(netBatteryPower).toFixed(1)}kW
               </div>
               <div className="text-sm text-gray-600 dark:text-gray-400">
-                {Math.abs((inverterStatus?.batteryPower || 0) * 1000).toFixed(0)}W
+                {Math.abs(netBatteryPower * 1000).toFixed(0)}W
               </div>
             </div>
             <div className={`text-sm font-medium ${
-              (inverterStatus?.batteryPower || 0) > 0 ? 'text-green-600' :
-              (inverterStatus?.batteryPower || 0) < 0 ? 'text-orange-600' : 'text-gray-500'
+              netBatteryPower > 0.01 ? 'text-green-600' :
+              netBatteryPower < -0.01 ? 'text-orange-600' : 'text-gray-500'
             }`}>
-              {(inverterStatus?.batteryPower || 0) > 0 ? 'Charging' :
-               (inverterStatus?.batteryPower || 0) < 0 ? 'Discharging' : 'Idle'}
+              {netBatteryPower > 0.01 ? 'Charging' :
+               netBatteryPower < -0.01 ? 'Discharging' : 'Idle'}
             </div>
           </div>
         </div>

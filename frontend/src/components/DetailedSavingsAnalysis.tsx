@@ -191,7 +191,9 @@ export const DetailedSavingsAnalysis: React.FC<DetailedSavingsAnalysisProps> = (
             <div className="flex items-center justify-center mb-1">
               <div className="px-2 py-1 bg-blue-200 dark:bg-blue-800 text-blue-800 dark:text-blue-200 rounded text-xs font-medium">GRID-ONLY</div>
             </div>
-            <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">{displayValue(totals.totalBaseCost)} SEK</div>
+            <div className="text-2xl font-bold text-gray-900 dark:text-white">
+              {displayValue(totals.totalBaseCost)} <span className="text-sm font-medium text-gray-600 dark:text-gray-400">SEK</span>
+            </div>
             <div className="text-sm text-gray-600 dark:text-gray-300">Baseline Cost</div>
             <div className="text-xs text-gray-500 dark:text-gray-400 mt-3">
               All electricity purchased from grid at market price
@@ -203,11 +205,13 @@ export const DetailedSavingsAnalysis: React.FC<DetailedSavingsAnalysisProps> = (
             <div className="flex items-center justify-center mb-1">
               <div className="px-2 py-1 bg-yellow-200 dark:bg-yellow-800 text-yellow-800 dark:text-yellow-200 rounded text-xs font-medium">SOLAR-ONLY</div>
             </div>
-            <div className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">{displayValue(totals.totalSolarOnlyCost)} SEK</div>
+            <div className="text-2xl font-bold text-gray-900 dark:text-white">
+              {displayValue(totals.totalSolarOnlyCost)} <span className="text-sm font-medium text-gray-600 dark:text-gray-400">SEK</span>
+            </div>
             <div className="text-sm text-gray-600 dark:text-gray-300">Solar-Only Cost</div>
             <div className="flex justify-between items-center mt-2 border-t border-yellow-200 dark:border-yellow-800 pt-2">
               <div className="text-left text-xs text-gray-600 dark:text-gray-300">Solar savings:</div>
-              <div className="text-right text-xs font-medium text-green-600 dark:text-green-400">{displayValue(totals.totalBaseCost - totals.totalSolarOnlyCost)} SEK</div>
+              <div className="text-right text-xs font-medium text-green-600 dark:text-green-400">{displayValue(totals.totalBaseCost - totals.totalSolarOnlyCost)} <span className="text-xs font-normal text-gray-600 dark:text-gray-400">SEK</span></div>
             </div>
             <div className="flex justify-between items-center">
               <div className="text-left text-xs text-gray-600 dark:text-gray-300">% Saved:</div>
@@ -224,11 +228,13 @@ export const DetailedSavingsAnalysis: React.FC<DetailedSavingsAnalysisProps> = (
             <div className="flex items-center justify-center mb-1">
               <div className="px-2 py-1 bg-green-200 dark:bg-green-800 text-green-800 dark:text-green-200 rounded text-xs font-medium">SOLAR+BATTERY</div>
             </div>
-            <div className="text-2xl font-bold text-green-600 dark:text-green-400">{displayValue(totals.totalBatterySolarCost)} SEK</div>
+            <div className="text-2xl font-bold text-gray-900 dark:text-white">
+              {displayValue(totals.totalBatterySolarCost)} <span className="text-sm font-medium text-gray-600 dark:text-gray-400">SEK</span>
+            </div>
             <div className="text-sm text-gray-600 dark:text-gray-300">Optimized Cost</div>
             <div className="flex justify-between items-center mt-2 border-t border-green-200 dark:border-green-800 pt-2">
               <div className="text-left text-xs text-gray-600 dark:text-gray-300">Total savings:</div>
-              <div className="text-right text-xs font-medium text-green-600 dark:text-green-400">{displayValue(totalDailySavings)} SEK</div>
+              <div className="text-right text-xs font-medium text-green-600 dark:text-green-400">{displayValue(totalDailySavings)} <span className="text-xs font-normal text-gray-600 dark:text-gray-400">SEK</span></div>
             </div>
             <div className="flex justify-between items-center">
               <div className="text-left text-xs text-gray-600 dark:text-gray-300">% Saved:</div>
@@ -236,7 +242,7 @@ export const DetailedSavingsAnalysis: React.FC<DetailedSavingsAnalysisProps> = (
             </div>
             <div className="flex justify-between items-center">
               <div className="text-left text-xs text-gray-600 dark:text-gray-300">Battery contribution:</div>
-              <div className="text-right text-xs font-medium text-green-600 dark:text-green-400">{displayValue(totals.totalSolarOnlyCost - totals.totalBatterySolarCost)} SEK</div>
+              <div className="text-right text-xs font-medium text-green-600 dark:text-green-400">{displayValue(totals.totalSolarOnlyCost - totals.totalBatterySolarCost)} <span className="text-xs font-normal text-gray-600 dark:text-gray-400">SEK</span></div>
             </div>
           </div>
         </div>

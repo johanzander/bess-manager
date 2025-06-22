@@ -6,7 +6,6 @@ import {
   Clock, 
   Settings, 
   TrendingUp,
-  AlertTriangle,
   Calendar
 } from 'lucide-react';
 import api from '../lib/api';
@@ -67,8 +66,8 @@ const InverterStatusDashboard: React.FC = () => {
   const [inverterStatus, setInverterStatus] = useState<InverterStatus | null>(null);
   const [growattSchedule, setGrowattSchedule] = useState<GrowattSchedule | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
+  const [, setError] = useState<string | null>(null);
+  const [, setLastUpdate] = useState<Date>(new Date());
   const [isInitialLoad, setIsInitialLoad] = useState(true);
 
   const fetchInverterStatus = async (): Promise<InverterStatus> => {

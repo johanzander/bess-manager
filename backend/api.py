@@ -284,7 +284,7 @@ async def get_dashboard_data(date: str = Query(None)):
     except Exception as e:
         logger.error(f"Error getting dashboard data: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
-
+    
 ############################################################################################
 # API Endpoints for Growatt inverter (s)
 ############################################################################################
@@ -434,6 +434,8 @@ async def get_growatt_detailed_schedule():
 # API Endpoints for Decision Insights
 ############################################################################################
 
+
+@router.get("/api/decision-intelligence")
 async def get_decision_intelligence_mock():
     """
     Get decision intelligence data with detailed flow patterns and economic reasoning.
@@ -479,7 +481,7 @@ async def get_decision_intelligence_mock():
                     pattern = {
                         "hour": hour,
                         "pattern_name": "GRID_TO_HOME_AND_BATTERY",
-                        "flow_description": f"Grid 11.2kWh: 5.2kWh→Home, 6.0kWh→Battery",
+                        "flow_description": "Grid 11.2kWh: 5.2kWh→Home, 6.0kWh→Battery",
                         "economic_context_description": "Ultra-cheap electricity at 0.01 SEK/kWh - maximum charging for extreme evening arbitrage",
                         "flows": {
                             "solar_to_home": 0, "solar_to_battery": 0, "solar_to_grid": 0,
@@ -509,7 +511,7 @@ async def get_decision_intelligence_mock():
                     pattern = {
                         "hour": hour,
                         "pattern_name": "GRID_TO_HOME",
-                        "flow_description": f"Grid 5.2kWh→Home",
+                        "flow_description": "Grid 5.2kWh→Home",
                         "economic_context_description": "High night prices prevent arbitrage charging - wait for cheaper periods",
                         "flows": {
                             "solar_to_home": 0, "solar_to_battery": 0, "solar_to_grid": 0,
@@ -538,7 +540,7 @@ async def get_decision_intelligence_mock():
                 pattern = {
                     "hour": hour,
                     "pattern_name": "GRID_TO_HOME_AND_BATTERY",
-                    "flow_description": f"Grid 8.2kWh: 5.2kWh→Home, 3.0kWh→Battery",
+                    "flow_description": "Grid 8.2kWh: 5.2kWh→Home, 3.0kWh→Battery",
                     "economic_context_description": "Rising morning prices but still profitable vs extreme evening peak - final charging window",
                     "flows": {
                         "solar_to_home": 0, "solar_to_battery": 0, "solar_to_grid": 0,
@@ -662,7 +664,7 @@ async def get_decision_intelligence_mock():
                 pattern = {
                     "hour": hour,
                     "pattern_name": "BATTERY_TO_HOME_AND_GRID",
-                    "flow_description": f"Battery 6.0kWh: 5.2kWh→Home, 0.8kWh→Grid",
+                    "flow_description": "Battery 6.0kWh: 5.2kWh→Home, 0.8kWh→Grid",
                     "economic_context_description": "Extreme peak prices - full arbitrage execution with both home supply and grid export",
                     "flows": {
                         "solar_to_home": 0, "solar_to_battery": 0, "solar_to_grid": 0,
@@ -692,7 +694,7 @@ async def get_decision_intelligence_mock():
                 pattern = {
                     "hour": hour,
                     "pattern_name": "BATTERY_TO_HOME",
-                    "flow_description": f"Battery 5.2kWh→Home",
+                    "flow_description": "Battery 5.2kWh→Home",
                     "economic_context_description": "Post-peak period - continue battery discharge while prices remain elevated above charging cost",
                     "flows": {
                         "solar_to_home": 0, "solar_to_battery": 0, "solar_to_grid": 0,
@@ -753,325 +755,5 @@ async def get_decision_intelligence_mock():
     except Exception as e:
         logger.error(f"Error generating decision intelligence data: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
-    
-
-def create_pattern_from_enhanced_flow(hour: int, enhanced_flow, current_hour: int):
-    """Convert enhanced flow to API pattern format."""
-    is_current = hour == current_hour
-    is_actual = hour < current_hour
-    
-    return {
-        "hour": hour,
-        "patternName": enhanced_flow.pattern_name or "BASIC_FLOW",
-        "flowDescription": enhanced_flow.description or f"Hour {hour}: Energy flow",
-        "economicContextDescription": f"Hour {hour}: Energy management",
-        "economicChain": enhanced_flow.economic_chain or "",
-        "flows": {
-            "solarToHome": enhanced_flow.solar_to_home,
-            "solarToBattery": enhanced_flow.solar_to_battery,
-            "solarToGrid": enhanced_flow.solar_to_grid,
-            "gridToHome": enhanced_flow.grid_to_home,
-            "gridToBattery": enhanced_flow.grid_to_battery,
-            "batteryToHome": enhanced_flow.battery_to_home,
-            "batteryToGrid": enhanced_flow.battery_to_grid,
-        },
-        "immediateFlowValues": enhanced_flow.flow_values or {},
-        "immediateTotalValue": enhanced_flow.immediate_value,
-        "futureOpportunity": {
-            "description": "",
-            "targetHours": [],
-            "expectedValue": enhanced_flow.future_value,
-            "dependencies": []
-        },
-        "netStrategyValue": enhanced_flow.net_strategy_value,
-        "riskFactors": enhanced_flow.risk_factors or [],
-        "electricityPrice": 0.0,  # TODO: Get from input data if available
-        "isCurrentHour": is_current,
-        "isActual": is_actual
-    }
-
-def create_empty_pattern(hour: int, current_hour: int):
-    """Create empty pattern for hours without decision data."""
-    is_current = hour == current_hour
-    is_actual = hour < current_hour
-    
-    return {
-        "hour": hour,
-        "patternName": "NO_DATA",
-        "flowDescription": "No decision data available" if not is_actual else "Historical data - decision context lost",
-        "economicContextDescription": "No optimization data for this hour",
-        "economicChain": "",
-        "flows": {
-            "solarToHome": 0,
-            "solarToBattery": 0,
-            "solarToGrid": 0,
-            "gridToHome": 0,
-            "gridToBattery": 0,
-            "batteryToHome": 0,
-            "batteryToGrid": 0,
-        },
-        "immediateFlowValues": {},
-        "immediateTotalValue": 0,
-        "futureOpportunity": {
-            "description": "",
-            "targetHours": [],
-            "expectedValue": 0,
-            "dependencies": []
-        },
-        "netStrategyValue": 0,
-        "riskFactors": [],
-        "electricityPrice": 0.0,
-        "isCurrentHour": is_current,
-        "isActual": is_actual
-    }
 
 
-@router.get("/api/decision-intelligence")
-async def get_decision_intelligence():
-    from app import bess_controller
-    from datetime import datetime
-    try:
-        current_hour = datetime.now().hour
-        battery_system = bess_controller.system
-        schedule_store = battery_system.schedule_store
-        
-        # Use the simple method that already exists
-        all_decisions = battery_system.get_24h_decision_intelligence(current_hour)
-        
-        logger.info(f"Got {len(all_decisions)} decisions, {sum(1 for d in all_decisions if d is not None)} non-null")
-        
-        patterns = []
-        for hour, enhanced_flow in enumerate(all_decisions):
-            if enhanced_flow is not None:
-                # Has actual decision data
-                try:
-                    pattern = create_pattern_from_enhanced_flow(hour, enhanced_flow, current_hour)
-                    patterns.append(pattern)
-                except Exception as e:
-                    logger.warning(f"Error creating pattern for hour {hour}: {e}")
-                    patterns.append(create_empty_pattern(hour, current_hour))
-            else:
-                # No decision data - create empty pattern
-                patterns.append(create_empty_pattern(hour, current_hour))
-        
-        # Calculate summary statistics
-        total_net_value = sum(p["netStrategyValue"] for p in patterns)
-        actual_patterns = [p for p in patterns if p["isActual"]]
-        predicted_patterns = [p for p in patterns if not p["isActual"]]
-        
-        # Find best decision (highest net strategy value)
-        best_decision = max(patterns, key=lambda p: p["netStrategyValue"]) if patterns else patterns[0]
-        
-        # Create complete response
-        response = {
-            "patterns": patterns,
-            "summary": {
-                "totalNetValue": total_net_value,
-                "bestDecisionHour": best_decision["hour"],
-                "bestDecisionValue": best_decision["netStrategyValue"],
-                "actualHoursCount": len(actual_patterns),
-                "predictedHoursCount": len(predicted_patterns)
-            }
-        }
-        
-        logger.info(f"Returning {len(patterns)} patterns with summary")
-        return response
-        
-    except Exception as e:
-        logger.error(f"Error in decision intelligence: {e}")
-        import traceback
-        logger.error(f"Traceback: {traceback.format_exc()}")
-        return {"error": str(e)}
-    
-async def get_decision_intelligence_():
-    """
-    Get decision intelligence data with enhanced energy flows and economic reasoning.
-    Uses enhanced flows from optimization results.
-    """
-    from app import bess_controller
-    from datetime import datetime
-
-#    try:
-    logger.info("Getting REAL decision intelligence data from enhanced flows")
-    
-    # Get current system state
-    current_hour = datetime.now().hour
-    
-    # Get from schedule store - should always exist in properly initialized system
-    battery_system = bess_controller.system
-    schedule_store = battery_system.schedule_store
-    
-    logger.info("1")
-    # Get all 24-hour decisions from schedule store
-    all_decisions = battery_system.get_24h_decision_intelligence(current_hour)
-    enhanced_flows = all_decisions  # This is our enhanced flows list
-    logger.info("2")
-    
-    # Get latest result for input data
-    latest_schedule = schedule_store.get_latest_schedule()
-    latest_result = latest_schedule.algorithm_result if latest_schedule else {}
-    logger.info("3")
-    
-    logger.info(f"Processing {len(enhanced_flows)} enhanced flows with intelligence")
-    
-    # Convert enhanced DetailedEnergyFlows to API format
-    patterns = []
-    
-    # Get price data for electricity prices
-    input_data = latest_result.get("input_data", {}) if latest_result else {}
-    buy_prices = input_data.get("buy_price", [])
-    
-    for i, enhanced_flow in enumerate(enhanced_flows):
-        hour = i  # Hour index
-        is_current = hour == current_hour
-        is_actual = hour < current_hour  # Past hours are actual
-        
-        # Handle None flows (hours without decisions)
-        if enhanced_flow is None:
-            # Create empty pattern for missing hours
-            pattern = {
-                "hour": hour,
-                "patternName": "NO_DATA",
-                "flowDescription": "No decision data available",
-                "economicContextDescription": "No optimization data for this hour",
-                "flows": {
-                    "solarToHome": 0,
-                    "solarToBattery": 0,
-                    "solarToGrid": 0,
-                    "gridToHome": 0,
-                    "gridToBattery": 0,
-                    "batteryToHome": 0,
-                    "batteryToGrid": 0
-                },
-                "immediateFlowValues": {},
-                "immediateTotalValue": 0,
-                "futureOpportunity": {
-                    "description": "",
-                    "targetHours": [],
-                    "expectedValue": 0,
-                    "dependencies": []
-                },
-                "economicChain": "",
-                "netStrategyValue": 0,
-                "riskFactors": [],
-                "electricityPrice": buy_prices[hour] if hour < len(buy_prices) else 0,
-                "isCurrentHour": is_current,
-                "isActual": is_actual
-            }
-            patterns.append(pattern)
-            continue
-        
-        # Create flows dict from DetailedEnergyFlows
-        flows_dict = {
-            "solarToHome": enhanced_flow.solar_to_home,
-            "solarToBattery": enhanced_flow.solar_to_battery, 
-            "solarToGrid": enhanced_flow.solar_to_grid,
-            "gridToHome": enhanced_flow.grid_to_home,
-            "gridToBattery": enhanced_flow.grid_to_battery,
-            "batteryToHome": enhanced_flow.battery_to_home,
-            "batteryToGrid": enhanced_flow.battery_to_grid
-        }
-        
-        # Check if this flow has intelligence data
-        if enhanced_flow.has_intelligence():
-            # Use intelligence data directly
-            pattern_name = enhanced_flow.pattern_name
-            flow_description = enhanced_flow.description
-            economic_chain = enhanced_flow.economic_chain
-            immediate_flow_values = enhanced_flow.flow_values or {}
-            immediate_total_value = enhanced_flow.immediate_value
-            future_value = enhanced_flow.future_value
-            net_strategy_value = enhanced_flow.net_strategy_value
-            risk_factors = enhanced_flow.risk_factors or []
-            
-            # Convert flow values to camelCase for frontend
-            camel_flow_values = {}
-            for key, value in immediate_flow_values.items():
-                # Convert snake_case to camelCase
-                camel_key = key.replace('_', ' ').title().replace(' ', '')
-                camel_key = camel_key[0].lower() + camel_key[1:] if camel_key else key
-                camel_flow_values[camel_key] = value
-            
-            # Create future opportunity dict
-            future_opportunity = {
-                "description": enhanced_flow.future_opportunity_description,
-                "targetHours": enhanced_flow.target_hours,
-                "expectedValue": future_value,
-                "dependencies": enhanced_flow.dependencies
-            }
-            
-            economic_context_description = f"Strategic decision with {net_strategy_value:.2f} SEK net value"
-            
-        else:
-            # Basic flow without intelligence - generate simple descriptions
-            pattern_name = "BASIC_FLOW"
-            flow_description = f"Hour {hour}: Basic energy flow"
-            economic_chain = f"Hour {hour:02d}: Standard energy management"
-            immediate_flow_values = {}
-            immediate_total_value = 0
-            future_value = 0
-            net_strategy_value = 0
-            risk_factors = []
-            camel_flow_values = {}
-            
-            future_opportunity = {
-                "description": "Basic energy management",
-                "targetHours": [],
-                "expectedValue": 0,
-                "dependencies": []
-            }
-            
-            economic_context_description = "Basic energy flow without optimization intelligence"
-        
-        # Get electricity price for this hour
-        electricity_price = buy_prices[hour] if hour < len(buy_prices) else 0
-        
-        pattern = {
-            "hour": hour,
-            "patternName": pattern_name,
-            "flowDescription": flow_description,
-            "economicContextDescription": economic_context_description,
-            "flows": flows_dict,
-            "immediateFlowValues": camel_flow_values,
-            "immediateTotalValue": immediate_total_value,
-            "futureOpportunity": future_opportunity,
-            "economicChain": economic_chain,
-            "netStrategyValue": net_strategy_value,
-            "riskFactors": risk_factors,
-            "electricityPrice": electricity_price,
-            "isCurrentHour": is_current,
-            "isActual": is_actual
-        }
-        
-        patterns.append(pattern)
-    
-    # Calculate summary statistics from REAL data
-    total_net_value = sum(p["netStrategyValue"] for p in patterns)
-    actual_patterns = [p for p in patterns if p["isActual"]]
-    predicted_patterns = [p for p in patterns if not p["isActual"]]
-    
-    # Find best decision (highest net strategy value)
-    best_decision = max(patterns, key=lambda p: p["netStrategyValue"]) if patterns else patterns[0]
-    
-    response = {
-        "patterns": patterns,
-        "summary": {
-            "totalNetValue": total_net_value,
-            "bestDecisionHour": best_decision["hour"],
-            "bestDecisionValue": best_decision["netStrategyValue"],
-            "actualHoursCount": len(actual_patterns),
-            "predictedHoursCount": len(predicted_patterns)
-        }
-    }
-    
-    logger.info(f"Decision intelligence generated: {len(patterns)} patterns, "
-                f"total value: {total_net_value:.2f} SEK, "
-                f"best hour: {best_decision['hour']}")
-    
-    return response
-
-#    except Exception as e:
-#        logger.error(f"Error generating REAL decision intelligence data: {e}")
-#        import traceback
-#        logger.error(f"Traceback: {traceback.format_exc()}")
-#        raise HTTPException(status_code=500, detail=str(e)) from e

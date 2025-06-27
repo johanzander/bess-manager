@@ -9,16 +9,17 @@ from typing import Any
 
 from .daily_view_builder import DailyView, DailyViewBuilder
 from .dp_battery_algorithm import (
-    DetailedEnergyFlows,
+    OptimizationResult,
     optimize_battery_schedule,
-    print_results_table,
+    print_optimization_results,
 )
 from .dp_schedule import DPSchedule
 from .energy_flow_calculator import EnergyFlowCalculator
 from .growatt_schedule import GrowattScheduleManager
 from .ha_api_controller import HomeAssistantAPIController
 from .health_check import run_system_health_checks
-from .historical_data_store import HistoricalDataStore, HourlyEvent
+from .historical_data_store import HistoricalDataStore
+from .models import EnergyFlow
 from .power_monitor import HomePowerMonitor
 from .price_manager import HomeAssistantSource, PriceManager, PriceSource
 from .schedule_store import ScheduleStore
@@ -317,7 +318,7 @@ class BatterySystemManager:
                     try:
                         self._record_historical_event(hour, flows)
                         logger.info(
-                            f"DEBUG: Stored hour {hour} with SOC={flows.get('battery_soc', 'MISSING')}"
+                            f"DEBUG: Stored hour {hour} with SOC={flows.battery_soc}"
                         )
                     except Exception as e:
                         logger.warning(f"Failed to record hour {hour}: {e}")
@@ -468,7 +469,7 @@ class BatterySystemManager:
 
                 if hourly_flows:
                     logger.info(
-                        f"SUCCESS: Got flows for hour {prev_hour} with intent {hourly_flows.get('strategic_intent', 'UNKNOWN')}"
+                        f"SUCCESS: Got flows for hour {prev_hour} with intent {hourly_flows.strategic_intent}"
                     )
                     logger.info(f"Calling _record_historical_event({prev_hour}, flows)")
                     self._record_historical_event(prev_hour, hourly_flows)
@@ -657,8 +658,8 @@ class BatterySystemManager:
         optimization_data: dict[str, list[float]],
         prices: list[float],
         prepare_next_day: bool,
-    ) -> dict[str, Any] | None:
-        """Run optimization - now captures strategic intents."""
+    ) -> OptimizationResult | None:
+        """Run optimization - now returns OptimizationResult directly."""
 
         try:
             current_soe = optimization_data["combined_soe"][optimization_hour]
@@ -704,7 +705,7 @@ class BatterySystemManager:
                 raw_prices=remaining_prices
             )
 
-            # Run DP optimization with strategic intent capture
+            # Run DP optimization with strategic intent capture - returns OptimizationResult directly
             result = optimize_battery_schedule(
                 buy_price=buy_prices,
                 sell_price=sell_prices,
@@ -715,32 +716,19 @@ class BatterySystemManager:
                 initial_cost_basis=initial_cost_basis,
             )
 
-            # Log strategic intent summary
-            strategic_intents = result.get("strategic_intent", [])
+            # Log strategic intent summary from OptimizationResult
+            strategic_intents = result.strategic_intent_summary
             if strategic_intents:
-                intent_counts = {}
-                for intent in strategic_intents:
-                    intent_counts[intent] = intent_counts.get(intent, 0) + 1
                 logger.info(
-                    f"Strategic decisions for hours {optimization_hour}-{optimization_hour + len(strategic_intents) - 1}: {intent_counts}"
+                    f"Strategic decisions for hours {optimization_hour}-{optimization_hour + len(result.hourly_data) - 1}: {strategic_intents}"
                 )
 
             # Print results table with strategic intents
-            print_results_table(
-                result["hourly_data"],
-                result["economic_results"],
-                result["input_data"]["buy_price"],
-                result["input_data"]["sell_price"],
-            )
+            print_optimization_results(result, buy_prices, sell_prices)
 
             # Store full day data in result for UI
-            if "input_data" in result:
-                result["input_data"]["full_home_consumption"] = optimization_data[
-                    "full_consumption"
-                ]
-                result["input_data"]["full_solar_production"] = optimization_data[
-                    "full_solar"
-                ]
+            result.input_data["full_home_consumption"] = optimization_data["full_consumption"]
+            result.input_data["full_solar_production"] = optimization_data["full_solar"]
 
             return result
 
@@ -751,13 +739,13 @@ class BatterySystemManager:
     def _create_updated_schedule(
         self,
         optimization_hour: int,
-        result: dict[str, Any],
+        result: OptimizationResult,
         prices: list[float],
         optimization_data: dict[str, list[float]],
         is_first_run: bool,
         prepare_next_day: bool,
     ) -> tuple[DPSchedule, GrowattScheduleManager] | None:
-        """Create updated schedule from optimization results with strategic intents and CORRECT SOC mapping."""
+        """Create updated schedule from OptimizationResult with strategic intents and CORRECT SOC mapping."""
 
         try:
             logger.info("=== SCHEDULE CREATION DEBUG START ===")
@@ -765,9 +753,8 @@ class BatterySystemManager:
                 f"optimization_hour: {optimization_hour}, prepare_next_day: {prepare_next_day}"
             )
 
-            # Extract results including strategic intents
-            hourly_data = result.get("hourly_data", {})
-            strategic_intents = result.get("strategic_intent", [])
+            # Extract HourlyData directly from OptimizationResult
+            hourly_data_list = result.hourly_data
 
             # FIXED: Start with the optimization_data SOE values (which have correct progression)
             combined_soe = optimization_data["combined_soe"].copy()
@@ -779,33 +766,17 @@ class BatterySystemManager:
             )
 
             # FIXED: Only update the hours that were actually optimized
-            if "battery_action" in hourly_data:
-                battery_actions = hourly_data["battery_action"]
-                logger.info(
-                    f"Got {len(battery_actions)} battery actions from optimization"
-                )
+            logger.info(f"Got {len(hourly_data_list)} HourlyData objects from optimization")
 
-                for i, action in enumerate(battery_actions):
-                    target_hour = optimization_hour + i
-                    if target_hour < 24:
-                        logger.debug(
-                            f"  Mapping battery action index {i} (action={action:.1f}) to hour {target_hour}"
-                        )
-                        combined_actions[target_hour] = action
-
-            # CRITICAL FIX: Update SOE values from optimization results
-            if "state_of_charge" in hourly_data:
-                soc_values = hourly_data["state_of_charge"]
-                logger.info(f"Got {len(soc_values)} SOE values from optimization")
-
-                for i, soe in enumerate(soc_values):
-                    target_hour = optimization_hour + i
-                    if target_hour < 24:
-                        logger.debug(
-                            f"  Mapping SOE index {i} (SOE={soe:.1f}) to hour {target_hour}"
-                        )
-                        # Store the SOE directly (it's already in kWh from the optimization)
-                        combined_soe[target_hour] = soe
+            for i, hour_data in enumerate(hourly_data_list):
+                target_hour = optimization_hour + i
+                if target_hour < 24:
+                    logger.debug(
+                        f"  Mapping HourlyData index {i} (action={hour_data.battery_action:.1f}) to hour {target_hour}"
+                    )
+                    combined_actions[target_hour] = hour_data.battery_action or 0.0
+                    # Store the SOE directly (it's already in the correct format from HourlyData)
+                    combined_soe[target_hour] = hour_data.battery_soc_end
 
             # Log the corrected SOE progression
             logger.info("CORRECTED SOE progression:")
@@ -820,15 +791,12 @@ class BatterySystemManager:
                     f"  Hour {h}: SOE={combined_soe[h]:.1f}kWh ({soc_percent:.1f}%), Action={action:.1f}kW"
                 )
 
-            # Rest of the method continues as before...
-            # (The remaining code for creating strategic intents and DPSchedule objects remains the same)
-
-            # Create strategic intents array
+            # Create strategic intents array from OptimizationResult
             full_day_strategic_intents = ["IDLE"] * 24
-            for i, intent in enumerate(strategic_intents):
+            for i, hour_data in enumerate(hourly_data_list):
                 target_hour = optimization_hour + i
                 if target_hour < 24:
-                    full_day_strategic_intents[target_hour] = intent
+                    full_day_strategic_intents[target_hour] = hour_data.strategic_intent
 
             # ADD: Correct historical hours with actual strategic intents BEFORE creating schedules
             if not prepare_next_day:
@@ -842,17 +810,17 @@ class BatterySystemManager:
                                 f"Hour {hour}: Corrected intent from IDLE to '{event.strategic_intent}'"
                             )
 
-            # FIXED: Store initial SOC in algorithm result for DailyViewBuilder
+            # FIXED: Store initial SOC in OptimizationResult for DailyViewBuilder
             if self._initial_soc is not None:
-                result["initial_soc"] = self._initial_soc
+                result.input_data["initial_soc"] = self._initial_soc
             elif not prepare_next_day:
                 current_soc = self._get_current_battery_soc()
                 if current_soc is not None:
-                    result["initial_soc"] = current_soc
+                    result.input_data["initial_soc"] = current_soc
     
-            # Store in schedule store
+            # Store in schedule store - now using OptimizationResult directly
             self.schedule_store.store_schedule(
-                algorithm_result=result,
+                optimization_result=result,
                 optimization_hour=optimization_hour,
                 scenario="tomorrow" if prepare_next_day else "hourly",
             )
@@ -864,16 +832,13 @@ class BatterySystemManager:
                 prices=prices,
                 cycle_cost=self.battery_settings.cycle_cost_per_kwh,
                 hourly_consumption=optimization_data["full_consumption"],
-                hourly_data=result.get("hourly_data", {}),
-                summary=result.get("summary", {}),
+                hourly_data={"strategic_intent": full_day_strategic_intents},  # Simplified for DPSchedule compatibility
+                summary=result.economic_summary,
                 solar_charged=solar_charged,
-                original_dp_results=result.copy(),
+                original_dp_results={"strategic_intent": full_day_strategic_intents},  # Store strategic intents
             )
 
             # Override the strategic intents in the schedule with corrected data
-            temp_schedule.original_dp_results["strategic_intent"] = (
-                full_day_strategic_intents
-            )
             temp_schedule.strategic_intents = full_day_strategic_intents
 
             # Create Growatt schedule manager
@@ -1182,11 +1147,23 @@ class BatterySystemManager:
         )
         self.controller.set_discharging_power_rate(discharge_rate)
 
-    def _record_historical_event(self, hour: int, flows: dict[str, Any]) -> None:
-        """Record historical event from energy flows - SIMPLIFIED to store only facts."""
+    def _record_historical_event(self, hour: int, flows: dict[str, Any] | EnergyFlow) -> None:
+        """
+        Record historical event from energy flows - UPDATED to store HourlyData directly.
+        
+        Args:
+            hour: The hour to record (0-23)
+            flows: Either an EnergyFlow object or a legacy dict with energy flow data
+        """
+        # Type hint is using Union for Python <3.10 compatibility
         try:
-            battery_soc_end = flows.get("battery_soc", 10.0)
-
+            # Convert dict to EnergyFlow if necessary
+            energy_flow = flows if isinstance(flows, EnergyFlow) else EnergyFlow.from_dict(flows)
+            
+            # Set hour if not already present
+            if energy_flow.hour is None:
+                energy_flow.hour = hour
+                
             # Calculate start SOC
             previous_event = (
                 self.historical_store.get_hour_event(hour - 1) if hour > 0 else None
@@ -1195,13 +1172,11 @@ class BatterySystemManager:
                 battery_soc_start = previous_event.battery_soc_end
             else:
                 # Calculate start SOC from energy flows
-                battery_charge = flows.get("battery_charged", 0.0)
-                battery_discharge = flows.get("battery_discharged", 0.0)
-                net_delta_kwh = battery_charge - battery_discharge
+                net_delta_kwh = energy_flow.battery_charged - energy_flow.battery_discharged
                 net_delta_percent = (
                     net_delta_kwh / self.battery_settings.total_capacity
                 ) * 100.0
-                battery_soc_start = max(0, battery_soc_end - net_delta_percent)
+                battery_soc_start = max(0, energy_flow.battery_soc - net_delta_percent)
 
             # Get price for this hour (context needed for cost calculations)
             buy_price = 1.0  # Default fallback
@@ -1214,27 +1189,18 @@ class BatterySystemManager:
             except Exception as e:
                 logger.warning(f"Failed to get price for hour {hour}: {e}")
 
-            # Use strategic intent from SensorCollector (already calculated)
-            strategic_intent = flows.get("strategic_intent", "IDLE")
-
-            # Create event with ONLY facts - no cost calculations
-            event = HourlyEvent(
-                hour=hour,
-                timestamp=datetime.now(),
+            # Convert EnergyFlow to HourlyData using our utility function
+            from core.bess.models import create_hourly_data_from_energy_flow
+            
+            hour_data = create_hourly_data_from_energy_flow(
+                flow=energy_flow,
                 battery_soc_start=battery_soc_start,
-                battery_soc_end=battery_soc_end,
-                solar_generated=flows.get("system_production", 0.0),
-                home_consumed=flows.get("load_consumption", 0.0),
-                grid_imported=flows.get("import_from_grid", 0.0),
-                grid_exported=flows.get("export_to_grid", 0.0),
-                battery_charged=flows.get("battery_charged", 0.0),
-                battery_discharged=flows.get("battery_discharged", 0.0),
                 buy_price=buy_price,
-                sell_price=sell_price,
-                strategic_intent=strategic_intent,
+                sell_price=sell_price
             )
 
-            self.historical_store.record_hour_completion(event)
+            # Store HourlyData directly
+            self.historical_store.record_hour_completion(hour_data)
 
         except Exception as e:
             logger.error(f"Failed to record event for hour {hour}: {e}")
@@ -1381,71 +1347,72 @@ class BatterySystemManager:
         return self._price_manager
 
     def get_historical_events(self) -> list[dict[str, Any]]:
-        """Get all historical events for frontend analytics."""
+        """Get all historical events for frontend analytics - now using HourlyData directly."""
         completed_hours = self.historical_store.get_completed_hours()
         logger.info(f"Stored hours: {completed_hours}")
         events = []
 
         for hour in completed_hours:
-            event = self.historical_store.get_hour_event(hour)
-            if event:
+            hour_data = self.historical_store.get_hour_event(hour)
+            if hour_data:
                 events.append(
                     {
-                        "hour": event.hour,
-                        "timestamp": event.timestamp.isoformat(),
-                        "battery_soc_start": event.battery_soc_start,
-                        "battery_soc_end": event.battery_soc_end,
-                        "solar_generated": event.solar_generated,
-                        "home_consumed": event.home_consumed,
-                        "grid_imported": event.grid_imported,
-                        "grid_exported": event.grid_exported,
-                        "battery_charged": event.battery_charged,
-                        "battery_discharged": event.battery_discharged,
-                        "battery_net_change": event.battery_net_change,
-                        # ADD camelCase versions
-                        "batterySOCStart": event.battery_soc_start,
-                        "batterySOCEnd": event.battery_soc_end,
-                        "solarGenerated": event.solar_generated,
-                        "homeConsumed": event.home_consumed,
-                        "gridImported": event.grid_imported,
-                        "gridExported": event.grid_exported,
-                        "batteryCharged": event.battery_charged,
-                        "batteryDischarged": event.battery_discharged,
-                        "batteryNetChange": event.battery_net_change,
+                        "hour": hour_data.hour,
+                        "timestamp": hour_data.timestamp.isoformat() if hour_data.timestamp else "",
+                        "battery_soc_start": hour_data.battery_soc_start,
+                        "battery_soc_end": hour_data.battery_soc_end,
+                        "solar_generated": hour_data.solar_generated,
+                        "home_consumed": hour_data.home_consumed,
+                        "grid_imported": hour_data.grid_imported,
+                        "grid_exported": hour_data.grid_exported,
+                        "battery_charged": hour_data.battery_charged,
+                        "battery_discharged": hour_data.battery_discharged,
+                        "battery_net_change": hour_data.battery_net_change,
+                        # ADD camelCase versions for frontend compatibility
+                        "batterySOCStart": hour_data.battery_soc_start,
+                        "batterySOCEnd": hour_data.battery_soc_end,
+                        "solarGenerated": hour_data.solar_generated,
+                        "homeConsumed": hour_data.home_consumed,
+                        "gridImported": hour_data.grid_imported,
+                        "gridExported": hour_data.grid_exported,
+                        "batteryCharged": hour_data.battery_charged,
+                        "batteryDischarged": hour_data.battery_discharged,
+                        "batteryNetChange": hour_data.battery_net_change,
                     }
                 )
 
         return events
 
-    # 2. Missing: get_optimization_history() - used by decision insights
     def get_optimization_history(self) -> list[dict[str, Any]]:
         """Get all optimization decisions for frontend analytics."""
         schedules = self.schedule_store.get_all_schedules_today()
         decisions = []
 
         for schedule in schedules:
-            context = schedule.algorithm_result.get("optimization_context", {})
-            econ_results = schedule.algorithm_result.get("economic_results", {})
+            # Access OptimizationResult directly
+            optimization_result = schedule.optimization_result
+            context = optimization_result.input_data
+            econ_results = optimization_result.economic_summary
 
             decisions.append(
                 {
                     "timestamp": schedule.timestamp.isoformat(),
                     "optimization_hour": schedule.optimization_hour,
                     "scenario": schedule.created_for_scenario,
-                    "initial_soc_percent": context.get("initial_soc_percent"),
-                    "cost_basis_sek_per_kwh": context.get("cost_basis_sek_per_kwh"),
+                    "initial_soc_percent": context.get("initial_soc"),
+                    "cost_basis_sek_per_kwh": context.get("initial_cost_basis"),
                     "predicted_savings": econ_results.get(
                         "base_to_battery_solar_savings", 0
                     ),
-                    "horizon_hours": context.get("optimization_horizon_hours"),
+                    "horizon_hours": len(optimization_result.hourly_data),
                     # ADD camelCase versions
                     "optimizationHour": schedule.optimization_hour,
-                    "initialSOCPercent": context.get("initial_soc_percent"),
-                    "costBasisSekPerKwh": context.get("cost_basis_sek_per_kwh"),
+                    "initialSOCPercent": context.get("initial_soc"),
+                    "costBasisSekPerKwh": context.get("initial_cost_basis"),
                     "predictedSavings": econ_results.get(
                         "base_to_battery_solar_savings", 0
                     ),
-                    "horizonHours": context.get("optimization_horizon_hours"),
+                    "horizonHours": len(optimization_result.hourly_data),
                 }
             )
 
@@ -1701,27 +1668,27 @@ class BatterySystemManager:
         }
 
         for hour in sorted(completed_hours):
-            event = self.historical_store.get_hour_event(hour)
-            if event:
+            hour_data = self.historical_store.get_hour_event(hour)
+            if hour_data:
                 hourly_item = {
                     "hour": hour,
-                    "solar_production": event.solar_generated,
-                    "home_consumption": event.home_consumed,
-                    "grid_import": event.grid_imported,
-                    "grid_export": event.grid_exported,
-                    "battery_charged": event.battery_charged,
-                    "battery_discharged": event.battery_discharged,
-                    "battery_soc_end": event.battery_soc_end,
-                    "battery_net_change": event.battery_charged
-                    - event.battery_discharged,
+                    "solar_production": hour_data.solar_generated,
+                    "home_consumption": hour_data.home_consumed,
+                    "grid_import": hour_data.grid_imported,
+                    "grid_export": hour_data.grid_exported,
+                    "battery_charged": hour_data.battery_charged,
+                    "battery_discharged": hour_data.battery_discharged,
+                    "battery_soc_end": hour_data.battery_soc_end,
+                    "battery_net_change": hour_data.battery_charged
+                    - hour_data.battery_discharged,
                 }
 
-                totals["total_solar"] += event.solar_generated
-                totals["total_consumption"] += event.home_consumed
-                totals["total_grid_import"] += event.grid_imported
-                totals["total_grid_export"] += event.grid_exported
-                totals["total_battery_charged"] += event.battery_charged
-                totals["total_battery_discharged"] += event.battery_discharged
+                totals["total_solar"] += hour_data.solar_generated
+                totals["total_consumption"] += hour_data.home_consumed
+                totals["total_grid_import"] += hour_data.grid_imported
+                totals["total_grid_export"] += hour_data.grid_exported
+                totals["total_battery_charged"] += hour_data.battery_charged
+                totals["total_battery_discharged"] += hour_data.battery_discharged
 
                 hourly_data.append(hourly_item)
 
@@ -1740,35 +1707,12 @@ class BatterySystemManager:
         
         for hour in range(start_hour, end_hour + 1):
             try:
-                # Get reconstructed energy flows from sensor collector
-                historical_flows = self.sensor_collector.collect_hour_flows(hour)
+                # Get stored HourlyData from historical store
+                hour_data = self.historical_store.get_hour_event(hour)
                 
-                if historical_flows:
-                    # Create basic DetailedEnergyFlows from historical data
-                    enhanced_flow = DetailedEnergyFlows(
-                        # Basic energy flows from historical data
-                        solar_to_home=historical_flows.get("solar_to_home", 0.0),
-                        solar_to_battery=historical_flows.get("solar_to_battery", 0.0),
-                        solar_to_grid=historical_flows.get("solar_to_grid", 0.0),
-                        grid_to_home=historical_flows.get("grid_to_home", 0.0),
-                        grid_to_battery=historical_flows.get("grid_to_battery", 0.0),
-                        battery_to_home=historical_flows.get("battery_to_home", 0.0),
-                        battery_to_grid=historical_flows.get("battery_to_grid", 0.0),
-                        grid_import=historical_flows.get("import_from_grid", 0.0),
-                        grid_export=historical_flows.get("export_to_grid", 0.0),
-                        
-                        # Basic intelligence - no economic reasoning since we don't have original prices/context
-                        pattern_name=f"HISTORICAL_{historical_flows.get('strategic_intent', 'UNKNOWN')}",
-                        description=f"Hour {hour}: Reconstructed from actual energy flows",
-                        economic_chain=f"Hour {hour:02d}: Historical data - original decision context unavailable",
-                        flow_values=None,  # No economic values for historical
-                        immediate_value=0.0,
-                        future_value=0.0,
-                        net_strategy_value=0.0,
-                        risk_factors=["Historical reconstruction - limited context"]
-                    )
-                    
-                    reconstructed_flows.append(enhanced_flow)
+                if hour_data:
+                    # Return HourlyData directly - no conversion needed
+                    reconstructed_flows.append(hour_data)
                 else:
                     # Create empty flow for missing data
                     reconstructed_flows.append(None)
@@ -1785,20 +1729,23 @@ class BatterySystemManager:
         
         for hour in range(24):
             if hour < current_hour:
-                # Historical: Try stored optimizations first
-                stored_decision = self.schedule_store.get_decision_for_hour(hour)
-                if stored_decision:
-                    decisions.append(stored_decision)
+                # Historical: Get stored HourlyData 
+                hour_data = self.historical_store.get_hour_event(hour)
+                if hour_data:
+                    decisions.append(hour_data)
                 else:
-                    # TODO: Add historical reconstruction here later
-                    # For now, just append None for missing historical data
                     decisions.append(None)
             else:
                 # Current/Future: Get from latest optimization
                 latest = self.schedule_store.get_latest_schedule()
-                if latest:
-                    decision = latest.get_decision_for_hour(hour)
-                    decisions.append(decision)
+                if latest and latest.optimization_result:
+                    # Get HourlyData from OptimizationResult
+                    hourly_data_list = latest.optimization_result.hourly_data
+                    relative_hour = hour - latest.optimization_hour
+                    if 0 <= relative_hour < len(hourly_data_list):
+                        decisions.append(hourly_data_list[relative_hour])
+                    else:
+                        decisions.append(None)
                 else:
                     decisions.append(None)
         
@@ -1914,28 +1861,28 @@ class BatterySystemManager:
             ]
 
         for hour in sorted(completed_hours):
-            event = self.historical_store.get_hour_event(hour)
-            if not event:
+            hour_data = self.historical_store.get_hour_event(hour)
+            if not hour_data:
                 continue
 
             hourly_item = {
                 "hour": hour,
-                "solar_production": event.solar_generated,
-                "home_consumption": event.home_consumed,
-                "grid_import": event.grid_imported,
-                "grid_export": event.grid_exported,
-                "battery_charged": event.battery_charged,
-                "battery_discharged": event.battery_discharged,
-                "battery_soc_end": event.battery_soc_end,
-                "battery_net_change": event.battery_charged - event.battery_discharged,
+                "solar_production": hour_data.solar_generated,
+                "home_consumption": hour_data.home_consumed,
+                "grid_import": hour_data.grid_imported,
+                "grid_export": hour_data.grid_exported,
+                "battery_charged": hour_data.battery_charged,
+                "battery_discharged": hour_data.battery_discharged,
+                "battery_soc_end": hour_data.battery_soc_end,
+                "battery_net_change": hour_data.battery_charged - hour_data.battery_discharged,
             }
 
-            totals["total_solar"] += event.solar_generated
-            totals["total_consumption"] += event.home_consumed
-            totals["total_grid_import"] += event.grid_imported
-            totals["total_grid_export"] += event.grid_exported
-            totals["total_battery_charged"] += event.battery_charged
-            totals["total_battery_discharged"] += event.battery_discharged
+            totals["total_solar"] += hour_data.solar_generated
+            totals["total_consumption"] += hour_data.home_consumed
+            totals["total_grid_import"] += hour_data.grid_imported
+            totals["total_grid_export"] += hour_data.grid_exported
+            totals["total_battery_charged"] += hour_data.battery_charged
+            totals["total_battery_discharged"] += hour_data.battery_discharged
 
             hourly_data.append(hourly_item)
 

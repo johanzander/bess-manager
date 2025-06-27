@@ -4,9 +4,11 @@ Robust SensorCollector - Clean sensor data collection from InfluxDB with strateg
 
 import logging
 from datetime import datetime, time, timedelta
+from typing import Any
 
 from .energy_flow_calculator import EnergyFlowCalculator
 from .influxdb_helper import get_sensor_data
+from .models import EnergyFlow
 
 logger = logging.getLogger(__name__)
 
@@ -63,8 +65,12 @@ class SensorCollector:
                 return "LOAD_SUPPORT"
         return "IDLE"
 
-    def collect_hour_flows(self, hour: int) -> dict[str, float] | None:
-        """Collect energy flows for a specific hour with strategic intent reconstruction."""
+    def collect_hour_flows(self, hour: int) -> EnergyFlow | None:
+        """
+        Collect energy flows for a specific hour with strategic intent reconstruction.
+        
+        Returns an EnergyFlow object containing all energy flow data for the hour.
+        """
         if not 0 <= hour <= 23:
             logger.error("Invalid hour: %d", hour)
             return None
@@ -97,36 +103,49 @@ class SensorCollector:
                 logger.warning("No previous readings for hour %d", hour)
                 return None
 
-            # Calculate flows using energy flow calculator
-            flows = self.energy_flow_calculator.calculate_hourly_flows(
+            # Calculate flows using energy flow calculator - still returns dict
+            flow_dict = self.energy_flow_calculator.calculate_hourly_flows(
                 current_readings, previous_readings, hour
             )
 
-            if not flows:
+            if not flow_dict:
                 logger.warning("Failed to calculate flows for hour %d", hour)
                 return None
 
             # Add SOC
-            flows["battery_soc"] = current_readings.get(
-                "rkm0d7n04x_statement_of_charge_soc", 10.0
+            battery_soc = current_readings.get("rkm0d7n04x_statement_of_charge_soc", 10.0)
+            battery_soe = (battery_soc / 100.0) * self.battery_capacity
+            
+            # Create EnergyFlow object
+            energy_flow = EnergyFlow(
+                hour=hour,
+                timestamp=datetime.now(),
+                battery_charged=flow_dict.get("battery_charged", 0.0),
+                battery_discharged=flow_dict.get("battery_discharged", 0.0),
+                system_production=flow_dict.get("system_production", 0.0),
+                load_consumption=flow_dict.get("load_consumption", 0.0),
+                export_to_grid=flow_dict.get("export_to_grid", 0.0),
+                import_from_grid=flow_dict.get("import_from_grid", 0.0),
+                grid_to_battery=flow_dict.get("grid_to_battery", 0.0),
+                solar_to_battery=flow_dict.get("solar_to_battery", 0.0),
+                self_consumption=flow_dict.get("self_consumption", 0.0),
+                battery_soc=battery_soc,
+                battery_soe=battery_soe,
             )
-            flows["battery_soe"] = (
-                flows["battery_soc"] / 100.0
-            ) * self.battery_capacity
-
+            
             # Add strategic intent reconstruction
-            flows["strategic_intent"] = self.analyze_strategic_intent_from_flows(flows)
+            energy_flow.strategic_intent = self.analyze_strategic_intent_from_flows(flow_dict)
 
             logger.info(
                 "Hour %d: Solar=%.1f, Load=%.1f, SOC=%.1f%%, Intent=%s",
                 hour,
-                flows.get("system_production", 0),
-                flows.get("load_consumption", 0),
-                flows["battery_soc"],
-                flows["strategic_intent"],
+                energy_flow.system_production,
+                energy_flow.load_consumption,
+                energy_flow.battery_soc,
+                energy_flow.strategic_intent,
             )
 
-            return flows
+            return energy_flow
 
         except Exception as e:
             logger.error("Failed to collect hour flows for hour %d: %s", hour, e)
@@ -134,7 +153,7 @@ class SensorCollector:
 
     def reconstruct_historical_flows(
         self, start_hour: int, end_hour: int
-    ) -> dict[int, dict[str, float]]:
+    ) -> dict[int, EnergyFlow]:
         """Reconstruct historical energy flows from InfluxDB with strategic intents."""
         reconstructed_flows = {}
         now = datetime.now()
@@ -173,7 +192,7 @@ class SensorCollector:
                     logger.debug(
                         "Hour %d: reconstructed successfully with intent %s",
                         hour,
-                        flows.get("strategic_intent", "UNKNOWN"),
+                        flows.strategic_intent,
                     )
                 else:
                     logger.warning("Hour %d: reconstruction failed", hour)
@@ -221,7 +240,7 @@ class SensorCollector:
 
         return safe_end_hour
 
-    def get_current_battery_state(self) -> dict[str, float] | None:
+    def get_current_battery_state(self) -> dict[str, Any] | None:
         """Get current battery SOC and energy content."""
         try:
             soc = self.ha_controller.get_battery_soc()

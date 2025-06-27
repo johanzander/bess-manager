@@ -14,7 +14,7 @@ import pytest
 
 from core.bess.dp_battery_algorithm import (
     optimize_battery_schedule,
-    print_results_table,
+    print_optimization_results,
 )
 from core.bess.price_manager import MockSource, PriceManager
 from core.bess.settings import BatterySettings
@@ -78,37 +78,37 @@ def test_historical_scenarios(scenario_name):
         tax_reduction=0.6518,
     )
 
-    buy_price = price_manager.buy_prices
-    sell_price = price_manager.sell_prices
+    buy_prices = price_manager.buy_prices
+    sell_prices = price_manager.sell_prices
 
     results = optimize_battery_schedule(
-        buy_price=buy_price,
-        sell_price=sell_price,
+        buy_price=buy_prices,
+        sell_price=sell_prices,
         home_consumption=home_consumption,
         solar_production=solar_production,
         initial_soc=battery["initial_soc"],
         battery_settings=battery_settings,
     )
 
-    # Log the results table using the extracted data
-    print_results_table(
-        results["hourly_data"], results["economic_results"], buy_price, sell_price
-    )
+    # Log the results table using the new structure
+    print_optimization_results(results, buy_prices, sell_prices)
 
     # Check if 'expected_results' exists in the test data
     if "expected_results" in scenario:
         expected_results = scenario["expected_results"]
-        assert round(results["economic_results"]["base_cost"], 2) == round(
+        economic_results = results.economic_summary
+        
+        assert round(economic_results["base_cost"], 2) == round(
             expected_results["base_cost"], 2
         )
-        assert round(results["economic_results"]["battery_solar_cost"], 2) == round(
+        assert round(economic_results["battery_solar_cost"], 2) == round(
             expected_results["battery_solar_cost"], 2
         )
         assert round(
-            results["economic_results"]["base_to_battery_solar_savings"], 2
+            economic_results["base_to_battery_solar_savings"], 2
         ) == round(expected_results["base_to_battery_solar_savings"], 2)
         assert round(
-            results["economic_results"]["base_to_battery_solar_savings_pct"], 2
+            economic_results["base_to_battery_solar_savings_pct"], 2
         ) == round(expected_results["base_to_battery_solar_savings_pct"], 2)
 
 
@@ -163,25 +163,23 @@ def test_synthetic_scenarios(scenario_name):
         additional_costs=0.0,
         tax_reduction=0.0,
     )
-    buy_price = price_manager.get_buy_prices()
-    sell_price = price_manager.get_sell_prices()
+    buy_prices = price_manager.get_buy_prices()
+    sell_prices = price_manager.get_sell_prices()
 
     results = optimize_battery_schedule(
-        buy_price=buy_price,
-        sell_price=sell_price,
+        buy_price=buy_prices,
+        sell_price=sell_prices,
         home_consumption=home_consumption,
         solar_production=solar_production,
         initial_soc=battery["initial_soc"],
         battery_settings=battery_settings,
     )
 
-    # Log the results table using the extracted data
-    print_results_table(
-        results["hourly_data"], results["economic_results"], buy_price, sell_price
-    )
+    # Log the results table using the new structure
+    print_optimization_results(results, buy_prices, sell_prices)
 
     if "expected_results" in scenario:
-        economic_results = results["economic_results"]
+        economic_results = results.economic_summary
         expected_results = scenario["expected_results"]
 
         # Verify the economic results with a tolerance for floating-point differences

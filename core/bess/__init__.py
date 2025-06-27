@@ -4,10 +4,8 @@
 __all__ = [
     "BatterySettings",  # Public settings classes
     "BatterySystemManager",  # Main facade
-    "HistoricalDataStore",
     "HomeAssistantAPIController",
     "HomeSettings",
-    "HourlyEvent",
     "PriceSettings",
 ]
 

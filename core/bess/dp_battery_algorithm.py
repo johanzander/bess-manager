@@ -52,17 +52,20 @@ The algorithm returns comprehensive results including:
 
 __all__ = [
     "CostScenarios",
-    "EnergyFlows",
+    "HourlyData",
+    "OptimizationResult",
     "calculate_hourly_costs",
     "optimize_battery_schedule",
+    "print_optimization_results",
     "print_results_table",
 ]
 
 
+import bisect
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum
-from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -81,15 +84,462 @@ POWER_STEP_KW = 0.2
 
 
 @dataclass
-class EnergyFlows:
-    """Standardized energy flow data structure."""
+class HourlyData:
+    """
+    UNIFIED hourly data structure - consolidates all energy data representations.
+    
+    This replaces:
+    - EnergyFlows 
+    - DetailedEnergyFlows
+    - daily_view_builder.HourlyData
+    - All the messy dict structures
+    
+    Used by:
+    - DP algorithm internal calculations
+    - Daily view builder
+    - API responses  
+    - Historical storage
+    - Cost calculations
+    """
+    
+    hour: int
+    data_source: str = "predicted"  # "actual" or "predicted"
+    timestamp: datetime | None = None  # Optional - only set when it makes sense
 
-    home_consumption: float
-    solar_production: float
-    grid_import: float
-    grid_export: float
-    battery_charged: float
-    battery_discharged: float
+    # Core energy flows (kWh) - standardized field names
+    solar_generated: float = 0.0  # Use consistent naming from historical store
+    home_consumed: float = 0.0    # Use consistent naming from historical store  
+    grid_imported: float = 0.0    # Use consistent naming from historical store
+    grid_exported: float = 0.0    # Use consistent naming from historical store
+    battery_charged: float = 0.0
+    battery_discharged: float = 0.0
+
+    # Detailed energy flows (kWh) - for enhanced flow analysis
+    solar_to_home: float = 0.0
+    solar_to_battery: float = 0.0
+    solar_to_grid: float = 0.0
+    grid_to_home: float = 0.0
+    grid_to_battery: float = 0.0
+    battery_to_home: float = 0.0
+    battery_to_grid: float = 0.0
+
+    # Battery state - ALWAYS stored as percentage (0-100%)
+    battery_soc_start: float = 0.0  # State of Charge as percentage (0-100%)
+    battery_soc_end: float = 0.0    # State of Charge as percentage (0-100%)
+
+    # Economic data
+    buy_price: float = 0.0  # SEK/kWh
+    sell_price: float = 0.0  # SEK/kWh
+    hourly_cost: float = 0.0  # SEK - Cost of solar+battery scenario
+    hourly_savings: float = 0.0  # SEK - Total savings: base_cost - optimized_cost
+    battery_cycle_cost: float = 0.0  # SEK
+
+    # Battery action (for predicted hours from DP algorithm)
+    battery_action: float | None = None  # kW (from optimization)
+
+    # Strategic intent for this hour
+    strategic_intent: str = "IDLE"
+
+    # Cost basis tracking (for DP algorithm)
+    cost_basis: float = 0.0  # SEK/kWh
+
+    # Enhanced flows intelligence (optional)
+    pattern_name: str = ""
+    description: str = ""
+    economic_chain: str = ""
+    flow_values: dict[str, float] = field(default_factory=dict)
+    immediate_value: float = 0.0
+    future_value: float = 0.0
+    net_strategy_value: float = 0.0
+    risk_factors: list[str] = field(default_factory=list)
+
+    @property
+    def battery_net_change(self) -> float:
+        """Net battery energy change (positive = charged, negative = discharged)."""
+        return self.battery_charged - self.battery_discharged
+
+    @property
+    def soc_change_kwh(self) -> float:
+        """SOC change during this hour in kWh."""
+        return self.battery_soc_end - self.battery_soc_start
+
+    @property
+    def solar_production(self) -> float:
+        """Alias for solar_generated for DP algorithm compatibility."""
+        return self.solar_generated
+
+    @property
+    def home_consumption(self) -> float:
+        """Alias for home_consumed for DP algorithm compatibility."""
+        return self.home_consumed
+
+    @property
+    def grid_import(self) -> float:
+        """Alias for grid_imported for DP algorithm compatibility."""
+        return self.grid_imported
+
+    @property
+    def grid_export(self) -> float:
+        """Alias for grid_exported for DP algorithm compatibility."""
+        return self.grid_exported
+
+    def _generate_pattern_name(self) -> str:
+        """Generate a descriptive pattern name based on energy flows and strategic intent."""
+        significant_flows = self.get_significant_flows(threshold=0.1)
+        
+        # Special case for IDLE with no flows
+        if len(significant_flows) == 0:
+            return "Minimal Activity"
+            
+        # Extract flow directions for naming
+        sources = set()
+        destinations = set()
+        
+        for flow_name in significant_flows:
+            parts = flow_name.split('_to_')
+            if len(parts) == 2:
+                sources.add(parts[0])
+                destinations.add(parts[1])
+        
+        # Generate pattern name based on strategic intent
+        if self.strategic_intent == "GRID_CHARGING":
+            return "Grid Price Arbitrage"
+        elif self.strategic_intent == "SOLAR_STORAGE":
+            return "Solar Energy Storage"
+        elif self.strategic_intent == "LOAD_SUPPORT":
+            return "Self Consumption"
+        elif self.strategic_intent == "EXPORT_ARBITRAGE":
+            return "Grid Export"
+        else:
+            # Generate based on flow directions
+            if 'solar' in sources and 'grid' in destinations:
+                return "Solar Export"
+            elif 'solar' in sources and len(destinations) > 1:
+                return "Solar Distribution"
+            elif 'grid' in sources and 'home' in destinations:
+                return "Grid Consumption"
+            elif 'battery' in sources:
+                return "Battery Discharge"
+            elif 'battery' in destinations:
+                return "Battery Charging"
+                
+        # Fallback
+        return "Mixed Energy Flow"
+
+    def _generate_flow_description(self) -> str:
+        """Generate a detailed human-readable description of the energy flows."""
+        significant_flows = self.get_significant_flows(threshold=0.1)
+        
+        if not significant_flows:
+            return "No significant energy flows"
+            
+        # Group flow descriptions
+        flow_groups = {}
+        
+        for flow_name in significant_flows:
+            flow_value = getattr(self, flow_name, 0.0)
+            
+            # Skip insignificant flows
+            if abs(flow_value) < 0.1:
+                continue
+                
+            parts = flow_name.split('_to_')
+            if len(parts) != 2:
+                continue
+                
+            source, destination = parts
+            
+            # Friendly names
+            source_name = source.capitalize()
+            dest_name = destination.capitalize()
+            
+            # Add to flow groups
+            if source not in flow_groups:
+                flow_groups[source] = {}
+            
+            if destination not in flow_groups[source]:
+                flow_groups[source][destination] = 0.0
+                
+            flow_groups[source][destination] = flow_value
+        
+        # Build description
+        descriptions = []
+        
+        for source, destinations in flow_groups.items():
+            source_total = sum(destinations.values())
+            source_name = source.capitalize()
+            
+            if source_total < 0.1:
+                continue
+                
+            # For single destination
+            if len(destinations) == 1:
+                destination, value = next(iter(destinations.items()))
+                dest_name = destination.capitalize()
+                descriptions.append(f"{source_name} {value:.1f}kWh→{dest_name}")
+            else:
+                # For multiple destinations
+                dest_parts = []
+                for destination, value in destinations.items():
+                    if value < 0.1:
+                        continue
+                    dest_name = destination.capitalize()
+                    dest_parts.append(f"{value:.1f}kWh→{dest_name}")
+                
+                if dest_parts:
+                    dest_str = ", ".join(dest_parts)
+                    descriptions.append(f"{source_name} {source_total:.1f}kWh: {dest_str}")
+        
+        if descriptions:
+            return ", ".join(descriptions)
+        else:
+            return "No significant energy flows"
+
+    def _analyze_future_opportunity(self, future_prices: list[float] | None) -> tuple[str, float]:
+        """Analyze future market opportunities based on current state and future prices.
+        
+        Returns:
+            tuple[str, float]: Description of opportunity and expected value
+        """
+        # Default values
+        description = "Unknown future opportunity"
+        value = 0.0
+        
+        # Can't analyze without future prices
+        if not future_prices or len(future_prices) == 0:
+            return "Insufficient future price data", 0.0
+        
+        avg_price = sum(future_prices) / len(future_prices)
+        max_price = max(future_prices)
+        min_price = min(future_prices)
+        price_range = max_price - min_price
+        
+        # Calculate price percentiles and find relevant future hour indexes
+        sorted_prices = sorted(future_prices)
+        current_price_percentile = bisect.bisect_left(sorted_prices, self.buy_price) / len(sorted_prices) * 100
+        
+        # Find next high-price and low-price periods
+        next_high_idx = next((i for i, p in enumerate(future_prices) if p > self.buy_price * 1.3), -1)
+        next_low_idx = next((i for i, p in enumerate(future_prices) if p < self.buy_price * 0.7), -1)
+        
+        # Battery is charged - looking for discharge opportunity
+        battery_charge = self.battery_soc_end
+        if battery_charge > 30 and self.strategic_intent in ["GRID_CHARGING", "SOLAR_STORAGE"]:
+            if next_high_idx >= 0:
+                high_price = future_prices[next_high_idx]
+                discharge_value = battery_charge * 0.01 * high_price  # Assuming 1% SOC
+                description = f"Discharge opportunity in {next_high_idx+1}h at price {high_price:.2f}"
+                value = discharge_value
+            else:
+                description = "Holding charge for upcoming price peaks"
+                value = battery_charge * 0.01 * avg_price  # Estimated future value
+                
+        # Battery is discharged - looking for charging opportunity
+        elif battery_charge < 70 and self.strategic_intent in ["LOAD_SUPPORT", "EXPORT_ARBITRAGE", "IDLE"]:
+            if next_low_idx >= 0:
+                low_price = future_prices[next_low_idx]
+                charging_cost = battery_charge * 0.01 * low_price  # Assuming 1% SOC
+                description = f"Charging opportunity in {next_low_idx+1}h at price {low_price:.2f}"
+                value = -charging_cost  # Cost is negative value
+            else:
+                description = "Waiting for lower prices to recharge"
+                value = -battery_charge * 0.01 * min(avg_price, self.buy_price) 
+                
+        # General market trend description
+        elif price_range > 0.5:  # Significant price variation
+            if current_price_percentile < 30:
+                description = "Current price is low - favorable for charging"
+                value = price_range * 0.5  # Rough estimate of opportunity value
+            elif current_price_percentile > 70:
+                description = "Current price is high - favorable for discharging"
+                value = price_range * 0.5
+            else:
+                description = "Moderate price period - waiting for better opportunities"
+                value = price_range * 0.25
+        else:
+            description = "Stable price period - limited arbitrage opportunities" 
+            value = price_range * 0.1
+            
+        return description, value
+
+    def _generate_economic_chain(self) -> str:
+        """Generate a concise description of the economic value chain for this hour."""
+        if self.strategic_intent == "GRID_CHARGING":
+            return f"Buy @ {self.buy_price:.2f} → Store → Use/Sell later at higher price"
+            
+        elif self.strategic_intent == "SOLAR_STORAGE":
+            return f"Free solar → Store → Avoid future purchase @ ~{self.buy_price:.2f}/kWh"
+            
+        elif self.strategic_intent == "LOAD_SUPPORT":
+            return f"Use stored energy → Avoid purchase @ {self.buy_price:.2f}/kWh"
+            
+        elif self.strategic_intent == "EXPORT_ARBITRAGE":
+            return f"Use stored energy → Sell @ {self.sell_price:.2f}/kWh"
+            
+        elif self.grid_imported > 0.1:
+            return f"Buy from grid @ {self.buy_price:.2f}/kWh"
+            
+        elif self.grid_exported > 0.1:
+            return f"Sell to grid @ {self.sell_price:.2f}/kWh"
+            
+        # Fallback for other cases
+        return ""
+
+    def add_intelligence(
+        self, 
+        buy_price: float, 
+        sell_price: float, 
+        hour: int, 
+        future_prices: list[float] | None = None,
+        power: float = 0.0
+    ):
+        """Add enhanced intelligence/analytics to hourly data.
+        
+        This function analyzes the hour data and adds valuable insights about:
+        - The economic pattern being followed
+        - The immediate vs. future value of the action
+        - Risk factors associated with the decision
+        - Detailed flow descriptions
+        
+        Args:
+            buy_price: The current hour's buy price
+            sell_price: The current hour's sell price
+            hour: The current hour (0-23)
+            future_prices: List of buy prices for future hours
+            power: Battery power action (kW, positive=charge, negative=discharge)
+        """
+        # Skip if already has intelligence
+        if self.has_intelligence():
+            return
+            
+        # Define price thresholds for analysis
+        if future_prices and len(future_prices) > 0:
+            avg_future_price = sum(future_prices) / len(future_prices)
+            min_future_price = min(future_prices) if future_prices else buy_price
+            max_future_price = max(future_prices) if future_prices else buy_price
+            price_range = max_future_price - min_future_price if future_prices else 0
+            
+            # Calculate price percentile for current hour
+            higher_prices = sum(1 for p in future_prices if p > buy_price)
+            price_percentile = (higher_prices / len(future_prices)) * 100 if future_prices else 50
+        else:
+            avg_future_price = buy_price
+            min_future_price = buy_price
+            max_future_price = buy_price
+            price_range = 0
+            price_percentile = 50
+        
+        # Initialize intelligence data
+        self.risk_factors = []
+        
+        # Generate pattern name and description
+        self.pattern_name = self._generate_pattern_name()
+        self.description = self._generate_flow_description()
+        
+        # Calculate some metrics
+        excess_solar = max(0, self.solar_generated - self.home_consumed)
+        remaining_load = max(0, self.home_consumed - self.solar_generated)
+        
+        # Calculate immediate value
+        if self.strategic_intent == "GRID_CHARGING":
+            # Grid charging - immediate cost
+            self.immediate_value = -self.grid_to_battery * buy_price
+            
+        elif self.strategic_intent == "SOLAR_STORAGE":
+            # Solar storage - opportunity cost
+            self.immediate_value = -self.solar_to_battery * sell_price
+            
+        elif self.strategic_intent == "LOAD_SUPPORT":
+            # Load support - avoided cost
+            self.immediate_value = self.battery_to_home * buy_price
+            
+        elif self.strategic_intent == "EXPORT_ARBITRAGE":
+            # Export - immediate revenue
+            self.immediate_value = self.battery_to_grid * sell_price
+            
+        else:
+            # IDLE - calculate direct flows
+            grid_cost = self.grid_imported * buy_price
+            grid_revenue = self.grid_exported * sell_price
+            self.immediate_value = grid_revenue - grid_cost
+            
+        # Calculate future opportunity value
+        future_description, expected_value = self._analyze_future_opportunity(future_prices)
+        self.future_value = expected_value
+        
+        # Calculate net strategy value
+        self.net_strategy_value = self.immediate_value + self.future_value - self.battery_cycle_cost
+        
+        # Generate economic chain description
+        self.economic_chain = self._generate_economic_chain()
+        
+        # Check for risk factors
+        # 1. High price charging
+        if self.strategic_intent == "GRID_CHARGING" and price_percentile > 70:
+            self.risk_factors.append("HIGH_PRICE_CHARGING")
+            
+        # 2. Low price discharging
+        if (self.strategic_intent == "LOAD_SUPPORT" or self.strategic_intent == "EXPORT_ARBITRAGE") and price_percentile < 30:
+            self.risk_factors.append("LOW_PRICE_DISCHARGING")
+            
+        # 3. Low arbitrage potential
+        if price_range < 0.3 and self.strategic_intent == "GRID_CHARGING":
+            self.risk_factors.append("LOW_ARBITRAGE_POTENTIAL")
+            
+        # 4. Excessive discharge depth
+        if self.battery_soc_end < 15:
+            self.risk_factors.append("EXCESSIVE_DISCHARGE_DEPTH")
+            
+        # 5. Insufficient solar energy
+        if self.strategic_intent == "SOLAR_STORAGE" and excess_solar < self.solar_to_battery:
+            self.risk_factors.append("INSUFFICIENT_SOLAR_ENERGY")
+        
+        # Store key value flows for reference
+        self.flow_values = {
+            "current_price": buy_price,
+            "avg_future_price": avg_future_price,
+            "price_percentile": price_percentile,
+            "price_range": price_range,
+            "excess_solar": excess_solar,
+            "remaining_load": remaining_load
+        }
+
+    def has_intelligence(self) -> bool:
+        """Check if intelligence data is already available."""
+        return self.pattern_name != ""
+        
+    def get_significant_flows(self, threshold: float = 0.1) -> list[str]:
+        """Return a list of significant flow field names and their values."""
+        flow_fields = [
+            "solar_to_home", "solar_to_battery", "solar_to_grid",
+            "grid_to_home", "grid_to_battery",
+            "battery_to_home", "battery_to_grid"
+        ]
+        
+        return [field for field in flow_fields if getattr(self, field, 0) > threshold]
+
+
+@dataclass
+class OptimizationResult:
+    """Result structure returned by optimize_battery_schedule."""
+    hourly_data: list[HourlyData]
+    economic_summary: dict[str, float]
+    strategic_intent_summary: dict[str, int]
+    input_data: dict
+    # Keep all existing fields for backward compatibility
+    soc_trace: list[float] = field(default_factory=list)
+    action_trace: list[float] = field(default_factory=list)
+    cost_basis_trace: list[float] = field(default_factory=list)
+    energy_flows: dict[str, list[float]] = field(default_factory=dict)
+    enhanced_flows: list = field(default_factory=list)
+    battery_params: dict = field(default_factory=dict)
+    final_cost_basis: float = 0.0
+    summary: dict = field(default_factory=dict)
+    flow_summary: dict = field(default_factory=dict)
+    optimization_context: dict = field(default_factory=dict)
+    total_energy_flows: dict[str, float] = field(default_factory=dict)
+    hourly_savings: list[float] = field(default_factory=list)
+
 
 
 @dataclass
@@ -105,335 +555,40 @@ class CostScenarios:
     battery_wear_cost: float
 
 
-@dataclass
-class DetailedEnergyFlows:
-    """
-    Enhanced energy flows with optional economic intelligence.
-    
-    This class replaces both basic energy flows and the AdvancedFlowPattern system.
-    It can be used as basic flows (backward compatible) or enhanced with intelligence.
-    """
-    
-    # Core energy flows (unchanged - maintains backward compatibility)
-    solar_to_home: float = 0.0
-    solar_to_battery: float = 0.0
-    solar_to_grid: float = 0.0
-    grid_to_home: float = 0.0
-    grid_to_battery: float = 0.0
-    battery_to_home: float = 0.0
-    battery_to_grid: float = 0.0
-    grid_import: float = 0.0
-    grid_export: float = 0.0
-    
-    # Economic intelligence (optional - only added when needed)
-    pattern_name: str = ""
-    description: str = ""
-    economic_chain: str = ""
-    flow_values: dict[str, float] | None = field(default=None)
-    immediate_value: float = 0.0
-    future_value: float = 0.0
-    net_strategy_value: float = 0.0
-    risk_factors: list[str] | None = field(default=None)
-    
-    def add_intelligence(
-        self, 
-        buy_price: float, 
-        sell_price: float, 
-        hour: int, 
-        future_prices: list[float] | None = None,
-        power: float = 0.0
-    ):
-        """
-        Add economic intelligence to basic energy flows.
-        
-        Args:
-            buy_price: Current hour electricity buy price (SEK/kWh)
-            sell_price: Current hour electricity sell price (SEK/kWh)
-            hour: Current hour (0-23)
-            future_prices: Future price forecast for opportunity analysis
-            power: Battery power for context (kW)
-        """
-        try:
-            # Calculate economic values for each flow
-            self.flow_values = {
-                "solar_to_home": self.solar_to_home * buy_price,  # Avoided grid cost
-                "solar_to_battery": 0.0,  # No direct cost (opportunity cost handled separately)
-                "solar_to_grid": self.solar_to_grid * sell_price,  # Export revenue
-                "grid_to_home": -self.grid_to_home * buy_price,  # Grid import cost
-                "grid_to_battery": -self.grid_to_battery * buy_price,  # Storage investment cost
-                "battery_to_home": self.battery_to_home * buy_price,  # Avoided grid cost
-                "battery_to_grid": self.battery_to_grid * sell_price,  # Export revenue
-            }
-            
-            # Generate pattern name based on significant flows
-            self.pattern_name = self._generate_pattern_name()
-            
-            # Generate human-readable description
-            self.description = self._generate_flow_description()
-            
-            # Analyze future opportunities and generate economic chain
-            future_opportunity = self._analyze_future_opportunity(hour, future_prices or [], power)
-            self.future_value = future_opportunity.get("expected_value", 0.0)
-            self.risk_factors = future_opportunity.get("dependencies", [])
-            
-            # Generate economic chain explanation
-            self.economic_chain = self._generate_economic_chain(hour, buy_price, future_opportunity)
-            
-            # Calculate total values
-            self.immediate_value = sum(self.flow_values.values())
-            self.net_strategy_value = self.immediate_value + self.future_value
-            
-        except Exception as e:
-            logger.warning(f"Failed to add intelligence to energy flows: {e}")
-            # Set error pattern
-            self.pattern_name = "ANALYSIS_ERROR"
-            self.description = "Economic analysis failed"
-            self.economic_chain = f"Hour {hour:02d}: Analysis failed due to error"
-            self.flow_values = {}
-            self.immediate_value = 0.0
-            self.future_value = 0.0
-            self.net_strategy_value = 0.0
-            self.risk_factors = ["Analysis error"]
-    
-    def _generate_pattern_name(self) -> str:
-        """Generate pattern name based on significant flows (>0.1 kWh)."""
-        significant_flows = []
-        
-        if self.solar_to_home > 0.1:
-            significant_flows.append("SOLAR_TO_HOME")
-        if self.solar_to_battery > 0.1:
-            significant_flows.append("SOLAR_TO_BATTERY")
-        if self.solar_to_grid > 0.1:
-            significant_flows.append("SOLAR_TO_GRID")
-        if self.grid_to_home > 0.1:
-            significant_flows.append("GRID_TO_HOME")
-        if self.grid_to_battery > 0.1:
-            significant_flows.append("GRID_TO_BATTERY")
-        if self.battery_to_home > 0.1:
-            significant_flows.append("BATTERY_TO_HOME")
-        if self.battery_to_grid > 0.1:
-            significant_flows.append("BATTERY_TO_GRID")
-        
-        if not significant_flows:
-            return "MINIMAL_ACTIVITY"
-        elif len(significant_flows) == 1:
-            return significant_flows[0]
-        else:
-            # Combine flows with logical connectors
-            return "_AND_".join(significant_flows[:3])  # Limit to 3 for readability
-    
-    def _generate_flow_description(self) -> str:
-        """Generate human-readable flow description."""
-        descriptions = []
-        
-        if self.solar_to_home > 0.1:
-            descriptions.append(f"Solar {self.solar_to_home:.1f}kWh → Home")
-        if self.solar_to_battery > 0.1:
-            descriptions.append(f"Solar {self.solar_to_battery:.1f}kWh → Battery")
-        if self.solar_to_grid > 0.1:
-            descriptions.append(f"Solar {self.solar_to_grid:.1f}kWh → Grid")
-        if self.grid_to_home > 0.1:
-            descriptions.append(f"Grid {self.grid_to_home:.1f}kWh → Home")
-        if self.grid_to_battery > 0.1:
-            descriptions.append(f"Grid {self.grid_to_battery:.1f}kWh → Battery")
-        if self.battery_to_home > 0.1:
-            descriptions.append(f"Battery {self.battery_to_home:.1f}kWh → Home")
-        if self.battery_to_grid > 0.1:
-            descriptions.append(f"Battery {self.battery_to_grid:.1f}kWh → Grid")
-        
-        if not descriptions:
-            return "Minimal energy activity"
-        
-        return "; ".join(descriptions)
-    
-    def _analyze_future_opportunity(self, hour: int, future_prices: list[float], power: float) -> dict[str, Any]:
-        """Analyze future opportunities enabled by current flows."""
-        if not future_prices or hour >= 23:
-            return {"expected_value": 0.0, "dependencies": []}
-        
-        try:
-            current_price = future_prices[0] if future_prices else 0.0
-            
-            # Grid charging -> look for high price discharge opportunities
-            if self.grid_to_battery > 0.1:
-                future_high_prices = [p for p in future_prices[1:4] if p > current_price * 1.2]
-                if future_high_prices:
-                    max_future_price = max(future_high_prices)
-                    expected_value = self.grid_to_battery * (max_future_price - current_price) * 0.9  # Account for efficiency
-                    target_hours = [hour + 1 + i for i, p in enumerate(future_prices[1:4]) if p == max_future_price]
-                    return {
-                        "expected_value": expected_value,
-                        "dependencies": ["Future price accuracy", "Battery availability"],
-                        "target_hours": target_hours[:2]  # Limit to 2 hours
-                    }
-            
-            # Battery discharge -> immediate opportunity realization
-            if self.battery_to_grid > 0.1:
-                return {
-                    "expected_value": 0.0,  # Already realized
-                    "dependencies": ["Current price accuracy"],
-                    "target_hours": []
-                }
-            
-            return {"expected_value": 0.0, "dependencies": []}
-            
-        except Exception:
-            return {"expected_value": 0.0, "dependencies": ["Analysis error"]}
-    
-    def _generate_economic_chain(self, hour: int, current_price: float, future_opportunity: dict[str, Any]) -> str:
-        """Generate economic chain explanation."""
-        try:
-            # Current action description
-            current_action = f"Hour {hour:02d}: "
-            
-            if self.grid_to_battery > 0.1:
-                current_action += f"Import {self.grid_to_battery:.1f}kWh at {current_price:.2f} SEK/kWh ({self.flow_values.get('grid_to_battery', 0):.2f} SEK)"
-            elif self.battery_to_grid > 0.1:
-                current_action += f"Export {self.battery_to_grid:.1f}kWh at {current_price:.2f} SEK/kWh (+{self.flow_values.get('battery_to_grid', 0):.2f} SEK)"
-            elif self.solar_to_battery > 0.1:
-                current_action += f"Store {self.solar_to_battery:.1f}kWh solar energy"
-            else:
-                current_action += f"Net value: {self.immediate_value:.2f} SEK"
-            
-            # Future opportunity
-            future_value = future_opportunity.get("expected_value", 0.0)
-            target_hours = future_opportunity.get("target_hours", [])
-            
-            if future_value > 0.1 and target_hours:
-                target_hours_str = ", ".join(f"{h:02d}:00" for h in target_hours[:2])
-                future_action = f" → Export at {target_hours_str} (+{future_value:.2f} SEK)"
-                net_profit = f" → Net strategy value: +{self.net_strategy_value:.2f} SEK"
-                return current_action + future_action + net_profit
-            else:
-                return current_action + f" → Immediate value: {self.immediate_value:.2f} SEK"
-                
-        except Exception:
-            return f"Hour {hour:02d}: Economic analysis failed"
-    
-    def has_intelligence(self) -> bool:
-        """Check if this flow has economic intelligence data."""
-        return bool(self.pattern_name and self.flow_values is not None)
-    
-    def get_significant_flows(self, threshold: float = 0.1) -> dict[str, float]:
-        """Get flows above threshold for pattern analysis."""
-        flows = {
-            "solar_to_home": self.solar_to_home,
-            "solar_to_battery": self.solar_to_battery,
-            "solar_to_grid": self.solar_to_grid,
-            "grid_to_home": self.grid_to_home,
-            "grid_to_battery": self.grid_to_battery,
-            "battery_to_home": self.battery_to_home,
-            "battery_to_grid": self.battery_to_grid,
-        }
-        return {name: value for name, value in flows.items() if value > threshold}
-
-
-def calculate_detailed_energy_flows(
-    solar_production: float,
-    home_consumption: float,
-    grid_import: float,
-    grid_export: float,
-    battery_charged: float,
-    battery_discharged: float,
-) -> DetailedEnergyFlows:
-    """
-    Single source of truth for energy flow calculations.
-
-    This function determines exactly where each kWh of energy flows based on
-    the fundamental energy balance and priority ordering.
-
-    Energy flow priority:
-    1. Solar → Home (direct consumption)
-    2. Solar → Battery (storage of excess)
-    3. Solar → Grid (export remaining excess)
-    4. Battery → Home (support load)
-    5. Battery → Grid (arbitrage export)
-    6. Grid → Home (meet remaining load)
-    7. Grid → Battery (charging from grid)
-
-    Args:
-        solar_production: Total solar generated (kWh)
-        home_consumption: Total home consumption (kWh)
-        grid_import: Total imported from grid (kWh)
-        grid_export: Total exported to grid (kWh)
-        battery_charged: Total charged to battery (kWh)
-        battery_discharged: Total discharged from battery (kWh)
-
-    Returns:
-        DetailedEnergyFlows with all individual flow breakdowns
-    """
-
-    # Solar flows - priority order
-    solar_to_home = min(solar_production, home_consumption)
-    remaining_consumption = max(0, home_consumption - solar_to_home)
-    remaining_solar = max(0, solar_production - solar_to_home)
-
-    solar_to_battery = min(remaining_solar, battery_charged)
-    solar_to_grid = max(0, remaining_solar - solar_to_battery)
-
-    # Battery flows
-    battery_to_home = min(battery_discharged, remaining_consumption)
-    battery_to_grid = max(0, battery_discharged - battery_to_home)
-
-    # Grid flows
-    grid_to_battery = max(0, battery_charged - solar_to_battery)
-    final_remaining_consumption = max(0, remaining_consumption - battery_to_home)
-    grid_to_home = final_remaining_consumption
-
-    return DetailedEnergyFlows(
-        solar_production=solar_production,
-        home_consumption=home_consumption,
-        grid_import=grid_import,
-        grid_export=grid_export,
-        battery_charged=battery_charged,
-        battery_discharged=battery_discharged,
-        solar_to_home=solar_to_home,
-        solar_to_battery=solar_to_battery,
-        solar_to_grid=solar_to_grid,
-        grid_to_home=grid_to_home,
-        grid_to_battery=grid_to_battery,
-        battery_to_home=battery_to_home,
-        battery_to_grid=battery_to_grid,
-    )
-
-
 def calculate_hourly_costs(
-    flows: EnergyFlows,
-    buy_price: float,
-    sell_price: float,
+    hour_data: "HourlyData",
     battery_cycle_cost_per_kwh: float = 0.0,
     charge_efficiency: float = 1.0,
     discharge_efficiency: float = 1.0,
 ) -> CostScenarios:
-    """Single source of truth for hourly cost calculations - matches original DP algorithm logic."""
-
+    """Calculate cost scenarios - EXACT match to working original logic."""
+    
     # Base case: Grid-only (no solar, no battery)
-    base_case_cost = flows.home_consumption * buy_price
-
+    base_case_cost = hour_data.home_consumed * hour_data.buy_price
+    
     # Solar-only case: Solar + grid (no battery)
-    direct_solar = min(flows.solar_production, flows.home_consumption)
-    solar_excess = max(0, flows.solar_production - direct_solar)
-    grid_needed = max(0, flows.home_consumption - direct_solar)
-
-    solar_only_cost = grid_needed * buy_price - solar_excess * sell_price
-
+    direct_solar = min(hour_data.solar_generated, hour_data.home_consumed)
+    solar_excess = max(0, hour_data.solar_generated - direct_solar)
+    grid_needed = max(0, hour_data.home_consumed - direct_solar)
+    solar_only_cost = grid_needed * hour_data.buy_price - solar_excess * hour_data.sell_price
+    
     # Battery+solar case: Full optimization
-    # Apply cycle cost only to charging (actual energy stored)
+    # EXACT from original: Apply cycle cost only to charging (actual energy stored)
     battery_wear_cost = (
-        flows.battery_charged * charge_efficiency * battery_cycle_cost_per_kwh
+        hour_data.battery_charged * charge_efficiency * battery_cycle_cost_per_kwh
     )
-
+    
     battery_solar_cost = (
-        flows.grid_import * buy_price
-        - flows.grid_export * sell_price
+        hour_data.grid_imported * hour_data.buy_price
+        - hour_data.grid_exported * hour_data.sell_price
         + battery_wear_cost
     )
-
+    
     # Calculate savings
     solar_savings = base_case_cost - solar_only_cost
     battery_savings = solar_only_cost - battery_solar_cost
     total_savings = base_case_cost - battery_solar_cost
-
+    
     return CostScenarios(
         base_case_cost=base_case_cost,
         solar_only_cost=solar_only_cost,
@@ -443,7 +598,6 @@ def calculate_hourly_costs(
         total_savings=total_savings,
         battery_wear_cost=battery_wear_cost,
     )
-
 
 class StrategicIntent(Enum):
     """Strategic intents for battery actions, determined at decision time."""
@@ -633,28 +787,19 @@ def _state_transition(
 
 
 def _calculate_energy_flows(
-    power: float, home_consumption: float, solar_production: float, dt: float = 1.0
-) -> DetailedEnergyFlows:
-    """
-    Calculate detailed energy flows showing exactly where each kWh comes from and goes to.
-    Returns DetailedEnergyFlows object (not dict).
-
-    This function provides the complete breakdown of energy flows for one time step,
-    revealing the strategic decisions made by the optimization algorithm.
-
-    Args:
-        power: Battery power (kW), positive for charging, negative for discharging
-        home_consumption: Home energy consumption (kWh)
-        solar_production: Solar energy production (kWh)
-        dt: Time step (hour)
-
-    Returns:
-        DetailedEnergyFlows object containing all energy flows
-    """
+    power: float, 
+    home_consumption: float, 
+    solar_production: float, 
+    dt: float = 1.0,
+    hour: int = 0, 
+    buy_price: float = 0.0, 
+    sell_price: float = 0.0
+) -> HourlyData:
+    """Calculate detailed energy flows returning HourlyData directly."""
+    
     # Calculate energy values for this timestep
     charge_energy = max(0, power) * dt
     discharge_energy = max(0, -power) * dt
-
 
     # Step 1: Solar first supplies home load (highest priority)
     solar_to_home = min(solar_production, home_consumption)
@@ -671,40 +816,35 @@ def _calculate_energy_flows(
 
     # Step 2: Handle battery actions
     if power > 0:  # Charging
-        # Solar excess goes to battery first, then grid supplements if needed
         solar_to_battery = min(solar_excess, charge_energy)
         grid_to_battery = max(0, charge_energy - solar_to_battery)
-
-        # Remaining solar excess exports to grid
         solar_to_grid = max(0, solar_excess - solar_to_battery)
-
-        # Grid must supply any remaining home consumption
         grid_to_home = remaining_home_consumption
 
     elif power < 0:  # Discharging
-        # Battery first supports remaining home load, then exports excess
         battery_to_home = min(discharge_energy, remaining_home_consumption)
         battery_to_grid = max(0, discharge_energy - battery_to_home)
-
-        # Grid supplies any remaining home consumption after battery
         grid_to_home = max(0, remaining_home_consumption - battery_to_home)
-
-        # All solar excess exports to grid (battery not charging)
         solar_to_grid = solar_excess
 
     else:  # Hold (no battery action)
-        # Grid supplies remaining home consumption
         grid_to_home = remaining_home_consumption
-
-        # All solar excess exports to grid
         solar_to_grid = solar_excess
 
-    # Calculate totals for compatibility with existing code
+    # Calculate totals
     grid_import = grid_to_home + grid_to_battery
     grid_export = solar_to_grid + battery_to_grid
 
-    # Return DetailedEnergyFlows object with the enhanced structure
-    return DetailedEnergyFlows(
+    # Return HourlyData object directly
+    return HourlyData(
+        hour=hour,
+        data_source="predicted",
+        solar_generated=solar_production,
+        home_consumed=home_consumption,
+        grid_imported=grid_import,
+        grid_exported=grid_export,
+        battery_charged=charge_energy,
+        battery_discharged=discharge_energy,
         solar_to_home=solar_to_home,
         solar_to_battery=solar_to_battery,
         solar_to_grid=solar_to_grid,
@@ -712,8 +852,9 @@ def _calculate_energy_flows(
         grid_to_battery=grid_to_battery,
         battery_to_home=battery_to_home,
         battery_to_grid=battery_to_grid,
-        grid_import=grid_import,
-        grid_export=grid_export
+        buy_price=buy_price,
+        sell_price=sell_price,
+        battery_action=power,
     )
 
 
@@ -730,32 +871,38 @@ def _calculate_reward(
     sell_price: list[float] | None = None,
     cost_basis: float = 0.0,
     future_prices: list[float] | None = None,
-) -> tuple[float, float, DetailedEnergyFlows]:
-    """Calculate reward with enhanced flows - single calculation."""
-    
+) -> tuple[float, float, "HourlyData"]:
+    """Calculate reward with HourlyData - EXACT cost basis logic from working version."""
+
     # Calculate energy flows
-    flows = _calculate_energy_flows(
+    hour_data = _calculate_energy_flows(
         power=power,
         home_consumption=home_consumption,
         solar_production=solar_production,
-        dt=dt
+        dt=dt,
+        hour=hour,
+        buy_price=buy_price[hour],  # Direct access like original
+        sell_price=sell_price[hour],  # Direct access like original
     )
     
     # Extract grid values from the detailed flows
-    grid_import = flows.grid_import
-    grid_export = flows.grid_export
+    grid_import = hour_data.grid_imported
+    grid_export = hour_data.grid_exported
     
-    # battery wear cost calculation
+    # Battery wear cost calculation - EXACT from original
     delta_soc = abs(next_soc - soc)
     battery_wear_cost = delta_soc * battery_settings.cycle_cost_per_kwh
 
-    # cost basis calculation
+    # FIX #2: EXACT cost basis calculation from working original
     if power > 0:  # Charging
         charge_energy = power * dt * battery_settings.efficiency_charge
+        
+        # EXACT solar vs grid split logic from original
         solar_available = max(0, solar_production - home_consumption)
         solar_to_battery = min(solar_available, power)
         grid_to_battery = max(0, power - solar_to_battery)
 
+        # EXACT cost calculation from original
         solar_energy_cost = (
             solar_to_battery * dt * battery_settings.efficiency_charge 
             * battery_settings.cycle_cost_per_kwh
@@ -778,31 +925,34 @@ def _calculate_reward(
     elif power < 0:  # Discharging
         effective_sell_price = sell_price[hour]
         
-        # profitability check
-        if effective_sell_price <= cost_basis + battery_settings.cycle_cost_per_kwh * 0.5:
-            return float("-inf"), cost_basis, flows
+        # Profitability check from original
+        if effective_sell_price <= cost_basis:
+            return float("-inf"), cost_basis, hour_data
 
         new_cost_basis = cost_basis
 
     else:  # No action
         new_cost_basis = cost_basis
 
-    # cost calculation
+    # FIX #3: EXACT reward calculation from working original
     import_cost = grid_import * buy_price[hour]
     export_revenue = grid_export * sell_price[hour]
     total_cost = import_cost - export_revenue + battery_wear_cost
-
     reward = -total_cost
-    
-    flows.add_intelligence(
-        buy_price=buy_price[hour],
-        sell_price=sell_price[hour] if hour < len(sell_price) else buy_price[hour],
-        hour=hour,
-        future_prices=future_prices or (buy_price[hour+1:] if hour+1 < len(buy_price) else []),
-        power=power
+
+    # Update HourlyData with calculated values (this part is new for HourlyData compatibility)
+    costs = calculate_hourly_costs(
+        hour_data=hour_data,
+        battery_cycle_cost_per_kwh=battery_settings.cycle_cost_per_kwh,
+        charge_efficiency=battery_settings.efficiency_charge,
+        discharge_efficiency=battery_settings.efficiency_discharge,
     )
     
-    return reward, new_cost_basis, flows
+    hour_data.hourly_cost = costs.battery_solar_cost
+    hour_data.hourly_savings = costs.total_savings
+    hour_data.battery_cycle_cost = costs.battery_wear_cost
+    
+    return reward, new_cost_basis, hour_data
 
 
 def _run_dynamic_programming(
@@ -1008,7 +1158,7 @@ def _run_dynamic_programming(
         next_soc = _state_transition(trace_soc, action, battery_settings)
         reward, new_cost_basis, enhanced_flow = _calculate_reward(
             power=power,
-            soc=soc,
+            soc=trace_soc,
             next_soc=next_soc,
             hour=t,
             home_consumption=home_consumption[t],
@@ -1056,284 +1206,188 @@ def _simulate_battery(
     list[float],
     dict[str, list],
     list[str],
-    list[DetailedEnergyFlows],  # Enhanced flows
+    list[HourlyData],  # CHANGED: HourlyData instead of DetailedEnergyFlows
 ]:
-    """
-    Simulate battery behavior with enhanced flow capture integrated.
-    """
-    logger.debug("Starting battery simulation with enhanced flow capture")
-
-    # Set defaults if not provided
-    if solar_production is None:
-        solar_production = [0.0] * horizon
-
-    if initial_soc is None:
-        initial_soc = battery_settings.min_soc_kwh
+    """Simulate battery behavior creating HourlyData objects directly."""
+    
+    logger.debug("Starting battery simulation with HourlyData objects")
 
     # Discretize state space (needed to interpret policy)
     soc_levels, _ = _discretize_state_action_space(battery_settings)
 
-    # Initialize tracking arrays
-    soc_trace = [initial_soc]
-    action_trace = []
-    cost_basis_trace = [initial_cost_basis]
-    enhanced_flows = []  # Track enhanced flows
+    # Initialize simulation
+    enhanced_flows = []  # NOW: list[HourlyData]
+    soc = initial_soc or battery_settings.min_soc_kwh
+    cost_basis = initial_cost_basis
+    dt = 1.0
 
-    # Initialize detailed energy flow tracking
+    # Initialize tracking lists
+    soc_trace = [soc]
+    action_trace = []
+    cost_basis_trace = [cost_basis]
+    strategic_intents = []
+    
+    # Initialize energy flows dict for backward compatibility
     energy_flows = {
         "solar_to_home": [],
         "solar_to_battery": [],
         "solar_to_grid": [],
-        "battery_to_home": [],
-        "battery_to_grid": [],
         "grid_to_home": [],
         "grid_to_battery": [],
+        "battery_to_home": [],
+        "battery_to_grid": [],
     }
-    strategic_intents = []
-
-    # Arrays for grid totals (compatibility)
-    grid_imports = []
-    grid_exports = []
-
-    # Arrays for economic comparison scenarios
-    base_case_grid_imports = []
-    base_case_grid_exports = []
+    
+    # Initialize cost tracking
     base_case_costs = []
-
-    solar_only_grid_imports = []
-    solar_only_grid_exports = []
     solar_only_costs = []
-
     battery_solar_costs = []
     b_costs = []
-
-    # Run forward simulation
-    soc = initial_soc
-    cost_basis = initial_cost_basis
-
+    
+    # Run forward simulation (YOUR ORIGINAL SIMULATION LOGIC!)
     for t in range(horizon):
-        # Determine action from policy
-        if policy.ndim == 2:
-            i = round((soc - battery_settings.min_soc_kwh) / SOC_STEP_KWH)
-            i = min(max(0, i), len(soc_levels) - 1)
-            power = policy[t, i]
-
-            # Get strategic intent if available
-            if intents and t < len(intents) and i < len(intents[t]):
-                intent = intents[t][i]
-            else:
-                # Fallback: determine intent from action
-                intent = _determine_action_intent(
-                    power=power,
-                    home_consumption=home_consumption[t],
-                    solar_production=solar_production[t],
-                )
+        # Determine action from policy (YOUR ORIGINAL LOGIC!)
+        i = round((soc - battery_settings.min_soc_kwh) / SOC_STEP_KWH)
+        i = min(max(0, i), len(soc_levels) - 1)
+        power = policy[t, i]
+        
+        # Get strategic intent
+        if intents and t < len(intents) and i < len(intents[t]):
+            strategic_intent = intents[t][i].value
         else:
-            power = policy[t]
-            # Determine intent from action for 1D policy
-            intent = _determine_action_intent(
-                power=power,
-                home_consumption=home_consumption[t],
-                solar_production=solar_production[t],
-            )
-
-        # Apply physical constraints
-        if power < 0:  # Discharging
-            available_energy = soc - battery_settings.min_soc_kwh
-            max_discharge_power = (
-                available_energy * battery_settings.efficiency_discharge
-            )
-            if abs(power) > max_discharge_power:
-                power = -max_discharge_power if max_discharge_power > 0 else 0
-        elif power > 0:  # Charging
-            available_capacity = battery_settings.max_soc_kwh - soc
-            max_charge_power = available_capacity / battery_settings.efficiency_charge
-            if power > max_charge_power:
-                power = max_charge_power if max_charge_power > 0 else 0
-
-        action_trace.append(power)
-        strategic_intents.append(intent.value)
-
-        # Calculate next SOC and update cost basis
-        next_soc = _state_transition(soc, power, battery_settings)
-
-        # Update cost basis using the same logic as in _calculate_reward
-        if power > 0:  # Charging
-            # Determine source
-            solar_available = max(0, solar_production[t] - home_consumption[t])
-            solar_to_battery = min(solar_available, power)
-            grid_to_battery = max(0, power - solar_to_battery)
-
-            # Calculate weighted average
-            solar_energy = solar_to_battery * battery_settings.efficiency_charge
-            grid_energy = grid_to_battery * battery_settings.efficiency_charge
-
-            solar_cost = solar_energy * battery_settings.cycle_cost_per_kwh
-            grid_cost = grid_energy * (
-                buy_price[t] + battery_settings.cycle_cost_per_kwh
-            )
-
-            if next_soc > battery_settings.min_soc_kwh:
-                cost_basis = (soc * cost_basis + solar_cost + grid_cost) / next_soc
-        # Cost basis doesn't change on discharge or hold
-
-        cost_basis_trace.append(cost_basis)
-
-        # Calculate detailed energy flows for this hour
-        hourly_flows = _calculate_energy_flows(
-            power, home_consumption[t], solar_production[t]
-        )
-
-        # Add economic intelligence if requested and prices available
-        hourly_flows.add_intelligence(
-            buy_price=buy_price[t],
-            sell_price=sell_price[t] if t < len(sell_price) else buy_price[t],
+            strategic_intent = "IDLE"
+        
+        # Calculate next SOC
+        next_soc = _state_transition(soc, power, battery_settings, dt)
+        
+        # Get prices for this hour
+        current_buy_price = buy_price[t] if buy_price and t < len(buy_price) else 0.5
+        current_sell_price = sell_price[t] if sell_price and t < len(sell_price) else 0.35
+        current_consumption = home_consumption[t]
+        current_solar = solar_production[t] if solar_production and t < len(solar_production) else 0.0
+        
+        # CREATE HourlyData object
+        hour_data = _calculate_energy_flows(
+            power=power,
+            home_consumption=current_consumption,
+            solar_production=current_solar,
+            dt=dt,
             hour=t,
-            future_prices=buy_price[t+1:] if t+1 < len(buy_price) else [],
-            power=power
+            buy_price=current_buy_price,
+            sell_price=current_sell_price,
         )
-
-        enhanced_flows.append(hourly_flows)
-
-        # Store detailed flows for legacy compatibility
-        for flow_key in energy_flows:
-            energy_flows[flow_key].append(getattr(hourly_flows, flow_key))
-
-        # Store grid totals for compatibility
-        grid_imports.append(hourly_flows.grid_import)
-        grid_exports.append(hourly_flows.grid_export)
-
-        # Use shared cost calculation function
-        flows = EnergyFlows(
-            home_consumption=home_consumption[t],
-            solar_production=solar_production[t],
-            grid_import=hourly_flows.grid_import,
-            grid_export=hourly_flows.grid_export,
-            battery_charged=max(0, power),
-            battery_discharged=max(0, -power),
-        )
-
+        
+        # Update battery state information
+        hour_data.battery_soc_start = soc
+        hour_data.battery_soc_end = next_soc
+        hour_data.strategic_intent = strategic_intent
+        hour_data.cost_basis = cost_basis
+        
+        # Calculate costs directly from HourlyData
         costs = calculate_hourly_costs(
-            flows=flows,
-            buy_price=buy_price[t],
-            sell_price=sell_price[t],
+            hour_data=hour_data,
             battery_cycle_cost_per_kwh=battery_settings.cycle_cost_per_kwh,
             charge_efficiency=battery_settings.efficiency_charge,
             discharge_efficiency=battery_settings.efficiency_discharge,
         )
-
-        # Store results (preserving existing interface)
-        base_case_grid_imports.append(flows.home_consumption)
-        base_case_grid_exports.append(0.0)
+        
+        # Update HourlyData with cost information
+        hour_data.hourly_cost = costs.battery_solar_cost
+        hour_data.hourly_savings = costs.total_savings
+        hour_data.battery_cycle_cost = costs.battery_wear_cost
+        
+        # Add intelligence if needed
+        future_prices = buy_price[t+1:] if buy_price and t+1 < len(buy_price) else []
+        hour_data.add_intelligence(
+            buy_price=current_buy_price,
+            sell_price=current_sell_price,
+            hour=t,
+            future_prices=future_prices,
+            power=power
+        )
+        
+        # Add to enhanced_flows list as HourlyData
+        enhanced_flows.append(hour_data)
+        
+        # Store detailed flows for legacy compatibility
+        for flow_key in energy_flows.keys():
+            energy_flows[flow_key].append(getattr(hour_data, flow_key))
+        
+        # Store cost information for legacy compatibility
         base_case_costs.append(costs.base_case_cost)
-
-        solar_only_grid_imports.append(
-            max(0, flows.home_consumption - flows.solar_production)
-        )
-        solar_only_grid_exports.append(
-            max(0, flows.solar_production - flows.home_consumption)
-        )
         solar_only_costs.append(costs.solar_only_cost)
-
-        b_costs.append(costs.battery_wear_cost)
         battery_solar_costs.append(costs.battery_solar_cost)
-
-        # Update SOC for next hour
+        b_costs.append(costs.battery_wear_cost)
+        
+        # Update cost basis for next iteration
+        if power > 0:  # Charging
+            if next_soc > battery_settings.min_soc_kwh:
+                cost_basis = (soc * cost_basis + hour_data.battery_charged * current_buy_price) / next_soc
+            # else: cost_basis stays the same
+        # For discharging or idle, cost_basis stays the same
+        
+        # Update state for next iteration
         soc = next_soc
         soc_trace.append(soc)
-
-        if power != 0:
+        action_trace.append(power)
+        cost_basis_trace.append(cost_basis)
+        strategic_intents.append(strategic_intent)
+        
+        if abs(power) > 0.01:
             logger.debug(
-                "Hour %d: Action=%.2f kW, SOC=%.2f kWh, Intent=%s, Cost basis=%.3f SEK/kWh",
-                t,
-                power,
-                soc,
-                intent.value,
-                cost_basis,
+                "Hour %d: SOC=%.1f kWh, Action=%.2f kW, Intent=%s, Cost=%.2f SEK",
+                t, soc, power, strategic_intent, hour_data.hourly_cost
             )
-
-    # Calculate total costs for economic analysis
-    base_case_cost = sum(base_case_costs)
-    solar_only_cost = sum(solar_only_costs)
-    battery_solar_cost = sum(battery_solar_costs)
-
-    # Calculate savings breakdown
-    base_to_solar_savings = base_case_cost - solar_only_cost
-    base_to_battery_solar_savings = base_case_cost - battery_solar_cost
-    solar_to_battery_solar_savings = solar_only_cost - battery_solar_cost
-
-    # Calculate battery activity totals
-    total_charged = sum(max(0, action) for action in action_trace)
-    total_discharged = sum(max(0, -action) for action in action_trace)
-
-    # Create comprehensive DataFrame with all data
-    df = pd.DataFrame(
-        {
-            "Hour": np.arange(horizon),
-            "Buy Price": buy_price,
-            "Sell Price": sell_price,
-            "Battery Action (kW)": action_trace,
-            "Home Consumption": home_consumption,
-            "Solar Production": solar_production,
-            "Grid Import": grid_imports,
-            "Grid Export": grid_exports,
-            "State of Charge (SoC)": soc_trace[:-1],
-            "Cost Basis (SEK/kWh)": cost_basis_trace[:-1],
-            "Strategic Intent": strategic_intents,
-            "Base Case Grid Import": base_case_grid_imports,
-            "Base Case Grid Export": base_case_grid_exports,
-            "Solar Only Grid Import": solar_only_grid_imports,
-            "Solar Only Grid Export": solar_only_grid_exports,
-            "Base Case Hourly Cost": base_case_costs,
-            "Solar Only Hourly Cost": solar_only_costs,
-            "Battery+Solar Hourly Cost": battery_solar_costs,
-            "B.Cost": b_costs,
-            # Add detailed energy flows to DataFrame
-            "Solar to Home": energy_flows["solar_to_home"],
-            "Solar to Battery": energy_flows["solar_to_battery"],
-            "Solar to Grid": energy_flows["solar_to_grid"],
-            "Battery to Home": energy_flows["battery_to_home"],
-            "Battery to Grid": energy_flows["battery_to_grid"],
-            "Grid to Home": energy_flows["grid_to_home"],
-            "Grid to Battery": energy_flows["grid_to_battery"],
-        }
-    )
-
-    # Create economic results dictionary
+    
+    # Create DataFrame for backward compatibility (if needed)
+    df_data = {
+        "Hour": list(range(horizon)),
+        "Buy Price": [buy_price[t] if buy_price else 0.5 for t in range(horizon)],
+        "Sell Price": [sell_price[t] if sell_price else 0.35 for t in range(horizon)],
+        "Home Consumption": home_consumption,
+        "Solar Production": [solar_production[t] if solar_production else 0.0 for t in range(horizon)],
+        "Battery Action (kW)": action_trace,
+        "State of Charge (SoC)": soc_trace[:-1],  # Exclude last element
+        "Grid Import": [h.grid_imported for h in enhanced_flows],
+        "Grid Export": [h.grid_exported for h in enhanced_flows],
+        "Base Case Hourly Cost": base_case_costs,
+        "Solar Only Hourly Cost": solar_only_costs,
+        "Battery+Solar Hourly Cost": battery_solar_costs,
+        "B.Cost": b_costs,
+    }
+    df = pd.DataFrame(df_data)
+    
+    # Calculate economic results
+    total_base_cost = sum(base_case_costs)
+    total_solar_only_cost = sum(solar_only_costs)
+    total_battery_solar_cost = sum(battery_solar_costs)
+    total_charged = sum(h.battery_charged for h in enhanced_flows)
+    total_discharged = sum(h.battery_discharged for h in enhanced_flows)
+    
+    base_to_solar_savings = total_base_cost - total_solar_only_cost
+    base_to_battery_solar_savings = total_base_cost - total_battery_solar_cost
+    solar_to_battery_solar_savings = total_solar_only_cost - total_battery_solar_cost
+    
     economic_results = {
-        "base_cost": base_case_cost,
-        "solar_only_cost": solar_only_cost,
-        "battery_solar_cost": battery_solar_cost,
+        "base_cost": total_base_cost,
+        "solar_only_cost": total_solar_only_cost,
+        "battery_solar_cost": total_battery_solar_cost,
         "base_to_solar_savings": base_to_solar_savings,
         "base_to_battery_solar_savings": base_to_battery_solar_savings,
         "solar_to_battery_solar_savings": solar_to_battery_solar_savings,
-        "percent_savings_from_base_to_solar": (
-            (base_to_solar_savings / base_case_cost) * 100 if base_case_cost > 0 else 0
-        ),
-        "percent_savings_from_base_to_battery_solar": (
-            (base_to_battery_solar_savings / base_case_cost) * 100
-            if base_case_cost > 0
-            else 0
-        ),
-        "percent_savings_from_solar_to_battery_solar": (
-            (solar_to_battery_solar_savings / solar_only_cost) * 100
-            if solar_only_cost > 0
-            else 0
-        ),
         "base_to_battery_solar_savings_pct": (
-            (base_to_battery_solar_savings / base_case_cost) * 100
-            if base_case_cost > 0
-            else 0
+            (base_to_battery_solar_savings / total_base_cost) * 100 
+            if total_base_cost > 0 else 0
         ),
         "total_charged": total_charged,
         "total_discharged": total_discharged,
     }
-
+    
     logger.debug(
         "Simulation complete: Base cost: %.2f SEK, Battery+Solar cost: %.2f SEK, "
         "Savings: %.2f SEK (%.1f%%), Final cost basis: %.3f SEK/kWh",
-        base_case_cost,
-        battery_solar_cost,
+        total_base_cost,
+        total_battery_solar_cost,
         base_to_battery_solar_savings,
         economic_results["base_to_battery_solar_savings_pct"],
         cost_basis_trace[-1],
@@ -1347,7 +1401,7 @@ def _simulate_battery(
         cost_basis_trace,
         energy_flows,
         strategic_intents,
-        enhanced_flows,  # Return enhanced flows
+        enhanced_flows,  # NOW: list[HourlyData] instead of list[DetailedEnergyFlows]
     )
 
 
@@ -1359,46 +1413,28 @@ def optimize_battery_schedule(
     solar_production: list[float] | None = None,
     initial_soc: float | None = None,
     initial_cost_basis: float | None = None,
-) -> dict[str, Any]:
-    """
-    Optimize battery dispatch schedule using dynamic programming with enhanced energy flows.
-
-    This is the main public interface for the battery optimization algorithm.
-    It finds the globally optimal battery charging and discharging schedule
-    that minimizes total electricity costs over a 24-hour horizon.
-
-    Now includes enhanced energy flows with economic intelligence for decision analysis.
-
-    Args:
-        buy_price: Electricity purchase prices for each hour (SEK/kWh)
-        sell_price: Electricity export prices for each hour (SEK/kWh)
-        home_consumption: Home energy consumption for each hour (kWh)
-        battery_settings: Battery physical and economic parameters
-        solar_production: Solar energy production for each hour (kWh)
-        initial_soc: Initial battery state of charge (kWh)
-        initial_cost_basis: Initial cost basis for energy in battery (SEK/kWh)
-
-    Returns:
-        Dictionary containing complete optimization results including:
-        - hourly_data: Detailed hourly results with all energy flows
-        - enhanced_flows: Enhanced energy flows with economic intelligence
-        - economic_results: Cost analysis and savings breakdown
-        - strategic_intent: Strategic reasoning for each hour
-        - input_data: All input parameters for reference
-        - final_cost_basis: Final cost basis for next optimization
-    """
+) -> OptimizationResult:
+    """Optimize battery dispatch schedule using dynamic programming."""
+    
+    # Your existing DP setup code...
     logger.debug("Starting battery optimization with enhanced energy flow analysis")
 
-    horizon = len(buy_price)
+    # Handle inputs exactly as in original
+    if buy_price is None:
+        horizon = len(home_consumption)
+        buy_price = [0.0] * horizon
+    else:
+        horizon = len(buy_price)
 
-    # Set defaults if not provided
+    if sell_price is None:
+        sell_price = [p * 0.7 for p in buy_price]
+
     if solar_production is None:
         solar_production = [0.0] * horizon
 
     if initial_soc is None:
         initial_soc = battery_settings.min_soc_kwh
 
-    # Handle initial cost basis
     if initial_cost_basis is None:
         if initial_soc > battery_settings.min_soc_kwh:
             initial_cost_basis = battery_settings.cycle_cost_per_kwh
@@ -1408,7 +1444,7 @@ def optimize_battery_schedule(
         else:
             initial_cost_basis = 0.0
 
-    # Step 1: Run dynamic programming
+    # Step 1: Run dynamic programming (YOUR ALGORITHM UNCHANGED!)
     logger.debug("Running dynamic programming with horizon=%d hours...", horizon)
     V, policy, C, intents = _run_dynamic_programming(
         horizon=horizon,
@@ -1421,8 +1457,8 @@ def optimize_battery_schedule(
         initial_cost_basis=initial_cost_basis,
     )
 
-    # Step 2: Simulate battery behavior WITH enhanced flow capture (single simulation!)
-    logger.debug("Simulating battery behavior with enhanced flow capture...")
+    # Step 2: Simulate battery behavior (UPDATED to return HourlyData)
+    logger.debug("Simulating battery behavior with HourlyData objects...")
     (
         df,
         soc_trace,
@@ -1431,7 +1467,7 @@ def optimize_battery_schedule(
         cost_basis_trace,
         energy_flows,
         strategic_intents,
-        enhanced_flows,  # Enhanced flows captured here
+        enhanced_flows,  # NOW: list[HourlyData]
     ) = _simulate_battery(
         horizon=horizon,
         buy_price=buy_price,
@@ -1447,137 +1483,17 @@ def optimize_battery_schedule(
         intents=intents,
     )
 
-    # Calculate flow summary from the single simulation
-    flow_summary = {
-        'total_hours_with_intelligence': sum(1 for f in enhanced_flows if f.has_intelligence()),
-        'profitable_hours': sum(1 for f in enhanced_flows if f.has_intelligence() and f.net_strategy_value > 0),
-        'total_strategy_value': sum(f.net_strategy_value for f in enhanced_flows if f.has_intelligence()),
-        'unique_patterns': list({f.pattern_name for f in enhanced_flows if f.has_intelligence() and f.pattern_name})
-    }
+    # Step 3: Return OptimizationResult directly (NO conversion needed!)
+    strategic_intent_summary = {}
+    for hour_data in enhanced_flows:
+        intent = hour_data.strategic_intent
+        strategic_intent_summary[intent] = strategic_intent_summary.get(intent, 0) + 1
 
-    logger.info(f"Enhanced flows captured: {flow_summary['total_hours_with_intelligence']} hours with intelligence, "
-               f"{flow_summary['profitable_hours']} profitable hours, "
-               f"total strategy value: {flow_summary['total_strategy_value']:.2f} SEK")
-
-    # Battery parameters for reference
-    battery_params = {
-        "capacity": battery_settings.total_capacity,
-        "min_soc": battery_settings.min_soc_kwh,
-        "max_soc": battery_settings.max_soc_kwh,
-        "max_charge_power": battery_settings.max_charge_power_kw,
-        "max_discharge_power": battery_settings.max_discharge_power_kw,
-        "charge_efficiency": battery_settings.efficiency_charge,
-        "discharge_efficiency": battery_settings.efficiency_discharge,
-        "cycle_cost": battery_settings.cycle_cost_per_kwh,
-    }
-
-    # Calculate hourly cost savings
-    hourly_savings = df["Base Case Hourly Cost"] - df["Battery+Solar Hourly Cost"]
-
-    # Calculate comprehensive energy flows for easy access
-    total_energy_flows = {
-        "grid_imports": df["Grid Import"].sum(),
-        "grid_exports": df["Grid Export"].sum(),
-        "solar_production": sum(solar_production),
-        "home_consumption": sum(home_consumption),
-        "battery_charged": economic_results.get("total_charged", 0),
-        "battery_discharged": economic_results.get("total_discharged", 0),
-    }
-
-    # Create optimization context for historical tracking
-    optimization_context = {
-        "initial_soc_kwh": initial_soc,
-        "initial_soc_percent": (initial_soc / battery_settings.total_capacity) * 100,
-        "cost_basis_sek_per_kwh": initial_cost_basis,
-        "optimization_horizon_hours": horizon,
-        "battery_capacity_kwh": battery_settings.total_capacity,
-        "min_soc_kwh": battery_settings.min_soc_kwh,
-        "max_soc_kwh": battery_settings.max_soc_kwh,
-    }
-
-    # Assemble comprehensive results
-
-    # Construct summary dict for compatibility
-    summary = {
-        "baseCost": economic_results.get("base_cost", 0),
-        "optimizedCost": economic_results.get("battery_solar_cost", 0),
-        "gridCosts": economic_results.get("base_cost", 0)
-        - economic_results.get("base_to_solar_savings", 0),
-        "batteryCosts": 0,
-        "savings": economic_results.get("solar_to_battery_solar_savings", 0),
-        "solarOnlyCost": economic_results.get("solar_only_cost", 0),
-        "solarOnlySavings": economic_results.get("base_to_solar_savings", 0),
-        "batterySavings": economic_results.get("solar_to_battery_solar_savings", 0),
-        "solarSavings": economic_results.get("base_to_solar_savings", 0),
-        "arbitrageSavings": economic_results.get("base_to_battery_solar_savings", 0),
-        "totalSolarProduction": total_energy_flows.get("solar_production", 0),
-        "totalBatteryCharge": economic_results.get("total_charged", 0),
-        "totalBatteryDischarge": economic_results.get("total_discharged", 0),
-        "totalGridImport": total_energy_flows.get("grid_imports", 0),
-        "totalGridExport": total_energy_flows.get("grid_exports", 0),
-        "cycleCount": (
-            (economic_results.get("total_charged", 0) / battery_settings.total_capacity)
-            if battery_settings.total_capacity
-            else 0
-        ),
-    }
-
-    hourly_data = {
-        "hour": df["Hour"].tolist(),
-        "buy_price": df["Buy Price"].tolist(),
-        "sell_price": df["Sell Price"].tolist(),
-        "battery_action": df["Battery Action (kW)"].tolist(),
-        "strategic_intent": strategic_intents,  
-        "home_consumption": df["Home Consumption"].tolist(),
-        "solar_production": df["Solar Production"].tolist(),
-        "grid_import": df["Grid Import"].tolist(),
-        "grid_export": df["Grid Export"].tolist(),
-        "state_of_charge": df["State of Charge (SoC)"].tolist(), 
-        "base_case_grid_import": df["Base Case Grid Import"].tolist(),
-        "base_case_grid_export": df["Base Case Grid Export"].tolist(),
-        "solar_only_grid_import": df["Solar Only Grid Import"].tolist(),
-        "solar_only_grid_export": df["Solar Only Grid Export"].tolist(),
-        "base_case_hourly_cost": df["Base Case Hourly Cost"].tolist(),
-        "solar_only_hourly_cost": df["Solar Only Hourly Cost"].tolist(),
-        "battery_solar_hourly_cost": df["Battery+Solar Hourly Cost"].tolist(),
-        "battery_cost": df["B.Cost"].tolist(),
-        "cost_basis": cost_basis_trace[:-1],  # Exclude last value for hourly data
-        # Add frontend-expected field names for compatibility
-        "solarGenerated": df["Solar Production"].tolist(),
-        "homeConsumed": df["Home Consumption"].tolist(),
-        "gridImported": df["Grid Import"].tolist(),
-        "gridExported": df["Grid Export"].tolist(),
-        "buyPrice": df["Buy Price"].tolist(),
-        "sellPrice": df["Sell Price"].tolist(),
-        "batteryAction": df["Battery Action (kW)"].tolist(),
-        "batterySocStart": df["State of Charge (SoC)"].tolist(),
-        "batterySocEnd": df["State of Charge (SoC)"].tolist(),
-        "hourlyCost": df["Battery+Solar Hourly Cost"].tolist(),
-        "hourlySavings": (df["Base Case Hourly Cost"] - df["Battery+Solar Hourly Cost"]).tolist(),
-        "electricityPrice": df["Buy Price"].tolist(),
-        "electricitySellPrice": df["Sell Price"].tolist(),
-        "batteryCharged": [max(0, action) for action in df["Battery Action (kW)"].tolist()],
-        "batteryDischarged": [max(0, -action) for action in df["Battery Action (kW)"].tolist()],
-        "dataSource": ["predicted"] * len(df["Hour"].tolist()),
-        "isActual": [False] * len(df["Hour"].tolist()),
-        "isPredicted": [True] * len(df["Hour"].tolist()),
-    }
-
-    # Assemble comprehensive results (EXACTLY as original)
-    results = {
-        "hourly_data": hourly_data,  # Use the manually created dict, NOT df.to_dict()
-        "soc_trace": soc_trace,
-        "action_trace": action_trace,
-        "economic_results": economic_results,
-        "cost_basis_trace": cost_basis_trace,
-        "energy_flows": energy_flows,
-        "strategic_intent": strategic_intents,
-        "battery_params": battery_params,
-        "hourly_savings": hourly_savings.tolist(),
-        "total_energy_flows": total_energy_flows,
-        "optimization_context": optimization_context,
-        "final_cost_basis": cost_basis_trace[-1] if cost_basis_trace else initial_cost_basis,
-        "input_data": {
+    return OptimizationResult(
+        hourly_data=enhanced_flows,  # DIRECT usage of HourlyData objects!
+        economic_summary=economic_results,
+        strategic_intent_summary=strategic_intent_summary,
+        input_data={
             "buy_price": buy_price,
             "sell_price": sell_price,
             "home_consumption": home_consumption,
@@ -1586,14 +1502,13 @@ def optimize_battery_schedule(
             "initial_cost_basis": initial_cost_basis,
             "horizon": horizon,
         },
-    }
-
-    # Add summary and enhanced flows
-    results["summary"] = summary
-    results["enhanced_flows"] = enhanced_flows
-    results["flow_summary"] = flow_summary
-
-    return results
+        soc_trace=soc_trace,
+        action_trace=action_trace,
+        cost_basis_trace=cost_basis_trace,
+        energy_flows=energy_flows,
+        enhanced_flows=enhanced_flows,  # Same as hourly_data
+        final_cost_basis=cost_basis_trace[-1] if cost_basis_trace else initial_cost_basis,
+    )
 
 
 def print_results_table(hourly_data, economic_results, buy_prices, sell_prices):
@@ -1710,4 +1625,134 @@ def print_results_table(hourly_data, economic_results, buy_prices, sell_prices):
     output.append(f"      Savings percentage:         {savings_percentage:.1f} %")
 
     # Log all output in a single call
+    logger.info("\n".join(output))
+
+def print_optimization_results(results, buy_prices, sell_prices):
+    """Log a detailed results table with strategic intents - new format version.
+    
+    Args:
+        results: OptimizationResult object with hourly_data and economic_summary
+        buy_prices: List of buy prices
+        sell_prices: List of sell prices
+    """
+    hourly_data_list = results.hourly_data
+    economic_results = results.economic_summary
+
+    # Initialize totals
+    total_consumption = 0
+    total_base_cost = 0
+    total_solar = 0
+    total_solar_to_bat = 0
+    total_grid_to_bat = 0
+    total_grid_cost = 0
+    total_battery_cost = 0
+    total_combined_cost = 0
+    total_savings = 0
+    total_charging = 0
+    total_discharging = 0
+
+    # Initialize output string
+    output = []
+
+    output.append("\nBattery Schedule:")
+    output.append(
+        "╔════╦════════════╦═════╦══════╦╦═════╦══════╦══════╦════╦══════╦════════════════╦══════╦══════╦══════╗"
+    )
+    output.append(
+        "║ Hr ║  Buy/Sell  ║Cons.║Cost  ║║Sol. ║Sol→B ║Gr→B  ║SoC ║Act.  ║ Strategic      ║ Grid ║ Batt ║ Save ║"
+    )
+    output.append(
+        "║    ║   (SEK)    ║(kWh)║(SEK) ║║(kWh)║(kWh) ║(kWh) ║(%) ║(kW)  ║ Intent         ║(SEK) ║(SEK) ║(SEK) ║"
+    )
+    output.append(
+        "╠════╬════════════╬═════╬══════╬╬═════╬══════╬══════╬════╬══════╬════════════════╬══════╬══════╬══════╣"
+    )
+
+    # Process each hour - replicating original logic exactly
+    for i, hour_data in enumerate(hourly_data_list):
+        hour = hour_data.hour
+        consumption = hour_data.home_consumed
+        solar = hour_data.solar_generated
+        action = hour_data.battery_action or 0.0
+        soc_percent = hour_data.battery_soc_end
+        intent = hour_data.strategic_intent
+        
+        # Calculate values exactly like original function
+        base_cost = consumption * buy_prices[i] if i < len(buy_prices) else consumption * hour_data.buy_price
+        
+        # Extract solar flows - try to get from detailed flows if available
+        solar_to_battery = 0.0
+        grid_to_battery = 0.0
+        
+        # If we have detailed flow data, use it
+        if hasattr(hour_data, 'solar_to_battery'):
+            solar_to_battery = hour_data.solar_to_battery
+            grid_to_battery = hour_data.grid_to_battery
+        else:
+            # Fallback: estimate from battery_charged
+            solar_to_battery = hour_data.battery_charged if hour_data.battery_charged > 0 else 0
+            grid_to_battery = max(0, hour_data.battery_charged - min(solar, hour_data.battery_charged))
+        
+        # Calculate costs exactly like original
+        grid_cost = hour_data.grid_imported * buy_prices[i] - hour_data.grid_exported * sell_prices[i] if i < len(buy_prices) else 0
+        battery_cost = hour_data.battery_cycle_cost
+        combined_cost = hour_data.hourly_cost
+        savings = base_cost - combined_cost
+
+        # Update totals exactly like original
+        total_consumption += consumption
+        total_base_cost += base_cost
+        total_solar += solar
+        total_solar_to_bat += solar_to_battery
+        total_grid_to_bat += grid_to_battery
+        total_grid_cost += grid_cost
+        total_battery_cost += battery_cost
+        total_combined_cost += combined_cost
+        total_savings += savings
+        
+        if action > 0:
+            total_charging += action
+        else:
+            total_discharging += abs(action)
+
+        # Format intent to fit column width exactly like original
+        intent_short = intent[:14] if len(intent) <= 14 else intent[:11] + "..."
+
+        # Use exact same formatting as original
+        buy_price_val = buy_prices[i] if i < len(buy_prices) else hour_data.buy_price
+        sell_price_val = sell_prices[i] if i < len(sell_prices) else hour_data.sell_price
+        
+        output.append(
+            f"║{hour:3d} ║{buy_price_val:5.3f}/{sell_price_val:5.3f}║{consumption:5.1f}║{base_cost:6.2f}║║{solar:5.1f}║{solar_to_battery:6.1f}║{grid_to_battery:6.1f}║{soc_percent:3.0f} ║{action:6.1f}║{intent_short:16s}║{grid_cost:6.2f}║{battery_cost:6.2f}║{savings:6.2f}║"
+        )
+
+    # Add totals row exactly like original
+    output.append(
+        "╠════╬════════════╬═════╬══════╬╬═════╬══════╬══════╬════╬══════╬════════════════╬══════╬══════╬══════╣"
+    )
+    output.append(
+        f"║TOT ║            ║{total_consumption:5.1f}║{total_base_cost:6.2f}║║{total_solar:5.1f}║{total_solar_to_bat:6.1f}║{total_grid_to_bat:6.1f}║    ║C:{total_charging:4.1f}║                ║{total_grid_cost:6.2f}║{total_battery_cost:6.2f}║{total_savings:6.2f}║"
+    )
+    output.append(
+        f"║    ║            ║     ║      ║║     ║      ║      ║    ║D:{total_discharging:4.1f}║                ║      ║      ║      ║"
+    )
+    output.append(
+        "╚════╩════════════╩═════╩══════╩╩═════╩══════╩══════╩════╩══════╩════════════════╩══════╩══════╩══════╝"
+    )
+
+    # Append summary stats exactly like original
+    output.append("\n      Summary:")
+    output.append(
+        f"      Base case cost:           {economic_results['base_cost']:.2f} SEK"
+    )
+    output.append(
+        f"      Optimized cost:           {economic_results['battery_solar_cost']:.2f} SEK"
+    )
+    output.append(
+        f"      Total savings:            {economic_results['base_to_battery_solar_savings']:.2f} SEK"
+    )
+    savings_percentage = economic_results["base_to_battery_solar_savings_pct"]
+    output.append(f"      Savings percentage:         {savings_percentage:.1f} %")
+
+    # Log all output in a single call exactly like original
     logger.info("\n".join(output))

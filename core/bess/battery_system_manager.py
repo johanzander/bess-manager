@@ -9,6 +9,7 @@ from typing import Any
 
 from .daily_view_builder import DailyView, DailyViewBuilder
 from .dp_battery_algorithm import (
+    HourlyData,
     OptimizationResult,
     optimize_battery_schedule,
     print_optimization_results,
@@ -1147,63 +1148,92 @@ class BatterySystemManager:
         )
         self.controller.set_discharging_power_rate(discharge_rate)
 
-    def _record_historical_event(self, hour: int, flows: dict[str, Any] | EnergyFlow) -> None:
+    def _record_historical_event(self, hour: int, flows: EnergyFlow) -> None:
         """
-        Record historical event from energy flows - UPDATED to store HourlyData directly.
+        Record historical event from energy flows using PURE SENSOR SOC DATA.
+        DETERMINISTIC - throws exceptions if data is invalid.
         
         Args:
             hour: The hour to record (0-23)
-            flows: Either an EnergyFlow object or a legacy dict with energy flow data
+            flows: EnergyFlow object with both start and end SOC from sensors
         """
-        # Type hint is using Union for Python <3.10 compatibility
+        if not isinstance(flows, EnergyFlow):
+            raise TypeError(f"Expected EnergyFlow object, got {type(flows)}")
+        
+        if not 0 <= hour <= 23:
+            raise ValueError(f"Invalid hour: {hour}. Must be 0-23.")
+        
+        if flows.hour != hour:
+            raise ValueError(f"EnergyFlow hour {flows.hour} doesn't match expected hour {hour}")
+        
+        # Validate required SOC data exists
+        if flows.battery_soc_start is None or flows.battery_soc_end is None:
+            raise ValueError(f"Hour {hour}: Missing required SOC data in EnergyFlow")
+        
+        # Get price for this hour
         try:
-            # Convert dict to EnergyFlow if necessary
-            energy_flow = flows if isinstance(flows, EnergyFlow) else EnergyFlow.from_dict(flows)
+            today_prices = self._price_manager.get_today_prices()
+            if hour >= len(today_prices):
+                raise IndexError(f"Hour {hour} not available in today's prices (length: {len(today_prices)})")
             
-            # Set hour if not already present
-            if energy_flow.hour is None:
-                energy_flow.hour = hour
+            buy_price = today_prices[hour].get("buyPrice")
+            sell_price = today_prices[hour].get("sellPrice")
+            
+            if buy_price is None or sell_price is None:
+                raise ValueError(f"Hour {hour}: Missing buy_price or sell_price in today's prices")
                 
-            # Calculate start SOC
-            previous_event = (
-                self.historical_store.get_hour_event(hour - 1) if hour > 0 else None
-            )
-            if previous_event:
-                battery_soc_start = previous_event.battery_soc_end
-            else:
-                # Calculate start SOC from energy flows
-                net_delta_kwh = energy_flow.battery_charged - energy_flow.battery_discharged
-                net_delta_percent = (
-                    net_delta_kwh / self.battery_settings.total_capacity
-                ) * 100.0
-                battery_soc_start = max(0, energy_flow.battery_soc - net_delta_percent)
-
-            # Get price for this hour (context needed for cost calculations)
-            buy_price = 1.0  # Default fallback
-            sell_price = 0.6  # Default fallback
-            try:
-                today_prices = self._price_manager.get_today_prices()
-                if hour < len(today_prices):
-                    buy_price = today_prices[hour].get("buyPrice", 1.0)
-                    sell_price = today_prices[hour].get("sellPrice", 0.6)
-            except Exception as e:
-                logger.warning(f"Failed to get price for hour {hour}: {e}")
-
-            # Convert EnergyFlow to HourlyData using our utility function
-            from core.bess.models import create_hourly_data_from_energy_flow
-            
-            hour_data = create_hourly_data_from_energy_flow(
-                flow=energy_flow,
-                battery_soc_start=battery_soc_start,
-                buy_price=buy_price,
-                sell_price=sell_price
-            )
-
-            # Store HourlyData directly
-            self.historical_store.record_hour_completion(hour_data)
-
         except Exception as e:
-            logger.error(f"Failed to record event for hour {hour}: {e}")
+            raise RuntimeError(f"Failed to get prices for hour {hour}: {e}")
+
+        # Convert EnergyFlow to HourlyData using PURE SENSOR SOC
+        hour_data = HourlyData(
+            hour=hour,
+            data_source="actual",
+            timestamp=flows.timestamp,
+            solar_generated=flows.system_production,
+            home_consumed=flows.load_consumption,
+            grid_imported=flows.import_from_grid,
+            grid_exported=flows.export_to_grid,
+            battery_charged=flows.battery_charged,
+            battery_discharged=flows.battery_discharged,
+            battery_soc_start=flows.battery_soc_start,  # PURE SENSOR DATA
+            battery_soc_end=flows.battery_soc_end,      # PURE SENSOR DATA
+            buy_price=buy_price,
+            sell_price=sell_price,
+            strategic_intent=flows.strategic_intent,
+            # Calculate battery action
+            battery_action=flows.battery_charged - flows.battery_discharged,
+        )
+        
+        # Calculate costs
+        from core.bess.dp_battery_algorithm import calculate_hourly_costs
+        
+        costs = calculate_hourly_costs(
+            hour_data, 
+            self.battery_settings.cycle_cost_per_kwh,
+            self.battery_settings.efficiency_charge,
+            self.battery_settings.efficiency_discharge
+        )
+        
+        # Update costs
+        hour_data.hourly_cost = costs.battery_solar_cost
+        hour_data.hourly_savings = costs.total_savings
+        hour_data.battery_cycle_cost = costs.battery_wear_cost
+
+        # Store in historical store
+        success = self.historical_store.record_hour_completion(hour_data)
+        if not success:
+            raise RuntimeError(f"Failed to store hour {hour} data in historical store")
+        
+        # Log the REAL sensor behavior
+        actual_soc_change = hour_data.battery_soc_end - hour_data.battery_soc_start
+        net_battery_energy = hour_data.battery_charged - hour_data.battery_discharged
+        
+        logger.info(
+            f"RECORDED Hour {hour}: SOC {hour_data.battery_soc_start:.1f}% → {hour_data.battery_soc_end:.1f}% "
+            f"(Δ{actual_soc_change:.1f}%), Battery net: {net_battery_energy:.2f} kWh, "
+            f"Intent: {hour_data.strategic_intent}"
+        )
 
     def _calculate_initial_cost_basis(self, current_hour: int) -> float:
         """Calculate cost basis using stored facts and shared calculation logic."""

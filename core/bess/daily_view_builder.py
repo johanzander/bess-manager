@@ -292,15 +292,28 @@ class DailyViewBuilder:
             max_possible_action = self.battery_settings.total_capacity
             if abs(battery_action) > max_possible_action:
                 logger.warning(
-                    f"Battery action for hour {hour} exceeds physical limits: {battery_action:.2f} kWh. Capping to {max_possible_action:.2f} kWh"
+                    f"Battery action for hour {hour} exceeds physical limits: {battery_action:.2f} kWh. "
+                    f"Capping to {max_possible_action:.2f} kWh"
                 )
                 battery_action = max(
                     -max_possible_action, min(max_possible_action, battery_action)
                 )
 
             # Calculate battery charge/discharge from action
-            battery_charged = max(0, battery_action)
-            battery_discharged = max(0, -battery_action)
+            battery_charged = max(0, battery_action)      # kWh - positive part of action
+            battery_discharged = max(0, -battery_action)  # kWh - magnitude of negative part
+            
+            # CONSISTENCY VALIDATION: Ensure action and charge/discharge values are consistent
+            if abs(battery_action) > 0.01:  # Only check if there's significant action
+                reconstructed_action = battery_charged - battery_discharged
+                action_error = abs(battery_action - reconstructed_action)
+                if action_error > 0.01:
+                    logger.warning(
+                        f"Hour {hour}: Battery action inconsistency - "
+                        f"original={battery_action:.3f} kW, "
+                        f"reconstructed={reconstructed_action:.3f} kW, "
+                        f"error={action_error:.3f} kW"
+                    )
 
             # CRITICAL FIX: Special handling for current hour SOC calculation
             if hour == current_hour:
@@ -344,12 +357,11 @@ class DailyViewBuilder:
                         f"Charging: {battery_charged:.2f} kWh * {self.battery_settings.efficiency_charge} / {self.battery_settings.total_capacity} = +{soc_change:.1f}%"
                     )
                 elif battery_discharged > 0:
-                    soc_change = (
-                        -(
-                            battery_discharged
-                            / self.battery_settings.efficiency_discharge
-                            / self.battery_settings.total_capacity
-                        )
+                    # FIXED: Removed extra parentheses and negative sign application
+                    soc_change = -(
+                        battery_discharged
+                        / self.battery_settings.efficiency_discharge
+                        / self.battery_settings.total_capacity
                         * 100
                     )
                     logger.info(
@@ -368,6 +380,10 @@ class DailyViewBuilder:
                 logger.info(f"CURRENT HOUR {hour} CALCULATION:")
                 logger.info(f"  Previous SOC: {prev_soc:.1f}%")
                 logger.info(f"  Battery Action: {battery_action:.2f} kW")
+                logger.info(f"  Battery Charged: {battery_charged:.2f} kWh")
+                logger.info(f"  Battery Discharged: {battery_discharged:.2f} kWh")
+                logger.info(f"  Charge Efficiency: {self.battery_settings.efficiency_charge:.3f}")
+                logger.info(f"  Discharge Efficiency: {self.battery_settings.efficiency_discharge:.3f}")
                 logger.info(f"  SOC Change: {soc_change:.1f}%")
                 logger.info(f"  Final SOC: {soc_percent:.1f}%")
                 logger.info("=== END CURRENT HOUR CALCULATION ===")
@@ -410,16 +426,23 @@ class DailyViewBuilder:
                         action = bridge_hour_result.battery_action or 0.0
                         
                         if action > 0:  # charging
+                            # Charging: SOC increases by (input_energy × efficiency) ÷ capacity  
                             soc_change_total += (
                                 action * efficiency_charge / self.battery_settings.total_capacity * 100
                             )
                         elif action < 0:  # discharging
+                            # FIXED: Discharging: SOC decreases by (output_energy ÷ efficiency) ÷ capacity
+                            # Since action is already negative, the result will be negative (SOC decrease)
                             soc_change_total += (
-                                action
-                                / efficiency_discharge
-                                / self.battery_settings.total_capacity
-                                * 100
+                                action / efficiency_discharge / self.battery_settings.total_capacity * 100
                             )
+                        
+                        logger.info(
+                            f"Bridge hour {bridge_hour}: action={action:.2f} kW, "
+                            f"efficiency_charge={efficiency_charge:.3f}, "
+                            f"efficiency_discharge={efficiency_discharge:.3f}, "
+                            f"cumulative_soc_change={soc_change_total:.2f}%"
+                        )
 
                     prev_soc_start = min(100, max(0, last_actual_soc + soc_change_total))
                     logger.info(
@@ -484,7 +507,7 @@ class DailyViewBuilder:
             raise ValueError(
                 f"Error processing optimization data for hour {hour}: {e}"
             ) from e
-
+        
     def _validate_energy_flows(self, hourly_data: list[HourlyData]) -> None:
         """Validate energy flows for physical consistency."""
         for hour_data in hourly_data:
@@ -497,7 +520,7 @@ class DailyViewBuilder:
                 battery_charge = hour_data.battery_charged
                 battery_discharge = hour_data.battery_discharged
 
-                # Energy conservation: Solar + Grid Import = Home Consumption + Grid Export + Battery Charge - Battery Discharge
+                # Energy conservation: Solar + Grid Import + Battery Discharge = Home Consumption + Grid Export + Battery Charge
                 energy_in = solar + grid_import + battery_discharge
                 energy_out = consumption + grid_export + battery_charge
 
@@ -511,18 +534,48 @@ class DailyViewBuilder:
                         energy_out,
                     )
 
-                # SOC change validation
+                # FIXED SOC change validation with efficiency consideration
                 soc_change = hour_data.battery_soc_end - hour_data.battery_soc_start
-                expected_soc_change = (
-                    (battery_charge - battery_discharge) / self.battery_settings.total_capacity * 100
-                )
+
+                # Calculate expected SOC change considering efficiency
+                if battery_charge > 0 and battery_discharge > 0:
+                    # Both charging and discharging in same hour (rare but possible)
+                    charge_soc_change = (
+                        battery_charge * self.battery_settings.efficiency_charge 
+                        / self.battery_settings.total_capacity * 100
+                    )
+                    discharge_soc_change = (
+                        battery_discharge / self.battery_settings.efficiency_discharge 
+                        / self.battery_settings.total_capacity * 100
+                    )
+                    expected_soc_change = charge_soc_change - discharge_soc_change
+                elif battery_charge > 0:
+                    # Only charging
+                    expected_soc_change = (
+                        battery_charge * self.battery_settings.efficiency_charge 
+                        / self.battery_settings.total_capacity * 100
+                    )
+                elif battery_discharge > 0:
+                    # Only discharging  
+                    expected_soc_change = -(
+                        battery_discharge / self.battery_settings.efficiency_discharge 
+                        / self.battery_settings.total_capacity * 100
+                    )
+                else:
+                    # No battery action
+                    expected_soc_change = 0.0
+
                 soc_error = abs(soc_change - expected_soc_change)
                 if soc_error > 2.0:  # Allow 2% error
                     logger.warning(
-                        "Hour %d: SOC change mismatch %.1f%% vs expected %.1f%%",
+                        "Hour %d: SOC change mismatch %.1f%% vs expected %.1f%% (charge=%.2f, discharge=%.2f, eff_charge=%.3f, eff_discharge=%.3f)",
                         hour_data.hour,
                         soc_change,
                         expected_soc_change,
+                        battery_charge,
+                        battery_discharge,
+                        self.battery_settings.efficiency_charge,
+                        self.battery_settings.efficiency_discharge,
                     )
 
             except Exception as e:

@@ -88,12 +88,6 @@ class HourlyData:
     """
     UNIFIED hourly data structure - consolidates all energy data representations.
     
-    This replaces:
-    - EnergyFlows 
-    - DetailedEnergyFlows
-    - daily_view_builder.HourlyData
-    - All the messy dict structures
-    
     Used by:
     - DP algorithm internal calculations
     - Daily view builder

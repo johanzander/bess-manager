@@ -91,7 +91,7 @@ class SensorCollector:
         if hour == 0:
             previous_readings = self._get_hour_readings(23, date_offset=-1)
             if not previous_readings:
-                raise RuntimeError(f"No sensor readings available for hour 23 of previous day (needed for hour 0 start SOC)")
+                raise RuntimeError("No sensor readings available for hour 23 of previous day (needed for hour 0 start SOC)")
         else:
             previous_readings = self._get_hour_readings(hour - 1)
             if not previous_readings:

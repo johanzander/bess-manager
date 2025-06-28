@@ -1183,7 +1183,7 @@ class BatterySystemManager:
                 raise ValueError(f"Hour {hour}: Missing buy_price or sell_price in today's prices")
                 
         except Exception as e:
-            raise RuntimeError(f"Failed to get prices for hour {hour}: {e}")
+            raise RuntimeError(f"Failed to get prices for hour {hour}: {e}") from e
 
         # Convert EnergyFlow to HourlyData using PURE SENSOR SOC
         hour_data = HourlyData(

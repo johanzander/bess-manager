@@ -426,7 +426,7 @@ class DailyViewBuilder:
                         action = bridge_hour_result.battery_action or 0.0
                         
                         if action > 0:  # charging
-                            # Charging: SOC increases by (input_energy × efficiency) ÷ capacity  
+                            # Charging: SOC increases by (input_energy x efficiency) ÷ capacity  
                             soc_change_total += (
                                 action * efficiency_charge / self.battery_settings.total_capacity * 100
                             )

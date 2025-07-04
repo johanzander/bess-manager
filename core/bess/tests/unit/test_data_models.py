@@ -1,12 +1,12 @@
 """
 Unit tests for new hierarchical data models.
 
-Tests the EnergyData, EconomicData, StrategyData, and HourlyData structures
+Tests the EnergyData, EconomicData, DecisionData, and HourlyData structures
 """
 
 from datetime import datetime
 
-from core.bess.models import EconomicData, EnergyData, HourlyData, StrategyData
+from core.bess.models import DecisionData, EconomicData, EnergyData, HourlyData
 
 
 class TestEnergyData:
@@ -215,12 +215,12 @@ class TestEconomicData:
         assert economic.calculate_net_value() == 0.0
 
 
-class TestStrategyData:
-    """Test StrategyData structure."""
+class TestDecisionData:
+    """Test DecisionData structure."""
 
     def test_creation_and_properties(self):
-        """Test StrategyData creation and properties."""
-        strategy = StrategyData(
+        """Test DecisionData creation and properties."""
+        decision = DecisionData(
             strategic_intent="GRID_CHARGING",
             battery_action=2.5,  # 2.5 kW charging
             cost_basis=1.0,
@@ -229,33 +229,30 @@ class TestStrategyData:
             economic_chain="Grid(1.0) -> Battery -> Home(1.5)",
             immediate_value=0.0,
             future_value=2.5,
-            risk_factors=["Price volatility", "Forecast accuracy"],
         )
 
-        assert strategy.strategic_intent == "GRID_CHARGING"
-        assert strategy.battery_action == 2.5
-        assert strategy.cost_basis == 1.0
-        assert strategy.pattern_name == "Cheap Grid Arbitrage"
-        assert strategy.description == "Store cheap grid energy for later use"
-        assert strategy.economic_chain == "Grid(1.0) -> Battery -> Home(1.5)"
-        assert strategy.immediate_value == 0.0
-        assert strategy.future_value == 2.5
-        assert len(strategy.risk_factors) == 2
+        assert decision.strategic_intent == "GRID_CHARGING"
+        assert decision.battery_action == 2.5
+        assert decision.cost_basis == 1.0
+        assert decision.pattern_name == "Cheap Grid Arbitrage"
+        assert decision.description == "Store cheap grid energy for later use"
+        assert decision.economic_chain == "Grid(1.0) -> Battery -> Home(1.5)"
+        assert decision.immediate_value == 0.0
+        assert decision.future_value == 2.5
 
     def test_default_values(self):
-        """Test StrategyData with default values."""
-        strategy = StrategyData()
+        """Test DecisionData with default values."""
+        decision = DecisionData()
 
-        assert strategy.strategic_intent == "IDLE"
-        assert strategy.battery_action is None
-        assert strategy.cost_basis == 0.0
-        assert strategy.pattern_name == ""
-        assert strategy.description == ""
-        assert strategy.economic_chain == ""
-        assert strategy.immediate_value == 0.0
-        assert strategy.future_value == 0.0
-        assert strategy.net_strategy_value == 0.0
-        assert strategy.risk_factors == []
+        assert decision.strategic_intent == "IDLE"
+        assert decision.battery_action is None
+        assert decision.cost_basis == 0.0
+        assert decision.pattern_name == ""
+        assert decision.description == ""
+        assert decision.economic_chain == ""
+        assert decision.immediate_value == 0.0
+        assert decision.future_value == 0.0
+        assert decision.net_strategy_value == 0.0
 
 
 class TestHourlyData:
@@ -278,7 +275,7 @@ class TestHourlyData:
             buy_price=1.2, sell_price=0.8, hourly_savings=2.5, battery_cycle_cost=0.3
         )
 
-        strategy = StrategyData(
+        strategy = DecisionData(
             strategic_intent="SOLAR_STORAGE",
             battery_action=1.0,
             pattern_name="Solar Excess Storage",
@@ -289,7 +286,7 @@ class TestHourlyData:
             hour=14,
             energy_data=energy,
             economic_data=economic,
-            strategy_data=strategy,
+            decision_data=strategy,
             timestamp=timestamp,
         )
 
@@ -301,7 +298,7 @@ class TestHourlyData:
         # Test composition
         assert hourly.energy is energy
         assert hourly.economic is economic
-        assert hourly.strategy is strategy
+        assert hourly.decision is strategy
 
     def test_creation_from_energy_data(self):
         """Test creating HourlyData from sensor energy data."""
@@ -328,9 +325,9 @@ class TestHourlyData:
 
         # Economic and strategy should have defaults
         assert isinstance(hourly.economic, EconomicData)
-        assert isinstance(hourly.strategy, StrategyData)
+        assert isinstance(hourly.decision, DecisionData)
         assert hourly.economic.buy_price == 0.0
-        assert hourly.strategy.strategic_intent == "IDLE"
+        assert hourly.decision.strategic_intent == "IDLE"
 
     def test_convenience_properties(self):
         """Test convenience properties delegate correctly."""
@@ -349,12 +346,12 @@ class TestHourlyData:
             buy_price=1.3, sell_price=0.9, hourly_cost=4.2, hourly_savings=1.8
         )
 
-        strategy = StrategyData(
+        strategy = DecisionData(
             strategic_intent="LOAD_SUPPORT", battery_action=-2.0  # Discharging
         )
 
         hourly = HourlyData.from_optimization(
-            hour=18, energy_data=energy, economic_data=economic, strategy_data=strategy
+            hour=18, energy_data=energy, economic_data=economic, decision_data=strategy
         )
 
         # Test all convenience properties

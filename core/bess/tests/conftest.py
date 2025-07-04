@@ -18,10 +18,10 @@ logger = logging.getLogger(__name__)
 
 from core.bess.battery_system_manager import BatterySystemManager  # noqa: E402
 from core.bess.models import (  # noqa: E402
+    DecisionData,
     EconomicData,
     EnergyData,
     HourlyData,
-    StrategyData,
 )
 
 
@@ -627,13 +627,13 @@ def sample_new_hourly_data():
         battery_cycle_cost=0.0,
     )
 
-    strategy_data = StrategyData(strategic_intent="IDLE", battery_action=0.0)
+    decision_data = DecisionData(strategic_intent="IDLE", battery_action=0.0)
 
     return HourlyData(
         hour=12,
         energy=energy_data,
         economic=economic_data,
-        strategy=strategy_data,
+        decision=decision_data,
         timestamp=datetime(2025, 7, 2, 12, 0, 0),
         data_source="predicted",
     )

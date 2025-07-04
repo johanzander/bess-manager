@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from core.bess.dp_battery_algorithm import calculate_hourly_costs
-from core.bess.models import EconomicData, EnergyData, HourlyData, StrategyData
+from core.bess.models import DecisionData, EconomicData, EnergyData, HourlyData
 
 from .historical_data_store import HistoricalDataStore
 from .schedule_store import ScheduleStore
@@ -224,8 +224,8 @@ class DailyViewBuilder:
 
         battery_action = event.energy.battery_charged - event.energy.battery_discharged
 
-        updated_strategy = StrategyData(
-            strategic_intent=event.strategy.strategic_intent,
+        updated_decision = DecisionData(
+            strategic_intent=event.decision.strategic_intent,
             battery_action=battery_action
         )
         
@@ -241,7 +241,7 @@ class DailyViewBuilder:
                 hourly_savings=0.0,
                 battery_cycle_cost=0.0
             ),
-            strategy=updated_strategy
+            decision=updated_decision
         )
 
         # calculate_hourly_costs accepts HourlyData directly
@@ -266,7 +266,7 @@ class DailyViewBuilder:
             timestamp=event.timestamp,
             data_source="actual",
             economic=final_economic,
-            strategy=updated_strategy
+            decision=updated_decision
         )
 
 
@@ -315,7 +315,7 @@ class DailyViewBuilder:
             
             hour_result = hourly_data_list[result_index]
             
-            battery_action = hour_result.strategy.battery_action or 0.0
+            battery_action = hour_result.decision.battery_action or 0.0
             solar_production = hour_result.energy.solar_generated
             home_consumption = hour_result.energy.home_consumed
             grid_import = hour_result.energy.grid_imported
@@ -384,8 +384,8 @@ class DailyViewBuilder:
                 battery_to_grid=hour_result.energy.battery_to_grid,
             )
 
-            strategy_data = StrategyData(
-                strategic_intent=hour_result.strategy.strategic_intent or "IDLE",
+            decision_data = DecisionData(
+                strategic_intent=hour_result.decision.strategic_intent or "IDLE",
                 battery_action=battery_action
             )
 
@@ -401,7 +401,7 @@ class DailyViewBuilder:
                     hourly_savings=0.0,
                     battery_cycle_cost=0.0
                 ),
-                strategy=strategy_data
+                decision=decision_data
             )
 
             # calculate_hourly_costs accepts HourlyData directly
@@ -426,7 +426,7 @@ class DailyViewBuilder:
                 timestamp=hour_result.timestamp,
                 data_source="predicted",
                 economic=final_economic_data,
-                strategy=strategy_data
+                decision=decision_data
             )
 
         except Exception as e:
@@ -573,7 +573,7 @@ class DailyViewBuilder:
 
             # Format strategic intent 
             intent_short = (
-                hour_data.strategy.strategic_intent[:8] if hour_data.strategy.strategic_intent else "IDLE"
+                hour_data.decision.strategic_intent[:8] if hour_data.decision.strategic_intent else "IDLE"
             )
 
             # Format SOC/SOE display 

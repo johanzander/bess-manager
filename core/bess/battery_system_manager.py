@@ -497,7 +497,7 @@ class BatterySystemManager:
             stored_data = self.historical_store.get_hour_record(prev_hour)
             if stored_data:
                 logger.info(
-                    f"Verified: Hour {prev_hour} stored with intent {stored_data.strategy.strategic_intent}"
+                    f"Verified: Hour {prev_hour} stored with intent {stored_data.decision.strategic_intent}"
                 )
             else:
                 raise RuntimeError(f"Failed to store energy data for hour {prev_hour}")

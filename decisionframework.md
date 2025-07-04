@@ -152,7 +152,7 @@ class AdvancedFlowPattern:
     decision_margin: float                  # How much better than alternatives
     forecast_sensitivity: float             # Sensitivity to prediction errors
     opportunity_score: float                # Quality of economic opportunity (0-1)
-    risk_factors: List[str]                # Dependencies and uncertainties
+
 Implementation Approach
 1. Modify DP Algorithm Core
 

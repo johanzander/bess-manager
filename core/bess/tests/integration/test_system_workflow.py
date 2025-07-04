@@ -425,7 +425,7 @@ class TestDataFlowValidation:
                 view_hour, HourlyData
             ), f"View hour {i} should be HourlyData"
 
-    def test_strategic_intent_propagation(self, battery_system_with_arbitrage):
+    def test_decision_intent_propagation(self, battery_system_with_arbitrage):
         """Test that strategic intents propagate correctly through the system."""
         current_hour = 5
 
@@ -442,7 +442,7 @@ class TestDataFlowValidation:
             battery_system_with_arbitrage.schedule_store.get_latest_schedule()
         )
         schedule_intents = [
-            h.strategy.strategic_intent
+            h.decision.strategic_intent
             for h in latest_schedule.optimization_result.hourly_data
         ]
 
@@ -450,7 +450,7 @@ class TestDataFlowValidation:
             current_hour=current_hour
         )
         predicted_view_intents = [
-            h.strategy.strategic_intent
+            h.decision.strategic_intent
             for h in daily_view.hourly_data
             if h.data_source == "predicted"
         ]

@@ -12,10 +12,12 @@ from datetime import datetime
 from typing import Any
 
 __all__ = [
+    "CostScenarios",
+    "DecisionData",
     "EconomicData",
     "EnergyData",
     "HourlyData",
-    "StrategyData",
+    "OptimizationResult"
 ]
 
 
@@ -180,6 +182,17 @@ class EnergyData:
             battery_to_grid=data.get("battery_to_grid", 0.0),
         )
 
+@dataclass
+class CostScenarios:
+    """All cost scenarios for one hour."""
+
+    base_case_cost: float
+    solar_only_cost: float
+    battery_solar_cost: float
+    solar_savings: float
+    battery_savings: float
+    total_savings: float
+    battery_wear_cost: float
 
 @dataclass
 class EconomicData:
@@ -214,7 +227,7 @@ class EconomicSummary:
 
 
 @dataclass
-class StrategyData:
+class DecisionData:
     """Strategic analysis and decision data."""
 
     strategic_intent: str = (
@@ -232,9 +245,6 @@ class StrategyData:
     immediate_value: float = 0.0  # Immediate economic value
     future_value: float = 0.0  # Future economic value
     net_strategy_value: float = 0.0  # Net strategic value
-    risk_factors: list[str] = field(
-        default_factory=list
-    )  # Risk factors for this decision
 
 
 @dataclass
@@ -253,7 +263,7 @@ class HourlyData:
     timestamp: datetime | None = None
     data_source: str = "predicted"  # "actual" or "predicted"
     economic: EconomicData = field(default_factory=EconomicData)
-    strategy: StrategyData = field(default_factory=StrategyData)
+    decision: DecisionData = field(default_factory=DecisionData)
 
     # Convenience properties for backward compatibility
     @property
@@ -294,11 +304,11 @@ class HourlyData:
 
     @property
     def strategic_intent(self) -> str:
-        return self.strategy.strategic_intent
+        return self.decision.strategic_intent
 
     @property
     def battery_action(self) -> float | None:
-        return self.strategy.battery_action
+        return self.decision.battery_action
 
     @property
     def buy_price(self) -> float:
@@ -343,7 +353,7 @@ class HourlyData:
         hour: int,
         energy_data: EnergyData,
         economic_data: EconomicData,
-        strategy_data: StrategyData,
+        decision_data: DecisionData,
         timestamp: datetime | None = None,
     ) -> "HourlyData":
         """Create complete HourlyData from optimization algorithm."""
@@ -353,7 +363,7 @@ class HourlyData:
             timestamp=timestamp or datetime.now(),
             data_source="predicted",
             economic=economic_data,
-            strategy=strategy_data,
+            decision=decision_data,
         )
 
     def validate_data(self) -> list[str]:

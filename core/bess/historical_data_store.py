@@ -7,7 +7,7 @@ HistoricalDataStore - Immutable storage of what actually happened.
 import logging
 from datetime import date, datetime
 
-from core.bess.models import EnergyData, HourlyData, StrategyData
+from core.bess.models import DecisionData, EnergyData, HourlyData
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +74,7 @@ class HistoricalDataStore:
             energy=energy_data,
             timestamp=timestamp or datetime.now(),
             data_source=data_source,
-            strategy=StrategyData(strategic_intent=strategic_intent),
+            decision=DecisionData(strategic_intent=strategic_intent),
         )
 
         # Validate the complete data

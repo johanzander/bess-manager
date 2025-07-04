@@ -51,29 +51,26 @@ The algorithm returns comprehensive results including:
 """
 
 __all__ = [
-    "CostScenarios",
-    "OptimizationResult",
     "calculate_hourly_costs",
     "optimize_battery_schedule",
     "print_optimization_results",
-    "print_results_table",
 ]
 
 
 import logging
-from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 
 import numpy as np
 
 from core.bess.models import (
+    CostScenarios,
+    DecisionData,
     EconomicData,
     EconomicSummary,
     EnergyData,
     HourlyData,
     OptimizationResult,
-    StrategyData,
 )
 from core.bess.settings import BatterySettings
 
@@ -86,21 +83,6 @@ logger = logging.getLogger(__name__)
 # Algorithm parameters
 SOC_STEP_KWH = 0.1
 POWER_STEP_KW = 0.2
-
-
-
-
-@dataclass
-class CostScenarios:
-    """All cost scenarios for one hour."""
-
-    base_case_cost: float
-    solar_only_cost: float
-    battery_solar_cost: float
-    solar_savings: float
-    battery_savings: float
-    total_savings: float
-    battery_wear_cost: float
 
 
 def calculate_hourly_costs(
@@ -351,7 +333,7 @@ def _calculate_reward(
                 hourly_cost=float("inf"),
                 base_case_cost=home_consumption * current_buy_price - max(0, solar_production - home_consumption) * current_sell_price
             )
-            strategy_data = StrategyData(
+            decision_data = DecisionData(
                 strategic_intent="IDLE",
                 battery_action=power,
                 cost_basis=cost_basis
@@ -362,7 +344,7 @@ def _calculate_reward(
                 timestamp=datetime.now().replace(hour=hour, minute=0, second=0, microsecond=0),
                 data_source="predicted",
                 economic=economic_data,
-                strategy=strategy_data
+                decision=decision_data
             )
             return float("-inf"), cost_basis, hour_data
 
@@ -401,7 +383,7 @@ def _calculate_reward(
         hourly_savings=hourly_savings
     )
 
-    strategy_data = StrategyData(
+    decision_data = DecisionData(
         strategic_intent=strategic_intent,
         battery_action=power,
         cost_basis=new_cost_basis
@@ -413,7 +395,7 @@ def _calculate_reward(
         timestamp=datetime.now().replace(hour=hour, minute=0, second=0, microsecond=0),
         data_source="predicted",
         economic=economic_data,
-        strategy=strategy_data
+        decision=decision_data
     )
 
     return reward, new_cost_basis, new_hourly_data
@@ -621,7 +603,7 @@ def _simulate_battery(
         logger.debug(
             "Hour %d: SOE %.1f -> %.1f kWh, Action %.2f kW, Intent %s",
             t, current_soe, next_soe, action,
-            new_hourly_data.strategy.strategic_intent,
+            new_hourly_data.decision.strategic_intent,
         )
 
     logger.debug("Simulation complete with %d HourlyData objects", len(simulation_results))
@@ -753,121 +735,6 @@ def optimize_battery_schedule(
         },
     )
 
-def print_results_table(hourly_data, economic_results, buy_prices, sell_prices):
-    """Log a detailed results table with strategic intents."""
-    horizon = len(hourly_data["hour"])
-
-    # Initialize totals
-    total_consumption = 0
-    total_base_cost = 0
-    total_solar = 0
-    total_solar_to_bat = 0
-    total_grid_to_bat = 0
-    total_grid_cost = 0
-    total_battery_cost = 0
-    total_combined_cost = 0
-    total_savings = 0
-    total_charging = 0
-    total_discharging = 0
-
-    # Initialize output string
-    output = []
-
-    output.append("\nBattery Schedule:")
-    output.append(
-        "╔════╦════════════╦═════╦══════╦╦═════╦══════╦══════╦════╦══════╦════════════════╦══════╦══════╦══════╗"
-    )
-    output.append(
-        "║ Hr ║  Buy/Sell  ║Cons.║Cost  ║║Sol. ║Sol→B ║Gr→B  ║SoC ║Act.  ║Strategic Intent║G.Cst ║B.Cst ║ Save ║"
-    )
-    output.append(
-        "╠════╬════════════╬═════╬══════╬╬═════╬══════╬══════╬════╬══════╬════════════════╬══════╬══════╬══════╣"
-    )
-
-    # Process each hour
-    for t in range(horizon):
-        hour_str = f"{hourly_data['hour'][t]:02d}"
-        buy = buy_prices[t]
-        sell = sell_prices[t]
-        price_str = f"{buy:5.2f}/{sell:5.2f}"
-        consumption = hourly_data["home_consumption"][t]
-        base_cost = hourly_data["base_case_hourly_cost"][t]
-        solar = hourly_data["solar_production"][t]
-        action = hourly_data["battery_action"][t]
-        soc = hourly_data["state_of_charge"][t]
-        grid_import = hourly_data["grid_import"][t]
-        grid_export = hourly_data["grid_export"][t]
-        battery_cost = hourly_data["battery_cost"][t]
-        grid_cost = grid_import * buy - grid_export * sell
-        total_cost = hourly_data["battery_solar_hourly_cost"][t]
-        intent = hourly_data.get("strategic_intent", ["IDLE"] * horizon)[t]
-
-        # Calculate solar to battery and grid to battery
-        solar_for_home = min(solar, consumption)
-        solar_left = max(0, solar - solar_for_home)
-
-        if action > 0:  # Charging
-            solar_to_bat = min(solar_left, action)
-            grid_to_bat = max(0, action - solar_to_bat)
-            total_charging += action
-        else:
-            solar_to_bat = 0
-            grid_to_bat = 0
-            if action < 0:
-                total_discharging -= action  # Convert to positive
-
-        # Calculate savings
-        savings = base_cost - total_cost
-
-        # Update totals
-        total_consumption += consumption
-        total_base_cost += base_cost
-        total_solar += solar
-        total_solar_to_bat += solar_to_bat
-        total_grid_to_bat += grid_to_bat
-        total_grid_cost += grid_cost
-        total_battery_cost += battery_cost
-        total_combined_cost += total_cost
-        total_savings += savings
-
-        # Truncate intent for display
-        intent_display = intent[:14] if len(intent) > 14 else intent
-
-        # Append row to output
-        output.append(
-            f"║{hour_str:>3} ║{price_str:^10} ║{consumption:5.1f}║{base_cost:6.2f}║║{solar:5.1f}║{solar_to_bat:6.1f}║{grid_to_bat:6.1f}║{soc:4.1f}║{action:6.1f}║{intent_display:^16}║{grid_cost:6.2f}║{battery_cost:6.2f}║{savings:6.2f}║"
-        )
-
-    # Append totals to output
-    output.append(
-        "╠════╬════════════╬═════╬══════╬╬═════╬══════╬══════╬════╬══════╬════════════════╬══════╬══════╬══════╣"
-    )
-    output.append(
-        f"║TOT ║            ║{total_consumption:5.1f}║{total_base_cost:6.2f}║║{total_solar:5.1f}║{total_solar_to_bat:6.1f}║{total_grid_to_bat:6.1f}║    ║C:{total_charging:4.1f}║                ║{total_grid_cost:6.2f}║{total_battery_cost:6.2f}║{total_savings:6.2f}║"
-    )
-    output.append(
-        f"║    ║            ║     ║      ║║     ║      ║      ║    ║D:{total_discharging:4.1f}║                ║      ║      ║      ║"
-    )
-    output.append(
-        "╚════╩════════════╩═════╩══════╩╩═════╩══════╩══════╩════╩══════╩════════════════╩══════╩══════╩══════╝"
-    )
-
-    # Append summary stats to output
-    output.append("\n      Summary:")
-    output.append(
-        f"      Base case cost:           {economic_results['base_cost']:.2f} SEK"
-    )
-    output.append(
-        f"      Optimized cost:           {economic_results['battery_solar_cost']:.2f} SEK"
-    )
-    output.append(
-        f"      Total savings:            {economic_results['base_to_battery_solar_savings']:.2f} SEK"
-    )
-    savings_percentage = economic_results["base_to_battery_solar_savings_pct"]
-    output.append(f"      Savings percentage:         {savings_percentage:.1f} %")
-
-    # Log all output in a single call
-    logger.info("\n".join(output))
 
 def print_optimization_results(results, buy_prices, sell_prices):
     """Log a detailed results table with strategic intents - new format version.

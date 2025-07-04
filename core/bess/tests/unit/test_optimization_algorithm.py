@@ -85,7 +85,7 @@ def test_battery_simulation_results(
         # Test that all components are present
         assert hour_data.energy is not None
         assert hour_data.economic is not None
-        assert hour_data.strategy is not None
+        assert hour_data.decision is not None
 
     # Test economic summary has expected fields (EconomicSummary dataclass)
     assert hasattr(economic_summary, "base_cost")
@@ -331,7 +331,7 @@ def test_strategy_data_structure():
 
     for hour_data in results.hourly_data:
         # Test that strategy component exists and has data
-        assert hour_data.strategy is not None
-        assert hour_data.strategy.strategic_intent is not None
-        assert hour_data.strategy.battery_action is not None
-        assert hour_data.strategy.cost_basis >= 0
+        assert hour_data.decision is not None
+        assert hour_data.decision.strategic_intent is not None
+        assert hour_data.decision.battery_action is not None
+        assert hour_data.decision.cost_basis >= 0

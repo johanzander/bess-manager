@@ -107,7 +107,7 @@ def test_all_scenarios(scenario_name):
         assert isinstance(hour_data, HourlyData)
         assert hour_data.energy is not None
         assert hour_data.economic is not None
-        assert hour_data.strategy is not None
+        assert hour_data.decision is not None
         assert hour_data.hour == i  # Should match the index
         assert hour_data.data_source == "predicted"
 
@@ -153,7 +153,7 @@ def test_all_scenarios(scenario_name):
         ), f"SOC end {soc_end_kwh:.2f} kWh outside bounds [{battery['min_soc_kwh']}, {battery['max_soc_kwh']}]"
 
         # Battery action should respect power limits - access through strategy field
-        battery_action = hour_data.strategy.battery_action
+        battery_action = hour_data.decision.battery_action
         if (
             battery_action and abs(battery_action) > 0.01
         ):  # Allow for small numerical errors

@@ -501,7 +501,6 @@ async def get_decision_intelligence_mock():
                         },
                         "economic_chain": f"Hour {hour:02d}: Import 11.2kWh at ultra-cheap {price:.4f} SEK/kWh (-{((home_consumption + 6.0) * price):.2f} SEK) → Peak discharge 20:00-21:00 at 2.73 SEK/kWh (+{(6.0 * 2.73):.2f} SEK) → Net arbitrage profit: +{(6.0 * 2.73 - (home_consumption + 6.0) * price):.2f} SEK",
                         "net_strategy_value": 6.0 * 2.73 - (home_consumption + 6.0) * price,
-                        "risk_factors": ["Battery capacity available", "Peak price realization", "No grid export limits"],
                         "electricity_price": price,
                         "is_current_hour": is_current,
                         "is_actual": is_actual
@@ -530,7 +529,6 @@ async def get_decision_intelligence_mock():
                         },
                         "economic_chain": f"Hour {hour:02d}: Standard consumption at {price:.2f} SEK/kWh (-{(home_consumption * price):.2f} SEK) → Avoid charging until ultra-cheap 03:00-04:00 periods",
                         "net_strategy_value": -home_consumption * price,
-                        "risk_factors": ["Price drop realization"],
                         "electricity_price": price,
                         "is_current_hour": is_current,
                         "is_actual": is_actual
@@ -560,7 +558,6 @@ async def get_decision_intelligence_mock():
                     },
                     "economic_chain": f"Hour {hour:02d}: Import 8.2kWh at {price:.2f} SEK/kWh (-{((home_consumption + 3.0) * price):.2f} SEK) → Evening peak discharge at 2.60 SEK/kWh (+{(3.0 * 2.6):.2f} SEK) → Net profit: +{(3.0 * 2.6 - (home_consumption + 3.0) * price):.2f} SEK",
                     "net_strategy_value": 3.0 * 2.6 - (home_consumption + 3.0) * price,
-                    "risk_factors": ["Evening peak price accuracy", "Battery availability"],
                     "electricity_price": price,
                     "is_current_hour": is_current,
                     "is_actual": is_actual
@@ -594,7 +591,6 @@ async def get_decision_intelligence_mock():
                         },
                         "economic_chain": f"Hour {hour:02d}: Solar saves {(home_consumption * price):.2f} SEK + export {(max(0, solar_production - home_consumption - 2.5) * 0.08):.2f} SEK → Stored solar discharge 19:00-21:00 at 2.59 SEK/kWh (+{(min(2.5, solar_production - home_consumption) * 2.59):.2f} SEK) → Total value: +{(home_consumption * price + max(0, solar_production - home_consumption - 2.5) * 0.08 + min(2.5, solar_production - home_consumption) * 2.59):.2f} SEK",
                         "net_strategy_value": home_consumption * price + max(0, solar_production - home_consumption - 2.5) * 0.08 + min(2.5, solar_production - home_consumption) * 2.59,
-                        "risk_factors": ["Evening peak prices", "Battery SOC management", "Home consumption accuracy"],
                         "electricity_price": price,
                         "is_current_hour": is_current,
                         "is_actual": is_actual
@@ -624,7 +620,6 @@ async def get_decision_intelligence_mock():
                         },
                         "economic_chain": f"Hour {hour:02d}: Solar saves {(solar_production * price):.2f} SEK, Grid costs {((home_consumption - solar_production) * price):.2f} SEK → Net: {(solar_production * price - (home_consumption - solar_production) * price):.2f} SEK",
                         "net_strategy_value": solar_production * price - (home_consumption - solar_production) * price,
-                        "risk_factors": ["Previously stored battery energy availability"],
                         "electricity_price": price,
                         "is_current_hour": is_current,
                         "is_actual": is_actual
@@ -654,7 +649,6 @@ async def get_decision_intelligence_mock():
                     },
                     "economic_chain": f"Hour {hour:02d}: Avoid grid at {price:.2f} SEK/kWh (+{(home_consumption * price):.2f} SEK saved) → Reserve charge for 20:00-21:00 peak at 2.73 SEK/kWh (+{(3.0 * 2.73):.2f} SEK potential)",
                     "net_strategy_value": home_consumption * price + 3.0 * 2.73,
-                    "risk_factors": ["Peak price realization", "Battery SOC sufficient"],
                     "electricity_price": price,
                     "is_current_hour": is_current,
                     "is_actual": is_actual
@@ -684,7 +678,6 @@ async def get_decision_intelligence_mock():
                     },
                     "economic_chain": f"Hour {hour:02d}: Battery arbitrage execution (+{(home_consumption * price + 0.8 * 0.08):.2f} SEK) ← Sourced from ultra-cheap night charging at 0.01 SEK/kWh → Net arbitrage profit: +{((home_consumption + 0.8) * price - (home_consumption + 0.8) * 0.01):.2f} SEK",
                     "net_strategy_value": (home_consumption + 0.8) * price - (home_consumption + 0.8) * 0.01,
-                    "risk_factors": ["Grid export capacity limits", "Battery discharge rate limits"],
                     "electricity_price": price,
                     "is_current_hour": is_current,
                     "is_actual": is_actual
@@ -713,7 +706,6 @@ async def get_decision_intelligence_mock():
                     },
                     "economic_chain": f"Hour {hour:02d}: Continue discharge at {price:.2f} SEK/kWh (+{(home_consumption * price):.2f} SEK) ← Sourced from 0.01 SEK/kWh charging → Arbitrage profit: +{(home_consumption * (price - 0.01)):.2f} SEK",
                     "net_strategy_value": home_consumption * (price - 0.01),
-                    "risk_factors": ["Next day price forecast", "Battery SOC management"],
                     "electricity_price": price,
                     "is_current_hour": is_current,
                     "is_actual": is_actual

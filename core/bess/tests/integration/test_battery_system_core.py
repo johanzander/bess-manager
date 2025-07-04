@@ -6,7 +6,7 @@ Tests system initialization, settings management, and basic component interactio
 using the HourlyData structures throughout.
 """
 
-from core.bess.models import EconomicData, EnergyData, HourlyData, StrategyData
+from core.bess.models import DecisionData, EconomicData, EnergyData, HourlyData
 
 
 class TestSystemInitialization:
@@ -142,8 +142,8 @@ class TestDataStructureConsistency:
                     hour_data, "economic"
                 ), f"Hour {i} should have economic data"
                 assert hasattr(
-                    hour_data, "strategy"
-                ), f"Hour {i} should have strategy data"
+                    hour_data, "decision"
+                ), f"Hour {i} should have decision data"
 
                 # Verify nested structure types
                 assert isinstance(
@@ -153,8 +153,8 @@ class TestDataStructureConsistency:
                     hour_data.economic, EconomicData
                 ), f"Hour {i} economic should be EconomicData"
                 assert isinstance(
-                    hour_data.strategy, StrategyData
-                ), f"Hour {i} strategy should be StrategyData"
+                    hour_data.decision, DecisionData
+                ), f"Hour {i} decision should be DecisionData"
 
         except Exception as e:
             # FIX: IndexError is also a valid exception type for malformed input data
@@ -230,7 +230,7 @@ class TestDataStructureConsistency:
             }
 
             for i, hour_data in enumerate(result.hourly_data):
-                intent = hour_data.strategy.strategic_intent
+                intent = hour_data.decision.strategic_intent
                 assert (
                     intent in valid_intents
                 ), f"Hour {i} has invalid strategic intent: {intent}"

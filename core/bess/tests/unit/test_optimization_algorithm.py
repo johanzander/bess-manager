@@ -8,7 +8,7 @@ but don't test specific optimization results.
 """
 
 from core.bess.dp_battery_algorithm import optimize_battery_schedule
-from core.bess.models import EconomicSummary, NewHourlyData
+from core.bess.models import EconomicSummary, HourlyData
 from core.bess.settings import BatterySettings
 
 # Create a BatterySettings instance for testing
@@ -51,9 +51,9 @@ def test_battery_simulation_results(
         economic_summary, EconomicSummary
     )  # Should be EconomicSummary dataclass
 
-    # Test that each hourly data object is NewHourlyData with proper structure
+    # Test that each hourly data object is HourlyData with proper structure
     for hour_data in hourly_data_list:
-        assert isinstance(hour_data, NewHourlyData)
+        assert isinstance(hour_data, HourlyData)
 
         # Test core properties (these use the property accessors)
         assert hasattr(hour_data, "hour")
@@ -138,7 +138,7 @@ def test_battery_constraints_respected():
         battery_settings=battery_settings,
     )
 
-    # Test constraints using new NewHourlyData structure
+    # Test constraints using new HourlyData structure
     for hour_data in results.hourly_data:
         # SOC should stay within bounds (convert from % to kWh for comparison)
         soc_start_kwh = (
@@ -241,7 +241,7 @@ def SKIP_test_strategic_intent_assignment():  # TODO: Fix this test
 
 def test_energy_data_structure():
     """
-    Test that energy data structure is properly populated in NewHourlyData.
+    Test that energy data structure is properly populated in HourlyData.
     """
     buy_price = [0.5] * 24
     sell_price = [0.3] * 24
@@ -278,7 +278,7 @@ def test_energy_data_structure():
 
 def test_economic_data_structure():
     """
-    Test that economic data structure is properly populated in NewHourlyData.
+    Test that economic data structure is properly populated in HourlyData.
     """
     buy_price = [0.5] * 24
     sell_price = [0.3] * 24
@@ -312,7 +312,7 @@ def test_economic_data_structure():
 
 def test_strategy_data_structure():
     """
-    Test that strategy data structure is properly populated in NewHourlyData.
+    Test that strategy data structure is properly populated in HourlyData.
     """
     buy_price = [0.5] * 24
     sell_price = [0.3] * 24

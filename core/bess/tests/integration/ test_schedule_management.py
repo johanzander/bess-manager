@@ -3,17 +3,17 @@
 Schedule creation and management integration tests.
 
 Tests schedule creation, updates, strategic intent classification, and
-schedule persistence using NewHourlyData structures.
+schedule persistence using HourlyData structures.
 """
 
-from core.bess.models import NewHourlyData
+from core.bess.models import HourlyData
 
 
 class TestScheduleCreation:
     """Test schedule creation with new data structures."""
 
     def test_create_tomorrow_schedule(self, battery_system):
-        """Test creating tomorrow's schedule returns NewHourlyData."""
+        """Test creating tomorrow's schedule returns HourlyData."""
         success = battery_system.update_battery_schedule(0, prepare_next_day=True)
         assert success, "Should create tomorrow's schedule"
 
@@ -25,11 +25,11 @@ class TestScheduleCreation:
         assert hasattr(optimization_result, "hourly_data"), "Should have hourly_data"
         assert len(optimization_result.hourly_data) == 24, "Should have 24 hours"
 
-        # Verify hourly_data contains NewHourlyData objects
+        # Verify hourly_data contains HourlyData objects
         for i, hour_data in enumerate(optimization_result.hourly_data):
             assert isinstance(
-                hour_data, NewHourlyData
-            ), f"Hour {i} should be NewHourlyData"
+                hour_data, HourlyData
+            ), f"Hour {i} should be HourlyData"
             assert hour_data.hour == i, f"Hour {i} should have correct hour value"
             assert hasattr(hour_data, "energy"), f"Hour {i} should have energy data"
             assert hasattr(hour_data, "economic"), f"Hour {i} should have economic data"
@@ -245,19 +245,6 @@ class TestScheduleUpdates:
                 latest_schedule.optimization_hour == hour
             ), f"Should track optimization hour {hour}"
 
-    def test_schedule_summary_info(self, battery_system):
-        """Test schedule summary information generation."""
-        success = battery_system.update_battery_schedule(0, prepare_next_day=True)
-        assert success, "Should create schedule"
-
-        latest_schedule = battery_system.schedule_store.get_latest_schedule()
-        summary_info = latest_schedule.get_summary_info()
-
-        assert isinstance(summary_info, str), "Summary should be a string"
-        assert "00:00-23:00" in summary_info, "Should include time range"
-        assert "SEK" in summary_info, "Should include currency"
-        assert "tomorrow" in summary_info.lower(), "Should indicate scenario"
-
 
 class TestScheduleEconomics:
     """Test economic calculations in schedules."""
@@ -381,21 +368,4 @@ class TestScheduleValidation:
                 0 <= energy.battery_soc_end <= 100
             ), f"Hour {i} end SOC should be 0-100%"
 
-    def test_schedule_store_limits(self, battery_system):
-        """Test schedule store handles storage limits appropriately."""
-        initial_count = battery_system.schedule_store.get_schedule_count()
 
-        # Create many schedules
-        for i in range(10):
-            success = battery_system.update_battery_schedule(0, prepare_next_day=True)
-            assert success, f"Should create schedule {i}"
-
-        final_count = battery_system.schedule_store.get_schedule_count()
-        assert final_count == initial_count + 10, "Should store all schedules"
-
-        # Test clearing
-        cleared_count = battery_system.schedule_store.clear_all_schedules()
-        assert cleared_count > 0, "Should clear some schedules"
-
-        empty_count = battery_system.schedule_store.get_schedule_count()
-        assert empty_count == 0, "Should have no schedules after clearing"

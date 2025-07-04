@@ -71,7 +71,7 @@ from core.bess.models import (
     EconomicData,
     EconomicSummary,
     EnergyData,
-    NewHourlyData,
+    HourlyData,
     OptimizationResult,
     StrategyData,
 )
@@ -104,12 +104,12 @@ class CostScenarios:
 
 
 def calculate_hourly_costs(
-    hour_data: NewHourlyData,
+    hour_data: HourlyData,
     battery_cycle_cost_per_kwh: float = 0.0,
     charge_efficiency: float = 1.0,
     discharge_efficiency: float = 1.0,
 ) -> CostScenarios:
-    """Calculate cost scenarios - updated for NewHourlyData structure."""
+    """Calculate cost scenarios."""
     
     # Base case: Grid-only (no solar, no battery)
     base_case_cost = hour_data.energy.home_consumed * hour_data.economic.buy_price
@@ -291,8 +291,8 @@ def _calculate_reward(
     sell_price: list[float] | None = None,
     cost_basis: float = 0.0,
     future_prices: list[float] | None = None,
-) -> tuple[float, float, NewHourlyData]:
-    """Calculate reward with NewHourlyData and proper SOE->SOC conversion."""
+) -> tuple[float, float, HourlyData]:
+    """Calculate reward with HourlyData and proper SOE->SOC conversion."""
     
     # Get prices for this hour
     current_buy_price = buy_price[hour] if buy_price and hour < len(buy_price) else 0.0
@@ -356,7 +356,7 @@ def _calculate_reward(
                 battery_action=power,
                 cost_basis=cost_basis
             )
-            hour_data = NewHourlyData(
+            hour_data = HourlyData(
                 hour=hour,
                 energy=energy_data,
                 timestamp=datetime.now().replace(hour=hour, minute=0, second=0, microsecond=0),
@@ -407,7 +407,7 @@ def _calculate_reward(
         cost_basis=new_cost_basis
     )
 
-    new_hourly_data = NewHourlyData(
+    new_hourly_data = HourlyData(
         hour=hour,
         energy=energy_data,
         timestamp=datetime.now().replace(hour=hour, minute=0, second=0, microsecond=0),
@@ -569,7 +569,7 @@ def _simulate_battery(
     C: np.ndarray | None = None,
     initial_cost_basis: float = 0.0,
     intents: list[list[StrategicIntent]] | None = None,
-) -> list[NewHourlyData]:
+) -> list[HourlyData]:
     """Simulate battery behavior - FIXED for SOE/SOC conversion."""
     if initial_soc is None:
         initial_soe = battery_settings.min_soc_kwh
@@ -600,7 +600,7 @@ def _simulate_battery(
         # Calculate next SOE
         next_soe = _state_transition(current_soe, action, battery_settings)
         
-        # Get NewHourlyData with proper SOE->SOC conversion
+        # Get HourlyData with proper SOE->SOC conversion
         reward, new_cost_basis, new_hourly_data = _calculate_reward(
             power=action,
             soe=current_soe,
@@ -624,7 +624,7 @@ def _simulate_battery(
             new_hourly_data.strategy.strategic_intent,
         )
 
-    logger.debug("Simulation complete with %d NewHourlyData objects", len(simulation_results))
+    logger.debug("Simulation complete with %d HourlyData objects", len(simulation_results))
     return simulation_results
 
 def optimize_battery_schedule(
@@ -678,8 +678,8 @@ def optimize_battery_schedule(
         initial_cost_basis=initial_cost_basis,
     )
 
-    # Step 2: Simulate battery behavior - get list of NewHourlyData objects (one per hour)
-    logger.debug("Simulating battery behavior with NewHourlyData objects...")
+    # Step 2: Simulate battery behavior - get list of HourlyData objects (one per hour)
+    logger.debug("Simulating battery behavior with HourlyData objects...")
     hourly_results = _simulate_battery(
         horizon=horizon,
         buy_price=buy_price,

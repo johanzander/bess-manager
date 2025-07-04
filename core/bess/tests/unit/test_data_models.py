@@ -1,12 +1,12 @@
 """
 Unit tests for new hierarchical data models.
 
-Tests the EnergyData, EconomicData, StrategyData, and NewHourlyData structures
+Tests the EnergyData, EconomicData, StrategyData, and HourlyData structures
 """
 
 from datetime import datetime
 
-from core.bess.models import EconomicData, EnergyData, NewHourlyData, StrategyData
+from core.bess.models import EconomicData, EnergyData, HourlyData, StrategyData
 
 
 class TestEnergyData:
@@ -258,11 +258,11 @@ class TestStrategyData:
         assert strategy.risk_factors == []
 
 
-class TestNewHourlyData:
-    """Test NewHourlyData composition structure."""
+class TestHourlyData:
+    """Test HourlyData composition structure."""
 
     def test_creation_from_optimization(self):
-        """Test creating NewHourlyData from optimization results."""
+        """Test creating HourlyData from optimization results."""
         energy = EnergyData(
             solar_generated=5.0,
             home_consumed=3.0,
@@ -285,7 +285,7 @@ class TestNewHourlyData:
         )
 
         timestamp = datetime(2025, 6, 28, 14, 0, 0)
-        hourly = NewHourlyData.from_optimization(
+        hourly = HourlyData.from_optimization(
             hour=14,
             energy_data=energy,
             economic_data=economic,
@@ -304,7 +304,7 @@ class TestNewHourlyData:
         assert hourly.strategy is strategy
 
     def test_creation_from_energy_data(self):
-        """Test creating NewHourlyData from sensor energy data."""
+        """Test creating HourlyData from sensor energy data."""
         energy = EnergyData(
             solar_generated=4.0,
             home_consumed=3.5,
@@ -317,7 +317,7 @@ class TestNewHourlyData:
         )
 
         timestamp = datetime(2025, 6, 28, 10, 0, 0)
-        hourly = NewHourlyData.from_energy_data(
+        hourly = HourlyData.from_energy_data(
             hour=10, energy_data=energy, data_source="actual", timestamp=timestamp
         )
 
@@ -353,7 +353,7 @@ class TestNewHourlyData:
             strategic_intent="LOAD_SUPPORT", battery_action=-2.0  # Discharging
         )
 
-        hourly = NewHourlyData.from_optimization(
+        hourly = HourlyData.from_optimization(
             hour=18, energy_data=energy, economic_data=economic, strategy_data=strategy
         )
 
@@ -387,7 +387,7 @@ class TestNewHourlyData:
             battery_soc_end=43.0,
         )
 
-        hourly = NewHourlyData.from_energy_data(hour=14, energy_data=energy)
+        hourly = HourlyData.from_energy_data(hour=14, energy_data=energy)
         errors = hourly.validate_data()
 
         assert len(errors) == 0, f"Should have no validation errors: {errors}"
@@ -405,7 +405,7 @@ class TestNewHourlyData:
             battery_soc_end=43.0,
         )
 
-        hourly = NewHourlyData.from_energy_data(hour=25, energy_data=energy)
+        hourly = HourlyData.from_energy_data(hour=25, energy_data=energy)
         errors = hourly.validate_data()
 
         assert len(errors) > 0
@@ -424,7 +424,7 @@ class TestNewHourlyData:
             battery_soc_end=43.0,
         )
 
-        hourly = NewHourlyData.from_energy_data(hour=14, energy_data=energy)
+        hourly = HourlyData.from_energy_data(hour=14, energy_data=energy)
         errors = hourly.validate_data()
 
         assert len(errors) > 0
@@ -443,7 +443,7 @@ class TestNewHourlyData:
             battery_soc_end=50.0,
         )
 
-        hourly = NewHourlyData.from_energy_data(hour=14, energy_data=energy)
+        hourly = HourlyData.from_energy_data(hour=14, energy_data=energy)
         errors = hourly.validate_data()
 
         assert len(errors) > 0
@@ -463,7 +463,7 @@ class TestNewHourlyData:
         )
 
         before = datetime.now()
-        hourly = NewHourlyData.from_energy_data(hour=12, energy_data=energy)
+        hourly = HourlyData.from_energy_data(hour=12, energy_data=energy)
         after = datetime.now()
 
         assert hourly.timestamp is not None

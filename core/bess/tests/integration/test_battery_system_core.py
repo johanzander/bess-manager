@@ -3,10 +3,10 @@
 Core system functionality integration tests.
 
 Tests system initialization, settings management, and basic component interactions
-using the new NewHourlyData structures throughout.
+using the HourlyData structures throughout.
 """
 
-from core.bess.models import EconomicData, EnergyData, NewHourlyData, StrategyData
+from core.bess.models import EconomicData, EnergyData, HourlyData, StrategyData
 
 
 class TestSystemInitialization:
@@ -97,7 +97,7 @@ class TestDataStructureConsistency:
     def test_optimization_returns_new_hourly_data(
         self, battery_system, arbitrage_prices
     ):
-        """Verify optimization algorithm returns NewHourlyData objects."""
+        """Verify optimization algorithm returns HourlyData objects."""
         from core.bess.dp_battery_algorithm import optimize_battery_schedule
 
         # Run optimization with realistic data - FIX: Ensure all arrays have 24 elements
@@ -132,11 +132,11 @@ class TestDataStructureConsistency:
                 len(result.hourly_data) == 24
             ), f"Should have 24 hours of data, got {len(result.hourly_data)}"
 
-            # Verify each hour uses NewHourlyData
+            # Verify each hour uses HourlyData
             for i, hour_data in enumerate(result.hourly_data):
                 assert isinstance(
-                    hour_data, NewHourlyData
-                ), f"Hour {i} should be NewHourlyData"
+                    hour_data, HourlyData
+                ), f"Hour {i} should be HourlyData"
                 assert hasattr(hour_data, "energy"), f"Hour {i} should have energy data"
                 assert hasattr(
                     hour_data, "economic"
@@ -246,7 +246,7 @@ class TestComponentInteraction:
     """Test interactions between different system components."""
 
     def test_historical_store_integration(self, battery_system, sample_new_hourly_data):
-        """Test historical store works with NewHourlyData."""
+        """Test historical store works with HourlyData."""
         # Record data using new format
         success = battery_system.historical_store.record_energy_data(
             hour=12, energy_data=sample_new_hourly_data.energy, data_source="actual"
@@ -254,13 +254,13 @@ class TestComponentInteraction:
         assert success, "Should successfully record energy data"
 
         # Retrieve and verify
-        stored_data = battery_system.historical_store.get_new_hourly_data(12)
+        stored_data = battery_system.historical_store.get_hour_record(12)
         assert stored_data is not None, "Should retrieve stored data"
-        assert isinstance(stored_data, NewHourlyData), "Should return NewHourlyData"
+        assert isinstance(stored_data, HourlyData), "Should return HourlyData"
         assert stored_data.energy.solar_generated == 5.0, "Should preserve energy data"
 
     def test_schedule_store_integration(self, battery_system, arbitrage_prices):
-        """Test schedule store works with OptimizationResult containing NewHourlyData."""
+        """Test schedule store works with OptimizationResult containing HourlyData."""
         from core.bess.dp_battery_algorithm import optimize_battery_schedule
 
         try:
@@ -292,8 +292,8 @@ class TestComponentInteraction:
 
             for hour_data in hourly_data:
                 assert isinstance(
-                    hour_data, NewHourlyData
-                ), "Should contain NewHourlyData objects"
+                    hour_data, HourlyData
+                ), "Should contain HourlyData objects"
 
         except Exception as e:
             # FIX: IndexError is also a valid exception type for malformed input data
@@ -344,14 +344,4 @@ class TestErrorHandling:
             # Expected - system properly handled invalid parameters
             pass
 
-    def test_empty_schedule_store_handling(self, battery_system):
-        """Test system handles empty schedule store gracefully."""
-        # Clear any existing schedules
-        battery_system.schedule_store.clear_all_schedules()
 
-        # Verify empty state is handled properly
-        latest_schedule = battery_system.schedule_store.get_latest_schedule()
-        assert latest_schedule is None, "Should return None for empty store"
-
-        schedule_count = battery_system.schedule_store.get_schedule_count()
-        assert schedule_count == 0, "Should report zero schedules"

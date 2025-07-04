@@ -17,7 +17,7 @@ from core.bess.dp_battery_algorithm import (
     optimize_battery_schedule,
     print_optimization_results,
 )
-from core.bess.models import EconomicSummary, NewHourlyData
+from core.bess.models import EconomicSummary, HourlyData
 from core.bess.price_manager import MockSource, PriceManager
 from core.bess.settings import BatterySettings
 
@@ -104,7 +104,7 @@ def test_all_scenarios(scenario_name):
 
     # Validate hourly data structure
     for i, hour_data in enumerate(result.hourly_data):
-        assert isinstance(hour_data, NewHourlyData)
+        assert isinstance(hour_data, HourlyData)
         assert hour_data.energy is not None
         assert hour_data.economic is not None
         assert hour_data.strategy is not None

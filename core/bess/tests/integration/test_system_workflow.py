@@ -3,14 +3,14 @@
 End-to-end system workflow integration tests.
 
 Tests complete workflows from external data input through optimization
-to hardware control using the new NewHourlyData structures throughout.
+to hardware control using the new HourlyData structures throughout.
 
 UPDATED: All tests now pass explicit current_hour parameter for deterministic testing.
 """
 
 from datetime import datetime, timedelta
 
-from core.bess.models import EnergyData, NewHourlyData
+from core.bess.models import EnergyData, HourlyData
 
 
 def populate_historical_data(
@@ -129,9 +129,9 @@ class TestCompleteWorkflows:
         assert success, "Should record sensor data"
 
         # Verify data can be retrieved
-        stored_data = battery_system.historical_store.get_new_hourly_data(hour)
+        stored_data = battery_system.historical_store.get_hour_record(hour)
         assert stored_data is not None, "Should retrieve stored data"
-        assert isinstance(stored_data, NewHourlyData), "Should return NewHourlyData"
+        assert isinstance(stored_data, HourlyData), "Should return HourlyData"
         assert stored_data.data_source == "actual", "Should preserve data source"
 
         # Verify data integrity
@@ -181,11 +181,11 @@ class TestCompleteWorkflows:
             hour_data = hourly_data[i]
             print(f"DEBUG: hourly_data[{i}].hour = {hour_data.hour}")
 
-        # Verify all hours have NewHourlyData structure
+        # Verify all hours have HourlyData structure
         for i, hour_data in enumerate(hourly_data):
             assert isinstance(
-                hour_data, NewHourlyData
-            ), f"Hour {i} should be NewHourlyData"
+                hour_data, HourlyData
+            ), f"Hour {i} should be HourlyData"
 
 
 #           expected_hour = current_hour + i
@@ -196,7 +196,7 @@ class TestDailyViewGeneration:
     """Test daily view generation and data combination."""
 
     def test_daily_view_creation(self, battery_system):
-        """Test daily view generation uses NewHourlyData throughout."""
+        """Test daily view generation uses HourlyData throughout."""
         current_hour = 12
 
         # POPULATE HISTORICAL DATA for past hours
@@ -229,8 +229,8 @@ class TestDailyViewGeneration:
         # Verify hourly data structure
         for i, hour_data in enumerate(daily_view.hourly_data):
             assert isinstance(
-                hour_data, NewHourlyData
-            ), f"Hour {i} should be NewHourlyData"
+                hour_data, HourlyData
+            ), f"Hour {i} should be HourlyData"
             assert hour_data.hour == i, f"Hour {i} should have correct hour number"
 
             if i < current_hour:
@@ -419,11 +419,11 @@ class TestDataFlowValidation:
         ):
             #            assert sched_hour.hour == view_hour.hour, f"Predicted hour {i} should be consistent"
             assert isinstance(
-                sched_hour, NewHourlyData
-            ), f"Schedule hour {i} should be NewHourlyData"
+                sched_hour, HourlyData
+            ), f"Schedule hour {i} should be HourlyData"
             assert isinstance(
-                view_hour, NewHourlyData
-            ), f"View hour {i} should be NewHourlyData"
+                view_hour, HourlyData
+            ), f"View hour {i} should be HourlyData"
 
     def test_strategic_intent_propagation(self, battery_system_with_arbitrage):
         """Test that strategic intents propagate correctly through the system."""

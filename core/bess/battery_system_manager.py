@@ -494,7 +494,7 @@ class BatterySystemManager:
             logger.info(f"Recorded energy data for hour {prev_hour}")
 
             # Verify storage
-            stored_data = self.historical_store.get_new_hourly_data(prev_hour)
+            stored_data = self.historical_store.get_hour_record(prev_hour)
             if stored_data:
                 logger.info(
                     f"Verified: Hour {prev_hour} stored with intent {stored_data.strategy.strategic_intent}"
@@ -583,7 +583,7 @@ class BatterySystemManager:
             for h in range(24):
                 if h in completed_hours and h < hour:
                     # Use actual data for past hours
-                    event = self.historical_store.get_hour_event(h)
+                    event = self.historical_store.get_hour_record(h)
                     if event:
                         consumption_data[h] = event.home_consumed
                         solar_data[h] = event.solar_generated
@@ -800,7 +800,7 @@ class BatterySystemManager:
                 current_hour = datetime.now().hour
                 for hour in range(min(current_hour, 24)):
                     if hour < len(full_day_strategic_intents):
-                        event = self.historical_store.get_hour_event(hour)
+                        event = self.historical_store.get_hour_record(hour)
                         if event and hasattr(event, "strategic_intent"):
                             full_day_strategic_intents[hour] = event.strategic_intent
                             logger.debug(
@@ -1175,7 +1175,7 @@ class BatterySystemManager:
             if hour >= current_hour:
                 continue
 
-            event = self.historical_store.get_hour_event(hour)
+            event = self.historical_store.get_hour_record(hour)
             if not event:
                 continue
 
@@ -1296,7 +1296,7 @@ class BatterySystemManager:
         events = []
 
         for hour in completed_hours:
-            hour_data = self.historical_store.get_hour_event(hour)
+            hour_data = self.historical_store.get_hour_record(hour)
             if hour_data:
                 events.append(
                     {
@@ -1594,7 +1594,7 @@ class BatterySystemManager:
         }
 
         for hour in sorted(completed_hours):
-            hour_data = self.historical_store.get_hour_event(hour)
+            hour_data = self.historical_store.get_hour_record(hour)
             if hour_data:
                 hourly_item = {
                     "hour": hour,
@@ -1636,7 +1636,7 @@ class BatterySystemManager:
         for hour in range(start_hour, end_hour + 1):
             try:
                 # Get stored HourlyData from historical store
-                hour_data = self.historical_store.get_hour_event(hour)
+                hour_data = self.historical_store.get_hour_record(hour)
 
                 if hour_data:
                     # Return HourlyData directly - no conversion needed
@@ -1660,7 +1660,7 @@ class BatterySystemManager:
         for hour in range(24):
             if hour < current_hour:
                 # Historical: Get stored HourlyData
-                hour_data = self.historical_store.get_hour_event(hour)
+                hour_data = self.historical_store.get_hour_record(hour)
                 if hour_data:
                     decisions.append(hour_data)
                 else:
@@ -1791,7 +1791,7 @@ class BatterySystemManager:
             ]
 
         for hour in sorted(completed_hours):
-            hour_data = self.historical_store.get_hour_event(hour)
+            hour_data = self.historical_store.get_hour_record(hour)
             if not hour_data:
                 continue
 

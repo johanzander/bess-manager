@@ -14,7 +14,7 @@ from typing import Any
 __all__ = [
     "EconomicData",
     "EnergyData",
-    "NewHourlyData",
+    "HourlyData",
     "StrategyData",
 ]
 
@@ -180,28 +180,6 @@ class EnergyData:
             battery_to_grid=data.get("battery_to_grid", 0.0),
         )
 
-    def to_dict(self) -> dict[str, Any]:
-        """Convert EnergyData to dictionary."""
-        return {
-            "solar_generated": self.solar_generated,
-            "home_consumed": self.home_consumed,
-            "grid_imported": self.grid_imported,
-            "grid_exported": self.grid_exported,
-            "battery_charged": self.battery_charged,
-            "battery_discharged": self.battery_discharged,
-            "battery_soc_start": self.battery_soc_start,
-            "battery_soc_end": self.battery_soc_end,
-            "battery_net_change": self.battery_net_change,
-            "soc_change_percent": self.soc_change_percent,
-            "solar_to_home": self.solar_to_home,
-            "solar_to_battery": self.solar_to_battery,
-            "solar_to_grid": self.solar_to_grid,
-            "grid_to_home": self.grid_to_home,
-            "grid_to_battery": self.grid_to_battery,
-            "battery_to_home": self.battery_to_home,
-            "battery_to_grid": self.battery_to_grid,
-        }
-
 
 @dataclass
 class EconomicData:
@@ -260,7 +238,7 @@ class StrategyData:
 
 
 @dataclass
-class NewHourlyData:
+class HourlyData:
     """
     Complete hourly data with context - when/where this data applies.
     Composes pure energy data with economic analysis and strategic decisions.
@@ -350,8 +328,8 @@ class NewHourlyData:
         energy_data: EnergyData,
         data_source: str = "actual",
         timestamp: datetime | None = None,
-    ) -> "NewHourlyData":
-        """Create NewHourlyData from pure energy data (sensor input)."""
+    ) -> "HourlyData":
+        """Create HourlyData from pure energy data (sensor input)."""
         return cls(
             hour=hour,
             energy=energy_data,
@@ -367,8 +345,8 @@ class NewHourlyData:
         economic_data: EconomicData,
         strategy_data: StrategyData,
         timestamp: datetime | None = None,
-    ) -> "NewHourlyData":
-        """Create complete NewHourlyData from optimization algorithm."""
+    ) -> "HourlyData":
+        """Create complete HourlyData from optimization algorithm."""
         return cls(
             hour=hour,
             energy=energy_data,
@@ -377,44 +355,6 @@ class NewHourlyData:
             economic=economic_data,
             strategy=strategy_data,
         )
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert NewHourlyData to dictionary for API compatibility."""
-        return {
-            "hour": self.hour,
-            "timestamp": self.timestamp.isoformat() if self.timestamp else None,
-            "data_source": self.data_source,
-            # Energy fields
-            "solar_generated": self.energy.solar_generated,
-            "home_consumed": self.energy.home_consumed,
-            "grid_imported": self.energy.grid_imported,
-            "grid_exported": self.energy.grid_exported,
-            "battery_charged": self.energy.battery_charged,
-            "battery_discharged": self.energy.battery_discharged,
-            "battery_soc_start": self.energy.battery_soc_start,
-            "battery_soc_end": self.energy.battery_soc_end,
-            "battery_net_change": self.energy.battery_net_change,
-            # Detailed flows
-            "solar_to_home": self.energy.solar_to_home,
-            "solar_to_battery": self.energy.solar_to_battery,
-            "solar_to_grid": self.energy.solar_to_grid,
-            "grid_to_home": self.energy.grid_to_home,
-            "grid_to_battery": self.energy.grid_to_battery,
-            "battery_to_home": self.energy.battery_to_home,
-            "battery_to_grid": self.energy.battery_to_grid,
-            # Economic fields
-            "buy_price": self.economic.buy_price,
-            "sell_price": self.economic.sell_price,
-            "hourly_cost": self.economic.hourly_cost,
-            "hourly_savings": self.economic.hourly_savings,
-            "battery_cycle_cost": self.economic.battery_cycle_cost,
-            # Strategy fields
-            "strategic_intent": self.strategy.strategic_intent,
-            "battery_action": self.strategy.battery_action,
-            "cost_basis": self.strategy.cost_basis,
-            "pattern_name": self.strategy.pattern_name,
-            "description": self.strategy.description,
-        }
 
     def validate_data(self) -> list[str]:
         """Validate all data components and return any errors."""
@@ -443,5 +383,5 @@ class OptimizationResult:
     """Result structure returned by optimize_battery_schedule."""
 
     input_data: dict
-    hourly_data: list[NewHourlyData]
+    hourly_data: list[HourlyData]
     economic_summary: EconomicSummary

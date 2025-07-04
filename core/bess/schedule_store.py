@@ -1,17 +1,14 @@
 """
 ScheduleStore - Storage for all optimization results throughout the day.
 
-CLEAN ARCHITECTURE: Now works directly with OptimizationResult objects.
-No conversions needed - unified data flow throughout the system.
 """
 
 import logging
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Any
 
 from core.bess.dp_battery_algorithm import OptimizationResult
-from core.bess.models import NewHourlyData
+from core.bess.models import HourlyData
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +17,6 @@ logger = logging.getLogger(__name__)
 class StoredSchedule:
     """Container for a stored optimization result with metadata.
 
-    UPDATED: Can store either OptimizationResult (new) or dict (legacy).
     """
 
     timestamp: datetime
@@ -38,7 +34,7 @@ class StoredSchedule:
         else:
             return (self.optimization_hour, 23)  # Partial day optimization
 
-    def get_hourly_data(self) -> list[NewHourlyData]:
+    def get_hourly_data(self) -> list[HourlyData]:
         """Get unified hourly data directly."""
         return self.optimization_result.hourly_data
 
@@ -46,44 +42,10 @@ class StoredSchedule:
         """Get total savings from optimization results."""
         return self.optimization_result.economic_summary.base_to_battery_solar_savings
 
-    def get_hourly_actions(self) -> list[float]:
-        """Get battery actions from unified data.
-
-        Returns:
-            list[float]: Battery actions for optimized hours
-        """
-        hourly_data = self.get_hourly_data()
-        return [h.battery_action or 0.0 for h in hourly_data]
-
-    def get_hourly_soe(self) -> list[float]:
-        """Get state of energy values from unified data.
-
-        Returns:
-            list[float]: SOE values for optimized hours
-        """
-        hourly_data = self.get_hourly_data()
-        return [h.battery_soc_end for h in hourly_data]
-
-    def get_summary_info(self) -> str:
-        """Get a summary string for logging.
-
-        Returns:
-            str: Human-readable summary of this schedule
-        """
-        start_hour, end_hour = self.get_optimization_range()
-        savings = self.get_total_savings()
-
-        return (
-            f"{self.created_for_scenario} schedule from {start_hour:02d}:00-{end_hour:02d}:00, "
-            f"savings: {savings:.2f} SEK"
-        )
-
 
 class ScheduleStore:
     """Storage for all optimization results throughout the day.
 
-    CLEAN ARCHITECTURE: Now works directly with OptimizationResult objects.
-    No conversions needed - unified data flow throughout the system.
     """
 
     def __init__(self):
@@ -130,8 +92,6 @@ class ScheduleStore:
         # Add to our list
         self._schedules.append(stored_schedule)
         self._current_date = stored_schedule.timestamp.date()
-
-        logger.info("Stored new schedule: %s", stored_schedule.get_summary_info())
 
         return stored_schedule
 
@@ -191,77 +151,4 @@ class ScheduleStore:
         """
         return len(self._schedules)
 
-    def clear_old_schedules(self, days_to_keep: int = 7) -> int:
-        """Clear schedules older than specified days.
 
-        Args:
-            days_to_keep: Number of days to keep (default: 7)
-
-        Returns:
-            int: Number of schedules cleared
-        """
-        cutoff_date = datetime.now().date()
-        cutoff_date = cutoff_date.replace(day=cutoff_date.day - days_to_keep)
-
-        original_count = len(self._schedules)
-        self._schedules = [
-            s for s in self._schedules if s.timestamp.date() >= cutoff_date
-        ]
-
-        cleared_count = original_count - len(self._schedules)
-        if cleared_count > 0:
-            logger.info(
-                f"Cleared {cleared_count} old schedules (keeping {days_to_keep} days)"
-            )
-
-        return cleared_count
-
-    def clear_all_schedules(self) -> int:
-        """Clear all stored schedules.
-
-        Returns:
-            int: Number of schedules cleared
-        """
-        count = len(self._schedules)
-        self._schedules.clear()
-        self._current_date = None
-
-        logger.info(f"Cleared all {count} schedules")
-        return count
-
-    def get_current_date(self) -> date | None:
-        """Get the current date for stored schedules.
-
-        Returns:
-            date | None: Current date, or None if no schedules stored
-        """
-        return self._current_date
-
-    def get_summary_stats(self) -> dict[str, Any]:
-        """Get summary statistics for stored schedules.
-
-        Returns:
-            dict[str, Any]: Summary statistics
-        """
-        if not self._schedules:
-            return {}
-
-        total_schedules = len(self._schedules)
-        scenarios = [s.created_for_scenario for s in self._schedules]
-        scenario_counts = {
-            scenario: scenarios.count(scenario)
-            for scenario in ["tomorrow", "hourly", "restart"]
-        }
-
-        latest_schedule = self.get_latest_schedule()
-        total_savings = sum(s.get_total_savings() for s in self._schedules)
-
-        return {
-            "total_schedules": total_schedules,
-            "scenario_counts": scenario_counts,
-            "latest_schedule_time": (
-                latest_schedule.timestamp if latest_schedule else None
-            ),
-            "total_savings_all_schedules": total_savings,
-            "current_date": self._current_date,
-        }

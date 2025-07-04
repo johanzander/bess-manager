@@ -106,10 +106,8 @@ class HourlyEvent:
 **Key Methods:**
 
 ```python
-def record_hour_completion(event: HourlyEvent) -> None
 def get_completed_hours() -> List[int]
 def get_hour_event(hour: int) -> Optional[HourlyEvent]
-def get_latest_battery_state() -> Tuple[float, float]
 ```
 
 ### 3.3 ScheduleStore

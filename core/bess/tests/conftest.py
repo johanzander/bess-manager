@@ -20,7 +20,7 @@ from core.bess.battery_system_manager import BatterySystemManager  # noqa: E402
 from core.bess.models import (  # noqa: E402
     EconomicData,
     EnergyData,
-    NewHourlyData,
+    HourlyData,
     StrategyData,
 )
 
@@ -607,7 +607,7 @@ def battery_system_with_arbitrage(mock_controller, arbitrage_prices, monkeypatch
 
 @pytest.fixture
 def sample_new_hourly_data():
-    """Provide sample NewHourlyData object for testing."""
+    """Provide sample HourlyData object for testing."""
     energy_data = EnergyData(
         solar_generated=5.0,
         home_consumed=3.0,
@@ -629,7 +629,7 @@ def sample_new_hourly_data():
 
     strategy_data = StrategyData(strategic_intent="IDLE", battery_action=0.0)
 
-    return NewHourlyData(
+    return HourlyData(
         hour=12,
         energy=energy_data,
         economic=economic_data,

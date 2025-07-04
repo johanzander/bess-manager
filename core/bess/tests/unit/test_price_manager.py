@@ -24,7 +24,7 @@ def test_direct_price_initialization():
     # - Apply markup, then apply VAT, and add costs
     expected_buy_price = (1.0 + 0.1) * 1.25 + 0.5
     assert pm.buy_prices[0] == expected_buy_price
-    
+
     # For sell price: add tax reduction to base price (VAT-exclusive)
     expected_sell_price = 1.0 + 0.2
     assert pm.sell_prices[0] == expected_sell_price
@@ -84,12 +84,12 @@ def test_controller_price_fetching():
     assert len(today_prices) == 24
     # Note: HomeAssistantSource now removes VAT from prices before returning them
     assert today_prices[0]["price"] == 1.0 / 1.25
-    
+
     # Check calculations with the updated formula:
     base_price = 1.0 / 1.25  # Price after VAT removal in HomeAssistantSource
     expected_buy_price = (base_price + 0.1) * 1.25 + 0.5
     assert today_prices[0]["buyPrice"] == expected_buy_price
-    
+
     # For sell price: add tax reduction to base price (VAT-exclusive)
     expected_sell_price = base_price + 0.2
     assert today_prices[0]["sellPrice"] == expected_sell_price
@@ -99,12 +99,12 @@ def test_controller_price_fetching():
     assert len(tomorrow_prices) == 24
     # Note: HomeAssistantSource now removes VAT from prices before returning them
     assert tomorrow_prices[0]["price"] == 25.0 / 1.25
-    
+
     # Calculate buy price with the updated formula
     tomorrow_base_price = 25.0 / 1.25  # Price after VAT removal in HomeAssistantSource
     tomorrow_expected_buy_price = (tomorrow_base_price + 0.1) * 1.25 + 0.5
     assert tomorrow_prices[0]["buyPrice"] == tomorrow_expected_buy_price
-    
+
     # For sell price: add tax reduction to base price (VAT-exclusive)
     tomorrow_expected_sell_price = tomorrow_base_price + 0.2
     assert tomorrow_prices[0]["sellPrice"] == tomorrow_expected_sell_price
@@ -126,12 +126,12 @@ def test_mock_source():
     today_prices = pm.get_today_prices()
     assert len(today_prices) == 4
     assert today_prices[0]["price"] == 1.0
-    
+
     # Check calculations with the updated formula:
     # MockSource prices are already VAT-exclusive, so no need to divide
     expected_buy_price = (1.0 + 0.1) * 1.25 + 0.5
     assert today_prices[0]["buyPrice"] == expected_buy_price
-    
+
     # For sell price: add tax reduction to base price (VAT-exclusive)
     expected_sell_price = 1.0 + 0.2
     assert today_prices[0]["sellPrice"] == expected_sell_price
@@ -149,10 +149,12 @@ def test_home_assistant_source_vat_parameter():
     # Create test data with 24 hours, all with price value of 2.0
     raw_today_data = []
     for hour in range(24):
-        raw_today_data.append({
-            "start": f"{today_date.isoformat()}T{hour:02d}:00:00+01:00",
-            "value": 2.0,  # VAT-inclusive price
-        })
+        raw_today_data.append(
+            {
+                "start": f"{today_date.isoformat()}T{hour:02d}:00:00+01:00",
+                "value": 2.0,  # VAT-inclusive price
+            }
+        )
 
     def mock_api_request(method, path):
         if "nordpool_kwh_se3_today" in path:

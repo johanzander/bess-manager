@@ -10,7 +10,8 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
 
-from core.bess.dp_battery_algorithm import HourlyData, OptimizationResult
+from core.bess.dp_battery_algorithm import OptimizationResult
+from core.bess.models import NewHourlyData
 
 logger = logging.getLogger(__name__)
 
@@ -29,19 +30,22 @@ class StoredSchedule:
 
     def get_optimization_range(self) -> tuple[int, int]:
         """Get the hour range that was optimized."""
-        if "next_day" in self.created_for_scenario or "tomorrow" in self.created_for_scenario:
+        if (
+            "next_day" in self.created_for_scenario
+            or "tomorrow" in self.created_for_scenario
+        ):
             return (0, 23)  # Full day optimization
         else:
             return (self.optimization_hour, 23)  # Partial day optimization
 
-    def get_hourly_data(self) -> list[HourlyData]:
+    def get_hourly_data(self) -> list[NewHourlyData]:
         """Get unified hourly data directly."""
         return self.optimization_result.hourly_data
 
     def get_total_savings(self) -> float:
-        """Get total savings from unified data."""
-        return self.optimization_result.economic_summary.get("total_savings", 0.0)
-    
+        """Get total savings from optimization results."""
+        return self.optimization_result.economic_summary.base_to_battery_solar_savings
+
     def get_hourly_actions(self) -> list[float]:
         """Get battery actions from unified data.
 
@@ -90,7 +94,10 @@ class ScheduleStore:
         logger.info("Initialized ScheduleStore with unified data structures")
 
     def store_schedule(
-        self, optimization_result: OptimizationResult, optimization_hour: int, scenario: str
+        self,
+        optimization_result: OptimizationResult,
+        optimization_hour: int,
+        scenario: str,
     ) -> StoredSchedule:
         """Store a new optimization result.
 
@@ -129,7 +136,10 @@ class ScheduleStore:
         return stored_schedule
 
     def store_optimization_result(
-        self, optimization_hour: int, optimization_result: OptimizationResult, scenario: str
+        self,
+        optimization_hour: int,
+        optimization_result: OptimizationResult,
+        scenario: str,
     ) -> StoredSchedule:
         """Store optimization result directly - just calls store_schedule with parameter order."""
         return self.store_schedule(optimization_result, optimization_hour, scenario)
@@ -169,9 +179,7 @@ class ScheduleStore:
             list[StoredSchedule]: All schedules for today, ordered by timestamp
         """
         today = datetime.now().date()
-        today_schedules = [
-            s for s in self._schedules if s.timestamp.date() == today
-        ]
+        today_schedules = [s for s in self._schedules if s.timestamp.date() == today]
 
         return sorted(today_schedules, key=lambda s: s.timestamp)
 
@@ -202,7 +210,9 @@ class ScheduleStore:
 
         cleared_count = original_count - len(self._schedules)
         if cleared_count > 0:
-            logger.info(f"Cleared {cleared_count} old schedules (keeping {days_to_keep} days)")
+            logger.info(
+                f"Cleared {cleared_count} old schedules (keeping {days_to_keep} days)"
+            )
 
         return cleared_count
 
@@ -239,7 +249,7 @@ class ScheduleStore:
         total_schedules = len(self._schedules)
         scenarios = [s.created_for_scenario for s in self._schedules]
         scenario_counts = {
-            scenario: scenarios.count(scenario) 
+            scenario: scenarios.count(scenario)
             for scenario in ["tomorrow", "hourly", "restart"]
         }
 
@@ -249,7 +259,9 @@ class ScheduleStore:
         return {
             "total_schedules": total_schedules,
             "scenario_counts": scenario_counts,
-            "latest_schedule_time": latest_schedule.timestamp if latest_schedule else None,
+            "latest_schedule_time": (
+                latest_schedule.timestamp if latest_schedule else None
+            ),
             "total_savings_all_schedules": total_savings,
             "current_date": self._current_date,
         }

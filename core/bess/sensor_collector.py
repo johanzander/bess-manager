@@ -8,7 +8,7 @@ from typing import Any
 
 from .energy_flow_calculator import EnergyFlowCalculator
 from .influxdb_helper import get_sensor_data
-from .models import EnergyFlow
+from .models import EnergyData
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +41,121 @@ class SensorCollector:
             battery_capacity_kwh,
         )
 
+    def collect_energy_data(self, hour: int) -> EnergyData:
+        """
+        NEW METHOD - Collect pure energy data for a specific hour.
+
+        This is the new preferred method for collecting hourly energy data.
+        Returns EnergyData (pure energy physics) without strategic intent.
+
+        Args:
+            hour: Hour to collect data for (0-23)
+
+        Returns:
+            EnergyData: Pure energy flow data from sensors
+
+        Raises:
+            ValueError: If hour is invalid or data collection fails
+        """
+        if not 0 <= hour <= 23:
+            raise ValueError(f"Invalid hour: {hour}. Must be 0-23.")
+
+        # Check if this hour is complete
+        now = datetime.now()
+        if hour == now.hour:
+            raise ValueError(
+                f"Hour {hour} is still in progress, cannot collect complete data"
+            )
+        elif hour > now.hour:
+            raise ValueError(f"Hour {hour} is in the future, cannot collect data")
+
+        # Get current hour data (END of hour readings)
+        current_readings = self._get_hour_readings(hour)
+        if not current_readings:
+            raise RuntimeError(f"No sensor readings available for hour {hour}")
+
+        # Get previous hour data (START of hour readings)
+        if hour == 0:
+            previous_readings = self._get_hour_readings(23, date_offset=-1)
+            if not previous_readings:
+                raise RuntimeError(
+                    "No sensor readings available for hour 23 of previous day (needed for hour 0 start SOC)"
+                )
+        else:
+            previous_readings = self._get_hour_readings(hour - 1)
+            if not previous_readings:
+                raise RuntimeError(
+                    f"No sensor readings available for hour {hour-1} (needed for hour {hour} start SOC)"
+                )
+
+        # Calculate energy flows using existing calculator
+        flow_dict = self.energy_flow_calculator.calculate_hourly_flows(
+            current_readings, previous_readings, hour
+        )
+        if not flow_dict:
+            raise RuntimeError(f"Energy flow calculation failed for hour {hour}")
+
+        # Extract BOTH SOC readings from sensors - NO DEFAULTS
+        battery_soc_end_key = "rkm0d7n04x_statement_of_charge_soc"
+
+        if battery_soc_end_key not in current_readings:
+            raise KeyError(
+                f"Hour {hour}: Missing end SOC sensor '{battery_soc_end_key}' in current readings"
+            )
+
+        if battery_soc_end_key not in previous_readings:
+            raise KeyError(
+                f"Hour {hour}: Missing start SOC sensor '{battery_soc_end_key}' in previous readings"
+            )
+
+        battery_soc_end = current_readings[battery_soc_end_key]
+        battery_soc_start = previous_readings[battery_soc_end_key]
+
+        # Validate SOC readings
+        if not 0 <= battery_soc_start <= 100:
+            raise ValueError(
+                f"Hour {hour}: Invalid start SOC {battery_soc_start}%. Must be 0-100%."
+            )
+
+        if not 0 <= battery_soc_end <= 100:
+            raise ValueError(
+                f"Hour {hour}: Invalid end SOC {battery_soc_end}%. Must be 0-100%."
+            )
+
+        # Create EnergyData object - pure energy physics, no strategic intent
+        energy_data = EnergyData(
+            solar_generated=flow_dict.get("system_production", 0.0),
+            home_consumed=flow_dict.get("load_consumption", 0.0),
+            grid_imported=flow_dict.get("import_from_grid", 0.0),
+            grid_exported=flow_dict.get("export_to_grid", 0.0),
+            battery_charged=flow_dict.get("battery_charged", 0.0),
+            battery_discharged=flow_dict.get("battery_discharged", 0.0),
+            battery_soc_start=battery_soc_start,
+            battery_soc_end=battery_soc_end,
+            # Detailed flows will be calculated automatically
+            solar_to_home=0.0,
+            solar_to_battery=0.0,
+            solar_to_grid=0.0,
+            grid_to_home=0.0,
+            grid_to_battery=0.0,
+            battery_to_home=0.0,
+            battery_to_grid=0.0,
+        )
+
+        # Calculate detailed flows from core energy data
+        energy_data.calculate_detailed_flows()
+
+        logger.info(
+            "Collected EnergyData for hour %02d: SOC %.1f%% -> %.1f%%, Solar: %.2f kWh, Load: %.2f kWh",
+            hour,
+            battery_soc_start,
+            battery_soc_end,
+            energy_data.solar_generated,
+            energy_data.home_consumed,
+        )
+
+        return energy_data
+
     def analyze_strategic_intent_from_flows(self, flows: dict[str, float]) -> str:
         """Analyze strategic intent from reconstructed energy flows.
 
@@ -64,227 +179,6 @@ class SensorCollector:
             else:
                 return "LOAD_SUPPORT"
         return "IDLE"
-
-    def collect_hour_flows(self, hour: int) -> EnergyFlow:
-        """
-        Collect energy flows for a specific hour with BOTH start and end SOC from sensors.
-        DETERMINISTIC - throws exceptions if any required data is missing.
-        
-        Returns an EnergyFlow object containing all energy flow data for the hour.
-        """
-        if not 0 <= hour <= 23:
-            raise ValueError(f"Invalid hour: {hour}. Must be 0-23.")
-
-        # Check if this hour is complete
-        now = datetime.now()
-        if hour == now.hour:
-            raise ValueError(f"Hour {hour} is still in progress, cannot collect complete data")
-        elif hour > now.hour:
-            raise ValueError(f"Hour {hour} is in the future, cannot collect data")
-
-        # Get current hour data (END of hour readings)
-        current_readings = self._get_hour_readings(hour)
-        if not current_readings:
-            raise RuntimeError(f"No sensor readings available for hour {hour}")
-
-        # Get previous hour data (START of hour readings) 
-        if hour == 0:
-            previous_readings = self._get_hour_readings(23, date_offset=-1)
-            if not previous_readings:
-                raise RuntimeError("No sensor readings available for hour 23 of previous day (needed for hour 0 start SOC)")
-        else:
-            previous_readings = self._get_hour_readings(hour - 1)
-            if not previous_readings:
-                raise RuntimeError(f"No sensor readings available for hour {hour-1} (needed for hour {hour} start SOC)")
-
-        # Calculate energy flows
-        flow_dict = self.energy_flow_calculator.calculate_hourly_flows(
-            current_readings, previous_readings, hour
-        )
-        if not flow_dict:
-            raise RuntimeError(f"Energy flow calculation failed for hour {hour}")
-
-        # Extract BOTH SOC readings from sensors - NO DEFAULTS
-        battery_soc_end_key = "rkm0d7n04x_statement_of_charge_soc"
-        
-        if battery_soc_end_key not in current_readings:
-            raise KeyError(f"Hour {hour}: Missing end SOC sensor '{battery_soc_end_key}' in current readings")
-        
-        if battery_soc_end_key not in previous_readings:
-            raise KeyError(f"Hour {hour}: Missing start SOC sensor '{battery_soc_end_key}' in previous readings")
-        
-        battery_soc_end = current_readings[battery_soc_end_key]
-        battery_soc_start = previous_readings[battery_soc_end_key]
-        
-        # Validate SOC readings
-        if not 0 <= battery_soc_start <= 100:
-            raise ValueError(f"Hour {hour}: Invalid start SOC {battery_soc_start}%. Must be 0-100%.")
-        
-        if not 0 <= battery_soc_end <= 100:
-            raise ValueError(f"Hour {hour}: Invalid end SOC {battery_soc_end}%. Must be 0-100%.")
-        
-        # Calculate SOE from SOC
-        battery_soe_start = (battery_soc_start / 100.0) * self.battery_capacity
-        battery_soe_end = (battery_soc_end / 100.0) * self.battery_capacity
-        
-        # Validate all required flow fields - NO DEFAULTS
-        required_flows = [
-            "battery_charged", "battery_discharged", "system_production", 
-            "load_consumption", "export_to_grid", "import_from_grid",
-            "grid_to_battery", "solar_to_battery", "self_consumption"
-        ]
-        
-        for flow_key in required_flows:
-            if flow_key not in flow_dict:
-                raise KeyError(f"Hour {hour}: Missing required energy flow '{flow_key}'")
-            if flow_dict[flow_key] is None:
-                raise ValueError(f"Hour {hour}: Energy flow '{flow_key}' is None")
-        
-        # Create EnergyFlow object with ALL required fields
-        energy_flow = EnergyFlow(
-            hour=hour,
-            timestamp=datetime.now(),
-            battery_charged=flow_dict["battery_charged"],
-            battery_discharged=flow_dict["battery_discharged"],
-            system_production=flow_dict["system_production"],
-            load_consumption=flow_dict["load_consumption"],
-            export_to_grid=flow_dict["export_to_grid"],
-            import_from_grid=flow_dict["import_from_grid"],
-            grid_to_battery=flow_dict["grid_to_battery"],
-            solar_to_battery=flow_dict["solar_to_battery"],
-            self_consumption=flow_dict["self_consumption"],
-            battery_soc_start=battery_soc_start,
-            battery_soc_end=battery_soc_end,
-            battery_soe_start=battery_soe_start,
-            battery_soe_end=battery_soe_end,
-            strategic_intent="",  # Will be set below
-        )
-        
-        # Add strategic intent reconstruction
-        energy_flow.strategic_intent = self.analyze_strategic_intent_from_flows(flow_dict)
-        
-        # Validate energy balance
-        self._validate_energy_balance(energy_flow)
-        
-        # Validate SOC change vs energy flows
-        self._validate_soc_consistency(energy_flow)
-
-        logger.info(
-            "Hour %d: SOC %.1f%% → %.1f%% (Δ%.1f%%), "
-            "Battery: +%.1f/-%.1f kWh, Solar=%.1f, Load=%.1f, Intent=%s",
-            hour,
-            battery_soc_start,
-            battery_soc_end,
-            battery_soc_end - battery_soc_start,
-            energy_flow.battery_charged,
-            energy_flow.battery_discharged,
-            energy_flow.system_production,
-            energy_flow.load_consumption,
-            energy_flow.strategic_intent,
-        )
-
-        return energy_flow
-
-    def _validate_energy_balance(self, energy_flow: EnergyFlow) -> None:
-        """Validate energy balance - throws exception if validation fails."""
-        energy_in = (
-            energy_flow.system_production + 
-            energy_flow.import_from_grid + 
-            energy_flow.battery_discharged
-        )
-        energy_out = (
-            energy_flow.load_consumption + 
-            energy_flow.export_to_grid + 
-            energy_flow.battery_charged
-        )
-        
-        energy_balance_error = abs(energy_in - energy_out)
-        tolerance = 0.1  # 0.1 kWh tolerance
-        
-        if energy_balance_error > tolerance:
-            logger.warning(
-                f"Hour {energy_flow.hour}: Large energy balance discrepancy - "
-                f"In: {energy_in:.2f} kWh, Out: {energy_out:.2f} kWh, "
-                f"Error: {energy_balance_error:.2f} kWh (tolerance: {tolerance} kWh). "
-            )
-
-    def _validate_soc_consistency(self, energy_flow: EnergyFlow) -> None:
-        """Validate SOC change vs energy flows - logs discrepancies but doesn't fail."""
-        actual_soc_change = energy_flow.battery_soc_end - energy_flow.battery_soc_start
-        actual_soe_change = energy_flow.battery_soe_end - energy_flow.battery_soe_start
-        net_battery_energy = energy_flow.battery_charged - energy_flow.battery_discharged
-        
-        # Log the real vs theoretical comparison for analysis
-        logger.info(
-            f"Hour {energy_flow.hour} SOC Analysis: "
-            f"Sensor SOC change: {actual_soc_change:.1f}% ({actual_soe_change:.2f} kWh), "
-            f"Net battery energy: {net_battery_energy:.2f} kWh, "
-            f"Difference: {abs(actual_soe_change - net_battery_energy):.2f} kWh"
-        )
-        
-        # Only warn about large discrepancies (this reveals real battery behavior)
-        if abs(actual_soe_change - net_battery_energy) > 1.0:  # 1 kWh tolerance
-            logger.warning(
-                f"Hour {energy_flow.hour}: Large SOC discrepancy detected - "
-                f"this may indicate battery efficiency differences or BMS behavior"
-            )
-
-    def reconstruct_historical_flows(
-        self, start_hour: int, end_hour: int
-    ) -> dict[int, EnergyFlow]:
-        """Reconstruct historical energy flows from InfluxDB with strategic intents."""
-        reconstructed_flows = {}
-        now = datetime.now()
-        current_hour = now.hour
-        current_minute = now.minute
-
-        logger.info(
-            "Reconstructing flows with intents from hour %d to %d (current time: %02d:%02d)",
-            start_hour,
-            end_hour,
-            current_hour,
-            current_minute,
-        )
-
-        # Adjust end_hour to only include complete hours
-        actual_end_hour = self._get_safe_end_hour(
-            end_hour, current_hour, current_minute
-        )
-
-        if actual_end_hour < start_hour:
-            logger.info(
-                "No complete hours available for reconstruction (adjusted end_hour: %d)",
-                actual_end_hour,
-            )
-            return reconstructed_flows
-
-        logger.debug(
-            "Adjusted reconstruction range: %d to %d", start_hour, actual_end_hour
-        )
-
-        for hour in range(start_hour, actual_end_hour + 1):
-            try:
-                flows = self.collect_hour_flows(hour)
-                if flows:
-                    reconstructed_flows[hour] = flows
-                    logger.debug(
-                        "Hour %d: reconstructed successfully with intent %s",
-                        hour,
-                        flows.strategic_intent,
-                    )
-                else:
-                    logger.warning("Hour %d: reconstruction failed", hour)
-
-            except Exception as e:
-                logger.error("Hour %d: reconstruction error: %s", hour, e)
-
-        logger.info(
-            "Reconstructed %d/%d hours successfully with strategic intents",
-            len(reconstructed_flows),
-            actual_end_hour - start_hour + 1,
-        )
-
-        return reconstructed_flows
 
     def _get_safe_end_hour(
         self, requested_end_hour: int, current_hour: int, current_minute: int

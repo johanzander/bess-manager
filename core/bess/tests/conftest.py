@@ -3,6 +3,7 @@
 import logging
 import os
 import sys
+from datetime import datetime
 
 import pytest
 
@@ -16,6 +17,12 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 from core.bess.battery_system_manager import BatterySystemManager  # noqa: E402
+from core.bess.models import (  # noqa: E402
+    EconomicData,
+    EnergyData,
+    NewHourlyData,
+    StrategyData,
+)
 
 
 class MockHomeAssistantController:
@@ -53,6 +60,14 @@ class MockHomeAssistantController:
         self.consumption_forecast = [4.5] * 24
         self.solar_forecast = [0.0] * 24
 
+        # Call tracking for integration tests
+        self.calls = {
+            "grid_charge": [],
+            "discharge_rate": [],
+            "charge_rate": [],
+            "tou_segments": [],
+        }
+
     # Required methods for Home Assistant Controller interface
     def get_battery_soc(self):
         """Get the current battery state of charge."""
@@ -77,6 +92,7 @@ class MockHomeAssistantController:
     def set_grid_charge(self, enabled):
         """Enable or disable grid charging."""
         self.settings["grid_charge"] = enabled
+        self.calls["grid_charge"].append(enabled)
 
     def get_solar_generation(self):
         """Get the current solar generation value."""
@@ -90,57 +106,42 @@ class MockHomeAssistantController:
         """Get the current battery discharge power."""
         return self.settings["discharge_power"]
 
-    def get_charging_power_rate(self):
-        """Get the current charging power rate."""
-        return self.settings["charging_power_rate"]
-
-    def set_charging_power_rate(self, rate):
-        """Set the charging power rate."""
-        self.settings["charging_power_rate"] = rate
-
-    def get_discharging_power_rate(self):
-        """Get the current discharging power rate."""
-        return self.settings["discharge_rate"]
-
     def set_discharging_power_rate(self, rate):
         """Set the discharging power rate."""
         self.settings["discharge_rate"] = rate
-
-    def get_charge_stop_soc(self):
-        """Get the SOC (state of charge) at which charging stops."""
-        return self.settings["charge_stop_soc"]
-
-    def set_charge_stop_soc(self, soc):
-        """Set the SOC (state of charge) at which charging stops."""
-        self.settings["charge_stop_soc"] = soc
-
-    def get_discharge_stop_soc(self):
-        """Get the SOC (state of charge) at which discharging stops."""
-        return self.settings["discharge_stop_soc"]
-
-    def set_discharge_stop_soc(self, soc):
-        """Set the SOC (state of charge) at which discharging stops."""
-        self.settings["discharge_stop_soc"] = soc
-
-    def set_test_mode(self, enabled):
-        """Enable or disable test mode."""
-        self.settings["test_mode"] = enabled
+        self.calls["discharge_rate"].append(rate)
 
     def get_l1_current(self):
-        """Get the current on line 1."""
+        """Get L1 phase current."""
         return self.settings["l1_current"]
 
     def get_l2_current(self):
-        """Get the current on line 2."""
+        """Get L2 phase current."""
         return self.settings["l2_current"]
 
     def get_l3_current(self):
-        """Get the current on line 3."""
+        """Get L3 phase current."""
         return self.settings["l3_current"]
 
-    def set_inverter_time_segment(self, **kwargs):
-        """Store TOU setting."""
-        self.settings["tou_settings"].append(kwargs)
+    def get_charge_stop_soc(self):
+        """Get charge stop SOC setting."""
+        return self.settings["charge_stop_soc"]
+
+    def get_discharge_stop_soc(self):
+        """Get discharge stop SOC setting."""
+        return self.settings["discharge_stop_soc"]
+
+    def get_charging_power_rate(self):
+        """Get charging power rate setting."""
+        return self.settings["charging_power_rate"]
+
+    def is_test_mode(self):
+        """Check if test mode is enabled."""
+        return self.settings["test_mode"]
+
+    def get_tou_settings(self):
+        """Get TOU settings."""
+        return self.settings["tou_settings"]
 
     def get_battery_charge_today(self):
         """Get total battery charging for today in kWh."""
@@ -182,6 +183,81 @@ class MockHomeAssistantController:
         """Get the current Nordpool prices for today."""
         return [1.0] * 24
 
+    # Additional methods for integration tests
+    def set_charging_power_rate(self, rate):
+        """Set battery charge power rate."""
+        self.settings["charge_rate"] = rate
+        self.calls["charge_rate"].append(rate)
+        return True
+
+    def set_inverter_time_segment(
+        self, segment_id, batt_mode, start_time, end_time, enabled
+    ):
+        """Set TOU time segment on inverter."""
+        self.calls["tou_segments"].append(
+            {
+                "segment_id": segment_id,
+                "batt_mode": batt_mode,
+                "start_time": start_time,
+                "end_time": end_time,
+                "enabled": enabled,
+            }
+        )
+        return True
+
+    def read_inverter_time_segments(self):
+        """Read current TOU segments from inverter."""
+        return []
+
+    def get_sensor_status(self, sensor_name):
+        """Get sensor status for health checks."""
+        return {"state": "available", "last_updated": datetime.now()}
+
+
+class MockSensorCollector:
+    """Mock sensor collector for integration tests - replaces InfluxDB dependency."""
+
+    def __init__(self, controller, battery_capacity_kwh):
+        """Initialize mock sensor collector."""
+        self.controller = controller
+        self.battery_capacity = battery_capacity_kwh
+
+    def collect_hour_flows(self, hour):
+        """Return realistic energy flow data for the given hour."""
+        # Use controller's existing forecasts (which tests can configure)
+        solar = (
+            self.controller.solar_forecast[hour]
+            if hour < len(self.controller.solar_forecast)
+            else 0.0
+        )
+        consumption = (
+            self.controller.consumption_forecast[hour]
+            if hour < len(self.controller.consumption_forecast)
+            else 4.0
+        )
+
+        # Simple energy balance calculation
+        solar_excess = max(0, solar - consumption)
+        grid_import = max(0, consumption - solar)
+
+        return {
+            "battery_soc": self.controller.get_battery_soc(),
+            "battery_soe": self.controller.get_battery_soc()
+            * self.battery_capacity
+            / 100,
+            "system_production": solar,
+            "load_consumption": consumption,
+            "import_from_grid": grid_import,
+            "export_to_grid": solar_excess,
+            "battery_charged": 0.0,
+            "battery_discharged": 0.0,
+            "strategic_intent": "IDLE",
+        }
+
+    def reconstruct_historical_flows(self, start_hour, end_hour):
+        """Mock historical reconstruction - return empty for testing."""
+        return {}
+
 
 # MOCK CONTROLLER FIXTURE
 @pytest.fixture
@@ -190,7 +266,22 @@ def mock_controller():
     return MockHomeAssistantController()
 
 
-# PRICE DATA FIXTURES
+@pytest.fixture
+def mock_controller_with_params():
+    """Provide a configurable mock controller with preset test parameters."""
+
+    def _create(consumption=None, battery_soc=None):
+        controller = MockHomeAssistantController()
+        if consumption:
+            controller.consumption_forecast = consumption
+        if battery_soc is not None:
+            controller.settings["battery_soc"] = battery_soc
+        return controller
+
+    return _create
+
+
+# RAW PRICE DATA FIXTURES (keep these - used by scenario files and tests)
 @pytest.fixture
 def price_data_2024_08_16():
     """Raw price data from 2024-08-16 with high price spread."""
@@ -315,70 +406,7 @@ def price_data_2025_01_13():
     ]
 
 
-# TEST CASE PARAMETER FIXTURES
-@pytest.fixture
-def test_case_2024_08_16():
-    """Test parameters for 2024-08-16 case."""
-    return {
-        "battery_soc": 10,  # Starting battery level
-        "consumption": [5.2] * 24,  # Consumption pattern
-        "expected_savings": 42.51,  # Expected cost savings
-        "expected_charge": 27.0,  # Expected charged energy
-        "expected_discharge": 27.0,  # Expected discharged energy
-    }
-
-
-@pytest.fixture
-def test_case_2025_01_05():
-    """Test parameters for 2025-01-05 case."""
-    return {
-        "battery_soc": 10,  # Starting battery level
-        "consumption": [5.2] * 24,  # Consumption pattern
-        "expected_savings": 0.0,  # Expected cost savings
-        "expected_charge": 0.0,  # Expected charged energy
-        "expected_discharge": 0.0,  # Expected discharged energy
-    }
-
-
-@pytest.fixture
-def test_case_2025_01_12():
-    """Test parameters for 2025-01-12 case."""
-    return {
-        "battery_soc": 10,  # Starting battery level
-        "consumption": [5.2] * 24,  # Consumption pattern
-        "expected_savings": 22.54,  # Expected cost savings
-        "expected_charge": 27.0,  # Expected charged energy
-        "expected_discharge": 27.0,  # Expected discharged energy
-    }
-
-
-@pytest.fixture
-def test_case_2025_01_13():
-    """Test parameters for 2025-01-13 case."""
-    return {
-        "battery_soc": 10,  # Starting battery level
-        "consumption": [5.2] * 24,  # Consumption pattern
-        "expected_savings": 1.20,  # Expected cost savings
-        "expected_charge": 6.0,  # Expected charged energy
-        "expected_discharge": 5.2,  # Expected discharged energy
-    }
-
-
-@pytest.fixture
-def mock_controller_with_params():
-    """Provide a configurable mock controller with preset test parameters."""
-
-    def _create(consumption=None, battery_soc=None):
-        controller = MockHomeAssistantController()
-        if consumption:
-            controller.consumption_forecast = consumption
-        if battery_soc is not None:
-            controller.settings["battery_soc"] = battery_soc
-        return controller
-
-    return _create
-
-
+# SIMPLE TEST DATA FIXTURES (for unit tests)
 @pytest.fixture
 def sample_price_data(price_data_2024_08_16):
     """
@@ -436,109 +464,183 @@ def sample_solar_data():
 @pytest.fixture
 def base_system(mock_controller):
     """Provide a clean system instance with mock controller."""
-
     return BatterySystemManager(controller=mock_controller)
 
 
 @pytest.fixture
-def configured_system(mock_controller):
-    """Configure a system instance for a specific test case."""
-
-    def _configure(test_case, price_data):
-        # Create system with mock controller
-        system = BatterySystemManager(controller=mock_controller)
-
-        # Apply test case configuration
-        mock_controller.settings["battery_soc"] = test_case["battery_soc"]
-        mock_controller.consumption_forecast = test_case["consumption"]
-
-        # Explicitly set consumption predictions on the energy manager
-        # This is the key fix - ensure the energy manager uses the correct consumption values
-        system._energy_manager.set_consumption_predictions(test_case["consumption"])
-
-        # Set mock prices directly in the price manager
-        system._price_manager.nordpool_prices = price_data
-
-        # Calculate buy and sell prices
-        buy_prices = [system._price_manager._calculate_buy_price(p) for p in price_data]
-        sell_prices = [
-            system._price_manager._calculate_sell_price(p) for p in price_data
-        ]
-
-        # Set the calculated prices
-        system._price_manager._buy_prices = buy_prices
-        system._price_manager._sell_prices = sell_prices
-
-        return system
-
-    return _configure
-
-
-@pytest.fixture
-def test_solar_adaptation_prices():
-    """Price pattern for solar adaptation test with clear low/high periods."""
+def arbitrage_prices():
+    """Price data that creates clear arbitrage opportunities for integration tests."""
     return [
-        0.2,
-        0.2,
-        0.2,  # Low prices hours 0-2
-        0.3,
-        0.4,
-        0.5,  # Medium prices hours 3-5
-        0.6,
-        0.7,
-        0.8,  # Higher prices hours 6-8
-        1.2,
-        1.4,
-        1.6,  # Peak prices hours 9-11
-        0.8,
-        0.7,
-        0.6,  # Decreasing prices hours 12-14
-        0.5,
-        0.4,
-        0.3,  # Lower prices hours 15-17
-        0.3,
-        0.4,
-        0.5,  # Evening hours 18-20
-        0.3,
-        0.2,
-        0.2,  # Night hours 21-23
+        # Night - very cheap (arbitrage opportunity)
+        0.10,
+        0.10,
+        0.10,
+        # Early morning - rising
+        0.20,
+        0.30,
+        0.40,
+        # Day - moderate
+        0.60,
+        0.80,
+        1.00,
+        # Peak hours - expensive (discharge opportunity)
+        1.50,
+        1.80,
+        2.00,
+        # Afternoon - falling
+        1.50,
+        1.20,
+        1.00,
+        # Evening - moderate
+        0.80,
+        0.60,
+        0.40,
+        # Evening peak - moderate
+        0.50,
+        0.60,
+        0.70,
+        # Late night - cheap again
+        0.30,
+        0.20,
+        0.10,
     ]
 
 
 @pytest.fixture
-def test_solar_adaptation_case():
-    """Test case parameters for solar adaptation test."""
-    return {
-        "battery_soc": 20,  # Starting with 20% SOC
-        "consumption": [5.2] * 24,  # Consistent consumption pattern
-        "expected_savings": 30.0,  # Not actually checked in this test
-        "expected_charge": 15.0,  # Not actually checked in this test
-        "expected_discharge": 12.0,  # Not actually checked in this test
-    }
+def realistic_consumption_pattern():
+    """Realistic consumption pattern for integration tests."""
+    return [
+        4.5,
+        4.2,
+        4.0,
+        3.8,
+        3.5,
+        3.2,  # Night hours 0-5
+        3.8,
+        4.5,
+        5.2,
+        6.0,
+        6.5,
+        7.0,  # Morning rise 6-11
+        7.2,
+        6.8,
+        6.5,
+        6.2,
+        5.8,
+        5.5,  # Afternoon 12-17
+        5.8,
+        6.2,
+        6.5,
+        5.8,
+        5.2,
+        4.8,  # Evening 18-23
+    ]
 
 
 @pytest.fixture
-def system_with_test_prices(
-    configured_system,
-    mock_controller,
-    test_solar_adaptation_case,
-    test_solar_adaptation_prices,
-):
-    """Provide a system configured with test prices for solar adaptation testing."""
-    # Create system using the configured_system factory
-    system = configured_system(test_solar_adaptation_case, test_solar_adaptation_prices)
+def realistic_solar_pattern():
+    """Realistic solar pattern for integration tests."""
+    return [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,  # Night 0-5
+        0.5,
+        2.0,
+        4.0,
+        6.0,
+        8.0,
+        9.0,  # Morning rise 6-11
+        9.5,
+        9.0,
+        8.0,
+        6.5,
+        4.5,
+        2.5,  # Afternoon 12-17
+        1.0,
+        0.2,
+        0.0,
+        0.0,
+        0.0,
+        0.0,  # Evening/Night 18-23
+    ]
 
-    # Make sure our system uses the same controller instance as the test will use
-    system._controller = mock_controller
 
-    # Additional specific configurations for solar tests
-    system.battery_settings.total_capacity = 30.0
-    system.battery_settings.min_soc = 10.0
-    system.battery_settings.cycle_cost = 0.5
+@pytest.fixture
+def battery_system_integration(mock_controller, monkeypatch):
+    """Create BatterySystemManager for integration tests with minimal external mocking."""
+    from core.bess.price_manager import MockSource
 
-    # Ensure the energy manager knows about our settings too
-    system._energy_manager.total_capacity = 30.0
-    system._energy_manager.min_soc = 10.0
-    system._energy_manager.reserved_capacity = 3.0  # 10% of 30 kWh
+    # Mock only external dependencies
+    monkeypatch.setattr(
+        "core.bess.sensor_collector.SensorCollector", MockSensorCollector
+    )
+
+    # Use MockSource for price data (replaces external price API)
+    price_source = MockSource([1.0] * 24)
+
+    # Create system with real internal components
+    system = BatterySystemManager(controller=mock_controller, price_source=price_source)
 
     return system
+
+
+@pytest.fixture
+def battery_system_with_arbitrage(mock_controller, arbitrage_prices, monkeypatch):
+    """Create BatterySystemManager with arbitrage price opportunities."""
+    from core.bess.price_manager import MockSource
+
+    # Mock external dependencies
+    monkeypatch.setattr(
+        "core.bess.sensor_collector.SensorCollector", MockSensorCollector
+    )
+
+    # Use arbitrage prices
+    price_source = MockSource(arbitrage_prices)
+
+    system = BatterySystemManager(controller=mock_controller, price_source=price_source)
+
+    return system
+
+
+@pytest.fixture
+def sample_new_hourly_data():
+    """Provide sample NewHourlyData object for testing."""
+    energy_data = EnergyData(
+        solar_generated=5.0,
+        home_consumed=3.0,
+        grid_imported=0.0,
+        grid_exported=2.0,
+        battery_charged=0.0,
+        battery_discharged=0.0,
+        battery_soc_start=50.0,
+        battery_soc_end=50.0,
+    )
+
+    economic_data = EconomicData(
+        buy_price=1.2,
+        sell_price=0.8,
+        hourly_cost=0.0,
+        hourly_savings=2.4,
+        battery_cycle_cost=0.0,
+    )
+
+    strategy_data = StrategyData(strategic_intent="IDLE", battery_action=0.0)
+
+    return NewHourlyData(
+        hour=12,
+        energy=energy_data,
+        economic=economic_data,
+        strategy=strategy_data,
+        timestamp=datetime(2025, 7, 2, 12, 0, 0),
+        data_source="predicted",
+    )
+
+
+# Aliases for backward compatibility with new test files
+@pytest.fixture
+def battery_system(battery_system_integration):
+    """Alias for integration test compatibility."""
+    return battery_system_integration

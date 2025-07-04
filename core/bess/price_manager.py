@@ -6,7 +6,7 @@ inversion.
 
 import logging
 from datetime import date, datetime, timedelta
-from typing import Optional
+from typing import Optional  # TODO: Replace with |
 
 
 class PriceSource:
@@ -55,7 +55,7 @@ class MockSource(PriceSource):
 
 class HomeAssistantSource(PriceSource):
     """Home Assistant Nordpool sensor price source with robust timestamp-based parsing.
-    
+
     This source handles Nordpool prices from Home Assistant, which include VAT.
     It removes VAT from prices before returning them, ensuring all price sources
     consistently return VAT-exclusive prices.
@@ -231,7 +231,7 @@ class HomeAssistantSource(PriceSource):
 
             # Extract prices
             prices = [float(entry["value"]) for entry in raw_data if "value" in entry]
-            
+
             # Nordpool prices from Home Assistant include VAT - remove it
             # to standardize all price sources to return VAT-exclusive prices
             prices = [price / self.vat_multiplier for price in prices]
@@ -359,9 +359,7 @@ class PriceManager:
         """
         return base_price + self.tax_reduction
 
-    def get_price_data(
-        self, target_date: Optional[date] = None  # noqa: UP007
-    ) -> list:
+    def get_price_data(self, target_date: Optional[date] = None) -> list:  # noqa: UP007
         """Get formatted price data for the specified date.
 
         Args:
@@ -426,9 +424,7 @@ class PriceManager:
         tomorrow = datetime.now().date() + timedelta(days=1)
         return self.get_price_data(tomorrow)
 
-    def get_prices(
-        self, target_date: Optional[date] = None  # noqa: UP007
-    ) -> list:
+    def get_prices(self, target_date: Optional[date] = None) -> list:  # noqa: UP007
         """Get raw price data for a specified date.
 
         This is a compatibility method for existing code.

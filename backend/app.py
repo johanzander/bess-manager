@@ -173,7 +173,7 @@ class BESSController:
 
         # Hourly schedule update (every hour at xx:00)
         self.scheduler.add_job(
-            lambda: self.system.update_battery_schedule(hour=datetime.now().hour),
+            lambda: self.system.update_battery_schedule(current_hour=datetime.now().hour),
             CronTrigger(minute=0),
             misfire_grace_time=30,  # Allow 30 seconds of misfire before warning
         )
@@ -181,7 +181,7 @@ class BESSController:
         # Next day preparation (daily at 23:55)
         self.scheduler.add_job(
             lambda: self.system.update_battery_schedule(
-                hour=datetime.now().hour, prepare_next_day=True
+                current_hour=datetime.now().hour, prepare_next_day=True
             ),
             CronTrigger(hour=23, minute=55),
             misfire_grace_time=30,  # Allow 30 seconds of misfire before warning
@@ -242,7 +242,7 @@ class BESSController:
     def start(self):
         """Start the scheduler."""
         self.system.start()
-        self.system.update_battery_schedule(hour=datetime.now().hour)
+        self.system.update_battery_schedule(current_hour=datetime.now().hour)
         self._init_scheduler_jobs()
         logger.info("Scheduler started successfully")
 

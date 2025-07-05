@@ -31,13 +31,8 @@ export default function DashboardPage({
       batteryAction?: number;
       batteryMode?: string;
       solarProduction?: number;
-      solar_production?: number;
-      solarGenerated?: number;
       homeConsumption?: number;
-      home_consumption?: number;
-      homeConsumed?: number;
       gridImport?: number;
-      grid_import?: number;
       gridImported?: number;
       gridExport?: number;
       grid_export?: number;

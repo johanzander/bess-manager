@@ -14,9 +14,7 @@ interface EnergySankeyChartProps {
 }
 
 export const EnergySankeyChart: React.FC<EnergySankeyChartProps> = ({ 
-  energyData, 
-  className = "" 
-}) => {
+  energyData}) => {
   const plotRef = useRef<HTMLDivElement>(null);
   const [plotlyLoaded, setPlotlyLoaded] = React.useState(false);
 
@@ -39,23 +37,23 @@ export const EnergySankeyChart: React.FC<EnergySankeyChartProps> = ({
       return null;
     }
 
-    // ✅ Use same backend totals as EnergyFlowCards
+    // ✅ Use canonical camelCase field names only
     const flows = {
-      solarProduction: data.totals?.totalSolar || data.totals?.total_solar || 0,
-      homeConsumption: data.totals?.totalConsumption || data.totals?.total_consumption || 0,
-      gridImport: data.totals?.totalGridImport || data.totals?.total_grid_import || 0,
-      gridExport: data.totals?.totalGridExport || data.totals?.total_grid_export || 0,
-      totalCharged: data.totals?.totalBatteryCharge || data.totals?.total_battery_charge || 0,
-      totalDischarged: data.totals?.totalBatteryDischarge || data.totals?.total_battery_discharge || 0,
+      solarProduction: data.totals?.totalSolarProduction || 0,
+      homeConsumption: data.totals?.totalHomeConsumption || 0,
+      gridImport: data.totals?.totalGridImport || 0,
+      gridExport: data.totals?.totalGridExport || 0,
+      totalCharged: data.totals?.totalBatteryCharged || 0,
+      totalDischarged: data.totals?.totalBatteryDischarged || 0,
       
-      // ✅ Use same flow breakdowns as EnergyFlowCards
-      solarToHome: data.totals?.totalSolarToHome || data.totals?.total_solar_to_home || 0,
-      solarToBattery: data.totals?.totalSolarToBattery || data.totals?.total_solar_to_battery || 0,
-      solarToGrid: data.totals?.totalSolarToGrid || data.totals?.total_solar_to_grid || 0,
-      gridToHome: data.totals?.totalGridToHome || data.totals?.total_grid_to_home || 0,
-      gridToBattery: data.totals?.totalGridToBattery || data.totals?.total_grid_to_battery || 0,
-      batteryToHome: data.totals?.totalBatteryToHome || data.totals?.total_battery_to_home || 0,
-      batteryToGrid: data.totals?.totalBatteryToGrid || data.totals?.total_battery_to_grid || 0
+      // ✅ Flow breakdowns with canonical camelCase names
+      solarToHome: data.totals?.totalSolarToHome || 0,
+      solarToBattery: data.totals?.totalSolarToBattery || 0,
+      solarToGrid: data.totals?.totalSolarToGrid || 0,
+      gridToHome: data.totals?.totalGridToHome || 0,
+      gridToBattery: data.totals?.totalGridToBattery || 0,
+      batteryToHome: data.totals?.totalBatteryToHome || 0,
+      batteryToGrid: data.totals?.totalBatteryToGrid || 0
     };
 
     return flows;

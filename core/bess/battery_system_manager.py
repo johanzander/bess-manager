@@ -19,6 +19,8 @@ from .growatt_schedule import GrowattScheduleManager
 from .ha_api_controller import HomeAssistantAPIController
 from .health_check import run_system_health_checks
 from .historical_data_store import HistoricalDataStore
+
+# EnergyData import removed as we're using fully calculated energy data from sensor_collector
 from .power_monitor import HomePowerMonitor
 from .price_manager import HomeAssistantSource, PriceManager, PriceSource
 from .schedule_store import ScheduleStore
@@ -313,9 +315,9 @@ class BatterySystemManager:
                 # Use new data collection method
                 for hour in range(0, end_hour + 1):
                     try:
-                        # Use new sensor collector method
+                        # Use new sensor collector method to get complete energy data with detailed flows
                         energy_data = self.sensor_collector.collect_energy_data(hour)
-
+                        
                         # Store using new historical store method
                         success = self.historical_store.record_energy_data(
                             hour, energy_data, data_source="actual"
@@ -480,6 +482,7 @@ class BatterySystemManager:
             prev_hour = hour - 1
             logger.info(f"Collecting data for previous hour: {prev_hour}")
 
+            # Use sensor collector to get complete energy data with detailed flows
             energy_data = self.sensor_collector.collect_energy_data(prev_hour)
 
             logger.info(
@@ -1289,47 +1292,6 @@ class BatterySystemManager:
         """Getter for price_manager to ensure API compatibility."""
         return self._price_manager
 
-    def get_historical_events(self) -> list[dict[str, Any]]:
-        """Get all historical events for frontend analytics - now using HourlyData directly."""
-        completed_hours = self.historical_store.get_completed_hours()
-        logger.info(f"Stored hours: {completed_hours}")
-        events = []
-
-        for hour in completed_hours:
-            hour_data = self.historical_store.get_hour_record(hour)
-            if hour_data:
-                events.append(
-                    {
-                        "hour": hour_data.hour,
-                        "timestamp": (
-                            hour_data.timestamp.isoformat()
-                            if hour_data.timestamp
-                            else ""
-                        ),
-                        "battery_soc_start": hour_data.battery_soc_start,
-                        "battery_soc_end": hour_data.battery_soc_end,
-                        "solar_generated": hour_data.solar_generated,
-                        "home_consumed": hour_data.home_consumed,
-                        "grid_imported": hour_data.grid_imported,
-                        "grid_exported": hour_data.grid_exported,
-                        "battery_charged": hour_data.battery_charged,
-                        "battery_discharged": hour_data.battery_discharged,
-                        "battery_net_change": hour_data.battery_net_change,
-                        # ADD camelCase versions for frontend compatibility
-                        "batterySOCStart": hour_data.battery_soc_start,
-                        "batterySOCEnd": hour_data.battery_soc_end,
-                        "solarGenerated": hour_data.solar_generated,
-                        "homeConsumed": hour_data.home_consumed,
-                        "gridImported": hour_data.grid_imported,
-                        "gridExported": hour_data.grid_exported,
-                        "batteryCharged": hour_data.battery_charged,
-                        "batteryDischarged": hour_data.battery_discharged,
-                        "batteryNetChange": hour_data.battery_net_change,
-                    }
-                )
-
-        return events
-
     def get_current_daily_view(self, current_hour: int | None = None) -> DailyView:
         """Get daily view for specified or current hour.
 
@@ -1505,14 +1467,12 @@ class BatterySystemManager:
         except (AttributeError, ValueError, KeyError) as e:
             logger.error("Failed to adjust charging power: %s", str(e))
 
-    def get_settings(self) -> dict[str, Any]:
-        """Get settings - preserves original interface."""
+    def get_settings(self):
+        """Get settings - return dataclasses directly for API layer conversion."""
         return {
-            "battery": self.battery_settings.asdict(),
-            "consumption": {"defaultHourly": 4.0, "estimatedConsumption": 4.0},
-            "totalConsumption": {"defaultHourly": 4.0, "estimatedConsumption": 4.0},
-            "home": self.home_settings.asdict(),
-            "price": self.price_settings.asdict(),
+            "battery": self.battery_settings,
+            "home": self.home_settings,
+            "price": self.price_settings,
         }
 
     def update_settings(self, settings: dict[str, Any]) -> None:

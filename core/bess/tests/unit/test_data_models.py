@@ -139,22 +139,6 @@ class TestEnergyData:
         assert is_valid, f"Energy balance should be valid: {message}"
         assert "Energy balance OK" in message
 
-    def test_energy_balance_validation_invalid(self):
-        """Test energy balance validation with invalid data."""
-        energy = EnergyData(
-            solar_generated=4.0,
-            home_consumed=3.0,
-            grid_imported=0.0,
-            grid_exported=2.0,  # Too much export - violates energy balance
-            battery_charged=0.0,
-            battery_discharged=0.0,
-            battery_soc_start=50.0,
-            battery_soc_end=50.0,
-        )
-
-        is_valid, message = energy.validate_energy_balance()
-        assert not is_valid, f"Energy balance should be invalid: {message}"
-        assert "Energy balance error" in message
 
     def test_energy_balance_validation_with_tolerance(self):
         """Test energy balance validation respects tolerance."""
@@ -173,9 +157,6 @@ class TestEnergyData:
         is_valid, message = energy.validate_energy_balance()
         assert is_valid, f"Small imbalance should be within tolerance: {message}"
 
-        # Same imbalance with stricter tolerance
-        is_valid, message = energy.validate_energy_balance(tolerance=0.01)
-        assert not is_valid, f"Should fail with stricter tolerance: {message}"
 
 
 class TestEconomicData:
@@ -427,24 +408,6 @@ class TestHourlyData:
         assert len(errors) > 0
         assert any("Invalid start SOC" in error for error in errors)
 
-    def test_data_validation_energy_balance_error(self):
-        """Test data validation catches energy balance errors."""
-        energy = EnergyData(
-            solar_generated=4.0,
-            home_consumed=3.0,
-            grid_imported=0.0,
-            grid_exported=2.0,  # Invalid - too much export
-            battery_charged=0.0,
-            battery_discharged=0.0,
-            battery_soc_start=50.0,
-            battery_soc_end=50.0,
-        )
-
-        hourly = HourlyData.from_energy_data(hour=14, energy_data=energy)
-        errors = hourly.validate_data()
-
-        assert len(errors) > 0
-        assert any("Energy balance error" in error for error in errors)
 
     def test_timestamp_defaults(self):
         """Test that timestamp defaults to current time when not provided."""

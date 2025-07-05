@@ -48,8 +48,8 @@ export interface DashboardHourlyData {
   dataSource: 'actual' | 'predicted';
   
   // Core energy flows
-  solarGenerated: number;
-  homeConsumed: number;
+  solarProduction: number;
+  homeConsumption: number;
   gridImported: number;
   gridExported: number;
   batteryCharged: number;
@@ -83,12 +83,6 @@ export interface DashboardHourlyData {
   // Compatibility flags
   isActual: boolean;
   isPredicted: boolean;
-  
-  // Aliases for backward compatibility
-  solarProduction?: number;
-  consumption?: number;
-  gridImport?: number;
-  gridExport?: number;
 }
 
 export interface DashboardSummary {
@@ -103,20 +97,20 @@ export interface DashboardSummary {
   solarSavings: number;
   arbitrageSavings: number;
   totalSolarProduction: number;
-  totalBatteryCharge: number;
-  totalBatteryDischarge: number;
+  totalBatteryCharged: number;
+  totalBatteryDischarged: number;
   totalGridImport: number;
   totalGridExport: number;
   cycleCount: number;
 }
 
 export interface DashboardTotals {
-  totalConsumption: number;
-  totalSolar: number;
+  totalHomeConsumption: number;
+  totalSolarProduction: number;
   totalGridImport: number;
   totalGridExport: number;
-  totalBatteryCharge: number;
-  totalBatteryDischarge: number;
+  totalBatteryCharged: number;
+  totalBatteryDischarged: number;
   totalSolarToHome: number;
   totalSolarToBattery: number;
   totalSolarToGrid: number;

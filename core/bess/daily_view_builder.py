@@ -257,7 +257,8 @@ class DailyViewBuilder:
             sell_price=sell_price,
             hourly_cost=costs.battery_solar_cost,
             hourly_savings=costs.total_savings,
-            battery_cycle_cost=costs.battery_wear_cost
+            battery_cycle_cost=costs.battery_wear_cost,
+            solar_only_cost=costs.solar_only_cost, 
         )
         
         return HourlyData(

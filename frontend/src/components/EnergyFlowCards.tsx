@@ -180,16 +180,16 @@ const EnergyFlowCards: React.FC<EnergyFlowCardsProps> = ({ className = "" }) => 
           console.log('Available totals keys:', Object.keys(apiData.totals));
         }
 
-        // ✅ Use only camelCase field names (no fallbacks)
+        // Use only canonical camelCase field names
         const totals = {
-          solarProduction: apiData.totals?.totalSolar || 0,
-          homeConsumption: apiData.totals?.totalConsumption || 0,
+          solarProduction: apiData.totals?.totalSolarProduction || 0,
+          homeConsumption: apiData.totals?.totalHomeConsumption || 0,
           gridImport: apiData.totals?.totalGridImport || 0,
           gridExport: apiData.totals?.totalGridExport || 0,
           
-          // ✅ Battery totals - camelCase only
-          batteryCharged: apiData.totals?.totalBatteryCharge || 0,
-          batteryDischarged: apiData.totals?.totalBatteryDischarge || 0,
+          // Battery totals
+          batteryCharged: apiData.totals?.totalBatteryCharged || 0,
+          batteryDischarged: apiData.totals?.totalBatteryDischarged || 0,
           
           // ✅ Battery flow details - camelCase only
           solarToHome: apiData.totals?.totalSolarToHome || 0,

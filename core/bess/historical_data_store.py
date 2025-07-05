@@ -56,15 +56,6 @@ class HistoricalDataStore:
         if not 0 <= hour <= 23:
             raise ValueError(f"Invalid hour: {hour}, must be 0-23")
 
-        # Validate energy data with a very tolerant threshold for testing
-        validation_errors = energy_data.validate_energy_balance(
-            tolerance=1.0
-        )  # Very tolerant for tests
-        if not validation_errors[0]:
-            logger.warning(
-                f"Energy balance issue for hour {hour}: {validation_errors[1]}"
-            )
-
         # Analyze strategic intent from energy flows
         strategic_intent = self._analyze_intent_from_energy_data(energy_data)
 

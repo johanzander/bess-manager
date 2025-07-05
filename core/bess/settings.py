@@ -49,18 +49,7 @@ class PriceSettings:
     min_profit: float = MIN_PROFIT
     use_actual_price: bool = USE_ACTUAL_PRICE
 
-    def asdict(self) -> dict:
-        """Convert to dictionary (snake_case only)."""
-        return {
-            "area": self.area,
-            "markup_rate": self.markup_rate,
-            "vat_multiplier": self.vat_multiplier,
-            "additional_costs": self.additional_costs,
-            "tax_reduction": self.tax_reduction,
-            "use_actual_price": self.use_actual_price,
-        }
-
-    def update(self, **kwargs: dict[str, Any]) -> None:
+    def update(self, **kwargs: Any) -> None:
         """Update settings from dict."""
         for key, value in kwargs.items():
             if hasattr(self, key):
@@ -89,24 +78,7 @@ class BatterySettings:
         self.min_soc_kwh = self.reserved_capacity
         self.max_soc_kwh = self.total_capacity
 
-    def asdict(self) -> dict:
-        """Convert to dictionary (snake_case only)."""
-        return {
-            "total_capacity": self.total_capacity,
-            "reserved_capacity": self.reserved_capacity,
-            "min_soc": self.min_soc,
-            "max_soc": self.max_soc,
-            "min_soc_kwh": self.min_soc_kwh,
-            "max_soc_kwh": self.max_soc_kwh,
-            "max_charge_power_kw": self.max_charge_power_kw,
-            "max_discharge_power_kw": self.max_discharge_power_kw,
-            "cycle_cost_per_kwh": self.cycle_cost_per_kwh,
-            "charging_power_rate": self.charging_power_rate,
-            "efficiency_charge": self.efficiency_charge,
-            "efficiency_discharge": self.efficiency_discharge,
-        }
-
-    def update(self, **kwargs: dict[str, Any]) -> None:
+    def update(self, **kwargs: Any) -> None:
         """Update settings from dict."""
         for key, value in kwargs.items():
             if hasattr(self, key):
@@ -147,18 +119,7 @@ class HomeSettings:
     min_valid: float = MIN_CONSUMPTION
     power_adjustment_step: int = 10
 
-    def asdict(self) -> dict:
-        """Convert to dictionary (snake_case only)."""
-        return {
-            "max_fuse_current": self.max_fuse_current,
-            "voltage": self.voltage,
-            "safety_margin": self.safety_margin,
-            "default_hourly": self.default_hourly,
-            "min_valid": self.min_valid,
-            "estimated_consumption": self.default_hourly,
-        }
-
-    def update(self, **kwargs: dict[str, Any]) -> None:
+    def update(self, **kwargs: Any) -> None:
         """Update settings from dict."""
         for key, value in kwargs.items():
             if hasattr(self, key):

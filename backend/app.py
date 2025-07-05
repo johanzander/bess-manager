@@ -28,6 +28,32 @@ INGRESS_PREFIX = os.environ.get("INGRESS_PREFIX", "")
 # Create FastAPI app with correct root_path
 app = FastAPI(root_path=INGRESS_PREFIX)
 
+# Add global exception handler to prevent server restarts
+@app.exception_handler(Exception)
+async def global_exception_handler(request, exc):
+    import traceback
+
+    from fastapi.responses import JSONResponse
+    
+    # Get the full stack trace
+    tb_str = traceback.format_exception(type(exc), exc, exc.__traceback__)
+    error_msg = "".join(tb_str)
+    
+    # Log the full error details
+    logger.error(f"Unhandled exception: {exc!s}")
+    logger.error(f"Request path: {request.url.path}")
+    logger.error(f"Stack trace:\n{error_msg}")
+    
+    # Return a 500 response but keep the server running
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": str(exc),
+            "type": str(type(exc).__name__),
+            "message": "The server encountered an internal error but is still running."
+        },
+    )
+
 # Now that logger patching is complete, log the ingress prefix
 logger.info(f"Ingress prefix: {INGRESS_PREFIX}")
 

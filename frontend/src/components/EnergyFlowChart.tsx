@@ -5,8 +5,8 @@ import { Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 interface HourlyData {
   hour: number;
   dataSource?: string; // Make it optional and more flexible
-  solarGenerated?: number;
-  homeConsumed?: number;
+  solarProduction: number;
+  homeConsumption: number;
   gridImported?: number;
   gridExported?: number;
   batteryCharged?: number;
@@ -50,11 +50,11 @@ export const EnergyFlowChart: React.FC<{
     // Use dailyViewData for actual data if marked as actual
     if (dailyViewHour && isActual) {
       // Check for missing keys and log warnings
-      if (dailyViewHour.solarGenerated === undefined) {
-        console.warn(`Missing key: solarGenerated in dailyViewHour at hour ${hour}`);
+      if (dailyViewHour.solarProduction === undefined) {
+        console.warn(`Missing key: solarProduction in dailyViewHour at hour ${hour}`);
       }
-      if (dailyViewHour.homeConsumed === undefined) {
-        console.warn(`Missing key: homeConsumed in dailyViewHour at hour ${hour}`);
+      if (dailyViewHour.homeConsumption === undefined) {
+        console.warn(`Missing key: homeConsumption in dailyViewHour at hour ${hour}`);
       }
       if (dailyViewHour.gridImported === undefined) {
         console.warn(`Missing key: gridImported in dailyViewHour at hour ${hour}`);
@@ -70,8 +70,8 @@ export const EnergyFlowChart: React.FC<{
       }
       
       actualData = {
-        solar: dailyViewHour.solarGenerated ?? 0,
-        consumption: dailyViewHour.homeConsumed ?? 0,
+        solar: dailyViewHour.solarProduction ?? 0,
+        consumption: dailyViewHour.homeConsumption ?? 0,
         gridImport: dailyViewHour.gridImported ?? 0,
         gridExport: dailyViewHour.gridExported ?? 0,
         batteryCharge: dailyViewHour.batteryCharged ?? 0,
@@ -83,8 +83,8 @@ export const EnergyFlowChart: React.FC<{
     // Handle predicted data from daily view
     if (dailyViewHour) {
       const data = {
-        solar: dailyViewHour.solarGenerated ?? 0,
-        consumption: dailyViewHour.homeConsumed ?? 0,
+        solar: dailyViewHour.solarProduction ?? 0,
+        consumption: dailyViewHour.homeConsumption ?? 0,
         gridImport: dailyViewHour.gridImported ?? 0,
         gridExport: dailyViewHour.gridExported ?? 0,
         batteryCharge: dailyViewHour.batteryCharged ?? 0,
@@ -181,13 +181,13 @@ export const EnergyFlowChart: React.FC<{
       // Find the daily view data for this hour to get predicted consumption
       const dailyViewHour = dailyViewData?.find(h => h.hour === data.hour);
       
-      if (dailyViewHour && dailyViewHour.homeConsumed === undefined) {
-        console.warn(`Missing key: homeConsumed in dailyViewHour at hour ${data.hour}`);
+      if (dailyViewHour && dailyViewHour.homeConsumption === undefined) {
+        console.warn(`Missing key: homeConsumption in dailyViewHour at hour ${data.hour}`);
       }
       
       return {
         ...data,
-        predictedConsumption: dailyViewHour?.homeConsumed ?? 0
+        predictedConsumption: dailyViewHour?.homeConsumption ?? 0
       };
     }
     return data;

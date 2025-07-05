@@ -41,54 +41,40 @@ class TestSystemInitialization:
         assert "home" in settings, "Should have home settings"
         assert "price" in settings, "Should have price settings"
 
-        # Verify battery settings structure - check what the system actually returns
+        # Settings now return dataclass objects, not dictionaries
         battery_settings = settings["battery"]
-        # Log to see actual field names
-        import logging
+        
+        # Check that it's a dataclass with expected attributes
+        assert hasattr(battery_settings, 'total_capacity'), "Should have total_capacity attribute"
+        assert hasattr(battery_settings, 'min_soc'), "Should have min_soc attribute"
+        assert hasattr(battery_settings, 'max_soc'), "Should have max_soc attribute"
+        assert hasattr(battery_settings, 'max_charge_power_kw'), "Should have max_charge_power_kw attribute"
+        
+        # Verify the values are numeric
+        assert isinstance(battery_settings.total_capacity, (int, float)), "total_capacity should be numeric"
+        assert isinstance(battery_settings.min_soc, (int, float)), "min_soc should be numeric"
+        assert isinstance(battery_settings.max_soc, (int, float)), "max_soc should be numeric"
+        assert isinstance(battery_settings.max_charge_power_kw, (int, float)), "max_charge_power_kw should be numeric"
 
-        logging.info(f"Actual battery settings: {battery_settings}")
-
-        # Check for the actual field names used by the system
-        expected_fields = [
-            "total_capacity",
-            "reserved_capacity",
-            "max_charge_power",
-            "max_discharge_power",
-        ]
-        for field in expected_fields:
-            if field in battery_settings:
-                assert isinstance(
-                    battery_settings[field], int | float
-                ), f"{field} should be numeric"
-                break
-        else:
-            # If none of the expected fields are found, just verify it's a dict
-            assert isinstance(
-                battery_settings, dict
-            ), "Battery settings should be a dictionary"
 
     def test_settings_update_functionality(self, battery_system):
         """Test that settings can be updated properly."""
+        # Get initial settings
+        initial_settings = battery_system.get_settings()
+        initial_capacity = initial_settings["battery"].total_capacity
+        
+        # Update battery settings using dataclass attribute names
+        new_settings = {
+            "battery": {"total_capacity": 35.0}
+        }
+        battery_system.update_settings(new_settings)
 
-        # Try to update a setting - use the actual field name
-        try:
-            new_settings = {
-                "battery": {"total_capacity": 35.0}  # Try the actual field name
-            }
-            battery_system.update_settings(new_settings)
-
-            # Verify update was applied
-            updated_settings = battery_system.get_settings()
-            assert updated_settings["battery"]["total_capacity"] == 35.0
-        except (KeyError, AttributeError):
-            # If that doesn't work, the settings system might not support updates
-            # Just verify the update_settings method exists and is callable
-            assert hasattr(
-                battery_system, "update_settings"
-            ), "Should have update_settings method"
-            assert callable(
-                battery_system.update_settings
-            ), "update_settings should be callable"
+        # Verify update was applied
+        updated_settings = battery_system.get_settings()
+        assert updated_settings["battery"].total_capacity == 35.0, "Settings update should work"
+        
+        # Verify it's different from initial
+        assert updated_settings["battery"].total_capacity != initial_capacity, "Setting should have changed"
 
 
 class TestDataStructureConsistency:

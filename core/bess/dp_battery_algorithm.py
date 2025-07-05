@@ -51,6 +51,8 @@ The algorithm returns comprehensive results including:
 """
 
 __all__ = [
+    "calculate_energy_flows",        # Primary canonical function for energy flow calculation
+    "calculate_energy_flows_direct", # Adapter for using with direct sensor values
     "calculate_hourly_costs",
     "optimize_battery_schedule",
     "print_optimization_results",
@@ -200,21 +202,46 @@ def _state_transition(
 
 
 
-def _calculate_energy_flows(
+def calculate_energy_flows(
     power: float, 
     home_consumption: float, 
     solar_production: float, 
-    soe_start: float,  # RENAMED: State of Energy in kWh
-    soe_end: float,    # RENAMED: State of Energy in kWh
-    battery_settings: BatterySettings,  # ADDED: For SOE->SOC conversion
+    soe_start: float,  # State of Energy in kWh
+    soe_end: float,    # State of Energy in kWh
+    battery_settings: BatterySettings,  # For SOE->SOC conversion
     dt: float = 1.0,
+    battery_charged: float | None = None,  # Optional: direct battery charged value
+    battery_discharged: float | None = None,  # Optional: direct battery discharged value
 ) -> EnergyData:
-    """Calculate detailed energy flows with proper SOE->SOC conversion."""
+    """
+    Calculate detailed energy flows with proper SOE->SOC conversion.
+    
+    This is the canonical energy flow calculation function used throughout the system.
+    It can work in two modes:
+    1. Power-based (for optimization): Uses power and dt to calculate battery flows
+    2. Direct (for sensor data): Uses provided battery_charged/discharged values
+    
+    Args:
+        power: Battery power in kW (+ charging, - discharging)
+        home_consumption: Home consumption in kWh
+        solar_production: Solar production in kWh
+        soe_start: Battery state of energy at start (kWh)
+        soe_end: Battery state of energy at end (kWh)
+        battery_settings: Battery settings for SOE->SOC conversion
+        dt: Time step in hours (default 1.0)
+        battery_charged: Optional direct battery charged value (kWh)
+        battery_discharged: Optional direct battery discharged value (kWh)
+        
+    Returns:
+        EnergyData with all core and detailed flows calculated
+    """
     from core.bess.models import EnergyData
     
-    # Calculate battery energy flows
-    battery_charged = max(0, power * dt) if power > 0 else 0.0
-    battery_discharged = max(0, -power * dt) if power < 0 else 0.0
+    # Calculate battery energy flows - either from power or use provided values
+    if battery_charged is None or battery_discharged is None:
+        # Power-based mode (optimization)
+        battery_charged = max(0, power * dt) if power > 0 else 0.0
+        battery_discharged = max(0, -power * dt) if power < 0 else 0.0
     
     # Priority: Solar -> Home first, then remaining solar -> Battery/Grid
     solar_to_home = min(solar_production, home_consumption)
@@ -222,22 +249,22 @@ def _calculate_energy_flows(
     remaining_consumption = home_consumption - solar_to_home
     
     # Solar allocation: battery charging takes priority over grid export
-    solar_to_battery = min(remaining_solar, battery_charged) if battery_charged > 0 else 0.0
+    solar_to_battery = min(remaining_solar, battery_charged)
     solar_to_grid = max(0, remaining_solar - solar_to_battery)
     
-    # Grid imports: fill remaining consumption and battery charging
-    grid_to_home = max(0, remaining_consumption - battery_discharged) if battery_discharged > 0 else remaining_consumption
-    grid_to_battery = max(0, battery_charged - solar_to_battery)
-    
-    # Battery discharge allocation
-    battery_to_home = min(battery_discharged, remaining_consumption) if battery_discharged > 0 else 0.0
+    # Battery discharge allocation: home consumption takes priority
+    battery_to_home = min(battery_discharged, remaining_consumption)
     battery_to_grid = max(0, battery_discharged - battery_to_home)
+    
+    # Grid imports: fill remaining consumption and battery charging
+    grid_to_home = max(0, remaining_consumption - battery_to_home)
+    grid_to_battery = max(0, battery_charged - solar_to_battery)
     
     # Calculate total grid flows
     grid_imported = grid_to_home + grid_to_battery
     grid_exported = solar_to_grid + battery_to_grid
     
-    # CRITICAL FIX: Convert State of Energy (kWh) to State of Charge (%)
+    # Convert State of Energy (kWh) to State of Charge (%)
     battery_soc_start_percent = (soe_start / battery_settings.total_capacity) * 100.0
     battery_soc_end_percent = (soe_end / battery_settings.total_capacity) * 100.0
     
@@ -258,6 +285,83 @@ def _calculate_energy_flows(
         battery_to_home=battery_to_home,
         battery_to_grid=battery_to_grid,
     )
+
+
+def calculate_energy_flows_direct(
+    solar_production: float,
+    home_consumption: float,
+    battery_charged: float,
+    battery_discharged: float,
+    battery_soc_start: float,
+    battery_soc_end: float,
+    grid_imported: float | None = None,
+    grid_exported: float | None = None,
+) -> EnergyData:
+    """
+    Calculate detailed energy flows directly from core energy values by using calculate_energy_flows.
+    
+    This is an adapter for the canonical calculate_energy_flows function that works with direct
+    sensor values rather than requiring SOE conversion.
+    
+    Args:
+        solar_production: Solar generation in kWh
+        home_consumption: Home consumption in kWh
+        battery_charged: Battery charging in kWh
+        battery_discharged: Battery discharging in kWh
+        battery_soc_start: Battery SOC at start (%)
+        battery_soc_end: Battery SOC at end (%)
+        grid_imported: Optional measured grid import in kWh
+        grid_exported: Optional measured grid export in kWh
+        
+    Returns:
+        EnergyData: Complete energy data with all detailed flows calculated
+    """
+    from core.bess.settings import BatterySettings
+    
+    # If grid values aren't provided, calculate them from energy balance
+    if grid_imported is None:
+        # Energy needed = home consumption + battery charging - solar production - battery discharging
+        grid_imported = max(0, home_consumption + battery_charged - solar_production - battery_discharged)
+    
+    if grid_exported is None:
+        # Excess energy = solar production + battery discharging - home consumption - battery charging
+        grid_exported = max(0, solar_production + battery_discharged - home_consumption - battery_charged)
+    
+    # Create a minimal BatterySettings with capacity=100 to make SOC%=SOE (kWh) numerically equivalent
+    # This allows us to pass SOC values directly as SOE values
+    temp_battery_settings = BatterySettings(
+        total_capacity=100.0,  # With capacity=100, SOC% and SOE(kWh) are numerically equal
+        efficiency_charge=1.0,
+        efficiency_discharge=1.0
+    )
+    
+    # Use the canonical flow calculation function with direct battery values
+    energy_data = calculate_energy_flows(
+        power=0.0,  # Not used when direct values are provided
+        home_consumption=home_consumption,
+        solar_production=solar_production,
+        soe_start=battery_soc_start,  # With capacity=100, SOC% = SOE kWh
+        soe_end=battery_soc_end,      # With capacity=100, SOC% = SOE kWh
+        battery_settings=temp_battery_settings,
+        dt=1.0,
+        battery_charged=battery_charged,  # Pass the actual values directly
+        battery_discharged=battery_discharged
+    )
+    
+    # Override the grid values to ensure they match what was provided
+    energy_data.grid_imported = grid_imported
+    energy_data.grid_exported = grid_exported
+    
+    # Validate energy balance
+    total_in = solar_production + grid_imported + battery_discharged
+    total_out = home_consumption + grid_exported + battery_charged
+    if abs(total_in - total_out) > 0.1:
+        logger.warning(
+            f"Energy balance discrepancy: in={total_in:.2f} != out={total_out:.2f}, "
+            f"diff={total_in-total_out:.2f} kWh"
+        )
+    
+    return energy_data
 
 
 def _calculate_reward(
@@ -281,7 +385,7 @@ def _calculate_reward(
     current_sell_price = sell_price[hour] if sell_price and hour < len(sell_price) else 0.0
     
     # Calculate energy flows with proper SOE->SOC conversion
-    energy_data = _calculate_energy_flows(
+    energy_data = calculate_energy_flows(
         power=power,
         home_consumption=home_consumption,
         solar_production=solar_production,

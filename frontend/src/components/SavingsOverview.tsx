@@ -14,8 +14,8 @@ interface DashboardResponse {
     hour: number;
     isActual?: boolean;
     dataSource?: string;
-    homeConsumed: number;
-    solarGenerated: number;
+    homeConsumption: number;
+    solarProduction: number;
     gridImported: number;
     gridExported: number;
     batteryCharged: number;
@@ -86,9 +86,9 @@ export const SavingsOverview: React.FC<SavingsOverviewProps> = () => {
     );
   }
 
-  // Calculate summary data from the hourly data
-  const totalConsumption = dashboardData.hourlyData.reduce((sum: number, h: any) => sum + h.homeConsumed, 0);
-  const totalSolar = dashboardData.hourlyData.reduce((sum: number, h: any) => sum + h.solarGenerated, 0);
+  // Calculate summary data from the hourly data using canonical field names
+  const totalHomeConsumption = dashboardData.hourlyData.reduce((sum: number, h: any) => sum + (h.homeConsumption || 0), 0);
+  const totalSolarProduction = dashboardData.hourlyData.reduce((sum: number, h: any) => sum + (h.solarProduction || 0), 0);
   const totalGridImport = dashboardData.hourlyData.reduce((sum: number, h: any) => sum + h.gridImported, 0);
   const totalGridExport = dashboardData.hourlyData.reduce((sum: number, h: any) => sum + h.gridExported, 0);
   const totalBatteryCharged = dashboardData.hourlyData.reduce((sum: number, h: any) => sum + h.batteryCharged, 0);
@@ -96,7 +96,7 @@ export const SavingsOverview: React.FC<SavingsOverviewProps> = () => {
   const netBatteryAction = totalBatteryCharged - totalBatteryDischarged;
   
   // Calculate base cost (grid-only scenario)
-  const baseCost = dashboardData.hourlyData.reduce((sum: number, h: any) => sum + (h.homeConsumed * h.buyPrice), 0);
+  const baseCost = dashboardData.hourlyData.reduce((sum: number, h: any) => sum + (h.homeConsumption * h.buyPrice), 0);
   
   // Actual optimized cost
   const optimizedCost = dashboardData.hourlyData.reduce((sum: number, h: any) => sum + h.hourlyCost, 0);
@@ -232,12 +232,12 @@ export const SavingsOverview: React.FC<SavingsOverviewProps> = () => {
                 </td>
                 
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
-                  <div className="font-medium text-yellow-600 dark:text-yellow-400">{hour.solarGenerated.toFixed(1)}</div>
+                  <div className="font-medium text-yellow-600 dark:text-yellow-400">{hour.solarProduction.toFixed(1)}</div>
                   <div className="text-xs text-gray-500 dark:text-gray-400">kWh</div>
                 </td>
                 
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
-                  <div className="font-medium">{hour.homeConsumed.toFixed(1)}</div>
+                  <div className="font-medium">{hour.homeConsumption.toFixed(1)}</div>
                   <div className="text-xs text-gray-500 dark:text-gray-400">kWh</div>
                 </td>
                 
@@ -320,13 +320,13 @@ export const SavingsOverview: React.FC<SavingsOverviewProps> = () => {
             
             <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
               <div className="font-medium text-yellow-600 dark:text-yellow-400">
-                {totalSolar.toFixed(1)}
+                {totalSolarProduction.toFixed(1)}
               </div>
             </td>
             
             <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
               <div className="font-medium">
-                {totalConsumption.toFixed(1)}
+                {totalHomeConsumption.toFixed(1)}
               </div>
             </td>
             

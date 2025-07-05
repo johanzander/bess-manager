@@ -11,8 +11,9 @@ export interface HourlyData {
   baseCost: number;
   savings: number;
   
-  // Solar data fields
-  solarProduction?: number;
+  // Energy data fields - canonical camelCase names
+  solarProduction: number;
+  homeConsumption: number;
   directSolar?: number;
   exportSolar?: number;
   importFromGrid?: number;
@@ -33,12 +34,10 @@ export interface HourlyData {
   // Legacy field for compatibility
   solarCharged?: number;
   
-  // API camelCase alternatives
+  // API camelCase fields
   buyPrice?: number;
   batteryAction?: number;
   batterySoc?: number;
-  homeConsumption?: number;
-  solarGenerated?: number;
   gridImported?: number;
   gridExported?: number;
 }
@@ -55,8 +54,8 @@ export interface ScheduleSummary {
   solarOnlyCost?: number;
   batterySavings?: number;
   totalSolarProduction?: number;
-  totalBatteryCharge?: number;
-  totalBatteryDischarge?: number;
+  totalBatteryCharged?: number;
+  totalBatteryDischarged?: number;
   totalGridImport?: number;
   totalGridExport?: number;
   cycleCount?: number;

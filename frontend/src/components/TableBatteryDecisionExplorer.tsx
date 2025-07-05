@@ -7,7 +7,7 @@ interface BatteryDecision {
   action: 'charge' | 'discharge' | 'hold';
   actionValue: number;
   electricityPrice: number;
-  solarGenerated: number;
+  solarProduction: number;
   solarBalance: number;
   socStart: number;
   socEnd: number;
@@ -31,8 +31,8 @@ interface DashboardResponse {
     batterySocEnd?: number;
     electricityPrice?: number;
     buyPrice?: number;
-    solarGenerated?: number;
-    homeConsumed?: number;
+    solarProduction?: number;
+    homeConsumption?: number;
     hourlyCost?: number;
     hourlySavings?: number;
   }>;
@@ -89,7 +89,7 @@ export const TableBatteryDecisionExplorer: React.FC = () => {
     if (batteryAction > 0.1) action = 'charge';
     else if (batteryAction < -0.1) action = 'discharge';
 
-    const solarBalance = (hour.solarGenerated || 0) - (hour.homeConsumed || 0);
+    const solarBalance = (hour.solarProduction || 0) - (hour.homeConsumption || 0);
     const price = hour.electricityPrice || hour.buyPrice || 0;
     
     // Generate primary reason based on action and context
@@ -135,7 +135,7 @@ export const TableBatteryDecisionExplorer: React.FC = () => {
       action,
       actionValue: Math.abs(batteryAction),
       electricityPrice: price,
-      solarGenerated: hour.solarGenerated || 0,
+      solarProduction: hour.solarProduction || 0,
       solarBalance,
       socStart: hour.batterySocStart || hour.batterySocEnd || 50,
       socEnd: hour.batterySocEnd || 50,
@@ -267,7 +267,7 @@ export const TableBatteryDecisionExplorer: React.FC = () => {
                   <div>
                     <div className="flex items-center">
                       <Sun className="h-3 w-3 mr-1 text-yellow-500" />
-                      <span className="text-xs text-gray-500 dark:text-gray-400">{decision.solarGenerated.toFixed(1)}</span>
+                      <span className="text-xs text-gray-500 dark:text-gray-400">{decision.solarProduction.toFixed(1)}</span>
                     </div>
                     <div className={`font-medium ${
                       decision.solarBalance > 0 ? 'text-green-600 dark:text-green-400' : 

@@ -236,7 +236,7 @@ def flatten_hourly_data(hourly, battery_capacity: float = 30.0) -> dict:
             
             # Calculate solar and battery savings with clear names
             "solarSavings": max(0, hourly.economic.grid_only_cost - hourly.economic.solar_only_cost),
-            "batterySavings": hourly.economic.solar_only_cost - hourly.economic.hourly_cost,  # Allow negative savings
+            "batterySavings": hourly.economic.grid_only_cost - hourly.economic.hourly_cost,  # Total savings from solar+battery vs grid-only
         })
     
     if hourly.decision:

@@ -1,10 +1,14 @@
+/**
+ * Battery state naming convention:
+ * - SOE (State of Energy): Absolute energy in kWh (0-30 kWh typical)
+ * - SOC (State of Charge): Relative charge in % (0-100%)
+ * - USE batterySocEnd for battery level displays (clear and unambiguous)
+ */
 export interface HourlyData {
   // Core fields
   hour: string;
   price: number;
   consumption: number;
-  batteryLevel: number;
-  action: number;
   gridCost: number;
   batteryCost: number;
   totalCost: number;
@@ -13,9 +17,6 @@ export interface HourlyData {
   // Energy data fields - canonical camelCase names
   solarProduction: number;
   homeConsumption: number;
-  directSolar?: number;
-  exportSolar?: number;
-  importFromGrid?: number;
   solarOnlyCost?: number;
   solarSavings?: number;
   gridOnlyCost?: number;
@@ -30,13 +31,17 @@ export interface HourlyData {
   gridToBattery?: number;
   solarToBattery?: number;
   
-  // Legacy field for compatibility
-  solarCharged?: number;
+  // Battery State of Energy (kWh) - absolute values
+  batterySoeStart?: number;  // kWh
+  batterySoeEnd?: number;    // kWh
+  
+  // Battery State of Charge (%) - percentage values  
+  batterySocStart?: number;  // % (0-100)
+  batterySocEnd?: number;    // % (0-100)
   
   // API camelCase fields
   buyPrice?: number;
   batteryAction?: number;
-  batterySoc?: number;
   gridImported?: number;
   gridExported?: number;
 }

@@ -25,8 +25,8 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
     if (hour.batteryAction === undefined) {
       console.warn(`Missing key: batteryAction at index ${index}`);
     }
-    if (hour.batterySocEnd === undefined && hour.batteryLevel === undefined) {
-      console.warn(`Missing keys: batterySocEnd and batteryLevel at index ${index}`);
+    if (hour.batterySocEnd === undefined) {
+      console.warn(`Missing key: batterySocEnd at index ${index}`);
     }
     if (hour.buyPrice === undefined) {
       console.warn(`Missing key: buyPrice at index ${index}`);
@@ -36,7 +36,7 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
     }
     
     const batteryAction = hour.batteryAction ?? 0;
-    const batterySocPercent = hour.batterySocEnd ?? hour.batteryLevel ?? 0;
+    const batterySocPercent = hour.batterySocEnd ?? 0;  // Use clear SOC field
     const price = hour.buyPrice ?? 0;
     const hourNum = typeof hour.hour === 'number' ? hour.hour : index;
     const dataSource = hour.dataSource ?? 'unknown';

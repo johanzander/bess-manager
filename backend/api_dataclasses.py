@@ -7,21 +7,29 @@ from dataclasses import dataclass
 
 @dataclass
 class APIBatterySettings:
-    """API response dataclass with canonical camelCase fields."""
+    """Battery settings with clear SOC/SOE naming."""
     
-    totalCapacity: float
-    reservedCapacity: float
-    minSoc: float
-    maxSoc: float
-    minSoeKwh: float  # State of Energy in kWh (not SOC percentage)
-    maxSoeKwh: float  # State of Energy in kWh (not SOC percentage)
-    maxChargePowerKw: float
-    maxDischargePowerKw: float
-    cycleCostPerKwh: float
-    chargingPowerRate: float
-    efficiencyCharge: float
-    efficiencyDischarge: float
-    estimatedConsumption: float
+    totalCapacity: float        # kWh - total battery capacity
+    reservedCapacity: float     # kWh - reserved capacity
+    
+    # State of Charge limits (%)
+    minSoc: float              # % (0-100) - minimum charge percentage
+    maxSoc: float              # % (0-100) - maximum charge percentage  
+    
+    # State of Energy limits (kWh) - calculated from SOC
+    minSoeKwh: float           # kWh - minimum energy (calculated)
+    maxSoeKwh: float           # kWh - maximum energy (calculated)
+    
+    # Power limits (kW)
+    maxChargePowerKw: float    # kW - maximum charge power
+    maxDischargePowerKw: float # kW - maximum discharge power
+    
+    # Economic settings
+    cycleCostPerKwh: float     # SEK/kWh - cost per cycle
+    chargingPowerRate: float   # % - charging power rate
+    efficiencyCharge: float    # % - charging efficiency
+    efficiencyDischarge: float # % - discharge efficiency
+    estimatedConsumption: float # kWh - estimated daily consumption
     
     @classmethod
     def from_internal(cls, battery, estimated_consumption: float) -> APIBatterySettings:
@@ -31,8 +39,8 @@ class APIBatterySettings:
             reservedCapacity=battery.reserved_capacity,
             minSoc=battery.min_soc,
             maxSoc=battery.max_soc,
-            minSoeKwh=battery.min_soe_kwh,  # State of Energy in kWh
-            maxSoeKwh=battery.max_soe_kwh,  # State of Energy in kWh
+            minSoeKwh=battery.min_soe_kwh,  # kWh - minimum energy
+            maxSoeKwh=battery.max_soe_kwh,  # kWh - maximum energy
             maxChargePowerKw=battery.max_charge_power_kw,
             maxDischargePowerKw=battery.max_discharge_power_kw,
             cycleCostPerKwh=battery.cycle_cost_per_kwh,
@@ -142,10 +150,16 @@ class APIEnergyData:
     gridExported: float
     batteryCharged: float
     batteryDischarged: float
-    batterySoeStart: float  # State of Energy in kWh (renamed for clarity)
-    batterySoeEnd: float    # State of Energy in kWh (renamed for clarity)
-    batterySocStart: float  # Keep for backward compatibility (contains SOE values!)
-    batterySocEnd: float    # Keep for backward compatibility (contains SOE values!)
+    
+    # Canonical SOE fields (kWh)
+    batterySoeStart: float  # State of Energy in kWh
+    batterySoeEnd: float    # State of Energy in kWh
+    
+    # Canonical SOC fields (%) - PROPERLY CALCULATED
+    batterySocStart: float  # State of Charge in % (0-100)
+    batterySocEnd: float    # State of Charge in % (0-100)
+    
+    # Energy flow details
     solarToHome: float = 0.0
     solarToBattery: float = 0.0
     solarToGrid: float = 0.0
@@ -156,15 +170,15 @@ class APIEnergyData:
     
     @classmethod
     def from_internal(cls, energy, battery_capacity: float = 30.0) -> APIEnergyData:
-        """Convert from internal snake_case to canonical camelCase.
+        """Convert from internal EnergyData to API camelCase with CORRECT SOC/SOE naming.
         
         Args:
             energy: Internal energy data with SOE values in kWh
             battery_capacity: Battery capacity in kWh for SOC conversion
         """
-        # Convert SOE (kWh) to SOC (%) for backward compatibility
-        soc_start = (energy.battery_soe_start / battery_capacity) * 100.0
-        soc_end = (energy.battery_soe_end / battery_capacity) * 100.0
+        # CORRECT: Convert SOE (kWh) to SOC (%) 
+        soc_start_percent = (energy.battery_soe_start / battery_capacity) * 100.0
+        soc_end_percent = (energy.battery_soe_end / battery_capacity) * 100.0
         
         return cls(
             solarProduction=energy.solar_generated,
@@ -173,10 +187,16 @@ class APIEnergyData:
             gridExported=energy.grid_exported,
             batteryCharged=energy.battery_charged,
             batteryDischarged=energy.battery_discharged,
-            batterySoeStart=energy.battery_soe_start,  # Correct SOE field (kWh)
-            batterySoeEnd=energy.battery_soe_end,      # Correct SOE field (kWh)
-            batterySocStart=soc_start,  # Proper SOC field (%)
-            batterySocEnd=soc_end,      # Proper SOC field (%)
+            
+            # FIXED: Proper SOE fields (kWh)
+            batterySoeStart=energy.battery_soe_start,  # kWh ✓
+            batterySoeEnd=energy.battery_soe_end,      # kWh ✓
+            
+            # FIXED: Proper SOC fields (%) 
+            batterySocStart=soc_start_percent,  # % ✓ 
+            batterySocEnd=soc_end_percent,      # % ✓
+            
+            # Detailed flows
             solarToHome=energy.solar_to_home,
             solarToBattery=energy.solar_to_battery,
             solarToGrid=energy.solar_to_grid,
@@ -206,10 +226,11 @@ def flatten_hourly_data(hourly, battery_capacity: float = 30.0) -> dict:
         "gridExported": api_energy.gridExported,
         "batteryCharged": api_energy.batteryCharged,
         "batteryDischarged": api_energy.batteryDischarged,
-        "batterySoeStart": api_energy.batterySoeStart,  # Correct SOE field (kWh)
-        "batterySoeEnd": api_energy.batterySoeEnd,      # Correct SOE field (kWh)
-        "batterySocStart": api_energy.batterySocStart,  # Proper SOC field (%)
-        "batterySocEnd": api_energy.batterySocEnd,      # Proper SOC field (%)
+        "batterySoeStart": api_energy.batterySoeStart,  # kWh ✓
+        "batterySoeEnd": api_energy.batterySoeEnd,      # kWh ✓
+        "batterySocStart": api_energy.batterySocStart,  # % ✓
+        "batterySocEnd": api_energy.batterySocEnd,      # % ✓
+        
         "solarToHome": api_energy.solarToHome,
         "solarToBattery": api_energy.solarToBattery,
         "solarToGrid": api_energy.solarToGrid,

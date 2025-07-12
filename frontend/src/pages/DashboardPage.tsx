@@ -27,7 +27,6 @@ export default function DashboardPage({
     hourlyData: Array<{
       hour: number;
       batterySocEnd?: number;
-      batteryLevel?: number;
       batteryAction?: number;
       batteryMode?: string;
       solarProduction?: number;

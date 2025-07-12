@@ -6,15 +6,15 @@ interface BatteryDecision {
   hour: number;
   action: 'charge' | 'discharge' | 'hold';
   actionValue: number;
-  electricityPrice: number;
+  buyPrice: number;  
   solarProduction: number;
   solarBalance: number;
-  socStart: number;
-  socEnd: number;
+  batterySocStart: number;  
+  batterySocEnd: number;    
   primaryReason: string;
   economicContext: string;
   opportunityScore: number;
-  savings: number;
+  hourlySavings: number;    
   isActual: boolean;
   isCurrentHour: boolean;
 }
@@ -29,12 +29,11 @@ interface DashboardResponse {
     batteryAction?: number;
     batterySocStart?: number;
     batterySocEnd?: number;
-    electricityPrice?: number;
-    buyPrice?: number;
+    buyPrice?: number;            
     solarProduction?: number;
     homeConsumption?: number;
     hourlyCost?: number;
-    hourlySavings?: number;
+    hourlySavings?: number;       
   }>;
 }
 
@@ -90,7 +89,7 @@ export const TableBatteryDecisionExplorer: React.FC = () => {
     else if (batteryAction < -0.1) action = 'discharge';
 
     const solarBalance = (hour.solarProduction || 0) - (hour.homeConsumption || 0);
-    const price = hour.electricityPrice || hour.buyPrice || 0;
+    const price = hour.buyPrice || 0;  // Use canonical buyPrice field
     
     // Generate primary reason based on action and context
     let primaryReason = 'Grid balancing';
@@ -128,21 +127,21 @@ export const TableBatteryDecisionExplorer: React.FC = () => {
     else if (action === 'discharge' && solarBalance < -2) opportunityScore = 0.85;
 
     // Use hourly savings from data or calculate basic savings
-    const savings = hour.hourlySavings || 0;
+    // Note: savings variable removed since we use canonical hourlySavings directly
 
     return {
       hour: hour.hour,
       action,
       actionValue: Math.abs(batteryAction),
-      electricityPrice: price,
+      buyPrice: price,                               
       solarProduction: hour.solarProduction || 0,
       solarBalance,
-      socStart: hour.batterySocStart || hour.batterySocEnd || 50,
-      socEnd: hour.batterySocEnd || 50,
+      batterySocStart: hour.batterySocStart || hour.batterySocEnd || 50,  
+      batterySocEnd: hour.batterySocEnd || 50,       
       primaryReason,
       economicContext,
       opportunityScore,
-      savings,
+      hourlySavings: hour.hourlySavings || 0,        
       isActual: hour.isActual || hour.dataSource === 'actual' || false,
       isCurrentHour: hour.hour === dashboardData.currentHour
     };
@@ -228,11 +227,11 @@ export const TableBatteryDecisionExplorer: React.FC = () => {
                 <td className="px-3 py-4 whitespace-nowrap text-sm">
                   <div>
                     <div className={`font-medium ${
-                      decision.electricityPrice > 1.0 ? 'text-red-600 dark:text-red-400' :
-                      decision.electricityPrice < 0.5 ? 'text-green-600 dark:text-green-400' :
+                      decision.buyPrice > 1.0 ? 'text-red-600 dark:text-red-400' :
+                      decision.buyPrice < 0.5 ? 'text-green-600 dark:text-green-400' :
                       'text-gray-900 dark:text-white'
                     }`}>
-                      {decision.electricityPrice.toFixed(2)}
+                      {decision.buyPrice.toFixed(2)}
                     </div>
                     <div className="text-xs text-gray-500 dark:text-gray-400">SEK/kWh</div>
                   </div>
@@ -257,8 +256,8 @@ export const TableBatteryDecisionExplorer: React.FC = () => {
                 {/* SOC */}
                 <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
                   <div>
-                    <div className="font-medium">{decision.socStart.toFixed(1)}</div>
-                    <div className="text-gray-500 dark:text-gray-400">→ {decision.socEnd.toFixed(1)}</div>
+                    <div className="font-medium">{decision.batterySocStart.toFixed(1)}</div>
+                    <div className="text-gray-500 dark:text-gray-400">→ {decision.batterySocEnd.toFixed(1)}</div>
                   </div>
                 </td>
 
@@ -302,9 +301,9 @@ export const TableBatteryDecisionExplorer: React.FC = () => {
                 {/* Savings */}
                 <td className="px-3 py-4 whitespace-nowrap text-sm">
                   <span className={`font-medium ${
-                    decision.savings >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
+                    decision.hourlySavings >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
                   }`}>
-                    {decision.savings >= 0 ? '+' : ''}{decision.savings.toFixed(2)} SEK
+                    {decision.hourlySavings >= 0 ? '+' : ''}{decision.hourlySavings.toFixed(2)} SEK
                   </span>
                 </td>
               </tr>

@@ -184,19 +184,40 @@ async def get_dashboard_data(date: str = Query(None)):
         
         logger.debug("Calculated costs and savings")
         
-        # Build summary with only the necessary fields (no duplicates with totals)
+        # Build canonical summary with consistent field names
         summary = {
-            "gridOnlyCost": total_grid_only_cost,  # Clear name for grid-only scenario
+            # Baseline costs (what scenarios would cost) - CANONICAL
+            "gridOnlyCost": total_grid_only_cost,
+            "solarOnlyCost": total_solar_only_cost, 
             "optimizedCost": total_battery_solar_cost,
-            "solarOnlyCost": total_solar_only_cost,
-            "gridCosts": total_grid_costs,
-            "batteryCosts": total_battery_costs,
-            "batteryCycleCost": total_battery_costs,  # Add alias for frontend compatibility
-            "savings": total_savings,
-            "solarOnlySavings": solar_only_savings,
+            
+            # Component costs (breakdown) - CANONICAL
+            "totalGridCost": total_grid_costs,
+            "totalBatteryCycleCost": total_battery_costs,
+            
+            # Savings calculations - CANONICAL
+            "totalSavings": total_savings,
+            "solarSavings": solar_only_savings,
             "batterySavings": battery_savings,
-            "arbitrageSavings": battery_savings,  # Battery arbitrage savings
-            "cycleCount": totals["totalBatteryCharged"] / battery_capacity if battery_capacity > 0 else 0.0
+            
+            # Energy totals - CANONICAL
+            "totalSolarProduction": totals["totalSolarProduction"],
+            "totalHomeConsumption": totals["totalHomeConsumption"], 
+            "totalBatteryCharged": totals["totalBatteryCharged"],
+            "totalBatteryDischarged": totals["totalBatteryDischarged"],
+            "totalGridImported": totals["totalGridImport"],
+            "totalGridExported": totals["totalGridExport"],
+            
+            # Efficiency metrics - CANONICAL
+            "cycleCount": totals["totalBatteryCharged"] / battery_capacity if battery_capacity > 0 else 0.0,
+            
+            # DEPRECATED fields - remove after frontend updated
+            "gridCosts": total_grid_costs,         # ❌ DEPRECATED - use totalGridCost
+            "batteryCosts": total_battery_costs,   # ❌ DEPRECATED - use totalBatteryCycleCost
+            "savings": total_savings,              # ❌ DEPRECATED - use totalSavings
+            "batteryCycleCost": total_battery_costs, # ❌ DEPRECATED - use totalBatteryCycleCost
+            "solarOnlySavings": solar_only_savings,  # ❌ DEPRECATED - use solarSavings
+            "arbitrageSavings": battery_savings,     # ❌ DEPRECATED - use batterySavings
         }
         
         result = {

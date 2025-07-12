@@ -191,7 +191,7 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "" }) =
           console.warn('BACKEND ISSUE: Missing batteryCapacity in dashboardData');
         }
         
-        // Simply use the values from the backend without calculation
+        // Current battery state - these are dashboard-level fields (not hourly)
         const currentSOC = dashboardData.batterySoc ?? 0;
         const currentSOE = dashboardData.batterySoe ?? 0;
         const batteryCapacity = dashboardData.batteryCapacity ?? 0;

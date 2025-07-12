@@ -70,25 +70,25 @@ export const EnergyFlowChart: React.FC<{
       }
       
       actualData = {
-        solar: dailyViewHour.solarProduction ?? 0,
-        consumption: dailyViewHour.homeConsumption ?? 0,
-        gridImport: dailyViewHour.gridImported ?? 0,
-        gridExport: dailyViewHour.gridExported ?? 0,
-        batteryCharge: dailyViewHour.batteryCharged ?? 0,
-        batteryDischarge: dailyViewHour.batteryDischarged ?? 0,
+        solarProduction: dailyViewHour.solarProduction ?? 0,
+        homeConsumption: dailyViewHour.homeConsumption ?? 0,
+        gridImported: dailyViewHour.gridImported ?? 0,
+        gridExported: dailyViewHour.gridExported ?? 0,
+        batteryCharged: dailyViewHour.batteryCharged ?? 0,
+        batteryDischarged: dailyViewHour.batteryDischarged ?? 0,
       };
     }
     // This section is now handled above
     
-    // Handle predicted data from daily view
+    // Handle predicted data from daily view using canonical field names
     if (dailyViewHour) {
       const data = {
-        solar: dailyViewHour.solarProduction ?? 0,
-        consumption: dailyViewHour.homeConsumption ?? 0,
-        gridImport: dailyViewHour.gridImported ?? 0,
-        gridExport: dailyViewHour.gridExported ?? 0,
-        batteryCharge: dailyViewHour.batteryCharged ?? 0,
-        batteryDischarge: dailyViewHour.batteryDischarged ?? 0,
+        solarProduction: dailyViewHour.solarProduction ?? 0,
+        homeConsumption: dailyViewHour.homeConsumption ?? 0,
+        gridImported: dailyViewHour.gridImported ?? 0,
+        gridExported: dailyViewHour.gridExported ?? 0,
+        batteryCharged: dailyViewHour.batteryCharged ?? 0,
+        batteryDischarged: dailyViewHour.batteryDischarged ?? 0,
       };
       
       // If this is predicted data OR if we don't have actual data, use as predicted
@@ -121,10 +121,10 @@ export const EnergyFlowChart: React.FC<{
 
   // Find the last actual consumption value to ensure line continuity
   const lastActualConsumptionData = chartData
-    .filter(d => d.isActual && d.actualData?.consumption !== null && d.actualData?.consumption !== undefined)
+    .filter(d => d.isActual && d.actualData?.homeConsumption !== null && d.actualData?.homeConsumption !== undefined)
     .sort((a, b) => b.hour - a.hour)[0]; // Get the latest hour with actual consumption
   
-  const lastActualConsumption = lastActualConsumptionData?.actualData?.consumption;
+  const lastActualConsumption = lastActualConsumptionData?.actualData?.homeConsumption;
   const lastActualHour = lastActualConsumptionData?.hour;
 
   // Process chart data with proper predicted data overlap
@@ -136,16 +136,16 @@ export const EnergyFlowChart: React.FC<{
       hour: data.hour,
       
       // Actual data - show if we have actual data
-      actualSolar: data.isActual ? (data.actualData?.solar || 0) : 0,
-      actualConsumption: data.isActual ? (data.actualData?.consumption || 0) : null,
-      actualGridImport: data.isActual ? (data.actualData?.gridImport || 0) : 0,
-      actualBatteryDischarge: data.isActual ? (data.actualData?.batteryDischarge || 0) : 0,
+      actualSolar: data.isActual ? (data.actualData?.solarProduction || 0) : 0,
+      actualConsumption: data.isActual ? (data.actualData?.homeConsumption || 0) : null,
+      actualGridImport: data.isActual ? (data.actualData?.gridImported || 0) : 0,
+      actualBatteryDischarge: data.isActual ? (data.actualData?.batteryDischarged || 0) : 0,
       
       // Predicted data - start at last actual hour to create overlap and remove gap
-      predictedSolar: shouldShowPredicted && data.predictedData ? (data.predictedData.solar || 0) : 0,
-      predictedConsumption: shouldShowPredicted && data.predictedData ? (data.predictedData.consumption || 0) : null,
-      predictedGridImport: shouldShowPredicted && data.predictedData ? (data.predictedData.gridImport || 0) : 0,
-      predictedBatteryDischarge: shouldShowPredicted && data.predictedData ? (data.predictedData.batteryDischarge || 0) : 0,
+      predictedSolar: shouldShowPredicted && data.predictedData ? (data.predictedData.solarProduction || 0) : 0,
+      predictedConsumption: shouldShowPredicted && data.predictedData ? (data.predictedData.homeConsumption || 0) : null,
+      predictedGridImport: shouldShowPredicted && data.predictedData ? (data.predictedData.gridImported || 0) : 0,
+      predictedBatteryDischarge: shouldShowPredicted && data.predictedData ? (data.predictedData.batteryDischarged || 0) : 0,
       
       // Meta information
       isActual: data.isActual,

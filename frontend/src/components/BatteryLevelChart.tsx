@@ -54,7 +54,7 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
   });
     
   const maxAction = Math.max(...chartData.map(d => Math.abs(d.action || 0)), 1);
-  const maxPrice = Math.max(...chartData.map(h => h.price), 1);
+  const maxPrice = Math.max(...chartData.map(h => h.price), 1);  // Already uses canonical buyPrice internally
 
   return (
     <div className="bg-green-50 dark:bg-green-900/10 border-green-200 dark:border-green-800 border-2 rounded-xl p-6 transition-all duration-200 hover:shadow-lg">

@@ -110,7 +110,7 @@ export const SavingsOverview: React.FC<SavingsOverviewProps> = () => {
   const summary = {
     gridOnlyCost,
     optimizedCost,
-    savings: totalSavings
+    totalSavings: totalSavings  // Use canonical field name
   };
 
   // Calculate final SOE for the totals row
@@ -381,11 +381,11 @@ export const SavingsOverview: React.FC<SavingsOverviewProps> = () => {
             
             <td className="px-3 py-2 whitespace-nowrap text-sm border border-gray-300 dark:border-gray-600 text-center">
               <div className={`font-medium ${
-                Math.abs(summary.savings) < 0.01 ? 'text-gray-900 dark:text-white' : 
-                summary.savings > 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
+                Math.abs(summary.totalSavings) < 0.01 ? 'text-gray-900 dark:text-white' : 
+                summary.totalSavings > 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
               }`}>
-                {Math.abs(summary.savings) < 0.01 ? '0.00' : 
-                 summary.savings > 0 ? `+${summary.savings.toFixed(2)}` : summary.savings.toFixed(2)}
+                {Math.abs(summary.totalSavings) < 0.01 ? '0.00' : 
+                 summary.totalSavings > 0 ? `+${summary.totalSavings.toFixed(2)}` : summary.totalSavings.toFixed(2)}
               </div>
               <div className="text-xs text-gray-500 dark:text-gray-400">SEK</div>
             </td>

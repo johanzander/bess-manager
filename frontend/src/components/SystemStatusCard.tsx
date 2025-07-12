@@ -16,7 +16,7 @@ interface SystemStatusData {
   costAndSavings?: {
     todaysCost: number;
     todaysSavings: number;
-    baseCost: number;
+    gridOnlyCost: number;
     percentageSaved: number;
   };
   batteryStatus?: {
@@ -200,8 +200,8 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "" }) =
         if (dashboardData.summary?.batteryCycleCost === undefined) {
           console.warn('Missing key: summary.batteryCycleCost in dashboardData');
         }
-        if (dashboardData.summary?.baseCost === undefined) {
-          console.warn('Missing key: summary.baseCost in dashboardData');
+        if (dashboardData.summary?.gridOnlyCost === undefined) {
+          console.warn('Missing key: summary.gridOnlyCost in dashboardData');
         }
         if (dashboardData.summary?.optimizedCost === undefined) {
           console.warn('Missing key: summary.optimizedCost in dashboardData');
@@ -211,9 +211,9 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "" }) =
         }
         
         // Calculate costs from dashboard data
-        const baseCost = dashboardData.summary?.baseCost ?? 0;
+        const gridOnlyCost = dashboardData.summary?.gridOnlyCost ?? 0;
         const optimizedCost = dashboardData.summary?.optimizedCost ?? 0;
-        const dailySavings = dashboardData.totalDailySavings ?? 0;
+        const dailySavings = gridOnlyCost - optimizedCost; // Calculate correctly as grid-only minus optimized
         
         // Get current battery power and status
         const currentHour = new Date().getHours();
@@ -250,8 +250,8 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "" }) =
           costAndSavings: {
             todaysCost: optimizedCost,
             todaysSavings: dailySavings,
-            baseCost: baseCost,
-            percentageSaved: baseCost > 0 ? (dailySavings / baseCost) * 100 : 0
+            gridOnlyCost: gridOnlyCost,
+            percentageSaved: gridOnlyCost > 0 ? (dailySavings / gridOnlyCost) * 100 : 0
           },
           batteryStatus: {
             soc: currentSOC,
@@ -337,8 +337,8 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "" }) =
       },
       metrics: [
         {
-          label: "Base Cost",
-          value: statusData.costAndSavings?.baseCost || 0,
+          label: "Grid-Only Cost",
+          value: statusData.costAndSavings?.gridOnlyCost || 0,
           unit: "SEK",
           icon: DollarSign
         },

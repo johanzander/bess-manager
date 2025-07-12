@@ -95,20 +95,20 @@ export const SavingsOverview: React.FC<SavingsOverviewProps> = () => {
   const totalBatteryDischarged = dashboardData.hourlyData.reduce((sum: number, h: any) => sum + h.batteryDischarged, 0);
   const netBatteryAction = totalBatteryCharged - totalBatteryDischarged;
   
-  // Calculate base cost (grid-only scenario)
-  const baseCost = dashboardData.hourlyData.reduce((sum: number, h: any) => sum + (h.homeConsumption * h.buyPrice), 0);
+  // Use the backend-calculated grid-only cost instead of manual calculation
+  const gridOnlyCost = dashboardData.hourlyData.reduce((sum: number, h: any) => sum + (h.gridOnlyCost || 0), 0);
   
   // Actual optimized cost
   const optimizedCost = dashboardData.hourlyData.reduce((sum: number, h: any) => sum + h.hourlyCost, 0);
   
-  // Total savings from optimization
-  const totalSavings = dashboardData.totalDailySavings;
+  // Calculate total savings as base cost minus optimized cost (grid-only vs optimized)
+  const totalSavings = gridOnlyCost - optimizedCost;
 
   // Average price
   const avgPrice = dashboardData.hourlyData.reduce((sum: number, h: any) => sum + h.buyPrice, 0) / dashboardData.hourlyData.length;
 
   const summary = {
-    baseCost,
+    gridOnlyCost,
     optimizedCost,
     savings: totalSavings
   };
@@ -130,7 +130,7 @@ export const SavingsOverview: React.FC<SavingsOverviewProps> = () => {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
         <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg text-center border border-blue-200 dark:border-blue-800">
           <div className="text-2xl font-bold text-gray-900 dark:text-white">
-            {baseCost.toFixed(2)} <span className="text-sm font-medium text-gray-600 dark:text-gray-400">SEK</span>
+            {gridOnlyCost.toFixed(2)} <span className="text-sm font-medium text-gray-600 dark:text-gray-400">SEK</span>
           </div>
           <div className="text-sm text-gray-600 dark:text-gray-300">Grid-Only Cost</div>
           <div className="text-xs text-gray-500 dark:text-gray-400">Without solar or battery</div>
@@ -149,7 +149,7 @@ export const SavingsOverview: React.FC<SavingsOverviewProps> = () => {
             {totalSavings.toFixed(2)} <span className="text-sm font-medium text-gray-600 dark:text-gray-400">SEK</span>
           </div>
           <div className="text-sm text-gray-600 dark:text-gray-300">Total Savings</div>
-          <div className="text-xs text-gray-500 dark:text-gray-400">{((totalSavings / baseCost) * 100).toFixed(1)}% saved</div>
+          <div className="text-xs text-gray-500 dark:text-gray-400">{((totalSavings / gridOnlyCost) * 100).toFixed(1)}% saved</div>
         </div>
       </div>
 
@@ -194,10 +194,11 @@ export const SavingsOverview: React.FC<SavingsOverviewProps> = () => {
             const isCurrentHour = hour.hour === dashboardData.currentHour;
             
             // Row styling based on actual/predicted/current
+            const isActual = hour.dataSource === 'actual';
             let rowClass = 'border-l-4 ';
             if (isCurrentHour) {
               rowClass += 'bg-purple-50 dark:bg-purple-900/20 border-purple-400';
-            } else if (hour.isActual) {
+            } else if (isActual) {
               rowClass += 'bg-gray-50 dark:bg-gray-700 border-green-400';
             } else {
               rowClass += 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-600';
@@ -208,12 +209,12 @@ export const SavingsOverview: React.FC<SavingsOverviewProps> = () => {
                 <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600">
                   <div className="flex items-center">
                     {hour.hour.toString().padStart(2, '0')}:00
-                    {hour.isActual && (
+                    {isActual && (
                       <span className="ml-2 text-xs bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 px-2 py-1 rounded">
                         Actual
                       </span>
                     )}
-                    {!hour.isActual && !isCurrentHour && (
+                    {!isActual && !isCurrentHour && (
                       <span className="ml-2 text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 px-2 py-1 rounded">
                         Predicted
                       </span>

@@ -42,22 +42,8 @@ class SensorCollector:
         )
 
     def collect_energy_data(self, hour: int) -> EnergyData:
-        """
-        NEW METHOD - Collect complete energy data for a specific hour.
-
-        This is the new preferred method for collecting hourly energy data.
-        Returns EnergyData with both core energy flows AND detailed flows
-        calculated using the canonical calculate_detailed_flows method.
-
-        Args:
-            hour: Hour to collect data for (0-23)
-
-        Returns:
-            EnergyData: Complete energy flow data with all detailed flows calculated
-
-        Raises:
-            ValueError: If hour is invalid or data collection fails
-        """
+        """Collect sensor data and create EnergyData with automatic detailed flows."""
+        
         if not 0 <= hour <= 23:
             raise ValueError(f"Invalid hour: {hour}. Must be 0-23.")
 
@@ -123,29 +109,27 @@ class SensorCollector:
                 f"Hour {hour}: Invalid end SOC {battery_soc_end}%. Must be 0-100%."
             )
 
+        # Convert SOC to SOE
+        soe_start = (battery_soc_start / 100.0) * self.battery_capacity
+        soe_end = (battery_soc_end / 100.0) * self.battery_capacity
 
-        # Create EnergyData object with direct sensor values
-        # This is the primary source of truth for the core energy flows
+        # Create EnergyData directly - detailed flows calculated automatically
         energy_data = EnergyData(
             solar_generated=flow_dict.get("system_production", 0.0),
             home_consumed=flow_dict.get("load_consumption", 0.0),
-            grid_imported=flow_dict.get("import_from_grid", 0.0),
-            grid_exported=flow_dict.get("export_to_grid", 0.0),  # Critical: Use actual sensor data
             battery_charged=flow_dict.get("battery_charged", 0.0),
             battery_discharged=flow_dict.get("battery_discharged", 0.0),
-            battery_soc_start=battery_soc_start,
-            battery_soc_end=battery_soc_end
+            grid_imported=flow_dict.get("import_from_grid", 0.0),
+            grid_exported=flow_dict.get("export_to_grid", 0.0),
+            battery_soe_start=soe_start,    
+            battery_soe_end=soe_end         
         )
-        
-        # Fill in the detailed flows using the actual sensor data
-        # Use internal helper method that doesn't require BatterySettings
-        self._fill_detailed_flows(energy_data, flow_dict)
 
         logger.info(
-            "Collected EnergyData for hour %02d: SOC %.1f%% -> %.1f%%, Solar: %.2f kWh, Load: %.2f kWh",
+            "Collected EnergyData for hour %02d: SOE %.1f -> %.1f kWh, Solar: %.2f kWh, Load: %.2f kWh",
             hour,
-            battery_soc_start,
-            battery_soc_end,
+            soe_start,
+            soe_end,
             energy_data.solar_generated,
             energy_data.home_consumed,
         )

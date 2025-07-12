@@ -70,13 +70,13 @@ class BatterySettings:
     efficiency_charge: float = BATTERY_EFFICIENCY_CHARGE
     efficiency_discharge: float = BATTERY_EFFICIENCY_DISCHARGE
     reserved_capacity: float = field(init=False)
-    min_soc_kwh: float = field(init=False)
-    max_soc_kwh: float = field(init=False)
+    min_soe_kwh: float = field(init=False)
+    max_soe_kwh: float = field(init=False)
 
     def __post_init__(self):
-        self.reserved_capacity = self.total_capacity * self.min_soc / 100.0
-        self.min_soc_kwh = self.reserved_capacity
-        self.max_soc_kwh = self.total_capacity
+        self.min_soe_kwh = self.total_capacity * self.min_soc / 100.0
+        self.max_soe_kwh = self.total_capacity * self.max_soc / 100.0
+        self.reserved_capacity = self.min_soe_kwh
 
     def update(self, **kwargs: Any) -> None:
         """Update settings from dict."""

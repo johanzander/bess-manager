@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from loguru import logger
-
 
 @dataclass
 class APIBatterySettings:
@@ -15,8 +13,8 @@ class APIBatterySettings:
     reservedCapacity: float
     minSoc: float
     maxSoc: float
-    minSocKwh: float
-    maxSocKwh: float
+    minSoeKwh: float  # State of Energy in kWh (not SOC percentage)
+    maxSoeKwh: float  # State of Energy in kWh (not SOC percentage)
     maxChargePowerKw: float
     maxDischargePowerKw: float
     cycleCostPerKwh: float
@@ -33,8 +31,8 @@ class APIBatterySettings:
             reservedCapacity=battery.reserved_capacity,
             minSoc=battery.min_soc,
             maxSoc=battery.max_soc,
-            minSocKwh=battery.min_soc_kwh,
-            maxSocKwh=battery.max_soc_kwh,
+            minSoeKwh=battery.min_soe_kwh,  # State of Energy in kWh
+            maxSoeKwh=battery.max_soe_kwh,  # State of Energy in kWh
             maxChargePowerKw=battery.max_charge_power_kw,
             maxDischargePowerKw=battery.max_discharge_power_kw,
             cycleCostPerKwh=battery.cycle_cost_per_kwh,
@@ -144,8 +142,10 @@ class APIEnergyData:
     gridExported: float
     batteryCharged: float
     batteryDischarged: float
-    batterySocStart: float
-    batterySocEnd: float
+    batterySoeStart: float  # State of Energy in kWh (renamed for clarity)
+    batterySoeEnd: float    # State of Energy in kWh (renamed for clarity)
+    batterySocStart: float  # Keep for backward compatibility (contains SOE values!)
+    batterySocEnd: float    # Keep for backward compatibility (contains SOE values!)
     solarToHome: float = 0.0
     solarToBattery: float = 0.0
     solarToGrid: float = 0.0
@@ -155,8 +155,17 @@ class APIEnergyData:
     batteryToGrid: float = 0.0
     
     @classmethod
-    def from_internal(cls, energy) -> APIEnergyData:
-        """Convert from internal snake_case to canonical camelCase."""
+    def from_internal(cls, energy, battery_capacity: float = 30.0) -> APIEnergyData:
+        """Convert from internal snake_case to canonical camelCase.
+        
+        Args:
+            energy: Internal energy data with SOE values in kWh
+            battery_capacity: Battery capacity in kWh for SOC conversion
+        """
+        # Convert SOE (kWh) to SOC (%) for backward compatibility
+        soc_start = (energy.battery_soe_start / battery_capacity) * 100.0
+        soc_end = (energy.battery_soe_end / battery_capacity) * 100.0
+        
         return cls(
             solarProduction=energy.solar_generated,
             homeConsumption=energy.home_consumed,
@@ -164,8 +173,10 @@ class APIEnergyData:
             gridExported=energy.grid_exported,
             batteryCharged=energy.battery_charged,
             batteryDischarged=energy.battery_discharged,
-            batterySocStart=energy.battery_soc_start,
-            batterySocEnd=energy.battery_soc_end,
+            batterySoeStart=energy.battery_soe_start,  # Correct SOE field (kWh)
+            batterySoeEnd=energy.battery_soe_end,      # Correct SOE field (kWh)
+            batterySocStart=soc_start,  # Proper SOC field (%)
+            batterySocEnd=soc_end,      # Proper SOC field (%)
             solarToHome=energy.solar_to_home,
             solarToBattery=energy.solar_to_battery,
             solarToGrid=energy.solar_to_grid,
@@ -176,9 +187,14 @@ class APIEnergyData:
         )
 
 
-def flatten_hourly_data(hourly) -> dict:
-    """Flatten HourlyData to a single dict for frontend."""
-    api_energy = APIEnergyData.from_internal(hourly.energy)
+def flatten_hourly_data(hourly, battery_capacity: float = 30.0) -> dict:
+    """Flatten HourlyData to a single dict for frontend.
+    
+    Args:
+        hourly: HourlyData object to flatten
+        battery_capacity: Battery capacity in kWh for SOC conversion
+    """
+    api_energy = APIEnergyData.from_internal(hourly.energy, battery_capacity)
     
     result = {
         "hour": hourly.hour,
@@ -190,8 +206,10 @@ def flatten_hourly_data(hourly) -> dict:
         "gridExported": api_energy.gridExported,
         "batteryCharged": api_energy.batteryCharged,
         "batteryDischarged": api_energy.batteryDischarged,
-        "batterySocStart": api_energy.batterySocStart,
-        "batterySocEnd": api_energy.batterySocEnd,
+        "batterySoeStart": api_energy.batterySoeStart,  # Correct SOE field (kWh)
+        "batterySoeEnd": api_energy.batterySoeEnd,      # Correct SOE field (kWh)
+        "batterySocStart": api_energy.batterySocStart,  # Proper SOC field (%)
+        "batterySocEnd": api_energy.batterySocEnd,      # Proper SOC field (%)
         "solarToHome": api_energy.solarToHome,
         "solarToBattery": api_energy.solarToBattery,
         "solarToGrid": api_energy.solarToGrid,
@@ -205,14 +223,20 @@ def flatten_hourly_data(hourly) -> dict:
         result.update({
             "buyPrice": hourly.economic.buy_price,
             "sellPrice": hourly.economic.sell_price,
-            "hourlyCost": hourly.economic.hourly_cost,
-            "hourlySavings": hourly.economic.hourly_savings,
-            "batteryCycleCost": hourly.economic.battery_cycle_cost,
             "gridCost": hourly.economic.grid_cost,
-            "baseCost": hourly.economic.base_case_cost,
+            "batteryCycleCost": hourly.economic.battery_cycle_cost,
+            "hourlyCost": hourly.economic.hourly_cost,
             "solarOnlyCost": hourly.economic.solar_only_cost,
-            "batterySolarCost": hourly.economic.hourly_cost,  # battery+solar cost = hourly_cost
-            "totalCost": hourly.economic.hourly_cost,
+            "gridOnlyCost": hourly.economic.grid_only_cost,  # Clear name for grid-only scenario
+            "totalCost": hourly.economic.hourly_cost,  # Use hourly_cost as total_cost
+            
+            # Dashboard expects these specific field names (keeping for compatibility)
+            "batterySolarCost": hourly.economic.hourly_cost,  # Dashboard looks for "batterySolarCost"
+            "hourlySavings": hourly.economic.hourly_savings,  # Savings vs solar-only baseline
+            
+            # Calculate solar and battery savings with clear names
+            "solarSavings": max(0, hourly.economic.grid_only_cost - hourly.economic.solar_only_cost),
+            "batterySavings": hourly.economic.solar_only_cost - hourly.economic.hourly_cost,  # Allow negative savings
         })
     
     if hourly.decision:
@@ -228,10 +252,4 @@ def flatten_hourly_data(hourly) -> dict:
             "netStrategyValue": hourly.decision.net_strategy_value,
         })
     
-    # Debug logging to verify grid_exported is being properly passed through
-    if "gridExported" in result: # TODO REMOVE once validated
-        logger.debug(f"Flattened hourly data includes gridExported: {result['gridExported']}")
-    else:
-        logger.warning(f"gridExported missing from flattened hourly data for hour {hourly.hour}")
-        
     return result

@@ -85,8 +85,8 @@ class HistoricalDataStore:
         logger.info(
             "Recorded hour %02d: SOC %.1f%% -> %.1f%%, Net: %.2f kWh, Solar: %.2f kWh, Load: %.2f kWh, Intent: %s",
             hour,
-            energy_data.battery_soc_start,
-            energy_data.battery_soc_end,
+            energy_data.battery_soe_start,
+            energy_data.battery_soe_end,
             energy_data.battery_net_change,
             energy_data.solar_generated,
             energy_data.home_consumed,
@@ -112,14 +112,34 @@ class HistoricalDataStore:
 
         return self._records.get(hour)
 
-    def has_data_for_hour(self, hour: int) -> bool:
-        """Check if new format data exists for a specific hour.
+    def get_latest_battery_state(self) -> tuple[float, float]:
+        """Get the latest battery SOC and SOE state.
+        
+        Returns:
+            tuple[float, float]: (soc_percent, soe_kwh)
+        """
+        if not self._records:
+            # No records, return default state
+            return 20.0, 6.0  # 20% SOC, 6 kWh SOE
+        
+        # Get the most recent hour
+        latest_hour = max(self._records.keys())
+        latest_record = self._records[latest_hour]
+        
+        # Return end state from the latest record
+        soc_percent = (latest_record.energy.battery_soe_end / self.total_capacity) * 100.0
+        soe_kwh = latest_record.energy.battery_soe_end
+        
+        return soc_percent, soe_kwh
 
+    def has_data_for_hour(self, hour: int) -> bool:
+        """Check if historical data exists for the given hour.
+        
         Args:
             hour: Hour to check (0-23)
-
+            
         Returns:
-            bool: True if new format data exists for the hour
+            bool: True if data exists for the hour
         """
         return hour in self._records
 

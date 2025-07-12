@@ -86,7 +86,7 @@ export interface DashboardHourlyData {
 }
 
 export interface DashboardSummary {
-  baseCost: number;
+  gridOnlyCost: number;  // Updated name
   optimizedCost: number;
   gridCosts: number;
   batteryCosts: number;

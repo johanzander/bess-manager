@@ -8,7 +8,6 @@ export interface HourlyData {
   gridCost: number;
   batteryCost: number;
   totalCost: number;
-  baseCost: number;
   savings: number;
   
   // Energy data fields - canonical camelCase names
@@ -43,7 +42,7 @@ export interface HourlyData {
 }
 
 export interface ScheduleSummary {
-  baseCost: number;
+  gridOnlyCost: number;
   optimizedCost: number;
   gridCosts: number;
   batteryCosts: number;

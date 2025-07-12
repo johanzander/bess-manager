@@ -306,17 +306,17 @@ class TestScheduleEconomics:
         economic_summary = latest_schedule.optimization_result.economic_summary
 
         # Verify economic summary has expected fields
-        assert hasattr(economic_summary, "base_cost"), "Should have base_cost"
+        assert hasattr(economic_summary, "grid_only_cost"), "Should have grid_only_cost"
         assert hasattr(
             economic_summary, "battery_solar_cost"
         ), "Should have battery_solar_cost"
         assert hasattr(
-            economic_summary, "base_to_battery_solar_savings"
+            economic_summary, "grid_to_battery_solar_savings"
         ), "Should have savings"
 
         # Verify consistency
         total_savings = latest_schedule.get_total_savings()
-        summary_savings = economic_summary.base_to_battery_solar_savings
+        summary_savings = economic_summary.grid_to_battery_solar_savings
         assert (
             abs(total_savings - summary_savings) < 0.01
         ), "Savings calculations should be consistent"

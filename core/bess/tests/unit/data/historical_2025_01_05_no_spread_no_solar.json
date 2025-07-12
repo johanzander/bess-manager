@@ -80,9 +80,9 @@
     0.0
   ],
   "battery": {
-    "initial_soc": 3.0,
-    "min_soc_kwh": 3.0,
-    "max_soc_kwh": 30.0,
+    "initial_soe": 3.0,
+    "min_soe_kwh": 3.0,
+    "max_soe_kwh": 30.0,
     "efficiency_charge": 0.95,
     "efficiency_discharge": 0.95,
     "cycle_cost_per_kwh": 0.4,
@@ -91,10 +91,10 @@
   },
   "expected_results": {
     "base_cost": 282.79,
-    "battery_solar_cost": 282.79,
-    "base_to_battery_solar_savings": 0.0,
-    "base_to_battery_solar_savings_pct": 0.0,
-    "total_charged": 0.0,
-    "total_discharged": 0.0
+    "battery_solar_cost": 282.26,
+    "base_to_battery_solar_savings": 0.53,
+    "base_to_battery_solar_savings_pct": 0.19,
+    "total_charged": 8.0,
+    "total_discharged": 7.6
   }
 }

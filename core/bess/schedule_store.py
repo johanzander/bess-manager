@@ -7,8 +7,7 @@ import logging
 from dataclasses import dataclass
 from datetime import date, datetime
 
-from core.bess.dp_battery_algorithm import OptimizationResult
-from core.bess.models import HourlyData
+from core.bess.models import HourlyData, OptimizationResult
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +39,7 @@ class StoredSchedule:
 
     def get_total_savings(self) -> float:
         """Get total savings from optimization results."""
-        return self.optimization_result.economic_summary.base_to_battery_solar_savings
+        return self.optimization_result.economic_summary.grid_to_battery_solar_savings
 
 
 class ScheduleStore:

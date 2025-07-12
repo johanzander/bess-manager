@@ -33,11 +33,11 @@ def populate_historical_data(
             grid_exported=0.0,  # Will be adjusted per hour
             battery_charged=0.0,
             battery_discharged=0.0,
-            battery_soc_start=50.0,  # Will be chained per hour
-            battery_soc_end=50.0,  # Will be chained per hour
+            battery_soe_start=25.0,  # Will be chained per hour, 50% SOC = 25.0 kWh (assuming 50 kWh battery)
+            battery_soe_end=25.0,  # Will be chained per hour, 50% SOC = 25.0 kWh (assuming 50 kWh battery)
         )
 
-    current_soc = 50.0  # Starting SOC
+    current_soe = 25.0  # Starting SOE in kWh (50% SOC = 25 kWh assuming 50 kWh battery)
     base_time = datetime.now().replace(minute=0, second=0, microsecond=0)
 
     for hour in range(start_hour, end_hour + 1):
@@ -62,8 +62,8 @@ def populate_historical_data(
             grid_exported=grid_export,
             battery_charged=0.0,
             battery_discharged=0.0,
-            battery_soc_start=current_soc,
-            battery_soc_end=current_soc,  # No battery action in mock data
+            battery_soe_start=current_soe,
+            battery_soe_end=current_soe,  # No battery action in mock data
         )
 
         # Record the historical data
@@ -375,7 +375,7 @@ class TestPerformanceWorkflows:
 
         economic_summary = latest_schedule.optimization_result.economic_summary
         assert (
-            economic_summary.base_to_battery_solar_savings >= 0
+            economic_summary.grid_to_battery_solar_savings >= 0
         ), "Should show non-negative savings"
 
 

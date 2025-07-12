@@ -32,7 +32,7 @@ def test_battery_simulation_results(
         sell_price=sell_price,
         home_consumption=home_consumption,
         solar_production=solar_production,
-        initial_soc=initial_soc,
+        initial_soe=initial_soc,
         battery_settings=battery_settings,
     )
 
@@ -66,8 +66,8 @@ def test_battery_simulation_results(
         assert hasattr(hour_data, "grid_exported")
         assert hasattr(hour_data, "battery_charged")
         assert hasattr(hour_data, "battery_discharged")
-        assert hasattr(hour_data, "battery_soc_start")
-        assert hasattr(hour_data, "battery_soc_end")
+        assert hasattr(hour_data, "battery_soe_start")
+        assert hasattr(hour_data, "battery_soe_end")
 
         # Test economic data access
         assert hasattr(hour_data, "buy_price")
@@ -88,19 +88,19 @@ def test_battery_simulation_results(
         assert hour_data.decision is not None
 
     # Test economic summary has expected fields (EconomicSummary dataclass)
-    assert hasattr(economic_summary, "base_cost")
+    assert hasattr(economic_summary, "grid_only_cost")
     assert hasattr(economic_summary, "battery_solar_cost")
-    assert hasattr(economic_summary, "base_to_battery_solar_savings")
-    assert hasattr(economic_summary, "base_to_battery_solar_savings_pct")
+    assert hasattr(economic_summary, "grid_to_battery_solar_savings")
+    assert hasattr(economic_summary, "grid_to_battery_solar_savings_pct")
     assert hasattr(economic_summary, "total_charged")
     assert hasattr(economic_summary, "total_discharged")
 
     # Test economic calculations with proper floating-point tolerance
-    assert economic_summary.base_cost >= 0
+    assert economic_summary.grid_only_cost >= 0
 
     # FIXED: Use floating-point tolerance for accumulated vs calculated values
-    expected_savings = economic_summary.base_cost - economic_summary.battery_solar_cost
-    actual_savings = economic_summary.base_to_battery_solar_savings
+    expected_savings = economic_summary.grid_only_cost - economic_summary.battery_solar_cost
+    actual_savings = economic_summary.grid_to_battery_solar_savings
 
     # Allow for small floating-point precision differences from 24 hours of calculations
     tolerance = 1e-10  # Very small tolerance for precision differences
@@ -109,12 +109,12 @@ def test_battery_simulation_results(
     ), f"Savings calculation mismatch: {actual_savings} vs {expected_savings} (diff: {abs(actual_savings - expected_savings)})"
 
     # Test that savings percentage is calculated correctly
-    if economic_summary.base_cost > 0:
+    if economic_summary.grid_only_cost > 0:
         expected_pct = (
-            economic_summary.base_to_battery_solar_savings / economic_summary.base_cost
+            economic_summary.grid_to_battery_solar_savings / economic_summary.grid_only_cost
         ) * 100
         assert (
-            abs(economic_summary.base_to_battery_solar_savings_pct - expected_pct)
+            abs(economic_summary.grid_to_battery_solar_savings_pct - expected_pct)
             < 0.01
         )
 
@@ -134,27 +134,23 @@ def test_battery_constraints_respected():
         sell_price=sell_price,
         home_consumption=home_consumption,
         solar_production=solar_production,
-        initial_soc=initial_soc,
+        initial_soe=initial_soc,
         battery_settings=battery_settings,
     )
 
     # Test constraints using new HourlyData structure
     for hour_data in results.hourly_data:
-        # SOC should stay within bounds (convert from % to kWh for comparison)
-        soc_start_kwh = (
-            hour_data.battery_soc_start * battery_settings.total_capacity / 100.0
-        )
-        soc_end_kwh = (
-            hour_data.battery_soc_end * battery_settings.total_capacity / 100.0
-        )
+        # SOE is already in kWh, no conversion needed
+        soe_start_kwh = hour_data.energy.battery_soe_start
+        soe_end_kwh = hour_data.energy.battery_soe_end
 
         assert (
-            battery_settings.min_soc_kwh
-            <= soc_start_kwh
-            <= battery_settings.max_soc_kwh
+            battery_settings.min_soe_kwh
+            <= soe_start_kwh
+            <= battery_settings.max_soe_kwh
         )
         assert (
-            battery_settings.min_soc_kwh <= soc_end_kwh <= battery_settings.max_soc_kwh
+            battery_settings.min_soe_kwh <= soe_end_kwh <= battery_settings.max_soe_kwh
         )
 
         # Battery action should respect power limits
@@ -217,7 +213,7 @@ def SKIP_test_strategic_intent_assignment():  # TODO: Fix this test
         sell_price=sell_price,
         home_consumption=home_consumption,
         solar_production=solar_production,
-        initial_soc=battery_settings.min_soc_kwh,
+        initial_soe=battery_settings.min_soe_kwh,
         battery_settings=battery_settings,
     )
 
@@ -254,7 +250,7 @@ def test_energy_data_structure():
         sell_price=sell_price,
         home_consumption=home_consumption,
         solar_production=solar_production,
-        initial_soc=initial_soc,
+        initial_soe=initial_soc,
         battery_settings=battery_settings,
     )
 
@@ -291,7 +287,7 @@ def test_economic_data_structure():
         sell_price=sell_price,
         home_consumption=home_consumption,
         solar_production=solar_production,
-        initial_soc=initial_soc,
+        initial_soe=initial_soc,
         battery_settings=battery_settings,
     )
 
@@ -300,12 +296,14 @@ def test_economic_data_structure():
         assert hour_data.economic is not None
         assert hour_data.economic.buy_price >= 0
         assert hour_data.economic.sell_price >= 0
-        assert hour_data.economic.base_case_cost >= 0  # Now available!
+        assert hour_data.economic.grid_only_cost >= 0  # Grid-only baseline cost
+        # Solar-only cost can be negative when exporting solar (earning money from export)
+        # No assertion needed for solar_only_cost as it can be positive, negative, or zero
         assert hour_data.economic.battery_cycle_cost >= 0
 
-        # Test that hourly savings is calculated correctly
+        # Test that hourly savings is calculated correctly vs solar-only baseline
         expected_savings = (
-            hour_data.economic.base_case_cost - hour_data.economic.hourly_cost
+            hour_data.economic.solar_only_cost - hour_data.economic.hourly_cost
         )
         assert abs(hour_data.economic.hourly_savings - expected_savings) < 0.01
 
@@ -325,7 +323,7 @@ def test_strategy_data_structure():
         sell_price=sell_price,
         home_consumption=home_consumption,
         solar_production=solar_production,
-        initial_soc=initial_soc,
+        initial_soe=initial_soc,
         battery_settings=battery_settings,
     )
 

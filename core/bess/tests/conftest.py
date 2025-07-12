@@ -615,8 +615,8 @@ def sample_new_hourly_data():
         grid_exported=2.0,
         battery_charged=0.0,
         battery_discharged=0.0,
-        battery_soc_start=50.0,
-        battery_soc_end=50.0,
+        battery_soe_start=25.0,  # 50% SOC = 25 kWh (assuming 50 kWh battery)
+        battery_soe_end=25.0,  # 50% SOC = 25 kWh (assuming 50 kWh battery)
     )
 
     economic_data = EconomicData(
@@ -625,6 +625,8 @@ def sample_new_hourly_data():
         hourly_cost=0.0,
         hourly_savings=2.4,
         battery_cycle_cost=0.0,
+        grid_only_cost=2.4,
+        solar_only_cost=2.4,
     )
 
     decision_data = DecisionData(strategic_intent="IDLE", battery_action=0.0)

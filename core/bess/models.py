@@ -10,11 +10,6 @@ the BESS system, providing type safety and clear interfaces between components.
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING
-
-# Use TYPE_CHECKING to avoid circular imports
-if TYPE_CHECKING:
-    from core.bess.settings import BatterySettings
 
 logger = logging.getLogger(__name__)
 
@@ -30,31 +25,68 @@ __all__ = [
 
 @dataclass
 class EnergyData:
-    """
-    Pure energy flow data - just the physics, no context about when/where.
-    This represents the actual energy flows measured by sensors or calculated by algorithms.
-    """
-
-    # Core energy flows (kWh) - directly from sensors
+    """Energy data with automatic detailed flow calculation using physical constraints."""
+    
+    # Core energy flows (kWh) - all provided by caller
     solar_generated: float
     home_consumed: float
-    grid_imported: float
-    grid_exported: float
     battery_charged: float
     battery_discharged: float
+    grid_imported: float
+    grid_exported: float
+    
+    # Battery state (kWh) - State of Energy for consistent units
+    battery_soe_start: float  # kWh (changed from battery_soc_start)
+    battery_soe_end: float    # kWh (changed from battery_soc_end)
+    
+    # Detailed flows (calculated automatically in __post_init__)
+    solar_to_home: float = field(default=0.0, init=False)
+    solar_to_battery: float = field(default=0.0, init=False)
+    solar_to_grid: float = field(default=0.0, init=False)
+    grid_to_home: float = field(default=0.0, init=False)
+    grid_to_battery: float = field(default=0.0, init=False)
+    battery_to_home: float = field(default=0.0, init=False)
+    battery_to_grid: float = field(default=0.0, init=False)
 
-    # Battery state (%) - directly from sensors
-    battery_soc_start: float  # % (0-100) - SOC at start of hour
-    battery_soc_end: float  # % (0-100) - SOC at end of hour
+    def __post_init__(self):
+        """Automatically calculate detailed flows when EnergyData is created."""
+        self._calculate_detailed_flows()
 
-    # Detailed energy flows (calculated from core flows)
-    solar_to_home: float = 0.0
-    solar_to_battery: float = 0.0
-    solar_to_grid: float = 0.0
-    grid_to_home: float = 0.0
-    grid_to_battery: float = 0.0
-    battery_to_home: float = 0.0
-    battery_to_grid: float = 0.0
+    def _calculate_detailed_flows(self) -> None:
+        """
+        Internal method: Calculate detailed energy flows using physical constraints.
+        
+        PHYSICAL CONSTRAINTS IMPLEMENTED:
+        1. HOME LOAD PRIORITY - Electrical loads satisfied before grid export
+        2. NO SIMULTANEOUS IMPORT/EXPORT - Physical system limitation  
+        3. BATTERY vs GRID PRIORITY - Typical residential inverter behavior
+        """
+        
+        # Priority: Solar -> Home first, then remaining solar -> Battery/Grid
+        solar_to_home = min(self.solar_generated, self.home_consumed)
+        remaining_solar = self.solar_generated - solar_to_home
+        remaining_consumption = self.home_consumed - solar_to_home
+        
+        # Solar allocation: battery charging takes priority over grid export
+        solar_to_battery = min(remaining_solar, self.battery_charged)
+        solar_to_grid = max(0, remaining_solar - solar_to_battery)
+        
+        # Battery discharge allocation: home consumption takes priority
+        battery_to_home = min(self.battery_discharged, remaining_consumption)
+        battery_to_grid = max(0, self.battery_discharged - battery_to_home)
+        
+        # Grid imports: fill remaining consumption and battery charging
+        grid_to_home = max(0, remaining_consumption - battery_to_home)
+        grid_to_battery = max(0, self.battery_charged - solar_to_battery)
+        
+        # Assign calculated flows
+        self.solar_to_home = solar_to_home
+        self.solar_to_battery = solar_to_battery
+        self.solar_to_grid = solar_to_grid
+        self.grid_to_home = grid_to_home
+        self.grid_to_battery = grid_to_battery
+        self.battery_to_home = battery_to_home
+        self.battery_to_grid = battery_to_grid
 
     @property
     def battery_net_change(self) -> float:
@@ -62,206 +94,9 @@ class EnergyData:
         return self.battery_charged - self.battery_discharged
 
     @property
-    def soc_change_percent(self) -> float:
-        """SOC change during this period in percentage points."""
-        return self.battery_soc_end - self.battery_soc_start
-    
-    def calculate_detailed_flows(self, battery_settings=None, use_direct_method=False) -> None:
-        """
-        Calculate detailed energy flows for this EnergyData instance.
-        
-        This is an instance method that uses the existing core energy values to calculate 
-        all detailed energy flows using the canonical calculation function. It updates 
-        the instance in-place with the calculated detailed flows.
-        
-        Args:
-            battery_settings: Optional battery settings to use. If None and use_direct_method=False,
-                              will try to use the instance's _battery_settings attribute or create a default.
-            use_direct_method: If True, uses direct calculation without SOE conversion or battery_settings.
-                              Set this to True to avoid BatterySettings dependency.
-                              
-        Note:
-            When use_direct_method=False, this requires battery capacity for SOE calculations.
-            Set use_direct_method=True to avoid BatterySettings dependency completely.
-        """
-        # If using direct method, we don't need battery_settings at all
-        if use_direct_method:
-            # Use the direct method that doesn't require SOE conversion or battery capacity
-            EnergyData.calculate_detailed_flows_direct(self)
-            return
-            
-        # Otherwise proceed with the original SOE-based method
-        from .settings import BatterySettings
-        
-        # Use provided settings, or fallback to instance attribute, or create default
-        if battery_settings is None:
-            battery_settings = getattr(self, '_battery_settings', None)
-            
-        if not battery_settings:
-            battery_settings = BatterySettings()
-            logger.warning(
-                "No battery settings provided - using default which may be inaccurate. "
-                "Consider using use_direct_method=True to avoid BatterySettings dependency."
-            )
-            # Store for future use
-            self._battery_settings = battery_settings
-        
-        # Import the canonical function
-        from core.bess.dp_battery_algorithm import calculate_energy_flows
-        
-        # Calculate net battery power for flow calculation
-        battery_net_power = self.battery_charged - self.battery_discharged
-        
-        # Convert percent SOC to kWh for the canonical function
-        soe_start = (self.battery_soc_start / 100.0) * battery_settings.total_capacity
-        soe_end = (self.battery_soc_end / 100.0) * battery_settings.total_capacity
-        
-        # Use the canonical function directly with the actual battery values
-        # This ensures we use the measured values rather than recalculating from power
-        detailed_flows = calculate_energy_flows(
-            power=battery_net_power,  # Still include power for compatibility
-            home_consumption=self.home_consumed,
-            solar_production=self.solar_generated,
-            soe_start=soe_start,
-            soe_end=soe_end,
-            battery_settings=battery_settings,
-            dt=1.0,
-            battery_charged=self.battery_charged,
-            battery_discharged=self.battery_discharged
-        )
-        
-        # Update this instance's detailed flow fields
-        self.solar_to_home = detailed_flows.solar_to_home
-        self.solar_to_battery = detailed_flows.solar_to_battery
-        self.solar_to_grid = detailed_flows.solar_to_grid
-        self.grid_to_home = detailed_flows.grid_to_home
-        self.grid_to_battery = detailed_flows.grid_to_battery
-        self.battery_to_home = detailed_flows.battery_to_home
-        self.battery_to_grid = detailed_flows.battery_to_grid
-    
-    @classmethod
-    def create_with_detailed_flows(
-        cls,
-        solar_generated: float,
-        home_consumed: float,
-        battery_charged: float,
-        battery_discharged: float,
-        battery_soc_start: float,
-        battery_soc_end: float,
-        battery_settings: "BatterySettings",
-        dt: float = 1.0
-    ) -> "EnergyData":
-        """
-        Create a new EnergyData instance with detailed flows calculated.
-        
-        This class factory method creates a new EnergyData instance with all detailed 
-        flows calculated using the canonical calculation function. It ensures consistent 
-        detailed flows calculated from the same source of truth.
-        
-        Args:
-            solar_generated: Total solar generation in kWh
-            home_consumed: Total home consumption in kWh
-            battery_charged: Total battery charging in kWh
-            battery_discharged: Total battery discharging in kWh
-            battery_soc_start: Battery state of charge at start (%)
-            battery_soc_end: Battery state of charge at end (%)
-            battery_settings: Battery settings for capacity calculations
-            dt: Time delta in hours (default 1.0 for hourly data)
-            
-        Returns:
-            EnergyData with all detailed flows calculated
-            
-        Example usage:
-            # Create a new EnergyData with detailed flows
-            energy_data = EnergyData.create_with_detailed_flows(
-                solar_generated=10.5,
-                home_consumed=8.2,
-                battery_charged=3.0,
-                battery_discharged=1.2,
-                battery_soc_start=65.0,
-                battery_soc_end=70.0,
-                battery_settings=battery_settings,
-                dt=1.0
-            )
-            
-        Example usage:
-            # Create EnergyData with detailed flows calculated from core flows
-            energy_data = EnergyData.create_with_detailed_flows(
-                solar_generated=10.5,
-                home_consumed=8.2,
-                battery_charged=3.0,
-                battery_discharged=1.2,
-                battery_soc_start=65.0,
-                battery_soc_end=70.0,
-                battery_settings=battery_settings,
-                dt=1.0
-            )
-            
-            # This ensures that all detailed flow fields like solar_to_home, solar_to_battery, etc.
-            # are calculated consistently using the canonical function in dp_battery_algorithm.py
-        """
-        from core.bess.dp_battery_algorithm import calculate_energy_flows
-        
-        # Convert percent SOC to kWh for the canonical function
-        soe_start = (battery_soc_start / 100.0) * battery_settings.total_capacity
-        soe_end = (battery_soc_end / 100.0) * battery_settings.total_capacity
-        
-        # Calculate net battery power (charge is positive, discharge is negative)
-        battery_net_power = (battery_charged - battery_discharged) / dt
-        
-        # Use canonical function to calculate detailed flows
-        # Pass both power and actual battery charged/discharged values
-        return calculate_energy_flows(
-            power=battery_net_power,
-            home_consumption=home_consumed,
-            solar_production=solar_generated,
-            soe_start=soe_start,
-            soe_end=soe_end,
-            battery_settings=battery_settings,
-            dt=dt,
-            battery_charged=battery_charged,
-            battery_discharged=battery_discharged
-        )
-
-    @staticmethod
-    def calculate_detailed_flows_direct(energy: "EnergyData") -> "EnergyData":
-        """
-        Calculate detailed energy flows directly from core flows without using BatterySettings.
-        
-        This method provides a simpler way to calculate detailed flows when you don't need
-        the precision of the battery SOE-based calculations, or when BatterySettings is unavailable.
-        
-        Args:
-            energy: The EnergyData object with core flows populated
-            
-        Returns:
-            Updated EnergyData with detailed flows calculated
-        """
-        from core.bess.dp_battery_algorithm import calculate_energy_flows_direct
-        
-        # Use the canonical function that doesn't require SOE conversion or BatterySettings
-        # This will properly calculate all detailed flows directly from core energy values
-        result = calculate_energy_flows_direct(
-            solar_production=energy.solar_generated,
-            home_consumption=energy.home_consumed,
-            battery_charged=energy.battery_charged,
-            battery_discharged=energy.battery_discharged,
-            battery_soc_start=energy.battery_soc_start,
-            battery_soc_end=energy.battery_soc_end,
-            grid_imported=energy.grid_imported,
-            grid_exported=energy.grid_exported
-        )
-        
-        # Copy the detailed flows back to the input energy object
-        energy.solar_to_home = result.solar_to_home
-        energy.solar_to_battery = result.solar_to_battery
-        energy.solar_to_grid = result.solar_to_grid
-        energy.grid_to_home = result.grid_to_home
-        energy.grid_to_battery = result.grid_to_battery
-        energy.battery_to_home = result.battery_to_home
-        energy.battery_to_grid = result.battery_to_grid
-                
-        return energy
+    def soe_change_kwh(self) -> float:
+        """SOE change during this period in kWh."""
+        return self.battery_soe_end - self.battery_soe_start
 
     def validate_energy_balance(self, tolerance: float = 0.2) -> tuple[bool, str]:
         """Validate energy balance - always warn and continue, never fail."""
@@ -272,9 +107,9 @@ class EnergyData:
         if balance_error <= tolerance:
             return True, f"Energy balance OK: {balance_error:.3f} kWh error"
         else:
-            # Always log warning and return True - never fail validation
             logger.warning(
-                f"Energy balance warning: In={energy_in:.2f}, Out={energy_out:.2f}, Error={balance_error:.2f} kWh"
+                f"Energy balance warning: In={energy_in:.2f}, Out={energy_out:.2f}, "
+                f"Error={balance_error:.2f} kWh"
             )
             return True, f"Energy balance warning: {balance_error:.2f} kWh error (continuing)"
     
@@ -282,13 +117,13 @@ class EnergyData:
 class CostScenarios:
     """All cost scenarios for one hour."""
 
-    base_case_cost: float
-    solar_only_cost: float
-    battery_solar_cost: float
-    solar_savings: float
-    battery_savings: float
-    total_savings: float
-    battery_wear_cost: float
+    grid_only_cost: float  # SEK - cost with grid only (no solar, no battery)
+    solar_only_cost: float  # SEK - cost with solar only (no battery)
+    battery_solar_cost: float  # SEK - cost with solar and battery
+    solar_savings: float  # SEK - savings from solar vs grid-only
+    battery_savings: float  # SEK - additional savings from battery vs solar-only
+    total_savings: float  # SEK - total savings vs grid-only
+    battery_wear_cost: float  # SEK - battery degradation cost
 
 @dataclass
 class EconomicData:
@@ -299,9 +134,9 @@ class EconomicData:
     grid_cost: float = 0.0  # SEK - cost of grid interactions (imports - exports)
     battery_cycle_cost: float = 0.0  # SEK - battery degradation cost
     hourly_cost: float = 0.0  # SEK - total optimized cost for this hour
-    base_case_cost: float = 0.0  # SEK - cost without optimization (baseline)
+    grid_only_cost: float = 0.0  # SEK - pure grid cost (home_consumption * buy_price)
+    solar_only_cost: float = 0.0  # SEK - cost with solar only (no battery - algorithm baseline)
     hourly_savings: float = 0.0  # SEK - savings vs baseline scenario
-    solar_only_cost: float = 0.0  # SEK - cost with solar only (no battery)
 
     def calculate_net_value(self) -> float:
         """Calculate net economic value (savings minus costs)."""
@@ -312,13 +147,13 @@ class EconomicData:
 class EconomicSummary:
     """Economic summary for optimization results."""
 
-    base_cost: float
+    grid_only_cost: float  # SEK - cost using only grid electricity
     solar_only_cost: float
     battery_solar_cost: float
-    base_to_solar_savings: float
-    base_to_battery_solar_savings: float
+    grid_to_solar_savings: float  # SEK - savings from solar vs grid-only
+    grid_to_battery_solar_savings: float  # SEK - savings from battery+solar vs grid-only
     solar_to_battery_solar_savings: float
-    base_to_battery_solar_savings_pct: float
+    grid_to_battery_solar_savings_pct: float  # % - percentage savings vs grid-only
     total_charged: float
     total_discharged: float
 
@@ -362,7 +197,10 @@ class HourlyData:
     economic: EconomicData = field(default_factory=EconomicData)
     decision: DecisionData = field(default_factory=DecisionData)
 
-    # Convenience properties for backward compatibility
+    # TODO: remove this in future versions
+    # This is a temporary measure to maintain backward compatibility
+    # with existing code that expects these properties directly on HourlyData.
+    # In future versions, we should access them through the energy attribute.
     @property
     def solar_generated(self) -> float:
         return self.energy.solar_generated
@@ -388,12 +226,12 @@ class HourlyData:
         return self.energy.battery_discharged
 
     @property
-    def battery_soc_start(self) -> float:
-        return self.energy.battery_soc_start
+    def battery_soe_start(self) -> float:
+        return self.energy.battery_soe_start
 
     @property
-    def battery_soc_end(self) -> float:
-        return self.energy.battery_soc_end
+    def battery_soe_end(self) -> float:
+        return self.energy.battery_soe_end
 
     @property
     def battery_net_change(self) -> float:
@@ -477,10 +315,10 @@ class HourlyData:
             errors.append(f"Energy balance error: {message}")
 
         # Validate SOC range
-        if not 0 <= self.energy.battery_soc_start <= 100:
-            errors.append(f"Invalid start SOC: {self.energy.battery_soc_start}%")
-        if not 0 <= self.energy.battery_soc_end <= 100:
-            errors.append(f"Invalid end SOC: {self.energy.battery_soc_end}%")
+        if not 0 <= self.energy.battery_soe_start <= 100:
+            errors.append(f"Invalid start SOE: {self.energy.battery_soe_start}%")
+        if not 0 <= self.energy.battery_soe_end <= 100:
+            errors.append(f"Invalid end SOE: {self.energy.battery_soe_end}%")
 
         return errors
 

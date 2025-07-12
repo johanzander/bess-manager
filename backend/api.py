@@ -100,7 +100,7 @@ async def get_dashboard_data(date: str = Query(None)):
         api_hourly_data = []
         for i, hour_data in enumerate(daily_view.hourly_data):
             # Get the flattened data with all fields directly from the model
-            flattened = flatten_hourly_data(hour_data)
+            flattened = flatten_hourly_data(hour_data, battery_capacity)
             
             # Only calculate UI-specific derived fields that aren't in the model
             home_consumption = flattened.get("homeConsumption", 0)
@@ -155,19 +155,19 @@ async def get_dashboard_data(date: str = Query(None)):
             "totalBatteryToGrid": sum(h.get("batteryToGrid", 0) for h in api_hourly_data),
             
             # Economic data - Costs
-            "totalBaseCost": sum(h.get("baseCost", 0) for h in api_hourly_data),
+            "totalGridOnlyCost": sum(h.get("gridOnlyCost", 0) for h in api_hourly_data),
             "totalSolarOnlyCost": sum(h.get("solarOnlyCost", 0) for h in api_hourly_data), 
             "totalBatterySolarCost": sum(h.get("batterySolarCost", 0) for h in api_hourly_data),
             
             # Economic data - Savings
             "totalSolarSavings": sum(h.get("solarSavings", 0) for h in api_hourly_data),
             "totalBatterySavings": sum(h.get("batterySavings", 0) for h in api_hourly_data),
-            "totalOptimizationSavings": sum(h.get("totalSavings", 0) for h in api_hourly_data),
+            "totalOptimizationSavings": sum(h.get("batterySavings", 0) for h in api_hourly_data),  # Use batterySavings consistently
         }
         logger.debug("Calculated totals successfully")
         
         # Use values from totals where available
-        total_base_cost = totals["totalBaseCost"]
+        total_grid_only_cost = totals["totalGridOnlyCost"]
         total_solar_only_cost = totals["totalSolarOnlyCost"]
         total_battery_solar_cost = totals["totalBatterySolarCost"]
         
@@ -178,19 +178,20 @@ async def get_dashboard_data(date: str = Query(None)):
         total_grid_costs = sum(h.get("gridCost", 0) for h in api_hourly_data)
         
         # Calculate savings using the pre-calculated totals
-        total_savings = total_base_cost - total_battery_solar_cost
-        solar_only_savings = total_base_cost - total_solar_only_cost
+        total_savings = total_grid_only_cost - total_battery_solar_cost
+        solar_only_savings = total_grid_only_cost - total_solar_only_cost
         battery_savings = total_solar_only_cost - total_battery_solar_cost
         
         logger.debug("Calculated costs and savings")
         
         # Build summary with only the necessary fields (no duplicates with totals)
         summary = {
-            "baseCost": total_base_cost,
+            "gridOnlyCost": total_grid_only_cost,  # Clear name for grid-only scenario
             "optimizedCost": total_battery_solar_cost,
             "solarOnlyCost": total_solar_only_cost,
             "gridCosts": total_grid_costs,
             "batteryCosts": total_battery_costs,
+            "batteryCycleCost": total_battery_costs,  # Add alias for frontend compatibility
             "savings": total_savings,
             "solarOnlySavings": solar_only_savings,
             "batterySavings": battery_savings,
@@ -697,14 +698,24 @@ async def get_growatt_detailed_schedule():
                 battery_action = hourly_settings.get("battery_action", 0.0)
                 battery_charged = max(0, battery_action) if battery_action > 0 else 0
                 battery_discharged = abs(min(0, battery_action)) if battery_action < 0 else 0
-                battery_soc_end = 50.0  # Default value
+                battery_soe_kwh = 25.0  # Default SOE value in kWh
+                battery_capacity = 50.0  # Default capacity in kWh
                 
-                # Try to get actual SOC values from controller if possible
+                # Try to get actual SOE values from controller if possible
                 try:
                     if hour == current_hour and hasattr(bess_controller.system, "controller"):
-                        battery_soc_end = bess_controller.system.controller.get_battery_soc()
+                        battery_soc_percent = bess_controller.system.controller.get_battery_soc()
+                        # Convert SOC percent to SOE kWh
+                        if hasattr(bess_controller.system, "battery_settings"):
+                            battery_capacity = bess_controller.system.battery_settings.total_capacity
+                            battery_soe_kwh = (battery_soc_percent / 100.0) * battery_capacity
+                        else:
+                            battery_soe_kwh = (battery_soc_percent / 100.0) * battery_capacity
                 except Exception:
                     pass  # Silently continue with default
+                
+                # Calculate SOC for display
+                battery_soc_end = (battery_soe_kwh / battery_capacity) * 100.0
                 
                 schedule_data.append({
                     "hour": hour,

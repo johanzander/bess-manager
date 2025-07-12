@@ -49,6 +49,11 @@ export default function DashboardPage({
     }>;
     currentHour?: number;
     dataSources?: Record<string, any>;
+    summary?: {
+      gridOnlyCost?: number;  // Updated name
+      optimizedCost?: number;
+      savings?: number;
+    };
     totals?: Record<string, number>;
     strategicIntentSummary?: Record<string, number>;
     actualHoursCount?: number;
@@ -108,7 +113,7 @@ export default function DashboardPage({
           
           debugMessages.push(`✅ Dashboard data loaded successfully`);
           debugMessages.push(`📊 Total hours: ${hourlyDataCount} (${actualCount} actual + ${predictedCount} predicted)`);
-          debugMessages.push(`💰 Daily savings: ${response.data.totalDailySavings?.toFixed(2) || 'N/A'} SEK`);
+          debugMessages.push(`💰 Daily savings: ${((response.data.summary?.gridOnlyCost || 0) - (response.data.summary?.optimizedCost || 0)).toFixed(2)} SEK`);
           debugMessages.push(`🔋 Battery capacity: ${response.data.batteryCapacity || 'N/A'} kWh`);
           
           // Log strategic intent summary if available
@@ -294,7 +299,7 @@ export default function DashboardPage({
                   📊 Data: {dashboardData.actualHoursCount} actual + {dashboardData.predictedHoursCount} predicted hours
                 </span>
                 <span className="text-sm text-blue-700 dark:text-blue-300">
-                  💰 Total savings: {dashboardData.totalDailySavings?.toFixed(2)} SEK
+                  💰 Total savings: {((dashboardData.summary?.gridOnlyCost || 0) - (dashboardData.summary?.optimizedCost || 0)).toFixed(2)} SEK
                 </span>
               </div>
             </div>

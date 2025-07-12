@@ -95,7 +95,7 @@ class TestDataStructureConsistency:
                 solar_production=[0.0] * 6
                 + [2.0, 4.0, 6.0, 8.0, 8.0, 6.0, 4.0, 2.0]
                 + [0.0] * 10,  # FIX: 6 + 8 + 10 = 24 elements
-                initial_soc=50.0,
+                initial_soe=50.0,
                 battery_settings=battery_system.battery_settings,
             )
 
@@ -160,29 +160,29 @@ class TestDataStructureConsistency:
                 solar_production=[0.0] * 6
                 + [6.0] * 8
                 + [0.0] * 10,  # FIX: 6 + 8 + 10 = 24 elements
-                initial_soc=50.0,
+                initial_soe=50.0,
                 battery_settings=battery_system.battery_settings,
             )
 
             # Verify economic summary structure (should be EconomicSummary object)
             economic_summary = result.economic_summary
-            assert hasattr(economic_summary, "base_cost"), "Should have base_cost"
+            assert hasattr(economic_summary, "grid_only_cost"), "Should have grid_only_cost"
             assert hasattr(
                 economic_summary, "battery_solar_cost"
             ), "Should have battery_solar_cost"
             assert hasattr(
-                economic_summary, "base_to_battery_solar_savings"
+                economic_summary, "grid_to_battery_solar_savings"
             ), "Should have savings"
 
             # Verify types are numeric
             assert isinstance(
-                economic_summary.base_cost, int | float
-            ), "base_cost should be numeric"
+                economic_summary.grid_only_cost, int | float
+            ), "grid_only_cost should be numeric"
             assert isinstance(
                 economic_summary.battery_solar_cost, int | float
             ), "battery_solar_cost should be numeric"
             assert isinstance(
-                economic_summary.base_to_battery_solar_savings, int | float
+                economic_summary.grid_to_battery_solar_savings, int | float
             ), "savings should be numeric"
 
         except Exception as e:
@@ -203,7 +203,7 @@ class TestDataStructureConsistency:
                 solar_production=[0.0] * 6
                 + [8.0] * 8
                 + [0.0] * 10,  # FIX: 6 + 8 + 10 = 24 elements
-                initial_soc=20.0,  # Low SOC to encourage charging
+                initial_soe=20.0,  # Low SOC to encourage charging
                 battery_settings=battery_system.battery_settings,
             )
 
@@ -258,7 +258,7 @@ class TestComponentInteraction:
                 solar_production=[0.0] * 6
                 + [6.0] * 8
                 + [0.0] * 10,  # FIX: 6 + 8 + 10 = 24 elements
-                initial_soc=50.0,
+                initial_soe=50.0,
                 battery_settings=battery_system.battery_settings,
             )
 
@@ -319,7 +319,7 @@ class TestErrorHandling:
                 sell_price=[1.0] * 24,
                 home_consumption=[4.0] * 24,
                 solar_production=[0.0] * 24,
-                initial_soc=50.0,
+                initial_soe=50.0,
                 battery_settings=battery_system.battery_settings,
             )
             # If it doesn't raise an exception, verify it at least returns something reasonable

@@ -103,7 +103,7 @@ class BatterySystemManager:
 
         # Current schedule tracking
         self._current_schedule = None
-        self._initial_soc = None
+        self._initial_soe = None
 
         logger.info("BatterySystemManager initialized with strategic intent support")
 
@@ -326,7 +326,7 @@ class BatterySystemManager:
                         if success:
                             logger.info(
                                 f"Stored hour {hour}: Solar={energy_data.solar_generated:.2f} kWh, "
-                                f"SOC={energy_data.battery_soc_start:.1f}%→{energy_data.battery_soc_end:.1f}%"
+                                f"SOC={energy_data.battery_soe_start:.1f}%→{energy_data.battery_soe_end:.1f}%"
                             )
                         else:
                             logger.warning(
@@ -425,8 +425,8 @@ class BatterySystemManager:
             try:
                 if self._controller is not None:
                     current_soc = self._controller.get_battery_soc()
-                    self._initial_soc = current_soc
-                    logger.info(f"Setting initial SOC for day: {self._initial_soc}%")
+                    self._initial_soe = current_soc
+                    logger.info(f"Setting initial SOC for day: {self._initial_soe}%")
                 else:
                     logger.warning(
                         "Cannot get initial SOC: controller is not available"
@@ -487,7 +487,7 @@ class BatterySystemManager:
 
             logger.info(
                 f"Collected energy data for hour {prev_hour} - Solar: {energy_data.solar_generated:.2f} kWh, "
-                f"Load: {energy_data.home_consumed:.2f} kWh, SOC: {energy_data.battery_soc_start:.1f}% → {energy_data.battery_soc_end:.1f}%"
+                f"Load: {energy_data.home_consumed:.2f} kWh, SOC: {energy_data.battery_soe_start:.1f}% → {energy_data.battery_soe_end:.1f}%"
             )
 
             # Store using new method
@@ -568,7 +568,7 @@ class BatterySystemManager:
             solar_data = solar_predictions
 
             # Initialize all hours with minimal SOC for next day
-            initial_soe = self.battery_settings.min_soc_kwh
+            initial_soe = self.battery_settings.min_soe_kwh
             combined_soe = [initial_soe] * 24
 
             optimization_hour = 0
@@ -591,7 +591,7 @@ class BatterySystemManager:
                         consumption_data[h] = event.home_consumed
                         solar_data[h] = event.solar_generated
                         combined_soe[h] = (
-                            event.battery_soc_end / 100.0
+                            event.battery_soe_end / 100.0
                         ) * self.battery_settings.total_capacity
                         combined_actions[h] = (
                             event.battery_charged - event.battery_discharged
@@ -714,7 +714,7 @@ class BatterySystemManager:
                 sell_price=sell_prices,
                 home_consumption=remaining_consumption,
                 solar_production=remaining_solar,
-                initial_soc=current_soe,
+                initial_soe=current_soe,
                 battery_settings=self.battery_settings,
                 initial_cost_basis=initial_cost_basis,
             )
@@ -776,7 +776,7 @@ class BatterySystemManager:
                     )
                     combined_actions[target_hour] = hour_data.battery_action or 0.0
                     # Store the SOE directly (it's already in the correct format from HourlyData)
-                    combined_soe[target_hour] = hour_data.battery_soc_end
+                    combined_soe[target_hour] = hour_data.battery_soe_end
 
             # Log the corrected SOE progression
             logger.info("CORRECTED SOE progression:")
@@ -811,12 +811,12 @@ class BatterySystemManager:
                             )
 
             # FIXED: Store initial SOC in OptimizationResult for DailyViewBuilder
-            if self._initial_soc is not None:
-                result.input_data["initial_soc"] = self._initial_soc
+            if self._initial_soe is not None:
+                result.input_data["initial_soe"] = self._initial_soe
             elif not prepare_next_day:
                 current_soc = self._get_current_battery_soc()
                 if current_soc is not None:
-                    result.input_data["initial_soc"] = current_soc
+                    result.input_data["initial_soe"] = current_soc
 
             # Store in schedule store - now using OptimizationResult directly
             self.schedule_store.store_schedule(
@@ -826,6 +826,19 @@ class BatterySystemManager:
             )
 
             # Create DPSchedule with corrected SOE and strategic intents
+            # Convert EconomicSummary to dict for DPSchedule
+            summary_dict = {
+                "grid_only_cost": result.economic_summary.grid_only_cost,
+                "solar_only_cost": result.economic_summary.solar_only_cost,
+                "battery_solar_cost": result.economic_summary.battery_solar_cost,
+                "grid_to_solar_savings": result.economic_summary.grid_to_solar_savings,
+                "grid_to_battery_solar_savings": result.economic_summary.grid_to_battery_solar_savings,
+                "solar_to_battery_solar_savings": result.economic_summary.solar_to_battery_solar_savings,
+                "grid_to_battery_solar_savings_pct": result.economic_summary.grid_to_battery_solar_savings_pct,
+                "total_charged": result.economic_summary.total_charged,
+                "total_discharged": result.economic_summary.total_discharged,
+            }
+            
             temp_schedule = DPSchedule(
                 actions=combined_actions,
                 state_of_energy=combined_soe,  # This now has correct SOE progression
@@ -835,7 +848,7 @@ class BatterySystemManager:
                 hourly_data={
                     "strategic_intent": full_day_strategic_intents
                 },  # Simplified for DPSchedule compatibility
-                summary=result.economic_summary, # TODO FIX THIS
+                summary=summary_dict,  # Now properly converted to dict
                 solar_charged=solar_charged,
                 original_dp_results={
                     "strategic_intent": full_day_strategic_intents
@@ -1318,140 +1331,7 @@ class BatterySystemManager:
         return self.daily_view_builder.build_daily_view(
             current_hour, buy_price, sell_price
         )
-
-    def _convert_daily_view_to_savings_report(
-        self, daily_view: DailyView
-    ) -> dict[str, Any]:
-        """Convert to old format - snake_case only."""
-
-        hourly_data = []
-        for hour_data in daily_view.hourly_data:
-            # Calculate derived values expected by frontend
-            default_consumption = hour_data.home_consumed
-            solar_production = hour_data.solar_generated
-            direct_solar = min(default_consumption, solar_production)
-            export_solar = max(0, solar_production - direct_solar)
-            import_from_grid = max(0, default_consumption - direct_solar)
-
-            hour_entry = {
-                "hour": str(hour_data.hour),
-                "price": hour_data.buy_price,
-                "consumption": hour_data.home_consumed,
-                "battery_level": hour_data.battery_soc_end,
-                "action": hour_data.battery_action or 0,
-                "grid_cost": hour_data.grid_imported * hour_data.buy_price,
-                "battery_cost": 0.0,
-                "total_cost": hour_data.hourly_cost,
-                "base_cost": hour_data.home_consumed * hour_data.buy_price,
-                "savings": hour_data.hourly_savings,
-                "hourly_cost": hour_data.hourly_cost,
-                "hourly_savings": hour_data.hourly_savings,
-                "solar_production": solar_production,
-                "direct_solar": direct_solar,
-                "export_solar": export_solar,
-                "import_from_grid": import_from_grid,
-                "solar_only_cost": import_from_grid * hour_data.buy_price,
-                "solar_savings": (hour_data.home_consumed - import_from_grid)
-                * hour_data.buy_price,
-                "grid_only_cost": hour_data.home_consumed * hour_data.buy_price,
-                "battery_savings": hour_data.hourly_savings,
-                "battery_grid_consumption": hour_data.grid_imported,
-                "battery_charge": hour_data.battery_charged,
-                "battery_discharge": hour_data.battery_discharged,
-                "grid_import": hour_data.grid_imported,
-                "grid_exported": hour_data.grid_exported,
-                "grid_imported": hour_data.grid_imported,
-                "grid_export": hour_data.grid_exported,
-                "data_source": hour_data.data_source,
-                "battery_soc_start": hour_data.battery_soc_start,
-                "solar_to_battery": min(
-                    hour_data.battery_charged, hour_data.solar_generated
-                ),
-                "grid_to_battery": max(
-                    0,
-                    hour_data.battery_charged
-                    - min(hour_data.battery_charged, hour_data.solar_generated),
-                ),
-                "solar_charged": min(
-                    hour_data.battery_charged, hour_data.solar_generated
-                ),
-                "effective_diff": (hour_data.buy_price - hour_data.buy_price * 0.6)
-                * 0.85
-                - 0.4,
-                "opportunity_score": 0.8,
-            }
-            hourly_data.append(hour_entry)
-
-        # Calculate summary
-        total_solar = sum(h["solar_production"] for h in hourly_data)
-        total_consumption = sum(h["consumption"] for h in hourly_data)
-        total_battery_charge = sum(h["battery_charge"] for h in hourly_data)
-        total_battery_discharge = sum(h["battery_discharge"] for h in hourly_data)
-        total_grid_import = sum(h["grid_import"] for h in hourly_data)
-        total_grid_export = sum(h["grid_export"] for h in hourly_data)
-        avg_price = (
-            sum(h["price"] for h in hourly_data) / len(hourly_data)
-            if hourly_data
-            else 1.0
-        )
-
-        # Economic scenarios
-        grid_only_cost = total_consumption * avg_price
-        solar_only_cost = max(0, total_consumption - total_solar) * avg_price
-        battery_solar_cost = (
-            total_grid_import * avg_price - total_grid_export * avg_price * 0.8
-        )
-
-        solar_savings = grid_only_cost - solar_only_cost
-        battery_savings = solar_only_cost - battery_solar_cost
-        total_savings = solar_savings + battery_savings
-
-        summary = {
-            "base_cost": grid_only_cost,
-            "optimized_cost": battery_solar_cost,
-            "grid_costs": total_grid_import * avg_price,
-            "battery_costs": 0,
-            "savings": total_savings,
-            "grid_only_cost": grid_only_cost,
-            "solar_only_cost": solar_only_cost,
-            "battery_solar_cost": battery_solar_cost,
-            "solar_only_savings": solar_savings,
-            "arbitrage_savings": battery_savings,
-            "battery_savings": battery_savings,
-            "total_solar_production": total_solar,
-            "total_battery_charge": total_battery_charge,
-            "total_battery_discharge": total_battery_discharge,
-            "total_grid_import": total_grid_import,
-            "total_grid_export": total_grid_export,
-            "total_direct_solar": sum(h["direct_solar"] for h in hourly_data),
-            "total_excess_solar": sum(h["export_solar"] for h in hourly_data),
-            "cycle_count": total_battery_discharge / 15.0,
-            "avg_buy_price": avg_price,
-            "avg_sell_price": avg_price * 0.8,
-            "total_daily_savings": daily_view.total_daily_savings,
-            "actual_savings_so_far": daily_view.actual_savings_so_far,
-            "predicted_remaining_savings": daily_view.predicted_remaining_savings,
-            "actual_hours": daily_view.actual_hours_count,
-            "predicted_hours": daily_view.predicted_hours_count,
-            "total_consumption": total_consumption,
-            "total_charge_from_solar": sum(h["solar_to_battery"] for h in hourly_data),
-            "total_charge_from_grid": sum(h["grid_to_battery"] for h in hourly_data),
-            "estimated_battery_cycles": total_battery_discharge
-            / self.battery_settings.total_capacity,
-        }
-
-        return {
-            "hourly_data": hourly_data,
-            "summary": summary,
-            "enhanced_summary": summary,
-            "energy_profile": {
-                "consumption": [h["consumption"] for h in hourly_data],
-                "solar": [h["solar_production"] for h in hourly_data],
-                "battery_soc": [h["battery_level"] for h in hourly_data],
-                "actual_hours": daily_view.actual_hours_count,
-            },
-        }
-
+    
     def adjust_charging_power(self) -> None:
         """Adjust charging power based on house consumption."""
         try:
@@ -1564,7 +1444,7 @@ class BatterySystemManager:
                     "grid_export": hour_data.grid_exported,
                     "battery_charged": hour_data.battery_charged,
                     "battery_discharged": hour_data.battery_discharged,
-                    "battery_soc_end": hour_data.battery_soc_end,
+                    "battery_soe_end": hour_data.battery_soe_end,
                     "battery_net_change": hour_data.battery_charged
                     - hour_data.battery_discharged,
                 }
@@ -1674,6 +1554,9 @@ class BatterySystemManager:
             # Mark predictions with ★
             indicator = "★" if data["hour"] >= current_hour else " "
 
+            # Convert SOE (kWh) to SOC (%) for display
+            battery_soc_end = (data['battery_soe_end'] / self.battery_settings.total_capacity) * 100.0
+            
             row = (
                 f"║ {data['hour']:02d}:00{indicator} "
                 f"║ {data['solar_production']:>5.1f}  "
@@ -1686,7 +1569,7 @@ class BatterySystemManager:
                 f"║ {data['battery_discharged']:>5.1f}  "
                 f"║ {solar_to_battery:>5.1f}  "
                 f"║ {grid_to_battery:>5.1f} "
-                f"║ {data['battery_soc_end']:>4.0f} ║"
+                f"║ {battery_soc_end:>4.0f} ║"
             )
             lines.append(row)
 
@@ -1763,7 +1646,7 @@ class BatterySystemManager:
                 "grid_export": hour_data.grid_exported,
                 "battery_charged": hour_data.battery_charged,
                 "battery_discharged": hour_data.battery_discharged,
-                "battery_soc_end": hour_data.battery_soc_end,
+                "battery_soe_end": hour_data.battery_soe_end,
                 "battery_net_change": hour_data.battery_charged
                 - hour_data.battery_discharged,
             }

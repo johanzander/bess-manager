@@ -10,7 +10,6 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime
 
-from core.bess.dp_battery_algorithm import calculate_hourly_costs
 from core.bess.models import DecisionData, EconomicData, EnergyData, HourlyData
 
 from .historical_data_store import HistoricalDataStore
@@ -183,8 +182,9 @@ class DailyViewBuilder:
                     )
 
                 # SOC validation logic 
-                soc_start = hour_data.energy.battery_soc_start
-                soc_end = hour_data.energy.battery_soc_end
+                # Convert SOE to SOC for display
+                soc_start = (hour_data.energy.battery_soe_start / self.battery_settings.total_capacity) * 100.0
+                soc_end = (hour_data.energy.battery_soe_end / self.battery_settings.total_capacity) * 100.0
                 soc_change = soc_end - soc_start
 
                 # All SOC validation calculations (unchanged)
@@ -216,7 +216,7 @@ class DailyViewBuilder:
     def _build_actual_hour_data(
         self, hour: int, buy_price: float, sell_price: float
     ) -> HourlyData:
-        """Build hour data from actual stored facts """
+        """Build hour data from actual stored facts with properly calculated economic data."""
         
         event = self.historical_store.get_hour_record(hour)
         if not event:
@@ -229,36 +229,46 @@ class DailyViewBuilder:
             battery_action=battery_action
         )
         
-        new_hourly_data = HourlyData(
-            hour=event.hour,
-            energy=event.energy,
-            timestamp=event.timestamp,
-            data_source="actual",
-            economic=EconomicData(
-                buy_price=buy_price,
-                sell_price=sell_price,
-                hourly_cost=0.0,
-                hourly_savings=0.0,
-                battery_cycle_cost=0.0
-            ),
-            decision=updated_decision
+        # Calculate economic data manually since actual data doesn't store it
+        # This is what the optimization would have calculated for this hour
+        
+        # Grid cost (net cost of grid interactions)
+        grid_cost = (
+            event.energy.grid_imported * buy_price -
+            event.energy.grid_exported * sell_price
         )
-
-        # calculate_hourly_costs accepts HourlyData directly
-        costs = calculate_hourly_costs( # TODO: Change signature of function so we dont need this bizarre temp object to calculate costs
-            new_hourly_data, 
-            self.battery_settings.cycle_cost_per_kwh,
-            self.battery_settings.efficiency_charge,
-            self.battery_settings.efficiency_discharge
+        
+        # Battery wear cost (only for charging, not discharging)
+        battery_wear_cost = event.energy.battery_charged * self.battery_settings.cycle_cost_per_kwh
+        
+        # Total hourly cost = grid cost + battery wear cost
+        battery_solar_cost = grid_cost + battery_wear_cost
+        
+        # Grid-only cost (no solar, no battery - just grid import for all consumption)
+        grid_only_cost = event.energy.home_consumed * buy_price
+        
+        # Solar-only cost (solar + grid, no battery)
+        direct_solar_to_home = min(event.energy.solar_generated, event.energy.home_consumed)
+        solar_excess = max(0, event.energy.solar_generated - direct_solar_to_home)
+        grid_needed = max(0, event.energy.home_consumed - direct_solar_to_home)
+        
+        solar_only_cost = (
+            grid_needed * buy_price -  # Pay for grid imports
+            solar_excess * sell_price  # Revenue from solar exports
         )
+        
+        # Calculate savings vs solar-only baseline (algorithm baseline)
+        solar_only_savings = solar_only_cost - battery_solar_cost
         
         final_economic = EconomicData(
             buy_price=buy_price,
             sell_price=sell_price,
-            hourly_cost=costs.battery_solar_cost,
-            hourly_savings=costs.total_savings,
-            battery_cycle_cost=costs.battery_wear_cost,
-            solar_only_cost=costs.solar_only_cost, 
+            grid_cost=grid_cost,  # FIXED: Set the separate grid cost field
+            hourly_cost=battery_solar_cost,
+            hourly_savings=solar_only_savings,  # Savings vs solar-only (algorithm baseline)
+            battery_cycle_cost=battery_wear_cost,
+            grid_only_cost=grid_only_cost,
+            solar_only_cost=solar_only_cost,
         )
         
         return HourlyData(
@@ -278,7 +288,9 @@ class DailyViewBuilder:
         for hour in range(23, -1, -1):
             event = self.historical_store.get_hour_record(hour)
             if event:
-                return hour, event.energy.battery_soc_end
+                # Convert SOE to SOC for display
+                soc_end = (event.energy.battery_soe_end / self.battery_settings.total_capacity) * 100.0
+                return hour, soc_end
 
         # Fallback to initial SOC from schedule
         latest_schedule = self.schedule_store.get_latest_schedule()
@@ -353,20 +365,24 @@ class DailyViewBuilder:
                 else:
                     prev_event = self.historical_store.get_hour_record(hour - 1)
                     if prev_event:
-                        prev_soc = prev_event.energy.battery_soc_end
+                        prev_soc = (prev_event.energy.battery_soe_end / self.battery_settings.total_capacity) * 100.0
                         logger.info(f"Using actual SOC from hour {hour-1}: {prev_soc:.1f}%")
                     else:
-                        prev_soc = hour_result.energy.battery_soc_start
+                        prev_soc = (hour_result.energy.battery_soe_start / self.battery_settings.total_capacity) * 100.0
                         logger.warning(
                             f"No historical data for hour {hour-1}, using optimization SOC: {prev_soc:.1f}%"
                         )
 
                 prev_soc_start = prev_soc
             else:
-                prev_soc_start = hour_result.energy.battery_soc_start
+                prev_soc_start = (hour_result.energy.battery_soe_start / self.battery_settings.total_capacity) * 100.0
+                
+            soc_percent = (hour_result.energy.battery_soe_end / self.battery_settings.total_capacity) * 100.0
 
-            soc_percent = hour_result.energy.battery_soc_end
-
+            # Convert SOC percentages to SOE values in kWh
+            soe_start = (prev_soc_start / 100.0) * self.battery_settings.total_capacity
+            soe_end = (soc_percent / 100.0) * self.battery_settings.total_capacity
+            
             energy_data = EnergyData(
                 solar_generated=solar_production,
                 home_consumed=home_consumption,
@@ -374,15 +390,9 @@ class DailyViewBuilder:
                 grid_exported=grid_export,
                 battery_charged=battery_charged,
                 battery_discharged=battery_discharged,
-                battery_soc_start=prev_soc_start,
-                battery_soc_end=soc_percent,
-                solar_to_home=hour_result.energy.solar_to_home,
-                solar_to_battery=hour_result.energy.solar_to_battery,
-                solar_to_grid=hour_result.energy.solar_to_grid,
-                grid_to_home=hour_result.energy.grid_to_home,
-                grid_to_battery=hour_result.energy.grid_to_battery,
-                battery_to_home=hour_result.energy.battery_to_home,
-                battery_to_grid=hour_result.energy.battery_to_grid,
+                battery_soe_start=soe_start,
+                battery_soe_end=soe_end,
+                # Detailed flows are automatically calculated by the model
             )
 
             decision_data = DecisionData(
@@ -390,35 +400,17 @@ class DailyViewBuilder:
                 battery_action=battery_action
             )
 
-            new_hourly_data = HourlyData(
-                hour=hour,
-                energy=energy_data,
-                timestamp=hour_result.timestamp,
-                data_source="predicted",
-                economic=EconomicData(
-                    buy_price=buy_price,
-                    sell_price=sell_price,
-                    hourly_cost=0.0,
-                    hourly_savings=0.0,
-                    battery_cycle_cost=0.0
-                ),
-                decision=decision_data
-            )
-
-            # calculate_hourly_costs accepts HourlyData directly
-            cost_results = calculate_hourly_costs(
-                new_hourly_data,
-                self.battery_settings.cycle_cost_per_kwh,
-                self.battery_settings.efficiency_charge,
-                self.battery_settings.efficiency_discharge,
-            )
-            
+            # Use the economic data from the optimization result directly
+            # Don't call calculate_hourly_costs since we already have the correct data
             final_economic_data = EconomicData(
                 buy_price=buy_price,
                 sell_price=sell_price,
-                hourly_cost=cost_results.battery_solar_cost,
-                hourly_savings=cost_results.total_savings,
-                battery_cycle_cost=cost_results.battery_wear_cost
+                hourly_cost=hour_result.economic.hourly_cost,
+                hourly_savings=hour_result.economic.hourly_savings,
+                battery_cycle_cost=hour_result.economic.battery_cycle_cost,
+                grid_only_cost=hour_result.economic.grid_only_cost,
+                solar_only_cost=hour_result.economic.solar_only_cost,
+                grid_cost=hour_result.economic.grid_cost,
             )
             
             return HourlyData(
@@ -462,7 +454,10 @@ class DailyViewBuilder:
                     )
 
                 # FIXED SOC change validation with efficiency consideration
-                soc_change = hour_data.battery_soc_end - hour_data.battery_soc_start
+                # Calculate SOC change from SOE values
+                soc_start = (hour_data.energy.battery_soe_start / self.battery_settings.total_capacity) * 100.0
+                soc_end = (hour_data.energy.battery_soe_end / self.battery_settings.total_capacity) * 100.0
+                soc_change = soc_end - soc_start
 
                 # Calculate expected SOC change considering efficiency
                 if battery_charge > 0 and battery_discharge > 0:
@@ -525,7 +520,7 @@ class DailyViewBuilder:
         total_grid_export = 0.0
         total_battery_charge = 0.0
         total_battery_discharge = 0.0
-        total_base_cost = 0.0
+        total_grid_only_cost = 0.0
         total_optimized_cost = 0.0
         total_battery_cost = 0.0
         total_cost = 0.0
@@ -538,7 +533,7 @@ class DailyViewBuilder:
         actual_grid_export = 0.0
         actual_battery_charge = 0.0
         actual_battery_discharge = 0.0
-        actual_base_cost = 0.0
+        actual_grid_only_cost = 0.0
         actual_optimized_cost = 0.0
         actual_battery_cost = 0.0
         actual_total_cost = 0.0
@@ -550,18 +545,18 @@ class DailyViewBuilder:
         predicted_grid_export = 0.0
         predicted_battery_charge = 0.0
         predicted_battery_discharge = 0.0
-        predicted_base_cost = 0.0
+        predicted_grid_only_cost = 0.0
         predicted_optimized_cost = 0.0
         predicted_battery_cost = 0.0
         predicted_total_cost = 0.0
         predicted_savings = 0.0
 
         for hour_data in daily_view.hourly_data:
-            # Calculate base cost 
-            base_cost = hour_data.energy.home_consumed * hour_data.economic.buy_price
+            # Use pre-calculated grid-only cost instead of recalculating
+            grid_only_cost = hour_data.economic.grid_only_cost
 
-            # Calculate total cost 
-            hour_total_cost = hour_data.economic.hourly_cost + hour_data.economic.battery_cycle_cost
+            # Calculate total cost - hourly_cost already includes battery wear cost
+            hour_total_cost = hour_data.economic.hourly_cost
 
             # Mark current hour and predicted hours
             current_hour = datetime.now().hour
@@ -578,15 +573,16 @@ class DailyViewBuilder:
             )
 
             # Format SOC/SOE display 
-            soe_kwh = (hour_data.energy.battery_soc_end / 100.0) * self.battery_settings.total_capacity
-            soc_soe_display = f"{hour_data.energy.battery_soc_end:3.0f}/{soe_kwh:4.1f}"
+            soe_kwh = hour_data.energy.battery_soe_end
+            soc_percent = (soe_kwh / self.battery_settings.total_capacity) * 100.0
+            soc_soe_display = f"{soc_percent:3.0f}/{soe_kwh:4.1f}"
 
             # Row formatting 
             row = (
                 f"║ {hour_data.hour:02d}:00{hour_marker}║ {hour_data.economic.buy_price:4.2f}/ {hour_data.economic.sell_price:4.2f} "
                 f"║ {hour_data.energy.solar_generated:5.1f} ║ {hour_data.energy.grid_imported:5.1f} ║ {hour_data.energy.battery_discharged:5.1f} ║"
                 f" {hour_data.energy.home_consumed:5.1f} ║ {hour_data.energy.grid_exported:5.1f} ║ {hour_data.energy.battery_charged:5.1f} ║"
-                f"{intent_short:8}║{soc_soe_display:9}║{base_cost:6.2f} ║{hour_data.economic.hourly_cost:6.2f} ║{hour_data.economic.battery_cycle_cost:6.2f} ║{hour_total_cost:6.2f} ║{hour_data.economic.hourly_savings:6.2f} ║"
+                f"{intent_short:8}║{soc_soe_display:9}║{grid_only_cost:6.2f} ║{hour_data.economic.hourly_cost:6.2f} ║{hour_data.economic.battery_cycle_cost:6.2f} ║{hour_total_cost:6.2f} ║{hour_data.economic.hourly_savings:6.2f} ║"
             )
             lines.append(row)
 
@@ -597,7 +593,7 @@ class DailyViewBuilder:
             total_grid_export += hour_data.energy.grid_exported
             total_battery_charge += hour_data.energy.battery_charged
             total_battery_discharge += hour_data.energy.battery_discharged
-            total_base_cost += base_cost
+            total_grid_only_cost += grid_only_cost
             total_optimized_cost += hour_data.economic.hourly_cost
             total_battery_cost += hour_data.economic.battery_cycle_cost
             total_cost += hour_total_cost
@@ -611,7 +607,7 @@ class DailyViewBuilder:
                 actual_grid_export += hour_data.energy.grid_exported
                 actual_battery_charge += hour_data.energy.battery_charged
                 actual_battery_discharge += hour_data.energy.battery_discharged
-                actual_base_cost += base_cost
+                actual_grid_only_cost += grid_only_cost
                 actual_optimized_cost += hour_data.economic.hourly_cost
                 actual_battery_cost += hour_data.economic.battery_cycle_cost
                 actual_total_cost += hour_total_cost
@@ -623,7 +619,7 @@ class DailyViewBuilder:
                 predicted_grid_export += hour_data.energy.grid_exported
                 predicted_battery_charge += hour_data.energy.battery_charged
                 predicted_battery_discharge += hour_data.energy.battery_discharged
-                predicted_base_cost += base_cost
+                predicted_grid_only_cost += grid_only_cost
                 predicted_optimized_cost += hour_data.economic.hourly_cost
                 predicted_battery_cost += hour_data.economic.battery_cycle_cost
                 predicted_total_cost += hour_total_cost
@@ -636,7 +632,7 @@ class DailyViewBuilder:
         lines.append(
             f"║ TOTAL ║            ║ {total_solar:5.1f} ║ {total_grid_import:5.1f} ║ {total_battery_discharge:5.1f} ║"
             f" {total_consumption:5.1f} ║ {total_grid_export:5.1f} ║ {total_battery_charge:5.1f} ║        ║         ║"
-            f"{total_base_cost:6.2f} ║{total_optimized_cost:6.2f} ║{total_battery_cost:6.2f} ║{total_cost:6.2f} ║{total_savings:6.2f} ║"
+            f"{total_grid_only_cost:6.2f} ║{total_optimized_cost:6.2f} ║{total_battery_cost:6.2f} ║{total_cost:6.2f} ║{total_savings:6.2f} ║"
         )
         lines.append(
             "╚═══════╩════════════╩═══════╩═══════╩═══════╩═══════╩═══════╩═══════╩════════╩═════════╩═══════╩═══════╩═══════╩═══════╩═══════╝"
@@ -649,7 +645,7 @@ class DailyViewBuilder:
         # Log summary statistics
         logger.info(f"Daily energy summary: {total_solar:.1f} kWh solar, {total_consumption:.1f} kWh consumption, "
                    f"{total_battery_charge:.1f} kWh charged, {total_battery_discharge:.1f} kWh discharged")
-        logger.info(f"Daily cost summary: {total_base_cost:.2f} SEK base, {total_cost:.2f} SEK optimized, "
+        logger.info(f"Daily cost summary: {total_grid_only_cost:.2f} SEK grid-only, {total_cost:.2f} SEK optimized, "
                    f"{total_savings:.2f} SEK savings")
         logger.info(f"Actual vs Predicted: {daily_view.actual_hours_count} actual hours ({actual_savings:.2f} SEK), "
                    f"{daily_view.predicted_hours_count} predicted hours ({predicted_savings:.2f} SEK)")
@@ -726,7 +722,8 @@ class DailyViewBuilder:
             
             if prev_data:
                 # Found previous hour in historical data
-                return prev_data.battery_soc_end
+                # Convert SOE to SOC for display
+                return (prev_data.energy.battery_soe_end / self.battery_settings.total_capacity) * 100.0
             else:
                 # If no historical data, we need to calculate from the schedule
                 raise ValueError(f"No historical data for hour {prev_hour}, need to use schedule SOC")

@@ -306,48 +306,6 @@ class TestHourlyData:
         assert hourly.economic.buy_price == 0.0
         assert hourly.decision.strategic_intent == "IDLE"
 
-    def test_convenience_properties(self):
-        """Test convenience properties delegate correctly."""
-        energy = EnergyData(
-            solar_generated=5.0,
-            home_consumed=3.0,
-            grid_imported=1.0,
-            grid_exported=2.0,
-            battery_charged=1.5,
-            battery_discharged=0.5,
-            battery_soe_start=45.0,
-            battery_soe_end=50.0,
-        )
-
-        economic = EconomicData(
-            buy_price=1.3, sell_price=0.9, hourly_cost=4.2, hourly_savings=1.8
-        )
-
-        strategy = DecisionData(
-            strategic_intent="LOAD_SUPPORT", battery_action=-2.0  # Discharging
-        )
-
-        hourly = HourlyData.from_optimization(
-            hour=18, energy_data=energy, economic_data=economic, decision_data=strategy
-        )
-
-        # Test all convenience properties
-        assert hourly.solar_generated == 5.0
-        assert hourly.home_consumed == 3.0
-        assert hourly.grid_imported == 1.0
-        assert hourly.grid_exported == 2.0
-        assert hourly.battery_charged == 1.5
-        assert hourly.battery_discharged == 0.5
-        assert hourly.battery_soe_start == 45.0
-        assert hourly.battery_soe_end == 50.0
-        assert hourly.battery_net_change == 1.0  # 1.5 - 0.5
-        assert hourly.strategic_intent == "LOAD_SUPPORT"
-        assert hourly.battery_action == -2.0
-        assert hourly.buy_price == 1.3
-        assert hourly.sell_price == 0.9
-        assert hourly.hourly_cost == 4.2
-        assert hourly.hourly_savings == 1.8
-
     def test_data_validation_valid(self):
         """Test data validation with valid data."""
         energy = EnergyData(

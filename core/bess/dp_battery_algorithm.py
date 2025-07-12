@@ -508,14 +508,14 @@ def print_optimization_results(results, buy_prices, sell_prices):
     # Process each hour - replicating original logic exactly
     for i, hour_data in enumerate(hourly_data_list):
         hour = hour_data.hour
-        consumption = hour_data.home_consumed
-        solar = hour_data.solar_generated
-        action = hour_data.battery_action or 0.0
-        soe_kwh = hour_data.battery_soe_end
-        intent = hour_data.strategic_intent
+        consumption = hour_data.energy.home_consumed
+        solar = hour_data.energy.solar_generated
+        action = hour_data.decision.battery_action or 0.0
+        soe_kwh = hour_data.energy.battery_soe_end
+        intent = hour_data.decision.strategic_intent
 
         # Calculate values exactly like original function
-        base_cost = consumption * buy_prices[i] if i < len(buy_prices) else consumption * hour_data.buy_price
+        base_cost = consumption * buy_prices[i] if i < len(buy_prices) else consumption * hour_data.economic.buy_price
         
         # Extract solar flows - try to get from detailed flows if available
         solar_to_battery = 0.0
@@ -527,11 +527,11 @@ def print_optimization_results(results, buy_prices, sell_prices):
             grid_to_battery = hour_data.grid_to_battery
         else:
             # Fallback: estimate from battery_charged
-            solar_to_battery = hour_data.battery_charged if hour_data.battery_charged > 0 else 0
-            grid_to_battery = max(0, hour_data.battery_charged - min(solar, hour_data.battery_charged))
+            solar_to_battery = hour_data.energy.battery_charged if hour_data.energy.battery_charged > 0 else 0
+            grid_to_battery = max(0, hour_data.energy.battery_charged - min(solar, hour_data.energy.battery_charged))
         
         # Calculate costs using original logic - FIXED: use property accessor for battery_cycle_cost
-        grid_cost = hour_data.grid_imported * hour_data.buy_price - hour_data.grid_exported * hour_data.sell_price
+        grid_cost = hour_data.energy.grid_imported * hour_data.economic.buy_price - hour_data.energy.grid_exported * hour_data.economic.sell_price
         battery_cost = hour_data.economic.battery_cycle_cost  # FIXED: access via economic component
         combined_cost = grid_cost + battery_cost
         hourly_savings = base_cost - combined_cost
@@ -546,8 +546,8 @@ def print_optimization_results(results, buy_prices, sell_prices):
         total_battery_cost += battery_cost
         total_combined_cost += combined_cost
         total_savings += hourly_savings
-        total_charging += hour_data.battery_charged
-        total_discharging += hour_data.battery_discharged
+        total_charging += hour_data.energy.battery_charged
+        total_discharging += hour_data.energy.battery_discharged
 
         # Format intent to fit column width
         intent_display = intent[:15] if len(intent) > 15 else intent

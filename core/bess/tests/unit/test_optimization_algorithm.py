@@ -59,25 +59,25 @@ def test_battery_simulation_results(
         assert hasattr(hour_data, "hour")
         assert 0 <= hour_data.hour <= 23
 
-        # Test energy data access
-        assert hasattr(hour_data, "solar_generated")
-        assert hasattr(hour_data, "home_consumed")
-        assert hasattr(hour_data, "grid_imported")
-        assert hasattr(hour_data, "grid_exported")
-        assert hasattr(hour_data, "battery_charged")
-        assert hasattr(hour_data, "battery_discharged")
-        assert hasattr(hour_data, "battery_soe_start")
-        assert hasattr(hour_data, "battery_soe_end")
+        # Test energy data access - using single source of truth pattern
+        assert hasattr(hour_data.energy, "solar_generated")
+        assert hasattr(hour_data.energy, "home_consumed")
+        assert hasattr(hour_data.energy, "grid_imported")
+        assert hasattr(hour_data.energy, "grid_exported")
+        assert hasattr(hour_data.energy, "battery_charged")
+        assert hasattr(hour_data.energy, "battery_discharged")
+        assert hasattr(hour_data.energy, "battery_soe_start")
+        assert hasattr(hour_data.energy, "battery_soe_end")
 
-        # Test economic data access
-        assert hasattr(hour_data, "buy_price")
-        assert hasattr(hour_data, "sell_price")
-        assert hasattr(hour_data, "hourly_cost")
-        assert hasattr(hour_data, "hourly_savings")
+        # Test economic data access - using single source of truth pattern
+        assert hasattr(hour_data.economic, "buy_price")
+        assert hasattr(hour_data.economic, "sell_price")
+        assert hasattr(hour_data.economic, "hourly_cost")
+        assert hasattr(hour_data.economic, "hourly_savings")
 
-        # Test strategy data access
-        assert hasattr(hour_data, "strategic_intent")
-        assert hasattr(hour_data, "battery_action")
+        # Test strategy data access - using single source of truth pattern
+        assert hasattr(hour_data.decision, "strategic_intent")
+        assert hasattr(hour_data.decision, "battery_action")
 
         # Test that data source is set correctly
         assert hour_data.data_source == "predicted"
@@ -154,16 +154,16 @@ def test_battery_constraints_respected():
         )
 
         # Battery action should respect power limits
-        if hour_data.battery_action:
-            assert abs(hour_data.battery_action) <= max(
+        if hour_data.decision.battery_action:
+            assert abs(hour_data.decision.battery_action) <= max(
                 battery_settings.max_charge_power_kw,
                 battery_settings.max_discharge_power_kw,
             )
 
         # Energy balance should be maintained (approximately)
-        energy_in = hour_data.solar_generated + hour_data.grid_imported
-        energy_out = hour_data.home_consumed + hour_data.grid_exported
-        battery_net = hour_data.battery_charged - hour_data.battery_discharged
+        energy_in = hour_data.energy.solar_generated + hour_data.energy.grid_imported
+        energy_out = hour_data.energy.home_consumed + hour_data.energy.grid_exported
+        battery_net = hour_data.energy.battery_charged - hour_data.energy.battery_discharged
 
         # Energy balance: energy_in = energy_out + battery_net (within tolerance for efficiency losses)
         balance_error = abs(energy_in - energy_out - battery_net)
@@ -218,7 +218,7 @@ def SKIP_test_strategic_intent_assignment():  # TODO: Fix this test
     )
 
     # Check that strategic intents are assigned
-    intents = [hour_data.strategic_intent for hour_data in results.hourly_data]
+    intents = [hour_data.decision.strategic_intent for hour_data in results.hourly_data]
 
     # Should have some strategic decisions (not all IDLE)
     assert len(set(intents)) > 1, "Should have multiple strategic intents"

@@ -588,16 +588,16 @@ class BatterySystemManager:
                     # Use actual data for past hours
                     event = self.historical_store.get_hour_record(h)
                     if event:
-                        consumption_data[h] = event.home_consumed
-                        solar_data[h] = event.solar_generated
+                        consumption_data[h] = event.energy.home_consumed
+                        solar_data[h] = event.energy.solar_generated
                         combined_soe[h] = (
-                            event.battery_soe_end / 100.0
+                            event.energy.battery_soe_end / 100.0
                         ) * self.battery_settings.total_capacity
                         combined_actions[h] = (
-                            event.battery_charged - event.battery_discharged
+                            event.energy.battery_charged - event.energy.battery_discharged
                         )
                         solar_charged[h] = min(
-                            event.battery_charged, event.solar_generated
+                            event.energy.battery_charged, event.energy.solar_generated
                         )
                         # Update running SOE to the end state of this hour
                         running_soe = combined_soe[h]
@@ -772,11 +772,11 @@ class BatterySystemManager:
                 target_hour = optimization_hour + i
                 if target_hour < 24:
                     logger.debug(
-                        f"  Mapping HourlyData index {i} (action={hour_data.battery_action:.1f}) to hour {target_hour}"
+                        f"  Mapping HourlyData index {i} (action={hour_data.decision.battery_action:.1f}) to hour {target_hour}"
                     )
-                    combined_actions[target_hour] = hour_data.battery_action or 0.0
+                    combined_actions[target_hour] = hour_data.decision.battery_action or 0.0
                     # Store the SOE directly (it's already in the correct format from HourlyData)
-                    combined_soe[target_hour] = hour_data.battery_soe_end
+                    combined_soe[target_hour] = hour_data.energy.battery_soe_end
 
             # Log the corrected SOE progression
             logger.info("CORRECTED SOE progression:")
@@ -796,7 +796,7 @@ class BatterySystemManager:
             for i, hour_data in enumerate(hourly_data_list):
                 target_hour = optimization_hour + i
                 if target_hour < 24:
-                    full_day_strategic_intents[target_hour] = hour_data.strategic_intent
+                    full_day_strategic_intents[target_hour] = hour_data.decision.strategic_intent
 
             # ADD: Correct historical hours with actual strategic intents BEFORE creating schedules
             if not prepare_next_day:
@@ -805,9 +805,9 @@ class BatterySystemManager:
                     if hour < len(full_day_strategic_intents):
                         event = self.historical_store.get_hour_record(hour)
                         if event and hasattr(event, "strategic_intent"):
-                            full_day_strategic_intents[hour] = event.strategic_intent
+                            full_day_strategic_intents[hour] = event.decision.strategic_intent
                             logger.debug(
-                                f"Hour {hour}: Corrected intent from IDLE to '{event.strategic_intent}'"
+                                f"Hour {hour}: Corrected intent from IDLE to '{event.decision.strategic_intent}'"
                             )
 
             # FIXED: Store initial SOC in OptimizationResult for DailyViewBuilder
@@ -1196,33 +1196,33 @@ class BatterySystemManager:
                 continue
 
             # Handle charging using stored facts
-            if event.battery_charged > 0:
+            if event.energy.battery_charged > 0:
                 # Simple calculation using stored energy flows
-                solar_to_battery = min(event.battery_charged, event.solar_generated)
-                grid_to_battery = max(0, event.battery_charged - solar_to_battery)
+                solar_to_battery = min(event.energy.battery_charged, event.energy.solar_generated)
+                grid_to_battery = max(0, event.energy.battery_charged - solar_to_battery)
 
                 # Calculate costs using same logic as everywhere else
                 solar_cost = solar_to_battery * self.battery_settings.cycle_cost_per_kwh
                 grid_cost = grid_to_battery * (
-                    event.buy_price + self.battery_settings.cycle_cost_per_kwh
+                    event.economic.buy_price + self.battery_settings.cycle_cost_per_kwh
                 )
 
                 new_energy_cost = solar_cost + grid_cost
                 running_total_cost += new_energy_cost
-                running_energy += event.battery_charged
+                running_energy += event.energy.battery_charged
 
             # Handle discharging
-            if event.battery_discharged > 0:
+            if event.energy.battery_discharged > 0:
                 if running_energy > 0:
                     # Calculate proportional cost to remove (weighted average cost)
                     avg_cost_per_kwh = running_total_cost / running_energy
                     discharged_cost = (
-                        min(event.battery_discharged, running_energy) * avg_cost_per_kwh
+                        min(event.energy.battery_discharged, running_energy) * avg_cost_per_kwh
                     )
 
                     # Remove proportional cost and energy
                     running_total_cost = max(0, running_total_cost - discharged_cost)
-                    running_energy = max(0, running_energy - event.battery_discharged)
+                    running_energy = max(0, running_energy - event.energy.battery_discharged)
 
                     if running_energy <= 0.1:
                         running_total_cost = 0.0
@@ -1438,23 +1438,23 @@ class BatterySystemManager:
             if hour_data:
                 hourly_item = {
                     "hour": hour,
-                    "solar_production": hour_data.solar_generated,
-                    "home_consumption": hour_data.home_consumed,
-                    "grid_import": hour_data.grid_imported,
-                    "grid_export": hour_data.grid_exported,
-                    "battery_charged": hour_data.battery_charged,
-                    "battery_discharged": hour_data.battery_discharged,
-                    "battery_soe_end": hour_data.battery_soe_end,
-                    "battery_net_change": hour_data.battery_charged
-                    - hour_data.battery_discharged,
+                    "solar_production": hour_data.energy.solar_generated,
+                    "home_consumption": hour_data.energy.home_consumed,
+                    "grid_import": hour_data.energy.grid_imported,
+                    "grid_export": hour_data.energy.grid_exported,
+                    "battery_charged": hour_data.energy.battery_charged,
+                    "battery_discharged": hour_data.energy.battery_discharged,
+                    "battery_soe_end": hour_data.energy.battery_soe_end,
+                    "battery_net_change": hour_data.energy.battery_charged
+                    - hour_data.energy.battery_discharged,
                 }
 
-                totals["total_solar"] += hour_data.solar_generated
-                totals["total_consumption"] += hour_data.home_consumed
-                totals["total_grid_import"] += hour_data.grid_imported
-                totals["total_grid_export"] += hour_data.grid_exported
-                totals["total_battery_charged"] += hour_data.battery_charged
-                totals["total_battery_discharged"] += hour_data.battery_discharged
+                totals["total_solar"] += hour_data.energy.solar_generated
+                totals["total_consumption"] += hour_data.energy.home_consumed
+                totals["total_grid_import"] += hour_data.energy.grid_imported
+                totals["total_grid_export"] += hour_data.energy.grid_exported
+                totals["total_battery_charged"] += hour_data.energy.battery_charged
+                totals["total_battery_discharged"] += hour_data.energy.battery_discharged
 
                 hourly_data.append(hourly_item)
 
@@ -1640,23 +1640,23 @@ class BatterySystemManager:
 
             hourly_item = {
                 "hour": hour,
-                "solar_production": hour_data.solar_generated,
-                "home_consumption": hour_data.home_consumed,
-                "grid_import": hour_data.grid_imported,
-                "grid_export": hour_data.grid_exported,
-                "battery_charged": hour_data.battery_charged,
-                "battery_discharged": hour_data.battery_discharged,
-                "battery_soe_end": hour_data.battery_soe_end,
-                "battery_net_change": hour_data.battery_charged
-                - hour_data.battery_discharged,
+                "solar_production": hour_data.energy.solar_generated,
+                "home_consumption": hour_data.energy.home_consumed,
+                "grid_import": hour_data.energy.grid_imported,
+                "grid_export": hour_data.energy.grid_exported,
+                "battery_charged": hour_data.energy.battery_charged,
+                "battery_discharged": hour_data.energy.battery_discharged,
+                "battery_soe_end": hour_data.energy.battery_soe_end,
+                "battery_net_change": hour_data.energy.battery_charged
+                - hour_data.energy.battery_discharged,
             }
 
-            totals["total_solar"] += hour_data.solar_generated
-            totals["total_consumption"] += hour_data.home_consumed
-            totals["total_grid_import"] += hour_data.grid_imported
-            totals["total_grid_export"] += hour_data.grid_exported
-            totals["total_battery_charged"] += hour_data.battery_charged
-            totals["total_battery_discharged"] += hour_data.battery_discharged
+            totals["total_solar"] += hour_data.energy.solar_generated
+            totals["total_consumption"] += hour_data.energy.home_consumed
+            totals["total_grid_import"] += hour_data.energy.grid_imported
+            totals["total_grid_export"] += hour_data.energy.grid_exported
+            totals["total_battery_charged"] += hour_data.energy.battery_charged
+            totals["total_battery_discharged"] += hour_data.energy.battery_discharged
 
             hourly_data.append(hourly_item)
 

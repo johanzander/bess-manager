@@ -157,7 +157,7 @@ async def get_dashboard_data(date: str = Query(None)):
             # Economic data - Costs
             "totalGridOnlyCost": sum(h.get("gridOnlyCost", 0) for h in api_hourly_data),
             "totalSolarOnlyCost": sum(h.get("solarOnlyCost", 0) for h in api_hourly_data), 
-            "totalBatterySolarCost": sum(h.get("batterySolarCost", 0) for h in api_hourly_data),
+            "totalOptimizedCost": sum(h.get("hourlyCost", 0) for h in api_hourly_data),
             
             # Economic data - Savings (calculate from hourly sums)
             "totalBatterySavings": sum(h.get("batterySavings", 0) for h in api_hourly_data),
@@ -169,13 +169,13 @@ async def get_dashboard_data(date: str = Query(None)):
         
         # Calculate total savings correctly from cost differences
         totals["totalSolarSavings"] = totals["totalGridOnlyCost"] - totals["totalSolarOnlyCost"]
-        totals["totalOptimizationSavings"] = totals["totalGridOnlyCost"] - totals["totalBatterySolarCost"]
+        totals["totalOptimizationSavings"] = totals["totalGridOnlyCost"] - totals["totalOptimizedCost"]
         logger.debug("Calculated totals successfully")
         
         # Use values from totals where available - BUT calculate savings directly from hourly data  
         total_grid_only_cost = totals["totalGridOnlyCost"]
         total_solar_only_cost = totals["totalSolarOnlyCost"]
-        total_battery_solar_cost = totals["totalBatterySolarCost"]
+        total_optimized_cost = totals["totalOptimizedCost"]
         
         # Get battery costs directly from hourly data
         total_battery_costs = sum(h.get("batteryCycleCost", 0) for h in api_hourly_data)
@@ -185,8 +185,8 @@ async def get_dashboard_data(date: str = Query(None)):
         
         # Calculate savings directly from cost totals (ignore pre-calculated fields)
         solar_savings_calculated = total_grid_only_cost - total_solar_only_cost     # Grid-Only → Solar-Only
-        battery_savings_calculated = total_solar_only_cost - total_battery_solar_cost  # Solar-Only → Solar+Battery  
-        total_savings_calculated = total_grid_only_cost - total_battery_solar_cost     # Grid-Only → Solar+Battery
+        battery_savings_calculated = total_solar_only_cost - total_optimized_cost  # Solar-Only → Solar+Battery  
+        total_savings_calculated = total_grid_only_cost - total_optimized_cost     # Grid-Only → Solar+Battery
         
         logger.debug("Calculated costs and savings")
         
@@ -195,7 +195,7 @@ async def get_dashboard_data(date: str = Query(None)):
             # Baseline costs (what scenarios would cost) - CANONICAL
             "gridOnlyCost": total_grid_only_cost,
             "solarOnlyCost": total_solar_only_cost, 
-            "optimizedCost": total_battery_solar_cost,
+            "optimizedCost": total_optimized_cost,
             
             # Component costs (breakdown) - CANONICAL
             "totalGridCost": total_grid_costs,

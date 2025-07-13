@@ -46,7 +46,7 @@ export interface HourlyData {
   solarOnlyCost?: number;      // SEK
   gridOnlyCost?: number;       // SEK
   batterySavings?: number;     // SEK
-  solarSavings?: number;       // SEK
+  solarSavings?: number;       // SEK - Solar-Only vs Grid-Only savings
   
   // Metadata
   dataSource?: 'actual' | 'predicted';  // ✓ CANONICAL

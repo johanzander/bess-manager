@@ -82,13 +82,6 @@ def hourly_data_to_api_dict(
         **decision_dict,  # All decision fields automatically converted
     }
 
-    # Add deterministic API field aliases for test compatibility
-    # These provide consistent field names regardless of internal naming
-    if "hourlyCost" in result:
-        result["batterySolarCost"] = result["hourlyCost"]  # Alias for optimized cost
-    if "hourlySavings" in result:
-        result["solarSavings"] = result["hourlySavings"]  # Alias for savings
-
     return result
 
 class APIConverter:

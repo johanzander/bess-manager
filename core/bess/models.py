@@ -14,7 +14,6 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "CostScenarios",
     "DecisionData",
     "EconomicData",
     "EnergyData",
@@ -114,18 +113,6 @@ class EnergyData:
             return True, f"Energy balance warning: {balance_error:.2f} kWh error (continuing)"
     
 @dataclass
-class CostScenarios:
-    """All cost scenarios for one hour."""
-
-    grid_only_cost: float  # SEK - cost with grid only (no solar, no battery)
-    solar_only_cost: float  # SEK - cost with solar only (no battery)
-    battery_solar_cost: float  # SEK - cost with solar and battery
-    solar_savings: float  # SEK - savings from solar vs grid-only
-    battery_savings: float  # SEK - additional savings from battery vs solar-only
-    total_savings: float  # SEK - total savings vs grid-only
-    battery_wear_cost: float  # SEK - battery degradation cost
-
-@dataclass
 class EconomicData:
     """Economic analysis data for one time period."""
 
@@ -137,6 +124,12 @@ class EconomicData:
     grid_only_cost: float = 0.0  # SEK - pure grid cost (home_consumption * buy_price)
     solar_only_cost: float = 0.0  # SEK - cost with solar only (no battery - algorithm baseline)
     hourly_savings: float = 0.0  # SEK - savings vs baseline scenario
+    solar_savings: float = field(default=0.0, init=False)  # SEK - calculated automatically
+
+    def __post_init__(self):
+        """Calculate derived economic fields."""
+        # Calculate solar savings: Grid-Only → Solar-Only savings
+        self.solar_savings = self.grid_only_cost - self.solar_only_cost
 
     def calculate_net_value(self) -> float:
         """Calculate net economic value (savings minus costs)."""

@@ -15,33 +15,6 @@ export const fetchDashboardData = async (date?: string) => {
   return response.data;
 };
 
-/**
- * Legacy function for backward compatibility.
- * @deprecated Use fetchDashboardData() instead
- */
-export const fetchScheduleData = async (date?: string) => {
-  console.warn('fetchScheduleData() is deprecated, use fetchDashboardData() instead');
-  return fetchDashboardData(date);
-};
-
-/**
- * Legacy function for backward compatibility.
- * @deprecated Use fetchDashboardData() instead
- */
-export const fetchEnergyProfile = async (date?: string) => {
-  console.warn('fetchEnergyProfile() is deprecated, use fetchDashboardData() instead');
-  return fetchDashboardData(date);
-};
-
-/**
- * Legacy function for backward compatibility.
- * @deprecated Use fetchDashboardData() instead
- */
-export const fetchDailyView = async (date?: string) => {
-  console.warn('fetchDailyView() is deprecated, use fetchDashboardData() instead');
-  return fetchDashboardData(date);
-};
-
 // Type definitions for the unified dashboard response
 export interface DashboardHourlyData {
   hour: number;
@@ -67,7 +40,6 @@ export interface DashboardHourlyData {
   // Battery state
   batterySocStart: number;
   batterySocEnd: number;
-  batteryLevel: number; // Alias for batterySocEnd
   
   // Financial data
   buyPrice: number;
@@ -76,13 +48,20 @@ export interface DashboardHourlyData {
   hourlySavings: number;
   batteryCycleCost: number;
   
+  // Additional economic fields
+  gridOnlyCost: number;
+  solarOnlyCost: number;
+  solarSavings: number;
+  batterySavings?: number;
+  
+  // Detailed analysis fields
+  directSolar: number;
+  gridImportNeeded: number;
+  solarExcess: number;
+  
   // Control data
   batteryAction: number | null;
   strategicIntent?: string;
-  
-  // Compatibility flags
-  isActual: boolean;
-  isPredicted: boolean;
 }
 
 export interface DashboardSummary {
@@ -126,19 +105,11 @@ export interface DashboardTotals {
   totalGridToBattery: number;
   totalBatteryToHome: number;
   totalBatteryToGrid: number;
-  cycleCount: number;
   avgBuyPrice: number;
   avgSellPrice: number;
   totalChargeFromSolar: number;
   totalChargeFromGrid: number;
   estimatedBatteryCycles: number;
-}
-
-export interface EnergyProfile {
-  consumption: number[];
-  solar: number[];
-  batterySoc: number[];
-  actualHours: number;
 }
 
 export interface DashboardResponse {
@@ -161,13 +132,9 @@ export interface DashboardResponse {
   
   // Enhanced summaries
   summary: DashboardSummary;
-  enhancedSummary: DashboardSummary; // Alias
   totals: DashboardTotals;
   strategicIntentSummary: Record<string, number>;
   batteryCapacity: number;
-  
-  // Energy profile for compatibility
-  energyProfile: EnergyProfile;
 }
 
 // Export default dashboard fetch function

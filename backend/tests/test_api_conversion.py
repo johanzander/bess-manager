@@ -71,9 +71,15 @@ class TestAPIConversion:
         
         # Check economic fields
         assert "gridOnlyCost" in api_data
-        assert "batterySolarCost" in api_data  # This should be mapped from hourly_cost
-        assert "solarSavings" in api_data
+        assert "hourlyCost" in api_data  # Use canonical name
+        assert "hourlySavings" in api_data  # Use canonical name (total optimization savings)
+        assert "solarSavings" in api_data  # Solar-only vs grid-only savings
         assert "batteryCycleCost" in api_data
+        
+        # Verify solarSavings calculation is correct
+        if "gridOnlyCost" in api_data and "solarOnlyCost" in api_data:
+            expected_solar_savings = api_data["gridOnlyCost"] - api_data["solarOnlyCost"]
+            assert abs(api_data["solarSavings"] - expected_solar_savings) < 0.01
         
         # Check values are correctly converted
         assert api_data["solarProduction"] == 5.0
@@ -95,7 +101,7 @@ class TestAPIConversion:
         required_fields = [
             "hour", "solarProduction", "homeConsumption", "gridImported", "gridExported",
             "batteryCharged", "batteryDischarged", "batterySocStart", "batterySocEnd",
-            "buyPrice", "sellPrice", "gridOnlyCost", "batterySolarCost", "solarSavings",
+            "buyPrice", "sellPrice", "gridOnlyCost", "hourlyCost", "hourlySavings", "solarSavings",
             "batteryCycleCost", "batteryAction", "dataSource"
         ]
         

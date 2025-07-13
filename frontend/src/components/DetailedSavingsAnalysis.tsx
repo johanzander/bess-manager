@@ -1,39 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import api from '../lib/api';
+import { DashboardHourlyData, DashboardSummary } from '../api/scheduleApi';
 
 interface DetailedSavingsAnalysisProps {
   settings: any;
-}
-
-interface DashboardHourlyData {
-  hour: number;
-  dataSource: 'actual' | 'predicted';
-  // Using canonical camelCase field names:
-  solarProduction: number;
-  homeConsumption: number;
-  gridImported: number;
-  gridExported: number;
-  batteryCharged: number;
-  batteryDischarged: number;
-  batterySocStart: number;
-  batterySocEnd: number;
-  buyPrice: number;
-  sellPrice: number;
-  hourlyCost: number;
-  hourlySavings: number;
-  batteryAction: number;
-  isActual: boolean;
-  isPredicted: boolean;
-  
-  // Values calculated on the backend
-  gridOnlyCost: number;  // Updated name
-  directSolar: number;
-  gridImportNeeded: number;
-  solarExcess: number;
-  solarOnlyCost: number;
-  solarSavings: number;
-  batterySolarCost: number;
-  batterySavings: number;
 }
 
 interface DashboardTotals {
@@ -45,28 +15,10 @@ interface DashboardTotals {
   totalBatteryDischarged: number;
   totalGridOnlyCost: number;  // Updated name
   totalSolarOnlyCost: number;
-  totalBatterySolarCost: number;
+  totalOptimizedCost: number;
   totalSolarSavings: number;
   totalBatterySavings: number;
   totalOptimizationSavings: number;
-}
-
-interface DashboardSummary {
-  gridOnlyCost: number;
-  solarOnlyCost: number;
-  optimizedCost: number;
-  totalGridCost: number;
-  totalBatteryCycleCost: number;
-  totalSavings: number;
-  solarSavings: number;
-  batterySavings: number;
-  totalSolarProduction: number;
-  totalHomeConsumption: number;
-  totalBatteryCharged: number;
-  totalBatteryDischarged: number;
-  totalGridImported: number;
-  totalGridExported: number;
-  cycleCount: number;
 }
 
 interface DashboardResponse {
@@ -196,7 +148,7 @@ export const DetailedSavingsAnalysis: React.FC<DetailedSavingsAnalysisProps> = (
               <div className="px-2 py-1 bg-green-200 dark:bg-green-800 text-green-800 dark:text-green-200 rounded text-xs font-medium">SOLAR+BATTERY</div>
             </div>
             <div className="text-2xl font-bold text-gray-900 dark:text-white">
-              {displayValue(totals.totalBatterySolarCost)} <span className="text-sm font-medium text-gray-600 dark:text-gray-400">SEK</span>
+              {displayValue(totals.totalOptimizedCost)} <span className="text-sm font-medium text-gray-600 dark:text-gray-400">SEK</span>
             </div>
             <div className="text-sm text-gray-600 dark:text-gray-300">Optimized Cost</div>
             <div className="flex justify-between items-center mt-2 border-t border-green-200 dark:border-green-800 pt-2">
@@ -359,10 +311,10 @@ export const DetailedSavingsAnalysis: React.FC<DetailedSavingsAnalysisProps> = (
                 </td>
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 bg-yellow-50 dark:bg-yellow-900/20 text-center">
                   <div className={`font-medium ${
-                    Math.abs(hour.solarSavings) < 0.01 ? 'text-gray-900 dark:text-white' : 
-                    hour.solarSavings > 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
+                    Math.abs(hour.hourlySavings || 0) < 0.01 ? 'text-gray-900 dark:text-white' : 
+                    (hour.hourlySavings || 0) > 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
                   }`}>
-                    {Math.abs(hour.solarSavings) < 0.01 ? '0.00' : displayValue(hour.solarSavings)}
+                    {Math.abs(hour.hourlySavings || 0) < 0.01 ? '0.00' : displayValue(hour.hourlySavings || 0)}
                   </div>
                   <div className="text-xs text-gray-500 dark:text-gray-400">SEK</div>
                 </td>
@@ -394,19 +346,19 @@ export const DetailedSavingsAnalysis: React.FC<DetailedSavingsAnalysisProps> = (
                 </td>
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 bg-green-50 dark:bg-green-900/20 text-center">
                   <div className={`font-medium ${
-                    Math.abs(hour.batterySolarCost) < 0.01 ? 'text-gray-900 dark:text-white' : 
-                    hour.batterySolarCost > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'
+                    Math.abs(hour.hourlyCost || 0) < 0.01 ? 'text-gray-900 dark:text-white' : 
+                    (hour.hourlyCost || 0) > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'
                   }`}>
-                    {displayValue(hour.batterySolarCost)}
+                    {displayValue(hour.hourlyCost || 0)}
                   </div>
                   <div className="text-xs text-gray-500 dark:text-gray-400">SEK</div>
                 </td>
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 bg-green-50 dark:bg-green-900/20 text-center">
                   <div className={`font-medium ${
-                    Math.abs(hour.gridOnlyCost - hour.batterySolarCost) < 0.01 ? 'text-gray-900 dark:text-white' : 
-                    (hour.gridOnlyCost - hour.batterySolarCost) > 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
+                    Math.abs(hour.gridOnlyCost - (hour.hourlyCost || 0)) < 0.01 ? 'text-gray-900 dark:text-white' : 
+                    (hour.gridOnlyCost - (hour.hourlyCost || 0)) > 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
                   }`}>
-                    {Math.abs(hour.gridOnlyCost - hour.batterySolarCost) < 0.01 ? '0.00' : displayValue(hour.gridOnlyCost - hour.batterySolarCost)}
+                    {Math.abs(hour.gridOnlyCost - (hour.hourlyCost || 0)) < 0.01 ? '0.00' : displayValue(hour.gridOnlyCost - (hour.hourlyCost || 0))}
                   </div>
                   <div className="text-xs text-gray-500 dark:text-gray-400">SEK</div>
                 </td>
@@ -491,10 +443,10 @@ export const DetailedSavingsAnalysis: React.FC<DetailedSavingsAnalysisProps> = (
             </td>
             <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 bg-green-100 dark:bg-green-900/30 text-center">
               <div className={`font-medium ${
-                Math.abs(totals.totalBatterySolarCost) < 0.01 ? 'text-gray-900 dark:text-white' : 
-                totals.totalBatterySolarCost > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'
+                Math.abs(totals.totalOptimizedCost) < 0.01 ? 'text-gray-900 dark:text-white' : 
+                totals.totalOptimizedCost > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'
               }`}>
-                {displayValue(totals.totalBatterySolarCost)}
+                {displayValue(totals.totalOptimizedCost)}
               </div>
               <div className="text-xs text-gray-500 dark:text-gray-400">SEK</div>
             </td>

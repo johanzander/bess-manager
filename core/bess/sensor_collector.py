@@ -113,10 +113,10 @@ class SensorCollector:
         soe_start = (battery_soc_start / 100.0) * self.battery_capacity
         soe_end = (battery_soc_end / 100.0) * self.battery_capacity
 
-        # Create EnergyData directly - detailed flows calculated automatically
+        # Create EnergyData directly - detailed flows calculated automatically in __post_init__
         energy_data = EnergyData(
-            solar_generated=flow_dict.get("system_production", 0.0),
-            home_consumed=flow_dict.get("load_consumption", 0.0),
+            solar_production=flow_dict.get("system_production", 0.0),
+            home_consumption=flow_dict.get("load_consumption", 0.0),
             battery_charged=flow_dict.get("battery_charged", 0.0),
             battery_discharged=flow_dict.get("battery_discharged", 0.0),
             grid_imported=flow_dict.get("import_from_grid", 0.0),
@@ -126,12 +126,12 @@ class SensorCollector:
         )
 
         logger.info(
-            "Collected EnergyData for hour %02d: SOE %.1f -> %.1f kWh, Solar: %.2f kWh, Load: %.2f kWh",
+            "Collected EnergyData for hour %02d: SOE %.1f -> %.1f kWh, Solar: %.2f kWh, Load: %.2f kWh, Detailed flows auto-calculated",
             hour,
             soe_start,
             soe_end,
-            energy_data.solar_generated,
-            energy_data.home_consumed,
+            energy_data.solar_production,
+            energy_data.home_consumption,
         )
 
         return energy_data
@@ -144,17 +144,17 @@ class SensorCollector:
         """
         battery_charged = flows.get("battery_charged", 0.0)
         battery_discharged = flows.get("battery_discharged", 0.0)
-        solar_generated = flows.get("system_production", 0.0)
-        home_consumed = flows.get("load_consumption", 0.0)
+        solar_production = flows.get("system_production", 0.0)
+        home_consumption = flows.get("load_consumption", 0.0)
         grid_imported = flows.get("import_from_grid", 0.0)
 
         if battery_charged > 0.1:
-            if grid_imported > solar_generated:
+            if grid_imported > solar_production:
                 return "GRID_CHARGING"  # More grid than solar available
             else:
                 return "SOLAR_STORAGE"  # Primarily solar charging
         elif battery_discharged > 0.1:
-            if battery_discharged > home_consumed:
+            if battery_discharged > home_consumption:
                 return "EXPORT_ARBITRAGE"
             else:
                 return "LOAD_SUPPORT"
@@ -385,41 +385,3 @@ class SensorCollector:
             raise ValueError(f"SOC sensor data missing for hour {hour}")
 
         return readings["rkm0d7n04x_statement_of_charge_soc"]
-
-    def _fill_detailed_flows(self, energy_data: EnergyData, flow_dict: dict[str, float]) -> None:
-        """
-        Fill in detailed energy flows directly from sensor-derived flow data.
-        
-        This decouples the detailed flow calculation from BatterySettings, making
-        the SensorCollector independent of the battery configuration details.
-        
-        Args:
-            energy_data: EnergyData instance to update with detailed flows
-            flow_dict: Dictionary of energy flows calculated from sensors
-        """
-        # First try using flow values directly from EnergyFlowCalculator if available
-        if all(key in flow_dict for key in ["solar_to_battery", "grid_to_battery"]):
-            energy_data.solar_to_home = flow_dict.get("self_consumption", 0.0)
-            energy_data.solar_to_battery = flow_dict.get("solar_to_battery", 0.0)
-            energy_data.solar_to_grid = flow_dict.get("export_to_grid", 0.0)
-            energy_data.grid_to_battery = flow_dict.get("grid_to_battery", 0.0)
-            energy_data.grid_to_home = max(0.0, energy_data.grid_imported - energy_data.grid_to_battery)
-            energy_data.battery_to_home = max(0.0, energy_data.home_consumed - energy_data.solar_to_home - energy_data.grid_to_home)
-            energy_data.battery_to_grid = max(0.0, energy_data.battery_discharged - energy_data.battery_to_home)
-            
-            logger.debug(
-                "Detailed flows filled using EnergyFlowCalculator values - Solar to: Home=%.2f Battery=%.2f Grid=%.2f",
-                energy_data.solar_to_home,
-                energy_data.solar_to_battery,
-                energy_data.solar_to_grid
-            )
-        else:
-            # Fallback to using the direct calculation method if EnergyFlowCalculator didn't provide all needed values
-            EnergyData.calculate_detailed_flows_direct(energy_data)
-            
-            logger.debug(
-                "Detailed flows calculated directly (no EnergyFlowCalculator values available) - Solar to: Home=%.2f Battery=%.2f Grid=%.2f",
-                energy_data.solar_to_home,
-                energy_data.solar_to_battery,
-                energy_data.solar_to_grid
-            )

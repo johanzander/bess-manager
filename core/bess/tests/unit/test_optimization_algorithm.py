@@ -60,8 +60,8 @@ def test_battery_simulation_results(
         assert 0 <= hour_data.hour <= 23
 
         # Test energy data access - using single source of truth pattern
-        assert hasattr(hour_data.energy, "solar_generated")
-        assert hasattr(hour_data.energy, "home_consumed")
+        assert hasattr(hour_data.energy, "solar_production")
+        assert hasattr(hour_data.energy, "home_consumption")
         assert hasattr(hour_data.energy, "grid_imported")
         assert hasattr(hour_data.energy, "grid_exported")
         assert hasattr(hour_data.energy, "battery_charged")
@@ -161,8 +161,8 @@ def test_battery_constraints_respected():
             )
 
         # Energy balance should be maintained (approximately)
-        energy_in = hour_data.energy.solar_generated + hour_data.energy.grid_imported
-        energy_out = hour_data.energy.home_consumed + hour_data.energy.grid_exported
+        energy_in = hour_data.energy.solar_production + hour_data.energy.grid_imported
+        energy_out = hour_data.energy.home_consumption + hour_data.energy.grid_exported
         battery_net = hour_data.energy.battery_charged - hour_data.energy.battery_discharged
 
         # Energy balance: energy_in = energy_out + battery_net (within tolerance for efficiency losses)
@@ -257,8 +257,8 @@ def test_energy_data_structure():
     for hour_data in results.hourly_data:
         # Test that energy component exists and has data
         assert hour_data.energy is not None
-        assert hour_data.energy.solar_generated >= 0
-        assert hour_data.energy.home_consumed >= 0
+        assert hour_data.energy.solar_production >= 0
+        assert hour_data.energy.home_consumption >= 0
         assert hour_data.energy.grid_imported >= 0
         assert hour_data.energy.grid_exported >= 0
 

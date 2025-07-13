@@ -241,8 +241,9 @@ class BESSController:
             settings = {
                 "battery": {
                     "totalCapacity": options.get("battery", {}).get("total_capacity", 30.0),
-                    "chargeCycleCost": options.get("battery", {}).get("cycle_cost", 0.50),
-                    "maxChargeDischargePower": options.get("battery", {}).get("max_charge_discharge_power", 15.0),
+                    "cycleCostPerKwh": options.get("battery", {}).get("cycle_cost", 0.50),  
+                    "maxChargePowerKw": options.get("battery", {}).get("max_charge_discharge_power", 15.0),    
+                    "maxDischargePowerKw": options.get("battery", {}).get("max_charge_discharge_power", 15.0),  
                     "estimatedConsumption": options.get("home", {}).get("consumption", 3.5),
                 },
                 "consumption": {

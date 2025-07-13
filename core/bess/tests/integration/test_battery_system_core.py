@@ -243,7 +243,7 @@ class TestComponentInteraction:
         stored_data = battery_system.historical_store.get_hour_record(12)
         assert stored_data is not None, "Should retrieve stored data"
         assert isinstance(stored_data, HourlyData), "Should return HourlyData"
-        assert stored_data.energy.solar_generated == 5.0, "Should preserve energy data"
+        assert stored_data.energy.solar_production == 5.0, "Should preserve energy data"
 
     def test_schedule_store_integration(self, battery_system, arbitrage_prices):
         """Test schedule store works with OptimizationResult containing HourlyData."""

@@ -15,8 +15,8 @@ class TestEnergyData:
     def test_creation_and_basic_properties(self):
         """Test basic EnergyData creation and properties."""
         energy = EnergyData(
-            solar_generated=5.0,
-            home_consumed=3.0,
+            solar_production=5.0,
+            home_consumption=3.0,
             grid_imported=1.0,
             grid_exported=2.0,
             battery_charged=1.5,
@@ -25,8 +25,8 @@ class TestEnergyData:
             battery_soe_end=25.0,    
         )
 
-        assert energy.solar_generated == 5.0
-        assert energy.home_consumed == 3.0
+        assert energy.solar_production == 5.0
+        assert energy.home_consumption == 3.0
         assert energy.grid_imported == 1.0
         assert energy.grid_exported == 2.0
         assert energy.battery_charged == 1.5
@@ -37,8 +37,8 @@ class TestEnergyData:
     def test_computed_properties(self):
         """Test computed properties."""
         energy = EnergyData(
-            solar_generated=4.0,
-            home_consumed=3.0,
+            solar_production=4.0,
+            home_consumption=3.0,
             grid_imported=0.0,
             grid_exported=1.0,
             battery_charged=2.0,
@@ -54,8 +54,8 @@ class TestEnergyData:
     def test_detailed_flow_calculation_charging_scenario(self):
         """Test detailed flow calculation for battery charging scenario."""
         energy = EnergyData(
-            solar_generated=6.0,  # 6 kWh solar
-            home_consumed=3.0,  # 3 kWh home consumption
+            solar_production=6.0,  # 6 kWh solar
+            home_consumption=3.0,  # 3 kWh home consumption
             grid_imported=0.0,  # No grid import
             grid_exported=1.0,  # 1 kWh to grid
             battery_charged=2.0,  # 2 kWh to battery
@@ -76,8 +76,8 @@ class TestEnergyData:
     def test_detailed_flow_calculation_discharging_scenario(self):
         """Test detailed flow calculation for battery discharging scenario."""
         energy = EnergyData(
-            solar_generated=2.0,  # 2 kWh solar (limited)
-            home_consumed=5.0,  # 5 kWh home consumption
+            solar_production=2.0,  # 2 kWh solar (limited)
+            home_consumption=5.0,  # 5 kWh home consumption
             grid_imported=1.0,  # 1 kWh from grid
             grid_exported=0.0,  # No export
             battery_charged=0.0,  # No charging
@@ -98,8 +98,8 @@ class TestEnergyData:
     def test_detailed_flow_calculation_idle_scenario(self):
         """Test detailed flow calculation for idle battery scenario."""
         energy = EnergyData(
-            solar_generated=4.0,  # 4 kWh solar
-            home_consumed=3.0,  # 3 kWh home consumption
+            solar_production=4.0,  # 4 kWh solar
+            home_consumption=3.0,  # 3 kWh home consumption
             grid_imported=0.0,  # No grid import
             grid_exported=1.0,  # 1 kWh to grid
             battery_charged=0.0,  # No charging
@@ -120,8 +120,8 @@ class TestEnergyData:
     def test_energy_balance_validation_valid(self):
         """Test energy balance validation with valid data."""
         energy = EnergyData(
-            solar_generated=4.0,
-            home_consumed=3.0,
+            solar_production=4.0,
+            home_consumption=3.0,
             grid_imported=0.0,
             grid_exported=1.0,  # 1 kWh excess solar exported
             battery_charged=0.0,
@@ -138,8 +138,8 @@ class TestEnergyData:
     def test_energy_balance_validation_with_tolerance(self):
         """Test energy balance validation respects tolerance."""
         energy = EnergyData(
-            solar_generated=4.0,
-            home_consumed=3.0,
+            solar_production=4.0,
+            home_consumption=3.0,
             grid_imported=0.0,
             grid_exported=1.1,  # Slightly off balance
             battery_charged=0.0,
@@ -238,8 +238,8 @@ class TestHourlyData:
     def test_creation_from_optimization(self):
         """Test creating HourlyData from optimization results."""
         energy = EnergyData(
-            solar_generated=5.0,
-            home_consumed=3.0,
+            solar_production=5.0,
+            home_consumption=3.0,
             grid_imported=0.0,
             grid_exported=1.0,
             battery_charged=1.0,
@@ -280,8 +280,8 @@ class TestHourlyData:
     def test_creation_from_energy_data(self):
         """Test creating HourlyData from sensor energy data."""
         energy = EnergyData(
-            solar_generated=4.0,
-            home_consumed=3.5,
+            solar_production=4.0,
+            home_consumption=3.5,
             grid_imported=0.0,
             grid_exported=0.5,
             battery_charged=0.0,
@@ -309,8 +309,8 @@ class TestHourlyData:
     def test_data_validation_valid(self):
         """Test data validation with valid data."""
         energy = EnergyData(
-            solar_generated=5.0,
-            home_consumed=3.0,
+            solar_production=5.0,
+            home_consumption=3.0,
             grid_imported=0.0,
             grid_exported=1.0,
             battery_charged=1.0,
@@ -327,8 +327,8 @@ class TestHourlyData:
     def test_data_validation_invalid_hour(self):
         """Test data validation catches invalid hour."""
         energy = EnergyData(
-            solar_generated=5.0,
-            home_consumed=3.0,
+            solar_production=5.0,
+            home_consumption=3.0,
             grid_imported=0.0,
             grid_exported=1.0,
             battery_charged=1.0,
@@ -347,8 +347,8 @@ class TestHourlyData:
     def test_timestamp_defaults(self):
         """Test timestamp defaults to provided value."""
         energy = EnergyData(
-            solar_generated=5.0,
-            home_consumed=3.0,
+            solar_production=5.0,
+            home_consumption=3.0,
             grid_imported=1.0,
             grid_exported=2.0,
             battery_charged=1.5,

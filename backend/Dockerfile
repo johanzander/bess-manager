@@ -28,7 +28,7 @@ RUN apk add --no-cache python3 py3-pip python3-dev gcc musl-dev bash
 WORKDIR /app
 
 # Copy application files
-COPY app.py api.py utils.py log_config.py requirements.txt run.sh ./
+COPY app.py api.py api_conversion.py api_dataclasses.py log_config.py requirements.txt run.sh ./
 COPY core/ /app/core/
 COPY frontend/ /app/frontend/
 

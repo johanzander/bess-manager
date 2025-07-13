@@ -30,10 +30,10 @@ interface DashboardResponse {
     batterySocStart?: number;
     batterySocEnd?: number;
     buyPrice?: number;            
-    solarProduction?: number;
-    homeConsumption?: number;
+    solarProduction?: number;     // ✅ Canonical field name
+    homeConsumption?: number;     // ✅ Canonical field name
     hourlyCost?: number;
-    hourlySavings?: number;       
+    hourlySavings?: number;       // ✅ Canonical field name
   }>;
 }
 
@@ -88,7 +88,10 @@ export const TableBatteryDecisionExplorer: React.FC = () => {
     if (batteryAction > 0.1) action = 'charge';
     else if (batteryAction < -0.1) action = 'discharge';
 
-    const solarBalance = (hour.solarProduction || 0) - (hour.homeConsumption || 0);
+    // ✅ Use canonical field names with safe fallbacks
+    const solarProduction = hour.solarProduction || 0;
+    const homeConsumption = hour.homeConsumption || 0;
+    const solarBalance = solarProduction - homeConsumption;
     const price = hour.buyPrice || 0;  // Use canonical buyPrice field
     
     // Generate primary reason based on action and context

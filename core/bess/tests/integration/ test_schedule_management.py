@@ -351,9 +351,9 @@ class TestScheduleValidation:
             energy = hour_data.energy
 
             # Basic energy balance checks
-            assert energy.solar_generated >= 0, f"Hour {i} solar should be non-negative"
+            assert energy.solar_production >= 0, f"Hour {i} solar should be non-negative"
             assert (
-                energy.home_consumed >= 0
+                energy.home_consumption >= 0
             ), f"Hour {i} consumption should be non-negative"
             assert (
                 energy.grid_imported >= 0

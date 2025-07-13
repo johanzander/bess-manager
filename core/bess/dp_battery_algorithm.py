@@ -64,7 +64,6 @@ from enum import Enum
 import numpy as np
 
 from core.bess.models import (
-    CostScenarios,
     DecisionData,
     EconomicData,
     EconomicSummary,
@@ -129,13 +128,12 @@ def _state_transition(
     Calculate the next state of energy based on current SOE and power action.
     
     EFFICIENCY HANDLING:
-    - Charging: power × dt × efficiency = energy actually stored
-    - Discharging: power × dt ÷ efficiency = energy removed from storage
-    
+    - Charging: power x dt x efficiency = energy actually stored
+    - Discharging: power x dt / efficiency = energy removed from storage    
     This ensures that efficiency losses are properly accounted for in energy balance.
     """
     if power > 0:  # Charging
-        # Energy stored = power throughput × charging efficiency
+        # Energy stored = power throughput x charging efficiency
         charge_energy = power * dt * battery_settings.efficiency_charge
         next_soe = min(battery_settings.max_soe_kwh, soe + charge_energy)
         
@@ -221,8 +219,8 @@ def calculate_energy_flows(
     grid_exported = solar_to_grid + battery_to_grid
         
     return EnergyData(
-        solar_generated=solar_production,
-        home_consumed=home_consumption,
+        solar_production=solar_production,
+        home_consumption=home_consumption,
         grid_imported=grid_imported,
         grid_exported=grid_exported,
         battery_charged=battery_charged,
@@ -263,8 +261,8 @@ def _calculate_reward(
     
     Example for stored energy costing 2.61 SEK/kWh:
     - If buy_price = 2.58, sell_price = 1.81
-    - Avoid purchase value: 2.58 × 0.95 = 2.45 SEK/kWh stored
-    - Export value: 1.81 × 0.95 = 1.72 SEK/kWh stored  
+    - Avoid purchase value: 2.58 x 0.95 = 2.45 SEK/kWh stored
+    - Export value: 1.81 x 0.95 = 1.72 SEK/kWh stored  
     - Best value: max(2.45, 1.72) = 2.45 SEK/kWh stored
     - 2.45 < 2.61 → UNPROFITABLE (correctly blocked)
     """
@@ -327,7 +325,7 @@ def _calculate_reward(
         
         # Update weighted average cost basis
         if next_soe > battery_settings.min_soe_kwh:
-            # Weighted average: (existing_energy × old_cost + new_energy × new_cost) / total_energy
+            # Weighted average: (existing_energy x old_cost + new_energy x new_cost) / total_energy
             existing_cost = soe * cost_basis
             new_cost_basis = (existing_cost + total_new_cost) / next_soe
         else:
@@ -508,8 +506,8 @@ def print_optimization_results(results, buy_prices, sell_prices):
     # Process each hour - replicating original logic exactly
     for i, hour_data in enumerate(hourly_data_list):
         hour = hour_data.hour
-        consumption = hour_data.energy.home_consumed
-        solar = hour_data.energy.solar_generated
+        consumption = hour_data.energy.home_consumption
+        solar = hour_data.energy.solar_production
         action = hour_data.decision.battery_action or 0.0
         soe_kwh = hour_data.energy.battery_soe_end
         intent = hour_data.decision.strategic_intent

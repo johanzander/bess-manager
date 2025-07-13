@@ -27,8 +27,8 @@ def populate_historical_data(
     if sample_energy_data is None:
         # Create realistic energy data template
         sample_energy_data = EnergyData(
-            solar_generated=0.0,  # Will be set per hour
-            home_consumed=4.0,  # Constant consumption
+            solar_production=0.0,  # Will be set per hour
+            home_consumption=4.0,  # Constant consumption
             grid_imported=4.0,  # Will be adjusted per hour
             grid_exported=0.0,  # Will be adjusted per hour
             battery_charged=0.0,
@@ -56,8 +56,8 @@ def populate_historical_data(
 
         # Create energy data for this hour
         hour_energy_data = EnergyData(
-            solar_generated=solar,
-            home_consumed=consumption,
+            solar_production=solar,
+            home_consumption=consumption,
             grid_imported=grid_import,
             grid_exported=grid_export,
             battery_charged=0.0,
@@ -136,12 +136,12 @@ class TestCompleteWorkflows:
 
         # Verify data integrity
         assert (
-            stored_data.energy.solar_generated
-            == sample_new_hourly_data.energy.solar_generated
+            stored_data.energy.solar_production
+            == sample_new_hourly_data.energy.solar_production
         )
         assert (
-            stored_data.energy.home_consumed
-            == sample_new_hourly_data.energy.home_consumed
+            stored_data.energy.home_consumption
+            == sample_new_hourly_data.energy.home_consumption
         )
 
     def test_forecast_to_optimization_workflow(self, battery_system):

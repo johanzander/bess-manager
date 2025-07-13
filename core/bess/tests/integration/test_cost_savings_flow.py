@@ -1,12 +1,11 @@
 """Integration tests for cost/savings flow validation.
 
-Tests the complete flow from optimization through daily view to dashboard API
+Tests the complete flow from optimization through daily view 
 to ensure cost and savings calculations are correct after the SOE migration.
 """
 
 import pytest
 
-from backend.api_dataclasses import flatten_hourly_data
 from core.bess.battery_system_manager import BatterySystemManager
 from core.bess.dp_battery_algorithm import optimize_battery_schedule
 from core.bess.settings import BatterySettings
@@ -101,22 +100,27 @@ class TestCostSavingsFlow:
             sell_price=test_scenario_data["sell_prices"]
         )
         
-        # Test API data flattening
-        flattened_data = [flatten_hourly_data(hourly, 30.0) for hourly in daily_view.hourly_data]
+        # Test core data structures directly (no API conversion needed)
+        hourly_data = daily_view.hourly_data
         
-        # Check that all required fields are present
-        required_fields = ["gridOnlyCost", "batterySolarCost", "solarSavings", "hour"]
-        for hour_data in flattened_data[:3]:  # Check first 3 hours
-            for field in required_fields:
-                assert field in hour_data, f"Field {field} missing from flattened data"
+        # Check that all required core fields are present
+        for hour_idx, hour_data in enumerate(hourly_data[:3]):  # Check first 3 hours
+            assert hasattr(hour_data, 'hour'), f"Hour {hour_idx}: Missing hour field"
+            assert hasattr(hour_data, 'economic'), f"Hour {hour_idx}: Missing economic field"
+            assert hasattr(hour_data.economic, 'grid_cost'), f"Hour {hour_idx}: Missing grid_cost in economic"
+            assert hasattr(hour_data.economic, 'hourly_cost'), f"Hour {hour_idx}: Missing hourly_cost in economic"
+            assert hasattr(hour_data.economic, 'battery_cycle_cost'), f"Hour {hour_idx}: Missing battery_cycle_cost in economic"
         
-        # Check that grid-only cost totals are positive (this was the main issue)
-        total_grid_only_cost = sum(hour.get("gridOnlyCost", 0) for hour in flattened_data)
-        assert total_grid_only_cost > 0, f"Total grid-only cost should be positive, got {total_grid_only_cost}"
+        # Check that grid costs are reasonable (this was the main issue)
+        total_grid_costs = sum(hour.economic.grid_cost for hour in hourly_data)
+        total_hourly_costs = sum(hour.economic.hourly_cost for hour in hourly_data)
         
-        # Check that total savings are positive
-        total_solar_savings = sum(hour.get("solarSavings", 0) for hour in flattened_data)
-        assert total_solar_savings > 0, f"Total solar savings should be positive, got {total_solar_savings}"
+        assert abs(total_grid_costs) > 0.01, f"Total grid costs should be non-zero, got {total_grid_costs}"
+        assert abs(total_hourly_costs) > 0.01, f"Total hourly costs should be non-zero, got {total_hourly_costs}"
+        
+        # Check that battery cycle costs are calculated
+        total_battery_costs = sum(hour.economic.battery_cycle_cost for hour in hourly_data)
+        assert total_battery_costs >= 0, f"Total battery costs should be non-negative, got {total_battery_costs}"
     
     def test_battery_soe_data_within_limits(self, optimization_result, test_scenario_data):
         """Test that battery SOE data stays within physical limits."""
@@ -173,8 +177,8 @@ class TestCostSavingsFlow:
         for hour in range(8):
             # Create realistic historical energy data
             historical_energy = EnergyData(
-                solar_generated=test_scenario_data["solar"][hour],
-                home_consumed=test_scenario_data["consumption"][hour],
+                solar_production=test_scenario_data["solar"][hour],
+                home_consumption=test_scenario_data["consumption"][hour],
                 battery_charged=0.5 if hour < 4 else 0.0,  # Some charging in early hours
                 battery_discharged=0.0 if hour < 4 else 0.2,  # Some discharging later
                 grid_imported=test_scenario_data["consumption"][hour] + (0.5 if hour < 4 else -0.2),

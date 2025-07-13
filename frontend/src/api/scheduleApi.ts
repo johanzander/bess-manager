@@ -86,21 +86,29 @@ export interface DashboardHourlyData {
 }
 
 export interface DashboardSummary {
-  gridOnlyCost: number;  // Updated name
-  optimizedCost: number;
-  gridCosts: number;
-  batteryCosts: number;
-  savings: number;
+  // Baseline costs (what scenarios would cost) - CANONICAL
+  gridOnlyCost: number;  
   solarOnlyCost: number;
-  solarOnlySavings: number;
-  batterySavings: number;
+  optimizedCost: number; 
+  
+  // Component costs (breakdown) - CANONICAL
+  totalGridCost: number; 
+  totalBatteryCycleCost: number; 
+  
+  // Savings calculations - CANONICAL
+  totalSavings: number;
   solarSavings: number;
-  arbitrageSavings: number;
+  batterySavings: number;
+  
+  // Energy totals - CANONICAL
   totalSolarProduction: number;
+  totalHomeConsumption: number;
   totalBatteryCharged: number;
   totalBatteryDischarged: number;
-  totalGridImport: number;
-  totalGridExport: number;
+  totalGridImported: number;
+  totalGridExported: number;
+  
+  // Efficiency metrics - CANONICAL
   cycleCount: number;
 }
 

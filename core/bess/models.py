@@ -28,12 +28,12 @@ class EnergyData:
     """Energy data with automatic detailed flow calculation using physical constraints."""
     
     # Core energy flows (kWh) - all provided by caller
-    solar_generated: float
-    home_consumed: float
-    battery_charged: float
-    battery_discharged: float
-    grid_imported: float
-    grid_exported: float
+    solar_production: float      
+    home_consumption: float     
+    battery_charged: float       
+    battery_discharged: float    
+    grid_imported: float        
+    grid_exported: float         
     
     # Battery state (kWh) - State of Energy for consistent units
     battery_soe_start: float  # kWh (changed from battery_soc_start)
@@ -63,9 +63,9 @@ class EnergyData:
         """
         
         # Priority: Solar -> Home first, then remaining solar -> Battery/Grid
-        solar_to_home = min(self.solar_generated, self.home_consumed)
-        remaining_solar = self.solar_generated - solar_to_home
-        remaining_consumption = self.home_consumed - solar_to_home
+        solar_to_home = min(self.solar_production, self.home_consumption)
+        remaining_solar = self.solar_production - solar_to_home
+        remaining_consumption = self.home_consumption - solar_to_home
         
         # Solar allocation: battery charging takes priority over grid export
         solar_to_battery = min(remaining_solar, self.battery_charged)
@@ -100,8 +100,8 @@ class EnergyData:
 
     def validate_energy_balance(self, tolerance: float = 0.2) -> tuple[bool, str]:
         """Validate energy balance - always warn and continue, never fail."""
-        energy_in = self.solar_generated + self.grid_imported + self.battery_discharged
-        energy_out = self.home_consumed + self.grid_exported + self.battery_charged
+        energy_in = self.solar_production + self.grid_imported + self.battery_discharged
+        energy_out = self.home_consumption + self.grid_exported + self.battery_charged
         balance_error = abs(energy_in - energy_out)
 
         if balance_error <= tolerance:

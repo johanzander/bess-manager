@@ -88,8 +88,8 @@ class HistoricalDataStore:
             energy_data.battery_soe_start,
             energy_data.battery_soe_end,
             energy_data.battery_net_change,
-            energy_data.solar_generated,
-            energy_data.home_consumed,
+            energy_data.solar_production,
+            energy_data.home_consumption,
             strategic_intent,
         )
 

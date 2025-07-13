@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from api_conversion import APIConverter
+
 
 @dataclass
 class APIBatterySettings:
@@ -39,8 +41,8 @@ class APIBatterySettings:
             reservedCapacity=battery.reserved_capacity,
             minSoc=battery.min_soc,
             maxSoc=battery.max_soc,
-            minSoeKwh=battery.min_soe_kwh,  # kWh - minimum energy
-            maxSoeKwh=battery.max_soe_kwh,  # kWh - maximum energy
+            minSoeKwh=battery.min_soe_kwh,
+            maxSoeKwh=battery.max_soe_kwh,
             maxChargePowerKw=battery.max_charge_power_kw,
             maxDischargePowerKw=battery.max_discharge_power_kw,
             cycleCostPerKwh=battery.cycle_cost_per_kwh,
@@ -140,137 +142,7 @@ class APIHomeSettings:
         }
 
 
-@dataclass
-class APIEnergyData:
-    """API response for energy data with canonical camelCase fields."""
-    
-    solarProduction: float
-    homeConsumption: float
-    gridImported: float
-    gridExported: float
-    batteryCharged: float
-    batteryDischarged: float
-    
-    # Canonical SOE fields (kWh)
-    batterySoeStart: float  # State of Energy in kWh
-    batterySoeEnd: float    # State of Energy in kWh
-    
-    # Canonical SOC fields (%) - PROPERLY CALCULATED
-    batterySocStart: float  # State of Charge in % (0-100)
-    batterySocEnd: float    # State of Charge in % (0-100)
-    
-    # Energy flow details
-    solarToHome: float = 0.0
-    solarToBattery: float = 0.0
-    solarToGrid: float = 0.0
-    gridToHome: float = 0.0
-    gridToBattery: float = 0.0
-    batteryToHome: float = 0.0
-    batteryToGrid: float = 0.0
-    
-    @classmethod
-    def from_internal(cls, energy, battery_capacity: float = 30.0) -> APIEnergyData:
-        """Convert from internal EnergyData to API camelCase with CORRECT SOC/SOE naming.
-        
-        Args:
-            energy: Internal energy data with SOE values in kWh
-            battery_capacity: Battery capacity in kWh for SOC conversion
-        """
-        # CORRECT: Convert SOE (kWh) to SOC (%) 
-        soc_start_percent = (energy.battery_soe_start / battery_capacity) * 100.0
-        soc_end_percent = (energy.battery_soe_end / battery_capacity) * 100.0
-        
-        return cls(
-            solarProduction=energy.solar_generated,
-            homeConsumption=energy.home_consumed,
-            gridImported=energy.grid_imported,
-            gridExported=energy.grid_exported,
-            batteryCharged=energy.battery_charged,
-            batteryDischarged=energy.battery_discharged,
-            
-            # FIXED: Proper SOE fields (kWh)
-            batterySoeStart=energy.battery_soe_start,  # kWh ✓
-            batterySoeEnd=energy.battery_soe_end,      # kWh ✓
-            
-            # FIXED: Proper SOC fields (%) 
-            batterySocStart=soc_start_percent,  # % ✓ 
-            batterySocEnd=soc_end_percent,      # % ✓
-            
-            # Detailed flows
-            solarToHome=energy.solar_to_home,
-            solarToBattery=energy.solar_to_battery,
-            solarToGrid=energy.solar_to_grid,
-            gridToHome=energy.grid_to_home,
-            gridToBattery=energy.grid_to_battery,
-            batteryToHome=energy.battery_to_home,
-            batteryToGrid=energy.battery_to_grid,
-        )
-
-
 def flatten_hourly_data(hourly, battery_capacity: float = 30.0) -> dict:
-    """Flatten HourlyData to a single dict for frontend.
-    
-    Args:
-        hourly: HourlyData object to flatten
-        battery_capacity: Battery capacity in kWh for SOC conversion
-    """
-    api_energy = APIEnergyData.from_internal(hourly.energy, battery_capacity)
-    
-    result = {
-        "hour": hourly.hour,
-        "dataSource": hourly.data_source,
-        "timestamp": hourly.timestamp.isoformat() if hourly.timestamp else None,
-        "solarProduction": api_energy.solarProduction,
-        "homeConsumption": api_energy.homeConsumption,
-        "gridImported": api_energy.gridImported,
-        "gridExported": api_energy.gridExported,
-        "batteryCharged": api_energy.batteryCharged,
-        "batteryDischarged": api_energy.batteryDischarged,
-        "batterySoeStart": api_energy.batterySoeStart,  # kWh ✓
-        "batterySoeEnd": api_energy.batterySoeEnd,      # kWh ✓
-        "batterySocStart": api_energy.batterySocStart,  # % ✓
-        "batterySocEnd": api_energy.batterySocEnd,      # % ✓
-        
-        "solarToHome": api_energy.solarToHome,
-        "solarToBattery": api_energy.solarToBattery,
-        "solarToGrid": api_energy.solarToGrid,
-        "gridToHome": api_energy.gridToHome,
-        "gridToBattery": api_energy.gridToBattery,
-        "batteryToHome": api_energy.batteryToHome,
-        "batteryToGrid": api_energy.batteryToGrid,
-    }
-    
-    if hourly.economic:
-        result.update({
-            "buyPrice": hourly.economic.buy_price,
-            "sellPrice": hourly.economic.sell_price,
-            "gridCost": hourly.economic.grid_cost,
-            "batteryCycleCost": hourly.economic.battery_cycle_cost,
-            "hourlyCost": hourly.economic.hourly_cost,
-            "solarOnlyCost": hourly.economic.solar_only_cost,
-            "gridOnlyCost": hourly.economic.grid_only_cost,  # Clear name for grid-only scenario
-            "totalCost": hourly.economic.hourly_cost,  # Use hourly_cost as total_cost
-            
-            # Dashboard expects these specific field names (keeping for compatibility)
-            "batterySolarCost": hourly.economic.hourly_cost,  # Dashboard looks for "batterySolarCost"
-            "hourlySavings": hourly.economic.hourly_savings,  # Savings vs solar-only baseline
-            
-            # Calculate solar and battery savings with clear names
-            "solarSavings": max(0, hourly.economic.grid_only_cost - hourly.economic.solar_only_cost),
-            "batterySavings": hourly.economic.grid_only_cost - hourly.economic.hourly_cost,  # Total savings from solar+battery vs grid-only
-        })
-    
-    if hourly.decision:
-        result.update({
-            "strategicIntent": hourly.decision.strategic_intent,
-            "batteryAction": hourly.decision.battery_action,
-            "costBasis": hourly.decision.cost_basis,
-            "patternName": hourly.decision.pattern_name,
-            "description": hourly.decision.description,
-            "economicChain": hourly.decision.economic_chain,
-            "immediateValue": hourly.decision.immediate_value,
-            "futureValue": hourly.decision.future_value,
-            "netStrategyValue": hourly.decision.net_strategy_value,
-        })
-    
-    return result
+    """Convert HourlyData to API dict using unified conversion system."""
+    converter = APIConverter(battery_capacity)
+    return converter.convert_hourly_data(hourly)

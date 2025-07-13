@@ -9,12 +9,31 @@ declare global {
 }
 
 interface EnergySankeyChartProps {
-  energyData: any;
+  energyData: {
+    totals: {
+      totalSolarProduction: number;
+      totalHomeConsumption: number;
+      totalGridImport: number;
+      totalGridExport: number;
+      totalBatteryCharged: number;
+      totalBatteryDischarged: number;
+      // Detailed flow totals from API
+      totalSolarToHome: number;
+      totalSolarToBattery: number;
+      totalSolarToGrid: number;
+      totalGridToHome: number;
+      totalGridToBattery: number;
+      totalBatteryToHome: number;
+      totalBatteryToGrid: number;
+    };
+  };
   className?: string;
 }
 
 export const EnergySankeyChart: React.FC<EnergySankeyChartProps> = ({ 
-  energyData}) => {
+  energyData, 
+  className = "" 
+}) => {
   const plotRef = useRef<HTMLDivElement>(null);
   const [plotlyLoaded, setPlotlyLoaded] = React.useState(false);
 
@@ -30,40 +49,38 @@ export const EnergySankeyChart: React.FC<EnergySankeyChartProps> = ({
     }
   }, []);
 
-  // Calculate energy flows from totals (same as EnergyFlowCards)
-  const calculateEnergyFlows = (data: any) => {
+  // Get energy flows directly from API totals - deterministic, no fallbacks
+  const getEnergyFlows = (data: any) => {
     if (!data?.totals) {
       console.error('Missing totals data:', data);
       return null;
     }
 
-    // ✅ Use canonical camelCase field names only
-    const flows = {
-      solarProduction: data.totals?.totalSolarProduction || 0,
-      homeConsumption: data.totals?.totalHomeConsumption || 0,
-      gridImport: data.totals?.totalGridImport || 0,
-      gridExport: data.totals?.totalGridExport || 0,
-      totalCharged: data.totals?.totalBatteryCharged || 0,
-      totalDischarged: data.totals?.totalBatteryDischarged || 0,
+    // ✅ Use exact values from API totals - no calculations or fallbacks
+    return {
+      solarProduction: data.totals.totalSolarProduction || 0,
+      homeConsumption: data.totals.totalHomeConsumption || 0,
+      gridImport: data.totals.totalGridImport || 0,
+      gridExport: data.totals.totalGridExport || 0,
+      totalCharged: data.totals.totalBatteryCharged || 0,
+      totalDischarged: data.totals.totalBatteryDischarged || 0,
       
-      // ✅ Flow breakdowns with canonical camelCase names
-      solarToHome: data.totals?.totalSolarToHome || 0,
-      solarToBattery: data.totals?.totalSolarToBattery || 0,
-      solarToGrid: data.totals?.totalSolarToGrid || 0,
-      gridToHome: data.totals?.totalGridToHome || 0,
-      gridToBattery: data.totals?.totalGridToBattery || 0,
-      batteryToHome: data.totals?.totalBatteryToHome || 0,
-      batteryToGrid: data.totals?.totalBatteryToGrid || 0
+      // Detailed flows directly from API totals
+      solarToHome: data.totals.totalSolarToHome || 0,
+      solarToBattery: data.totals.totalSolarToBattery || 0,
+      solarToGrid: data.totals.totalSolarToGrid || 0,
+      gridToHome: data.totals.totalGridToHome || 0,
+      gridToBattery: data.totals.totalGridToBattery || 0,
+      batteryToHome: data.totals.totalBatteryToHome || 0,
+      batteryToGrid: data.totals.totalBatteryToGrid || 0
     };
-
-    return flows;
   };
 
   // Create Plotly Sankey diagram
   useEffect(() => {
     if (!plotlyLoaded || !plotRef.current || !energyData) return;
 
-    const flows = calculateEnergyFlows(energyData);
+    const flows = getEnergyFlows(energyData);
     if (!flows) return;
 
     // Define nodes
@@ -127,7 +144,7 @@ export const EnergySankeyChart: React.FC<EnergySankeyChartProps> = ({
 
   if (!energyData) {
     return (
-      <div className="bg-purple-50 dark:bg-purple-900/10 border-purple-200 dark:border-purple-800 border-2 rounded-xl p-6 transition-all duration-200 hover:shadow-lg">
+      <div className={`bg-purple-50 dark:bg-purple-900/10 border-purple-200 dark:border-purple-800 border-2 rounded-xl p-6 transition-all duration-200 hover:shadow-lg ${className}`}>
         <h2 className="text-xl font-semibold mb-4 text-purple-900 dark:text-purple-100">Daily Energy Flow Overview</h2>
         <div className="flex items-center justify-center h-64 text-purple-500 dark:text-purple-400">
           <Info className="h-8 w-8 mr-2" />
@@ -137,11 +154,11 @@ export const EnergySankeyChart: React.FC<EnergySankeyChartProps> = ({
     );
   }
 
-  const flows = calculateEnergyFlows(energyData);
+  const flows = getEnergyFlows(energyData);
 
   if (!flows) {
     return (
-      <div className="bg-purple-50 dark:bg-purple-900/10 border-purple-200 dark:border-purple-800 border-2 rounded-xl p-6 transition-all duration-200 hover:shadow-lg">
+      <div className={`bg-purple-50 dark:bg-purple-900/10 border-purple-200 dark:border-purple-800 border-2 rounded-xl p-6 transition-all duration-200 hover:shadow-lg ${className}`}>
         <h2 className="text-xl font-semibold mb-4 text-purple-900 dark:text-purple-100">Daily Energy Flow Overview</h2>
         <div className="flex items-center justify-center h-64 text-purple-500 dark:text-purple-400">
           <Info className="h-8 w-8 mr-2" />
@@ -152,7 +169,7 @@ export const EnergySankeyChart: React.FC<EnergySankeyChartProps> = ({
   }
 
   return (
-    <div className="bg-purple-50 dark:bg-purple-900/10 border-purple-200 dark:border-purple-800 border-2 rounded-xl p-6 transition-all duration-200 hover:shadow-lg">
+    <div className={`bg-purple-50 dark:bg-purple-900/10 border-purple-200 dark:border-purple-800 border-2 rounded-xl p-6 transition-all duration-200 hover:shadow-lg ${className}`}>
       <h2 className="text-xl font-semibold mb-4 text-purple-900 dark:text-purple-100">Daily Energy Flow Overview</h2>
       
       {/* Sankey Diagram Only - No Cards */}

@@ -325,7 +325,7 @@ class BatterySystemManager:
 
                         if success:
                             logger.info(
-                                f"Stored hour {hour}: Solar={energy_data.solar_generated:.2f} kWh, "
+                                f"Stored hour {hour}: Solar={energy_data.solar_production:.2f} kWh, "
                                 f"SOC={energy_data.battery_soe_start:.1f}%→{energy_data.battery_soe_end:.1f}%"
                             )
                         else:
@@ -486,8 +486,8 @@ class BatterySystemManager:
             energy_data = self.sensor_collector.collect_energy_data(prev_hour)
 
             logger.info(
-                f"Collected energy data for hour {prev_hour} - Solar: {energy_data.solar_generated:.2f} kWh, "
-                f"Load: {energy_data.home_consumed:.2f} kWh, SOC: {energy_data.battery_soe_start:.1f}% → {energy_data.battery_soe_end:.1f}%"
+                f"Collected energy data for hour {prev_hour} - Solar: {energy_data.solar_production:.2f} kWh, "
+                f"Load: {energy_data.home_consumption:.2f} kWh, SOC: {energy_data.battery_soe_start:.1f}% → {energy_data.battery_soe_end:.1f}%"
             )
 
             # Store using new method
@@ -588,8 +588,8 @@ class BatterySystemManager:
                     # Use actual data for past hours
                     event = self.historical_store.get_hour_record(h)
                     if event:
-                        consumption_data[h] = event.energy.home_consumed
-                        solar_data[h] = event.energy.solar_generated
+                        consumption_data[h] = event.energy.home_consumption
+                        solar_data[h] = event.energy.solar_production
                         combined_soe[h] = (
                             event.energy.battery_soe_end / 100.0
                         ) * self.battery_settings.total_capacity
@@ -597,7 +597,7 @@ class BatterySystemManager:
                             event.energy.battery_charged - event.energy.battery_discharged
                         )
                         solar_charged[h] = min(
-                            event.energy.battery_charged, event.energy.solar_generated
+                            event.energy.battery_charged, event.energy.solar_production
                         )
                         # Update running SOE to the end state of this hour
                         running_soe = combined_soe[h]
@@ -1198,7 +1198,7 @@ class BatterySystemManager:
             # Handle charging using stored facts
             if event.energy.battery_charged > 0:
                 # Simple calculation using stored energy flows
-                solar_to_battery = min(event.energy.battery_charged, event.energy.solar_generated)
+                solar_to_battery = min(event.energy.battery_charged, event.energy.solar_production)
                 grid_to_battery = max(0, event.energy.battery_charged - solar_to_battery)
 
                 # Calculate costs using same logic as everywhere else
@@ -1438,8 +1438,8 @@ class BatterySystemManager:
             if hour_data:
                 hourly_item = {
                     "hour": hour,
-                    "solar_production": hour_data.energy.solar_generated,
-                    "home_consumption": hour_data.energy.home_consumed,
+                    "solar_production": hour_data.energy.solar_production,
+                    "home_consumption": hour_data.energy.home_consumption,
                     "grid_import": hour_data.energy.grid_imported,
                     "grid_export": hour_data.energy.grid_exported,
                     "battery_charged": hour_data.energy.battery_charged,
@@ -1449,8 +1449,8 @@ class BatterySystemManager:
                     - hour_data.energy.battery_discharged,
                 }
 
-                totals["total_solar"] += hour_data.energy.solar_generated
-                totals["total_consumption"] += hour_data.energy.home_consumed
+                totals["total_solar"] += hour_data.energy.solar_production
+                totals["total_consumption"] += hour_data.energy.home_consumption
                 totals["total_grid_import"] += hour_data.energy.grid_imported
                 totals["total_grid_export"] += hour_data.energy.grid_exported
                 totals["total_battery_charged"] += hour_data.energy.battery_charged
@@ -1640,8 +1640,8 @@ class BatterySystemManager:
 
             hourly_item = {
                 "hour": hour,
-                "solar_production": hour_data.energy.solar_generated,
-                "home_consumption": hour_data.energy.home_consumed,
+                "solar_production": hour_data.energy.solar_production,
+                "home_consumption": hour_data.energy.home_consumption,
                 "grid_import": hour_data.energy.grid_imported,
                 "grid_export": hour_data.energy.grid_exported,
                 "battery_charged": hour_data.energy.battery_charged,
@@ -1651,8 +1651,8 @@ class BatterySystemManager:
                 - hour_data.energy.battery_discharged,
             }
 
-            totals["total_solar"] += hour_data.energy.solar_generated
-            totals["total_consumption"] += hour_data.energy.home_consumed
+            totals["total_solar"] += hour_data.energy.solar_production
+            totals["total_consumption"] += hour_data.energy.home_consumption
             totals["total_grid_import"] += hour_data.energy.grid_imported
             totals["total_grid_export"] += hour_data.energy.grid_exported
             totals["total_battery_charged"] += hour_data.energy.battery_charged

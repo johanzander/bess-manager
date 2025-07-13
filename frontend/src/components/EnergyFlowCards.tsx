@@ -38,13 +38,13 @@ interface EnergyFlowCard {
 
 interface EnergyFlowData {
   solarGeneration?: {
-    production: number;
+    solarProduction: number;
     toHome: number;
     toGrid: number;
     toBattery: number;
   };
   homeConsumption?: {
-    consumption: number;
+    homeConsumption: number;
     fromSolar: number;
     fromGrid: number;
     fromBattery: number;
@@ -214,13 +214,13 @@ const EnergyFlowCards: React.FC<EnergyFlowCardsProps> = ({ className = "" }) => 
 
         const transformedData: EnergyFlowData = {
           solarGeneration: {
-            production: totals.solarProduction,
+            solarProduction: totals.solarProduction,  
             toHome: totals.solarToHome,
             toGrid: totals.solarToGrid,
             toBattery: totals.solarToBattery
           },
           homeConsumption: {
-            consumption: totals.homeConsumption,
+            homeConsumption: totals.homeConsumption,  
             fromSolar: totals.solarToHome,
             fromGrid: totals.gridToHome,
             fromBattery: totals.batteryToHome
@@ -297,7 +297,7 @@ const EnergyFlowCards: React.FC<EnergyFlowCardsProps> = ({ className = "" }) => 
       icon: Sun,
       color: "yellow" as const,
       keyMetric: "Total Production",
-      keyValue: energyData.solarGeneration?.production || 0,
+      keyValue: energyData.solarGeneration?.solarProduction || 0,
       keyUnit: "kWh",
       flows: [
         {
@@ -328,7 +328,7 @@ const EnergyFlowCards: React.FC<EnergyFlowCardsProps> = ({ className = "" }) => 
       icon: Home,
       color: "blue" as const,
       keyMetric: "Total Consumption",
-      keyValue: energyData.homeConsumption?.consumption || 0,
+      keyValue: energyData.homeConsumption?.homeConsumption || 0,
       keyUnit: "kWh",
       flows: [
         {

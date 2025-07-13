@@ -51,6 +51,24 @@ interface DashboardTotals {
   totalOptimizationSavings: number;
 }
 
+interface DashboardSummary {
+  gridOnlyCost: number;
+  solarOnlyCost: number;
+  optimizedCost: number;
+  totalGridCost: number;
+  totalBatteryCycleCost: number;
+  totalSavings: number;
+  solarSavings: number;
+  batterySavings: number;
+  totalSolarProduction: number;
+  totalHomeConsumption: number;
+  totalBatteryCharged: number;
+  totalBatteryDischarged: number;
+  totalGridImported: number;
+  totalGridExported: number;
+  cycleCount: number;
+}
+
 interface DashboardResponse {
   date: string;
   currentHour: number;
@@ -62,6 +80,7 @@ interface DashboardResponse {
   hourlyData: DashboardHourlyData[];
   batteryCapacity?: number;
   totals: DashboardTotals;
+  summary: DashboardSummary;
 }
 
 export const DetailedSavingsAnalysis: React.FC<DetailedSavingsAnalysisProps> = ({ }) => {
@@ -120,8 +139,8 @@ export const DetailedSavingsAnalysis: React.FC<DetailedSavingsAnalysisProps> = (
   // Get data from the backend totals
   const totals = dashboardData.totals;
   
-  // Calculate total daily savings as grid-only minus optimized cost (not from backend totalDailySavings)
-  const totalDailySavings = totals.totalGridOnlyCost - totals.totalBatterySolarCost;
+  // Use backend-calculated total optimization savings instead of calculating in frontend
+  const totalDailySavings = totals.totalOptimizationSavings;
 
   return (
     <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow overflow-x-auto">
@@ -190,7 +209,7 @@ export const DetailedSavingsAnalysis: React.FC<DetailedSavingsAnalysisProps> = (
             </div>
             <div className="flex justify-between items-center">
               <div className="text-left text-xs text-gray-600 dark:text-gray-300">Battery contribution:</div>
-              <div className="text-right text-xs font-medium text-green-600 dark:text-green-400">{displayValue(totals.totalBatterySavings)} <span className="text-xs font-normal text-gray-600 dark:text-gray-400">SEK</span></div>
+              <div className="text-right text-xs font-medium text-green-600 dark:text-green-400">{displayValue(dashboardData.summary.batterySavings)} <span className="text-xs font-normal text-gray-600 dark:text-gray-400">SEK</span></div>
             </div>
           </div>
         </div>
@@ -384,10 +403,10 @@ export const DetailedSavingsAnalysis: React.FC<DetailedSavingsAnalysisProps> = (
                 </td>
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 bg-green-50 dark:bg-green-900/20 text-center">
                   <div className={`font-medium ${
-                    Math.abs(hour.batterySavings) < 0.01 ? 'text-gray-900 dark:text-white' : 
-                    hour.batterySavings > 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
+                    Math.abs(hour.gridOnlyCost - hour.batterySolarCost) < 0.01 ? 'text-gray-900 dark:text-white' : 
+                    (hour.gridOnlyCost - hour.batterySolarCost) > 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
                   }`}>
-                    {Math.abs(hour.batterySavings) < 0.01 ? '0.00' : displayValue(hour.batterySavings)}
+                    {Math.abs(hour.gridOnlyCost - hour.batterySolarCost) < 0.01 ? '0.00' : displayValue(hour.gridOnlyCost - hour.batterySolarCost)}
                   </div>
                   <div className="text-xs text-gray-500 dark:text-gray-400">SEK</div>
                 </td>

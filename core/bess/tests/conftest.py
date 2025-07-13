@@ -609,8 +609,8 @@ def battery_system_with_arbitrage(mock_controller, arbitrage_prices, monkeypatch
 def sample_new_hourly_data():
     """Provide sample HourlyData object for testing."""
     energy_data = EnergyData(
-        solar_generated=5.0,
-        home_consumed=3.0,
+        solar_production=5.0,
+        home_consumption=3.0,
         grid_imported=0.0,
         grid_exported=2.0,
         battery_charged=0.0,

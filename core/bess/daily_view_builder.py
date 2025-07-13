@@ -163,8 +163,8 @@ class DailyViewBuilder:
         for hour_data in hourly_data:
             try:
                 # Energy balance validation logic 
-                solar = hour_data.energy.solar_generated
-                consumption = hour_data.energy.home_consumed
+                solar = hour_data.energy.solar_production
+                consumption = hour_data.energy.home_consumption
                 grid_import = hour_data.energy.grid_imported
                 grid_export = hour_data.energy.grid_exported
                 battery_charge = hour_data.energy.battery_charged
@@ -245,12 +245,12 @@ class DailyViewBuilder:
         battery_solar_cost = grid_cost + battery_wear_cost
         
         # Grid-only cost (no solar, no battery - just grid import for all consumption)
-        grid_only_cost = event.energy.home_consumed * buy_price
+        grid_only_cost = event.energy.home_consumption * buy_price
         
         # Solar-only cost (solar + grid, no battery)
-        direct_solar_to_home = min(event.energy.solar_generated, event.energy.home_consumed)
-        solar_excess = max(0, event.energy.solar_generated - direct_solar_to_home)
-        grid_needed = max(0, event.energy.home_consumed - direct_solar_to_home)
+        direct_solar_to_home = min(event.energy.solar_production, event.energy.home_consumption)
+        solar_excess = max(0, event.energy.solar_production - direct_solar_to_home)
+        grid_needed = max(0, event.energy.home_consumption - direct_solar_to_home)
         
         solar_only_cost = (
             grid_needed * buy_price -  # Pay for grid imports
@@ -258,14 +258,14 @@ class DailyViewBuilder:
         )
         
         # Calculate savings vs solar-only baseline (algorithm baseline)
-        solar_only_savings = solar_only_cost - battery_solar_cost
+        hourly_savings = solar_only_cost - battery_solar_cost
         
         final_economic = EconomicData(
             buy_price=buy_price,
             sell_price=sell_price,
             grid_cost=grid_cost,  # FIXED: Set the separate grid cost field
-            hourly_cost=battery_solar_cost,
-            hourly_savings=solar_only_savings,  # Savings vs solar-only (algorithm baseline)
+            hourly_cost=battery_solar_cost,  # FIXED: Use correct field name
+            hourly_savings=hourly_savings,  # FIXED: Use correct field name
             battery_cycle_cost=battery_wear_cost,
             grid_only_cost=grid_only_cost,
             solar_only_cost=solar_only_cost,
@@ -329,8 +329,8 @@ class DailyViewBuilder:
             hour_result = hourly_data_list[result_index]
             
             battery_action = hour_result.decision.battery_action or 0.0
-            solar_production = hour_result.energy.solar_generated
-            home_consumption = hour_result.energy.home_consumed
+            solar_production = hour_result.energy.solar_production
+            home_consumption = hour_result.energy.home_consumption
             grid_import = hour_result.energy.grid_imported
             grid_export = hour_result.energy.grid_exported
             
@@ -384,8 +384,8 @@ class DailyViewBuilder:
             soe_end = (soc_percent / 100.0) * self.battery_settings.total_capacity
             
             energy_data = EnergyData(
-                solar_generated=solar_production,
-                home_consumed=home_consumption,
+                solar_production=solar_production,
+                home_consumption=home_consumption,
                 grid_imported=grid_import,
                 grid_exported=grid_export,
                 battery_charged=battery_charged,
@@ -401,7 +401,6 @@ class DailyViewBuilder:
             )
 
             # Use the economic data from the optimization result directly
-            # Don't call calculate_hourly_costs since we already have the correct data
             final_economic_data = EconomicData(
                 buy_price=buy_price,
                 sell_price=sell_price,
@@ -432,8 +431,8 @@ class DailyViewBuilder:
         for hour_data in hourly_data:
             try:
                 # Basic energy balance check
-                solar = hour_data.energy.solar_generated
-                consumption = hour_data.energy.home_consumed
+                solar = hour_data.energy.solar_production
+                consumption = hour_data.energy.home_consumption
                 grid_import = hour_data.energy.grid_imported
                 grid_export = hour_data.energy.grid_exported
                 battery_charge = hour_data.energy.battery_charged
@@ -580,15 +579,15 @@ class DailyViewBuilder:
             # Row formatting 
             row = (
                 f"║ {hour_data.hour:02d}:00{hour_marker}║ {hour_data.economic.buy_price:4.2f}/ {hour_data.economic.sell_price:4.2f} "
-                f"║ {hour_data.energy.solar_generated:5.1f} ║ {hour_data.energy.grid_imported:5.1f} ║ {hour_data.energy.battery_discharged:5.1f} ║"
-                f" {hour_data.energy.home_consumed:5.1f} ║ {hour_data.energy.grid_exported:5.1f} ║ {hour_data.energy.battery_charged:5.1f} ║"
+                f"║ {hour_data.energy.solar_production:5.1f} ║ {hour_data.energy.grid_imported:5.1f} ║ {hour_data.energy.battery_discharged:5.1f} ║"
+                f" {hour_data.energy.home_consumption:5.1f} ║ {hour_data.energy.grid_exported:5.1f} ║ {hour_data.energy.battery_charged:5.1f} ║"
                 f"{intent_short:8}║{soc_soe_display:9}║{grid_only_cost:6.2f} ║{hour_data.economic.hourly_cost:6.2f} ║{hour_data.economic.battery_cycle_cost:6.2f} ║{hour_total_cost:6.2f} ║{hour_data.economic.hourly_savings:6.2f} ║"
             )
             lines.append(row)
 
             # Accumulate combined totals 
-            total_consumption += hour_data.energy.home_consumed
-            total_solar += hour_data.energy.solar_generated
+            total_consumption += hour_data.energy.home_consumption
+            total_solar += hour_data.energy.solar_production
             total_grid_import += hour_data.energy.grid_imported
             total_grid_export += hour_data.energy.grid_exported
             total_battery_charge += hour_data.energy.battery_charged
@@ -601,8 +600,8 @@ class DailyViewBuilder:
 
             # Accumulate split totals 
             if hour_data.data_source == "actual":
-                actual_consumption += hour_data.energy.home_consumed
-                actual_solar += hour_data.energy.solar_generated
+                actual_consumption += hour_data.energy.home_consumption
+                actual_solar += hour_data.energy.solar_production
                 actual_grid_import += hour_data.energy.grid_imported
                 actual_grid_export += hour_data.energy.grid_exported
                 actual_battery_charge += hour_data.energy.battery_charged
@@ -613,8 +612,8 @@ class DailyViewBuilder:
                 actual_total_cost += hour_total_cost
                 actual_savings += hour_data.economic.hourly_savings
             else:  # predicted
-                predicted_consumption += hour_data.energy.home_consumed
-                predicted_solar += hour_data.energy.solar_generated
+                predicted_consumption += hour_data.energy.home_consumption
+                predicted_solar += hour_data.energy.solar_production
                 predicted_grid_import += hour_data.energy.grid_imported
                 predicted_grid_export += hour_data.energy.grid_exported
                 predicted_battery_charge += hour_data.energy.battery_charged

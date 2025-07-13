@@ -2,6 +2,7 @@
 
 from datetime import datetime
 
+from api_conversion import convert_keys_to_camel_case
 from api_dataclasses import APIBatterySettings, APIPriceSettings
 from fastapi import APIRouter, HTTPException, Query
 from loguru import logger
@@ -11,7 +12,7 @@ router = APIRouter()
 
 @router.get("/api/settings/battery")
 async def get_battery_settings():
-    """Get current battery settings in canonical camelCase format."""
+    """Get current battery settings using unified conversion."""
     from app import bess_controller
 
     try:
@@ -19,6 +20,7 @@ async def get_battery_settings():
         battery_settings = settings["battery"]
         estimated_consumption = settings["home"].default_hourly
         
+        # Create APIBatterySettings using existing method (maintains compatibility)
         api_settings = APIBatterySettings.from_internal(battery_settings, estimated_consumption)
         return api_settings.__dict__
         
@@ -81,7 +83,7 @@ async def get_dashboard_data(date: str = Query(None)):
     """Unified dashboard endpoint returning canonical camelCase data directly."""
     # Import at function level to avoid circular imports
     from api_dataclasses import flatten_hourly_data
-
+    
     from app import bess_controller
 
     try:
@@ -138,8 +140,6 @@ async def get_dashboard_data(date: str = Query(None)):
             "totalHomeConsumption": sum(h.get("homeConsumption", 0) for h in api_hourly_data),
             "totalGridImport": sum(h.get("gridImported", 0) for h in api_hourly_data),
             "totalGridExport": sum(h.get("gridExported", 0) for h in api_hourly_data),
-            "totalBatteryCharged": sum(h.get("batteryCharged", 0) for h in api_hourly_data),
-            "totalBatteryDischarged": sum(h.get("batteryDischarged", 0) for h in api_hourly_data),
             
             # Detailed energy flows - Solar origin
             "totalSolarToHome": sum(h.get("solarToHome", 0) for h in api_hourly_data),
@@ -159,14 +159,20 @@ async def get_dashboard_data(date: str = Query(None)):
             "totalSolarOnlyCost": sum(h.get("solarOnlyCost", 0) for h in api_hourly_data), 
             "totalBatterySolarCost": sum(h.get("batterySolarCost", 0) for h in api_hourly_data),
             
-            # Economic data - Savings
-            "totalSolarSavings": sum(h.get("solarSavings", 0) for h in api_hourly_data),
+            # Economic data - Savings (calculate from hourly sums)
             "totalBatterySavings": sum(h.get("batterySavings", 0) for h in api_hourly_data),
-            "totalOptimizationSavings": sum(h.get("batterySavings", 0) for h in api_hourly_data),  # Use batterySavings consistently
         }
+        
+        # Calculate battery totals from flow components (more reliable than direct hourly sums)
+        totals["totalBatteryCharged"] = totals["totalSolarToBattery"] + totals["totalGridToBattery"]
+        totals["totalBatteryDischarged"] = totals["totalBatteryToHome"] + totals["totalBatteryToGrid"]
+        
+        # Calculate total savings correctly from cost differences
+        totals["totalSolarSavings"] = totals["totalGridOnlyCost"] - totals["totalSolarOnlyCost"]
+        totals["totalOptimizationSavings"] = totals["totalGridOnlyCost"] - totals["totalBatterySolarCost"]
         logger.debug("Calculated totals successfully")
         
-        # Use values from totals where available
+        # Use values from totals where available - BUT calculate savings directly from hourly data  
         total_grid_only_cost = totals["totalGridOnlyCost"]
         total_solar_only_cost = totals["totalSolarOnlyCost"]
         total_battery_solar_cost = totals["totalBatterySolarCost"]
@@ -177,10 +183,10 @@ async def get_dashboard_data(date: str = Query(None)):
         # Calculate grid costs (net cost of grid interactions)
         total_grid_costs = sum(h.get("gridCost", 0) for h in api_hourly_data)
         
-        # Calculate savings using the pre-calculated totals
-        total_savings = total_grid_only_cost - total_battery_solar_cost
-        solar_only_savings = total_grid_only_cost - total_solar_only_cost
-        battery_savings = total_solar_only_cost - total_battery_solar_cost
+        # Calculate savings directly from cost totals (ignore pre-calculated fields)
+        solar_savings_calculated = total_grid_only_cost - total_solar_only_cost     # Grid-Only → Solar-Only
+        battery_savings_calculated = total_solar_only_cost - total_battery_solar_cost  # Solar-Only → Solar+Battery  
+        total_savings_calculated = total_grid_only_cost - total_battery_solar_cost     # Grid-Only → Solar+Battery
         
         logger.debug("Calculated costs and savings")
         
@@ -195,10 +201,10 @@ async def get_dashboard_data(date: str = Query(None)):
             "totalGridCost": total_grid_costs,
             "totalBatteryCycleCost": total_battery_costs,
             
-            # Savings calculations - CANONICAL
-            "totalSavings": total_savings,
-            "solarSavings": solar_only_savings,
-            "batterySavings": battery_savings,
+            # Savings calculations - CANONICAL (use correct calculations)
+            "totalSavings": total_savings_calculated,        # Grid-Only → Solar+Battery total savings
+            "solarSavings": solar_savings_calculated,        # Grid-Only → Solar-Only savings  
+            "batterySavings": battery_savings_calculated,    # Solar-Only → Solar+Battery additional savings
             
             # Energy totals - CANONICAL
             "totalSolarProduction": totals["totalSolarProduction"],
@@ -210,14 +216,6 @@ async def get_dashboard_data(date: str = Query(None)):
             
             # Efficiency metrics - CANONICAL
             "cycleCount": totals["totalBatteryCharged"] / battery_capacity if battery_capacity > 0 else 0.0,
-            
-            # DEPRECATED fields - remove after frontend updated
-            "gridCosts": total_grid_costs,         # ❌ DEPRECATED - use totalGridCost
-            "batteryCosts": total_battery_costs,   # ❌ DEPRECATED - use totalBatteryCycleCost
-            "savings": total_savings,              # ❌ DEPRECATED - use totalSavings
-            "batteryCycleCost": total_battery_costs, # ❌ DEPRECATED - use totalBatteryCycleCost
-            "solarOnlySavings": solar_only_savings,  # ❌ DEPRECATED - use solarSavings
-            "arbitrageSavings": battery_savings,     # ❌ DEPRECATED - use batterySavings
         }
         
         result = {
@@ -244,35 +242,9 @@ async def get_dashboard_data(date: str = Query(None)):
         logger.error(f"Error generating dashboard data: {e}")
         logger.exception("Full dashboard error traceback:")
         raise HTTPException(status_code=500, detail=str(e)) from e
-        
-
 ############################################################################################
 # API Endpoints for Decision Insights
 ############################################################################################
-
-def to_camel_case(snake_str: str) -> str:
-    """Convert snake_case to camelCase."""
-    components = snake_str.split('_')
-    return components[0] + ''.join(word.capitalize() for word in components[1:])
-
-def convert_snake_to_camel_case(data):
-    """Convert all snake_case keys to camelCase for API - ONLY expose camelCase to frontend."""
-    if isinstance(data, dict):
-        result = {}
-        for key, value in data.items():
-            # Convert snake_case keys to camelCase
-            if '_' in key:
-                camel_key = to_camel_case(key)
-                result[camel_key] = convert_snake_to_camel_case(value)
-            else:
-                # Keep keys that are already camelCase or single words
-                result[key] = convert_snake_to_camel_case(value)
-        
-        return result
-    elif isinstance(data, list):
-        return [convert_snake_to_camel_case(item) for item in data]
-    else:
-        return data
 
 @router.get("/api/decision-intelligence")
 async def get_decision_intelligence_mock():
@@ -581,7 +553,7 @@ async def get_decision_intelligence_mock():
                 }
                 
         # Convert all other snake_case to camelCase
-        return convert_snake_to_camel_case(response)
+        return convert_keys_to_camel_case(response)
 
     except Exception as e:
         logger.error(f"Error generating decision intelligence data: {e}")
@@ -639,7 +611,7 @@ async def get_inverter_status():
         }
 
         # Convert to camelCase for API consistency
-        return convert_snake_to_camel_case(response)
+        return convert_keys_to_camel_case(response)
 
     except Exception as e:
         logger.error(f"Error getting inverter status: {e}")
@@ -805,7 +777,7 @@ async def get_growatt_detailed_schedule():
             "strategic_intent_summary": strategic_summary,
         }
 
-        return convert_snake_to_camel_case(response)
+        return convert_keys_to_camel_case(response)
 
     except Exception as e:
         logger.error(f"Error in get_growatt_detailed_schedule: {e}", exc_info=True)
@@ -863,7 +835,7 @@ async def get_tou_settings():
 
             enhanced_tou_intervals.append(enhanced_interval)
 
-        return convert_snake_to_camel_case({"tou_settings": enhanced_tou_intervals})
+        return convert_keys_to_camel_case({"tou_settings": enhanced_tou_intervals})
 
     except Exception as e:
         logger.error(f"Error getting TOU settings: {e}")
@@ -935,7 +907,7 @@ async def get_strategic_intents():
             "hourly_intents": hourly_intents,
         }
 
-        return convert_snake_to_camel_case(response)
+        return convert_keys_to_camel_case(response)
 
     except Exception as e:
         logger.error(f"Error getting strategic intents: {e}")

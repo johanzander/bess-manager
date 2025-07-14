@@ -43,38 +43,51 @@ class TestSystemInitialization:
 
         # Settings now return dataclass objects, not dictionaries
         battery_settings = settings["battery"]
-        
-        # Check that it's a dataclass with expected attributes
-        assert hasattr(battery_settings, 'total_capacity'), "Should have total_capacity attribute"
-        assert hasattr(battery_settings, 'min_soc'), "Should have min_soc attribute"
-        assert hasattr(battery_settings, 'max_soc'), "Should have max_soc attribute"
-        assert hasattr(battery_settings, 'max_charge_power_kw'), "Should have max_charge_power_kw attribute"
-        
-        # Verify the values are numeric
-        assert isinstance(battery_settings.total_capacity, (int, float)), "total_capacity should be numeric"
-        assert isinstance(battery_settings.min_soc, (int, float)), "min_soc should be numeric"
-        assert isinstance(battery_settings.max_soc, (int, float)), "max_soc should be numeric"
-        assert isinstance(battery_settings.max_charge_power_kw, (int, float)), "max_charge_power_kw should be numeric"
 
+        # Check that it's a dataclass with expected attributes
+        assert hasattr(
+            battery_settings, "total_capacity"
+        ), "Should have total_capacity attribute"
+        assert hasattr(battery_settings, "min_soc"), "Should have min_soc attribute"
+        assert hasattr(battery_settings, "max_soc"), "Should have max_soc attribute"
+        assert hasattr(
+            battery_settings, "max_charge_power_kw"
+        ), "Should have max_charge_power_kw attribute"
+
+        # Verify the values are numeric
+        assert isinstance(
+            battery_settings.total_capacity, int | float
+        ), "total_capacity should be numeric"
+        assert isinstance(
+            battery_settings.min_soc, int | float
+        ), "min_soc should be numeric"
+        assert isinstance(
+            battery_settings.max_soc, int | float
+        ), "max_soc should be numeric"
+        assert isinstance(
+            battery_settings.max_charge_power_kw, int | float
+        ), "max_charge_power_kw should be numeric"
 
     def test_settings_update_functionality(self, battery_system):
         """Test that settings can be updated properly."""
         # Get initial settings
         initial_settings = battery_system.get_settings()
         initial_capacity = initial_settings["battery"].total_capacity
-        
+
         # Update battery settings using dataclass attribute names
-        new_settings = {
-            "battery": {"total_capacity": 35.0}
-        }
+        new_settings = {"battery": {"total_capacity": 35.0}}
         battery_system.update_settings(new_settings)
 
         # Verify update was applied
         updated_settings = battery_system.get_settings()
-        assert updated_settings["battery"].total_capacity == 35.0, "Settings update should work"
-        
+        assert (
+            updated_settings["battery"].total_capacity == 35.0
+        ), "Settings update should work"
+
         # Verify it's different from initial
-        assert updated_settings["battery"].total_capacity != initial_capacity, "Setting should have changed"
+        assert (
+            updated_settings["battery"].total_capacity != initial_capacity
+        ), "Setting should have changed"
 
 
 class TestDataStructureConsistency:
@@ -166,7 +179,9 @@ class TestDataStructureConsistency:
 
             # Verify economic summary structure (should be EconomicSummary object)
             economic_summary = result.economic_summary
-            assert hasattr(economic_summary, "grid_only_cost"), "Should have grid_only_cost"
+            assert hasattr(
+                economic_summary, "grid_only_cost"
+            ), "Should have grid_only_cost"
             assert hasattr(
                 economic_summary, "battery_solar_cost"
             ), "Should have battery_solar_cost"
@@ -329,5 +344,3 @@ class TestErrorHandling:
         except (ValueError, TypeError, AttributeError):
             # Expected - system properly handled invalid parameters
             pass
-
-

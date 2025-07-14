@@ -43,7 +43,7 @@ class SensorCollector:
 
     def collect_energy_data(self, hour: int) -> EnergyData:
         """Collect sensor data and create EnergyData with automatic detailed flows."""
-        
+
         if not 0 <= hour <= 23:
             raise ValueError(f"Invalid hour: {hour}. Must be 0-23.")
 
@@ -121,8 +121,8 @@ class SensorCollector:
             battery_discharged=flow_dict.get("battery_discharged", 0.0),
             grid_imported=flow_dict.get("import_from_grid", 0.0),
             grid_exported=flow_dict.get("export_to_grid", 0.0),
-            battery_soe_start=soe_start,    
-            battery_soe_end=soe_end         
+            battery_soe_start=soe_start,
+            battery_soe_end=soe_end,
         )
 
         logger.info(

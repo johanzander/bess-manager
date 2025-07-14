@@ -14,9 +14,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class StoredSchedule:
-    """Container for a stored optimization result with metadata.
-
-    """
+    """Container for a stored optimization result with metadata."""
 
     timestamp: datetime
     optimization_hour: int  # Hour optimization started from (0-23)
@@ -43,9 +41,7 @@ class StoredSchedule:
 
 
 class ScheduleStore:
-    """Storage for all optimization results throughout the day.
-
-    """
+    """Storage for all optimization results throughout the day."""
 
     def __init__(self):
         """Initialize the schedule store."""
@@ -149,5 +145,3 @@ class ScheduleStore:
             int: Number of stored schedules
         """
         return len(self._schedules)
-
-

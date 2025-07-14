@@ -98,8 +98,10 @@ def test_battery_simulation_results(
     # Test economic calculations with proper floating-point tolerance
     assert economic_summary.grid_only_cost >= 0
 
-    # FIXED: Use floating-point tolerance for accumulated vs calculated values
-    expected_savings = economic_summary.grid_only_cost - economic_summary.battery_solar_cost
+    # Use floating-point tolerance for accumulated vs calculated values
+    expected_savings = (
+        economic_summary.grid_only_cost - economic_summary.battery_solar_cost
+    )
     actual_savings = economic_summary.grid_to_battery_solar_savings
 
     # Allow for small floating-point precision differences from 24 hours of calculations
@@ -111,7 +113,8 @@ def test_battery_simulation_results(
     # Test that savings percentage is calculated correctly
     if economic_summary.grid_only_cost > 0:
         expected_pct = (
-            economic_summary.grid_to_battery_solar_savings / economic_summary.grid_only_cost
+            economic_summary.grid_to_battery_solar_savings
+            / economic_summary.grid_only_cost
         ) * 100
         assert (
             abs(economic_summary.grid_to_battery_solar_savings_pct - expected_pct)
@@ -163,7 +166,9 @@ def test_battery_constraints_respected():
         # Energy balance should be maintained (approximately)
         energy_in = hour_data.energy.solar_production + hour_data.energy.grid_imported
         energy_out = hour_data.energy.home_consumption + hour_data.energy.grid_exported
-        battery_net = hour_data.energy.battery_charged - hour_data.energy.battery_discharged
+        battery_net = (
+            hour_data.energy.battery_charged - hour_data.energy.battery_discharged
+        )
 
         # Energy balance: energy_in = energy_out + battery_net (within tolerance for efficiency losses)
         balance_error = abs(energy_in - energy_out - battery_net)

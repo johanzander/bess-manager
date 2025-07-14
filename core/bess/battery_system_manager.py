@@ -317,7 +317,7 @@ class BatterySystemManager:
                     try:
                         # Use new sensor collector method to get complete energy data with detailed flows
                         energy_data = self.sensor_collector.collect_energy_data(hour)
-                        
+
                         # Store using new historical store method
                         success = self.historical_store.record_energy_data(
                             hour, energy_data, data_source="actual"
@@ -533,9 +533,13 @@ class BatterySystemManager:
                 else:
                     logger.warning(f"Invalid SOC from controller: {soc}")
 
-            # Fallback to last known state
-            latest_soc, _ = self.historical_store.get_latest_battery_state()
-            return latest_soc
+            # TODO: Remove this fallback - it appears to never be used in practice
+            # If we reach here, the controller failed to provide valid SOC
+            logger.warning(
+                "Controller failed to provide valid SOC. This fallback code path "
+                "should be investigated and potentially removed if never used."
+            )
+            return None  # Return None to indicate failure rather than using unreliable fallback
 
         except Exception as e:
             logger.error(f"Failed to get battery SOC: {e}")
@@ -594,7 +598,8 @@ class BatterySystemManager:
                             event.energy.battery_soe_end / 100.0
                         ) * self.battery_settings.total_capacity
                         combined_actions[h] = (
-                            event.energy.battery_charged - event.energy.battery_discharged
+                            event.energy.battery_charged
+                            - event.energy.battery_discharged
                         )
                         solar_charged[h] = min(
                             event.energy.battery_charged, event.energy.solar_production
@@ -774,7 +779,9 @@ class BatterySystemManager:
                     logger.debug(
                         f"  Mapping HourlyData index {i} (action={hour_data.decision.battery_action:.1f}) to hour {target_hour}"
                     )
-                    combined_actions[target_hour] = hour_data.decision.battery_action or 0.0
+                    combined_actions[target_hour] = (
+                        hour_data.decision.battery_action or 0.0
+                    )
                     # Store the SOE directly (it's already in the correct format from HourlyData)
                     combined_soe[target_hour] = hour_data.energy.battery_soe_end
 
@@ -796,7 +803,9 @@ class BatterySystemManager:
             for i, hour_data in enumerate(hourly_data_list):
                 target_hour = optimization_hour + i
                 if target_hour < 24:
-                    full_day_strategic_intents[target_hour] = hour_data.decision.strategic_intent
+                    full_day_strategic_intents[target_hour] = (
+                        hour_data.decision.strategic_intent
+                    )
 
             # ADD: Correct historical hours with actual strategic intents BEFORE creating schedules
             if not prepare_next_day:
@@ -805,7 +814,9 @@ class BatterySystemManager:
                     if hour < len(full_day_strategic_intents):
                         event = self.historical_store.get_hour_record(hour)
                         if event and hasattr(event, "strategic_intent"):
-                            full_day_strategic_intents[hour] = event.decision.strategic_intent
+                            full_day_strategic_intents[hour] = (
+                                event.decision.strategic_intent
+                            )
                             logger.debug(
                                 f"Hour {hour}: Corrected intent from IDLE to '{event.decision.strategic_intent}'"
                             )
@@ -838,7 +849,7 @@ class BatterySystemManager:
                 "total_charged": result.economic_summary.total_charged,
                 "total_discharged": result.economic_summary.total_discharged,
             }
-            
+
             temp_schedule = DPSchedule(
                 actions=combined_actions,
                 state_of_energy=combined_soe,  # This now has correct SOE progression
@@ -1198,8 +1209,12 @@ class BatterySystemManager:
             # Handle charging using stored facts
             if event.energy.battery_charged > 0:
                 # Simple calculation using stored energy flows
-                solar_to_battery = min(event.energy.battery_charged, event.energy.solar_production)
-                grid_to_battery = max(0, event.energy.battery_charged - solar_to_battery)
+                solar_to_battery = min(
+                    event.energy.battery_charged, event.energy.solar_production
+                )
+                grid_to_battery = max(
+                    0, event.energy.battery_charged - solar_to_battery
+                )
 
                 # Calculate costs using same logic as everywhere else
                 solar_cost = solar_to_battery * self.battery_settings.cycle_cost_per_kwh
@@ -1217,12 +1232,15 @@ class BatterySystemManager:
                     # Calculate proportional cost to remove (weighted average cost)
                     avg_cost_per_kwh = running_total_cost / running_energy
                     discharged_cost = (
-                        min(event.energy.battery_discharged, running_energy) * avg_cost_per_kwh
+                        min(event.energy.battery_discharged, running_energy)
+                        * avg_cost_per_kwh
                     )
 
                     # Remove proportional cost and energy
                     running_total_cost = max(0, running_total_cost - discharged_cost)
-                    running_energy = max(0, running_energy - event.energy.battery_discharged)
+                    running_energy = max(
+                        0, running_energy - event.energy.battery_discharged
+                    )
 
                     if running_energy <= 0.1:
                         running_total_cost = 0.0
@@ -1331,7 +1349,7 @@ class BatterySystemManager:
         return self.daily_view_builder.build_daily_view(
             current_hour, buy_price, sell_price
         )
-    
+
     def adjust_charging_power(self) -> None:
         """Adjust charging power based on house consumption."""
         try:
@@ -1454,7 +1472,9 @@ class BatterySystemManager:
                 totals["total_grid_import"] += hour_data.energy.grid_imported
                 totals["total_grid_export"] += hour_data.energy.grid_exported
                 totals["total_battery_charged"] += hour_data.energy.battery_charged
-                totals["total_battery_discharged"] += hour_data.energy.battery_discharged
+                totals[
+                    "total_battery_discharged"
+                ] += hour_data.energy.battery_discharged
 
                 hourly_data.append(hourly_item)
 
@@ -1555,8 +1575,10 @@ class BatterySystemManager:
             indicator = "★" if data["hour"] >= current_hour else " "
 
             # Convert SOE (kWh) to SOC (%) for display
-            battery_soc_end = (data['battery_soe_end'] / self.battery_settings.total_capacity) * 100.0
-            
+            battery_soc_end = (
+                data["battery_soe_end"] / self.battery_settings.total_capacity
+            ) * 100.0
+
             row = (
                 f"║ {data['hour']:02d}:00{indicator} "
                 f"║ {data['solar_production']:>5.1f}  "

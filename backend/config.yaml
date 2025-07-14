@@ -35,6 +35,7 @@ options:
     total_capacity: 30.0             # kWh
     max_charge_discharge_power: 15.0 # kW
     cycle_cost: 0.50                 # 50 öre/kWh / charge/discharge cycle
+    min_action_profit_threshold: 1.5  # SEK fixed minimum profit threshold for any battery action
   electricity_price:
     area: "SE4"                      # Area for Nordpool pricing
     markup_rate: 0.08                # 8 öre/kWh
@@ -89,6 +90,7 @@ schema:
     total_capacity: float
     max_charge_discharge_power: float
     cycle_cost: float
+    min_action_profit_threshold: float
   electricity_price:
     area: str
     markup_rate: float

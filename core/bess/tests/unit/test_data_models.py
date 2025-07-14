@@ -21,8 +21,8 @@ class TestEnergyData:
             grid_exported=2.0,
             battery_charged=1.5,
             battery_discharged=0.0,
-            battery_soe_start=22.5,  
-            battery_soe_end=25.0,    
+            battery_soe_start=22.5,
+            battery_soe_end=25.0,
         )
 
         assert energy.solar_production == 5.0
@@ -32,7 +32,7 @@ class TestEnergyData:
         assert energy.battery_charged == 1.5
         assert energy.battery_discharged == 0.0
         assert energy.battery_soe_start == 22.5  # Changed from battery_soe_start
-        assert energy.battery_soe_end == 25.0    # Changed from battery_soe_end
+        assert energy.battery_soe_end == 25.0  # Changed from battery_soe_end
 
     def test_computed_properties(self):
         """Test computed properties."""
@@ -44,12 +44,11 @@ class TestEnergyData:
             battery_charged=2.0,
             battery_discharged=0.5,
             battery_soe_start=20.0,  # Changed from battery_soe_start=40.0
-            battery_soe_end=22.5,    # Changed from battery_soe_end=45.0
+            battery_soe_end=22.5,  # Changed from battery_soe_end=45.0
         )
 
         assert energy.battery_net_change == 1.5  # charged - discharged
-        assert energy.soe_change_kwh == 2.5      # Changed from soc_change_percent == 5.0
-
+        assert energy.soe_change_kwh == 2.5  # Changed from soc_change_percent == 5.0
 
     def test_detailed_flow_calculation_charging_scenario(self):
         """Test detailed flow calculation for battery charging scenario."""
@@ -61,7 +60,7 @@ class TestEnergyData:
             battery_charged=2.0,  # 2 kWh to battery
             battery_discharged=0.0,  # No discharge
             battery_soe_start=20.0,  # Changed from battery_soe_start=40.0
-            battery_soe_end=23.5,    # Changed from battery_soe_end=47.0
+            battery_soe_end=23.5,  # Changed from battery_soe_end=47.0
         )
 
         # Verify flow calculations for charging scenario
@@ -83,7 +82,7 @@ class TestEnergyData:
             battery_charged=0.0,  # No charging
             battery_discharged=2.0,  # 2 kWh from battery
             battery_soe_start=30.0,  # Changed from battery_soe_start=60.0
-            battery_soe_end=26.5,    # Changed from battery_soe_end=53.0
+            battery_soe_end=26.5,  # Changed from battery_soe_end=53.0
         )
 
         # Verify flow calculations for discharging scenario
@@ -104,8 +103,8 @@ class TestEnergyData:
             grid_exported=1.0,  # 1 kWh to grid
             battery_charged=0.0,  # No charging
             battery_discharged=0.0,  # No discharge
-            battery_soe_start=25.0,  
-            battery_soe_end=25.0,     
+            battery_soe_start=25.0,
+            battery_soe_end=25.0,
         )
 
         # Verify flow calculations for idle scenario
@@ -126,14 +125,13 @@ class TestEnergyData:
             grid_exported=1.0,  # 1 kWh excess solar exported
             battery_charged=0.0,
             battery_discharged=0.0,
-            battery_soe_start=25.0,  
-            battery_soe_end=25.0,    
+            battery_soe_start=25.0,
+            battery_soe_end=25.0,
         )
 
         is_valid, message = energy.validate_energy_balance()
         assert is_valid, f"Energy balance should be valid: {message}"
         assert "Energy balance OK" in message
-
 
     def test_energy_balance_validation_with_tolerance(self):
         """Test energy balance validation respects tolerance."""
@@ -144,13 +142,12 @@ class TestEnergyData:
             grid_exported=1.1,  # Slightly off balance
             battery_charged=0.0,
             battery_discharged=0.0,
-            battery_soe_start=25.0,  
-            battery_soe_end=25.0,    
+            battery_soe_start=25.0,
+            battery_soe_end=25.0,
         )
 
         is_valid, message = energy.validate_energy_balance(tolerance=0.2)
         assert is_valid, f"Should pass with tolerance: {message}"
-
 
 
 class TestEconomicData:
@@ -333,8 +330,8 @@ class TestHourlyData:
             grid_exported=1.0,
             battery_charged=1.0,
             battery_discharged=0.0,
-            battery_soe_start=22.5,  
-            battery_soe_end=25.0,    
+            battery_soe_start=22.5,
+            battery_soe_end=25.0,
         )
 
         hourly = HourlyData.from_energy_data(hour=25, energy_data=energy)
@@ -342,7 +339,6 @@ class TestHourlyData:
 
         assert len(errors) > 0
         assert any("Invalid hour" in error for error in errors)
-
 
     def test_timestamp_defaults(self):
         """Test timestamp defaults to provided value."""
@@ -353,8 +349,8 @@ class TestHourlyData:
             grid_exported=2.0,
             battery_charged=1.5,
             battery_discharged=0.0,
-            battery_soe_start=22.5,  
-            battery_soe_end=25.0,    
+            battery_soe_start=22.5,
+            battery_soe_end=25.0,
         )
 
         before = datetime.now()

@@ -17,9 +17,21 @@ KEY FEATURES:
 - 24-hour optimization horizon with perfect foresight
 - Cost basis tracking for stored energy (FIFO accounting)
 - Profitability checks to prevent unprofitable discharging
+- Minimum profit threshold system to prevent excessive cycling for low-profit actions
 - Multi-objective optimization: cost minimization + battery longevity
 - Simultaneous energy flow optimization across multiple sources/destinations
 - Strategic intent capture at decision time for transparency and hardware control
+
+MINIMUM PROFIT THRESHOLD SYSTEM:
+The minimum profit threshold prevents unprofitable battery cycling by raising the cost threshold for charging decisions:
+The threshold doesn't require immediate profit, but ensures the complete charge/discharge strategy provides meaningful profit above the penalty level. This prevents excessive cycling for marginal gains while preserving clearly profitable arbitrage opportunities.
+
+Adds fixed penalty (min_action_profit_threshold) to charging actions only during optimization
+No penalty on discharging actions - stored energy is always usable without additional threshold costs
+Creates minimum profit barrier: charging only occurs when total future benefits exceed all costs (grid + cycle + threshold)
+Threshold penalty only affects optimization decisions, not user-facing cost calculations
+Default: 1.5 SEK - configurable via battery.min_action_profit_threshold_sek in config.yaml
+Example: 1.5 SEK threshold means charging strategies must provide net benefits >1.5 SEK above normal costs to be selected by the optimizer
 
 STRATEGIC INTENT CAPTURE:
 The algorithm now captures the strategic reasoning behind each decision:
@@ -95,86 +107,85 @@ class StrategicIntent(Enum):
     IDLE = "IDLE"  # No significant action (includes natural solar export)
 
 
-def _discretize_state_action_space(battery_settings: BatterySettings) -> tuple[np.ndarray, np.ndarray]:
+def _discretize_state_action_space(
+    battery_settings: BatterySettings,
+) -> tuple[np.ndarray, np.ndarray]:
     """Discretize state and action spaces - FIXED to return SOE levels."""
     # State space: State of Energy (kWh)
     soe_levels = np.arange(
         battery_settings.min_soe_kwh,
-        battery_settings.max_soe_kwh + SOE_STEP_KWH,  
+        battery_settings.max_soe_kwh + SOE_STEP_KWH,
         SOE_STEP_KWH,
     )
-    
+
     # Action space: power levels (kW)
     max_power = max(
-        battery_settings.max_charge_power_kw,
-        battery_settings.max_discharge_power_kw
+        battery_settings.max_charge_power_kw, battery_settings.max_discharge_power_kw
     )
     power_levels = np.arange(
         -max_power,
         max_power + POWER_STEP_KW,
         POWER_STEP_KW,
     )
-    
+
     return soe_levels, power_levels
 
-    
+
 def _state_transition(
-    soe: float,  
-    power: float, 
-    battery_settings: BatterySettings, 
-    dt: float = 1.0
+    soe: float, power: float, battery_settings: BatterySettings, dt: float = 1.0
 ) -> float:
     """
     Calculate the next state of energy based on current SOE and power action.
-    
+
     EFFICIENCY HANDLING:
     - Charging: power x dt x efficiency = energy actually stored
-    - Discharging: power x dt / efficiency = energy removed from storage    
+    - Discharging: power x dt / efficiency = energy removed from storage
     This ensures that efficiency losses are properly accounted for in energy balance.
     """
     if power > 0:  # Charging
         # Energy stored = power throughput x charging efficiency
         charge_energy = power * dt * battery_settings.efficiency_charge
         next_soe = min(battery_settings.max_soe_kwh, soe + charge_energy)
-        
-    elif power < 0:  # Discharging  
+
+    elif power < 0:  # Discharging
         # Energy removed from storage = power throughput ÷ discharging efficiency
         discharge_energy = abs(power) * dt / battery_settings.efficiency_discharge
         available_energy = soe - battery_settings.min_soe_kwh
         actual_discharge = min(discharge_energy, available_energy)
         next_soe = soe - actual_discharge
-        
+
     else:  # Hold
         next_soe = soe
 
     # Ensure SOE stays within physical bounds
     next_soe = min(
-        battery_settings.max_soe_kwh, 
-        max(battery_settings.min_soe_kwh, next_soe)
+        battery_settings.max_soe_kwh, max(battery_settings.min_soe_kwh, next_soe)
     )
-    
+
     return next_soe
 
 
 def calculate_energy_flows(
-    power: float, 
-    home_consumption: float, 
-    solar_production: float, 
+    power: float,
+    home_consumption: float,
+    solar_production: float,
     soe_start: float,  # State of Energy in kWh
-    soe_end: float,    # State of Energy in kWh
+    soe_end: float,  # State of Energy in kWh
     battery_settings: BatterySettings,  # For SOE->SOC conversion
     dt: float = 1.0,
     battery_charged: float | None = None,  # Optional: direct battery charged value
-    battery_discharged: float | None = None,  # Optional: direct battery discharged value
+    battery_discharged: (
+        float | None
+    ) = None,  # Optional: direct battery discharged value
 ) -> EnergyData:
     """
     Calculate detailed energy flows with proper SOE->SOC conversion.
-    
+
     This is the canonical energy flow calculation function used throughout the system.
     It can work in two modes:
     1. Power-based (for optimization): Uses power and dt to calculate battery flows
     2. Direct (for sensor data): Uses provided battery_charged/discharged values
-    
+
     Args:
         power: Battery power in kW (+ charging, - discharging)
         home_consumption: Home consumption in kWh
@@ -185,39 +196,39 @@ def calculate_energy_flows(
         dt: Time step in hours (default 1.0)
         battery_charged: Optional direct battery charged value (kWh)
         battery_discharged: Optional direct battery discharged value (kWh)
-        
+
     Returns:
         EnergyData with all core and detailed flows calculated
     """
     from core.bess.models import EnergyData
-    
+
     # Calculate battery energy flows - either from power or use provided values
     if battery_charged is None or battery_discharged is None:
         # Power-based mode (optimization)
         battery_charged = max(0, power * dt) if power > 0 else 0.0
         battery_discharged = max(0, -power * dt) if power < 0 else 0.0
-    
+
     # Priority: Solar -> Home first, then remaining solar -> Battery/Grid
     solar_to_home = min(solar_production, home_consumption)
     remaining_solar = solar_production - solar_to_home
     remaining_consumption = home_consumption - solar_to_home
-    
+
     # Solar allocation: battery charging takes priority over grid export
     solar_to_battery = min(remaining_solar, battery_charged)
     solar_to_grid = max(0, remaining_solar - solar_to_battery)
-    
+
     # Battery discharge allocation: home consumption takes priority
     battery_to_home = min(battery_discharged, remaining_consumption)
     battery_to_grid = max(0, battery_discharged - battery_to_home)
-    
+
     # Grid imports: fill remaining consumption and battery charging
     grid_to_home = max(0, remaining_consumption - battery_to_home)
     grid_to_battery = max(0, battery_charged - solar_to_battery)
-    
+
     # Calculate total grid flows
     grid_imported = grid_to_home + grid_to_battery
     grid_exported = solar_to_grid + battery_to_grid
-        
+
     return EnergyData(
         solar_production=solar_production,
         home_consumption=home_consumption,
@@ -232,8 +243,8 @@ def calculate_energy_flows(
 
 def _calculate_reward(
     power: float,
-    soe: float,      # State of Energy in kWh
-    next_soe: float, # State of Energy in kWh  
+    soe: float,  # State of Energy in kWh
+    next_soe: float,  # State of Energy in kWh
     hour: int,
     home_consumption: float,
     battery_settings: BatterySettings,
@@ -246,31 +257,33 @@ def _calculate_reward(
 ) -> tuple[float, float, HourlyData]:
     """
     Calculate reward with proper cycle cost accounting and CORRECTED discharge profitability checks.
-    
+
     CYCLE COST POLICY:
     - Applied only to charging operations (not discharging)
     - Applied to energy actually stored (after efficiency losses)
     - Grid costs applied to energy throughput (what you draw from grid)
     - Cost basis includes BOTH grid costs AND cycle costs for profitability analysis
-    
+
     PROFITABILITY CHECK - CORRECTED:
     - For any discharge, calculate the value of the discharged energy
-    - Value = max(avoiding grid purchases, grid export revenue) 
+    - Value = max(avoiding grid purchases, grid export revenue)
     - Discharge only profitable if this value > cost_basis
     - CRITICAL: Must account for discharge efficiency losses
-    
+
     Example for stored energy costing 2.61 SEK/kWh:
     - If buy_price = 2.58, sell_price = 1.81
     - Avoid purchase value: 2.58 x 0.95 = 2.45 SEK/kWh stored
-    - Export value: 1.81 x 0.95 = 1.72 SEK/kWh stored  
+    - Export value: 1.81 x 0.95 = 1.72 SEK/kWh stored
     - Best value: max(2.45, 1.72) = 2.45 SEK/kWh stored
     - 2.45 < 2.61 → UNPROFITABLE (correctly blocked)
     """
-    
+
     # Get prices for this hour
     current_buy_price = buy_price[hour] if buy_price and hour < len(buy_price) else 0.0
-    current_sell_price = sell_price[hour] if sell_price and hour < len(sell_price) else 0.0
-    
+    current_sell_price = (
+        sell_price[hour] if sell_price and hour < len(sell_price) else 0.0
+    )
+
     # Calculate energy flows
     energy_data = calculate_energy_flows(
         power=power,
@@ -281,16 +294,17 @@ def _calculate_reward(
         battery_settings=battery_settings,
         dt=dt,
     )
-    
+
     # ============================================================================
     # BATTERY CYCLE COST CALCULATION
     # ============================================================================
     # Apply cycle cost ONLY to charging operations, ONLY to energy actually stored
+    energy_stored = 0.0  # Initialize for use in cost basis calculation
     if power > 0:  # Charging
         # Energy actually stored in battery (after efficiency losses)
         energy_stored = power * dt * battery_settings.efficiency_charge
         battery_wear_cost = energy_stored * battery_settings.cycle_cost_per_kwh
-        
+
         # Sanity check: energy_stored should equal (next_soe - soe)
         expected_stored = next_soe - soe
         if abs(energy_stored - expected_stored) > 0.01:
@@ -300,29 +314,45 @@ def _calculate_reward(
             )
     else:  # Discharging or idle
         battery_wear_cost = 0.0
-    
+
+    # MINIMUM ACTION PROFIT THRESHOLD
     # ============================================================================
-    # COST BASIS CALCULATION  
+    # Apply fixed penalty ONLY to charging actions (like cycle cost)
+    # This prevents low-profit charging while never penalizing use of stored energy
+    if power > 0:  # Only charging actions
+        action_threshold_penalty = battery_settings.min_action_profit_threshold
+    else:
+        action_threshold_penalty = 0.0
+
     # ============================================================================
-    # CRITICAL: Cost basis must include ALL costs (grid + cycle) for proper profitability analysis
+    # COST BASIS CALCULATION
+    # ============================================================================
+    # Cost basis includes ALL costs (grid + cycle) for proper profitability analysis
     new_cost_basis = cost_basis
-    
+
     if power > 0:  # Charging - update cost basis with new energy costs
         # Calculate costs by energy source
         solar_available = max(0, solar_production - home_consumption)
-        solar_to_battery = min(solar_available, power * dt)  # Energy throughput from solar
-        grid_to_battery = max(0, (power * dt) - solar_to_battery)  # Energy throughput from grid
-        
+        solar_to_battery = min(
+            solar_available, power * dt
+        )  # Energy throughput from solar
+        grid_to_battery = max(
+            0, (power * dt) - solar_to_battery
+        )  # Energy throughput from grid
+
         # Cost components:
         # - Solar energy: "free" in terms of grid cost (but still has cycle cost)
         # - Grid energy: pay buy price for energy drawn from grid
-        solar_energy_cost = 0.0  # Solar energy has no grid cost
-        grid_energy_cost = grid_to_battery * current_buy_price  # Pay for grid throughput
-        
+        grid_energy_cost = (
+            grid_to_battery * current_buy_price
+        )  # Pay for grid throughput
+
         # CRITICAL FIX: Include cycle cost in cost basis for proper profitability analysis
-        total_new_cost = grid_energy_cost + battery_wear_cost  # Include both grid and cycle costs
+        total_new_cost = (
+            grid_energy_cost + battery_wear_cost
+        )  # Include both grid and cycle costs
         total_new_energy = energy_stored  # Use actual stored energy for cost basis
-        
+
         # Update weighted average cost basis
         if next_soe > battery_settings.min_soe_kwh:
             # Weighted average: (existing_energy x old_cost + new_energy x new_cost) / total_energy
@@ -330,8 +360,12 @@ def _calculate_reward(
             new_cost_basis = (existing_cost + total_new_cost) / next_soe
         else:
             # Battery was empty, cost basis is just the cost of new energy
-            new_cost_basis = (total_new_cost / total_new_energy) if total_new_energy > 0 else cost_basis
-    
+            new_cost_basis = (
+                (total_new_cost / total_new_energy)
+                if total_new_energy > 0
+                else cost_basis
+            )
+
     elif power < 0:  # Discharging - CORRECTED profitability check
         # ========================================================================
         # CRITICAL FIX: Calculate the TRUE value of discharged energy
@@ -339,19 +373,19 @@ def _calculate_reward(
         # Discharged energy can be used for:
         # 1. Avoiding grid purchases (saves buy_price per kWh delivered)
         # 2. Grid export (earns sell_price per kWh delivered)
-        # 
+        #
         # The value per kWh of stored energy is the HIGHER of these two options,
         # accounting for discharge efficiency losses.
-        
+
         # Option 1: Value from avoiding grid purchases
         avoid_purchase_value = current_buy_price * battery_settings.efficiency_discharge
-        
-        # Option 2: Value from grid export  
+
+        # Option 2: Value from grid export
         export_value = current_sell_price * battery_settings.efficiency_discharge
-        
+
         # Take the better option
         effective_value_per_kwh_stored = max(avoid_purchase_value, export_value)
-        
+
         # Profitability check: only discharge if value exceeds cost
         if effective_value_per_kwh_stored <= cost_basis:
             # This discharge is unprofitable - prevent it
@@ -362,7 +396,7 @@ def _calculate_reward(
                 f"Best value: {effective_value_per_kwh_stored:.3f} <= "
                 f"Cost basis: {cost_basis:.3f} SEK/kWh stored"
             )
-            
+
             # Return negative infinity to prevent this action in optimization
             economic_data = EconomicData(
                 buy_price=current_buy_price,
@@ -370,41 +404,44 @@ def _calculate_reward(
                 battery_cycle_cost=battery_wear_cost,
                 hourly_cost=float("inf"),  # Infinite cost to prevent this action
                 grid_only_cost=home_consumption * current_buy_price,
-                solar_only_cost=max(0, home_consumption - solar_production) * current_buy_price - max(0, solar_production - home_consumption) * current_sell_price
+                solar_only_cost=max(0, home_consumption - solar_production)
+                * current_buy_price
+                - max(0, solar_production - home_consumption) * current_sell_price,
             )
             decision_data = DecisionData(
-                strategic_intent="IDLE",
-                battery_action=power,
-                cost_basis=cost_basis
+                strategic_intent="IDLE", battery_action=power, cost_basis=cost_basis
             )
             hour_data = HourlyData(
                 hour=hour,
                 energy=energy_data,
-                timestamp=datetime.now().replace(hour=hour, minute=0, second=0, microsecond=0),
+                timestamp=datetime.now().replace(
+                    hour=hour, minute=0, second=0, microsecond=0
+                ),
                 data_source="predicted",
                 economic=economic_data,
-                decision=decision_data
+                decision=decision_data,
             )
             return float("-inf"), cost_basis, hour_data
-#        else:
-#            # Discharge is profitable - log the details for debugging
-#            logger.debug(
-#                f"Hour {hour}: Profitable discharge allowed. "
-#                f"Best value: {effective_value_per_kwh_stored:.3f} > "
-#                f"Cost basis: {cost_basis:.3f} SEK/kWh stored"
-#            )
-    
+    #        else:
+    #            # Discharge is profitable - log the details for debugging
+    #            logger.debug(
+    #                f"Hour {hour}: Profitable discharge allowed. "
+    #                f"Best value: {effective_value_per_kwh_stored:.3f} > "
+    #                f"Cost basis: {cost_basis:.3f} SEK/kWh stored"
+    #            )
+
     # ============================================================================
     # REWARD CALCULATION
-    # ============================================================================
-    # Calculate immediate economic reward (negative of total cost)
+    # ============================================================================    # Calculate immediate economic reward (negative of total cost)
     import_cost = energy_data.grid_imported * current_buy_price
     export_revenue = energy_data.grid_exported * current_sell_price
-    
-    # Total cost = grid costs + battery degradation costs
-    total_cost = import_cost - export_revenue + battery_wear_cost
+
+    # Total cost = grid costs + battery degradation costs + action threshold penalty
+    total_cost = (
+        import_cost - export_revenue + battery_wear_cost + action_threshold_penalty
+    )
     reward = -total_cost  # Negative cost = positive reward
-    
+
     # ============================================================================
     # STRATEGIC INTENT DETERMINATION
     # ============================================================================
@@ -421,7 +458,7 @@ def _calculate_reward(
             strategic_intent = "LOAD_SUPPORT"  # Supporting home load
     else:  # Minimal action
         strategic_intent = "IDLE"
-    
+
     # ============================================================================
     # CREATE HOURLY DATA OBJECT
     # ============================================================================
@@ -429,7 +466,10 @@ def _calculate_reward(
     grid_cost = import_cost - export_revenue
     hourly_cost = grid_cost + battery_wear_cost
     grid_only_cost = home_consumption * current_buy_price
-    solar_only_cost = max(0, home_consumption - solar_production) * current_buy_price - max(0, solar_production - home_consumption) * current_sell_price
+    solar_only_cost = (
+        max(0, home_consumption - solar_production) * current_buy_price
+        - max(0, solar_production - home_consumption) * current_sell_price
+    )
     hourly_savings = solar_only_cost - hourly_cost
 
     economic_data = EconomicData(
@@ -440,13 +480,13 @@ def _calculate_reward(
         hourly_cost=hourly_cost,
         grid_only_cost=grid_only_cost,
         solar_only_cost=solar_only_cost,
-        hourly_savings=hourly_savings
+        hourly_savings=hourly_savings,
     )
 
     decision_data = DecisionData(
         strategic_intent=strategic_intent,
         battery_action=power,
-        cost_basis=new_cost_basis
+        cost_basis=new_cost_basis,
     )
 
     new_hourly_data = HourlyData(
@@ -455,16 +495,15 @@ def _calculate_reward(
         timestamp=datetime.now().replace(hour=hour, minute=0, second=0, microsecond=0),
         data_source="predicted",
         economic=economic_data,
-        decision=decision_data
+        decision=decision_data,
     )
 
     return reward, new_cost_basis, new_hourly_data
 
 
-
 def print_optimization_results(results, buy_prices, sell_prices):
     """Log a detailed results table with strategic intents - new format version.
-    
+
     Args:
         results: OptimizationResult object with hourly_data and economic_summary
         buy_prices: List of buy prices
@@ -513,27 +552,44 @@ def print_optimization_results(results, buy_prices, sell_prices):
         intent = hour_data.decision.strategic_intent
 
         # Calculate values exactly like original function
-        base_cost = consumption * buy_prices[i] if i < len(buy_prices) else consumption * hour_data.economic.buy_price
-        
+        base_cost = (
+            consumption * buy_prices[i]
+            if i < len(buy_prices)
+            else consumption * hour_data.economic.buy_price
+        )
+
         # Extract solar flows - try to get from detailed flows if available
         solar_to_battery = 0.0
         grid_to_battery = 0.0
-        
+
         # If we have detailed flow data, use it
-        if hasattr(hour_data, 'solar_to_battery'):
+        if hasattr(hour_data, "solar_to_battery"):
             solar_to_battery = hour_data.solar_to_battery
             grid_to_battery = hour_data.grid_to_battery
         else:
             # Fallback: estimate from battery_charged
-            solar_to_battery = hour_data.energy.battery_charged if hour_data.energy.battery_charged > 0 else 0
-            grid_to_battery = max(0, hour_data.energy.battery_charged - min(solar, hour_data.energy.battery_charged))
-        
+            solar_to_battery = (
+                hour_data.energy.battery_charged
+                if hour_data.energy.battery_charged > 0
+                else 0
+            )
+            grid_to_battery = max(
+                0,
+                hour_data.energy.battery_charged
+                - min(solar, hour_data.energy.battery_charged),
+            )
+
         # Calculate costs using original logic - FIXED: use property accessor for battery_cycle_cost
-        grid_cost = hour_data.energy.grid_imported * hour_data.economic.buy_price - hour_data.energy.grid_exported * hour_data.economic.sell_price
-        battery_cost = hour_data.economic.battery_cycle_cost  # FIXED: access via economic component
+        grid_cost = (
+            hour_data.energy.grid_imported * hour_data.economic.buy_price
+            - hour_data.energy.grid_exported * hour_data.economic.sell_price
+        )
+        battery_cost = (
+            hour_data.economic.battery_cycle_cost
+        )  # FIXED: access via economic component
         combined_cost = grid_cost + battery_cost
         hourly_savings = base_cost - combined_cost
-        
+
         # Update totals
         total_consumption += consumption
         total_base_cost += base_cost
@@ -549,10 +605,10 @@ def print_optimization_results(results, buy_prices, sell_prices):
 
         # Format intent to fit column width
         intent_display = intent[:15] if len(intent) > 15 else intent
-        
+
         # Format hour row - preserving original formatting exactly
         buy_sell_str = f"{buy_prices[i] if i < len(buy_prices) else hour_data.buy_price:.2f}/{sell_prices[i] if i < len(sell_prices) else hour_data.sell_price:.2f}"
-        
+
         output.append(
             f"║{hour:3d} ║ {buy_sell_str:10s} ║{consumption:4.1f} ║{base_cost:5.2f} ║║{solar:4.1f} ║{solar_to_battery:5.1f} ║{grid_to_battery:5.1f} ║{soe_kwh:3.0f} ║{action:5.1f} ║{intent_display:15s} ║{grid_cost:5.2f} ║{battery_cost:5.2f} ║{hourly_savings:5.2f} ║"
         )
@@ -603,27 +659,29 @@ def _run_dynamic_programming_with_storage(
     Enhanced DP that stores the HourlyData objects calculated during optimization.
     This eliminates the need for reward recalculation in simulation.
     """
-    
+
     logger.debug("Starting DP optimization with HourlyData storage")
-    
+
     # Set defaults if not provided
     if solar_production is None:
         solar_production = [0.0] * horizon
     if initial_soe is None:
         initial_soe = battery_settings.min_soe_kwh
-        
+
     # Discretize state and action spaces (same as before)
     soe_levels, power_levels = _discretize_state_action_space(battery_settings)
-    
+
     # Initialize DP arrays (same as before)
     V = np.zeros((horizon + 1, len(soe_levels)))
     policy = np.zeros((horizon, len(soe_levels)))
     C = np.full((horizon + 1, len(soe_levels)), initial_cost_basis)
-    intents = [[StrategicIntent.IDLE for _ in range(len(soe_levels))] for _ in range(horizon)]
-    
+    intents = [
+        [StrategicIntent.IDLE for _ in range(len(soe_levels))] for _ in range(horizon)
+    ]
+
     # NEW: Store HourlyData objects calculated during DP
     stored_hourly_data = {}  # Key: (t, i), Value: HourlyData
-    
+
     # Backward induction (same structure as before)
     for t in reversed(range(horizon)):
         for i, soe in enumerate(soe_levels):
@@ -632,7 +690,7 @@ def _run_dynamic_programming_with_storage(
             best_cost_basis = C[t, i]
             best_intent = StrategicIntent.IDLE
             best_hourly_data = None  # NEW: Store the HourlyData from best action
-            
+
             # Try all possible actions
             for power in power_levels:
                 # Skip physically impossible actions (same as before)
@@ -653,8 +711,10 @@ def _run_dynamic_programming_with_storage(
 
                 # Calculate next state
                 next_soe = _state_transition(soe, power, battery_settings)
-                if (next_soe < battery_settings.min_soe_kwh or 
-                    next_soe > battery_settings.max_soe_kwh):
+                if (
+                    next_soe < battery_settings.min_soe_kwh
+                    or next_soe > battery_settings.max_soe_kwh
+                ):
                     continue
 
                 # Calculate reward WITH HourlyData creation
@@ -688,10 +748,12 @@ def _run_dynamic_programming_with_storage(
                     best_action = power
                     best_cost_basis = new_cost_basis
                     best_hourly_data = hourly_data  # NEW: Store the HourlyData
-                    
+
                     # Determine strategic intent
                     if power > 0.1:
-                        solar_available = max(0, solar_production[t] - home_consumption[t])
+                        solar_available = max(
+                            0, solar_production[t] - home_consumption[t]
+                        )
                         if power > solar_available:
                             best_intent = StrategicIntent.GRID_CHARGING
                         else:
@@ -705,11 +767,11 @@ def _run_dynamic_programming_with_storage(
             V[t, i] = best_value
             policy[t, i] = best_action
             intents[t][i] = best_intent
-            
+
             # NEW: Store the HourlyData for this optimal decision
             if best_hourly_data is not None:
                 stored_hourly_data[(t, i)] = best_hourly_data
-            
+
             # Update cost basis for next time step
             if best_action != 0 and t + 1 < horizon:
                 next_soe = _state_transition(soe, best_action, battery_settings)
@@ -739,32 +801,32 @@ def _simulate_battery_direct(
     Simulation that uses HourlyData calculated during DP optimization directly.
     This eliminates the dual cost calculation problem completely.
     """
-    
+
     logger.debug("Starting simulation using stored DP results")
-    
+
     soe_levels = np.arange(
         battery_settings.min_soe_kwh,
         battery_settings.max_soe_kwh + SOE_STEP_KWH,
         SOE_STEP_KWH,
     )
-    
+
     simulation_results = []
     current_soe = initial_soe
-    
+
     for t in range(horizon):
         # Find current state index
         i = round((current_soe - battery_settings.min_soe_kwh) / SOE_STEP_KWH)
         i = min(max(0, i), len(soe_levels) - 1)
-        
+
         # Get the HourlyData calculated during DP
         if (t, i) in stored_hourly_data:
             hourly_data = stored_hourly_data[(t, i)]
-            
+
             # Update state for next iteration
             current_soe = hourly_data.energy.battery_soe_end
-            
+
             simulation_results.append(hourly_data)
-            
+
             action = hourly_data.decision.battery_action or 0.0
             if abs(action) > 0.01:
                 logger.debug(
@@ -783,34 +845,36 @@ def _simulate_battery_direct(
                 soe_end=current_soe,
                 battery_settings=battery_settings,
             )
-            
+
             economic_data = EconomicData(
                 buy_price=2.0,  # Default
-                sell_price=1.4,  # Default  
+                sell_price=1.4,  # Default
                 battery_cycle_cost=0.0,
                 hourly_cost=5.2 * 2.0,
                 grid_only_cost=5.2 * 2.0,
                 solar_only_cost=5.2 * 2.0,
-                hourly_savings=0.0
+                hourly_savings=0.0,
             )
-            
+
             decision_data = DecisionData(
                 strategic_intent="IDLE",
                 battery_action=0.0,
-                cost_basis=initial_cost_basis
+                cost_basis=initial_cost_basis,
             )
-            
+
             hourly_data = HourlyData(
                 hour=t,
                 energy=energy_data,
-                timestamp=datetime.now().replace(hour=t, minute=0, second=0, microsecond=0),
+                timestamp=datetime.now().replace(
+                    hour=t, minute=0, second=0, microsecond=0
+                ),
                 data_source="predicted",
                 economic=economic_data,
-                decision=decision_data
+                decision=decision_data,
             )
-            
+
             simulation_results.append(hourly_data)
-    
+
     logger.debug("Direct simulation complete")
     return simulation_results
 
@@ -828,9 +892,9 @@ def optimize_battery_schedule(
     Battery optimization that eliminates dual cost calculation by using
     DP-calculated HourlyData directly in simulation.
     """
-    
+
     horizon = len(buy_price)
-    
+
     # Handle defaults
     if solar_production is None:
         solar_production = [0.0] * horizon
@@ -839,7 +903,9 @@ def optimize_battery_schedule(
     if initial_cost_basis is None:
         initial_cost_basis = battery_settings.cycle_cost_per_kwh
 
-    logger.info(f"Starting direct optimization: horizon={horizon}, initial_soe={initial_soe:.1f}, initial_cost_basis={initial_cost_basis:.3f}")
+    logger.info(
+        f"Starting direct optimization: horizon={horizon}, initial_soe={initial_soe:.1f}, initial_cost_basis={initial_cost_basis:.3f}"
+    )
 
     # Step 1: Run DP with HourlyData storage
     V, policy, C, intents, stored_hourly_data = _run_dynamic_programming_with_storage(
@@ -864,15 +930,17 @@ def optimize_battery_schedule(
     )
 
     # Step 3: Calculate economic summary directly from HourlyData
-    total_base_cost = sum(home_consumption[i] * buy_price[i] for i in range(len(buy_price)))
-    
+    total_base_cost = sum(
+        home_consumption[i] * buy_price[i] for i in range(len(buy_price))
+    )
+
     total_optimized_cost = sum(h.economic.hourly_cost for h in hourly_results)
     total_charged = sum(h.energy.battery_charged for h in hourly_results)
     total_discharged = sum(h.energy.battery_discharged for h in hourly_results)
-    
+
     # Calculate savings directly - renamed variables for clarity
     grid_to_battery_solar_savings = total_base_cost - total_optimized_cost
-    
+
     economic_summary = EconomicSummary(
         grid_only_cost=total_base_cost,
         solar_only_cost=total_base_cost,  # Simplified - no solar in this scenario
@@ -881,7 +949,9 @@ def optimize_battery_schedule(
         grid_to_battery_solar_savings=grid_to_battery_solar_savings,
         solar_to_battery_solar_savings=grid_to_battery_solar_savings,
         grid_to_battery_solar_savings_pct=(
-            (grid_to_battery_solar_savings / total_base_cost) * 100 if total_base_cost > 0 else 0
+            (grid_to_battery_solar_savings / total_base_cost) * 100
+            if total_base_cost > 0
+            else 0
         ),
         total_charged=total_charged,
         total_discharged=total_discharged,

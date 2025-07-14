@@ -38,7 +38,6 @@ class DailyView:
     data_sources: list[str]  # ["actual", "predicted"
 
 
-
 class DailyViewBuilder:
     """Builds complete daily views combining historical actuals and current predictions.
 
@@ -64,12 +63,11 @@ class DailyViewBuilder:
         self.schedule_store = schedule_store
         self.battery_settings = battery_settings
 
-
     def build_daily_view(
         self, current_hour: int, buy_price: list[float], sell_price: list[float]
     ) -> DailyView:
         """Build complete 00-23 daily view"""
-        
+
         logger.info(f"Building daily view for hour {current_hour}")
 
         if not 0 <= current_hour <= 23:
@@ -78,12 +76,19 @@ class DailyViewBuilder:
         # Get latest schedule and validate coverage
         latest_schedule = self.schedule_store.get_latest_schedule()
         if not latest_schedule:
-            raise ValueError("No optimization schedule available - system cannot provide daily view")
+            raise ValueError(
+                "No optimization schedule available - system cannot provide daily view"
+            )
 
-        (schedule_start_hour, schedule_end_hour,) = latest_schedule.get_optimization_range()
-        logger.info(f"Latest schedule covers hours {schedule_start_hour}-{schedule_end_hour}")
+        (
+            schedule_start_hour,
+            schedule_end_hour,
+        ) = latest_schedule.get_optimization_range()
+        logger.info(
+            f"Latest schedule covers hours {schedule_start_hour}-{schedule_end_hour}"
+        )
 
-        # Validate we have required data for ALL hours 
+        # Validate we have required data for ALL hours
         missing_actual_hours = []
         missing_predicted_hours = []
 
@@ -120,25 +125,31 @@ class DailyViewBuilder:
 
         for hour in range(24):
             if hour < current_hour:
-                hour_data = self._build_actual_hour_data(hour, buy_price[hour], sell_price[hour])
+                hour_data = self._build_actual_hour_data(
+                    hour, buy_price[hour], sell_price[hour]
+                )
                 data_sources.append("actual")
             else:
-                hour_data = self._build_predicted_hour_data(hour, buy_price[hour], sell_price[hour], current_hour)
+                hour_data = self._build_predicted_hour_data(
+                    hour, buy_price[hour], sell_price[hour], current_hour
+                )
                 data_sources.append("predicted")
 
             hourly_data.append(hour_data)
 
-        # Sort and validate 
+        # Sort and validate
         hourly_data.sort(key=lambda x: x.hour)
         self._validate_energy_flows_new(hourly_data)
 
-        # Calculate metrics 
+        # Calculate metrics
         actual_savings = sum(
-            h.economic.hourly_savings for h in hourly_data 
+            h.economic.hourly_savings
+            for h in hourly_data
             if h.data_source == "actual" and h.economic.hourly_savings is not None
         )
         predicted_savings = sum(
-            h.economic.hourly_savings for h in hourly_data 
+            h.economic.hourly_savings
+            for h in hourly_data
             if h.data_source == "predicted" and h.economic.hourly_savings is not None
         )
 
@@ -149,20 +160,23 @@ class DailyViewBuilder:
             total_daily_savings=actual_savings + predicted_savings,
             actual_savings_so_far=actual_savings,
             predicted_remaining_savings=predicted_savings,
-            actual_hours_count=len([h for h in hourly_data if h.data_source == "actual"]),
-            predicted_hours_count=len([h for h in hourly_data if h.data_source == "predicted"]),
+            actual_hours_count=len(
+                [h for h in hourly_data if h.data_source == "actual"]
+            ),
+            predicted_hours_count=len(
+                [h for h in hourly_data if h.data_source == "predicted"]
+            ),
             data_sources=data_sources,
         )
 
         self.log_complete_daily_schedule(daily_view)
         return daily_view
 
-
     def _validate_energy_flows_new(self, hourly_data: list[HourlyData]) -> None:
-        """Validate energy flows for physical consistency """
+        """Validate energy flows for physical consistency"""
         for hour_data in hourly_data:
             try:
-                # Energy balance validation logic 
+                # Energy balance validation logic
                 solar = hour_data.energy.solar_production
                 consumption = hour_data.energy.home_consumption
                 grid_import = hour_data.energy.grid_imported
@@ -174,29 +188,42 @@ class DailyViewBuilder:
                 total_generation = solar + grid_import + battery_discharge
                 total_consumption = consumption + grid_export + battery_charge
                 balance_error = abs(total_generation - total_consumption)
-                
+
                 if balance_error > 0.1:  # Allow 0.1 kWh error
                     logger.warning(
                         "Hour %d: Energy balance error %.2f kWh (gen=%.2f, cons=%.2f)",
-                        hour_data.hour, balance_error, total_generation, total_consumption
+                        hour_data.hour,
+                        balance_error,
+                        total_generation,
+                        total_consumption,
                     )
 
-                # SOC validation logic 
+                # SOC validation logic
                 # Convert SOE to SOC for display
-                soc_start = (hour_data.energy.battery_soe_start / self.battery_settings.total_capacity) * 100.0
-                soc_end = (hour_data.energy.battery_soe_end / self.battery_settings.total_capacity) * 100.0
+                soc_start = (
+                    hour_data.energy.battery_soe_start
+                    / self.battery_settings.total_capacity
+                ) * 100.0
+                soc_end = (
+                    hour_data.energy.battery_soe_end
+                    / self.battery_settings.total_capacity
+                ) * 100.0
                 soc_change = soc_end - soc_start
 
                 # All SOC validation calculations (unchanged)
                 if battery_charge > 0:
                     expected_soc_change = (
-                        battery_charge * self.battery_settings.efficiency_charge 
-                        / self.battery_settings.total_capacity * 100
+                        battery_charge
+                        * self.battery_settings.efficiency_charge
+                        / self.battery_settings.total_capacity
+                        * 100
                     )
                 elif battery_discharge > 0:
                     expected_soc_change = -(
-                        battery_discharge / self.battery_settings.efficiency_discharge 
-                        / self.battery_settings.total_capacity * 100
+                        battery_discharge
+                        / self.battery_settings.efficiency_discharge
+                        / self.battery_settings.total_capacity
+                        * 100
                     )
                 else:
                     expected_soc_change = 0.0
@@ -205,61 +232,71 @@ class DailyViewBuilder:
                 if soc_error > 2.0:  # Allow 2% error
                     logger.warning(
                         "Hour %d: SOC change mismatch %.1f%% vs expected %.1f%% (charge=%.2f, discharge=%.2f, eff_charge=%.3f, eff_discharge=%.3f)",
-                        hour_data.hour, soc_change, expected_soc_change, battery_charge, battery_discharge,
-                        self.battery_settings.efficiency_charge, self.battery_settings.efficiency_discharge,
+                        hour_data.hour,
+                        soc_change,
+                        expected_soc_change,
+                        battery_charge,
+                        battery_discharge,
+                        self.battery_settings.efficiency_charge,
+                        self.battery_settings.efficiency_discharge,
                     )
 
             except Exception as e:
                 logger.warning(f"Validation error for hour {hour_data.hour}: {e}")
 
-
     def _build_actual_hour_data(
         self, hour: int, buy_price: float, sell_price: float
     ) -> HourlyData:
         """Build hour data from actual stored facts with properly calculated economic data."""
-        
+
         event = self.historical_store.get_hour_record(hour)
         if not event:
-            raise ValueError(f"No data for hour {hour} - validation should prevent this")
+            raise ValueError(
+                f"No data for hour {hour} - validation should prevent this"
+            )
 
         battery_action = event.energy.battery_charged - event.energy.battery_discharged
 
         updated_decision = DecisionData(
             strategic_intent=event.decision.strategic_intent,
-            battery_action=battery_action
+            battery_action=battery_action,
         )
-        
+
         # Calculate economic data manually since actual data doesn't store it
         # This is what the optimization would have calculated for this hour
-        
+
         # Grid cost (net cost of grid interactions)
         grid_cost = (
-            event.energy.grid_imported * buy_price -
-            event.energy.grid_exported * sell_price
+            event.energy.grid_imported * buy_price
+            - event.energy.grid_exported * sell_price
         )
-        
+
         # Battery wear cost (only for charging, not discharging)
-        battery_wear_cost = event.energy.battery_charged * self.battery_settings.cycle_cost_per_kwh
-        
+        battery_wear_cost = (
+            event.energy.battery_charged * self.battery_settings.cycle_cost_per_kwh
+        )
+
         # Total hourly cost = grid cost + battery wear cost
         battery_solar_cost = grid_cost + battery_wear_cost
-        
+
         # Grid-only cost (no solar, no battery - just grid import for all consumption)
         grid_only_cost = event.energy.home_consumption * buy_price
-        
+
         # Solar-only cost (solar + grid, no battery)
-        direct_solar_to_home = min(event.energy.solar_production, event.energy.home_consumption)
+        direct_solar_to_home = min(
+            event.energy.solar_production, event.energy.home_consumption
+        )
         solar_excess = max(0, event.energy.solar_production - direct_solar_to_home)
         grid_needed = max(0, event.energy.home_consumption - direct_solar_to_home)
-        
+
         solar_only_cost = (
-            grid_needed * buy_price -  # Pay for grid imports
-            solar_excess * sell_price  # Revenue from solar exports
+            grid_needed * buy_price  # Pay for grid imports
+            - solar_excess * sell_price  # Revenue from solar exports
         )
-        
+
         # Calculate savings vs solar-only baseline (algorithm baseline)
         hourly_savings = solar_only_cost - battery_solar_cost
-        
+
         final_economic = EconomicData(
             buy_price=buy_price,
             sell_price=sell_price,
@@ -270,47 +307,53 @@ class DailyViewBuilder:
             grid_only_cost=grid_only_cost,
             solar_only_cost=solar_only_cost,
         )
-        
+
         return HourlyData(
             hour=event.hour,
             energy=event.energy,
             timestamp=event.timestamp,
             data_source="actual",
             economic=final_economic,
-            decision=updated_decision
+            decision=updated_decision,
         )
-
 
     def _get_latest_hourly_soc(self) -> tuple[int, float]:
         """Get the hour and SOC of the most recent actual data point"""
-        
-        # Iterate backwards logic 
+
+        # Iterate backwards logic
         for hour in range(23, -1, -1):
             event = self.historical_store.get_hour_record(hour)
             if event:
                 # Convert SOE to SOC for display
-                soc_end = (event.energy.battery_soe_end / self.battery_settings.total_capacity) * 100.0
+                soc_end = (
+                    event.energy.battery_soe_end / self.battery_settings.total_capacity
+                ) * 100.0
                 return hour, soc_end
 
         # Fallback to initial SOC from schedule
         latest_schedule = self.schedule_store.get_latest_schedule()
         if latest_schedule and latest_schedule.optimization_result.input_data:
-            initial_soc = latest_schedule.optimization_result.input_data.get("initial_soc")
+            initial_soc = latest_schedule.optimization_result.input_data.get(
+                "initial_soc"
+            )
             if initial_soc is not None:
                 return -1, initial_soc
 
         # Error instead of default (no fallbacks per instructions)
-        raise ValueError("No actual battery state data available and no initial SOC in schedule")
-
+        raise ValueError(
+            "No actual battery state data available and no initial SOC in schedule"
+        )
 
     def _build_predicted_hour_data(
         self, hour: int, buy_price: float, sell_price: float, current_hour: int
     ) -> HourlyData:
         """Build hour data from predicted schedule data - HourlyData only."""
-        
+
         latest_schedule = self.schedule_store.get_latest_schedule()
         if latest_schedule is None:
-            raise ValueError(f"No schedule available for hour {hour}, cannot create deterministic view")
+            raise ValueError(
+                f"No schedule available for hour {hour}, cannot create deterministic view"
+            )
 
         start_hour, end_hour = latest_schedule.get_optimization_range()
         if not (start_hour <= hour <= end_hour):
@@ -322,29 +365,33 @@ class DailyViewBuilder:
             optimization_result = latest_schedule.optimization_result
             hourly_data_list = optimization_result.hourly_data
             result_index = hour - start_hour
-            
+
             if result_index < 0 or result_index >= len(hourly_data_list):
-                raise ValueError(f"Hour {hour} is out of range in optimization result (index {result_index})")
-            
+                raise ValueError(
+                    f"Hour {hour} is out of range in optimization result (index {result_index})"
+                )
+
             hour_result = hourly_data_list[result_index]
-            
+
             battery_action = hour_result.decision.battery_action or 0.0
             solar_production = hour_result.energy.solar_production
             home_consumption = hour_result.energy.home_consumption
             grid_import = hour_result.energy.grid_imported
             grid_export = hour_result.energy.grid_exported
-            
+
             max_possible_action = self.battery_settings.total_capacity
             if abs(battery_action) > max_possible_action:
                 logger.warning(
                     f"Battery action for hour {hour} exceeds physical limits: {battery_action:.2f} kWh. "
                     f"Capping to {max_possible_action:.2f} kWh"
                 )
-                battery_action = max(-max_possible_action, min(max_possible_action, battery_action))
+                battery_action = max(
+                    -max_possible_action, min(max_possible_action, battery_action)
+                )
 
             battery_charged = max(0, battery_action)
             battery_discharged = max(0, -battery_action)
-            
+
             if abs(battery_action) > 0.01:
                 reconstructed_action = battery_charged - battery_discharged
                 action_error = abs(battery_action - reconstructed_action)
@@ -361,28 +408,44 @@ class DailyViewBuilder:
 
                 if hour == 0:
                     prev_soc = optimization_result.input_data.get("initial_soc", 20.0)
-                    logger.info(f"Hour 0: Using initial SOC from schedule: {prev_soc:.1f}%")
+                    logger.info(
+                        f"Hour 0: Using initial SOC from schedule: {prev_soc:.1f}%"
+                    )
                 else:
                     prev_event = self.historical_store.get_hour_record(hour - 1)
                     if prev_event:
-                        prev_soc = (prev_event.energy.battery_soe_end / self.battery_settings.total_capacity) * 100.0
-                        logger.info(f"Using actual SOC from hour {hour-1}: {prev_soc:.1f}%")
+                        prev_soc = (
+                            prev_event.energy.battery_soe_end
+                            / self.battery_settings.total_capacity
+                        ) * 100.0
+                        logger.info(
+                            f"Using actual SOC from hour {hour-1}: {prev_soc:.1f}%"
+                        )
                     else:
-                        prev_soc = (hour_result.energy.battery_soe_start / self.battery_settings.total_capacity) * 100.0
+                        prev_soc = (
+                            hour_result.energy.battery_soe_start
+                            / self.battery_settings.total_capacity
+                        ) * 100.0
                         logger.warning(
                             f"No historical data for hour {hour-1}, using optimization SOC: {prev_soc:.1f}%"
                         )
 
                 prev_soc_start = prev_soc
             else:
-                prev_soc_start = (hour_result.energy.battery_soe_start / self.battery_settings.total_capacity) * 100.0
-                
-            soc_percent = (hour_result.energy.battery_soe_end / self.battery_settings.total_capacity) * 100.0
+                prev_soc_start = (
+                    hour_result.energy.battery_soe_start
+                    / self.battery_settings.total_capacity
+                ) * 100.0
+
+            soc_percent = (
+                hour_result.energy.battery_soe_end
+                / self.battery_settings.total_capacity
+            ) * 100.0
 
             # Convert SOC percentages to SOE values in kWh
             soe_start = (prev_soc_start / 100.0) * self.battery_settings.total_capacity
             soe_end = (soc_percent / 100.0) * self.battery_settings.total_capacity
-            
+
             energy_data = EnergyData(
                 solar_production=solar_production,
                 home_consumption=home_consumption,
@@ -397,7 +460,7 @@ class DailyViewBuilder:
 
             decision_data = DecisionData(
                 strategic_intent=hour_result.decision.strategic_intent or "IDLE",
-                battery_action=battery_action
+                battery_action=battery_action,
             )
 
             # Use the economic data from the optimization result directly
@@ -411,21 +474,24 @@ class DailyViewBuilder:
                 solar_only_cost=hour_result.economic.solar_only_cost,
                 grid_cost=hour_result.economic.grid_cost,
             )
-            
+
             return HourlyData(
                 hour=hour,
                 energy=energy_data,
                 timestamp=hour_result.timestamp,
                 data_source="predicted",
                 economic=final_economic_data,
-                decision=decision_data
+                decision=decision_data,
             )
 
         except Exception as e:
-            logger.error(f"Error building predicted data for hour {hour} ({latest_schedule.get_optimization_range()}): {e}")
-            raise ValueError(f"Error processing optimization data for hour {hour}: {e}") from e
+            logger.error(
+                f"Error building predicted data for hour {hour} ({latest_schedule.get_optimization_range()}): {e}"
+            )
+            raise ValueError(
+                f"Error processing optimization data for hour {hour}: {e}"
+            ) from e
 
-        
     def _validate_energy_flows(self, hourly_data: list[HourlyData]) -> None:
         """Validate energy flows for physical consistency."""
         for hour_data in hourly_data:
@@ -454,33 +520,47 @@ class DailyViewBuilder:
 
                 # FIXED SOC change validation with efficiency consideration
                 # Calculate SOC change from SOE values
-                soc_start = (hour_data.energy.battery_soe_start / self.battery_settings.total_capacity) * 100.0
-                soc_end = (hour_data.energy.battery_soe_end / self.battery_settings.total_capacity) * 100.0
+                soc_start = (
+                    hour_data.energy.battery_soe_start
+                    / self.battery_settings.total_capacity
+                ) * 100.0
+                soc_end = (
+                    hour_data.energy.battery_soe_end
+                    / self.battery_settings.total_capacity
+                ) * 100.0
                 soc_change = soc_end - soc_start
 
                 # Calculate expected SOC change considering efficiency
                 if battery_charge > 0 and battery_discharge > 0:
                     # Both charging and discharging in same hour (rare but possible)
                     charge_soc_change = (
-                        battery_charge * self.battery_settings.efficiency_charge 
-                        / self.battery_settings.total_capacity * 100
+                        battery_charge
+                        * self.battery_settings.efficiency_charge
+                        / self.battery_settings.total_capacity
+                        * 100
                     )
                     discharge_soc_change = (
-                        battery_discharge / self.battery_settings.efficiency_discharge 
-                        / self.battery_settings.total_capacity * 100
+                        battery_discharge
+                        / self.battery_settings.efficiency_discharge
+                        / self.battery_settings.total_capacity
+                        * 100
                     )
                     expected_soc_change = charge_soc_change - discharge_soc_change
                 elif battery_charge > 0:
                     # Only charging
                     expected_soc_change = (
-                        battery_charge * self.battery_settings.efficiency_charge 
-                        / self.battery_settings.total_capacity * 100
+                        battery_charge
+                        * self.battery_settings.efficiency_charge
+                        / self.battery_settings.total_capacity
+                        * 100
                     )
                 elif battery_discharge > 0:
-                    # Only discharging  
+                    # Only discharging
                     expected_soc_change = -(
-                        battery_discharge / self.battery_settings.efficiency_discharge 
-                        / self.battery_settings.total_capacity * 100
+                        battery_discharge
+                        / self.battery_settings.efficiency_discharge
+                        / self.battery_settings.total_capacity
+                        * 100
                     )
                 else:
                     # No battery action
@@ -505,12 +585,20 @@ class DailyViewBuilder:
     def log_complete_daily_schedule(self, daily_view: DailyView) -> None:
         """Log complete 24-hour schedule table - HourlyData access."""
         lines = []
-        
+
         # All header formatting
-        lines.append("╔═══════╦════════════╦═══════╦═══════╦═══════╦═══════╦═══════╦═══════╦════════╦═════════╦═══════╦═══════╦═══════╦═══════╦═══════╗")
-        lines.append("║ Hour  ║   Prices   ║      Solar    ║ Grid  ║ Batt  ║ Home  ║ Grid  ║ Batt  ║Intent  ║SOC/SOE  ║ Base  ║Grid+  ║ Batt  ║ Total ║Savings║")
-        lines.append("║       ║ Buy/Sell   ║   Generated   ║Import ║Dischg ║ Cons  ║Export ║Charge ║        ║  %/kWh  ║ Cost  ║Solar  ║ Wear  ║ Cost  ║  SEK  ║")
-        lines.append("╠═══════╬════════════╬═══════╬═══════╬═══════╬═══════╬═══════╬═══════╬════════╬═════════╬═══════╬═══════╬═══════╬═══════╬═══════╣")
+        lines.append(
+            "╔═══════╦════════════╦═══════╦═══════╦═══════╦═══════╦═══════╦═══════╦════════╦═════════╦═══════╦═══════╦═══════╦═══════╦═══════╗"
+        )
+        lines.append(
+            "║ Hour  ║   Prices   ║      Solar    ║ Grid  ║ Batt  ║ Home  ║ Grid  ║ Batt  ║Intent  ║SOC/SOE  ║ Base  ║Grid+  ║ Batt  ║ Total ║Savings║"
+        )
+        lines.append(
+            "║       ║ Buy/Sell   ║   Generated   ║Import ║Dischg ║ Cons  ║Export ║Charge ║        ║  %/kWh  ║ Cost  ║Solar  ║ Wear  ║ Cost  ║  SEK  ║"
+        )
+        lines.append(
+            "╠═══════╬════════════╬═══════╬═══════╬═══════╬═══════╬═══════╬═══════╬════════╬═════════╬═══════╬═══════╬═══════╬═══════╬═══════╣"
+        )
 
         # Initialize all accumulation variables
         total_consumption = 0.0
@@ -566,17 +654,19 @@ class DailyViewBuilder:
             else:
                 hour_marker = " "
 
-            # Format strategic intent 
+            # Format strategic intent
             intent_short = (
-                hour_data.decision.strategic_intent[:8] if hour_data.decision.strategic_intent else "IDLE"
+                hour_data.decision.strategic_intent[:8]
+                if hour_data.decision.strategic_intent
+                else "IDLE"
             )
 
-            # Format SOC/SOE display 
+            # Format SOC/SOE display
             soe_kwh = hour_data.energy.battery_soe_end
             soc_percent = (soe_kwh / self.battery_settings.total_capacity) * 100.0
             soc_soe_display = f"{soc_percent:3.0f}/{soe_kwh:4.1f}"
 
-            # Row formatting 
+            # Row formatting
             row = (
                 f"║ {hour_data.hour:02d}:00{hour_marker}║ {hour_data.economic.buy_price:4.2f}/ {hour_data.economic.sell_price:4.2f} "
                 f"║ {hour_data.energy.solar_production:5.1f} ║ {hour_data.energy.grid_imported:5.1f} ║ {hour_data.energy.battery_discharged:5.1f} ║"
@@ -585,7 +675,7 @@ class DailyViewBuilder:
             )
             lines.append(row)
 
-            # Accumulate combined totals 
+            # Accumulate combined totals
             total_consumption += hour_data.energy.home_consumption
             total_solar += hour_data.energy.solar_production
             total_grid_import += hour_data.energy.grid_imported
@@ -598,7 +688,7 @@ class DailyViewBuilder:
             total_cost += hour_total_cost
             total_savings += hour_data.economic.hourly_savings
 
-            # Accumulate split totals 
+            # Accumulate split totals
             if hour_data.data_source == "actual":
                 actual_consumption += hour_data.energy.home_consumption
                 actual_solar += hour_data.energy.solar_production
@@ -642,25 +732,33 @@ class DailyViewBuilder:
             logger.info(line)
 
         # Log summary statistics
-        logger.info(f"Daily energy summary: {total_solar:.1f} kWh solar, {total_consumption:.1f} kWh consumption, "
-                   f"{total_battery_charge:.1f} kWh charged, {total_battery_discharge:.1f} kWh discharged")
-        logger.info(f"Daily cost summary: {total_grid_only_cost:.2f} SEK grid-only, {total_cost:.2f} SEK optimized, "
-                   f"{total_savings:.2f} SEK savings")
-        logger.info(f"Actual vs Predicted: {daily_view.actual_hours_count} actual hours ({actual_savings:.2f} SEK), "
-                   f"{daily_view.predicted_hours_count} predicted hours ({predicted_savings:.2f} SEK)")
+        logger.info(
+            f"Daily energy summary: {total_solar:.1f} kWh solar, {total_consumption:.1f} kWh consumption, "
+            f"{total_battery_charge:.1f} kWh charged, {total_battery_discharge:.1f} kWh discharged"
+        )
+        logger.info(
+            f"Daily cost summary: {total_grid_only_cost:.2f} SEK grid-only, {total_cost:.2f} SEK optimized, "
+            f"{total_savings:.2f} SEK savings"
+        )
+        logger.info(
+            f"Actual vs Predicted: {daily_view.actual_hours_count} actual hours ({actual_savings:.2f} SEK), "
+            f"{daily_view.predicted_hours_count} predicted hours ({predicted_savings:.2f} SEK)"
+        )
 
-    def _get_list_item(self, data_list: list | None, index: int, field_name: str, default=None) -> float:
+    def _get_list_item(
+        self, data_list: list | None, index: int, field_name: str, default=None
+    ) -> float:
         """Get item from a list with proper error handling.
-        
+
         Args:
             data_list: List to extract from
             index: Index to extract
             field_name: Name of field for error reporting
             default: Default value if extraction fails and default is not None
-        
+
         Returns:
             float: Value from list or default
-            
+
         Raises:
             ValueError if list is None or index out of bounds and no default is provided
         """
@@ -668,25 +766,25 @@ class DailyViewBuilder:
             if default is not None:
                 return default
             raise ValueError(f"Missing {field_name} list in schedule")
-        
+
         if not isinstance(data_list, list):
             if default is not None:
                 return default
             raise ValueError(f"{field_name} is not a list: {type(data_list)}")
-        
+
         if not 0 <= index < len(data_list):
             if default is not None:
                 return default
             raise ValueError(
                 f"{field_name} index {index} out of bounds (0-{len(data_list)-1})"
             )
-        
+
         value = data_list[index]
         if value is None:
             if default is not None:
                 return default
             raise ValueError(f"{field_name}[{index}] is None")
-        
+
         try:
             return float(value)
         except (ValueError, TypeError) as e:
@@ -696,33 +794,44 @@ class DailyViewBuilder:
 
     def _get_previous_hour_soc(self, hour: int) -> float:
         """Get the start SOC for an hour from the ending SOC of the previous hour.
-        
+
         Args:
             hour: Hour to get the starting SOC for
-            
+
         Returns:
             float: Starting SOC percentage (0-100)
-            
+
         Raises:
             ValueError if previous hour data is not available
         """
         if hour == 0:
             # Hour 0 needs special handling - get from latest schedule
             latest_schedule = self.schedule_store.get_latest_schedule()
-            if latest_schedule and latest_schedule.optimization_result.input_data and "initial_soc" in latest_schedule.optimization_result.input_data:
+            if (
+                latest_schedule
+                and latest_schedule.optimization_result.input_data
+                and "initial_soc" in latest_schedule.optimization_result.input_data
+            ):
                 return latest_schedule.optimization_result.input_data["initial_soc"]
             else:
                 # Default fallback (should not happen with validation)
-                raise ValueError("Cannot determine SOC for hour 0 - no initial_soc in schedule")
+                raise ValueError(
+                    "Cannot determine SOC for hour 0 - no initial_soc in schedule"
+                )
         else:
             # For hours 1-23, get from previous hour's ending SOC
             prev_hour = hour - 1
             prev_data = self.historical_store.get_hour_record(prev_hour)
-            
+
             if prev_data:
                 # Found previous hour in historical data
                 # Convert SOE to SOC for display
-                return (prev_data.energy.battery_soe_end / self.battery_settings.total_capacity) * 100.0
+                return (
+                    prev_data.energy.battery_soe_end
+                    / self.battery_settings.total_capacity
+                ) * 100.0
             else:
                 # If no historical data, we need to calculate from the schedule
-                raise ValueError(f"No historical data for hour {prev_hour}, need to use schedule SOC")
+                raise ValueError(
+                    f"No historical data for hour {prev_hour}, need to use schedule SOC"
+                )

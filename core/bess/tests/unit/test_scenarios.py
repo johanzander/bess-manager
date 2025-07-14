@@ -156,13 +156,15 @@ def test_all_scenarios(scenario_name):
     print_optimization_results(result, buy_prices, sell_prices)
 
     # Validate that the optimization is reasonable
-    assert result.economic_summary.grid_only_cost > 0, "Grid-only cost should be positive"
+    assert (
+        result.economic_summary.grid_only_cost > 0
+    ), "Grid-only cost should be positive"
 
     # Check if 'expected_results' exists in the test data
     if "expected_results" in scenario:
         expected_results = scenario["expected_results"]
         economic_results = result.economic_summary
-        
+
         # Compare expected vs actual results with rounding to account for small numerical differences
         # Map scenario field names to EconomicSummary field names
         assert round(economic_results.grid_only_cost, 1) == round(
@@ -172,15 +174,13 @@ def test_all_scenarios(scenario_name):
         assert round(economic_results.battery_solar_cost, 1) == round(
             expected_results["battery_solar_cost"], 1
         ), f"Battery solar cost mismatch: {economic_results.battery_solar_cost:.2f} != {expected_results['battery_solar_cost']:.2f}"
-        
-        assert round(
-            economic_results.grid_to_battery_solar_savings, 1
-        ) == round(expected_results["base_to_battery_solar_savings"], 1
+
+        assert round(economic_results.grid_to_battery_solar_savings, 1) == round(
+            expected_results["base_to_battery_solar_savings"], 1
         ), f"Savings mismatch: {economic_results.grid_to_battery_solar_savings:.2f} != {expected_results['base_to_battery_solar_savings']:.2f}"
-        
-        assert round(
-            economic_results.grid_to_battery_solar_savings_pct, 1
-        ) == round(expected_results["base_to_battery_solar_savings_pct"], 1
+
+        assert round(economic_results.grid_to_battery_solar_savings_pct, 1) == round(
+            expected_results["base_to_battery_solar_savings_pct"], 1
         ), f"Savings percentage mismatch: {economic_results.grid_to_battery_solar_savings_pct:.2f}% != {expected_results['base_to_battery_solar_savings_pct']:.2f}%"
     else:
         logger.info(
@@ -209,8 +209,10 @@ def test_all_scenarios(scenario_name):
             # Add small tolerance for floating-point precision errors
             tolerance = 1e-10
             if battery_action > 0:  # Charging (positive)
-                assert battery_action <= battery["max_charge_power_kw"] + tolerance, \
-                    f"Battery charging action {battery_action:.2f} kW exceeds max charge power {battery['max_charge_power_kw']} kW"
+                assert (
+                    battery_action <= battery["max_charge_power_kw"] + tolerance
+                ), f"Battery charging action {battery_action:.2f} kW exceeds max charge power {battery['max_charge_power_kw']} kW"
             else:  # Discharging (negative)
-                assert abs(battery_action) <= battery["max_discharge_power_kw"] + tolerance, \
-                    f"Battery discharging action {abs(battery_action):.2f} kW exceeds max discharge power {battery['max_discharge_power_kw']} kW"
+                assert (
+                    abs(battery_action) <= battery["max_discharge_power_kw"] + tolerance
+                ), f"Battery discharging action {abs(battery_action):.2f} kW exceeds max discharge power {battery['max_discharge_power_kw']} kW"

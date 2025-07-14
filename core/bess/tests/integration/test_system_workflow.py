@@ -183,9 +183,7 @@ class TestCompleteWorkflows:
 
         # Verify all hours have HourlyData structure
         for i, hour_data in enumerate(hourly_data):
-            assert isinstance(
-                hour_data, HourlyData
-            ), f"Hour {i} should be HourlyData"
+            assert isinstance(hour_data, HourlyData), f"Hour {i} should be HourlyData"
 
 
 #           expected_hour = current_hour + i
@@ -228,9 +226,7 @@ class TestDailyViewGeneration:
 
         # Verify hourly data structure
         for i, hour_data in enumerate(daily_view.hourly_data):
-            assert isinstance(
-                hour_data, HourlyData
-            ), f"Hour {i} should be HourlyData"
+            assert isinstance(hour_data, HourlyData), f"Hour {i} should be HourlyData"
             assert hour_data.hour == i, f"Hour {i} should have correct hour number"
 
             if i < current_hour:

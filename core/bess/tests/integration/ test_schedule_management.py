@@ -27,9 +27,7 @@ class TestScheduleCreation:
 
         # Verify hourly_data contains HourlyData objects
         for i, hour_data in enumerate(optimization_result.hourly_data):
-            assert isinstance(
-                hour_data, HourlyData
-            ), f"Hour {i} should be HourlyData"
+            assert isinstance(hour_data, HourlyData), f"Hour {i} should be HourlyData"
             assert hour_data.hour == i, f"Hour {i} should have correct hour value"
             assert hasattr(hour_data, "energy"), f"Hour {i} should have energy data"
             assert hasattr(hour_data, "economic"), f"Hour {i} should have economic data"
@@ -351,7 +349,9 @@ class TestScheduleValidation:
             energy = hour_data.energy
 
             # Basic energy balance checks
-            assert energy.solar_production >= 0, f"Hour {i} solar should be non-negative"
+            assert (
+                energy.solar_production >= 0
+            ), f"Hour {i} solar should be non-negative"
             assert (
                 energy.home_consumption >= 0
             ), f"Hour {i} consumption should be non-negative"
@@ -367,5 +367,3 @@ class TestScheduleValidation:
             assert (
                 0 <= energy.battery_soc_end <= 100
             ), f"Hour {i} end SOC should be 0-100%"
-
-

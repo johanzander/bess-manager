@@ -447,16 +447,16 @@ def _calculate_reward(
     # ============================================================================
     # Determine why this action makes sense strategically
     if power > 0.1:  # Charging
-        if energy_data.grid_to_battery > energy_data.solar_to_battery:
-            strategic_intent = "GRID_CHARGING"  # Primarily storing grid energy
+        if energy_data.grid_to_battery > 0.1:  # ANY grid charging needs capability
+            strategic_intent = "GRID_CHARGING"  # Enable grid charging capability
         else:
-            strategic_intent = "SOLAR_STORAGE"  # Primarily storing solar energy
-    elif power < -0.1:  # Discharging
-        if energy_data.battery_to_grid > energy_data.battery_to_home:
-            strategic_intent = "EXPORT_ARBITRAGE"  # Selling to grid
+            strategic_intent = "SOLAR_STORAGE"  # Pure solar charging
+    elif power < -0.1:  # Discharging  
+        if energy_data.battery_to_grid > 0.1:  # ANY export needs capability
+            strategic_intent = "EXPORT_ARBITRAGE"  # Enable export capability
         else:
-            strategic_intent = "LOAD_SUPPORT"  # Supporting home load
-    else:  # Minimal action
+            strategic_intent = "LOAD_SUPPORT"  # Pure home support
+    else:
         strategic_intent = "IDLE"
 
     # ============================================================================

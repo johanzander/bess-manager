@@ -373,8 +373,8 @@ class DailyViewBuilder:
 
             hour_result = hourly_data_list[result_index]
 
-            # Just return the optimization result as-is
-            # The optimization algorithm produced a coherent, mathematically consistent result
+            # Set the correct hour index for the daily view
+            hour_result.hour = hour
             return hour_result
 
         except Exception as e:

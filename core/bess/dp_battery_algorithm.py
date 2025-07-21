@@ -75,6 +75,7 @@ from enum import Enum
 
 import numpy as np
 
+from core.bess.decision_intelligence import create_decision_data
 from core.bess.models import (
     DecisionData,
     EconomicData,
@@ -347,7 +348,7 @@ def _calculate_reward(
             grid_to_battery * current_buy_price
         )  # Pay for grid throughput
 
-        # CRITICAL FIX: Include cycle cost in cost basis for proper profitability analysis
+        # Include cycle cost in cost basis for proper profitability analysis
         total_new_cost = (
             grid_energy_cost + battery_wear_cost
         )  # Include both grid and cycle costs
@@ -366,10 +367,8 @@ def _calculate_reward(
                 else cost_basis
             )
 
-    elif power < 0:  # Discharging - CORRECTED profitability check
-        # ========================================================================
-        # CRITICAL FIX: Calculate the TRUE value of discharged energy
-        # ========================================================================
+    elif power < 0:  # Discharging
+
         # Discharged energy can be used for:
         # 1. Avoiding grid purchases (saves buy_price per kWh delivered)
         # 2. Grid export (earns sell_price per kWh delivered)
@@ -422,17 +421,12 @@ def _calculate_reward(
                 decision=decision_data,
             )
             return float("-inf"), cost_basis, hour_data
-    #        else:
-    #            # Discharge is profitable - log the details for debugging
-    #            logger.debug(
-    #                f"Hour {hour}: Profitable discharge allowed. "
-    #                f"Best value: {effective_value_per_kwh_stored:.3f} > "
-    #                f"Cost basis: {cost_basis:.3f} SEK/kWh stored"
-    #            )
 
     # ============================================================================
     # REWARD CALCULATION
-    # ============================================================================    # Calculate immediate economic reward (negative of total cost)
+    # ============================================================================    
+    
+    # Calculate immediate economic reward (negative of total cost)
     import_cost = energy_data.grid_imported * current_buy_price
     export_revenue = energy_data.grid_exported * current_sell_price
 
@@ -443,26 +437,25 @@ def _calculate_reward(
     reward = -total_cost  # Negative cost = positive reward
 
     # ============================================================================
-    # STRATEGIC INTENT DETERMINATION
-    # ============================================================================
-    # Determine why this action makes sense strategically
-    if power > 0.1:  # Charging
-        if energy_data.grid_to_battery > 0.1:  # ANY grid charging needs capability
-            strategic_intent = "GRID_CHARGING"  # Enable grid charging capability
-        else:
-            strategic_intent = "SOLAR_STORAGE"  # Pure solar charging
-    elif power < -0.1:  # Discharging  
-        if energy_data.battery_to_grid > 0.1:  # ANY export needs capability
-            strategic_intent = "EXPORT_ARBITRAGE"  # Enable export capability
-        else:
-            strategic_intent = "LOAD_SUPPORT"  # Pure home support
-    else:
-        strategic_intent = "IDLE"
+    # DECISION DATA CREATION
+    # ============================================================================    
+
+
+    decision_data = create_decision_data(
+        power=power,
+        energy_data=energy_data,
+        hour=hour,
+        cost_basis=new_cost_basis,
+        reward=reward,
+        import_cost=import_cost,
+        export_revenue=export_revenue,
+        battery_wear_cost=battery_wear_cost,
+    )
 
     # ============================================================================
-    # CREATE HOURLY DATA OBJECT
-    # ============================================================================
-    # Package all results into standardized data structure
+    # ECONOMIC DATA CREATION
+    # ============================================================================    
+
     grid_cost = import_cost - export_revenue
     hourly_cost = grid_cost + battery_wear_cost
     grid_only_cost = home_consumption * current_buy_price
@@ -483,11 +476,9 @@ def _calculate_reward(
         hourly_savings=hourly_savings,
     )
 
-    decision_data = DecisionData(
-        strategic_intent=strategic_intent,
-        battery_action=power,
-        cost_basis=new_cost_basis,
-    )
+    # ============================================================================
+    # CREATE HOURLY DATA OBJECT
+    # ============================================================================
 
     new_hourly_data = HourlyData(
         hour=hour,

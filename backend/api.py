@@ -246,7 +246,178 @@ async def get_dashboard_data(date: str = Query(None)):
 # API Endpoints for Decision Insights
 ############################################################################################
 
+# Add this converter function to your existing api.py
+
+def convert_real_data_to_mock_format(hourly_data_list, current_hour):
+    """
+    Convert real HourlyData with enhanced DecisionData to exact mock format.
+    
+    Args:
+        hourly_data_list: List of HourlyData from optimization (with enhanced DecisionData)
+        current_hour: Current hour for marking is_current_hour
+        
+    Returns:
+        Dictionary matching exact mock decision intelligence format
+    """
+    patterns = []
+    
+    for hourly_data in hourly_data_list:
+        hour = hourly_data.hour
+        energy = hourly_data.energy
+        economic = hourly_data.economic
+        decision = hourly_data.decision
+        
+        # Determine if this is current hour and actual vs predicted
+        is_current = hour == current_hour
+        is_actual = hourly_data.data_source == "actual"
+        
+        # Create flows dictionary matching exact mock format
+        flows = {
+            "solar_to_home": energy.solar_to_home,
+            "solar_to_battery": energy.solar_to_battery,
+            "solar_to_grid": energy.solar_to_grid,
+            "grid_to_home": energy.grid_to_home,
+            "grid_to_battery": energy.grid_to_battery,
+            "battery_to_home": energy.battery_to_home,
+            "battery_to_grid": energy.battery_to_grid,
+        }
+        
+        # Create immediate_flow_values matching mock format (economic value of each flow)
+        immediate_flow_values = {}
+        
+        # Add flow values only for significant flows (> 0.1 kWh)
+        if energy.solar_to_home > 0.1:
+            immediate_flow_values["solar_to_home"] = energy.solar_to_home * economic.buy_price
+        
+        if energy.grid_to_home > 0.1:
+            immediate_flow_values["grid_to_home"] = -(energy.grid_to_home * economic.buy_price)
+        
+        if energy.grid_to_battery > 0.1:
+            immediate_flow_values["grid_to_battery"] = -(energy.grid_to_battery * economic.buy_price)
+        
+        if energy.battery_to_home > 0.1:
+            immediate_flow_values["battery_to_home"] = energy.battery_to_home * economic.buy_price
+        
+        if energy.battery_to_grid > 0.1:
+            immediate_flow_values["battery_to_grid"] = energy.battery_to_grid * economic.sell_price
+        
+        if energy.solar_to_grid > 0.1:
+            immediate_flow_values["solar_to_grid"] = energy.solar_to_grid * economic.sell_price
+        
+        # Calculate immediate_total_value as sum of all flow values
+        immediate_total_value = sum(immediate_flow_values.values())
+        
+        # Create future_opportunity matching mock format
+        future_opportunity = {
+            "description": f"Future value realization from {decision.strategic_intent.lower().replace('_', ' ')} strategy",
+            "target_hours": [],
+            "expected_value": decision.future_value or 0.0,
+            "dependencies": [
+                "Price forecast accuracy", 
+                "Battery state management",
+                "Solar production forecast"
+            ]
+        }
+        
+        # Create the pattern object matching exact mock format
+        pattern = {
+            "hour": hour,
+            "pattern_name": decision.pattern_name or f"{decision.strategic_intent} Strategy",
+            "flow_description": decision.description or "No significant energy flows",
+            "economic_context_description": f"Strategic intent: {decision.strategic_intent} - {decision.pattern_name or 'Standard operation'}",
+            "flows": flows,
+            "immediate_flow_values": immediate_flow_values,
+            "immediate_total_value": immediate_total_value,
+            "future_opportunity": future_opportunity,
+            "economic_chain": decision.economic_chain or f"Hour {hour:02d}: No enhanced economic reasoning available",
+            "net_strategy_value": decision.net_strategy_value or 0.0,
+            "electricity_price": economic.buy_price,
+            "is_current_hour": is_current,
+            "is_actual": is_actual
+        }
+        
+        patterns.append(pattern)
+    
+    # Calculate summary statistics matching mock format
+    if patterns:
+        total_net_value = sum(p["net_strategy_value"] for p in patterns)
+        actual_patterns = [p for p in patterns if p["is_actual"]]
+        predicted_patterns = [p for p in patterns if not p["is_actual"]]
+        best_decision = max(patterns, key=lambda p: p["net_strategy_value"])
+        
+        summary = {
+            "total_net_value": total_net_value,
+            "best_decision_hour": best_decision["hour"],
+            "best_decision_value": best_decision["net_strategy_value"],
+            "actual_hours_count": len(actual_patterns),
+            "predicted_hours_count": len(predicted_patterns)
+        }
+    else:
+        summary = {
+            "total_net_value": 0.0,
+            "best_decision_hour": 0,
+            "best_decision_value": 0.0,
+            "actual_hours_count": 0,
+            "predicted_hours_count": 0
+        }
+    
+    # Create response matching exact mock format
+    response = {
+        "patterns": patterns,
+        "summary": summary
+    }
+    
+    # Process future_opportunity objects for camelCase conversion (matching mock logic)
+    for pattern in patterns:
+        opportunity = pattern.get("future_opportunity")
+        if opportunity:
+            pattern["future_opportunity"] = {
+                "description": opportunity["description"],
+                "targetHours": opportunity["target_hours"],
+                "expectedValue": opportunity["expected_value"],
+                "dependencies": opportunity["dependencies"]
+            }
+    
+    return response
+
+
 @router.get("/api/decision-intelligence")
+async def get_decision_intelligence():
+    """
+    Get decision intelligence data using real optimization results.
+    Converts real HourlyData to exact mock format for frontend compatibility.
+    """
+    from app import bess_controller
+
+    try:
+        # Get the daily view with real optimization data (same as dashboard)
+        daily_view = bess_controller.system.get_current_daily_view()
+        
+        # Convert real HourlyData to mock format
+        response = convert_real_data_to_mock_format(
+            daily_view.hourly_data, 
+            daily_view.current_hour
+        )
+        
+        # Convert snake_case to camelCase for frontend (matching mock behavior)
+        return convert_keys_to_camel_case(response)
+        
+    except Exception as e:
+        logger.error(f"Error generating decision intelligence from real data: {e}")
+        # Fallback to empty response on error
+        empty_response = {
+            "patterns": [],
+            "summary": {
+                "total_net_value": 0.0,
+                "best_decision_hour": 0,
+                "best_decision_value": 0.0,
+                "actual_hours_count": 0,
+                "predicted_hours_count": 0
+            }
+        }
+        return convert_keys_to_camel_case(empty_response)
+
+#@router.get("/api/decision-intelligence")
 async def get_decision_intelligence_mock():
     """
     Get decision intelligence data with detailed flow patterns and economic reasoning.

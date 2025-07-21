@@ -311,20 +311,30 @@ export const DetailedSavingsAnalysis: React.FC<DetailedSavingsAnalysisProps> = (
                 </td>
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 bg-yellow-50 dark:bg-yellow-900/20 text-center">
                   <div className={`font-medium ${
-                    Math.abs(hour.hourlySavings || 0) < 0.01 ? 'text-gray-900 dark:text-white' : 
-                    (hour.hourlySavings || 0) > 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
+                    Math.abs(hour.solarSavings || 0) < 0.01 ? 'text-gray-900 dark:text-white' : 
+                    (hour.solarSavings || 0) > 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
                   }`}>
-                    {Math.abs(hour.hourlySavings || 0) < 0.01 ? '0.00' : displayValue(hour.hourlySavings || 0)}
+                    {Math.abs(hour.solarSavings || 0) < 0.01 ? '0.00' : displayValue(hour.solarSavings || 0)}                  
                   </div>
                   <div className="text-xs text-gray-500 dark:text-gray-400">SEK</div>
                 </td>
                 
                 {/* Solar+Battery Data */}
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 bg-green-50 dark:bg-green-900/20 text-center">
-                  <div className={`font-medium ${batteryAction > 0 ? 'text-blue-600 dark:text-blue-400' : batteryAction < 0 ? 'text-orange-600 dark:text-orange-400' : 'text-gray-500 dark:text-gray-400'}`}>
-                    {batteryAction > 0 ? '+' : ''}{displayValue(batteryAction, "0.0", 1)}
+                  <div className={`font-medium ${
+                    Math.abs(batteryAction) < 0.01 ? 'text-gray-500 dark:text-gray-400' : 
+                    batteryAction > 0 ? 'text-blue-600 dark:text-blue-400' : 'text-orange-600 dark:text-orange-400'
+                  }`}>
+                    {(() => {
+                      if (Math.abs(batteryAction) < 0.01) {
+                        return '0.0';
+                      } else if (batteryAction > 0) {
+                        return `+${displayValue(batteryAction, "0.0", 1)}`;
+                      } else {
+                        return displayValue(batteryAction, "0.0", 1);
+                      }
+                    })()}
                   </div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">kWh</div>
                 </td>
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 bg-green-50 dark:bg-green-900/20 text-center">
                   <div className="font-medium">{displayValue(batterySoc, "N/A", 0)}%</div>

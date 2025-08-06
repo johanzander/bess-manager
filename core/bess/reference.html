@@ -1,0 +1,818 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Decision Intelligence</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f9fafb;
+            color: #111827;
+            line-height: 1.5;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            margin-bottom: 24px;
+        }
+        
+        .header h1 {
+            font-size: 24px;
+            font-weight: 700;
+            margin: 0 0 4px 0;
+            color: #111827;
+        }
+        
+        .header p {
+            color: #6b7280;
+            margin: 0;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+        
+        .stat-card {
+            background: white;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 16px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+        
+        .stat-card .value {
+            font-size: 20px;
+            font-weight: 600;
+            color: #111827;
+        }
+        
+        .stat-card .label {
+            font-size: 14px;
+            color: #6b7280;
+            margin-bottom: 4px;
+        }
+        
+        .hours-table {
+            background: white;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+        
+        .table-header {
+            background: #f9fafb;
+            border-bottom: 1px solid #e5e7eb;
+            padding: 16px 20px;
+        }
+        
+        .table-header h2 {
+            font-size: 18px;
+            font-weight: 600;
+            margin: 0 0 4px 0;
+            color: #111827;
+        }
+        
+        .table-header p {
+            color: #6b7280;
+            margin: 0;
+            font-size: 14px;
+        }
+        
+        .hour-row {
+            border-bottom: 1px solid #f3f4f6;
+        }
+        
+        .hour-summary {
+            display: grid;
+            grid-template-columns: 80px 120px 120px 120px 120px 100px 40px;
+            gap: 16px;
+            padding: 12px 20px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            align-items: center;
+        }
+        
+        .hour-summary:hover {
+            background-color: #f9fafb;
+        }
+        
+        .hour-time {
+            font-weight: 600;
+            color: #111827;
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 500;
+            margin-left: 8px;
+        }
+        
+        .badge-actual {
+            background: #d1fae5;
+            color: #065f46;
+        }
+        
+        .badge-predicted {
+            background: #dbeafe;
+            color: #1e40af;
+        }
+        
+        .positive {
+            color: #059669;
+            font-weight: 600;
+        }
+        
+        .negative {
+            color: #dc2626;
+            font-weight: 600;
+        }
+        
+        .neutral {
+            color: #6b7280;
+            font-weight: 600;
+        }
+        
+        .expand-icon {
+            width: 16px;
+            height: 16px;
+            color: #9ca3af;
+            transition: transform 0.2s;
+        }
+        
+        .hour-row.expanded .expand-icon {
+            transform: rotate(90deg);
+        }
+        
+        .hour-details {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease;
+            background: #f8fafc;
+            border-top: 1px solid #e5e7eb;
+        }
+        
+        .hour-row.expanded .hour-details {
+            max-height: 800px;
+        }
+        
+        .details-content {
+            padding: 24px;
+        }
+        
+        .tabs {
+            display: flex;
+            border-bottom: 1px solid #e5e7eb;
+            margin-bottom: 20px;
+        }
+        
+        .tab {
+            padding: 8px 16px;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            color: #6b7280;
+            font-weight: 500;
+            font-size: 14px;
+        }
+        
+        .tab.active {
+            color: #2563eb;
+            border-bottom-color: #2563eb;
+        }
+        
+        .tab-content {
+            display: none;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        .view-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 16px;
+        }
+        
+        .view-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #111827;
+        }
+        
+        .view-subtitle {
+            color: #6b7280;
+            font-size: 14px;
+            margin-top: 2px;
+        }
+        
+        .toggle-buttons {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .toggle-btn {
+            padding: 6px 12px;
+            font-size: 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 4px;
+            background: white;
+            color: #374151;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .toggle-btn.active {
+            background: #2563eb;
+            color: white;
+            border-color: #2563eb;
+        }
+        
+        .content-box {
+            background: white;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            padding: 16px;
+        }
+        
+        .chart-container {
+            height: 300px;
+            position: relative;
+        }
+        
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        .data-table th {
+            background: #f9fafb;
+            padding: 8px 12px;
+            text-align: left;
+            border-bottom: 1px solid #e5e7eb;
+            font-weight: 600;
+            color: #374151;
+            font-size: 12px;
+            text-transform: uppercase;
+        }
+        
+        .data-table td {
+            padding: 8px 12px;
+            border-bottom: 1px solid #f3f4f6;
+            font-size: 14px;
+        }
+        
+        .link-hour {
+            color: #2563eb;
+            text-decoration: none;
+            font-weight: 500;
+        }
+        
+        .link-hour:hover {
+            text-decoration: underline;
+        }
+        
+        .hidden {
+            display: none !important;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>Decision Intelligence</h1>
+            <p>Algorithm decision analysis and transparency</p>
+        </div>
+
+        <!-- Summary Stats -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="label">💰 Total Daily Value</div>
+                <div class="value positive">+47.3 SEK</div>
+                <div style="font-size: 12px; color: #6b7280; margin-top: 4px;">Net optimization benefit</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">⚡ Peak Export Volume</div>
+                <div class="value">8.7 kWh</div>
+                <div style="font-size: 12px; color: #6b7280; margin-top: 4px;">Maximum single hour discharge</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">🎯 Decision Confidence</div>
+                <div class="value">92%</div>
+                <div style="font-size: 12px; color: #6b7280; margin-top: 4px;">Average optimization certainty</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">🏆 Peak Value Hour</div>
+                <div class="value">19:00</div>
+                <div style="font-size: 12px; color: #6b7280; margin-top: 4px;">Highest economic impact hour</div>
+            </div>
+        </div>
+
+        <!-- Hours Table -->
+        <div class="hours-table">
+            <div class="table-header">
+                <h2>Hourly Decision Analysis</h2>
+                <p>Click any hour to explore the decision reasoning</p>
+            </div>
+            
+            <!-- Table Column Headers -->
+            <div style="display: grid; grid-template-columns: 80px 120px 120px 120px 120px 100px 40px; gap: 16px; padding: 12px 20px; background: #f3f4f6; border-bottom: 1px solid #e5e7eb; font-size: 12px; font-weight: 600; color: #374151; text-transform: uppercase;">
+                <div>Hour</div>
+                <div>Battery Action</div>
+                <div>Immediate Value</div>
+                <div>Future Value</div>
+                <div>Total Reward</div>
+                <div>Grid Price</div>
+                <div></div>
+            </div>
+            
+            <!-- Hour 00:00 -->
+            <div class="hour-row" data-hour="0">
+                <div class="hour-summary" onclick="toggleHour(0)">
+                    <div class="hour-time">
+                        00:00
+                        <span class="badge badge-actual">Actual</span>
+                    </div>
+                    <div>-0.4 kWh</div>
+                    <div class="negative">-1.53 SEK</div>
+                    <div class="positive">+3.53 SEK</div>
+                    <div class="positive">+2.00 SEK</div>
+                    <div>1.91 SEK/kWh</div>
+                    <div>
+                        <svg class="expand-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                        </svg>
+                    </div>
+                </div>
+                
+                <div class="hour-details">
+                    <div class="details-content">
+                        <div class="tabs">
+                            <div class="tab active" onclick="showTab(0, 'landscape')">Decision Landscape</div>
+                            <div class="tab" onclick="showTab(0, 'economic')">Economic Impact</div>
+                            <div class="tab" onclick="showTab(0, 'future')">Future Timeline</div>
+                        </div>
+                        
+                        <!-- Decision Landscape -->
+                        <div class="tab-content active" id="landscape-0">
+                            <div class="view-header">
+                                <div>
+                                    <div class="view-title">📊 Decision Landscape</div>
+                                    <div class="view-subtitle">Why was -0.4 kWh chosen over all other possible actions?</div>
+                                </div>
+                                <div class="toggle-buttons">
+                                    <button class="toggle-btn active" onclick="toggleView(0, 'landscape', 'chart')">Chart</button>
+                                    <button class="toggle-btn" onclick="toggleView(0, 'landscape', 'table')">Table</button>
+                                </div>
+                            </div>
+                            
+                            <div class="content-box">
+                                <div class="chart-container" id="landscapeChartContainer-0">
+                                    <canvas id="landscapeChart-0"></canvas>
+                                </div>
+                                <div class="hidden" id="landscapeTable-0">
+                                    <table class="data-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Action (kWh)</th>
+                                                <th>Total Reward (SEK)</th>
+                                                <th>Difference</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr style="background: #f0fdf4;">
+                                                <td><strong>-0.4 (Chosen)</strong></td>
+                                                <td class="positive">+2.00</td>
+                                                <td>Optimal</td>
+                                            </tr>
+                                            <tr>
+                                                <td>0.0 (Do Nothing)</td>
+                                                <td>+1.16</td>
+                                                <td class="negative">-0.84</td>
+                                            </tr>
+                                            <tr>
+                                                <td>-1.0</td>
+                                                <td>+0.30</td>
+                                                <td class="negative">-1.70</td>
+                                            </tr>
+                                            <tr>
+                                                <td>+1.0</td>
+                                                <td class="negative">-1.20</td>
+                                                <td class="negative">-3.20</td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Economic Impact -->
+                        <div class="tab-content" id="economic-0">
+                            <div class="view-header">
+                                <div>
+                                    <div class="view-title">💰 Economic Impact Analysis</div>
+                                    <div class="view-subtitle">What economic components create the immediate value?</div>
+                                </div>
+                                <div class="toggle-buttons">
+                                    <button class="toggle-btn active" onclick="toggleView(0, 'economic', 'chart')">Chart</button>
+                                    <button class="toggle-btn" onclick="toggleView(0, 'economic', 'table')">Table</button>
+                                </div>
+                            </div>
+                            
+                            <div class="content-box">
+                                <div class="chart-container" id="economicChartContainer-0">
+                                    <canvas id="economicChart-0"></canvas>
+                                </div>
+                                <div class="hidden" id="economicTable-0">
+                                    <table class="data-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Component</th>
+                                                <th>Energy</th>
+                                                <th>Rate</th>
+                                                <th>Value</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr style="background-color: #fef2f2;">
+                                                <td>Grid Purchase (Home)</td>
+                                                <td>0.8 kWh</td>
+                                                <td>1.91 SEK/kWh</td>
+                                                <td class="negative">-1.53 SEK</td>
+                                            </tr>
+                                            <tr style="background-color: #f0fdf4;">
+                                                <td>Grid Avoidance Benefit</td>
+                                                <td>0.4 kWh</td>
+                                                <td>1.91 SEK/kWh</td>
+                                                <td class="positive">+0.76 SEK</td>
+                                            </tr>
+                                            <tr style="background-color: #fef2f2;">
+                                                <td>Battery Cost Basis</td>
+                                                <td>0.4 kWh</td>
+                                                <td>0.40 SEK/kWh</td>
+                                                <td class="negative">-0.16 SEK</td>
+                                            </tr>
+                                            <tr style="background-color: #fef2f2;">
+                                                <td>Battery Wear Cost</td>
+                                                <td>0.4 kWh</td>
+                                                <td>0.05 SEK/kWh</td>
+                                                <td class="negative">-0.02 SEK</td>
+                                            </tr>
+                                            <tr style="border-top: 2px solid #374151; background-color: #f9fafb; font-weight: 600;">
+                                                <td><strong>Net Immediate Value</strong></td>
+                                                <td>-</td>
+                                                <td>-</td>
+                                                <td class="negative"><strong>-1.53 SEK</strong></td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Future Timeline -->
+                        <div class="tab-content" id="future-0">
+                            <div class="view-header">
+                                <div>
+                                    <div class="view-title">⏰ Future Value Timeline</div>
+                                    <div class="view-subtitle">When is the +3.53 SEK future value realized?</div>
+                                </div>
+                                <div class="toggle-buttons">
+                                    <button class="toggle-btn active" onclick="toggleView(0, 'future', 'chart')">Chart</button>
+                                    <button class="toggle-btn" onclick="toggleView(0, 'future', 'table')">Table</button>
+                                </div>
+                            </div>
+                            
+                            <div class="content-box">
+                                <div class="chart-container" id="futureChartContainer-0">
+                                    <canvas id="futureChart-0"></canvas>
+                                </div>
+                                <div class="hidden" id="futureTable-0">
+                                    <table class="data-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Hour</th>
+                                                <th>Contribution</th>
+                                                <th>Type</th>
+                                                <th>Action</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr>
+                                                <td><a href="#" class="link-hour" onclick="navigateToHour(7)">07:00</a></td>
+                                                <td class="positive">+0.03 SEK</td>
+                                                <td>Load Support</td>
+                                                <td>-0.1 kWh</td>
+                                            </tr>
+                                            <tr>
+                                                <td><a href="#" class="link-hour" onclick="navigateToHour(8)">08:00</a></td>
+                                                <td class="negative">-0.23 SEK</td>
+                                                <td>Solar Storage</td>
+                                                <td>+0.6 kWh</td>
+                                            </tr>
+                                            <tr>
+                                                <td><a href="#" class="link-hour" onclick="navigateToHour(19)">19:00</a></td>
+                                                <td class="positive">+2.18 SEK</td>
+                                                <td>Peak Export</td>
+                                                <td>-14.2 kWh</td>
+                                            </tr>
+                                            <tr>
+                                                <td colspan="4" style="text-align: center; color: #6b7280; font-style: italic;">... and 20 more hours</td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Hour 07:00 -->
+            <div class="hour-row" data-hour="7">
+                <div class="hour-summary" onclick="toggleHour(7)">
+                    <div class="hour-time">
+                        07:00
+                        <span class="badge badge-actual">Actual</span>
+                    </div>
+                    <div>-0.1 kWh</div>
+                    <div class="positive">+0.03 SEK</div>
+                    <div class="positive">+2.89 SEK</div>
+                    <div class="positive">+2.92 SEK</div>
+                    <div>1.85 SEK/kWh</div>
+                    <div>
+                        <svg class="expand-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                        </svg>
+                    </div>
+                </div>
+                
+                <div class="hour-details">
+                    <div class="details-content">
+                        <div style="text-align: center; padding: 40px; color: #6b7280;">
+                            Loading hour 07:00 analysis...
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Hour 19:00 -->
+            <div class="hour-row" data-hour="19">
+                <div class="hour-summary" onclick="toggleHour(19)">
+                    <div class="hour-time">
+                        19:00
+                        <span class="badge badge-predicted">Predicted</span>
+                    </div>
+                    <div>-14.2 kWh</div>
+                    <div class="positive">+21.84 SEK</div>
+                    <div class="neutral">+0.00 SEK</div>
+                    <div class="positive">+21.84 SEK</div>
+                    <div>2.36 SEK/kWh</div>
+                    <div>
+                        <svg class="expand-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                        </svg>
+                    </div>
+                </div>
+                
+                <div class="hour-details">
+                    <div class="details-content">
+                        <div style="text-align: center; padding: 40px; color: #6b7280;">
+                            Loading hour 19:00 analysis...
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentExpandedHour = null;
+        let chartsInitialized = {};
+
+        function toggleHour(hour) {
+            const hourRow = document.querySelector(`[data-hour="${hour}"]`);
+            const details = hourRow.querySelector('.hour-details');
+            const isExpanded = hourRow.classList.contains('expanded');
+            
+            // Close currently expanded hour
+            if (currentExpandedHour !== null && currentExpandedHour !== hour) {
+                const currentRow = document.querySelector(`[data-hour="${currentExpandedHour}"]`);
+                currentRow.classList.remove('expanded');
+            }
+            
+            // Toggle current hour
+            if (isExpanded) {
+                hourRow.classList.remove('expanded');
+                currentExpandedHour = null;
+            } else {
+                hourRow.classList.add('expanded');
+                currentExpandedHour = hour;
+                
+                // Initialize charts for this hour if not already done
+                if (!chartsInitialized[hour]) {
+                    setTimeout(() => initializeCharts(hour), 300);
+                    chartsInitialized[hour] = true;
+                }
+            }
+        }
+
+        function showTab(hour, tabName) {
+            const hourRow = document.querySelector(`[data-hour="${hour}"]`);
+            
+            // Update tabs
+            const tabs = hourRow.querySelectorAll('.tab');
+            tabs.forEach(tab => tab.classList.remove('active'));
+            event.target.classList.add('active');
+            
+            // Show corresponding content
+            const contents = hourRow.querySelectorAll('.tab-content');
+            contents.forEach(content => content.classList.remove('active'));
+            hourRow.querySelector(`#${tabName}-${hour}`).classList.add('active');
+        }
+
+        function toggleView(hour, section, viewType) {
+            const chartContainer = document.getElementById(`${section}ChartContainer-${hour}`);
+            const tableContainer = document.getElementById(`${section}Table-${hour}`);
+            const buttons = event.target.parentElement.querySelectorAll('.toggle-btn');
+            
+            if (viewType === 'chart') {
+                chartContainer.classList.remove('hidden');
+                tableContainer.classList.add('hidden');
+                buttons[0].classList.add('active');
+                buttons[1].classList.remove('active');
+            } else {
+                chartContainer.classList.add('hidden');
+                tableContainer.classList.remove('hidden');
+                buttons[0].classList.remove('active');
+                buttons[1].classList.add('active');
+            }
+        }
+
+        function navigateToHour(targetHour) {
+            // Close current hour if open
+            if (currentExpandedHour !== null) {
+                const currentRow = document.querySelector(`[data-hour="${currentExpandedHour}"]`);
+                currentRow.classList.remove('expanded');
+            }
+            
+            // Open target hour
+            const targetRow = document.querySelector(`[data-hour="${targetHour}"]`);
+            if (targetRow) {
+                targetRow.classList.add('expanded');
+                currentExpandedHour = targetHour;
+                targetRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                
+                if (!chartsInitialized[targetHour]) {
+                    setTimeout(() => initializeCharts(targetHour), 300);
+                    chartsInitialized[targetHour] = true;
+                }
+            } else {
+                alert(`Hour ${targetHour}:00 data not available in this demo.`);
+            }
+            return false;
+        }
+
+        function initializeCharts(hour) {
+            // Only initialize charts for hour 0 in this demo
+            if (hour !== 0) return;
+            
+            // Decision Landscape Chart
+            const landscapeCtx = document.getElementById(`landscapeChart-${hour}`);
+            if (landscapeCtx && !landscapeCtx.chart) {
+                landscapeCtx.chart = new Chart(landscapeCtx, {
+                    type: 'bar',
+                    data: {
+                        labels: ['-15', '-10', '-5', '-2', '-1', '-0.4', '0', '+1', '+2', '+5', '+10', '+15'],
+                        datasets: [{
+                            data: [-8.5, -6.2, -3.1, -0.8, 0.3, 2.0, 1.16, -1.2, -2.8, -5.1, -7.4, -9.8],
+                            backgroundColor: function(context) {
+                                if (context.dataIndex === 5) return '#059669';
+                                return context.parsed.y > 0 ? '#84cc16' : '#f87171';
+                            },
+                            borderColor: function(context) {
+                                return context.dataIndex === 5 ? '#047857' : 'transparent';
+                            },
+                            borderWidth: function(context) {
+                                return context.dataIndex === 5 ? 3 : 0;
+                            }
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: { legend: { display: false } },
+                        scales: {
+                            x: { title: { display: true, text: 'Battery Action (kWh)' }},
+                            y: { title: { display: true, text: 'Total Reward (SEK)' }}
+                        }
+                    }
+                });
+            }
+
+            // Economic Chart
+            const economicCtx = document.getElementById(`economicChart-${hour}`);
+            if (economicCtx && !economicCtx.chart) {
+                economicCtx.chart = new Chart(economicCtx, {
+                    type: 'bar',
+                    data: {
+                        labels: ['Grid\nPurchase', 'Grid\nAvoidance', 'Battery\nCost', 'Battery\nWear', 'Net\nTotal'],
+                        datasets: [{
+                            data: [-1.53, 0.76, -0.16, -0.02, -1.53],
+                            backgroundColor: ['#f87171', '#84cc16', '#f87171', '#f87171', '#6b7280'],
+                            borderColor: ['#dc2626', '#65a30d', '#dc2626', '#dc2626', '#374151'],
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: { 
+                            legend: { display: false },
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        return context.parsed.y.toFixed(2) + ' SEK';
+                                    }
+                                }
+                            }
+                        },
+                        scales: { 
+                            y: { 
+                                title: { display: true, text: 'Value (SEK)' },
+                                grid: { color: '#f3f4f6' }
+                            },
+                            x: {
+                                grid: { display: false }
+                            }
+                        }
+                    }
+                });
+            }
+
+            // Future Value Chart
+            const futureCtx = document.getElementById(`futureChart-${hour}`);
+            if (futureCtx && !futureCtx.chart) {
+                const futureData = [0.02, 0.02, 0.02, 0.03, 0.03, 0.03, 0.03, -0.23, -0.18, -0.15, -0.21, -0.19, -0.17, -0.16, -0.19, -0.20, 0.12, 0.15, 2.18, 0.08, 0.06, 0.04, 0.02];
+                
+                futureCtx.chart = new Chart(futureCtx, {
+                    type: 'bar',
+                    data: {
+                        labels: Array.from({length: 23}, (_, i) => `${String(i + 1).padStart(2, '0')}:00`),
+                        datasets: [{
+                            data: futureData,
+                            backgroundColor: futureData.map(val => val > 0 ? '#84cc16' : '#f87171')
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: { 
+                            legend: { display: false },
+                            tooltip: {
+                                callbacks: {
+                                    title: function(context) {
+                                        return 'Hour ' + context[0].label;
+                                    },
+                                    label: function(context) {
+                                        const value = context.parsed.y;
+                                        return value > 0 ? 
+                                            '+' + value.toFixed(2) + ' SEK (Value Added)' : 
+                                            value.toFixed(2) + ' SEK (Investment Cost)';
+                                    }
+                                }
+                            }
+                        },
+                        onClick: function(event, elements) {
+                            if (elements.length > 0) {
+                                const hourIndex = elements[0].index + 1;
+                                navigateToHour(hourIndex);
+                            }
+                        },
+                        scales: {
+                            x: { title: { display: true, text: 'Future Hours (click to navigate)' }},
+                            y: { title: { display: true, text: 'Contribution (SEK)' }}
+                        }
+                    }
+                });
+            }
+        }
+    </script>
+</body>
+</html>

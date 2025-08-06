@@ -10,7 +10,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime
 
-from core.bess.models import DecisionData, EconomicData, EnergyData, HourlyData
+from core.bess.models import DecisionData, EconomicData, HourlyData
 
 from .historical_data_store import HistoricalDataStore
 from .schedule_store import ScheduleStore

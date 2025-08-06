@@ -70,6 +70,7 @@ __all__ = [
 
 
 import logging
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 
@@ -77,6 +78,7 @@ import numpy as np
 
 from core.bess.decision_intelligence import create_decision_data
 from core.bess.models import (
+    DecisionAlternative,
     DecisionData,
     EconomicData,
     EconomicSummary,
@@ -86,6 +88,18 @@ from core.bess.models import (
 )
 from core.bess.settings import BatterySettings
 
+
+@dataclass
+class DPAlternative:
+    """Alternative action evaluated during DP optimization with real computed values."""
+    
+    action: float  # kW power level
+    immediate_reward: float  # SEK immediate reward
+    future_value: float  # SEK future value from DP value function
+    total_reward: float  # SEK total reward (immediate + future)
+    next_soe: float  # kWh resulting state of energy
+    feasible: bool  # Whether action was physically feasible
+    
 # Configure logging
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
@@ -450,6 +464,9 @@ def _calculate_reward(
         import_cost=import_cost,
         export_revenue=export_revenue,
         battery_wear_cost=battery_wear_cost,
+        battery_settings=battery_settings,
+        buy_price=current_buy_price,
+        sell_price=current_sell_price,
     )
 
     # ============================================================================
@@ -870,6 +887,162 @@ def _simulate_battery_direct(
     return simulation_results
 
 
+def _capture_alternatives_for_optimal_path(
+    optimization_result: OptimizationResult,
+    V: np.ndarray,
+    policy: np.ndarray,
+    battery_settings: BatterySettings,
+    buy_price: list[float],
+    sell_price: list[float],
+    home_consumption: list[float],
+    solar_production: list[float],
+    initial_soe: float,
+) -> dict[int, list[DPAlternative]]:
+    """
+    Capture real DP alternatives for the optimal path only.
+    
+    Re-evaluates alternatives at each optimal state to get the actual
+    alternatives the DP algorithm considered.
+    """
+    soe_levels, power_levels = _discretize_state_action_space(battery_settings)
+    
+    # Normalize power levels to 0.5 kW steps for manageable alternatives
+    normalized_power_levels = []
+    for power in power_levels:
+        normalized_power = round(power * 2) / 2  # Round to nearest 0.5
+        if normalized_power not in normalized_power_levels:
+            normalized_power_levels.append(normalized_power)
+    
+    optimal_path_alternatives = {}
+    current_soe = initial_soe
+    
+    horizon = len(optimization_result.hourly_data)
+    
+    for t in range(horizon):
+        # Find current state index in DP grid
+        # Re-evaluate alternatives at this optimal state
+        alternatives = []
+        
+        for power in normalized_power_levels:
+            # Check if alternative is physically feasible
+            if power < 0:
+                available_energy = current_soe - battery_settings.min_soe_kwh
+                max_discharge_power = available_energy * battery_settings.efficiency_discharge
+                if abs(power) > max_discharge_power:
+                    continue
+            elif power > 0:
+                available_capacity = battery_settings.max_soe_kwh - current_soe
+                max_charge_power = available_capacity / battery_settings.efficiency_charge
+                if power > max_charge_power:
+                    continue
+            
+            # Calculate immediate reward using production system logic
+            immediate_reward = _calculate_immediate_reward_for_alternative(
+                power=power,
+                current_soe=current_soe,
+                buy_price=buy_price[t],
+                sell_price=sell_price[t],
+                home_consumption=home_consumption[t],
+                solar_production=solar_production[t],
+                battery_settings=battery_settings,
+            )
+            
+            # Calculate next SOE
+            if power > 0:  # Charging
+                next_soe = current_soe + power * battery_settings.efficiency_charge
+            else:  # Discharging or idle
+                next_soe = current_soe + power / battery_settings.efficiency_discharge
+            
+            next_soe = min(
+                max(next_soe, battery_settings.min_soe_kwh),
+                battery_settings.max_soe_kwh,
+            )
+            
+            # Get future value from DP table (REAL future value!)
+            j = min(
+                max(
+                    0,
+                    round((next_soe - battery_settings.min_soe_kwh) / SOE_STEP_KWH),
+                ),
+                len(soe_levels) - 1,
+            )
+            
+            future_value = V[t + 1, j] if t + 1 < len(V) else 0.0
+            total_reward = immediate_reward + future_value
+            
+            alternatives.append(DPAlternative(
+                action=power,
+                immediate_reward=immediate_reward,
+                future_value=future_value,
+                total_reward=total_reward,
+                next_soe=next_soe,
+                feasible=True,
+            ))
+        
+        # Sort alternatives by total reward (best first)
+        alternatives.sort(key=lambda a: a.total_reward, reverse=True)
+        
+        # Keep top 10 alternatives to avoid overwhelming the UI
+        optimal_path_alternatives[t] = alternatives[:10]
+        
+        # Move to next state on optimal path using actual energy flows
+        if t < len(optimization_result.hourly_data):
+            current_soe = optimization_result.hourly_data[t].energy.battery_soe_end
+    
+    return optimal_path_alternatives
+
+
+def _calculate_immediate_reward_for_alternative(
+    power: float,
+    current_soe: float,
+    buy_price: float,
+    sell_price: float,
+    home_consumption: float,
+    solar_production: float,
+    battery_settings: BatterySettings,
+) -> float:
+    """
+    Calculate immediate reward for an alternative action using PRODUCTION SYSTEM LOGIC.
+    
+    NO SHORTCUTS - Uses actual energy flow calculations and battery settings.
+    """
+    # Calculate precise SOE after action
+    if power > 0:  # Charging
+        new_soe = current_soe + power * battery_settings.efficiency_charge
+    else:  # Discharging or idle
+        new_soe = current_soe + power / battery_settings.efficiency_discharge
+    
+    new_soe = min(
+        max(new_soe, battery_settings.min_soe_kwh),
+        battery_settings.max_soe_kwh,
+    )
+    
+    # Use production energy flow calculation
+    energy_data = calculate_energy_flows(
+        power=power,
+        home_consumption=home_consumption,
+        solar_production=solar_production,
+        soe_start=current_soe,
+        soe_end=new_soe,
+        battery_settings=battery_settings,
+    )
+    
+    # Calculate costs using actual system values
+    import_cost = energy_data.grid_imported * buy_price
+    export_revenue = energy_data.grid_exported * sell_price
+    
+    # Use actual battery cycle cost from settings
+    battery_wear_cost = 0.0
+    if power > 0:  # Charging
+        energy_stored = power * battery_settings.efficiency_charge
+        battery_wear_cost = energy_stored * battery_settings.cycle_cost_per_kwh
+    elif power < 0:  # Discharging
+        battery_wear_cost = abs(power) * battery_settings.cycle_cost_per_kwh
+    
+    immediate_reward = export_revenue - import_cost - battery_wear_cost
+    
+    return immediate_reward
+
 def optimize_battery_schedule(
     buy_price: list[float],
     sell_price: list[float],
@@ -883,7 +1056,8 @@ def optimize_battery_schedule(
     Battery optimization that eliminates dual cost calculation by using
     DP-calculated HourlyData directly in simulation.
     """
-
+    
+    # Get horizon from buy_price length
     horizon = len(buy_price)
 
     # Handle defaults
@@ -920,6 +1094,7 @@ def optimize_battery_schedule(
         initial_cost_basis=initial_cost_basis,
     )
 
+
     # Step 3: Calculate economic summary directly from HourlyData
     total_base_cost = sum(
         home_consumption[i] * buy_price[i] for i in range(len(buy_price))
@@ -938,23 +1113,58 @@ def optimize_battery_schedule(
         battery_solar_cost=total_optimized_cost,
         grid_to_solar_savings=0.0,  # No solar
         grid_to_battery_solar_savings=grid_to_battery_solar_savings,
-        solar_to_battery_solar_savings=grid_to_battery_solar_savings,
+        solar_to_battery_solar_savings=0.0,  # No solar
         grid_to_battery_solar_savings_pct=(
             (grid_to_battery_solar_savings / total_base_cost) * 100
             if total_base_cost > 0
-            else 0
+            else 0.0
         ),
         total_charged=total_charged,
         total_discharged=total_discharged,
     )
 
-    logger.info(
-        f"Direct Results: Grid-only cost: {total_base_cost:.2f}, "
-        f"Optimized cost: {total_optimized_cost:.2f}, "
-        f"Savings: {grid_to_battery_solar_savings:.2f} SEK ({economic_summary.grid_to_battery_solar_savings_pct:.1f}%)"
-    )
+    # --- DP-based Future Value Timeline Implementation ---
+    # For each hour, trace the optimal policy path and decompose the future_value into contributions from future hours
+    # This will be stored in a dict: hour -> list of FutureValueContribution
+    from core.bess.models import FutureValueContribution
+    future_value_timelines = {}
+    horizon = len(hourly_results)
+    for t in range(horizon):
+        timeline = []
+        # Only decompose if there is a nonzero future value
+        fv = hourly_results[t].decision.future_value
+        if abs(fv) > 0.01:
+            # Trace the optimal path from t+1 onward, attributing value to each future hour
+            current_soe = hourly_results[t].energy.battery_soe_end
+            for future_t in range(t+1, horizon):
+                # The value at each future hour is the difference in V between steps
+                i = round((current_soe - battery_settings.min_soe_kwh) / SOE_STEP_KWH)
+                i = min(max(0, i), V.shape[1] - 1)
+                # Find next SOE by following the optimal policy
+                action = policy[future_t, i] if future_t < policy.shape[0] else 0.0
+                # Calculate next SOE
+                if action > 0:
+                    next_soe = current_soe + action * battery_settings.efficiency_charge
+                else:
+                    next_soe = current_soe + action / battery_settings.efficiency_discharge
+                next_soe = min(
+                    max(next_soe, battery_settings.min_soe_kwh),
+                    battery_settings.max_soe_kwh,
+                )
+                # The value realized at this hour is the immediate_value of the optimal action
+                immediate_val = hourly_results[future_t].decision.immediate_value
+                if abs(immediate_val) > 0.01:
+                    timeline.append(FutureValueContribution(
+                        hour=future_t,
+                        contribution=immediate_val,
+                        action=action,
+                        action_type=hourly_results[future_t].decision.strategic_intent
+                    ))
+                current_soe = next_soe
+        future_value_timelines[t] = timeline
 
-    return OptimizationResult(
+    # Create optimization result
+    optimization_result = OptimizationResult(
         hourly_data=hourly_results,
         economic_summary=economic_summary,
         input_data={
@@ -967,3 +1177,64 @@ def optimize_battery_schedule(
             "horizon": horizon,
         },
     )
+
+    # Capture real DP alternatives for optimal path
+    logger.debug("Capturing real DP alternatives for decision intelligence")
+    optimal_path_alternatives = _capture_alternatives_for_optimal_path(
+        optimization_result, V, policy, battery_settings,
+        buy_price, sell_price, home_consumption, solar_production, initial_soe
+    )
+
+    # Enhance HourlyData with real alternatives and future value timeline
+    for hour_data in optimization_result.hourly_data:
+        hour = hour_data.hour
+        # --- Decision Alternatives ---
+        if hour in optimal_path_alternatives:
+            dp_alternatives = optimal_path_alternatives[hour]
+            decision_alternatives = []
+            chosen_action = hour_data.decision.battery_action or 0.0
+            chosen_reward = hour_data.decision.immediate_value + hour_data.decision.future_value
+            for dp_alt in dp_alternatives:
+                if abs(dp_alt.action - chosen_action) < 0.01:
+                    confidence_score = 1.0
+                else:
+                    confidence_score = (
+                        max(0.0, dp_alt.total_reward / chosen_reward)
+                        if chosen_reward > 0 else 0.0
+                    )
+                decision_alternatives.append(DecisionAlternative(
+                    battery_action=dp_alt.action,
+                    immediate_reward=dp_alt.immediate_reward,
+                    future_value=dp_alt.future_value,
+                    total_reward=dp_alt.total_reward,
+                    confidence_score=confidence_score,
+                ))
+            hour_data.decision.alternatives_evaluated = decision_alternatives
+            if len(decision_alternatives) > 1:
+                sorted_alts = sorted(decision_alternatives, key=lambda a: a.total_reward, reverse=True)
+                best_alt = sorted_alts[0]
+                chosen_alt = next(
+                    (a for a in decision_alternatives
+                     if abs(a.battery_action - chosen_action) < 0.01),
+                    best_alt
+                )
+                if (not np.isnan(best_alt.total_reward) and not np.isnan(chosen_alt.total_reward) and
+                    not np.isinf(best_alt.total_reward) and not np.isinf(chosen_alt.total_reward)):
+                    hour_data.decision.opportunity_cost = best_alt.total_reward - chosen_alt.total_reward
+                    hour_data.decision.decision_confidence = (
+                        chosen_alt.total_reward / best_alt.total_reward
+                        if best_alt.total_reward > 0 else 1.0
+                    )
+                else:
+                    hour_data.decision.opportunity_cost = 0.0
+                    hour_data.decision.decision_confidence = 1.0
+                    logger.warning(f"Invalid reward values in hour {hour}: best={best_alt.total_reward}, chosen={chosen_alt.total_reward}")
+            else:
+                hour_data.decision.opportunity_cost = 0.0
+                hour_data.decision.decision_confidence = 1.0
+        # --- Future Value Timeline ---
+        if hour in future_value_timelines:
+            hour_data.decision.future_value_timeline = future_value_timelines[hour]
+
+    logger.info(f"Optimization complete with {len(optimal_path_alternatives)} hours of decision intelligence and future value timelines")
+    return optimization_result

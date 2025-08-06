@@ -162,6 +162,39 @@ class EconomicSummary:
 
 
 @dataclass
+
+@dataclass
+class DecisionAlternative:
+    """Alternative battery action evaluated during decision process."""
+    battery_action: float  # kWh - alternative action value
+    immediate_reward: float  # SEK - immediate economic reward
+    future_value: float  # SEK - estimated future value
+    total_reward: float  # SEK - total reward (immediate + future)
+    confidence_score: float  # 0-1 - confidence relative to optimal
+
+
+@dataclass
+class EconomicBreakdown:
+    """Detailed economic component breakdown for immediate value."""
+    
+    grid_purchase_cost: float  # SEK - cost of grid electricity to home
+    grid_avoidance_benefit: float  # SEK - value of avoiding grid purchase
+    battery_cost_basis: float  # SEK - cost of energy stored in battery
+    battery_wear_cost: float  # SEK - degradation cost from cycling
+    export_revenue: float  # SEK - revenue from selling to grid
+    net_immediate_value: float  # SEK - total immediate economic impact
+
+
+@dataclass
+class FutureValueContribution:
+    """Future hour contribution to total future value."""
+    
+    hour: int  # Future hour index
+    contribution: float  # SEK - contribution to future value
+    action: float  # kWh - planned action for that hour
+    action_type: str  # Action type description
+
+@dataclass
 class DecisionData:
     """Strategic analysis and decision data."""
 
@@ -180,6 +213,11 @@ class DecisionData:
     immediate_value: float = 0.0  # Immediate economic value
     future_value: float = 0.0  # Future economic value
     net_strategy_value: float = 0.0  # Net strategic value
+    alternatives_evaluated: list[DecisionAlternative] = field(default_factory=list)
+    economic_breakdown: EconomicBreakdown | None = None
+    future_value_timeline: list[FutureValueContribution] = field(default_factory=list)
+    decision_confidence: float = 0.0
+    opportunity_cost: float = 0.0
 
 
 @dataclass

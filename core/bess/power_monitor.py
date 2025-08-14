@@ -20,9 +20,9 @@ This module is designed to work with the Home Assistant controller and to be run
 """
 
 import logging
-from datetime import datetime
 
 from .ha_api_controller import HomeAssistantAPIController
+from .health_check import perform_health_check
 from .settings import BatterySettings, HomeSettings
 
 logger = logging.getLogger(__name__)
@@ -84,127 +84,34 @@ class HomePowerMonitor:
             )
         )
 
-    def check_health(self):
-        """Check the health of the Power Monitor component.
-
-        Returns:
-            list: List containing one health check result
-        """
-
-        power_check = {
-            "name": "Power Monitoring",
-            "description": "Monitors home power consumption and adapts battery charging",
-            "required": False,  # System can run without dynamic charging adaptation
-            "status": "UNKNOWN",
-            "checks": [],
-            "last_run": datetime.now().isoformat(),
-        }
-
-        # Check phase current sensors
-        phase_sensors = [
-            {
-                "name": "Phase 1 Current",
-                "method": "get_l1_current",
-                "key": "current_l1",
-            },
-            {
-                "name": "Phase 2 Current",
-                "method": "get_l2_current",
-                "key": "current_l2",
-            },
-            {
-                "name": "Phase 3 Current",
-                "method": "get_l3_current",
-                "key": "current_l3",
-            },
+    def check_health(self) -> list:
+        """Check the health of the Power Monitor component."""
+        # Define what controller methods this component uses
+        power_methods = [
+            "get_l1_current",
+            "get_l2_current", 
+            "get_l3_current",
+            "get_charging_power_rate"
         ]
-
-        for sensor in phase_sensors:
-            check_result = {
-                "name": sensor["name"],
-                "key": sensor["key"],
-                "entity_id": self.controller.sensors.get(
-                    sensor["key"], "Not configured"
-                ),
-                "status": "UNKNOWN",
-                "value": None,
-                "error": None,
-            }
-
-            try:
-                # Try to get the current value
-                method = getattr(self.controller, sensor["method"])
-                value = method()
-
-                # Validate the value (current should be a positive number)
-                if value is not None and value >= 0:
-                    check_result["status"] = "OK"
-                    check_result["value"] = f"{value:.2f} A"
-                else:
-                    check_result["status"] = "WARNING"
-                    check_result["error"] = f"Invalid current value: {value}"
-            except AttributeError as e:
-                check_result["status"] = "ERROR"
-                check_result["error"] = f"Method not found: {e}"
-            except Exception as e:
-                check_result["status"] = "ERROR"
-                check_result["error"] = str(e)
-
-            power_check["checks"].append(check_result)
-
-        # Check battery charging power rate control
-        charging_check = {
-            "name": "Charging Power Rate Control",
-            "key": "battery_charging_power_rate",
-            "entity_id": self.controller.sensors.get(
-                "battery_charging_power_rate", "Not configured"
-            ),
-            "status": "UNKNOWN",
-            "value": None,
-            "error": None,
-        }
-
-        try:
-            # Check if we can read and potentially set the charging power rate
-            current_rate = self.controller.get_charging_power_rate()
-            charging_check["status"] = "OK"
-            charging_check["value"] = f"Current rate: {current_rate}%"
-        except Exception as e:
-            charging_check["status"] = "ERROR"
-            charging_check["error"] = f"Failed to access charging power rate: {e}"
-
-        power_check["checks"].append(charging_check)
-
-        # Check available charging power calculation
-        calc_check = {
-            "name": "Available Charging Power Calculation",
-            "key": None,
-            "entity_id": None,
-            "status": "UNKNOWN",
-            "value": None,
-            "error": None,
-        }
-
-        try:
-            # Try to calculate available charging power
-            available_power = self.calculate_available_charging_power()
-            calc_check["status"] = "OK"
-            calc_check["value"] = f"{available_power:.2f}%"
-        except Exception as e:
-            calc_check["status"] = "ERROR"
-            calc_check["error"] = f"Failed to calculate available charging power: {e}"
-
-        power_check["checks"].append(calc_check)
-
-        # Determine overall status
-        if all(check["status"] == "OK" for check in power_check["checks"]):
-            power_check["status"] = "OK"
-        elif any(check["status"] == "ERROR" for check in power_check["checks"]):
-            power_check["status"] = "ERROR"
-        else:
-            power_check["status"] = "WARNING"
-
-        return [power_check]
+        
+        # For power monitoring, L1/L2/L3 current are required for basic functionality
+        # charging_power_rate is optional (enhancement)
+        required_power_methods = [
+            "get_l1_current",
+            "get_l2_current", 
+            "get_l3_current"
+        ]
+        
+        health_check = perform_health_check(
+            component_name="Power Monitoring",
+            description="Monitors home power consumption and adapts battery charging",
+            is_required=False,
+            controller=self.controller,
+            all_methods=power_methods,
+            required_methods=required_power_methods
+        )
+        
+        return [health_check]
 
     def get_current_phase_loads_w(self) -> tuple[float, float, float]:
         """Get current load on each phase in watts."""

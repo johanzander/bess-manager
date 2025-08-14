@@ -9,6 +9,10 @@ interface SystemCheck {
   status: StatusType;
   message: string;
   details?: string;
+  key?: string;
+  entityId?: string;
+  value?: string | number;
+  error?: string;
 }
 
 interface ComponentCheck {
@@ -36,6 +40,105 @@ const StatusIcon: React.FC<{ status: StatusType }> = ({ status }) => {
     default:
       return <AlertCircle className="h-5 w-5 text-gray-500" />;
   }
+};
+
+// Utility function to format health check values based on sensor type
+const formatHealthCheckValue = (
+  value: string | number | undefined | null,
+  sensorName: string,
+  componentName: string,
+  sensorKey?: string
+): string => {
+  if (value === undefined || value === null || value === 'N/A') {
+    return 'N/A';
+  }
+
+  const numValue = typeof value === 'number' ? value : parseFloat(value.toString());
+  const lowerName = sensorName.toLowerCase();
+  const lowerKey = sensorKey?.toLowerCase() || '';
+  const lowerComponent = componentName.toLowerCase();
+
+  // Handle specific formatting based on sensor type and component
+  if (lowerComponent.includes('price') || lowerComponent.includes('electricity')) {
+    // Price component
+    if (typeof value === 'number' && value >= 24) {
+      return `${value} prices available`;
+    } else if (typeof value === 'number' && value > 0 && value < 24) {
+      return `${value}/24 prices available`;
+    }
+    return value.toString();
+  }
+
+  if (lowerComponent.includes('battery control') || lowerComponent.includes('battery')) {
+    // Battery Control component
+    if (lowerName.includes('power') && (lowerKey.includes('power') || lowerName.includes('charging') || lowerName.includes('discharging'))) {
+      return `${numValue}%`;
+    }
+    if (lowerName.includes('level') || lowerName.includes('soc') || lowerKey.includes('soc')) {
+      return `${numValue}%`;
+    }
+    if (lowerName.includes('enabled') || lowerName.includes('charge')) {
+      return typeof value === 'boolean' ? (value ? 'Enabled' : 'Disabled') : value.toString();
+    }
+  }
+
+  if (lowerComponent.includes('power monitor') || lowerComponent.includes('power')) {
+    // Power Monitoring component
+    if (lowerName.includes('current') || lowerKey.includes('current')) {
+      return `${numValue.toFixed(2)} A`;
+    }
+    if (lowerName.includes('power') && (lowerKey.includes('power') || lowerName.includes('charging'))) {
+      return `${numValue}%`;
+    }
+  }
+
+  if (lowerComponent.includes('energy') || lowerComponent.includes('monitoring') || lowerComponent.includes('prediction')) {
+    // Energy/Battery/Prediction Monitoring components
+    
+    // Check for list patterns first - don't try to parse as numbers
+    if (typeof value === 'string' && value.includes('List with') && value.includes('values')) {
+      return value;
+    }
+    
+    // Special case for power consumption sensor 
+    if ((lowerName.includes('average') && lowerName.includes('power') && lowerName.includes('consumption'))) {
+      // This is power in watts, convert to appropriate unit
+      if (numValue >= 1000) {
+        return `${(numValue / 1000).toFixed(2)} kW`;
+      } else {
+        return `${numValue.toFixed(0)} W`;
+      }
+    }
+    
+    if (lowerKey.includes('today') || lowerKey.includes('energy') || lowerName.includes('today') || 
+        lowerName.includes('consumption') || lowerName.includes('generation') || 
+        lowerName.includes('charge') || lowerName.includes('discharge')) {
+      return `${numValue.toFixed(2)} kWh`;
+    }
+    if (lowerKey.includes('power') || lowerName.includes('power')) {
+      return `${numValue.toFixed(2)} kW`;
+    }
+    if (lowerKey.includes('soc') || lowerName.includes('soc') || lowerName.includes('level')) {
+      return `${numValue}%`;
+    }
+    if (lowerName.includes('forecast') || lowerKey.includes('forecast')) {
+      return typeof value === 'object' ? 'Available' : (numValue ? 'Available' : 'Not Available');
+    }
+  }
+
+  // Default formatting for unrecognized types
+  if (typeof value === 'number') {
+    // If it looks like a percentage (0-100 range)
+    if (numValue >= 0 && numValue <= 100 && Number.isInteger(numValue)) {
+      return `${numValue}%`;
+    }
+    // If it's a decimal, format with 2 decimal places
+    if (numValue % 1 !== 0) {
+      return numValue.toFixed(2);
+    }
+  }
+
+  return value.toString();
 };
 
 const SystemHealthComponent: React.FC = () => {
@@ -67,9 +170,7 @@ const SystemHealthComponent: React.FC = () => {
     };
 
     fetchHealthData();
-    // Refresh every 30 seconds
-    const interval = setInterval(fetchHealthData, 30000);
-    return () => clearInterval(interval);
+    // No automatic refresh - data loads once on component mount
   }, []);
 
   if (loading) {
@@ -104,27 +205,29 @@ const SystemHealthComponent: React.FC = () => {
     statusCounts[component.status] += 1;
   });
 
-  // Sort components - required with errors first, then required with warnings, then optional with issues, then OK components
+  // Sort components - preserve logical order (price → control → monitoring) while prioritizing error states
   const sortedComponents = [...(healthData?.checks || [])].sort((a, b) => {
-    // First priority: required components with issues
-    if (a.required && !b.required) return -1;
-    if (!a.required && b.required) return 1;
+    // Get original indices to preserve backend order for components with same priority
+    const aIndex = (healthData?.checks || []).indexOf(a);
+    const bIndex = (healthData?.checks || []).indexOf(b);
     
-    // Second priority: error status
-    const statusPriority: Record<StatusType, number> = { 
-      ERROR: 0, 
-      WARNING: 1, 
-      OK: 2, 
-      UNKNOWN: 3 
-    };
-    return statusPriority[a.status] - statusPriority[b.status];
+    // First priority: ERROR status (critical issues need immediate attention)
+    if (a.status === 'ERROR' && b.status !== 'ERROR') return -1;
+    if (a.status !== 'ERROR' && b.status === 'ERROR') return 1;
+    
+    // Second priority: WARNING status for required components
+    if (a.required && a.status === 'WARNING' && !(b.required && b.status === 'WARNING')) return -1;
+    if (!(a.required && a.status === 'WARNING') && b.required && b.status === 'WARNING') return 1;
+    
+    // Otherwise preserve original order from backend (logical system flow)
+    return aIndex - bIndex;
   });
 
   return (
     <div className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
       <div className="p-6 border-b border-gray-200 dark:border-gray-700">
         <div className="flex justify-between items-center">
-          <h2 className="text-xl font-semibold text-gray-900 dark:text-white">System Health Status</h2>
+          <h2 className="text-xl font-semibold text-gray-900 dark:text-white">System Status</h2>
           <div className="flex space-x-3">
             <div className="flex items-center">
               <CheckCircle className="h-5 w-5 text-green-500 mr-1" />
@@ -142,9 +245,6 @@ const SystemHealthComponent: React.FC = () => {
         </div>
         <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
           Last updated: {healthData ? new Date(healthData.timestamp).toLocaleString() : ''}
-        </p>
-        <p className="text-sm text-gray-600 dark:text-gray-300">
-          System mode: <span className="font-medium">{healthData?.system_mode}</span>
         </p>
       </div>
 
@@ -203,6 +303,23 @@ const SystemHealthComponent: React.FC = () => {
                         <div className="flex-1">
                           <p className="text-sm font-medium text-gray-900 dark:text-white">{check.name}</p>
                           <p className="text-sm text-gray-600 dark:text-gray-300">{check.message}</p>
+                          {check.entityId && (
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                              Entity ID: <code className="bg-gray-100 dark:bg-gray-600 px-1 rounded text-xs">{check.entityId}</code>
+                            </p>
+                          )}
+                          {check.value !== undefined && check.value !== null && check.value !== 'N/A' && (
+                            <p className="text-xs text-gray-600 dark:text-gray-300 mt-1">
+                              Value: <span className="font-medium">
+                                {formatHealthCheckValue(check.value, check.name, component.name, check.key)}
+                              </span>
+                            </p>
+                          )}
+                          {check.error && (
+                            <p className="text-xs text-red-600 dark:text-red-400 mt-1">
+                              Error: {check.error}
+                            </p>
+                          )}
                           {check.details && (
                             <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{check.details}</p>
                           )}

@@ -6,6 +6,7 @@ Updated to use strategic intents from the DP algorithm for TOU and hourly contro
 import logging
 
 from .dp_schedule import DPSchedule
+from .health_check import perform_health_check
 from .settings import BatterySettings
 
 logger = logging.getLogger(__name__)
@@ -703,3 +704,28 @@ class GrowattScheduleManager:
         )
 
         logger.info("\n".join(lines))
+
+    def check_health(self, controller) -> list:
+        """Check battery control capabilities."""
+        # Define what controller methods this component uses
+        battery_control_methods = [
+            "get_charging_power_rate",
+            "get_discharging_power_rate",
+            "grid_charge_enabled",
+            "get_charge_stop_soc",
+            "get_discharge_stop_soc"
+        ]
+
+        # For battery control, all methods are required for safe battery operation
+        required_battery_control_methods = battery_control_methods
+        
+        health_check = perform_health_check(
+            component_name="Battery Control",
+            description="Controls battery charging and discharging schedule",
+            is_required=True,
+            controller=controller,
+            all_methods=battery_control_methods,
+            required_methods=required_battery_control_methods
+        )
+        
+        return [health_check]

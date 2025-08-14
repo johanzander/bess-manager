@@ -38,8 +38,8 @@ def test_controller_price_fetching():
     """Test price fetching from controller."""
     mock_controller = MagicMock()
     mock_controller.sensors = {
-        "nordpool_kwh_today": "sensor.nordpool_kwh_se3_today",
-        "nordpool_kwh_tomorrow": "sensor.nordpool_kwh_se3_tomorrow",
+        "nordpool_kwh_today": "sensor.nordpool_kwh_se4_sek_2_10_025",
+        "nordpool_kwh_tomorrow": "sensor.nordpool_kwh_se4_sek_2_10_025",
     }
 
     today_date = datetime.now().date()
@@ -62,13 +62,16 @@ def test_controller_price_fetching():
     ]
 
     def mock_api_request(method, path):
-        if "nordpool_kwh_se3_today" in path:
-            return {"attributes": {"raw_today": raw_today_data}}
-        elif "nordpool_kwh_se3_tomorrow" in path:
-            return {"attributes": {"raw_tomorrow": raw_tomorrow_data}}
+        if "sensor.nordpool_kwh_se4_sek_2_10_025" in path:
+            # Return both today and tomorrow data for the same entity
+            return {"attributes": {"raw_today": raw_today_data, "raw_tomorrow": raw_tomorrow_data}}
         return None
 
+    def mock_get_entity_for_service(sensor_key):
+        return "sensor.nordpool_kwh_se4_sek_2_10_025"
+
     mock_controller._api_request = mock_api_request
+    mock_controller._get_entity_for_service = mock_get_entity_for_service
 
     ha_source = HomeAssistantSource(mock_controller)
     pm = PriceManager(
@@ -141,7 +144,7 @@ def test_home_assistant_source_vat_parameter():
     """Test that the VAT multiplier parameter in HomeAssistantSource works correctly."""
     mock_controller = MagicMock()
     mock_controller.sensors = {
-        "nordpool_kwh_today": "sensor.nordpool_kwh_se3_today",
+        "nordpool_kwh_today": "sensor.nordpool_kwh_se4_sek_2_10_025",
     }
 
     today_date = datetime.now().date()
@@ -157,11 +160,15 @@ def test_home_assistant_source_vat_parameter():
         )
 
     def mock_api_request(method, path):
-        if "nordpool_kwh_se3_today" in path:
+        if "sensor.nordpool_kwh_se4_sek_2_10_025" in path:
             return {"attributes": {"raw_today": raw_today_data}}
         return None
 
+    def mock_get_entity_for_service(sensor_key):
+        return "sensor.nordpool_kwh_se4_sek_2_10_025"
+
     mock_controller._api_request = mock_api_request
+    mock_controller._get_entity_for_service = mock_get_entity_for_service
 
     # Test with default VAT multiplier (1.25)
     ha_source_default = HomeAssistantSource(mock_controller)

@@ -1,4 +1,7 @@
-"""Updated API endpoints using canonical camelCase dataclasses."""
+"""
+API endpoints for battery and electricity settings, dashboard data, and decision intelligence.
+
+"""
 
 from datetime import datetime
 
@@ -1083,3 +1086,58 @@ async def get_strategic_intents():
     except Exception as e:
         logger.error(f"Error getting strategic intents: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
+    
+
+@router.get("/api/system-health")
+async def get_system_health():
+    """Get comprehensive system health including detailed sensor diagnostics."""
+    from app import bess_controller
+    from core.bess.health_check import run_system_health_checks
+
+    try:
+        logger.debug("Starting system health check")
+
+        # Run the enhanced health checks with sensor introspection
+        health_results = run_system_health_checks(bess_controller.system)
+
+        # All health check methods now consistently return lists of dicts
+        checks = health_results.get("checks", [])
+
+        total_components = len(checks)
+        ok_components = len([c for c in checks if c.get("status") == "OK"])
+        warning_components = len([c for c in checks if c.get("status") == "WARNING"])
+        error_components = len([c for c in checks if c.get("status") == "ERROR"])
+
+        # Enhance results with summary
+        health_results["checks"] = checks
+        health_results.update({
+            "summary": {
+                "total_components": total_components,
+                "ok_components": ok_components,
+                "warning_components": warning_components,
+                "error_components": error_components,
+                "overall_status": "ERROR" if error_components > 0 else ("WARNING" if warning_components > 0 else "OK")
+            }
+        })
+
+        logger.debug(f"Health check completed: {ok_components}/{total_components} components OK")
+
+        # Convert to camelCase for frontend consistency
+        return convert_keys_to_camel_case(health_results)
+
+    except Exception as e:
+        logger.error(f"Error getting system health: {e}")
+        # Return error state that frontend can handle
+        return {
+            "timestamp": datetime.now().isoformat(),
+            "systemMode": "unknown",
+            "checks": [],
+            "summary": {
+                "totalComponents": 0,
+                "okComponents": 0,
+                "warningComponents": 0,
+                "errorComponents": 1,
+                "overallStatus": "ERROR"
+            },
+            "error": str(e)
+        }

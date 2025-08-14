@@ -6,6 +6,7 @@ but uses the REST API instead of direct pyscript access.
 
 import logging
 import time
+from typing import ClassVar
 
 import requests
 
@@ -35,19 +36,74 @@ def run_request(http_method, *args, **kwargs):
         raise
 
 
+
 class HomeAssistantAPIController:
     """A class for interacting with Inverter controls via Home Assistant REST API."""
 
-    def __init__(self, base_url="", token=None, sensor_config=None) -> None:
+    def _get_sensor_display_name(self, sensor_key: str) -> str:
+        """Get display name for a sensor key from METHOD_SENSOR_MAP."""
+        for method_info in self.METHOD_SENSOR_MAP.values():
+            if method_info["sensor_key"] == sensor_key:
+                return method_info["name"]
+        return f"sensor '{sensor_key}'"
+
+    def _get_entity_for_service(self, sensor_key: str) -> str:
+        """Get entity ID for service calls with proper error handling."""
+        try:
+            entity_id, _ = self._resolve_entity_id(sensor_key, for_service=True)
+            return entity_id
+        except ValueError as e:
+            description = self._get_sensor_display_name(sensor_key)
+            raise ValueError(f"No entity ID configured for {description}") from e
+
+    def _get_sensor_key(self, method_name: str) -> str | None:
+        """Get the sensor key for a method - compatibility method for existing code."""
+        return self.get_method_sensor_key(method_name)
+
+    @classmethod
+    def get_method_info(cls, method_name: str) -> dict[str, str] | None:
+        """Get method information including sensor key and display name."""
+        return cls.METHOD_SENSOR_MAP.get(method_name)
+
+    @classmethod
+    def get_method_name(cls, method_name: str) -> str | None:
+        """Get the display name for a method."""
+        method_info = cls.METHOD_SENSOR_MAP.get(method_name)
+        return method_info["name"] if method_info else None
+
+    @classmethod
+    def get_method_sensor_key(cls, method_name: str) -> str | None:
+        """Get the sensor key for a method."""
+        method_info = cls.METHOD_SENSOR_MAP.get(method_name)
+        return method_info["sensor_key"] if method_info else None
+
+    @classmethod
+    def get_methods_by_category(cls, category: str) -> list[str]:
+        """Get method names by category (based on comment groupings)."""
+        # This could be extended to include category metadata in the future
+        if category == "battery_monitoring":
+            return ["get_battery_soc", "get_battery_charge_power", "get_battery_discharge_power"]
+        elif category == "energy_tracking":
+            return [
+                "get_battery_charge_today", "get_battery_discharge_today", "get_solar_generation_today",
+                "get_export_to_grid_today", "get_load_consumption_today", "get_import_from_grid_today", 
+                "get_grid_to_battery_today", "get_ev_energy_today"
+            ]
+        elif category == "prediction":
+            return ["get_solar_forecast_today", "get_solar_forecast_tomorrow", "get_estimated_consumption"]
+        else:
+            return []
+
+    def __init__(self, ha_url: str, token: str, sensor_config: dict | None = None):
         """Initialize the Controller with Home Assistant API access.
 
         Args:
-            base_url: Base URL of Home Assistant (default: "http://supervisor/core")
+            ha_url: Base URL of Home Assistant (default: "http://supervisor/core")
             token: Long-lived access token for Home Assistant
             sensor_config: Sensor configuration mapping from options.json
 
         """
-        self.base_url = base_url
+        self.base_url = ha_url
         self.token = token
         self.headers = {
             "Authorization": f"Bearer {token}",
@@ -63,6 +119,129 @@ class HomeAssistantAPIController:
         logger.info(
             f"Initialized HomeAssistantAPIController with {len(self.sensors)} sensor mappings"
         )
+
+    # Class-level sensor mapping - immutable mapping
+    METHOD_SENSOR_MAP: ClassVar[dict[str, dict[str, str]]] = {
+        # Battery control methods
+        "get_battery_soc": {"sensor_key": "battery_soc", "name": "Battery State of Charge"},
+        "get_charging_power_rate": {"sensor_key": "battery_charging_power_rate", "name": "Battery Charging Power Rate"},
+        "get_discharging_power_rate": {"sensor_key": "battery_discharging_power_rate", "name": "Battery Discharging Power Rate"},
+        "get_charge_stop_soc": {"sensor_key": "battery_charge_stop_soc", "name": "Battery Charge Stop SOC"},
+        "get_discharge_stop_soc": {"sensor_key": "battery_discharge_stop_soc", "name": "Battery Discharge Stop SOC"},
+        "grid_charge_enabled": {"sensor_key": "grid_charge", "name": "Grid Charge Enabled"},
+        # Power monitoring methods
+        "get_battery_charge_power": {"sensor_key": "battery_charge_power", "name": "Battery Charging Power"},
+        "get_battery_discharge_power": {"sensor_key": "battery_discharge_power", "name": "Battery Discharging Power"},
+        "get_l1_current": {"sensor_key": "current_l1", "name": "Current L1"},
+        "get_l2_current": {"sensor_key": "current_l2", "name": "Current L2"},
+        "get_l3_current": {"sensor_key": "current_l3", "name": "Current L3"},
+        # Energy totals
+        "get_battery_charge_today": {"sensor_key": "battery_charged_today", "name": "Battery Energy Charged Today"},
+        "get_battery_discharge_today": {"sensor_key": "battery_discharged_today", "name": "Battery Energy Discharged Today"},
+        "get_solar_generation_today": {"sensor_key": "solar_production_today", "name": "Solar Energy Generated Today"},
+        "get_load_consumption_today": {"sensor_key": "load_consumption_today", "name": "Total Load Consumption Today"},
+        "get_import_from_grid_today": {"sensor_key": "import_from_grid_today", "name": "Energy Imported from Grid Today"},
+        "get_export_to_grid_today": {"sensor_key": "export_to_grid_today", "name": "Energy Exported to Grid Today"},
+        "get_grid_to_battery_today": {"sensor_key": "batteries_charged_from_grid_today", "name": "Grid to Battery Energy Today"},
+        "get_ev_energy_today": {"sensor_key": "ev_energy_today", "name": "EV Charging Energy Total"},
+        # Price sensors
+        "get_nordpool_prices_today": {"sensor_key": "nordpool_kwh_today", "name": "Nord Pool Prices Today"},
+        "get_nordpool_prices_tomorrow": {"sensor_key": "nordpool_kwh_tomorrow", "name": "Nord Pool Prices Tomorrow"},
+        # Home consumption forecast
+        "get_estimated_consumption": {"sensor_key": "48h_avg_grid_import", "name": "Average Hourly Power Consumption"},
+        # Solar forecast
+        "get_solar_forecast": {"sensor_key": "solar_forecast_today", "name": "Solar Forecast"},
+        "get_solar_forecast_today": {"sensor_key": "solar_forecast_today", "name": "Solar Forecast Today"},
+        "get_solar_forecast_tomorrow": {"sensor_key": "solar_forecast_tomorrow", "name": "Solar Forecast Tomorrow"}
+    }
+
+    def _resolve_entity_id(self, sensor_key: str, for_service: bool = False) -> tuple[str, str]:
+        """Unified entity ID resolution with consistent logic.
+        
+        Args:
+            sensor_key: The sensor key to resolve
+            for_service: If True, raises error on missing config (for write operations)
+            
+        Returns:
+            tuple: (entity_id, resolution_method)
+            
+        Raises:
+            ValueError: If sensor_key not found and for_service=True
+        """
+        # First check our sensor configuration
+        if sensor_key in self.sensors:
+            entity_id = self.sensors[sensor_key]
+            return entity_id, "configured"
+        
+        # Require explicit configuration for all operations
+        # This ensures proper sensor mapping and prevents silent failures
+        raise ValueError(f"No entity ID configured for sensor '{sensor_key}'")
+
+    def get_method_sensor_info(self, method_name: str) -> dict:
+        """Get sensor configuration info for a controller method."""
+        method_info = self.METHOD_SENSOR_MAP.get(method_name)
+        if not method_info:
+            return {
+                "method_name": method_name,
+                "name": method_name,
+                "sensor_key": None,
+                "entity_id": None,
+                "status": "unknown_method",
+                "error": f"Method '{method_name}' not found in sensor mapping"
+            }
+
+        sensor_key = method_info["sensor_key"]
+        try:
+            entity_id, resolution_method = self._resolve_entity_id(sensor_key, for_service=False)
+        except ValueError as e:
+            return {
+                "method_name": method_name,
+                "name": method_info["name"],
+                "sensor_key": sensor_key,
+                "entity_id": "Not configured",
+                "status": "not_configured",
+                "error": str(e),
+                "current_value": None
+            }
+
+        result = {
+            "method_name": method_name,
+            "name": method_info["name"],
+            "sensor_key": sensor_key,
+            "entity_id": entity_id,
+            "status": "unknown",
+            "error": None,
+            "current_value": None,
+            "resolution_method": resolution_method
+        }
+
+        try:
+            response = self._api_request("get", f"/api/states/{entity_id}")
+            if not response:
+                result.update({
+                    "status": "entity_missing",
+                    "error": f"Entity '{entity_id}' does not exist in Home Assistant"
+                })
+            elif response.get("state") in ["unavailable", "unknown"]:
+                result.update({
+                    "status": "entity_unavailable",
+                    "error": f"Entity '{entity_id}' state is '{response.get('state')}'"
+                })
+            else:
+                result.update({
+                    "status": "ok",
+                    "current_value": response.get("state")
+                })
+        except Exception as e:
+            result.update({
+                "status": "error",
+                "error": f"Failed to check entity '{entity_id}': {e!s}"
+            })
+        return result
+
+    def validate_methods_sensors(self, method_list: list) -> list:
+        """Validate sensors for multiple methods at once."""
+        return [self.get_method_sensor_info(method) for method in method_list]
 
     def _api_request(self, method, path, **kwargs):
         """Make an API request to Home Assistant with retry logic.
@@ -201,24 +380,13 @@ class HomeAssistantAPIController:
         # Make API call
         return self._api_request("post", path, json=json_data)
 
-    def get_sensor_value(self, sensor_name):
-        """Get value from any sensor by name."""
+    def _get_sensor_value(self, sensor_name):
+        """Get value from any sensor by name using unified entity resolution."""
         try:
-            # First, check if this key exists in our sensor config
-            if sensor_name in self.sensors:
-                # Use the configured entity ID
-                entity_id = self.sensors[sensor_name]
-                logger.debug(
-                    f"Using configured entity ID '{entity_id}' for sensor '{sensor_name}'"
-                )
-            elif "." in sensor_name:
-                # This is already a full entity ID
-                entity_id = sensor_name
-                logger.debug(f"Using direct entity ID: {entity_id}")
-            else:
-                # Fall back to default format
-                entity_id = f"sensor.{sensor_name}"
-                logger.debug(f"Using default entity ID format: {entity_id}")
+            entity_id, resolution_method = self._resolve_entity_id(sensor_name, for_service=False)
+            logger.debug(
+                f"Resolving sensor '{sensor_name}' to entity '{entity_id}' (method: {resolution_method})"
+            )
 
             # Make API call to get state
             response = self._api_request("get", f"/api/states/{entity_id}")
@@ -242,115 +410,112 @@ class HomeAssistantAPIController:
 
     def get_estimated_consumption(self):
         """Get estimated hourly consumption for 24 hours."""
-        avg_consumption = self.get_sensor_value("48h_avg_grid_import") / 1000
+        avg_consumption = self._get_sensor_value("48h_avg_grid_import") / 1000
         return [avg_consumption] * 24
 
     def get_solar_generation_today(self):
         """Get the current solar generation reading (cumulative for today)."""
-        return self.get_sensor_value("solar_production_today")
-
-    def get_current_consumption(self):
-        """Get the current hour's home consumption in kWh."""
-        return self.get_sensor_value("1h_avg_grid_import")
+        return self._get_sensor_value("solar_production_today")
 
     def get_battery_charge_today(self):
         """Get total battery charging for today in kWh."""
-        return self.get_sensor_value("battery_charged_today")
+        return self._get_sensor_value("battery_charged_today")
 
     def get_battery_discharge_today(self):
         """Get total battery discharging for today in kWh."""
-        return self.get_sensor_value("battery_discharged_today")
-
-    def get_self_consumption_today(self):
-        """Get total solar self-consumption for today in kWh."""
-        return self.get_sensor_value("self_consumption_today")
+        return self._get_sensor_value("battery_discharged_today")
 
     def get_export_to_grid_today(self):
         """Get total export to grid for today in kWh."""
-        return self.get_sensor_value("export_to_grid_today")
+        return self._get_sensor_value("export_to_grid_today")
 
     def get_load_consumption_today(self):
         """Get total home load consumption for today in kWh."""
-        return self.get_sensor_value("load_consumption_today")
+        return self._get_sensor_value("load_consumption_today")
 
     def get_import_from_grid_today(self):
         """Get total import from grid for today in kWh."""
-        return self.get_sensor_value("import_from_grid_today")
+        return self._get_sensor_value("import_from_grid_today")
 
     def get_grid_to_battery_today(self):
         """Get total grid to battery charging for today in kWh."""
-        return self.get_sensor_value("batteries_charged_from_grid_today")
+        return self._get_sensor_value("batteries_charged_from_grid_today")
 
     def get_ev_energy_today(self):
         """Get total EV charging energy for today in kWh."""
-        return self.get_sensor_value("ev_energy_today")
+        return self._get_sensor_value("ev_energy_today")
 
     def get_battery_soc(self):
         """Get the battery state of charge (SOC)."""
-        return self.get_sensor_value("battery_soc")
+        return self._get_sensor_value("battery_soc")
 
     def get_charge_stop_soc(self):
         """Get the charge stop state of charge (SOC)."""
-        return self.get_sensor_value("battery_charge_stop_soc")
+        return self._get_sensor_value("battery_charge_stop_soc")
 
     def set_charge_stop_soc(self, charge_stop_soc):
         """Set the charge stop state of charge (SOC)."""
+        entity_id = self._get_entity_for_service("battery_charge_stop_soc")
         self._service_call_with_retry(
             "number",
             "set_value",
-            entity_id=self.sensors.get("battery_charge_stop_soc"),
+            entity_id=entity_id,
             value=charge_stop_soc,
         )
 
     def get_discharge_stop_soc(self):
         """Get the discharge stop state of charge (SOC)."""
-        return self.get_sensor_value("battery_discharge_stop_soc")
+        return self._get_sensor_value("battery_discharge_stop_soc")
 
     def set_discharge_stop_soc(self, discharge_stop_soc):
         """Set the discharge stop state of charge (SOC)."""
+        entity_id = self._get_entity_for_service("battery_discharge_stop_soc")
         self._service_call_with_retry(
             "number",
             "set_value",
-            entity_id=self.sensors.get("battery_discharge_stop_soc"),
+            entity_id=entity_id,
             value=discharge_stop_soc,
         )
 
     def get_charging_power_rate(self):
         """Get the charging power rate."""
-        return self.get_sensor_value("battery_charging_power_rate")
+        return self._get_sensor_value("battery_charging_power_rate")
 
     def set_charging_power_rate(self, rate):
         """Set the charging power rate."""
+        entity_id = self._get_entity_for_service("battery_charging_power_rate")
         self._service_call_with_retry(
             "number",
             "set_value",
-            entity_id=self.sensors.get("battery_charging_power_rate"),
+            entity_id=entity_id,
             value=rate,
         )
 
     def get_discharging_power_rate(self):
         """Get the discharging power rate."""
-        return self.get_sensor_value("battery_discharging_power_rate")
+        return self._get_sensor_value("battery_discharging_power_rate")
 
     def set_discharging_power_rate(self, rate):
         """Set the discharging power rate."""
+        entity_id = self._get_entity_for_service("battery_discharging_power_rate")
         self._service_call_with_retry(
             "number",
             "set_value",
-            entity_id=self.sensors.get("battery_discharging_power_rate"),
+            entity_id=entity_id,
             value=rate,
         )
 
     def get_battery_charge_power(self):
         """Get current battery charging power in watts."""
-        return self.get_sensor_value("battery_charge_power")
+        return self._get_sensor_value("battery_charge_power")
 
     def get_battery_discharge_power(self):
         """Get current battery discharging power in watts."""
-        return self.get_sensor_value("battery_discharge_power")
+        return self._get_sensor_value("battery_discharge_power")
 
     def set_grid_charge(self, enable):
         """Enable or disable grid charging."""
+        entity_id = self._get_entity_for_service("grid_charge")
         service = "turn_on" if enable else "turn_off"
 
         if enable:
@@ -361,21 +526,20 @@ class HomeAssistantAPIController:
         self._service_call_with_retry(
             "switch",
             service,
-            entity_id=self.sensors.get("grid_charge"),
+            entity_id=entity_id,
         )
 
     def grid_charge_enabled(self):
         """Return True if grid charging is enabled."""
-        # Use the sensor config to get the correct entity ID
-        entity_id = self.sensors.get("grid_charge")
-        if not entity_id:
-            logger.warning("No entity ID configured for grid_charge")
+        try:
+            entity_id = self._get_entity_for_service("grid_charge")
+            response = self._api_request("get", f"/api/states/{entity_id}")
+            if response and "state" in response:
+                return response["state"] == "on"
             return False
-
-        response = self._api_request("get", f"/api/states/{entity_id}")
-        if response and "state" in response:
-            return response["state"] == "on"
-        return False
+        except ValueError as e:
+            logger.warning(str(e))
+            return False
 
     def set_inverter_time_segment(
         self,
@@ -437,15 +601,15 @@ class HomeAssistantAPIController:
 
     def get_l1_current(self):
         """Get the current load for L1."""
-        return self.get_sensor_value("current_l1")
+        return self._get_sensor_value("current_l1")
 
     def get_l2_current(self):
         """Get the current load for L2."""
-        return self.get_sensor_value("current_l2")
+        return self._get_sensor_value("current_l2")
 
     def get_l3_current(self):
         """Get the current load for L3."""
-        return self.get_sensor_value("current_l3")
+        return self._get_sensor_value("current_l3")
 
     def get_solar_forecast(self, day_offset=0, confidence_level="estimate"):
         """Get solar forecast data from Solcast integration."""
@@ -511,6 +675,7 @@ class HomeAssistantAPIController:
         Raises:
             ValueError: If prices are not available for the date
         """
+        time_label = "tomorrow" if is_tomorrow else "today"
         try:
             # Determine which sensor to use
             sensor_key = (
@@ -521,7 +686,6 @@ class HomeAssistantAPIController:
                 logger.warning(f"No entity ID configured for {sensor_key}")
                 raise ValueError(f"Missing entity ID configuration for {sensor_key}")
 
-            time_label = "tomorrow" if is_tomorrow else "today"
             logger.debug(f"Fetching Nordpool prices for {time_label} from {entity_id}")
 
             # Get entity state
@@ -591,17 +755,19 @@ class HomeAssistantAPIController:
     # These methods are specifically for supporting the EnergyManager class
 
     def get_sensor_data(self, sensors_list, end_time=None):
-        """Get sensor data for each hour of today with incremental values for cumulative sensors.
+        """Get current sensor data via Home Assistant REST API.
 
-        This replaces the influxdb_helper.get_sensor_data function to use the REST API instead.
+        Note: This method only provides current sensor states, not historical data.
+        Historical data is handled by InfluxDB integration in sensor_collector.py.
+        
+        The end_time parameter is ignored - this method always returns current states.
 
         Args:
             sensors_list: List of sensor names to fetch
-            end_time: Optional datetime to fetch states for
+            end_time: Optional datetime parameter (ignored - always returns current states)
 
         Returns:
-            Dictionary with sensor data in the same format as influxdb_helper
-
+            Dictionary with current sensor data in the same format as influxdb_helper
         """
         # Initialize result with proper format
         result = {"status": "success", "data": {}}
@@ -609,12 +775,8 @@ class HomeAssistantAPIController:
         try:
             # For each sensor in the list, get the current state
             for sensor in sensors_list:
-                # Check if it's a full entity_id or a short name
-                if "." in sensor:
-                    entity_id = sensor
-                else:
-                    # Use the mapping if available, otherwise build entity_id
-                    entity_id = self.sensors.get(sensor, f"sensor.{sensor}")
+                # Use unified entity resolution - require explicit configuration
+                entity_id, _ = self._resolve_entity_id(sensor, for_service=False)
 
                 # Get sensor state
                 response = self._api_request("get", f"/api/states/{entity_id}")

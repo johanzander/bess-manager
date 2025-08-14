@@ -139,7 +139,7 @@ class BESSController:
         )
 
         return HomeAssistantAPIController(
-            base_url=ha_url, token=ha_token, sensor_config=sensor_config
+            ha_url=ha_url, token=ha_token, sensor_config=sensor_config
         )
 
     def _load_and_apply_settings(self):

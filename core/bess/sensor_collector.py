@@ -4,9 +4,9 @@ Robust SensorCollector - Clean sensor data collection from InfluxDB with strateg
 
 import logging
 from datetime import datetime, time, timedelta
-from typing import Any
 
 from .energy_flow_calculator import EnergyFlowCalculator
+from .health_check import perform_health_check
 from .influxdb_helper import get_sensor_data
 from .models import EnergyData
 
@@ -22,7 +22,7 @@ class SensorCollector:
         self.battery_capacity = battery_capacity_kwh
         self.energy_flow_calculator = EnergyFlowCalculator(battery_capacity_kwh)
 
-        # Cumulative sensors we track
+        # Cumulative sensors we track from InfluxDB
         self.cumulative_sensors = [
             "rkm0d7n04x_lifetime_total_all_batteries_charged",
             "rkm0d7n04x_lifetime_total_all_batteries_discharged",
@@ -192,23 +192,6 @@ class SensorCollector:
 
         return safe_end_hour
 
-    def get_current_battery_state(self) -> dict[str, Any] | None:
-        """Get current battery SOC and energy content."""
-        try:
-            soc = self.ha_controller.get_battery_soc()
-            if soc is None or not 0 <= soc <= 100:
-                logger.warning("Invalid SOC: %s", soc)
-                return None
-
-            return {
-                "soc_percent": soc,
-                "energy_kwh": (soc / 100.0) * self.battery_capacity,
-                "timestamp": datetime.now(),
-            }
-
-        except Exception as e:
-            logger.error("Failed to get battery state: %s", e)
-            return None
 
     def _get_hour_readings(
         self, hour: int, date_offset: int = 0
@@ -295,9 +278,10 @@ class SensorCollector:
         self, target_datetime: datetime, max_retries: int = 3
     ) -> dict:
         """Query InfluxDB with retry logic and fallback times."""
-
+        
         for attempt in range(max_retries):
             try:
+                # Use InfluxDB for historical data - this is what the system was designed for
                 result = get_sensor_data(self.cumulative_sensors, target_datetime)
 
                 if result and result.get("status") == "success" and result.get("data"):
@@ -360,28 +344,89 @@ class SensorCollector:
 
         return readings
 
-    def validate_hour_completeness(self, hour: int) -> bool:
-        """Validate that an hour is complete and data should be available."""
-        now = datetime.now()
 
-        # Future hours are never complete
-        if hour > now.hour:
-            return False
+    def check_battery_health(self) -> dict:
+        """Check battery monitoring health, with all sensors required for critical battery operation."""
+        # Define required methods 
+        required_battery_methods = [
+            "get_battery_soc",
+            "get_battery_charge_power", 
+            "get_battery_discharge_power"
+        ]
+        
+        # Define optional methods 
+        optional_battery_methods = []
+        
+        # Combine all methods for health check
+        all_battery_methods = required_battery_methods + optional_battery_methods
+        
+        return perform_health_check(
+            component_name="Battery Monitoring",
+            description="Real-time battery state and power monitoring",
+            is_required=True,
+            controller=self.ha_controller,
+            all_methods=all_battery_methods,
+            required_methods=required_battery_methods
+        )
 
-        # Current hour is only complete if we're past minute 58
-        if hour == now.hour:
-            return now.minute >= 58
+    def check_energy_health(self) -> dict:
+        """Check energy monitoring health, with all sensors required except EV."""
 
-        # All other past hours should definitely be complete
-        return True
+        # Define required methods (critical for energy flow calculations)
+        required_energy_methods = [
+            "get_import_from_grid_today",
+            "get_export_to_grid_today",
+            "get_solar_generation_today", 
+            "get_load_consumption_today",
+            "get_battery_charge_today",
+            "get_battery_discharge_today",
+        ]
+        
+        # Define optional methods (nice-to-have but not critical)
+        optional_energy_methods = [
+            # "get_ev_energy",  # Optional - EV data not critical for basic operation
+        ]
+        
+        # Combine all methods for health check
+        all_energy_methods = required_energy_methods + optional_energy_methods
+        
+        return perform_health_check(
+            component_name="Energy Monitoring",
+            description="Tracks energy flows and consumption patterns",
+            is_required=True,
+            controller=self.ha_controller,
+            all_methods=all_energy_methods,
+            required_methods=required_energy_methods
+        )
 
-    def get_soc_at_hour_start(self, hour: int) -> float:
-        """Get SOC reading from start of specified hour."""
-        readings = self._get_hour_readings(hour)
-        if not readings:
-            raise ValueError(f"No sensor readings available for hour {hour}")
+    def check_prediction_health(self) -> dict:
+        """Check prediction health, with no sensors required (nice-to-have for optimization)."""
+        # Define required methods 
+        required_prediction_methods = [
+            "get_estimated_consumption",
+            "get_solar_forecast"
+        ]
+        
+        # Define optional methods 
+        optional_prediction_methods = [
+        ]
+        
+        # Combine all methods for health check
+        all_prediction_methods = required_prediction_methods + optional_prediction_methods
+        
+        return perform_health_check(
+            component_name="Energy Prediction",
+            description="Solar and consumption forecasting for optimization",
+            is_required=False,
+            controller=self.ha_controller,
+            all_methods=all_prediction_methods,
+            required_methods=required_prediction_methods
+        )
 
-        if "rkm0d7n04x_statement_of_charge_soc" not in readings:
-            raise ValueError(f"SOC sensor data missing for hour {hour}")
-
-        return readings["rkm0d7n04x_statement_of_charge_soc"]
+    def check_health(self) -> list:
+        """Check ALL sensor data collection capabilities - returns list of separate checks."""
+        return [
+            self.check_battery_health(),
+            self.check_energy_health(),
+            self.check_prediction_health()
+        ]

@@ -6,7 +6,6 @@ inversion.
 
 import logging
 from datetime import date, datetime, timedelta
-from typing import Optional  # TODO: Replace with |
 
 
 class PriceSource:
@@ -73,33 +72,16 @@ class HomeAssistantSource(PriceSource):
         self.vat_multiplier = vat_multiplier
 
     def get_prices_for_date(self, target_date: date) -> list:
-        """Get prices from Home Assistant for the specified date using timestamp validation.
-
-        This method fetches both today and tomorrow sensors, parses their actual timestamps,
-        and returns the correct data for the target_date. If timestamp parsing fails,
-        it fails fast rather than guessing.
-
-        Args:
-            target_date: The date to get prices for
-
-        Returns:
-            List of hourly prices for the specified date
-
-        Raises:
-            ValueError: If prices are not available for the date
-        """
+        """Get prices from Home Assistant for the specified date using timestamp validation."""
         logger = logging.getLogger(__name__)
-
         try:
-            # Fetch both today and tomorrow sensor data to get all available price data
+            # Fetch both today and tomorrow sensor data from the correct entity
             today_data = self._fetch_sensor_attributes("nordpool_kwh_today")
             tomorrow_data = self._fetch_sensor_attributes("nordpool_kwh_tomorrow")
 
-            # Try to find target_date in either sensor using timestamp parsing
             target_prices = None
             found_in_sensor = None
 
-            # Check today sensor for our target date
             if today_data:
                 prices = self._extract_prices_for_date(
                     today_data, target_date, "today sensor"
@@ -109,7 +91,6 @@ class HomeAssistantSource(PriceSource):
                     found_in_sensor = "today sensor"
                     logger.debug(f"Found {target_date} prices in today sensor")
 
-            # Check tomorrow sensor for our target date (might override if both have same date)
             if tomorrow_data:
                 prices = self._extract_prices_for_date(
                     tomorrow_data, target_date, "tomorrow sensor"
@@ -125,46 +106,35 @@ class HomeAssistantSource(PriceSource):
                 )
                 return target_prices
 
-            # No fallbacks - fail with diagnostic information
-            logger.error(f"Failed to find price data for {target_date} in any sensor")
-
-            # Provide diagnostic info for debugging
-            today_available = self._get_sensor_diagnostic_info(
-                today_data, "today sensor"
-            )
-            tomorrow_available = self._get_sensor_diagnostic_info(
-                tomorrow_data, "tomorrow sensor"
-            )
-
+            # No price data found for the target date
+            today_available = self._get_sensor_diagnostic_info(today_data, "today sensor")
+            tomorrow_available = self._get_sensor_diagnostic_info(tomorrow_data, "tomorrow sensor")
+                
             error_msg = (
                 f"No price data found for {target_date}. "
                 f"Today sensor: {today_available}. "
                 f"Tomorrow sensor: {tomorrow_available}."
             )
-
             raise ValueError(error_msg)
-
         except Exception as e:
-            logger.error(f"Error fetching prices for {target_date}: {e}")
             if isinstance(e, ValueError):
-                raise  # Re-raise ValueError with original message
+                raise
             raise ValueError(f"Failed to get price data for {target_date}: {e}") from e
 
     def _fetch_sensor_attributes(self, sensor_key):
-        """Fetch attributes from a specific HA sensor."""
+        """Fetch attributes from the configured Nordpool sensor via HA controller's sensor mapping."""
         try:
+            # Use HA controller's sensor mapping to get the actual entity ID
             entity_id = self.ha_controller.sensors.get(sensor_key)
             if not entity_id:
                 return None
-
-            response = self.ha_controller._api_request(
-                "get", f"/api/states/{entity_id}"
-            )
+                
+            # Fetch sensor state with attributes using the mapped entity ID
+            response = self.ha_controller._api_request("get", f"/api/states/{entity_id}")
             if not response or "attributes" not in response:
                 return None
-
+                
             return response["attributes"]
-
         except Exception:
             return None
 
@@ -359,7 +329,7 @@ class PriceManager:
         """
         return base_price + self.tax_reduction
 
-    def get_price_data(self, target_date: Optional[date] = None) -> list:  # noqa: UP007
+    def get_price_data(self, target_date: date | None = None) -> list:
         """Get formatted price data for the specified date.
 
         Args:
@@ -404,7 +374,8 @@ class PriceManager:
             return price_data
 
         except Exception as e:
-            self._logger.error(f"Error getting prices for {target_date}: {e}")
+            if isinstance(e, ValueError):
+                raise  # Re-raise ValueError as-is
             raise ValueError(f"Failed to get price data: {e}") from e
 
     def get_today_prices(self) -> list:
@@ -419,12 +390,15 @@ class PriceManager:
         """Get prices for the next day.
 
         Returns:
-            List of price entries for tomorrow
+            List of price entries for tomorrow, or empty list if not yet available
         """
         tomorrow = datetime.now().date() + timedelta(days=1)
-        return self.get_price_data(tomorrow)
+        try:
+            return self.get_price_data(tomorrow)
+        except ValueError:
+            return []  # Return empty list instead of raising error
 
-    def get_prices(self, target_date: Optional[date] = None) -> list:  # noqa: UP007
+    def get_prices(self, target_date: date | None = None) -> list:
         """Get raw price data for a specified date.
 
         This is a compatibility method for existing code.
@@ -439,7 +413,7 @@ class PriceManager:
 
     def get_buy_prices(
         self,
-        target_date: Optional[date] = None,  # noqa: UP007
+        target_date: date | None = None,
         raw_prices: list | None = None,
     ) -> list:
         """Get buy prices for the specified date or from raw prices.
@@ -461,7 +435,7 @@ class PriceManager:
 
     def get_sell_prices(
         self,
-        target_date: Optional[date] = None,  # noqa: UP007
+        target_date: date | None = None,
         raw_prices: list | None = None,
     ) -> list:
         """Get sell prices for the specified date or from raw prices.
@@ -522,3 +496,105 @@ class PriceManager:
             self._logger.info(price_data)
         except Exception as e:
             self._logger.warning(f"Failed to log price information: {e}")
+
+    def check_health(self) -> list:
+        """Check price management capabilities."""
+
+        price_check = {
+            "name": "Electricity Price Data",
+            "description": "Retrieves electricity prices for optimization",
+            "required": True,
+            "status": "UNKNOWN",
+            "checks": [],
+            "last_run": datetime.now().isoformat(),
+        }
+
+        # Define what controller methods this component uses - following the established pattern
+        price_methods = [
+            "get_nordpool_prices_today",
+            "get_nordpool_prices_tomorrow"
+        ]
+
+        # Get sensor diagnostics for all methods - this will include the centralized names
+        sensor_diagnostics = self.price_source.ha_controller.validate_methods_sensors(price_methods)  # type: ignore
+
+        working_methods = 0
+        
+        for method_info in sensor_diagnostics:
+            # Use the centralized name from the method info
+            display_name = method_info.get("name", method_info.get("method_name", "Unknown"))
+            
+            check_result = {
+                "name": display_name,
+                "key": method_info.get("sensor_key", method_info.get("method_name")),
+                "entity_id": method_info.get("entity_id", "Not mapped"),
+                "status": "UNKNOWN",
+                "value": None,
+                "error": None,
+            }
+
+            # Map HA controller method to price manager method
+            ha_method = method_info["method_name"]
+            price_method = "get_today_prices" if "today" in ha_method else "get_tomorrow_prices"
+            is_required = "today" in ha_method
+
+            try:
+                method = getattr(self, price_method)
+                prices = method()
+
+                if prices and len(prices) >= 24:
+                    check_result.update({
+                        "status": "OK", 
+                        "value": f"{len(prices)} prices available"
+                    })
+                    working_methods += 1
+                elif prices and len(prices) > 0:
+                    check_result.update({
+                        "status": "WARNING",
+                        "value": f"{len(prices)} prices available",
+                        "error": "Incomplete price data",
+                    })
+                else:
+                    # For tomorrow prices, missing data is WARNING not ERROR
+                    if is_required:
+                        check_result.update({
+                            "status": "ERROR", 
+                            "error": "No price data available", 
+                            "value": "N/A"
+                        })
+                    else:
+                        check_result.update({
+                            "status": "WARNING", 
+                            "value": "Not yet available"
+                        })
+
+            except Exception as e:
+                # For tomorrow prices, failures are WARNING not ERROR 
+                if is_required:
+                    check_result.update({
+                        "status": "ERROR", 
+                        "error": f"Method failed: {e!s}", 
+                        "value": "N/A"
+                    })
+                else:
+                    check_result.update({
+                        "status": "WARNING", 
+                        "value": "Not yet available"
+                    })
+
+            price_check["checks"].append(check_result)
+
+        # Determine overall status - only ERROR if today's prices fail
+        has_critical_error = any(
+            c["status"] == "ERROR" and "Today" in c["name"] for c in price_check["checks"]
+        )
+        
+        if has_critical_error:
+            price_check["status"] = "ERROR"
+        elif working_methods >= 1:
+            price_check["status"] = "OK"
+        else:
+            price_check["status"] = "WARNING"
+
+        return [price_check]
+

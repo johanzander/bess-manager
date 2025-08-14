@@ -125,6 +125,9 @@ class BatterySystemManager:
                     battery_settings=self.battery_settings,
                 )
 
+                # Run health check before we start using sensors
+                self._run_health_check()
+
                 # Initialize schedule from inverter - preserves original logic
                 self._initialize_tou_schedule_from_inverter()
 
@@ -133,9 +136,6 @@ class BatterySystemManager:
 
                 # Fetch predictions
                 self._fetch_predictions()
-
-                # Run health check
-                self._run_health_check()
 
             self.log_system_startup()
             logger.info("BatterySystemManager started successfully")
@@ -1272,7 +1272,7 @@ class BatterySystemManager:
             health_results = run_system_health_checks(self)
 
             logger.info("System Health Check Results:")
-            logger.info("=" * 80)
+            logger.info("=" * 40)
 
             for component in health_results["checks"]:
                 status_indicator = (
@@ -1302,7 +1302,7 @@ class BatterySystemManager:
                             )
                     logger.info("-" * 40)
 
-            logger.info("=" * 80)
+            logger.info("=" * 40)
             return health_results
 
         except Exception as e:

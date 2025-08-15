@@ -282,7 +282,7 @@ class SensorCollector:
         for attempt in range(max_retries):
             try:
                 # Use InfluxDB for historical data - this is what the system was designed for
-                result = get_sensor_data(self.cumulative_sensors, target_datetime)
+                result = get_sensor_data(self.cumulative_sensors, stop_time=target_datetime)
 
                 if result and result.get("status") == "success" and result.get("data"):
                     return result

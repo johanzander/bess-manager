@@ -7,7 +7,7 @@ This module is designed to run within either the Pyscript environment or a stand
 import json
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import requests
@@ -59,16 +59,32 @@ def get_influxdb_config():
     return config
 
 
-def get_sensor_data(sensors_list, end_time=None) -> dict:
-    """Get sensor data for each hour of today with incremental values for cumulative sensors."""
+def get_sensor_data(sensors_list, start_time=None, stop_time=None) -> dict:
+    """Get sensor data with configurable time range.
+    
+    Args:
+        sensors_list: List of sensor names to query
+        start_time: Start time for the query (defaults to 24h before stop_time)
+        stop_time: End time for the query (defaults to now)
+    
+    Returns:
+        dict: Query results with status and data
+    """
     # Set up timezone
     local_tz = ZoneInfo("Europe/Stockholm")
 
-    # Determine end time
-    if end_time is None:
-        end_time = datetime.now(local_tz)
-    elif end_time.tzinfo is None:
-        end_time = end_time.replace(tzinfo=local_tz)
+    # Determine stop time
+    if stop_time is None:
+        stop_time = datetime.now(local_tz)
+    elif stop_time.tzinfo is None:
+        stop_time = stop_time.replace(tzinfo=local_tz)
+
+    # Determine start time - default to 24h before stop time
+    if start_time is None:
+        start_time = stop_time - timedelta(hours=24)
+        _LOGGER.debug("Using default 24-hour window")
+    elif start_time.tzinfo is None:
+        start_time = start_time.replace(tzinfo=local_tz)
 
     # Get configuration
     influxdb_config = get_influxdb_config()
@@ -92,15 +108,16 @@ def get_sensor_data(sensors_list, end_time=None) -> dict:
     }
 
     # Format times for InfluxDB query
-    end_str = end_time.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%SZ")
-
+    start_str = start_time.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%SZ")
+    end_str = stop_time.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%SZ")
+    
     sensor_filter = " or ".join(
         [f'r["_measurement"] == "sensor.{sensor}"' for sensor in sensors_list]
     )
 
-    # Query each sensor separately to get all readings between start and end
+    # Time-bounded query (always uses range since we always have start_time)
     flux_query = f"""from(bucket: "home_assistant/autogen")
-                    |> range(start: 0, stop: {end_str})
+                    |> range(start: {start_str}, stop: {end_str})
                     |> filter(fn: (r) => {sensor_filter})
                     |> filter(fn: (r) => r["_field"] == "value")
                     |> filter(fn: (r) => r["domain"] == "sensor")

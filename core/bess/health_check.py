@@ -283,7 +283,7 @@ def check_historical_data_access():
             # The actual sensor data availability will be tested by the sensor collector
             test_sensors = ["battery_soc"]  # Use generic key, let the system handle mapping
 
-            response = get_sensor_data(test_sensors, one_hour_ago)
+            response = get_sensor_data(test_sensors, stop_time=one_hour_ago)
 
             if response["status"] == "success":
                 data_check["status"] = "OK" 

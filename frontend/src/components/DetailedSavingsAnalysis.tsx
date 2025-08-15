@@ -250,9 +250,12 @@ export const DetailedSavingsAnalysis: React.FC<DetailedSavingsAnalysisProps> = (
             return (
               <tr key={index} className="hover:bg-gray-50 dark:hover:bg-gray-700">
                 <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
-                  {String(hour.hour || index).padStart(2, '0')}:00
-                  <div className="text-xs text-gray-500 dark:text-gray-400">
-                    {hour.dataSource || 'predicted'}
+                  <div className="text-center">
+                    <div>{String(hour.hour || index).padStart(2, '0')}:00</div>
+                    <div className="text-xs text-gray-400 dark:text-gray-500">-{String(hour.hour || index).padStart(2, '0')}:59</div>
+                  </div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400 text-center">
+                    {(hour.dataSource || 'predicted').charAt(0).toUpperCase() + (hour.dataSource || 'predicted').slice(1)}
                   </div>
                 </td>
                 

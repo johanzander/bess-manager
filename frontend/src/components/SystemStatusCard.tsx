@@ -3,12 +3,12 @@ import api from '../lib/api';
 import { 
   DollarSign, 
   Battery, 
-  Heart,
   TrendingUp,
   TrendingDown,
   AlertTriangle,
   CheckCircle,
-  Zap
+  Zap,
+  Home
 } from 'lucide-react';
 
 // System status data structure
@@ -26,36 +26,38 @@ interface SystemStatusData {
     status: 'charging' | 'discharging' | 'idle';
     batteryMode?: string; // Current operating mode (e.g., "load-first", "battery-first")
   };
-  systemHealth?: {
-    status: 'healthy' | 'warning' | 'error';
-    uptime: number;
-    lastOptimization: string;
-    activeSessions: number;
-    actualHours: number;
-    totalHours: number;
+  realTimePower?: {
+    solarPower: number;        // kW - Total solar DC production (converted from watts)
+    homeLoad: number;          // kW - Home consumption (converted from watts)
+    gridImport: number;        // kW - Grid import power (converted from watts)
+    gridExport: number;        // kW - Grid export power (converted from watts)
+    batteryCharge: number;     // kW - Battery charging power (converted from watts)
+    batteryDischarge: number;  // kW - Battery discharging power (converted from watts)
+    netBattery: number;        // kW - Net battery power: + = charging, - = discharging
+    netGrid: number;           // kW - Net grid power: + = importing, - = exporting
   };
 }
 
 // StatusCard component
 interface StatusCardProps {
   title: string;
-  icon: React.ComponentType<any>;
-  color: 'blue' | 'green' | 'red' | 'yellow' | 'purple';
   keyMetric: string;
   keyValue: number | string;
   keyUnit: string;
-  metrics: {
+  status: {
+    icon: React.ComponentType<{ className?: string }>;
+    text: string;
+    color: 'green' | 'red' | 'yellow' | 'blue';
+  };
+  metrics: Array<{
     label: string;
     value: number | string;
-    unit?: string;
-    icon?: React.ComponentType<any>;
-    color?: string;
-  }[];
-  status?: {
-    icon: React.ComponentType<any>;
-    text: string;
-    color?: string;
-  };
+    unit: string;
+    icon?: React.ComponentType<{ className?: string }>;
+    color?: 'green' | 'red' | 'yellow' | 'blue';
+  }>;
+  color: 'blue' | 'green' | 'yellow' | 'red' | 'purple';
+  icon: React.ComponentType<{ className?: string }>;
   className?: string;
 }
 
@@ -118,7 +120,7 @@ const StatusCard: React.FC<StatusCardProps> = ({
       <div className="mb-6">
         <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">{keyMetric}</p>
         <p className="text-3xl font-bold text-gray-900 dark:text-gray-100">
-          {typeof keyValue === 'number' ? keyValue.toFixed(2) : keyValue}
+          {typeof keyValue === 'number' ? keyValue.toFixed(1) : keyValue}
           <span className="text-lg font-normal text-gray-600 dark:text-gray-400 ml-2">{keyUnit}</span>
         </p>
       </div>
@@ -135,9 +137,7 @@ const StatusCard: React.FC<StatusCardProps> = ({
               metric.color ? metricColorClasses[metric.color] : 'text-gray-900 dark:text-gray-100'
             }`}>
               {typeof metric.value === 'number' 
-                ? metric.label === "Percentage Saved" 
-                  ? metric.value.toFixed(1) 
-                  : metric.value.toFixed(2) 
+                ? metric.value.toFixed(1)
                 : metric.value}
               {metric.unit && <span className="opacity-70 ml-1">{metric.unit}</span>}
             </span>
@@ -180,6 +180,10 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "" }) =
         const dashboardResponse = await api.get('/api/dashboard');
         const dashboardData = dashboardResponse.data;
         
+        // Fetch actual inverter status for correct battery mode and other real-time data
+        const inverterResponse = await api.get('/api/growatt/inverter_status');
+        const inverterStatusData = inverterResponse.data;
+        
         // Check for required battery data
         if (dashboardData.batterySoc === undefined) {
           console.warn('BACKEND ISSUE: Missing batterySoc in dashboardData');
@@ -219,10 +223,14 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "" }) =
         const currentHour = new Date().getHours();
         const currentHourData = dashboardData.hourlyData?.find((h: any) => h.hour === currentHour);
         
+        // Get actual battery mode from inverter status (not schedule)
+        const actualBatteryMode = inverterStatusData.batteryMode || 'load-first';
+        
         // Debug log to see all available fields in the currentHourData
         if (currentHourData) {
           console.log("Current hour data fields:", Object.keys(currentHourData));
         }
+        console.log("Actual inverter battery mode:", actualBatteryMode);
         
         // Check for missing keys in hourly data
         if (currentHourData && currentHourData.batteryAction === undefined) {
@@ -232,21 +240,32 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "" }) =
         const batteryPower = Math.abs(currentHourData?.batteryAction ?? 0);
         const batteryStatus = currentHourData?.batteryAction > 0.1 ? 'charging' : 
                             currentHourData?.batteryAction < -0.1 ? 'discharging' : 'idle';
-        
-        // Check for missing keys in system health data
-        if (dashboardData.actualHoursCount === undefined) {
-          console.warn('Missing key: actualHoursCount in dashboardData');
-        }
-        if (dashboardData.hourlyData === undefined) {
-          console.warn('Missing key: hourlyData in dashboardData');
-        }
-        
-        // System health indicators
-        const actualHours = dashboardData.actualHoursCount ?? 0;
-        const totalHours = dashboardData.hourlyData?.length ?? 24;
-        const systemUptime = (actualHours / totalHours) * 100;
-        
-        const transformedData: SystemStatusData = {
+
+    // Get real-time power data from dashboard response (in watts)
+    const realTimePowerDataW = dashboardData.realTimePower || {
+      solarPowerW: 0,
+      homeLoadPowerW: 0,
+      gridImportPowerW: 0,
+      gridExportPowerW: 0,
+      batteryChargePowerW: 0,
+      batteryDischargePowerW: 0,
+      netBatteryPowerW: 0,
+      netGridPowerW: 0,
+      acPowerW: 0,
+      selfPowerW: 0,
+    };
+
+    // Convert to kW for display (preserving precision until display)
+    const realTimePowerData = {
+      solarPower: realTimePowerDataW.solarPowerW / 1000,           // Total solar production
+      homeLoad: realTimePowerDataW.homeLoadPowerW / 1000,         // Home consumption
+      gridImport: realTimePowerDataW.gridImportPowerW / 1000,     // Grid import
+      gridExport: realTimePowerDataW.gridExportPowerW / 1000,     // Grid export
+      batteryCharge: realTimePowerDataW.batteryChargePowerW / 1000,     // Battery charging
+      batteryDischarge: realTimePowerDataW.batteryDischargePowerW / 1000, // Battery discharging
+      netBattery: realTimePowerDataW.netBatteryPowerW / 1000,     // Net battery power
+      netGrid: realTimePowerDataW.netGridPowerW / 1000,           // Net grid power
+    };        const transformedData: SystemStatusData = {
           costAndSavings: {
             todaysCost: optimizedCost,
             todaysSavings: dailySavings,
@@ -258,17 +277,10 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "" }) =
             soe: currentSOE,
             power: batteryPower,
             status: batteryStatus,
-            // The backend "battery_mode" is converted to "batteryMode" by the API
-            batteryMode: currentHourData?.batteryMode || 'load-first'
+            // Use the actual inverter battery mode instead of optimization schedule
+            batteryMode: actualBatteryMode
           },
-          systemHealth: {
-            status: systemUptime > 90 ? 'healthy' : systemUptime > 70 ? 'warning' : 'error',
-            uptime: systemUptime,
-            lastOptimization: dashboardData.lastOptimization ?? 'Unknown',
-            activeSessions: 1, // TODO: Get actual session count
-            actualHours: actualHours,
-            totalHours: totalHours
-          }
+          realTimePower: realTimePowerData
         };
         
         // Debug log to check hourly data structure
@@ -324,16 +336,103 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "" }) =
 
   const cards = [
     {
-      title: "Cost & Savings",
+      title: "Power Flow",
+      icon: Zap,
+      color: "blue" as const,
+      keyMetric: "Solar Production",
+      keyValue: statusData.realTimePower?.solarPower || 0,
+      keyUnit: "kW",
+      status: {
+        icon: (statusData.realTimePower?.gridExport || 0) > 0.1 ? TrendingUp : 
+              (statusData.realTimePower?.gridImport || 0) > 0.1 ? TrendingDown : CheckCircle,
+        text: (statusData.realTimePower?.gridExport || 0) > 0.1 ? `${(statusData.realTimePower?.gridExport || 0).toFixed(1)}kW exporting` :
+              (statusData.realTimePower?.gridImport || 0) > 0.1 ? `${(statusData.realTimePower?.gridImport || 0).toFixed(1)}kW importing` : 'Grid balanced',
+        color: (statusData.realTimePower?.gridExport || 0) > 0.1 ? 'green' as const : 
+               (statusData.realTimePower?.gridImport || 0) > 0.1 ? 'red' as const : 'green' as const
+      },
+      metrics: [
+        {
+          label: "Home Load",
+          value: statusData.realTimePower?.homeLoad || 0,
+          unit: "kW",
+          icon: Home
+        },
+        {
+          label: "Grid Flow",
+          value: Math.abs(statusData.realTimePower?.netGrid || 0),
+          unit: (statusData.realTimePower?.gridExport || 0) > 0.1 ? "kW Export ↑" : 
+                (statusData.realTimePower?.gridImport || 0) > 0.1 ? "kW Import ↓" : "kW",
+          icon: Zap,
+          color: (statusData.realTimePower?.gridExport || 0) > 0.1 ? 'green' as const : 
+                 (statusData.realTimePower?.gridImport || 0) > 0.1 ? 'red' as const : undefined
+        },
+        {
+          label: "Battery",
+          value: Math.abs(statusData.realTimePower?.netBattery || 0),
+          unit: (statusData.realTimePower?.netBattery || 0) > 0.1 ? "kW Charging ↑" :
+                (statusData.realTimePower?.netBattery || 0) < -0.1 ? "kW Discharging ↓" : "kW",
+          icon: Battery,
+          color: (statusData.realTimePower?.netBattery || 0) > 0.1 ? 'green' as const : 
+                 (statusData.realTimePower?.netBattery || 0) < -0.1 ? 'yellow' as const : undefined
+        }
+      ]
+    },
+    {
+      title: "Inverter & Battery",
+      icon: Battery,
+      color: "blue" as const,
+      keyMetric: "State of Charge",
+      keyValue: statusData.batteryStatus?.soc || 0,
+      keyUnit: "%",
+      status: {
+        icon: (statusData.realTimePower?.netBattery || 0) > 0.1 ? TrendingUp :
+              (statusData.realTimePower?.netBattery || 0) < -0.1 ? TrendingDown : CheckCircle,
+        text: (statusData.realTimePower?.netBattery || 0) > 0.1 ? 
+          `Charging ${Math.abs(statusData.realTimePower?.netBattery || 0).toFixed(1)}kW` :
+          (statusData.realTimePower?.netBattery || 0) < -0.1 ? 
+          `Discharging ${Math.abs(statusData.realTimePower?.netBattery || 0).toFixed(1)}kW` : 
+          'Idle',
+        color: (statusData.realTimePower?.netBattery || 0) > 0.1 ? 'green' as const :
+               (statusData.realTimePower?.netBattery || 0) < -0.1 ? 'yellow' as const : 'blue' as const
+      },
+      metrics: [
+        {
+          label: "State of Energy",
+          value: parseFloat((statusData.batteryStatus?.soe || 0).toFixed(1)),
+          unit: "kWh",
+          icon: Zap
+          // Removed color to use default (black)
+        },
+        {
+          label: "Current Mode",
+          value: formatBatteryMode(statusData.batteryStatus?.batteryMode || 'Unknown'),
+          unit: "",
+          icon: Battery
+          // Removed color to use default (black)
+        },
+        {
+          label: (statusData.realTimePower?.netBattery || 0) > 0.1 ? 'Charging' :
+                 (statusData.realTimePower?.netBattery || 0) < -0.1 ? 'Discharging' : 'Power',
+          value: parseFloat((Math.abs(statusData.realTimePower?.netBattery || 0)).toFixed(1)),
+          unit: "kW",
+          icon: (statusData.realTimePower?.netBattery || 0) > 0.1 ? TrendingUp :
+                (statusData.realTimePower?.netBattery || 0) < -0.1 ? TrendingDown : Zap,
+          color: (statusData.realTimePower?.netBattery || 0) > 0.1 ? 'green' as const :
+                 (statusData.realTimePower?.netBattery || 0) < -0.1 ? 'yellow' as const : 'blue' as const
+        }
+      ]
+    },
+    {
+      title: "Today's Cost & Savings",
       icon: DollarSign,
-      color: "blue" as const, // Changed to blue to match the cost theme
+      color: "blue" as const,
       keyMetric: "Today's Costs",
       keyValue: statusData.costAndSavings?.todaysCost || 0,
       keyUnit: "SEK",
       status: {
         icon: (statusData.costAndSavings?.todaysSavings || 0) >= 0 ? TrendingUp : TrendingDown,
         text: `${((statusData.costAndSavings?.percentageSaved || 0)).toFixed(1)}% saved`,
-        color: (statusData.costAndSavings?.todaysSavings || 0) >= 0 ? 'green' : 'red' as const
+        color: (statusData.costAndSavings?.todaysSavings || 0) >= 0 ? 'green' as const : 'red' as const
       },
       metrics: [
         {
@@ -347,85 +446,15 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "" }) =
           value: statusData.costAndSavings?.todaysSavings || 0,
           unit: "SEK",
           icon: DollarSign,
-          color: (statusData.costAndSavings?.todaysSavings || 0) >= 0 ? 'green' : 'red'
+          color: (statusData.costAndSavings?.todaysSavings || 0) >= 0 ? 'green' as const : 'red' as const
         },
         {
           label: "Percentage Saved",
           value: statusData.costAndSavings?.percentageSaved || 0,
           unit: "%",
           icon: TrendingUp,
-          color: (statusData.costAndSavings?.percentageSaved || 0) >= 0 ? 'green' : 'red'
+          color: (statusData.costAndSavings?.percentageSaved || 0) >= 0 ? 'green' as const : 'red' as const
         }
-      ]
-    },
-    {
-      title: "Battery Status",
-      icon: Battery,
-      color: "blue" as const,
-      keyMetric: "State of Charge",
-      keyValue: statusData.batteryStatus?.soc || 0,
-      keyUnit: "%",
-      status: {
-        icon: statusData.batteryStatus?.status === 'charging' ? TrendingUp :
-              statusData.batteryStatus?.status === 'discharging' ? TrendingDown : CheckCircle,
-        text: statusData.batteryStatus?.status === 'charging' ? 
-          `Charging ${(statusData.batteryStatus?.power || 0).toFixed(1)}kW` :
-          statusData.batteryStatus?.status === 'discharging' ? 
-          `Discharging ${(statusData.batteryStatus?.power || 0).toFixed(1)}kW` : 
-          'Idle',
-        color: statusData.batteryStatus?.status === 'charging' ? 'green' :
-               statusData.batteryStatus?.status === 'discharging' ? 'yellow' : 'blue' as const
-      },
-      metrics: [
-        {
-          label: "State of Energy",
-          value: statusData.batteryStatus?.soe || 0,
-          unit: "kWh",
-          icon: Zap
-          // Removed color to use default (black)
-        },
-        {
-          label: "Current Mode",
-          value: formatBatteryMode(statusData.batteryStatus?.batteryMode || 'Unknown'),
-          unit: "",
-          icon: Battery
-          // Removed color to use default (black)
-        },
-        {
-          label: statusData.batteryStatus?.status === 'charging' ? 'Charging' :
-                 statusData.batteryStatus?.status === 'discharging' ? 'Discharging' : 'Power',
-          value: Math.abs(statusData.batteryStatus?.power || 0),
-          unit: "kW",
-          icon: statusData.batteryStatus?.status === 'charging' ? TrendingUp :
-                statusData.batteryStatus?.status === 'discharging' ? TrendingDown : Zap,
-          color: statusData.batteryStatus?.status === 'charging' ? 'green' :
-                 statusData.batteryStatus?.status === 'discharging' ? 'yellow' : 'blue' as const
-        }
-      ]
-    },
-    {
-      title: "System Health",
-      icon: Heart,
-      color: statusData.systemHealth?.status === 'healthy' ? "green" : 
-             statusData.systemHealth?.status === 'warning' ? "yellow" : "red" as 'blue' | 'green' | 'red' | 'yellow' | 'purple',
-      keyMetric: "Hours With Actual Data",
-      keyValue: statusData.systemHealth?.uptime || 0,
-      keyUnit: "%",
-      status: {
-        icon: statusData.systemHealth?.status === 'healthy' ? CheckCircle :
-              statusData.systemHealth?.status === 'warning' ? AlertTriangle : TrendingDown,
-        text: statusData.systemHealth?.status === 'healthy' ? 'Healthy' :
-              statusData.systemHealth?.status === 'warning' ? 'Warning' : 'Error',
-        color: statusData.systemHealth?.status === 'healthy' ? 'green' :
-               statusData.systemHealth?.status === 'warning' ? 'yellow' : 'red'
-      },
-      metrics: [
-        {
-          label: "Data Available",
-          value: `${statusData.systemHealth?.actualHours || 0} of ${statusData.systemHealth?.totalHours || 24}`,
-          unit: "hours",
-          icon: CheckCircle
-        },
       ]
     }
   ];

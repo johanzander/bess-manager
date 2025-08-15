@@ -25,15 +25,8 @@
 ### 4. **Fix System Health Page**
 **Impact**: Medium-High | **Effort**: Medium | **Dependencies**: System monitoring
 
-**Why Fourth**: Essential for system monitoring and debugging, affects operational reliability
-
-**Current State**: SystemHealthPage has rendering/functionality issues (needs investigation)
-
-**Technical Tasks**:
-- Debug SystemHealthPage component errors
-- Fix data fetching and error handling
-- Update health status indicators  
-- Test all monitoring features
+Review which should be required and optional
+test that missing sensors actually works
 
 ---
 
@@ -132,3 +125,12 @@ But at noon every day we get tomorrows schedule. We could use this information t
 
 Why cant they be the same?
 
+---
+
+- Refactor all API endpoints to use dataclass-based serialization (with robust mapping for all field variants) for consistent, type-safe, and future-proof API responses. Ensure all details and fields are preserved as in the original dict-based implementation.
+
+add power monitoring sensors to health check.
+
+check if all sensors in config.yaml are actually needed and used (lifetime e.g.)
+
+fix dark mode button

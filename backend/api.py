@@ -3,10 +3,11 @@ API endpoints for battery and electricity settings, dashboard data, and decision
 
 """
 
+
 from datetime import datetime
 
 from api_conversion import convert_keys_to_camel_case
-from api_dataclasses import APIBatterySettings, APIPriceSettings
+from api_dataclasses import APIBatterySettings, APIPriceSettings, APIRealTimePower
 from fastapi import APIRouter, HTTPException, Query
 from loguru import logger
 
@@ -23,7 +24,7 @@ async def get_battery_settings():
         battery_settings = settings["battery"]
         estimated_consumption = settings["home"].default_hourly
         
-        # Create APIBatterySettings using existing method (maintains compatibility)
+        # Create APIBatterySettings using existing method
         api_settings = APIBatterySettings.from_internal(battery_settings, estimated_consumption)
         return api_settings.__dict__
         
@@ -135,6 +136,9 @@ async def get_dashboard_data(date: str = Query(None)):
         battery_soc = controller.get_battery_soc()
         battery_soe = (battery_soc / 100.0) * battery_capacity
         logger.debug(f"Battery SOC: {battery_soc}%, SOE: {battery_soe} kWh")
+
+        # Get real-time power data for Live Power Flow card
+        real_time_power_data = APIRealTimePower.from_controller(controller)
         
         # Calculate totals from hourly data - using only canonical camelCase field names
         totals = {
@@ -236,6 +240,7 @@ async def get_dashboard_data(date: str = Query(None)):
             "batteryCapacity": battery_capacity,
             "batterySoc": battery_soc,
             "batterySoe": battery_soe,
+            "realTimePower": real_time_power_data.__dict__,
         }
         
         logger.debug("Dashboard data prepared successfully")
@@ -248,8 +253,6 @@ async def get_dashboard_data(date: str = Query(None)):
 ############################################################################################
 # API Endpoints for Decision Insights
 ############################################################################################
-
-# Add this converter function to your existing api.py
 
 def convert_real_data_to_mock_format(hourly_data_list, current_hour):
     """
@@ -753,6 +756,16 @@ async def get_inverter_status():
             
         battery_settings = bess_controller.system.battery_settings
         
+        # Get current battery mode from schedule for current hour
+        current_battery_mode = "load-first"  # Default
+        try:
+            current_hour = datetime.now().hour
+            schedule_manager = bess_controller.system._schedule_manager
+            hourly_settings = schedule_manager.get_hourly_settings(current_hour)
+            current_battery_mode = hourly_settings.get("batt_mode", "load-first")
+        except Exception as e:
+            logger.warning(f"Failed to get current battery mode: {e}")
+            
         # Default values in case of errors
         battery_soc = 50.0
         battery_soe = 0.0
@@ -777,6 +790,7 @@ async def get_inverter_status():
             "battery_soe": battery_soe,
             "battery_charge_power": battery_charge_power,
             "battery_discharge_power": battery_discharge_power,
+            "battery_mode": current_battery_mode, 
             "grid_charge_enabled": grid_charge_enabled,
             "charge_stop_soc": 100.0,
             "discharge_stop_soc": battery_settings.min_soc,
@@ -1091,53 +1105,29 @@ async def get_strategic_intents():
 @router.get("/api/system-health")
 async def get_system_health():
     """Get comprehensive system health including detailed sensor diagnostics."""
+
     from app import bess_controller
     from core.bess.health_check import run_system_health_checks
 
     try:
         logger.debug("Starting system health check")
-
-        # Run the enhanced health checks with sensor introspection
         health_results = run_system_health_checks(bess_controller.system)
-
-        # All health check methods now consistently return lists of dicts
-        checks = health_results.get("checks", [])
-
-        total_components = len(checks)
-        ok_components = len([c for c in checks if c.get("status") == "OK"])
-        warning_components = len([c for c in checks if c.get("status") == "WARNING"])
-        error_components = len([c for c in checks if c.get("status") == "ERROR"])
-
-        # Enhance results with summary
-        health_results["checks"] = checks
-        health_results.update({
-            "summary": {
-                "total_components": total_components,
-                "ok_components": ok_components,
-                "warning_components": warning_components,
-                "error_components": error_components,
-                "overall_status": "ERROR" if error_components > 0 else ("WARNING" if warning_components > 0 else "OK")
-            }
-        })
-
-        logger.debug(f"Health check completed: {ok_components}/{total_components} components OK")
-
-        # Convert to camelCase for frontend consistency
+        logger.debug(f"Health check completed: {health_results}")
         return convert_keys_to_camel_case(health_results)
-
     except Exception as e:
         logger.error(f"Error getting system health: {e}")
         # Return error state that frontend can handle
-        return {
+        from datetime import datetime
+        error_result = {
             "timestamp": datetime.now().isoformat(),
-            "systemMode": "unknown",
+            "system_mode": "unknown",
             "checks": [],
             "summary": {
-                "totalComponents": 0,
-                "okComponents": 0,
-                "warningComponents": 0,
-                "errorComponents": 1,
-                "overallStatus": "ERROR"
-            },
-            "error": str(e)
+                "total_components": 0,
+                "ok_components": 0,
+                "warning_components": 0,
+                "error_components": 1,
+                "overall_status": "ERROR"
+            }
         }
+        return convert_keys_to_camel_case(error_result)

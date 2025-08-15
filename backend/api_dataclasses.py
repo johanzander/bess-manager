@@ -142,6 +142,38 @@ class APIHomeSettings:
         }
 
 
+@dataclass
+class APIRealTimePower:
+    """Real-time power data with canonical camelCase fields."""
+    
+    solarPowerW: float
+    homeLoadPowerW: float
+    gridImportPowerW: float
+    gridExportPowerW: float
+    batteryChargePowerW: float
+    batteryDischargePowerW: float
+    netBatteryPowerW: float
+    netGridPowerW: float
+    acPowerW: float
+    selfPowerW: float
+    
+    @classmethod
+    def from_controller(cls, controller) -> APIRealTimePower:
+        """Convert from controller readings to canonical camelCase."""
+        return cls(
+            solarPowerW=controller.get_pv_power(),
+            homeLoadPowerW=controller.get_local_load_power(),
+            gridImportPowerW=controller.get_import_power(),
+            gridExportPowerW=controller.get_export_power(),
+            batteryChargePowerW=controller.get_battery_charge_power(),
+            batteryDischargePowerW=controller.get_battery_discharge_power(),
+            netBatteryPowerW=controller.get_net_battery_power(),
+            netGridPowerW=controller.get_net_grid_power(),
+            acPowerW=controller.get_ac_power(),
+            selfPowerW=controller.get_self_power()
+        )
+
+
 def flatten_hourly_data(hourly, battery_capacity: float = 30.0) -> dict:
     """Convert HourlyData to API dict using unified conversion system."""
     converter = APIConverter(battery_capacity)

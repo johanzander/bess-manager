@@ -215,8 +215,9 @@ export const TableBatteryDecisionExplorer: React.FC = () => {
                 <td className="px-3 py-4 whitespace-nowrap text-sm">
                   <div className="flex items-center">
                     <div>
-                      <div className="font-medium text-gray-900 dark:text-white">
-                        {decision.hour.toString().padStart(2, '0')}:00
+                      <div className="font-medium text-gray-900 dark:text-white text-right">
+                        <div>{decision.hour.toString().padStart(2, '0')}:00</div>
+                        <div className="text-xs text-gray-400 dark:text-gray-500 font-normal">-{decision.hour.toString().padStart(2, '0')}:59</div>
                       </div>
                       <div className="text-xs text-gray-500 dark:text-gray-400">
                         {decision.isCurrentHour ? 'Current' : 

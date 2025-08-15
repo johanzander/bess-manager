@@ -117,17 +117,55 @@ const Navigation = () => {
 function App() {
   console.log('App component rendering');
   
-  // Dark mode state
-  const [darkMode, setDarkMode] = useState(false);
+  // Function to toggle dark mode
+  const toggleDarkMode = () => {
+    setDarkMode(!darkMode);
+  };
 
-  // Dark mode effect
+  // Function to reset to system preference (double-click)
+  const resetToSystemPreference = () => {
+    localStorage.removeItem('darkMode');
+    const systemPreference = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    setDarkMode(systemPreference);
+  };
+
+  // Enhanced dark mode state with localStorage persistence and system preference detection
+  const [darkMode, setDarkMode] = useState(() => {
+    // Check localStorage first, then system preference
+    const saved = localStorage.getItem('darkMode');
+    if (saved !== null) {
+      return JSON.parse(saved);
+    }
+    // Fall back to system preference
+    return window.matchMedia('(prefers-color-scheme: dark)').matches;
+  });
+
+  // Dark mode effect with localStorage persistence
   useEffect(() => {
+    // Save preference to localStorage
+    localStorage.setItem('darkMode', JSON.stringify(darkMode));
+    
+    // Apply to document
     if (darkMode) {
       document.documentElement.classList.add('dark');
     } else {
       document.documentElement.classList.remove('dark');
     }
   }, [darkMode]);
+
+  // Listen for system theme changes (only if user hasn't set a manual preference)
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const handleSystemThemeChange = (e: MediaQueryListEvent) => {
+      // Only auto-update if no manual preference is saved
+      if (localStorage.getItem('darkMode') === null) {
+        setDarkMode(e.matches);
+      }
+    };
+
+    mediaQuery.addEventListener('change', handleSystemThemeChange);
+    return () => mediaQuery.removeEventListener('change', handleSystemThemeChange);
+  }, []);
   
   try {
     const { 
@@ -209,9 +247,10 @@ function App() {
                   
                   {/* Dark Mode Toggle Button */}
                   <button
-                    onClick={() => setDarkMode(!darkMode)}
+                    onClick={toggleDarkMode}
+                    onDoubleClick={resetToSystemPreference}
                     className="p-2 rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
-                    title={darkMode ? "Switch to light mode" : "Switch to dark mode"}
+                    title={`${darkMode ? "Switch to light mode" : "Switch to dark mode"} • Click to toggle • Double-click to follow system preference`}
                   >
                     {darkMode ? (
                       <Sun className="h-5 w-5 text-yellow-500" />

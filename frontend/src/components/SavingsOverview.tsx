@@ -208,7 +208,10 @@ export const SavingsOverview: React.FC<SavingsOverviewProps> = () => {
               <tr key={index} className={rowClass}>
                 <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600">
                   <div className="flex items-center">
-                    {hour.hour.toString().padStart(2, '0')}:00
+                    <div className="text-right">
+                      <div>{hour.hour.toString().padStart(2, '0')}:00</div>
+                      <div className="text-xs text-gray-400 dark:text-gray-500">-{hour.hour.toString().padStart(2, '0')}:59</div>
+                    </div>
                     {isActual && (
                       <span className="ml-2 text-xs bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 px-2 py-1 rounded">
                         Actual

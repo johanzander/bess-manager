@@ -145,7 +145,6 @@ export const EnergySankeyChart: React.FC<EnergySankeyChartProps> = ({
   if (!energyData) {
     return (
       <div className={`bg-purple-50 dark:bg-purple-900/10 border-purple-200 dark:border-purple-800 border-2 rounded-xl p-6 transition-all duration-200 hover:shadow-lg ${className}`}>
-        <h2 className="text-xl font-semibold mb-4 text-purple-900 dark:text-purple-100">Daily Energy Flow Overview</h2>
         <div className="flex items-center justify-center h-64 text-purple-500 dark:text-purple-400">
           <Info className="h-8 w-8 mr-2" />
           <span>No data available</span>
@@ -159,7 +158,6 @@ export const EnergySankeyChart: React.FC<EnergySankeyChartProps> = ({
   if (!flows) {
     return (
       <div className={`bg-purple-50 dark:bg-purple-900/10 border-purple-200 dark:border-purple-800 border-2 rounded-xl p-6 transition-all duration-200 hover:shadow-lg ${className}`}>
-        <h2 className="text-xl font-semibold mb-4 text-purple-900 dark:text-purple-100">Daily Energy Flow Overview</h2>
         <div className="flex items-center justify-center h-64 text-purple-500 dark:text-purple-400">
           <Info className="h-8 w-8 mr-2" />
           <span>Unable to calculate energy flows</span>
@@ -170,8 +168,6 @@ export const EnergySankeyChart: React.FC<EnergySankeyChartProps> = ({
 
   return (
     <div className={`bg-purple-50 dark:bg-purple-900/10 border-purple-200 dark:border-purple-800 border-2 rounded-xl p-6 transition-all duration-200 hover:shadow-lg ${className}`}>
-      <h2 className="text-xl font-semibold mb-4 text-purple-900 dark:text-purple-100">Daily Energy Flow Overview</h2>
-      
       {/* Sankey Diagram Only - No Cards */}
       <div ref={plotRef} className="w-full h-96" />
     </div>

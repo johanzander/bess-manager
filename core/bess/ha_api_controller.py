@@ -130,6 +130,14 @@ class HomeAssistantAPIController:
         "get_discharge_stop_soc": {"sensor_key": "battery_discharge_stop_soc", "name": "Battery Discharge Stop SOC"},
         "grid_charge_enabled": {"sensor_key": "grid_charge", "name": "Grid Charge Enabled"},
         # Power monitoring methods
+        "get_pv_power": {"sensor_key": "pv_power", "name": "Solar Power"},
+        "get_import_power": {"sensor_key": "import_power", "name": "Grid Import Power"},
+        "get_export_power": {"sensor_key": "export_power", "name": "Grid Export Power"},
+        "get_local_load_power": {"sensor_key": "local_load_power", "name": "Home Load Power"},
+        "get_ac_power": {"sensor_key": "ac_power", "name": "AC Power"},
+        "get_output_power": {"sensor_key": "output_power", "name": "Output Power"},
+        "get_self_power": {"sensor_key": "self_power", "name": "Self Power"},
+        "get_system_power": {"sensor_key": "system_power", "name": "System Power"},
         "get_battery_charge_power": {"sensor_key": "battery_charge_power", "name": "Battery Charging Power"},
         "get_battery_discharge_power": {"sensor_key": "battery_discharge_power", "name": "Battery Discharging Power"},
         "get_l1_current": {"sensor_key": "current_l1", "name": "Current L1"},
@@ -152,7 +160,7 @@ class HomeAssistantAPIController:
         # Solar forecast
         "get_solar_forecast": {"sensor_key": "solar_forecast_today", "name": "Solar Forecast"},
         "get_solar_forecast_today": {"sensor_key": "solar_forecast_today", "name": "Solar Forecast Today"},
-        "get_solar_forecast_tomorrow": {"sensor_key": "solar_forecast_tomorrow", "name": "Solar Forecast Tomorrow"}
+        "get_solar_forecast_tomorrow": {"sensor_key": "solar_forecast_tomorrow", "name": "Solar Forecast Tomorrow"},    
     }
 
     def _resolve_entity_id(self, sensor_key: str, for_service: bool = False) -> tuple[str, str]:
@@ -751,9 +759,6 @@ class HomeAssistantAPIController:
         """Get tomorrow's Nordpool prices from Home Assistant sensor."""
         return self._get_nordpool_prices(is_tomorrow=True)
 
-    # --- Energy Manager Methods ---
-    # These methods are specifically for supporting the EnergyManager class
-
     def get_sensor_data(self, sensors_list, end_time=None):
         """Get current sensor data via Home Assistant REST API.
 
@@ -804,3 +809,47 @@ class HomeAssistantAPIController:
         except Exception as e:
             logger.error("Error fetching sensor data: %s", str(e))
             return {"status": "error", "message": str(e)}
+
+    def get_pv_power(self):
+        """Get current solar PV power production in watts."""
+        return self._get_sensor_value("pv_power")
+
+    def get_import_power(self):
+        """Get current grid import power in watts."""
+        return self._get_sensor_value("import_power")
+
+    def get_export_power(self):
+        """Get current grid export power in watts."""
+        return self._get_sensor_value("export_power")
+
+    def get_local_load_power(self):
+        """Get current home load power in watts."""
+        return self._get_sensor_value("local_load_power")
+
+    def get_ac_power(self):
+        """Get current AC power in watts."""
+        return self._get_sensor_value("ac_power")
+
+    def get_output_power(self):
+        """Get current output power in watts."""
+        return self._get_sensor_value("output_power")
+
+    def get_self_power(self):
+        """Get current self power in watts."""
+        return self._get_sensor_value("self_power")
+
+    def get_system_power(self):
+        """Get current system power in watts."""
+        return self._get_sensor_value("system_power")
+
+    def get_net_battery_power(self):
+        """Get net battery power (positive = charging, negative = discharging) in watts."""
+        charge_power = self.get_battery_charge_power()
+        discharge_power = self.get_battery_discharge_power()  
+        return charge_power - discharge_power
+
+    def get_net_grid_power(self):
+        """Get net grid power (positive = importing, negative = exporting) in watts."""
+        import_power = self.get_import_power()
+        export_power = self.get_export_power()
+        return import_power - export_power

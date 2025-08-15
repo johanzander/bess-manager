@@ -6,28 +6,28 @@
  */
 export interface HourlyData {
   // Core display fields (use these for UI)
-  hour: string;
-  buyPrice: number;           // SEK/kWh
+  hour: string | number;
+  buyPrice?: number;           // SEK/kWh
   
   // Energy flows (use these for all energy calculations)  
-  solarProduction: number;    // kWh
-  homeConsumption: number;    // kWh
-  gridImported: number;       // kWh
-  gridExported: number;       // kWh  
-  batteryCharged: number;     // kWh
-  batteryDischarged: number;  // kWh
+  solarProduction?: number;    // kWh
+  homeConsumption?: number;    // kWh
+  gridImported?: number;       // kWh
+  gridExported?: number;       // kWh  
+  batteryCharged?: number;     // kWh
+  batteryDischarged?: number;  // kWh
   
   // Economic fields (use these for cost calculations)
-  batteryCycleCost: number;   // SEK battery wear
-  gridCost: number;           // SEK net grid cost
-  hourlyCost: number;         // SEK total cost
-  hourlySavings: number;      // SEK savings
+  batteryCycleCost?: number;   // SEK battery wear
+  gridCost?: number;           // SEK net grid cost
+  hourlyCost?: number;         // SEK total cost
+  hourlySavings?: number;      // SEK savings
   
   // Battery state (established in SOC/SOE naming fix)
-  batterySoeStart: number;    // kWh 
-  batterySoeEnd: number;      // kWh
-  batterySocStart: number;    // %
-  batterySocEnd: number;      // %
+  batterySoeStart?: number;    // kWh 
+  batterySoeEnd?: number;      // kWh
+  batterySocStart?: number;    // %
+  batterySocEnd?: number;      // %
   
   // Detailed energy flows
   solarToHome?: number;        // kWh
@@ -49,7 +49,7 @@ export interface HourlyData {
   solarSavings?: number;       // SEK - Solar-Only vs Grid-Only savings
   
   // Metadata
-  dataSource?: 'actual' | 'predicted';  // ✓ CANONICAL
+  dataSource?: string;  // 'actual' | 'predicted' | others
   timestamp?: string;         // ISO format
 }
 

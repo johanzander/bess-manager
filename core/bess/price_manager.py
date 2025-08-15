@@ -7,6 +7,7 @@ inversion.
 import logging
 from datetime import date, datetime, timedelta
 
+logger = logging.getLogger(__name__)
 
 class PriceSource:
     """Abstract base class for price sources.
@@ -72,50 +73,37 @@ class HomeAssistantSource(PriceSource):
         self.vat_multiplier = vat_multiplier
 
     def get_prices_for_date(self, target_date: date) -> list:
-        """Get prices from Home Assistant for the specified date using timestamp validation."""
+        """Get prices from Home Assistant for the specified date.
+        
+        Simple, fault-tolerant approach: fetch sensor data and parse with timestamp validation.
+        """
         logger = logging.getLogger(__name__)
+        
+        current_date = datetime.now().date()
+        tomorrow_date = current_date + timedelta(days=1)
+        
+        # Only support today and tomorrow
+        if target_date not in (current_date, tomorrow_date):
+            raise ValueError(f"Can only fetch today's or tomorrow's prices, not {target_date}")
+        
         try:
-            # Fetch both today and tomorrow sensor data from the correct entity
+            # Fetch sensor data from both sensors
             today_data = self._fetch_sensor_attributes("nordpool_kwh_today")
             tomorrow_data = self._fetch_sensor_attributes("nordpool_kwh_tomorrow")
-
-            target_prices = None
-            found_in_sensor = None
-
-            if today_data:
-                prices = self._extract_prices_for_date(
-                    today_data, target_date, "today sensor"
-                )
+            
+            # Try both sensors - use whichever has valid data for our target date
+            for sensor_data, sensor_name in [(today_data, "today"), (tomorrow_data, "tomorrow")]:
+                if not sensor_data:
+                    continue
+                    
+                prices = self._extract_prices_for_date(sensor_data, target_date, sensor_name)
                 if prices:
-                    target_prices = prices
-                    found_in_sensor = "today sensor"
-                    logger.debug(f"Found {target_date} prices in today sensor")
-
-            if tomorrow_data:
-                prices = self._extract_prices_for_date(
-                    tomorrow_data, target_date, "tomorrow sensor"
-                )
-                if prices:
-                    target_prices = prices
-                    found_in_sensor = "tomorrow sensor"
-                    logger.debug(f"Found {target_date} prices in tomorrow sensor")
-
-            if target_prices:
-                logger.info(
-                    f"Successfully extracted {len(target_prices)} prices for {target_date} from {found_in_sensor}"
-                )
-                return target_prices
-
-            # No price data found for the target date
-            today_available = self._get_sensor_diagnostic_info(today_data, "today sensor")
-            tomorrow_available = self._get_sensor_diagnostic_info(tomorrow_data, "tomorrow sensor")
-                
-            error_msg = (
-                f"No price data found for {target_date}. "
-                f"Today sensor: {today_available}. "
-                f"Tomorrow sensor: {tomorrow_available}."
-            )
-            raise ValueError(error_msg)
+                    logger.debug(f"Found {target_date} prices in {sensor_name} sensor")
+                    return prices
+            
+            # No prices found
+            raise ValueError(f"No price data available for {target_date}")
+            
         except Exception as e:
             if isinstance(e, ValueError):
                 raise
@@ -139,34 +127,32 @@ class HomeAssistantSource(PriceSource):
             return None
 
     def _extract_prices_for_date(self, sensor_attributes, target_date, sensor_name):
-        """Extract prices for a specific date from sensor attributes using timestamp validation."""
+        """Extract prices for a specific date from sensor attributes."""
+        if not sensor_attributes:
+            return None
+            
         try:
-            # First try raw_today with timestamp parsing
-            raw_today = sensor_attributes.get("raw_today")
-            if raw_today:
-                prices = self._parse_raw_data_for_date(raw_today, target_date)
-                if prices:
-                    return prices
+            # Try raw data first (with timestamp validation)
+            for raw_key in ["raw_today", "raw_tomorrow"]:
+                raw_data = sensor_attributes.get(raw_key)
+                if raw_data:
+                    prices = self._parse_raw_data_for_date(raw_data, target_date)
+                    if prices:
+                        return prices
 
-            # Then try raw_tomorrow with timestamp parsing
-            raw_tomorrow = sensor_attributes.get("raw_tomorrow")
-            if raw_tomorrow:
-                prices = self._parse_raw_data_for_date(raw_tomorrow, target_date)
-                if prices:
-                    return prices
-
-            # Fallback to regular arrays (educated guess based on current date)
-            today_array = sensor_attributes.get("today")
-            tomorrow_array = sensor_attributes.get("tomorrow")
-
+            # Fallback to regular arrays (simple date matching)
             current_date = datetime.now().date()
             tomorrow_date = current_date + timedelta(days=1)
 
-            # Try to match target_date with available arrays
-            if target_date == current_date and today_array:
-                return self._handle_dst_transitions(today_array)
-            elif target_date == tomorrow_date and tomorrow_array:
-                return self._handle_dst_transitions(tomorrow_array)
+            if target_date == current_date:
+                prices = sensor_attributes.get("today")
+                if prices:
+                    return self._handle_dst_transitions(prices)
+                    
+            elif target_date == tomorrow_date:
+                prices = sensor_attributes.get("tomorrow")
+                if prices:
+                    return self._handle_dst_transitions(prices)
 
             return None
 
@@ -236,35 +222,20 @@ class HomeAssistantSource(PriceSource):
             )
 
     def _get_sensor_diagnostic_info(self, sensor_data, sensor_name):
-        """Get diagnostic information about what data is available in a sensor."""
+        """Get simple diagnostic information about sensor data availability."""
         if not sensor_data:
             return "no data"
-
+        
         info = []
-
-        # Check for raw data with timestamps
-        if sensor_data.get("raw_today"):
-            try:
-                first_entry = sensor_data["raw_today"][0]
-                start_time = first_entry.get("start", "unknown")
-                info.append(f"raw_today({start_time[:10]})")
-            except (IndexError, KeyError, TypeError, AttributeError) as e:
-                info.append(f"raw_today(invalid: {type(e).__name__})")
-
-        if sensor_data.get("raw_tomorrow"):
-            try:
-                first_entry = sensor_data["raw_tomorrow"][0]
-                start_time = first_entry.get("start", "unknown")
-                info.append(f"raw_tomorrow({start_time[:10]})")
-            except (IndexError, KeyError, TypeError, AttributeError) as e:
-                info.append(f"raw_tomorrow(invalid: {type(e).__name__})")
-
-        # Check for regular arrays
         if sensor_data.get("today"):
             info.append("today array")
         if sensor_data.get("tomorrow"):
             info.append("tomorrow array")
-
+        if sensor_data.get("raw_today"):
+            info.append("raw_today")
+        if sensor_data.get("raw_tomorrow"):
+            info.append("raw_tomorrow")
+        
         return ", ".join(info) if info else "no price data"
 
 

@@ -594,9 +594,7 @@ class BatterySystemManager:
                     if event:
                         consumption_data[h] = event.energy.home_consumption
                         solar_data[h] = event.energy.solar_production
-                        combined_soe[h] = (
-                            event.energy.battery_soe_end / 100.0
-                        ) * self.battery_settings.total_capacity
+                        combined_soe[h] = event.energy.battery_soe_end
                         combined_actions[h] = (
                             event.energy.battery_charged
                             - event.energy.battery_discharged

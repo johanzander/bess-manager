@@ -4,20 +4,12 @@ import { HourlyData } from '../types';
 
 interface ChartDataPoint {
   hour: number;
-  // Actual data series (full opacity)
-  solarActual: number;
-  batteryOutActual: number;
-  gridInActual: number;
-  homeActual: number;
-  batteryInActual: number;
-  gridOutActual: number;
-  // Predicted data series (reduced opacity)
-  solarPredicted: number;
-  batteryOutPredicted: number;
-  gridInPredicted: number;
-  homePredicted: number;
-  batteryInPredicted: number;
-  gridOutPredicted: number;
+  solar: number;
+  batteryOut: number;
+  gridIn: number;
+  home: number;
+  batteryIn: number;
+  gridOut: number;
   // Price data
   price: number;
   // Meta data
@@ -131,49 +123,30 @@ const CustomTooltip = ({ active, payload, label }: any) => {
       // Add empty data point at the start (before 00:00)
       return {
         hour: 0,
-        solarActual: 0,
-        batteryOutActual: 0,
-        gridInActual: 0,
-        homeActual: 0,
-        batteryInActual: 0,
-        gridOutActual: 0,
-        solarPredicted: 0,
-        batteryOutPredicted: 0,
-        gridInPredicted: 0,
-        homePredicted: 0,
-        batteryInPredicted: 0,
-        gridOutPredicted: 0,
+        solar: 0,
+        batteryOut: 0,
+        gridIn: 0,
+        home: 0,
+        batteryIn: 0,
+        gridOut: 0,
         isActual: true,
         price: 0,
       };
     }
-    
-    const dataHour = index - 1; // Shift: index 1 = hour 0, index 2 = hour 1, etc.
+    const dataHour = index - 1;
     const dailyViewHour = dailyViewData?.find(h => {
       const hourValue = typeof h.hour === 'string' ? parseInt(h.hour, 10) : h.hour;
       return hourValue === dataHour;
     });
     const isActual = dailyViewHour?.dataSource === 'actual';
-    
     return {
-      hour: index, // Timeline position (1, 2, 3, ... 24)
-      // Actual data (full opacity)
-      solarActual: isActual ? (dailyViewHour?.solarProduction || 0) : 0,
-      batteryOutActual: isActual ? (dailyViewHour?.batteryDischarged || 0) : 0,
-      gridInActual: isActual ? (dailyViewHour?.gridImported || 0) : 0,
-      homeActual: isActual ? -(dailyViewHour?.homeConsumption || 0) : 0,
-      batteryInActual: isActual ? -(dailyViewHour?.batteryCharged || 0) : 0,
-      gridOutActual: isActual ? -(dailyViewHour?.gridExported || 0) : 0,
-      
-      // Predicted data (reduced opacity)
-      solarPredicted: !isActual ? (dailyViewHour?.solarProduction || 0) : 0,
-      batteryOutPredicted: !isActual ? (dailyViewHour?.batteryDischarged || 0) : 0,
-      gridInPredicted: !isActual ? (dailyViewHour?.gridImported || 0) : 0,
-      homePredicted: !isActual ? -(dailyViewHour?.homeConsumption || 0) : 0,
-      batteryInPredicted: !isActual ? -(dailyViewHour?.batteryCharged || 0) : 0,
-      gridOutPredicted: !isActual ? -(dailyViewHour?.gridExported || 0) : 0,
-      
-      // Meta data
+      hour: index,
+      solar: dailyViewHour?.solarProduction || 0,
+      batteryOut: dailyViewHour?.batteryDischarged || 0,
+      gridIn: dailyViewHour?.gridImported || 0,
+      home: -(dailyViewHour?.homeConsumption || 0),
+      batteryIn: -(dailyViewHour?.batteryCharged || 0),
+      gridOut: -(dailyViewHour?.gridExported || 0),
       isActual,
       price: dailyViewHour?.buyPrice || 0,
     };
@@ -277,126 +250,89 @@ const CustomTooltip = ({ active, payload, label }: any) => {
             {/* Reference line at zero to separate sources from consumption */}
             <ReferenceLine y={0} stroke={colors.text} strokeWidth={2} />
             
-            {/* ENERGY SOURCES - ACTUAL DATA (full opacity) */}
+            {/* ENERGY SOURCES - Single series, style by isActual */}
             <Area
               type="monotone"
-              dataKey="solarActual"
+              dataKey="solar"
               stackId="sources"
               stroke={colors.solar}
               fill="url(#solarActualGradient)"
               strokeWidth={2}
               name="Solar Production"
+              isAnimationActive={false}
+              dot={false}
+              connectNulls
             />
             <Area
               type="monotone"
-              dataKey="batteryOutActual"
+              dataKey="batteryOut"
               stackId="sources"
               stroke={colors.battery}
               fill="url(#batteryActualGradient)"
               strokeWidth={2}
               name="Battery Discharge"
+              isAnimationActive={false}
+              dot={false}
+              connectNulls
             />
             <Area
               type="monotone"
-              dataKey="gridInActual"
+              dataKey="gridIn"
               stackId="sources"
               stroke={colors.grid}
               fill="url(#gridActualGradient)"
               strokeWidth={2}
               name="Grid Import"
+              isAnimationActive={false}
+              dot={false}
+              connectNulls
             />
-            
-            {/* ENERGY SOURCES - PREDICTED DATA (reduced opacity) */}
+            {/* ENERGY CONSUMPTION - Single series, style by isActual */}
             <Area
               type="monotone"
-              dataKey="solarPredicted"
-              stackId="sources"
-              stroke={colors.solar}
-              strokeOpacity={0.4}
-              fill="url(#solarPredictedGradient)"
-              strokeWidth={1}
-              name="Solar Production (Predicted)"
-            />
-            <Area
-              type="monotone"
-              dataKey="batteryOutPredicted"
-              stackId="sources"
-              stroke={colors.battery}
-              strokeOpacity={0.4}
-              fill="url(#batteryPredictedGradient)"
-              strokeWidth={1}
-              name="Battery Discharge (Predicted)"
-            />
-            <Area
-              type="monotone"
-              dataKey="gridInPredicted"
-              stackId="sources"
-              stroke={colors.grid}
-              strokeOpacity={0.4}
-              fill="url(#gridPredictedGradient)"
-              strokeWidth={1}
-              name="Grid Import (Predicted)"
-            />
-            
-            {/* ENERGY CONSUMPTION - ACTUAL DATA (full opacity) */}
-            <Area
-              type="monotone"
-              dataKey="homeActual"
+              dataKey="home"
               stackId="consumption"
               stroke={colors.home}
               fill="url(#homeActualGradient)"
               strokeWidth={2}
               name="Home Load"
+              isAnimationActive={false}
+              dot={false}
+              connectNulls
             />
             <Area
               type="monotone"
-              dataKey="batteryInActual"
+              dataKey="batteryIn"
               stackId="consumption"
               stroke={colors.battery}
               fill="url(#batteryChargeActualGradient)"
               strokeWidth={2}
               name="Battery Charge"
+              isAnimationActive={false}
+              dot={false}
+              connectNulls
             />
             <Area
               type="monotone"
-              dataKey="gridOutActual"
+              dataKey="gridOut"
               stackId="consumption"
               stroke={colors.gridExport}
               fill="url(#gridExportActualGradient)"
               strokeWidth={2}
               name="Grid Export"
+              isAnimationActive={false}
+              dot={false}
+              connectNulls
             />
-            
-            {/* ENERGY CONSUMPTION - PREDICTED DATA (reduced opacity) */}
-            <Area
-              type="monotone"
-              dataKey="homePredicted"
-              stackId="consumption"
-              stroke={colors.home}
-              strokeOpacity={0.4}
-              fill="url(#homePredictedGradient)"
-              strokeWidth={1}
-              name="Home Load (Predicted)"
-            />
-            <Area
-              type="monotone"
-              dataKey="batteryInPredicted"
-              stackId="consumption"
-              stroke={colors.battery}
-              strokeOpacity={0.4}
-              fill="url(#batteryChargePredictedGradient)"
-              strokeWidth={1}
-              name="Battery Charge (Predicted)"
-            />
-            <Area
-              type="monotone"
-              dataKey="gridOutPredicted"
-              stackId="consumption"
-              stroke={colors.gridExport}
-              strokeOpacity={0.4}
-              fill="url(#gridExportPredictedGradient)"
-              strokeWidth={1}
-              name="Grid Export (Predicted)"
+            {/* Overlay for predicted hours */}
+            <rect
+              x={((chartData.findIndex(d => !d.isActual) || chartData.length) / chartData.length) * 100 + '%'}
+              y={0}
+              width={((chartData.length - (chartData.findIndex(d => !d.isActual) || chartData.length)) / chartData.length) * 100 + '%'}
+              height="100%"
+              fill={isDarkMode ? 'rgba(120,120,120,0.12)' : 'rgba(120,120,120,0.10)'}
+              pointerEvents="none"
+              style={{ position: 'absolute', zIndex: 1 }}
             />
             
             {/* Price line on secondary Y-axis */}
@@ -438,12 +374,12 @@ const CustomTooltip = ({ active, payload, label }: any) => {
         </div>
         <div className="flex items-center text-xs text-gray-600 dark:text-gray-400 ml-4">
           <div className="flex items-center mr-3">
-            <div className="w-3 h-2 rounded mr-1" style={{ backgroundColor: colors.solar, opacity: 0.8 }}></div>
-            <span>Actual</span>
+            <div className="w-4 h-3 rounded mr-1 border border-gray-400" style={{ backgroundColor: 'transparent', borderStyle: 'solid', borderWidth: 1 }}></div>
+            <span>Actual hours</span>
           </div>
           <div className="flex items-center">
-            <div className="w-3 h-2 rounded mr-1" style={{ backgroundColor: colors.solar, opacity: 0.3 }}></div>
-            <span>Predicted</span>
+            <div className="w-4 h-3 rounded mr-1" style={{ background: isDarkMode ? 'rgba(120,120,120,0.12)' : 'rgba(120,120,120,0.10)' }}></div>
+            <span>Predicted hours</span>
           </div>
         </div>
       </div>

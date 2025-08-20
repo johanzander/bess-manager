@@ -38,6 +38,7 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
+    chunkSizeWarningLimit: 1500, // Increase chunk size warning limit (in kB)
     rollupOptions: {
       input: {
         main: './index.html'

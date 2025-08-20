@@ -5,8 +5,11 @@ set -e
 
 echo "Building BESS Manager add-on for Home Assistant..."
 
-# Create build directory
+echo "Cleaning old build directory..."
 BUILD_DIR="./build/bess_manager"
+echo "Cleaning old build directory..."
+rm -rf "$BUILD_DIR"
+echo "Creating new build directory..."
 mkdir -p "$BUILD_DIR"
 
 # Build frontend
@@ -20,7 +23,8 @@ cd ..
 cp backend/Dockerfile "$BUILD_DIR/Dockerfile"
 cp backend/app.py "$BUILD_DIR/app.py"
 cp backend/api.py "$BUILD_DIR/api.py"
-cp backend/utils.py "$BUILD_DIR/utils.py"
+cp backend/api_conversion.py "$BUILD_DIR/api_conversion.py"
+cp backend/api_dataclasses.py "$BUILD_DIR/api_dataclasses.py"
 cp backend/log_config.py "$BUILD_DIR/log_config.py"
 cp backend/requirements.txt "$BUILD_DIR/requirements.txt"
 cp backend/run.sh "$BUILD_DIR/run.sh"

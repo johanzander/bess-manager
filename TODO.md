@@ -134,3 +134,17 @@ add power monitoring sensors to health check.
 check if all sensors in config.yaml are actually needed and used (lifetime e.g.)
 
 fix dark mode button
+
+**
+seems like sensor collector is using influxdb readings also for hourly updates instead of reading directly from the sensors.**
+
+: Based on the code, here’s what happens:
+
+The function _get_hour_readings in SensorCollector is called by collect_energy_data(hour).
+collect_energy_data(hour) is not called every hour automatically by the system; it is called when the system wants to collect and record data for a specific hour.
+The actual historical data for the dashboard is served from the HistoricalDataStore, which is an in-memory store populated by calls to record_energy_data (which uses the output of collect_energy_data).
+So:
+
+_get_hour_readings (and thus the InfluxDB query) is called at startup (to reconstruct history) and whenever a new hour is completed and needs to be recorded.
+It is not called every hour by a scheduler, but it is called for each hour that needs to be reconstructed or recorded.
+If you want to confirm when and how often this is called, you can add logging to collect_energy_data or _get_hour_readings.

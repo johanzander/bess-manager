@@ -60,20 +60,11 @@
 
 ## 🟡 **HIGH PRIORITY** (Core Functionality)
 
-### 4. **Fix System Health Page**
-
-**Impact**: Medium-High | **Effort**: Medium | **Dependencies**: System monitoring
-
-Review which should be required and optional
-test that missing sensors actually works
-
----
-
-### 5. **Improve Battery SOC and Actions Component**
+### 3. **Improve Battery SOC and Actions Component**
 
 **Impact**: Medium-High | **Effort**: High | **Dependencies**: Backend cost calculations
 
-**Why Fifth**: Core feature enhancement showing detailed battery optimization reasoning
+**Description**: Core feature enhancement showing detailed battery optimization reasoning
 
 **Current State**: `BatteryLevelChart` shows basic SOC but lacks prediction breakdown
 
@@ -98,7 +89,7 @@ test that missing sensors actually works
 
 ---
 
-### 7. **Move Relevant Parts of Daily Summary to Dashboard**
+### 4. **Move Relevant Parts of Daily Summary to Dashboard**
 
 **Impact**: Medium | **Effort**: Low-Medium | **Dependencies**: Dashboard layout
 
@@ -118,7 +109,7 @@ test that missing sensors actually works
 
 ---
 
-### 8. **Fix Inverter Page Visual Style**
+### 5. **Fix Inverter Page Visual Style**
 
 **Impact**: Medium | **Effort**: Medium | **Dependencies**: UI consistency
 
@@ -133,7 +124,7 @@ test that missing sensors actually works
 
 ---
 
-### 9. **Enhance Insights Page with Decision Detail**
+### 6. **Enhance Insights Page with Decision Detail**
 
 **Impact**: Medium | **Effort**: High | **Dependencies**: Backend decision logging
 
@@ -154,19 +145,85 @@ test that missing sensors actually works
 
 ---
 
+### 7. **Demo Mode for Users Without Configured Sensors**
+
+**Impact**: Medium | **Effort**: Medium | **Dependencies**: Backend architecture, Mock data
+
+**Description**: Allow users to run and explore the system without requiring fully configured Home Assistant sensors. This enables evaluation, development, and troubleshooting scenarios.
+
+**Implementation**:
+
+- **Enhanced mock data generation**: Create realistic synthetic energy data, battery states, and pricing
+- **Demo mode toggle**: Configuration option to enable full demo mode vs partial sensor availability
+- **Graceful degradation**: System operates with missing sensors using reasonable defaults
+- **Demo data scenarios**: Multiple realistic scenarios (high solar, EV charging, peak pricing days)
+- **Visual indicators**: Clear UI indication when running in demo/mock mode
+
+**Benefits**: Users can evaluate the system before full HA integration, developers can test without hardware, easier onboarding experience
+
+**Technical Tasks**:
+
+- Extend existing test mode functionality in `ha_api_controller.py`
+- Create comprehensive mock data generators for all sensor types
+- Add demo mode configuration to `config.yaml`
+- Update frontend to show demo mode indicators
+- Ensure optimization algorithms work with mock data
+
+### 8. **Improve Sensor Unit Formatting Architecture**
+
+**Impact**: Medium | **Effort**: Medium | **Dependencies**: Backend sensor mapping, Frontend health components
+
+**Description**: Replace fragile frontend string-based unit formatting with proper backend unit metadata system.
+
+**Current Problem**: Frontend uses brittle string matching to determine sensor units:
+- Business logic mixed with UI presentation
+- Fragile sensor name pattern matching (`lowerName.includes('power')`)
+- Duplicated formatting logic across components
+- Hard to maintain when adding new sensors
+- No type safety or guarantees about actual sensor units
+
+**Proposed Solution**: Backend unit metadata approach
+- Add `unit` and `display_unit` fields to `METHOD_SENSOR_MAP` in `ha_api_controller.py`
+- Backend provides formatted values with correct units
+- Frontend simply displays the formatted strings
+- Centralized unit conversion logic
+- Easy to extend for new sensor types
+
+**Implementation**:
+
+- Update `METHOD_SENSOR_MAP` with unit metadata:
+
+```python
+"get_battery_discharge_power": {
+    "sensor_key": "battery_discharge_power",
+    "name": "Battery Discharging Power", 
+    "unit": "W",
+    "display_unit": "auto"  # auto-convert W/kW based on value
+}
+```
+
+- Create backend formatting service for health check values
+- Update health check API to return formatted values
+- Simplify frontend `SystemHealth.tsx` to remove unit conversion logic
+- Add unit support to other components using sensor data
+
+**Benefits**: Cleaner separation of concerns, easier maintenance, consistent unit handling, type safety
+
+---
+
 ## 🟢 **LOW PRIORITY** (Polish)
 
-### 11. **Move and consolidate all types and data fetching in frontend**
+### 9. **Move and consolidate all types and data fetching in frontend**
 
 **Current State**: Each component fetches it's own data, while there is basically only one endpoint (/api/dashboard). Could we centralize this to make cleaner code. Also there is an energy endpoint we've removed where we are still recreating the old data structures - this could be removed.
 
-### 12. Add Prediction accuracy and history
+### 10. Add Prediction accuracy and history
 
-### 13. Intent is not always correct for historical data
+### 11. Intent is not always correct for historical data
 
 **Current State**: The inverter sometimes charges/discharges small amounts like 0.1kW. Or its a rounding error or inefficiencies losses when calculating flows. I don't think its a strategic intent, but it is interpreted as one.
 
-### 14. Add multi day view
+### 12. Add multi day view
 
 **Problem**: Today we only operate on 24h intervals.
 But at noon every day we get tomorrows schedule. We could use this information to take better economic decisions. It would mean changing a lot of places where 24h is hard coded.
@@ -183,10 +240,12 @@ But at noon every day we get tomorrows schedule. We could use this information t
 - Add log parsing to extract ERROR and WARNING level messages with timestamps
 - Create dismissible banner component in frontend (similar to alert banners)
 - Show critical issues like:
+
   - TOU interval ordering problems
   - Sensor communication failures  
   - Optimization errors
   - Hardware communication issues
+
 - Auto-refresh banner every 30 seconds
 - Allow manual refresh and dismissal
 - Limit to last 10 errors/warnings from past 24 hours

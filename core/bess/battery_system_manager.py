@@ -120,6 +120,9 @@ class BatterySystemManager:
         self._current_schedule = None
         self._initial_soe = None
 
+        # Critical sensor failure tracking for graceful degradation
+        self._critical_sensor_failures = []
+
         logger.info("BatterySystemManager initialized with strategic intent support")
 
     @property
@@ -1342,11 +1345,37 @@ class BatterySystemManager:
                     logger.info("-" * 40)
 
             logger.info("=" * 40)
+            
+            # Check for critical failures but don't abort startup - allow graceful degradation
+            critical_failures = []
+            for component in health_results["checks"]:
+                if component.get("required", False) and component["status"] == "ERROR":
+                    critical_failures.append(component["name"])
+            
+            if critical_failures:
+                logger.error(f"⚠️ SYSTEM DEGRADED: Critical sensor failures detected in required components: {', '.join(critical_failures)}")
+                logger.error("⚠️ System will start in degraded mode. Some functionality may not work correctly.")
+                logger.error("⚠️ Please fix sensor configuration for full functionality.")
+                # Store critical failures for UI to display
+                self._critical_sensor_failures = critical_failures
+            else:
+                logger.info("✓ All required sensors are functional - system fully operational")
+                self._critical_sensor_failures = []
             return health_results
 
         except Exception as e:
             logger.error(f"Health check failed: {e}")
+            # Don't crash the system, allow degraded mode operation
+            self._critical_sensor_failures = ["System Health Check"]
             return {"status": "ERROR", "checks": []}
+
+    def has_critical_sensor_failures(self) -> bool:
+        """Check if the system has critical sensor failures (degraded mode)."""
+        return len(self._critical_sensor_failures) > 0
+
+    def get_critical_sensor_failures(self) -> list[str]:
+        """Get list of critical components with sensor failures."""
+        return self._critical_sensor_failures.copy()
 
     def _get_today_price_data(self) -> list[float]:
         """Get today's price data for reports and views."""

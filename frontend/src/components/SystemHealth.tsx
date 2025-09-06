@@ -71,8 +71,17 @@ const formatHealthCheckValue = (
 
   if (lowerComponent.includes('battery control') || lowerComponent.includes('battery')) {
     // Battery Control component
-    if (lowerName.includes('power') && (lowerKey.includes('power') || lowerName.includes('charging') || lowerName.includes('discharging'))) {
+    if (lowerName.includes('power rate') || lowerKey.includes('power_rate') || (lowerName.includes('rate') && lowerName.includes('power'))) {
+      // Power rates are percentages (0-100%)
       return `${numValue}%`;
+    }
+    if (lowerName.includes('power') && (lowerKey.includes('power') || lowerName.includes('charging') || lowerName.includes('discharging'))) {
+      // Battery power values are in watts, convert to appropriate unit
+      if (numValue >= 1000) {
+        return `${(numValue / 1000).toFixed(2)} kW`;
+      } else {
+        return `${numValue.toFixed(0)} W`;
+      }
     }
     if (lowerName.includes('level') || lowerName.includes('soc') || lowerKey.includes('soc')) {
       return `${numValue}%`;
@@ -87,8 +96,17 @@ const formatHealthCheckValue = (
     if (lowerName.includes('current') || lowerKey.includes('current')) {
       return `${numValue.toFixed(2)} A`;
     }
-    if (lowerName.includes('power') && (lowerKey.includes('power') || lowerName.includes('charging'))) {
+    if (lowerName.includes('power rate') || lowerKey.includes('power_rate') || (lowerName.includes('rate') && lowerName.includes('power'))) {
+      // Power rates are percentages (0-100%)
       return `${numValue}%`;
+    }
+    if (lowerName.includes('power') && (lowerKey.includes('power') || lowerName.includes('charging'))) {
+      // Power values are in watts
+      if (numValue >= 1000) {
+        return `${(numValue / 1000).toFixed(2)} kW`;
+      } else {
+        return `${numValue.toFixed(0)} W`;
+      }
     }
   }
 

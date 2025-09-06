@@ -5,6 +5,7 @@ import { BatterySettings, ElectricitySettings } from '../types';
 import { Clock, AlertCircle } from 'lucide-react';
 import EnergyFlowCards from '../components/EnergyFlowCards';
 import SystemStatusCard from '../components/SystemStatusCard';
+import AlertBanner from '../components/AlertBanner';
 import api from '../lib/api';
 
 interface DashboardProps {
@@ -68,6 +69,27 @@ export default function DashboardPage({
   const [error, setError] = useState<string | null>(null);
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
   const [isInitialLoad, setIsInitialLoad] = useState(true);
+  
+  // Health summary state for alert banner
+  interface HealthSummary {
+    hasCriticalErrors: boolean;
+    criticalIssues: Array<{
+      component: string;
+      description: string;
+      status: string;
+    }>;
+    totalCriticalIssues: number;
+    timestamp: string;
+    systemMode: string;
+  }
+  
+  const [healthSummary, setHealthSummary] = useState<HealthSummary | null>(null);
+  const [dismissedBanner, setDismissedBanner] = useState(false);
+
+  // Handle banner dismissal
+  const handleDismissBanner = useCallback(() => {
+    setDismissedBanner(true);
+  }, []);
 
   // Memoize the fetchData function to avoid recreation on each render
   const fetchData = useCallback(async (isManualRefresh = false) => {
@@ -81,7 +103,13 @@ export default function DashboardPage({
       // ✅ CRITICAL FIX: Don't clear data to prevent blinking
       // setDashboardData(null); // ← REMOVED THIS LINE
 
-      const response = await api.get('/api/dashboard');
+      // Fetch both dashboard data and health summary concurrently
+      const [dashboardResponse, healthResponse] = await Promise.all([
+        api.get('/api/dashboard'),
+        api.get('/api/dashboard-health-summary')
+      ]);
+
+      const response = dashboardResponse;
       
       if (response?.data) {
         // Check if this is an error response with incomplete data
@@ -97,6 +125,15 @@ export default function DashboardPage({
         }
       } else {
         throw new Error('No data received from dashboard endpoint');
+      }
+
+      // Process health summary data
+      if (healthResponse?.data) {
+        setHealthSummary(healthResponse.data);
+        // Reset dismissed banner if there are new critical issues
+        if (healthResponse.data.hasCriticalErrors) {
+          setDismissedBanner(false);
+        }
       }
 
       setLastUpdate(new Date());
@@ -138,6 +175,16 @@ export default function DashboardPage({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Critical Sensor Alert Banner */}
+      {healthSummary && healthSummary.hasCriticalErrors && !dismissedBanner && (
+        <AlertBanner
+          hasCriticalErrors={healthSummary.hasCriticalErrors}
+          criticalIssues={healthSummary.criticalIssues}
+          totalCriticalIssues={healthSummary.totalCriticalIssues}
+          onDismiss={handleDismissBanner}
+        />
       )}
       
       {/* System Status Header */}

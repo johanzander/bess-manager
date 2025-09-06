@@ -10,6 +10,8 @@ from api_dataclasses import APIBatterySettings, APIPriceSettings, APIRealTimePow
 from fastapi import APIRouter, HTTPException, Query
 from loguru import logger
 
+from core.bess.health_check import run_system_health_checks
+
 router = APIRouter()
 
 
@@ -1306,7 +1308,6 @@ async def get_system_health():
     """Get comprehensive system health including detailed sensor diagnostics."""
 
     from app import bess_controller
-    from core.bess.health_check import run_system_health_checks
 
     try:
         logger.debug("Starting system health check")
@@ -1331,3 +1332,79 @@ async def get_system_health():
             },
         }
         return convert_keys_to_camel_case(error_result)
+
+
+@router.get("/api/dashboard-health-summary")
+async def get_dashboard_health_summary():
+    """Get lightweight health summary for dashboard alert banner - only critical issues."""
+    
+    from app import bess_controller
+    
+    try:
+        logger.debug("Starting dashboard health summary check")
+        
+        # Check if system is in degraded mode first
+        if hasattr(bess_controller.system, 'has_critical_sensor_failures') and bess_controller.system.has_critical_sensor_failures():
+            # System is in degraded mode due to critical sensor failures
+            critical_failures = bess_controller.system.get_critical_sensor_failures()
+            critical_issues = []
+            for failure in critical_failures:
+                critical_issues.append({
+                    "component": failure,
+                    "description": "Critical sensor configuration issue detected",
+                    "status": "ERROR"
+                })
+            
+            summary = {
+                "has_critical_errors": True,
+                "critical_issues": critical_issues,
+                "total_critical_issues": len(critical_issues),
+                "timestamp": datetime.now().isoformat(),
+                "system_mode": "degraded"
+            }
+        else:
+            # System is healthy, run full health check
+            health_results = run_system_health_checks(bess_controller.system)
+            
+            # Extract only critical information
+            critical_issues = []
+            has_critical_error = False
+            
+            for component in health_results.get("checks", []):
+                # Only care about required components with ERROR status
+                if component.get("required", False) and component.get("status") == "ERROR":
+                    has_critical_error = True
+                    critical_issues.append({
+                        "component": component.get("name", "Unknown"),
+                        "description": component.get("description", ""),
+                        "status": component.get("status", "UNKNOWN")
+                    })
+            
+            summary = {
+                "has_critical_errors": has_critical_error,
+                "critical_issues": critical_issues,
+                "total_critical_issues": len(critical_issues),
+                "timestamp": datetime.now().isoformat(),
+                "system_mode": health_results.get("system_mode", "normal")
+            }
+        
+        logger.debug(f"Dashboard health summary: {summary}")
+        return convert_keys_to_camel_case(summary)
+        
+    except Exception as e:
+        logger.error(f"Error getting dashboard health summary: {e}")
+        # Return safe error state
+        error_summary = {
+            "has_critical_errors": True,
+            "critical_issues": [
+                {
+                    "component": "System Health Check",
+                    "description": "Unable to perform health check",
+                    "status": "ERROR"
+                }
+            ],
+            "total_critical_issues": 1,
+            "timestamp": datetime.now().isoformat(),
+            "system_mode": "unknown"
+        }
+        return convert_keys_to_camel_case(error_summary)

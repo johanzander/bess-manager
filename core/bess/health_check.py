@@ -7,13 +7,13 @@ logger = logging.getLogger(__name__)
 
 
 def determine_health_status(
-    sensor_diagnostics: list, working_sensors: int, required_methods: list | None = None
+    health_check_results: list, working_sensors: int, required_methods: list | None = None
 ) -> str:
     """Generic method to determine health check status based on required vs optional sensors.
 
     Args:
-        sensor_diagnostics: List of sensor diagnostic results
-        working_sensors: Count of working sensors
+        health_check_results: List of health check results (after method calls)
+        working_sensors: Count of working sensors (unused, kept for compatibility)
         required_methods: List of method names that are required (optional sensors are non-required)
 
     Returns:
@@ -29,9 +29,10 @@ def determine_health_status(
     optional_working = 0
     optional_total = 0
 
-    for method_info in sensor_diagnostics:
-        method_name = method_info["method_name"]
-        is_working = method_info["status"] == "ok"
+    for check_result in health_check_results:
+        method_name = check_result.get("method_name", "unknown")
+        # A sensor is working if it has status "OK" after method call testing
+        is_working = check_result.get("status") == "OK"
 
         if method_name in required_methods:
             required_total += 1
@@ -91,6 +92,7 @@ def perform_health_check(
         check_result = {
             "name": method_info.get("name", method_info.get("method_name", "Unknown")),
             "key": method_info.get("sensor_key", method_info.get("method_name")),
+            "method_name": method_info.get("method_name"),
             "entity_id": method_info.get("entity_id", "Not mapped"),
             "status": "UNKNOWN",
             "value": None,
@@ -186,7 +188,7 @@ def perform_health_check(
 
     # Determine overall status using the generic method
     status = determine_health_status(
-        sensor_diagnostics, working_sensors, required_methods
+        health_check["checks"], working_sensors, required_methods
     )
     health_check["status"] = status
 

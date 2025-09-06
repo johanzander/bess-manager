@@ -416,13 +416,13 @@ class SensorCollector:
     def check_prediction_health(self) -> dict:
         """Check prediction health, with no sensors required (nice-to-have for optimization)."""
         # Define required methods
-        required_prediction_methods = [
+        required_prediction_methods = []
+
+        # Define optional methods
+        optional_prediction_methods = [
             "get_estimated_consumption",
             "get_solar_forecast",
         ]
-
-        # Define optional methods
-        optional_prediction_methods = []
 
         # Combine all methods for health check
         all_prediction_methods = (
@@ -432,7 +432,7 @@ class SensorCollector:
         return perform_health_check(
             component_name="Energy Prediction",
             description="Solar and consumption forecasting for optimization",
-            is_required=True,
+            is_required=False,
             controller=self.ha_controller,
             all_methods=all_prediction_methods,
             required_methods=required_prediction_methods,

@@ -386,6 +386,14 @@ class HomeAssistantAPIController:
                 return None
 
             except requests.RequestException as e:
+                # Don't retry on 404 (sensor not found) - fail fast for missing sensors
+                if hasattr(e, 'response') and e.response is not None and e.response.status_code == 404:
+                    logger.error(
+                        "API request to %s failed: Sensor not found (404). This indicates a missing or misconfigured sensor.",
+                        url
+                    )
+                    raise  # Fail immediately on 404
+                
                 if attempt < self.max_attempts - 1:  # Not the last attempt
                     logger.warning(
                         "API request to %s failed on attempt %d/%d: %s. Retrying in %d seconds...",
@@ -897,3 +905,36 @@ class HomeAssistantAPIController:
         import_power = self.get_import_power()
         export_power = self.get_export_power()
         return import_power - export_power
+
+    # Lifetime energy sensors (used by energy monitoring health checks)
+    def get_battery_charged_lifetime(self):
+        """Get lifetime total battery charged energy in kWh."""
+        return self._get_sensor_value("lifetime_battery_charged")
+
+    def get_battery_discharged_lifetime(self):
+        """Get lifetime total battery discharged energy in kWh."""
+        return self._get_sensor_value("lifetime_battery_discharged")
+
+    def get_solar_production_lifetime(self):
+        """Get lifetime total solar energy production in kWh."""
+        return self._get_sensor_value("lifetime_solar_energy")
+
+    def get_grid_import_lifetime(self):
+        """Get lifetime total grid import energy in kWh."""
+        return self._get_sensor_value("lifetime_import_from_grid")
+
+    def get_grid_export_lifetime(self):
+        """Get lifetime total grid export energy in kWh."""
+        return self._get_sensor_value("lifetime_export_to_grid")
+
+    def get_load_consumption_lifetime(self):
+        """Get lifetime total load consumption energy in kWh."""
+        return self._get_sensor_value("lifetime_load_consumption")
+
+    def get_system_production_lifetime(self):
+        """Get lifetime total system production energy in kWh."""
+        return self._get_sensor_value("lifetime_system_production")
+
+    def get_self_consumption_lifetime(self):
+        """Get lifetime total self consumption energy in kWh."""
+        return self._get_sensor_value("lifetime_self_consumption")

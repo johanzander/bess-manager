@@ -94,9 +94,9 @@ class HomePowerMonitor:
             "get_charging_power_rate",
         ]
 
-        # For power monitoring, L1/L2/L3 current are required for basic functionality
-        # charging_power_rate is optional (enhancement)
-        required_power_methods = ["get_l1_current", "get_l2_current", "get_l3_current"]
+        # For power monitoring, since the component itself is optional, all methods are optional
+        # System can operate without power monitoring - it's an enhancement feature
+        required_power_methods = []
 
         health_check = perform_health_check(
             component_name="Power Monitoring",

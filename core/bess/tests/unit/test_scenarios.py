@@ -11,7 +11,7 @@ import logging
 import os
 from pathlib import Path
 
-import pytest
+import pytest  # type: ignore
 
 from core.bess.dp_battery_algorithm import (
     optimize_battery_schedule,

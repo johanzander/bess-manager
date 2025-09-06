@@ -61,12 +61,12 @@ def get_influxdb_config():
 
 def get_sensor_data(sensors_list, start_time=None, stop_time=None) -> dict:
     """Get sensor data with configurable time range.
-    
+
     Args:
         sensors_list: List of sensor names to query
         start_time: Start time for the query (defaults to 24h before stop_time)
         stop_time: End time for the query (defaults to now)
-    
+
     Returns:
         dict: Query results with status and data
     """
@@ -110,7 +110,7 @@ def get_sensor_data(sensors_list, start_time=None, stop_time=None) -> dict:
     # Format times for InfluxDB query
     start_str = start_time.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%SZ")
     end_str = stop_time.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%SZ")
-    
+
     sensor_filter = " or ".join(
         [f'r["_measurement"] == "sensor.{sensor}"' for sensor in sensors_list]
     )

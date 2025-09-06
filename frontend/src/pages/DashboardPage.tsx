@@ -180,7 +180,7 @@ export default function DashboardPage({
           {/* Energy Flow Cards - Restructured section */}
           <div className="space-y-6">
             <div>
-              <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">Today's Energy Flows - Actuals & Predicted</h2>
+              <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">Today&apos;s Energy Flows - Actuals & Predicted</h2>
               <EnergyFlowCards />
             </div>
           </div>

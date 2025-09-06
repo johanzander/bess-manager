@@ -8,21 +8,20 @@ This module enhances the existing DecisionData fields without creating new class
 maintaining compatibility with the existing software architecture.
 """
 
-
 from core.bess.models import DecisionData, EnergyData
 
 
 def determine_strategic_intent(power: float, energy_data: EnergyData) -> str:
     """
     Determine strategic intent based on battery action and energy flows.
-    
+
     This moves the strategic intent logic from dp_algorithm to decision framework
     for better separation of concerns.
-    
+
     Args:
         power: Battery power in kW (+ charging, - discharging)
         energy_data: Complete energy flow data
-        
+
     Returns:
         Strategic intent string
     """
@@ -45,17 +44,17 @@ def generate_strategic_pattern_name(
 ) -> str:
     """
     Generate high-level strategic pattern name based on action and intent.
-    
+
     Args:
         strategic_intent: Strategic intent (GRID_CHARGING, SOLAR_STORAGE, etc.)
         energy_data: Complete energy flow data
-        
+
     Returns:
         User-friendly strategic pattern name
-        
+
     Examples:
         - "Grid Charging Strategy"
-        - "Solar Storage Strategy" 
+        - "Solar Storage Strategy"
         - "Peak Export Arbitrage"
         - "Home Load Support"
         - "Optimal Idle"
@@ -83,13 +82,13 @@ def generate_strategic_pattern_name(
 def generate_flow_description(energy_data: EnergyData) -> str:
     """
     Generate human-readable flow description.
-    
+
     Args:
         energy_data: Complete energy flow data
-        
+
     Returns:
         Human-readable description of energy flows
-        
+
     Examples:
         - "Solar 4.2kWh: 1.8kWh→Home, 2.4kWh→Battery"
         - "Grid 3.0kWh→Battery; Battery 5.2kWh→Home"
@@ -97,7 +96,7 @@ def generate_flow_description(energy_data: EnergyData) -> str:
     """
     descriptions = []
     threshold = 0.1  # kWh threshold for reporting
-    
+
     # Solar flows description
     if energy_data.solar_production > threshold:
         solar_flows = []
@@ -107,43 +106,42 @@ def generate_flow_description(energy_data: EnergyData) -> str:
             solar_flows.append(f"{energy_data.solar_to_battery:.1f}kWh→Battery")
         if energy_data.solar_to_grid > threshold:
             solar_flows.append(f"{energy_data.solar_to_grid:.1f}kWh→Grid")
-        
+
         if solar_flows:
             solar_desc = (
                 f"Solar {energy_data.solar_production:.1f}kWh: "
                 f"{', '.join(solar_flows)}"
             )
             descriptions.append(solar_desc)
-    
+
     # Grid import flows description
     grid_flows = []
     if energy_data.grid_to_home > threshold:
         grid_flows.append(f"{energy_data.grid_to_home:.1f}kWh→Home")
     if energy_data.grid_to_battery > threshold:
         grid_flows.append(f"{energy_data.grid_to_battery:.1f}kWh→Battery")
-    
+
     if grid_flows:
         total_grid_import = energy_data.grid_to_home + energy_data.grid_to_battery
         grid_desc = f"Grid {total_grid_import:.1f}kWh: {', '.join(grid_flows)}"
         descriptions.append(grid_desc)
-    
+
     # Battery discharge flows description
     battery_flows = []
     if energy_data.battery_to_home > threshold:
         battery_flows.append(f"{energy_data.battery_to_home:.1f}kWh→Home")
     if energy_data.battery_to_grid > threshold:
         battery_flows.append(f"{energy_data.battery_to_grid:.1f}kWh→Grid")
-    
+
     if battery_flows:
         total_battery_discharge = (
             energy_data.battery_to_home + energy_data.battery_to_grid
         )
         battery_desc = (
-            f"Battery {total_battery_discharge:.1f}kWh: "
-            f"{', '.join(battery_flows)}"
+            f"Battery {total_battery_discharge:.1f}kWh: " f"{', '.join(battery_flows)}"
         )
         descriptions.append(battery_desc)
-    
+
     return "; ".join(descriptions) if descriptions else "No significant energy flows"
 
 
@@ -157,9 +155,9 @@ def generate_economic_chain(
 ) -> str:
     """
     Generate economic chain explanation.
-    
+
     Shows immediate action → future opportunity → net value.
-    
+
     Args:
         hour: Current hour (0-23)
         energy_data: Complete energy flow data
@@ -167,14 +165,14 @@ def generate_economic_chain(
         immediate_value: Immediate economic value
         future_value: Future economic value
         cost_basis: Cost basis of stored energy (SEK/kWh)
-        
+
     Returns:
         Economic chain explanation string
-        
+
     Examples:
-        - "Hour 02: Store grid energy (-2.84 SEK) → Future discharge opportunity 
+        - "Hour 02: Store grid energy (-2.84 SEK) → Future discharge opportunity
           (+7.23 SEK) → Net strategy: +4.39 SEK"
-        - "Hour 19: Export arbitrage (+5.12 SEK) ← Previous storage at 1.2 SEK/kWh 
+        - "Hour 19: Export arbitrage (+5.12 SEK) ← Previous storage at 1.2 SEK/kWh
           → Arbitrage profit: +3.92 SEK"
     """
     # Build context-specific economic explanations
@@ -194,7 +192,7 @@ def generate_economic_chain(
                 f"(+{future_value:.2f} SEK) → Net: "
                 f"{immediate_value + future_value:+.2f} SEK"
             )
-    
+
     elif strategic_intent == "SOLAR_STORAGE":
         if energy_data.solar_to_battery > 0.1:
             storage_amount = energy_data.solar_to_battery
@@ -211,7 +209,7 @@ def generate_economic_chain(
                 f"(+{future_value:.2f} SEK) → Net: "
                 f"{immediate_value + future_value:+.2f} SEK"
             )
-    
+
     elif strategic_intent == "EXPORT_ARBITRAGE":
         if energy_data.battery_to_grid > 0.1:
             export_amount = energy_data.battery_to_grid
@@ -227,7 +225,7 @@ def generate_economic_chain(
                 f"(+{immediate_value:.2f} SEK) ← Strategic storage "
                 f"→ Net profit: {immediate_value:+.2f} SEK"
             )
-    
+
     elif strategic_intent == "LOAD_SUPPORT":
         if energy_data.battery_to_home > 0.1:
             support_amount = energy_data.battery_to_home
@@ -244,7 +242,7 @@ def generate_economic_chain(
                 f"({immediate_value:+.2f} SEK) ← Battery available but minimal "
                 f"discharge needed → Net value: {immediate_value:+.2f} SEK"
             )
-    
+
     else:  # IDLE
         return (
             f"Hour {hour:02d}: Optimal idle - no beneficial battery action available "
@@ -260,32 +258,32 @@ def extract_economic_values_from_reward(
 ) -> tuple[float, float]:
     """
     Extract immediate and future values from DP reward calculation.
-    
+
     Uses the meaningful economic variables from _calculate_reward:
     - import_cost: energy_data.grid_imported * current_buy_price
     - export_revenue: energy_data.grid_exported * current_sell_price
     - battery_wear_cost: battery degradation cost
-    
+
     Note: action_threshold_penalty is excluded as it's a technical optimization detail,
     not a meaningful economic component for user understanding.
-    
+
     Args:
-        reward: Total reward from DP calculation 
+        reward: Total reward from DP calculation
         import_cost: Grid import cost this hour
         export_revenue: Grid export revenue this hour
         battery_wear_cost: Battery degradation cost
-    
+
     Returns:
         Tuple of (immediate_value, future_value)
     """
     # Calculate immediate economic impact (meaningful economic components only)
     immediate_value = export_revenue - import_cost - battery_wear_cost
-    
+
     # Future value is the remainder of the total reward
     # Note: This includes the action_threshold_penalty in the future value calculation,
     # but we don't expose it separately since it's a technical detail
     future_value = reward - immediate_value
-    
+
     return immediate_value, future_value
 
 
@@ -301,10 +299,10 @@ def create_decision_data(
 ) -> DecisionData:
     """
     Create enhanced DecisionData with rich pattern analysis and economic reasoning.
-    
+
     Now determines strategic intent in the decision framework for better separation of concerns.
     Uses meaningful economic variables from _calculate_reward (excludes technical optimization details).
-    
+
     Args:
         power: Battery power action (+ charge, - discharge)
         energy_data: Complete energy flow data
@@ -314,19 +312,19 @@ def create_decision_data(
         import_cost: Grid import cost (energy_data.grid_imported * current_buy_price)
         export_revenue: Grid export revenue (energy_data.grid_exported * current_sell_price)
         battery_wear_cost: Battery degradation cost
-    
+
     Returns:
         Enhanced DecisionData with all fields populated
     """
     # Determine strategic intent in decision framework (moved from dp_algorithm)
     strategic_intent = determine_strategic_intent(power, energy_data)
-    
+
     # Generate high-level strategic pattern name
     pattern_name = generate_strategic_pattern_name(strategic_intent, energy_data)
-    
+
     # Generate detailed flow description (different from pattern name)
     description = generate_flow_description(energy_data)
-    
+
     # Extract economic values from DP reward calculation using meaningful economic components
     immediate_value, future_value = extract_economic_values_from_reward(
         reward=reward,
@@ -334,10 +332,10 @@ def create_decision_data(
         export_revenue=export_revenue,
         battery_wear_cost=battery_wear_cost,
     )
-    
+
     # Calculate net strategy value
     net_strategy_value = immediate_value + future_value
-    
+
     # Generate economic chain explanation
     economic_chain = generate_economic_chain(
         hour=hour,
@@ -347,7 +345,7 @@ def create_decision_data(
         future_value=future_value,
         cost_basis=cost_basis,
     )
-    
+
     # Create enhanced DecisionData using existing model fields
     return DecisionData(
         strategic_intent=strategic_intent,

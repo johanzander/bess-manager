@@ -5,18 +5,15 @@ import os
 import sys
 from datetime import datetime
 
-import pytest
+import pytest  # type: ignore
 
-# Add the project root to Python path
+# Add the project root to Python path BEFORE any other imports
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
 from core.bess.battery_system_manager import BatterySystemManager  # noqa: E402
+from core.bess.ha_api_controller import HomeAssistantAPIController  # noqa: E402
 from core.bess.models import (  # noqa: E402
     DecisionData,
     EconomicData,
@@ -24,8 +21,17 @@ from core.bess.models import (  # noqa: E402
     HourlyData,
 )
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-class MockHomeAssistantController:
+
+class MockHomeAssistantController(HomeAssistantAPIController):
+    def _resolve_entity_id(self, sensor_key: str, for_service: bool = False):  # type: ignore[unused-argument]
+        """Mock entity ID resolution: returns a dummy entity_id for any sensor_key."""
+        # For testing, just return 'sensor.' + sensor_key (simulate real entity IDs)
+        return f"sensor.{sensor_key}", "mock"
+
     """Mock Home Assistant controller for testing."""
 
     def __init__(self) -> None:
@@ -81,7 +87,7 @@ class MockHomeAssistantController:
         """Get estimated hourly consumption for 24 hours."""
         return self.consumption_forecast
 
-    def get_solar_forecast(self, day_offset=0, confidence_level="estimate"):
+    def get_solar_forecast(self, day_offset=0):  # type: ignore[unused-argument]
         """Get solar forecast data from Solcast integration."""
         return self.solar_forecast
 
@@ -89,10 +95,10 @@ class MockHomeAssistantController:
         """Check if grid charging is enabled."""
         return self.settings["grid_charge"]
 
-    def set_grid_charge(self, enabled):
+    def set_grid_charge(self, enable):
         """Enable or disable grid charging."""
-        self.settings["grid_charge"] = enabled
-        self.calls["grid_charge"].append(enabled)
+        self.settings["grid_charge"] = enable
+        self.calls["grid_charge"].append(enable)
 
     def get_solar_generation(self):
         """Get the current solar generation value."""
@@ -143,42 +149,6 @@ class MockHomeAssistantController:
         """Get TOU settings."""
         return self.settings["tou_settings"]
 
-    def get_battery_charge_today(self):
-        """Get total battery charging for today in kWh."""
-        return self.settings["battery_charge_today"]
-
-    def get_battery_discharge_today(self):
-        """Get total battery discharging for today in kWh."""
-        return self.settings["battery_discharge_today"]
-
-    def get_solar_generation_today(self):
-        """Get total solar generation for today in kWh."""
-        return self.settings["solar_generation_today"]
-
-    def get_self_consumption_today(self):
-        """Get total solar self-consumption for today in kWh."""
-        return self.settings["self_consumption_today"]
-
-    def get_export_to_grid_today(self):
-        """Get total export to grid for today in kWh."""
-        return self.settings["export_to_grid_today"]
-
-    def get_load_consumption_today(self):
-        """Get total home load consumption for today in kWh."""
-        return self.settings["load_consumption_today"]
-
-    def get_import_from_grid_today(self):
-        """Get total import from grid for today in kWh."""
-        return self.settings["import_from_grid_today"]
-
-    def get_grid_to_battery_today(self):
-        """Get total grid to battery charging for today in kWh."""
-        return self.settings["grid_to_battery_today"]
-
-    def get_ev_energy_today(self):
-        """Get total EV charging energy for today in kWh."""
-        return self.settings["ev_energy_today"]
-
     def get_nordpool_prices_today(self) -> list[float]:
         """Get the current Nordpool prices for today."""
         return [1.0] * 24
@@ -188,10 +158,11 @@ class MockHomeAssistantController:
         """Set battery charge power rate."""
         self.settings["charge_rate"] = rate
         self.calls["charge_rate"].append(rate)
-        return True
+        # Match base class return type (None)
+        return None
 
     def set_inverter_time_segment(
-        self, segment_id, batt_mode, start_time, end_time, enabled
+        self, segment_id, batt_mode, start_time, end_time, enabled, **kwargs
     ):
         """Set TOU time segment on inverter."""
         self.calls["tou_segments"].append(
@@ -203,15 +174,12 @@ class MockHomeAssistantController:
                 "enabled": enabled,
             }
         )
-        return True
+        # Match base class return type (None)
+        return None
 
     def read_inverter_time_segments(self):
         """Read current TOU segments from inverter."""
         return []
-
-    def get_sensor_status(self, sensor_name):
-        """Get sensor status for health checks."""
-        return {"state": "available", "last_updated": datetime.now()}
 
 
 class MockSensorCollector:
@@ -245,7 +213,7 @@ class MockSensorCollector:
             "battery_soe": self.controller.get_battery_soc()
             * self.battery_capacity
             / 100,
-            "system_production": solar,
+            "solar_production": solar,
             "load_consumption": consumption,
             "import_from_grid": grid_import,
             "export_to_grid": solar_excess,
@@ -254,7 +222,7 @@ class MockSensorCollector:
             "strategic_intent": "IDLE",
         }
 
-    def reconstruct_historical_flows(self, start_hour, end_hour):
+    def reconstruct_historical_flows(self, start_hour, end_hour):  # type: ignore[unused-argument]
         """Mock historical reconstruction - return empty for testing."""
         return {}
 

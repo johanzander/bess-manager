@@ -35,7 +35,7 @@ interface DashboardResponse {
   summary: DashboardSummary;
 }
 
-export const DetailedSavingsAnalysis: React.FC<DetailedSavingsAnalysisProps> = ({ }) => {
+export const DetailedSavingsAnalysis: React.FC<DetailedSavingsAnalysisProps> = () => {
   const [dashboardData, setDashboardData] = useState<DashboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

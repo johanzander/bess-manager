@@ -14,7 +14,6 @@ from .dp_battery_algorithm import (
     print_optimization_results,
 )
 from .dp_schedule import DPSchedule
-from .energy_flow_calculator import EnergyFlowCalculator
 from .growatt_schedule import GrowattScheduleManager
 from .ha_api_controller import HomeAssistantAPIController
 from .health_check import run_system_health_checks
@@ -46,6 +45,7 @@ class BatterySystemManager:
         self,
         controller: HomeAssistantAPIController | None = None,
         price_source: PriceSource | None = None,
+        nordpool_config: dict | None = None,
     ):
         """Initialize with same interface as original BatterySystemManager."""
 
@@ -53,6 +53,7 @@ class BatterySystemManager:
         self.battery_settings = BatterySettings()
         self.home_settings = HomeSettings()
         self.price_settings = PriceSettings()
+        self._nordpool_config = nordpool_config or {}
 
         # Store controller reference
         self._controller = controller
@@ -66,9 +67,6 @@ class BatterySystemManager:
         # Initialize specialized components
         self.sensor_collector = SensorCollector(
             controller, self.battery_settings.total_capacity
-        )
-        self.energy_flow_calculator = EnergyFlowCalculator(
-            self.battery_settings.total_capacity
         )
 
         # Initialize view builder
@@ -85,10 +83,27 @@ class BatterySystemManager:
 
         # Initialize price manager
         if not price_source:
-            # Create HomeAssistantSource with the same VAT multiplier as used in PriceManager
-            price_source = HomeAssistantSource(
-                controller, vat_multiplier=self.price_settings.vat_multiplier
-            )
+            # Check if official Nordpool integration should be used
+            nordpool_config = getattr(self, "_nordpool_config", {})
+            use_official = nordpool_config.get("use_official_integration", False)
+            config_entry_id = nordpool_config.get("config_entry_id")
+
+            if use_official and config_entry_id:
+                # Use official Home Assistant Nordpool integration
+                from .official_nordpool_source import OfficialNordpoolSource
+
+                price_source = OfficialNordpoolSource(
+                    controller,
+                    config_entry_id,
+                    vat_multiplier=self.price_settings.vat_multiplier,
+                )
+                logger.info("Using official Home Assistant Nordpool integration")
+            else:
+                # Use legacy sensor-based approach (current custom component)
+                price_source = HomeAssistantSource(
+                    controller, vat_multiplier=self.price_settings.vat_multiplier
+                )
+                logger.info("Using legacy/custom Nordpool sensor integration")
 
         self._price_manager = PriceManager(
             price_source=price_source,
@@ -988,6 +1003,12 @@ class BatterySystemManager:
                 len(new_tou),
             )
 
+            # DIAGNOSTIC: Validate intervals before sending to inverter
+            logger.info("Validating TOU intervals before sending to inverter...")
+            temp_growatt.validate_tou_intervals_ordering(
+                new_tou, "before_sending_to_inverter"
+            )
+
             effective_hour = 0 if prepare_next_day else hour
 
             # Find segments to disable and update
@@ -1096,7 +1117,17 @@ class BatterySystemManager:
                                 segment["end_time"],
                                 segment["batt_mode"],
                             )
-                            self._controller.set_inverter_time_segment(**segment)
+                            # Filter parameters to only include what the method accepts
+                            inverter_params = {
+                                "segment_id": segment["segment_id"],
+                                "batt_mode": segment["batt_mode"],
+                                "start_time": segment["start_time"],
+                                "end_time": segment["end_time"],
+                                "enabled": segment["enabled"],
+                            }
+                            self._controller.set_inverter_time_segment(
+                                **inverter_params
+                            )
                             logger.debug("SUCCESS: Segment disabled")
                         except Exception as e:
                             logger.error("FAILED: Failed to disable TOU segment: %s", e)
@@ -1111,7 +1142,17 @@ class BatterySystemManager:
                                 segment["end_time"],
                                 segment["batt_mode"],
                             )
-                            self._controller.set_inverter_time_segment(**segment)
+                            # Filter parameters to only include what the method accepts
+                            inverter_params = {
+                                "segment_id": segment["segment_id"],
+                                "batt_mode": segment["batt_mode"],
+                                "start_time": segment["start_time"],
+                                "end_time": segment["end_time"],
+                                "enabled": segment["enabled"],
+                            }
+                            self._controller.set_inverter_time_segment(
+                                **inverter_params
+                            )
                             logger.debug("SUCCESS: Segment updated")
                         except Exception as e:
                             logger.error("FAILED: Failed to update TOU segment: %s", e)
@@ -1485,32 +1526,6 @@ class BatterySystemManager:
 
         return hourly_data, totals
 
-    def reconstruct_historical_enhanced_flows(
-        self, start_hour: int, end_hour: int
-    ) -> list:
-        """Reconstruct enhanced flows from historical data for decision intelligence."""
-        reconstructed_flows = []
-
-        for hour in range(start_hour, end_hour + 1):
-            try:
-                # Get stored HourlyData from historical store
-                hour_data = self.historical_store.get_hour_record(hour)
-
-                if hour_data:
-                    # Return HourlyData directly - no conversion needed
-                    reconstructed_flows.append(hour_data)
-                else:
-                    # Create empty flow for missing data
-                    reconstructed_flows.append(None)
-
-            except Exception as e:
-                logger.warning(
-                    f"Could not reconstruct enhanced flow for hour {hour}: {e}"
-                )
-                reconstructed_flows.append(None)
-
-        return reconstructed_flows
-
     def get_24h_decision_intelligence(self, current_hour: int) -> list:
         """Get complete 24-hour decision intelligence with historical reconstruction."""
         decisions = []
@@ -1628,69 +1643,3 @@ class BatterySystemManager:
 
         except Exception as e:
             logger.error(f"Failed to log system startup: {e}")
-
-    def log_energy_flows_api(
-        self, hour_range: tuple[int, int] | None = None
-    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-        """Get energy flows report for API."""
-        hourly_data = []
-        totals = {
-            "total_solar": 0.0,
-            "total_consumption": 0.0,
-            "total_grid_import": 0.0,
-            "total_grid_export": 0.0,
-            "total_battery_charged": 0.0,
-            "total_battery_discharged": 0.0,
-            "battery_net_change": 0.0,
-            "hours_recorded": 0,
-        }
-
-        completed_hours = self.historical_store.get_completed_hours()
-        logger.info(f"Stored hours: {completed_hours}")
-        if hour_range:
-            start_hour, end_hour = hour_range
-            completed_hours = [
-                h for h in completed_hours if start_hour <= h <= end_hour
-            ]
-
-        for hour in sorted(completed_hours):
-            hour_data = self.historical_store.get_hour_record(hour)
-            if not hour_data:
-                continue
-
-            hourly_item = {
-                "hour": hour,
-                "solar_production": hour_data.energy.solar_production,
-                "home_consumption": hour_data.energy.home_consumption,
-                "grid_import": hour_data.energy.grid_imported,
-                "grid_export": hour_data.energy.grid_exported,
-                "battery_charged": hour_data.energy.battery_charged,
-                "battery_discharged": hour_data.energy.battery_discharged,
-                "battery_soe_end": hour_data.energy.battery_soe_end,
-                "battery_net_change": hour_data.energy.battery_charged
-                - hour_data.energy.battery_discharged,
-            }
-
-            totals["total_solar"] += hour_data.energy.solar_production
-            totals["total_consumption"] += hour_data.energy.home_consumption
-            totals["total_grid_import"] += hour_data.energy.grid_imported
-            totals["total_grid_export"] += hour_data.energy.grid_exported
-            totals["total_battery_charged"] += hour_data.energy.battery_charged
-            totals["total_battery_discharged"] += hour_data.energy.battery_discharged
-
-            hourly_data.append(hourly_item)
-
-        totals["battery_net_change"] = (
-            totals["total_battery_charged"] - totals["total_battery_discharged"]
-        )
-        totals["hours_recorded"] = len(hourly_data)
-
-        logger.info(
-            "Energy flows report: %d hours, %.2f kWh solar, %.2f kWh consumption, %.2f kWh battery net",
-            totals["hours_recorded"],
-            totals["total_solar"],
-            totals["total_consumption"],
-            totals["battery_net_change"],
-        )
-
-        return hourly_data, totals

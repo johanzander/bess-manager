@@ -4,7 +4,7 @@ Tests the complete flow from optimization through daily view
 to ensure cost and savings calculations are correct after the SOE migration.
 """
 
-import pytest
+import pytest  # type: ignore
 
 from core.bess.battery_system_manager import BatterySystemManager
 from core.bess.dp_battery_algorithm import optimize_battery_schedule
@@ -156,8 +156,9 @@ class TestCostSavingsFlow:
         self, optimization_result, test_scenario_data
     ):
         """Test that daily view shows positive savings (core issue that was fixed)."""
-        # Create battery system manager
-        manager = BatterySystemManager()
+        from core.bess.tests.conftest import MockHomeAssistantController
+
+        manager = BatterySystemManager(controller=MockHomeAssistantController())
 
         # Store optimization result
         manager.schedule_store.store_schedule(
@@ -182,8 +183,9 @@ class TestCostSavingsFlow:
         self, optimization_result, test_scenario_data
     ):
         """Test that dashboard API provides required fields with non-zero totals."""
-        # Create battery system manager
-        manager = BatterySystemManager()
+        from core.bess.tests.conftest import MockHomeAssistantController
+
+        manager = BatterySystemManager(controller=MockHomeAssistantController())
 
         # Store optimization result
         manager.schedule_store.store_schedule(
@@ -241,8 +243,9 @@ class TestCostSavingsFlow:
         self, optimization_result, test_scenario_data
     ):
         """Test that battery SOE data stays within physical limits."""
-        # Create battery system manager
-        manager = BatterySystemManager()
+        from core.bess.tests.conftest import MockHomeAssistantController
+
+        manager = BatterySystemManager(controller=MockHomeAssistantController())
 
         # Store optimization result
         manager.schedule_store.store_schedule(
@@ -280,9 +283,9 @@ class TestCostSavingsFlow:
         from datetime import datetime, timedelta
 
         from core.bess.models import EnergyData
+        from core.bess.tests.conftest import MockHomeAssistantController
 
-        # Create battery system manager
-        manager = BatterySystemManager()
+        manager = BatterySystemManager(controller=MockHomeAssistantController())
 
         # Store optimization result
         manager.schedule_store.store_schedule(

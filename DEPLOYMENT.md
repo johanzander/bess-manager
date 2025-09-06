@@ -16,16 +16,21 @@ This guide provides step-by-step instructions for deploying the BESS Battery Man
 1. Build the Add-on:
 
    ```bash
+
    # Clone the repository
-   git clone https://github.com/yourusername/bess-manager.git
+
+   git clone https://github.com/johanzander/bess-manager.git
    cd bess-manager
 
    # Make the package script executable
+
    chmod +x package-addon.sh
 
    # Run the packaging script
+
    ./package-addon.sh
-   ```
+
+```text
 
 2. Transfer Files:
 
@@ -86,7 +91,7 @@ price:
   additional_costs: 1.03        # Additional costs (SEK/kWh)
   tax_reduction: 0.6518         # Tax reduction (SEK/kWh)
   use_actual_price: false       # Use actual price with all costs
-```
+```text
 
 ### Required Sensors
 
@@ -94,23 +99,28 @@ Configure these in the add-on settings:
 
 ```yaml
 sensors:
+
   # Battery sensors
+
   battery_soc: "sensor.growatt_battery_soc"
   battery_charge_power: "sensor.growatt_battery_charge_power"
   battery_discharge_power: "sensor.growatt_battery_discharge_power"
   battery_status: "sensor.growatt_battery_status"
 
   # Solar sensors
+
   solar_power: "sensor.growatt_solar_power"
   solar_energy_today: "sensor.growatt_solar_energy_today"
 
   # Grid sensors
+
   grid_power: "sensor.growatt_grid_power"
   export_power: "sensor.growatt_export_power"
 
   # Price sensor
+
   electricity_price: "sensor.nordpool_kwh_se4"
-```
+```text
 
 ## Automation
 
@@ -122,14 +132,18 @@ Create these automations in Home Assistant:
 alias: Start BESS System at Startup
 description: Start the BESS system when Home Assistant starts up
 trigger:
+
   - platform: homeassistant
+
     event: start
 action:
+
   - service: hassio.addon_stdin
+
     data:
       addon: local_bess_manager
       input: {"command": "start"}
-```
+```text
 
 ### 2. Hourly Schedule Update
 
@@ -137,14 +151,18 @@ action:
 alias: Update BESS Schedule Hourly
 description: Update the battery schedule every hour
 trigger:
+
   - platform: time_pattern
+
     minutes: "0"
 action:
+
   - service: hassio.addon_stdin
+
     data:
       addon: local_bess_manager
       input: {"command": "update"}
-```
+```text
 
 ### 3. Prepare Next Day's Schedule
 
@@ -152,71 +170,16 @@ action:
 alias: Prepare Next Day BESS Schedule
 description: Prepare the battery schedule for the next day
 trigger:
+
   - platform: time
+
     at: "23:55:00"
 action:
+
   - service: hassio.addon_stdin
+
     data:
       addon: local_bess_manager
       input: {"command": "prepare_next_day"}
-```
+```text
 
-## Troubleshooting
-
-### Check Add-on Logs
-
-1. Go to the add-on's Logs tab
-2. Examine logs for error messages
-3. Increase log level if needed
-
-### Common Issues
-
-1. No Schedule Created:
-
-   - Check Nordpool integration
-   - Verify price data availability
-
-2. Battery Not Responding:
-
-   - Check Growatt integration
-   - Verify battery control in Home Assistant
-
-3. Server Error in Web UI:
-
-   - Check add-on logs
-   - Verify required integrations
-
-## Updates and Maintenance
-
-### Updating the Add-on
-
-1. For local installation:
-
-   - Transfer new files to Home Assistant
-
-2. For custom repository:
-
-   - Pull latest changes
-
-3. In Home Assistant:
-
-   - Go to Add-on Store
-   - Click "Reload"
-   - Update when prompted
-
-### Backup and Restore
-
-The add-on stores configuration in:
-
-- Add-on configuration (Home Assistant database)
-- `/data` directory (add-on container)
-
-To backup:
-
-1. Include add-on in Home Assistant backup
-2. All settings and data will be preserved
-
-To restore:
-
-1. Restore your Home Assistant backup
-2. Add-on will be restored with settings

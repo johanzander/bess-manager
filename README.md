@@ -1,50 +1,71 @@
 # BESS Battery Manager Add-on for Home Assistant
 
-Battery Energy Storage System (BESS) management and optimization add-on for Home Assistant.
+Intelligent Battery Energy Storage System (BESS) management and optimization for Home Assistant.
+
+> **💰 Maximize your battery savings** by automatically optimizing your battery storage system with real-time price data, solar integration, and adaptive scheduling.
 
 ## Overview
 
-The BESS Battery Manager optimizes your battery storage system to maximize savings by:
+The BESS Battery Manager is a sophisticated Home Assistant add-on that automatically optimizes Growatt inverter battery storage systems using dynamic programming algorithms and Nordic electricity market pricing. It continuously analyzes published electricity prices, solar production forecasts, and consumption predictions to determine optimal charge/discharge schedules that minimize your electricity costs.
 
-- Charging the battery during low-price periods
-- Discharging the battery during high-price periods
-- Maximizing solar charging when available
-- Respecting technical constraints of the battery and home electrical system
-- Adaptively updating schedule hourly based on real-time measurements
+The system requires the Growatt, Nordpool, and solar forecast (e.g., Solcast) Home Assistant integrations to function, and optionally uses InfluxDB for historical data storage. Unlike simple timer-based systems, BESS Manager makes intelligent decisions by weighing multiple factors: current battery state, published hourly electricity prices, solar weather forecasts, consumption estimates, and battery degradation costs. The system updates its optimization strategy every hour as new sensor data becomes available, ensuring your battery always operates in the most economically beneficial way while respecting technical constraints like charge rates and depth-of-discharge limits.
 
-## Features
+## Key Capabilities
 
-- Price-Based Optimization: Uses Nordpool electricity prices to optimize charging/discharging
+**Dynamic Programming Optimization**: Solves 24-hour energy scheduling as an optimization problem, considering electricity prices, solar forecasts, consumption patterns, and battery constraints to find the globally optimal charge/discharge schedule.
 
-- Solar Integration: Prioritizes solar charging and detects solar energy flows
+**Nordpool Market Integration**: Automatically retrieves hourly electricity prices from Nordic power markets and updates optimization decisions when tomorrow's prices become available (typically around 13:00).
 
-- Adaptive Scheduling: Updates schedules hourly based on current conditions
+**Battery Wear Economics**: Incorporates battery degradation costs (cycle wear, depth-of-discharge impacts) into optimization calculations to balance immediate savings against long-term battery life.
 
-- Consumption Prediction: Uses historical data to predict future consumption
+**Hourly Re-optimization**: Recalculates the optimal 24-hour schedule every hour as predicted values become actual.
 
-- Battery Lifecycle Management: Accounts for battery wear costs in optimization
+**Comprehensive Energy Tracking**: Tracks all energy flows (solar production, grid import/export, battery charge/discharge, home consumption) with detailed cost analysis and savings calculations.
 
-- Real-time Monitoring: Tracks energy flows and battery state
+**Power Monitoring & Fuse Protection**: Monitors grid current to prevent overloading electrical fuses by limiting battery charging when household consumption is high.
 
-### Web Interface Features
+### Web Interface
 
-The BESS Manager includes a comprehensive web interface with:
+The BESS Manager provides a comprehensive web interface organized into focused pages:
 
-- Daily Production View: Visualize electricity production patterns including grid sales, self-consumption, and battery charging
+**Dashboard**: Real-time system overview with live energy flows, current battery optimization decisions, and today's performance summary.
 
-- Consumption Analytics: Track power usage from grid, solar, and battery sources throughout the day
+**Savings**: Financial analysis with daily savings breakdown, cost comparisons between grid-only vs solar-only vs optimized battery scenarios, and detailed hourly cost analysis.
 
-- Battery Usage Dashboard: Monitor detailed battery charge/discharge patterns and energy flows
+**Inverter**: Detailed information about your inverter including current status, active schedule, operating modes, and configuration settings.
 
-- Interactive Controls: Date-based visualization controls for historical analysis
+**Insights**: Understand the economic reasoning behind every battery decision - why the system chose to charge, discharge, or remain idle at any given time.
 
-## Requirements
+**System Health**: Component status monitoring with sensor validation, integration health checks, and system diagnostics.
 
-- Home Assistant OS, Home Assistant Container, or Home Assistant Supervised
+## Compatibility
 
-- Growatt battery storage system with Home Assistant integration
+### Supported Battery Systems
 
-- Nordpool electricity price sensor in Home Assistant
+- ✅ **Growatt inverters** with controllable battery storage via Home Assistant
+- ⚠️ **Compatibility**: Your Growatt integration must provide both read access (energy sensors) and write access (battery control entities)
+- 📋 **Check compatibility**: Review required sensors in configuration documentation before installation. Tested with MIN/TLX inverters
+
+### Required Integrations
+
+- 📊 **Nordpool** integration for electricity prices
+- 🏠 **Growatt** integration for battery control and energy monitoring
+- ☀️ **Solar forecast** integration (e.g., Solcast) for production predictions
+- 📈 **InfluxDB** (optional but recommended for historical data)
+- ⚡ **Tibber** integration (optional for power monitoring and fuse protection)
+
+## Screenshots
+
+![Dashboard Overview](docs/images/dashboard-overview.png)
+*Beautiful energy flow visualization with real-time optimization results*
+
+![Battery Schedule](docs/images/battery-schedule.png)
+*Intelligent scheduling showing charge/discharge decisions with price predictions*
+
+![Savings Analysis](docs/images/savings-analysis.png)  
+*Detailed savings breakdown with ROI calculations and performance metrics*
+
+> 📸 **Screenshot placeholders** - Add actual screenshots to `docs/images/` directory
 
 ## Quick Start
 
@@ -66,15 +87,34 @@ The BESS Manager includes a comprehensive web interface with:
      area: "SE4"            # Your Nordpool price area
    ```
 
-4. Start the add-on
+4. Start the add-on and enjoy automatic optimization! 🎉
 
 For detailed setup instructions, see [DEPLOYMENT.md](DEPLOYMENT.md).
 
-For development information, see [DEVELOPMENT.md](DEVELOPMENT.md).
+## How It Works
 
-## Support
+**The optimization process:**
 
-For issues and feature requests, please [open an issue](https://github.com/johanzander/bess-manager/issues) on GitHub.
+- 📊 **Analyzes prices** - Monitors Nordpool electricity prices continuously
+- 🧠 **Calculates optimal strategy** - Uses dynamic programming to find best charge/discharge schedule
+- ⚡ **Executes decisions** - Automatically adjusts your Growatt inverter settings
+- 📈 **Tracks results** - Measures actual savings and system performance
+
+*Savings depend on your local electricity prices, consumption patterns, battery size, and price volatility.*
+
+## Documentation
+
+- 📚 **[User Guide](USER_GUIDE.md)** - Understanding the interface and results
+- 🔧 **[Deployment Guide](DEPLOYMENT.md)** - Complete installation and production setup
+- 🏗️ **[Software Architecture](SOFTWARE_DESIGN.md)** - Technical design and system architecture
+- 👨‍💻 **[Development Guide](DEVELOPMENT.md)** - Contributing and development setup
+
+## Community & Support
+
+- 🐛 **Issues**: [GitHub Issues](https://github.com/johanzander/bess-manager/issues)
+- 💬 **Community**: [Home Assistant Community Forum](https://community.home-assistant.io/)
+- 📢 **Updates**: Follow repository for latest features
+- ⭐ **Like it?** Star the repository to support development!
 
 ## License
 

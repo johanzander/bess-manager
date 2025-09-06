@@ -7,15 +7,18 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from core.bess.models import HourlyData
 
+
 def snake_to_camel(snake_str: str) -> str:
     """Convert snake_case to camelCase."""
     components = snake_str.split("_")
     return components[0] + "".join(word.capitalize() for word in components[1:])
 
+
 def camel_to_snake(camel_str: str) -> str:
     """Convert camelCase to snake_case."""
     s1 = re.sub("(.)([A-Z][a-z]+)", r"\1_\2", camel_str)
     return re.sub("([a-z0-9])([A-Z])", r"\1_\2", s1).lower()
+
 
 def convert_keys_to_camel_case(data: Any) -> Any:
     """Recursively convert all dict keys from snake_case to camelCase."""
@@ -32,6 +35,7 @@ def convert_keys_to_camel_case(data: Any) -> Any:
         # Convert dataclass instance to dict, then convert keys
         return convert_keys_to_camel_case(asdict(data))
     return data
+
 
 def dataclass_to_api_dict(obj: Any, battery_capacity: float = 30.0) -> dict[str, Any]:
     """Convert any dataclass to API-ready camelCase dict."""
@@ -55,6 +59,7 @@ def dataclass_to_api_dict(obj: Any, battery_capacity: float = 30.0) -> dict[str,
     # Convert all keys to camelCase
     return convert_keys_to_camel_case(data_dict)
 
+
 def hourly_data_to_api_dict(
     hourly: "HourlyData", battery_capacity: float = 30.0
 ) -> dict[str, Any]:
@@ -77,12 +82,13 @@ def hourly_data_to_api_dict(
         "hour": hourly.hour,
         "dataSource": hourly.data_source,
         "timestamp": hourly.timestamp.isoformat() if hourly.timestamp else None,
-        **energy_dict,    # All energy fields automatically converted
+        **energy_dict,  # All energy fields automatically converted
         **economic_dict,  # All economic fields automatically converted
         **decision_dict,  # All decision fields automatically converted
     }
 
     return result
+
 
 class APIConverter:
     """Main API conversion class - replaces all manual conversion methods."""

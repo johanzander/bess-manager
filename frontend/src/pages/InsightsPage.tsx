@@ -14,7 +14,7 @@ const InsightsPage: React.FC = () => {
           Insights & Decision Intelligence
         </h1>
         <p className="text-gray-600 dark:text-gray-300 mt-2">
-          Deep insights into your battery system's decision-making process and optimization strategies
+          Deep insights into your battery system&apos;s decision-making process and optimization strategies
         </p>
       </div>
 
@@ -56,7 +56,7 @@ const InsightsPage: React.FC = () => {
             <p>
               Each decision includes forward-looking analysis showing what future opportunities 
               it enables, with expected values and dependency analysis to build trust in the 
-              system's sophisticated optimization logic.
+              system&apos;s sophisticated optimization logic.
             </p>
           </div>
         </div>

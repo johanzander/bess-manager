@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Link, useLocation, Navigate } from 'react-router-dom';
 import DashboardPage from './pages/DashboardPage';
 import SavingsAnalysisPage from './pages/SavingsPage';
 import InverterPage from './pages/InverterPage';
@@ -285,10 +285,13 @@ function App() {
                     settings={mergedSettings}
                   />
                 } />
+                <Route path="/dashboard" element={<Navigate to="/" replace />} />
                 <Route path="/insights" element={<InsightsPage />} />
                 <Route path="/savings" element={<SavingsAnalysisPage />} />
                 <Route path="/inverter" element={<InverterPage />} />
                 <Route path="/system-health" element={<SystemHealthPage />} />
+                {/* Catch-all route: redirect any unmatched paths to dashboard */}
+                <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
             </ErrorBoundary>
           </main>

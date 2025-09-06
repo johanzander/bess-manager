@@ -3,7 +3,6 @@ API endpoints for battery and electricity settings, dashboard data, and decision
 
 """
 
-
 from datetime import datetime
 
 from api_conversion import convert_keys_to_camel_case
@@ -23,11 +22,13 @@ async def get_battery_settings():
         settings = bess_controller.system.get_settings()
         battery_settings = settings["battery"]
         estimated_consumption = settings["home"].default_hourly
-        
+
         # Create APIBatterySettings using existing method
-        api_settings = APIBatterySettings.from_internal(battery_settings, estimated_consumption)
+        api_settings = APIBatterySettings.from_internal(
+            battery_settings, estimated_consumption
+        )
         return api_settings.__dict__
-        
+
     except Exception as e:
         logger.error(f"Error getting battery settings: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -43,7 +44,7 @@ async def update_battery_settings(settings: dict):
         internal_updates = api_settings.to_internal_update()
         bess_controller.system.update_settings({"battery": internal_updates})
         return {"message": "Battery settings updated successfully"}
-        
+
     except Exception as e:
         logger.error(f"Error updating battery settings: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -57,10 +58,10 @@ async def get_electricity_price_settings():
     try:
         settings = bess_controller.system.get_settings()
         price_settings = settings["price"]
-        
+
         api_settings = APIPriceSettings.from_internal(price_settings)
         return api_settings.__dict__
-        
+
     except Exception as e:
         logger.error(f"Error getting electricity settings: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -76,7 +77,7 @@ async def update_electricity_price_settings(settings: dict):
         internal_updates = api_settings.to_internal_update()
         bess_controller.system.update_settings({"price": internal_updates})
         return {"message": "Electricity settings updated successfully"}
-        
+
     except Exception as e:
         logger.error(f"Error updating electricity settings: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -87,50 +88,54 @@ async def get_dashboard_data(date: str = Query(None)):
     """Unified dashboard endpoint returning canonical camelCase data directly."""
     # Import at function level to avoid circular imports
     from api_dataclasses import flatten_hourly_data
-    
+
     from app import bess_controller
 
     try:
         logger.debug("Starting dashboard data retrieval")
-        
+
         # Get daily view data
         daily_view = bess_controller.system.get_current_daily_view()
-        logger.debug(f"Daily view retrieved successfully with {len(daily_view.hourly_data)} hours")
-        
+        logger.debug(
+            f"Daily view retrieved successfully with {len(daily_view.hourly_data)} hours"
+        )
+
         # Get settings for additional calculations
         settings = bess_controller.system.get_settings()
         battery_capacity = settings["battery"].total_capacity
         logger.debug(f"Retrieved battery capacity: {battery_capacity}")
-        
+
         # Process hourly data using values directly from the HourlyData objects
         api_hourly_data = []
         for i, hour_data in enumerate(daily_view.hourly_data):
             # Get the flattened data with all fields directly from the model
             flattened = flatten_hourly_data(hour_data, battery_capacity)
-            
+
             # Only calculate UI-specific derived fields that aren't in the model
             home_consumption = flattened.get("homeConsumption", 0)
             solar_production = flattened.get("solarProduction", 0)
-            
+
             # Calculate derived display fields that aren't part of the core model
             # These are purely for UI convenience
             direct_solar = min(solar_production, home_consumption)
             grid_import_needed = max(0, home_consumption - direct_solar)
             solar_excess = max(0, solar_production - home_consumption)
-            
+
             # Update only UI-specific derived fields
-            flattened.update({
-                "directSolar": direct_solar,
-                "gridImportNeeded": grid_import_needed,
-                "solarExcess": solar_excess
-            })
-            
+            flattened.update(
+                {
+                    "directSolar": direct_solar,
+                    "gridImportNeeded": grid_import_needed,
+                    "solarExcess": solar_excess,
+                }
+            )
+
             api_hourly_data.append(flattened)
             if i == 0:  # Log first hour as sample
                 logger.debug(f"Sample hour data: {flattened}")
-                
+
         logger.debug(f"Processed {len(api_hourly_data)} hours of data")
-        
+
         # Get battery information
         controller = bess_controller.system.controller
         battery_soc = controller.get_battery_soc()
@@ -139,92 +144,117 @@ async def get_dashboard_data(date: str = Query(None)):
 
         # Get real-time power data for Live Power Flow card
         real_time_power_data = APIRealTimePower.from_controller(controller)
-        
+
         # Calculate totals from hourly data - using only canonical camelCase field names
         totals = {
             # Main energy sources and sinks
-            "totalSolarProduction": sum(h.get("solarProduction", 0) for h in api_hourly_data),
-            "totalHomeConsumption": sum(h.get("homeConsumption", 0) for h in api_hourly_data),
+            "totalSolarProduction": sum(
+                h.get("solarProduction", 0) for h in api_hourly_data
+            ),
+            "totalHomeConsumption": sum(
+                h.get("homeConsumption", 0) for h in api_hourly_data
+            ),
             "totalGridImport": sum(h.get("gridImported", 0) for h in api_hourly_data),
             "totalGridExport": sum(h.get("gridExported", 0) for h in api_hourly_data),
-            
             # Detailed energy flows - Solar origin
             "totalSolarToHome": sum(h.get("solarToHome", 0) for h in api_hourly_data),
-            "totalSolarToBattery": sum(h.get("solarToBattery", 0) for h in api_hourly_data),
+            "totalSolarToBattery": sum(
+                h.get("solarToBattery", 0) for h in api_hourly_data
+            ),
             "totalSolarToGrid": sum(h.get("solarToGrid", 0) for h in api_hourly_data),
-            
             # Detailed energy flows - Grid origin
             "totalGridToHome": sum(h.get("gridToHome", 0) for h in api_hourly_data),
-            "totalGridToBattery": sum(h.get("gridToBattery", 0) for h in api_hourly_data),
-            
+            "totalGridToBattery": sum(
+                h.get("gridToBattery", 0) for h in api_hourly_data
+            ),
             # Detailed energy flows - Battery origin
-            "totalBatteryToHome": sum(h.get("batteryToHome", 0) for h in api_hourly_data),
-            "totalBatteryToGrid": sum(h.get("batteryToGrid", 0) for h in api_hourly_data),
-            
+            "totalBatteryToHome": sum(
+                h.get("batteryToHome", 0) for h in api_hourly_data
+            ),
+            "totalBatteryToGrid": sum(
+                h.get("batteryToGrid", 0) for h in api_hourly_data
+            ),
             # Economic data - Costs
             "totalGridOnlyCost": sum(h.get("gridOnlyCost", 0) for h in api_hourly_data),
-            "totalSolarOnlyCost": sum(h.get("solarOnlyCost", 0) for h in api_hourly_data), 
+            "totalSolarOnlyCost": sum(
+                h.get("solarOnlyCost", 0) for h in api_hourly_data
+            ),
             "totalOptimizedCost": sum(h.get("hourlyCost", 0) for h in api_hourly_data),
-            
             # Economic data - Savings (calculate from hourly sums)
-            "totalBatterySavings": sum(h.get("batterySavings", 0) for h in api_hourly_data),
+            "totalBatterySavings": sum(
+                h.get("batterySavings", 0) for h in api_hourly_data
+            ),
         }
-        
+
         # Calculate battery totals from flow components (more reliable than direct hourly sums)
-        totals["totalBatteryCharged"] = totals["totalSolarToBattery"] + totals["totalGridToBattery"]
-        totals["totalBatteryDischarged"] = totals["totalBatteryToHome"] + totals["totalBatteryToGrid"]
-        
+        totals["totalBatteryCharged"] = (
+            totals["totalSolarToBattery"] + totals["totalGridToBattery"]
+        )
+        totals["totalBatteryDischarged"] = (
+            totals["totalBatteryToHome"] + totals["totalBatteryToGrid"]
+        )
+
         # Calculate total savings correctly from cost differences
-        totals["totalSolarSavings"] = totals["totalGridOnlyCost"] - totals["totalSolarOnlyCost"]
-        totals["totalOptimizationSavings"] = totals["totalGridOnlyCost"] - totals["totalOptimizedCost"]
+        totals["totalSolarSavings"] = (
+            totals["totalGridOnlyCost"] - totals["totalSolarOnlyCost"]
+        )
+        totals["totalOptimizationSavings"] = (
+            totals["totalGridOnlyCost"] - totals["totalOptimizedCost"]
+        )
         logger.debug("Calculated totals successfully")
-        
-        # Use values from totals where available - BUT calculate savings directly from hourly data  
+
+        # Use values from totals where available - BUT calculate savings directly from hourly data
         total_grid_only_cost = totals["totalGridOnlyCost"]
         total_solar_only_cost = totals["totalSolarOnlyCost"]
         total_optimized_cost = totals["totalOptimizedCost"]
-        
+
         # Get battery costs directly from hourly data
         total_battery_costs = sum(h.get("batteryCycleCost", 0) for h in api_hourly_data)
-        
+
         # Calculate grid costs (net cost of grid interactions)
         total_grid_costs = sum(h.get("gridCost", 0) for h in api_hourly_data)
-        
+
         # Calculate savings directly from cost totals (ignore pre-calculated fields)
-        solar_savings_calculated = total_grid_only_cost - total_solar_only_cost     # Grid-Only → Solar-Only
-        battery_savings_calculated = total_solar_only_cost - total_optimized_cost  # Solar-Only → Solar+Battery  
-        total_savings_calculated = total_grid_only_cost - total_optimized_cost     # Grid-Only → Solar+Battery
-        
+        solar_savings_calculated = (
+            total_grid_only_cost - total_solar_only_cost
+        )  # Grid-Only → Solar-Only
+        battery_savings_calculated = (
+            total_solar_only_cost - total_optimized_cost
+        )  # Solar-Only → Solar+Battery
+        total_savings_calculated = (
+            total_grid_only_cost - total_optimized_cost
+        )  # Grid-Only → Solar+Battery
+
         logger.debug("Calculated costs and savings")
-        
+
         # Build canonical summary with consistent field names
         summary = {
             # Baseline costs (what scenarios would cost) - CANONICAL
             "gridOnlyCost": total_grid_only_cost,
-            "solarOnlyCost": total_solar_only_cost, 
+            "solarOnlyCost": total_solar_only_cost,
             "optimizedCost": total_optimized_cost,
-            
             # Component costs (breakdown) - CANONICAL
             "totalGridCost": total_grid_costs,
             "totalBatteryCycleCost": total_battery_costs,
-            
             # Savings calculations - CANONICAL (use correct calculations)
-            "totalSavings": total_savings_calculated,        # Grid-Only → Solar+Battery total savings
-            "solarSavings": solar_savings_calculated,        # Grid-Only → Solar-Only savings  
-            "batterySavings": battery_savings_calculated,    # Solar-Only → Solar+Battery additional savings
-            
+            "totalSavings": total_savings_calculated,  # Grid-Only → Solar+Battery total savings
+            "solarSavings": solar_savings_calculated,  # Grid-Only → Solar-Only savings
+            "batterySavings": battery_savings_calculated,  # Solar-Only → Solar+Battery additional savings
             # Energy totals - CANONICAL
             "totalSolarProduction": totals["totalSolarProduction"],
-            "totalHomeConsumption": totals["totalHomeConsumption"], 
+            "totalHomeConsumption": totals["totalHomeConsumption"],
             "totalBatteryCharged": totals["totalBatteryCharged"],
             "totalBatteryDischarged": totals["totalBatteryDischarged"],
             "totalGridImported": totals["totalGridImport"],
             "totalGridExported": totals["totalGridExport"],
-            
             # Efficiency metrics - CANONICAL
-            "cycleCount": totals["totalBatteryCharged"] / battery_capacity if battery_capacity > 0 else 0.0,
+            "cycleCount": (
+                totals["totalBatteryCharged"] / battery_capacity
+                if battery_capacity > 0
+                else 0.0
+            ),
         }
-        
+
         result = {
             "date": daily_view.date.isoformat(),
             "currentHour": daily_view.current_hour,
@@ -242,41 +272,44 @@ async def get_dashboard_data(date: str = Query(None)):
             "batterySoe": battery_soe,
             "realTimePower": real_time_power_data.__dict__,
         }
-        
+
         logger.debug("Dashboard data prepared successfully")
         return result
-        
+
     except Exception as e:
         logger.error(f"Error generating dashboard data: {e}")
         logger.exception("Full dashboard error traceback:")
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
 ############################################################################################
 # API Endpoints for Decision Insights
 ############################################################################################
 
+
 def convert_real_data_to_mock_format(hourly_data_list, current_hour):
     """
     Convert real HourlyData with enhanced DecisionData to exact mock format.
-    
+
     Args:
         hourly_data_list: List of HourlyData from optimization (with enhanced DecisionData)
         current_hour: Current hour for marking is_current_hour
-        
+
     Returns:
         Dictionary matching exact mock decision intelligence format
     """
     patterns = []
-    
+
     for hourly_data in hourly_data_list:
         hour = hourly_data.hour
         energy = hourly_data.energy
         economic = hourly_data.economic
         decision = hourly_data.decision
-        
+
         # Determine if this is current hour and actual vs predicted
         is_current = hour == current_hour
         is_actual = hourly_data.data_source == "actual"
-        
+
         # Create flows dictionary matching exact mock format
         flows = {
             "solar_to_home": energy.solar_to_home,
@@ -287,76 +320,90 @@ def convert_real_data_to_mock_format(hourly_data_list, current_hour):
             "battery_to_home": energy.battery_to_home,
             "battery_to_grid": energy.battery_to_grid,
         }
-        
+
         # Create immediate_flow_values matching mock format (economic value of each flow)
         immediate_flow_values = {}
-        
+
         # Add flow values only for significant flows (> 0.1 kWh)
         if energy.solar_to_home > 0.1:
-            immediate_flow_values["solar_to_home"] = energy.solar_to_home * economic.buy_price
-        
+            immediate_flow_values["solar_to_home"] = (
+                energy.solar_to_home * economic.buy_price
+            )
+
         if energy.grid_to_home > 0.1:
-            immediate_flow_values["grid_to_home"] = -(energy.grid_to_home * economic.buy_price)
-        
+            immediate_flow_values["grid_to_home"] = -(
+                energy.grid_to_home * economic.buy_price
+            )
+
         if energy.grid_to_battery > 0.1:
-            immediate_flow_values["grid_to_battery"] = -(energy.grid_to_battery * economic.buy_price)
-        
+            immediate_flow_values["grid_to_battery"] = -(
+                energy.grid_to_battery * economic.buy_price
+            )
+
         if energy.battery_to_home > 0.1:
-            immediate_flow_values["battery_to_home"] = energy.battery_to_home * economic.buy_price
-        
+            immediate_flow_values["battery_to_home"] = (
+                energy.battery_to_home * economic.buy_price
+            )
+
         if energy.battery_to_grid > 0.1:
-            immediate_flow_values["battery_to_grid"] = energy.battery_to_grid * economic.sell_price
-        
+            immediate_flow_values["battery_to_grid"] = (
+                energy.battery_to_grid * economic.sell_price
+            )
+
         if energy.solar_to_grid > 0.1:
-            immediate_flow_values["solar_to_grid"] = energy.solar_to_grid * economic.sell_price
-        
+            immediate_flow_values["solar_to_grid"] = (
+                energy.solar_to_grid * economic.sell_price
+            )
+
         # Calculate immediate_total_value as sum of all flow values
         immediate_total_value = sum(immediate_flow_values.values())
-        
+
         # Create future_opportunity matching mock format
         future_opportunity = {
             "description": f"Future value realization from {decision.strategic_intent.lower().replace('_', ' ')} strategy",
             "target_hours": [],
             "expected_value": decision.future_value or 0.0,
             "dependencies": [
-                "Price forecast accuracy", 
+                "Price forecast accuracy",
                 "Battery state management",
-                "Solar production forecast"
-            ]
+                "Solar production forecast",
+            ],
         }
-        
+
         # Create the pattern object matching exact mock format
         pattern = {
             "hour": hour,
-            "pattern_name": decision.pattern_name or f"{decision.strategic_intent} Strategy",
+            "pattern_name": decision.pattern_name
+            or f"{decision.strategic_intent} Strategy",
             "flow_description": decision.description or "No significant energy flows",
             "economic_context_description": f"Strategic intent: {decision.strategic_intent} - {decision.pattern_name or 'Standard operation'}",
             "flows": flows,
             "immediate_flow_values": immediate_flow_values,
             "immediate_total_value": immediate_total_value,
             "future_opportunity": future_opportunity,
-            "economic_chain": decision.economic_chain or f"Hour {hour:02d}: No enhanced economic reasoning available",
+            "economic_chain": decision.economic_chain
+            or f"Hour {hour:02d}: No enhanced economic reasoning available",
             "net_strategy_value": decision.net_strategy_value or 0.0,
             "electricity_price": economic.buy_price,
             "is_current_hour": is_current,
-            "is_actual": is_actual
+            "is_actual": is_actual,
         }
-        
+
         patterns.append(pattern)
-    
+
     # Calculate summary statistics matching mock format
     if patterns:
         total_net_value = sum(p["net_strategy_value"] for p in patterns)
         actual_patterns = [p for p in patterns if p["is_actual"]]
         predicted_patterns = [p for p in patterns if not p["is_actual"]]
         best_decision = max(patterns, key=lambda p: p["net_strategy_value"])
-        
+
         summary = {
             "total_net_value": total_net_value,
             "best_decision_hour": best_decision["hour"],
             "best_decision_value": best_decision["net_strategy_value"],
             "actual_hours_count": len(actual_patterns),
-            "predicted_hours_count": len(predicted_patterns)
+            "predicted_hours_count": len(predicted_patterns),
         }
     else:
         summary = {
@@ -364,15 +411,12 @@ def convert_real_data_to_mock_format(hourly_data_list, current_hour):
             "best_decision_hour": 0,
             "best_decision_value": 0.0,
             "actual_hours_count": 0,
-            "predicted_hours_count": 0
+            "predicted_hours_count": 0,
         }
-    
+
     # Create response matching exact mock format
-    response = {
-        "patterns": patterns,
-        "summary": summary
-    }
-    
+    response = {"patterns": patterns, "summary": summary}
+
     # Process future_opportunity objects for camelCase conversion (matching mock logic)
     for pattern in patterns:
         opportunity = pattern.get("future_opportunity")
@@ -381,9 +425,9 @@ def convert_real_data_to_mock_format(hourly_data_list, current_hour):
                 "description": opportunity["description"],
                 "targetHours": opportunity["target_hours"],
                 "expectedValue": opportunity["expected_value"],
-                "dependencies": opportunity["dependencies"]
+                "dependencies": opportunity["dependencies"],
             }
-    
+
     return response
 
 
@@ -398,16 +442,15 @@ async def get_decision_intelligence():
     try:
         # Get the daily view with real optimization data (same as dashboard)
         daily_view = bess_controller.system.get_current_daily_view()
-        
+
         # Convert real HourlyData to mock format
         response = convert_real_data_to_mock_format(
-            daily_view.hourly_data, 
-            daily_view.current_hour
+            daily_view.hourly_data, daily_view.current_hour
         )
-        
+
         # Convert snake_case to camelCase for frontend (matching mock behavior)
         return convert_keys_to_camel_case(response)
-        
+
     except Exception as e:
         logger.error(f"Error generating decision intelligence from real data: {e}")
         # Fallback to empty response on error
@@ -418,16 +461,17 @@ async def get_decision_intelligence():
                 "best_decision_hour": 0,
                 "best_decision_value": 0.0,
                 "actual_hours_count": 0,
-                "predicted_hours_count": 0
-            }
+                "predicted_hours_count": 0,
+            },
         }
         return convert_keys_to_camel_case(empty_response)
 
-#@router.get("/api/decision-intelligence")
+
+# @router.get("/api/decision-intelligence")
 async def get_decision_intelligence_mock():
     """
     Get decision intelligence data with detailed flow patterns and economic reasoning.
-    
+
     Returns comprehensive energy flow analysis for each hour showing:
     - Battery actions (charge/discharge decisions)
     - Energy flow patterns between solar, grid, home, and battery
@@ -436,22 +480,64 @@ async def get_decision_intelligence_mock():
     """
     try:
         from datetime import datetime
-        
+
         current_hour = datetime.now().hour
         patterns = []
-        
+
         # Real historical prices from 2024-08-16 (extreme volatility day)
         prices = [
-            0.9827, 0.8419, 0.0321, 0.0097, 0.0098, 0.9136, 1.4433, 1.5162,  # 00-07: High→Low→High
-            1.4029, 1.1346, 0.8558, 0.6485, 0.2895, 0.1363, 0.1253, 0.62,    # 08-15: Morning high, midday drop
-            0.888, 1.1662, 1.5163, 2.5908, 2.7325, 1.9312, 1.5121, 1.3056   # 16-23: Evening extreme peak
+            0.9827,
+            0.8419,
+            0.0321,
+            0.0097,
+            0.0098,
+            0.9136,
+            1.4433,
+            1.5162,  # 00-07: High→Low→High
+            1.4029,
+            1.1346,
+            0.8558,
+            0.6485,
+            0.2895,
+            0.1363,
+            0.1253,
+            0.62,  # 08-15: Morning high, midday drop
+            0.888,
+            1.1662,
+            1.5163,
+            2.5908,
+            2.7325,
+            1.9312,
+            1.5121,
+            1.3056,  # 16-23: Evening extreme peak
         ]
 
         # Realistic solar pattern for summer day
         solar = [
-            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.8,    # 00-07: No solar
-            2.3, 3.7, 4.8, 5.5, 5.8, 5.8, 5.3, 4.4,   # 08-15: Solar ramp up to peak
-            3.3, 1.9, 0.9, 0.1, 0.0, 0.0, 0.0, 0.0    # 16-23: Solar declining
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.8,  # 00-07: No solar
+            2.3,
+            3.7,
+            4.8,
+            5.5,
+            5.8,
+            5.8,
+            5.3,
+            4.4,  # 08-15: Solar ramp up to peak
+            3.3,
+            1.9,
+            0.9,
+            0.1,
+            0.0,
+            0.0,
+            0.0,
+            0.0,  # 16-23: Solar declining
         ]
 
         home_consumption = 5.2  # Constant consumption from test data
@@ -461,7 +547,7 @@ async def get_decision_intelligence_mock():
             solar_production = solar[hour]
             is_actual = hour < current_hour
             is_current = hour == current_hour
-            
+
             if hour >= 0 and hour <= 4:
                 # Night/Early morning: Different strategies based on price extremes
                 if price < 0.05:
@@ -472,26 +558,35 @@ async def get_decision_intelligence_mock():
                         "flow_description": "Grid 11.2kWh: 5.2kWh→Home, 6.0kWh→Battery",
                         "economic_context_description": "Ultra-cheap electricity at 0.01 SEK/kWh - maximum charging for extreme evening arbitrage",
                         "flows": {
-                            "solar_to_home": 0, "solar_to_battery": 0, "solar_to_grid": 0,
-                            "grid_to_home": home_consumption, "grid_to_battery": 6.0, 
-                            "battery_to_home": 0, "battery_to_grid": 0
+                            "solar_to_home": 0,
+                            "solar_to_battery": 0,
+                            "solar_to_grid": 0,
+                            "grid_to_home": home_consumption,
+                            "grid_to_battery": 6.0,
+                            "battery_to_home": 0,
+                            "battery_to_grid": 0,
                         },
                         "immediate_flow_values": {
                             "grid_to_home": -home_consumption * price,
-                            "grid_to_battery": -6.0 * price
+                            "grid_to_battery": -6.0 * price,
                         },
                         "immediate_total_value": -(home_consumption + 6.0) * price,
                         "future_opportunity": {
                             "description": "Peak arbitrage during extreme evening prices at 2.73 SEK/kWh",
                             "target_hours": [20, 21],
                             "expected_value": 6.0 * 2.73,
-                            "dependencies": ["Battery capacity available", "Peak price realization", "No grid export limits"]
+                            "dependencies": [
+                                "Battery capacity available",
+                                "Peak price realization",
+                                "No grid export limits",
+                            ],
                         },
                         "economic_chain": f"Hour {hour:02d}: Import 11.2kWh at ultra-cheap {price:.4f} SEK/kWh (-{((home_consumption + 6.0) * price):.2f} SEK) → Peak discharge 20:00-21:00 at 2.73 SEK/kWh (+{(6.0 * 2.73):.2f} SEK) → Net arbitrage profit: +{(6.0 * 2.73 - (home_consumption + 6.0) * price):.2f} SEK",
-                        "net_strategy_value": 6.0 * 2.73 - (home_consumption + 6.0) * price,
+                        "net_strategy_value": 6.0 * 2.73
+                        - (home_consumption + 6.0) * price,
                         "electricity_price": price,
                         "is_current_hour": is_current,
-                        "is_actual": is_actual
+                        "is_actual": is_actual,
                     }
                 else:
                     # Expensive night hours: Conservative operation
@@ -501,9 +596,13 @@ async def get_decision_intelligence_mock():
                         "flow_description": "Grid 5.2kWh→Home",
                         "economic_context_description": "High night prices prevent arbitrage charging - wait for cheaper periods",
                         "flows": {
-                            "solar_to_home": 0, "solar_to_battery": 0, "solar_to_grid": 0,
-                            "grid_to_home": home_consumption, "grid_to_battery": 0, 
-                            "battery_to_home": 0, "battery_to_grid": 0
+                            "solar_to_home": 0,
+                            "solar_to_battery": 0,
+                            "solar_to_grid": 0,
+                            "grid_to_home": home_consumption,
+                            "grid_to_battery": 0,
+                            "battery_to_home": 0,
+                            "battery_to_grid": 0,
                         },
                         "immediate_flow_values": {
                             "grid_to_home": -home_consumption * price
@@ -513,13 +612,13 @@ async def get_decision_intelligence_mock():
                             "description": "Wait for ultra-cheap periods at 03:00-04:00 for arbitrage charging",
                             "target_hours": [3, 4],
                             "expected_value": 0,
-                            "dependencies": ["Price drop realization"]
+                            "dependencies": ["Price drop realization"],
                         },
                         "economic_chain": f"Hour {hour:02d}: Standard consumption at {price:.2f} SEK/kWh (-{(home_consumption * price):.2f} SEK) → Avoid charging until ultra-cheap 03:00-04:00 periods",
                         "net_strategy_value": -home_consumption * price,
                         "electricity_price": price,
                         "is_current_hour": is_current,
-                        "is_actual": is_actual
+                        "is_actual": is_actual,
                     }
             elif hour >= 5 and hour <= 7:
                 # Morning: Price rising, prepare for peak
@@ -529,26 +628,33 @@ async def get_decision_intelligence_mock():
                     "flow_description": "Grid 8.2kWh: 5.2kWh→Home, 3.0kWh→Battery",
                     "economic_context_description": "Rising morning prices but still profitable vs extreme evening peak - final charging window",
                     "flows": {
-                        "solar_to_home": 0, "solar_to_battery": 0, "solar_to_grid": 0,
-                        "grid_to_home": home_consumption, "grid_to_battery": 3.0, 
-                        "battery_to_home": 0, "battery_to_grid": 0
+                        "solar_to_home": 0,
+                        "solar_to_battery": 0,
+                        "solar_to_grid": 0,
+                        "grid_to_home": home_consumption,
+                        "grid_to_battery": 3.0,
+                        "battery_to_home": 0,
+                        "battery_to_grid": 0,
                     },
                     "immediate_flow_values": {
                         "grid_to_home": -home_consumption * price,
-                        "grid_to_battery": -3.0 * price
+                        "grid_to_battery": -3.0 * price,
                     },
                     "immediate_total_value": -(home_consumption + 3.0) * price,
                     "future_opportunity": {
                         "description": "Evening arbitrage at 2.59-2.73 SEK/kWh peak",
                         "target_hours": [19, 20, 21],
                         "expected_value": 3.0 * 2.6,
-                        "dependencies": ["Evening peak price accuracy", "Battery availability"]
+                        "dependencies": [
+                            "Evening peak price accuracy",
+                            "Battery availability",
+                        ],
                     },
                     "economic_chain": f"Hour {hour:02d}: Import 8.2kWh at {price:.2f} SEK/kWh (-{((home_consumption + 3.0) * price):.2f} SEK) → Evening peak discharge at 2.60 SEK/kWh (+{(3.0 * 2.6):.2f} SEK) → Net profit: +{(3.0 * 2.6 - (home_consumption + 3.0) * price):.2f} SEK",
                     "net_strategy_value": 3.0 * 2.6 - (home_consumption + 3.0) * price,
                     "electricity_price": price,
                     "is_current_hour": is_current,
-                    "is_actual": is_actual
+                    "is_actual": is_actual,
                 }
             elif hour >= 8 and hour <= 15:
                 # Daytime: Solar available, complex optimization
@@ -560,28 +666,48 @@ async def get_decision_intelligence_mock():
                         "flow_description": f"Solar {solar_production:.1f}kWh: {home_consumption:.1f}kWh→Home, {min(2.5, solar_production - home_consumption):.1f}kWh→Battery, {max(0, solar_production - home_consumption - 2.5):.1f}kWh→Grid",
                         "economic_context_description": "Peak solar optimally distributed - prioritize battery storage over immediate export for evening arbitrage",
                         "flows": {
-                            "solar_to_home": home_consumption, 
-                            "solar_to_battery": min(2.5, solar_production - home_consumption), 
-                            "solar_to_grid": max(0, solar_production - home_consumption - 2.5),
-                            "grid_to_home": 0, "grid_to_battery": 0, "battery_to_home": 0, "battery_to_grid": 0
+                            "solar_to_home": home_consumption,
+                            "solar_to_battery": min(
+                                2.5, solar_production - home_consumption
+                            ),
+                            "solar_to_grid": max(
+                                0, solar_production - home_consumption - 2.5
+                            ),
+                            "grid_to_home": 0,
+                            "grid_to_battery": 0,
+                            "battery_to_home": 0,
+                            "battery_to_grid": 0,
                         },
                         "immediate_flow_values": {
                             "solar_to_home": home_consumption * price,
                             "solar_to_battery": 0,
-                            "solar_to_grid": max(0, solar_production - home_consumption - 2.5) * 0.08
+                            "solar_to_grid": max(
+                                0, solar_production - home_consumption - 2.5
+                            )
+                            * 0.08,
                         },
-                        "immediate_total_value": home_consumption * price + max(0, solar_production - home_consumption - 2.5) * 0.08,
+                        "immediate_total_value": home_consumption * price
+                        + max(0, solar_production - home_consumption - 2.5) * 0.08,
                         "future_opportunity": {
                             "description": "Stored solar enables evening peak arbitrage worth 2.59 SEK/kWh",
                             "target_hours": [19, 20, 21],
-                            "expected_value": min(2.5, solar_production - home_consumption) * 2.59,
-                            "dependencies": ["Evening peak prices", "Battery SOC management", "Home consumption accuracy"]
+                            "expected_value": min(
+                                2.5, solar_production - home_consumption
+                            )
+                            * 2.59,
+                            "dependencies": [
+                                "Evening peak prices",
+                                "Battery SOC management",
+                                "Home consumption accuracy",
+                            ],
                         },
                         "economic_chain": f"Hour {hour:02d}: Solar saves {(home_consumption * price):.2f} SEK + export {(max(0, solar_production - home_consumption - 2.5) * 0.08):.2f} SEK → Stored solar discharge 19:00-21:00 at 2.59 SEK/kWh (+{(min(2.5, solar_production - home_consumption) * 2.59):.2f} SEK) → Total value: +{(home_consumption * price + max(0, solar_production - home_consumption - 2.5) * 0.08 + min(2.5, solar_production - home_consumption) * 2.59):.2f} SEK",
-                        "net_strategy_value": home_consumption * price + max(0, solar_production - home_consumption - 2.5) * 0.08 + min(2.5, solar_production - home_consumption) * 2.59,
+                        "net_strategy_value": home_consumption * price
+                        + max(0, solar_production - home_consumption - 2.5) * 0.08
+                        + min(2.5, solar_production - home_consumption) * 2.59,
                         "electricity_price": price,
                         "is_current_hour": is_current,
-                        "is_actual": is_actual
+                        "is_actual": is_actual,
                     }
                 else:
                     # Insufficient solar
@@ -591,26 +717,35 @@ async def get_decision_intelligence_mock():
                         "flow_description": f"Solar {solar_production:.1f}kWh→Home, Grid {(home_consumption - solar_production):.1f}kWh→Home",
                         "economic_context_description": "Partial solar coverage - grid supplement needed but avoid charging during moderate prices",
                         "flows": {
-                            "solar_to_home": solar_production, "solar_to_battery": 0, "solar_to_grid": 0,
-                            "grid_to_home": home_consumption - solar_production, "grid_to_battery": 0, 
-                            "battery_to_home": 0, "battery_to_grid": 0
+                            "solar_to_home": solar_production,
+                            "solar_to_battery": 0,
+                            "solar_to_grid": 0,
+                            "grid_to_home": home_consumption - solar_production,
+                            "grid_to_battery": 0,
+                            "battery_to_home": 0,
+                            "battery_to_grid": 0,
                         },
                         "immediate_flow_values": {
                             "solar_to_home": solar_production * price,
-                            "grid_to_home": -(home_consumption - solar_production) * price
+                            "grid_to_home": -(home_consumption - solar_production)
+                            * price,
                         },
-                        "immediate_total_value": solar_production * price - (home_consumption - solar_production) * price,
+                        "immediate_total_value": solar_production * price
+                        - (home_consumption - solar_production) * price,
                         "future_opportunity": {
                             "description": "Wait for evening peak to discharge stored energy from night charging",
                             "target_hours": [19, 20, 21],
                             "expected_value": 0,
-                            "dependencies": ["Previously stored battery energy availability"]
+                            "dependencies": [
+                                "Previously stored battery energy availability"
+                            ],
                         },
                         "economic_chain": f"Hour {hour:02d}: Solar saves {(solar_production * price):.2f} SEK, Grid costs {((home_consumption - solar_production) * price):.2f} SEK → Net: {(solar_production * price - (home_consumption - solar_production) * price):.2f} SEK",
-                        "net_strategy_value": solar_production * price - (home_consumption - solar_production) * price,
+                        "net_strategy_value": solar_production * price
+                        - (home_consumption - solar_production) * price,
                         "electricity_price": price,
                         "is_current_hour": is_current,
-                        "is_actual": is_actual
+                        "is_actual": is_actual,
                     }
             elif hour >= 16 and hour <= 18:
                 # Early evening: Price rising, transition strategy
@@ -620,26 +755,35 @@ async def get_decision_intelligence_mock():
                     "flow_description": f"Solar {solar_production:.1f}kWh→Home, Battery {max(0, home_consumption - solar_production):.1f}kWh→Home",
                     "economic_context_description": "Rising prices trigger battery discharge - preserve remaining charge for extreme peak hours",
                     "flows": {
-                        "solar_to_home": min(solar_production, home_consumption), "solar_to_battery": 0, "solar_to_grid": 0,
-                        "grid_to_home": 0, "grid_to_battery": 0, 
-                        "battery_to_home": max(0, home_consumption - solar_production), "battery_to_grid": 0
+                        "solar_to_home": min(solar_production, home_consumption),
+                        "solar_to_battery": 0,
+                        "solar_to_grid": 0,
+                        "grid_to_home": 0,
+                        "grid_to_battery": 0,
+                        "battery_to_home": max(0, home_consumption - solar_production),
+                        "battery_to_grid": 0,
                     },
                     "immediate_flow_values": {
-                        "solar_to_home": min(solar_production, home_consumption) * price,
-                        "battery_to_home": max(0, home_consumption - solar_production) * price
+                        "solar_to_home": min(solar_production, home_consumption)
+                        * price,
+                        "battery_to_home": max(0, home_consumption - solar_production)
+                        * price,
                     },
                     "immediate_total_value": home_consumption * price,
                     "future_opportunity": {
                         "description": "Preserve remaining battery charge for extreme peak at 2.73 SEK/kWh",
                         "target_hours": [20, 21],
                         "expected_value": 3.0 * 2.73,
-                        "dependencies": ["Peak price realization", "Battery SOC sufficient"]
+                        "dependencies": [
+                            "Peak price realization",
+                            "Battery SOC sufficient",
+                        ],
                     },
                     "economic_chain": f"Hour {hour:02d}: Avoid grid at {price:.2f} SEK/kWh (+{(home_consumption * price):.2f} SEK saved) → Reserve charge for 20:00-21:00 peak at 2.73 SEK/kWh (+{(3.0 * 2.73):.2f} SEK potential)",
                     "net_strategy_value": home_consumption * price + 3.0 * 2.73,
                     "electricity_price": price,
                     "is_current_hour": is_current,
-                    "is_actual": is_actual
+                    "is_actual": is_actual,
                 }
             elif hour >= 19 and hour <= 21:
                 # Peak hours: Maximum arbitrage execution
@@ -649,26 +793,31 @@ async def get_decision_intelligence_mock():
                     "flow_description": "Battery 6.0kWh: 5.2kWh→Home, 0.8kWh→Grid",
                     "economic_context_description": "Extreme peak prices - full arbitrage execution with both home supply and grid export",
                     "flows": {
-                        "solar_to_home": 0, "solar_to_battery": 0, "solar_to_grid": 0,
-                        "grid_to_home": 0, "grid_to_battery": 0, 
-                        "battery_to_home": home_consumption, "battery_to_grid": 0.8
+                        "solar_to_home": 0,
+                        "solar_to_battery": 0,
+                        "solar_to_grid": 0,
+                        "grid_to_home": 0,
+                        "grid_to_battery": 0,
+                        "battery_to_home": home_consumption,
+                        "battery_to_grid": 0.8,
                     },
                     "immediate_flow_values": {
                         "battery_to_home": home_consumption * price,
-                        "battery_to_grid": 0.8 * 0.08
+                        "battery_to_grid": 0.8 * 0.08,
                     },
                     "immediate_total_value": home_consumption * price + 0.8 * 0.08,
                     "future_opportunity": {
                         "description": "Peak arbitrage strategy execution - realizing value from night charging at 0.01 SEK/kWh",
                         "target_hours": [],
                         "expected_value": 0,
-                        "dependencies": []
+                        "dependencies": [],
                     },
                     "economic_chain": f"Hour {hour:02d}: Battery arbitrage execution (+{(home_consumption * price + 0.8 * 0.08):.2f} SEK) ← Sourced from ultra-cheap night charging at 0.01 SEK/kWh → Net arbitrage profit: +{((home_consumption + 0.8) * price - (home_consumption + 0.8) * 0.01):.2f} SEK",
-                    "net_strategy_value": (home_consumption + 0.8) * price - (home_consumption + 0.8) * 0.01,
+                    "net_strategy_value": (home_consumption + 0.8) * price
+                    - (home_consumption + 0.8) * 0.01,
                     "electricity_price": price,
                     "is_current_hour": is_current,
-                    "is_actual": is_actual
+                    "is_actual": is_actual,
                 }
             else:
                 # Late evening: Post-peak wind down
@@ -678,9 +827,13 @@ async def get_decision_intelligence_mock():
                     "flow_description": "Battery 5.2kWh→Home",
                     "economic_context_description": "Post-peak period - continue battery discharge while prices remain elevated above charging cost",
                     "flows": {
-                        "solar_to_home": 0, "solar_to_battery": 0, "solar_to_grid": 0,
-                        "grid_to_home": 0, "grid_to_battery": 0, 
-                        "battery_to_home": home_consumption, "battery_to_grid": 0
+                        "solar_to_home": 0,
+                        "solar_to_battery": 0,
+                        "solar_to_grid": 0,
+                        "grid_to_home": 0,
+                        "grid_to_battery": 0,
+                        "battery_to_home": home_consumption,
+                        "battery_to_grid": 0,
                     },
                     "immediate_flow_values": {
                         "battery_to_home": home_consumption * price
@@ -690,13 +843,16 @@ async def get_decision_intelligence_mock():
                         "description": "Continue arbitrage until prices drop below charging costs - prepare for next cycle",
                         "target_hours": [],
                         "expected_value": 0,
-                        "dependencies": ["Next day price forecast", "Battery SOC management"]
+                        "dependencies": [
+                            "Next day price forecast",
+                            "Battery SOC management",
+                        ],
                     },
                     "economic_chain": f"Hour {hour:02d}: Continue discharge at {price:.2f} SEK/kWh (+{(home_consumption * price):.2f} SEK) ← Sourced from 0.01 SEK/kWh charging → Arbitrage profit: +{(home_consumption * (price - 0.01)):.2f} SEK",
                     "net_strategy_value": home_consumption * (price - 0.01),
                     "electricity_price": price,
                     "is_current_hour": is_current,
-                    "is_actual": is_actual
+                    "is_actual": is_actual,
                 }
 
             patterns.append(pattern)
@@ -714,8 +870,8 @@ async def get_decision_intelligence_mock():
                 "best_decision_hour": best_decision["hour"],
                 "best_decision_value": best_decision["net_strategy_value"],
                 "actual_hours_count": len(actual_patterns),
-                "predicted_hours_count": len(predicted_patterns)
-            }
+                "predicted_hours_count": len(predicted_patterns),
+            },
         }
 
         # Deep conversion for future_opportunity objects
@@ -726,9 +882,9 @@ async def get_decision_intelligence_mock():
                     "description": opportunity["description"],
                     "targetHours": opportunity["target_hours"],
                     "expectedValue": opportunity["expected_value"],
-                    "dependencies": opportunity["dependencies"]
+                    "dependencies": opportunity["dependencies"],
                 }
-                
+
         # Convert all other snake_case to camelCase
         return convert_keys_to_camel_case(response)
 
@@ -747,15 +903,19 @@ async def get_inverter_status():
         # Safety checks to avoid None references
         if not hasattr(bess_controller, "system") or bess_controller.system is None:
             logger.error("Battery system not initialized")
-            raise HTTPException(status_code=503, detail="Battery system not initialized")
-            
+            raise HTTPException(
+                status_code=503, detail="Battery system not initialized"
+            )
+
         controller = bess_controller.system._controller
         if controller is None:
             logger.error("Battery controller not initialized")
-            raise HTTPException(status_code=503, detail="Battery controller not initialized")
-            
+            raise HTTPException(
+                status_code=503, detail="Battery controller not initialized"
+            )
+
         battery_settings = bess_controller.system.battery_settings
-        
+
         # Get current battery mode from schedule for current hour
         current_battery_mode = "load-first"  # Default
         try:
@@ -765,7 +925,7 @@ async def get_inverter_status():
             current_battery_mode = hourly_settings.get("batt_mode", "load-first")
         except Exception as e:
             logger.warning(f"Failed to get current battery mode: {e}")
-            
+
         # Default values in case of errors
         battery_soc = 50.0
         battery_soe = 0.0
@@ -773,7 +933,7 @@ async def get_inverter_status():
         discharge_power_rate = 100.0
         battery_charge_power = 0.0
         battery_discharge_power = 0.0
-        
+
         # Get battery data with error handling
         try:
             battery_soc = controller.get_battery_soc()
@@ -790,7 +950,7 @@ async def get_inverter_status():
             "battery_soe": battery_soe,
             "battery_charge_power": battery_charge_power,
             "battery_discharge_power": battery_discharge_power,
-            "battery_mode": current_battery_mode, 
+            "battery_mode": current_battery_mode,
             "grid_charge_enabled": grid_charge_enabled,
             "charge_stop_soc": 100.0,
             "discharge_stop_soc": battery_settings.min_soc,
@@ -843,10 +1003,12 @@ async def get_growatt_detailed_schedule():
             try:
                 hourly_settings = schedule_manager.get_hourly_settings(hour)
                 battery_mode = hourly_settings.get("batt_mode", "load-first")
-                mode_distribution[battery_mode] = mode_distribution.get(battery_mode, 0) + 1
-                
+                mode_distribution[battery_mode] = (
+                    mode_distribution.get(battery_mode, 0) + 1
+                )
+
                 strategic_intent = hourly_settings.get("strategic_intent", "IDLE")
-                
+
                 # Determine action and color based on strategic intent
                 if strategic_intent == "GRID_CHARGING":
                     action = "GRID_CHARGE"
@@ -869,7 +1031,9 @@ async def get_growatt_detailed_schedule():
                 price = 1.0
                 try:
                     if hasattr(bess_controller.system, "price_manager"):
-                        price_entries = bess_controller.system.price_manager.get_today_prices()
+                        price_entries = (
+                            bess_controller.system.price_manager.get_today_prices()
+                        )
                         if hour < len(price_entries):
                             price = price_entries[hour]
                 except Exception as e:
@@ -878,77 +1042,100 @@ async def get_growatt_detailed_schedule():
                 # Calculate or default battery-related values
                 battery_action = hourly_settings.get("battery_action", 0.0)
                 battery_charged = max(0, battery_action) if battery_action > 0 else 0
-                battery_discharged = abs(min(0, battery_action)) if battery_action < 0 else 0
+                battery_discharged = (
+                    abs(min(0, battery_action)) if battery_action < 0 else 0
+                )
                 battery_soe_kwh = 25.0  # Default SOE value in kWh
                 battery_capacity = 50.0  # Default capacity in kWh
-                
+
                 # Try to get actual SOE values from controller if possible
                 try:
-                    if hour == current_hour and hasattr(bess_controller.system, "controller"):
-                        battery_soc_percent = bess_controller.system.controller.get_battery_soc()
+                    if hour == current_hour and hasattr(
+                        bess_controller.system, "controller"
+                    ):
+                        battery_soc_percent = (
+                            bess_controller.system.controller.get_battery_soc()
+                        )
                         # Convert SOC percent to SOE kWh
                         if hasattr(bess_controller.system, "battery_settings"):
-                            battery_capacity = bess_controller.system.battery_settings.total_capacity
-                            battery_soe_kwh = (battery_soc_percent / 100.0) * battery_capacity
+                            battery_capacity = (
+                                bess_controller.system.battery_settings.total_capacity
+                            )
+                            battery_soe_kwh = (
+                                battery_soc_percent / 100.0
+                            ) * battery_capacity
                         else:
-                            battery_soe_kwh = (battery_soc_percent / 100.0) * battery_capacity
+                            battery_soe_kwh = (
+                                battery_soc_percent / 100.0
+                            ) * battery_capacity
                 except Exception:
                     pass  # Silently continue with default
-                
+
                 # Calculate SOC for display
                 battery_soc_end = (battery_soe_kwh / battery_capacity) * 100.0
-                
-                schedule_data.append({
-                    "hour": hour,
-                    "mode": hourly_settings.get("state", "idle"),
-                    "batt_mode": battery_mode,
-                    "batteryMode": battery_mode,  # Add alias for frontend compatibility
-                    "grid_charge": hourly_settings.get("grid_charge", False),
-                    "discharge_rate": hourly_settings.get("discharge_rate", 100),
-                    "dischargePowerRate": hourly_settings.get("discharge_rate", 100),  # Add alias
-                    "chargePowerRate": 100,  # Default charge power rate
-                    "strategic_intent": strategic_intent,
-                    "intent_description": schedule_manager._get_intent_description(strategic_intent)
-                    if hasattr(schedule_manager, "_get_intent_description") else "",
-                    "action": action,
-                    "action_color": action_color,
-                    "battery_action": battery_action,
-                    "battery_action_kw": hourly_settings.get("battery_action_kw", 0.0),
-                    "batteryCharged": battery_charged,  # Add for frontend compatibility
-                    "batteryDischarged": battery_discharged,  # Add for frontend compatibility
-                    "soc": 50.0,
-                    "batterySocEnd": battery_soc_end,  # Add for frontend compatibility
-                    "price": price,
-                    "electricity_price": price,  # Add this for frontend compatibility
-                    "grid_power": 0,
-                    "is_current": hour == current_hour
-                })
+
+                schedule_data.append(
+                    {
+                        "hour": hour,
+                        "mode": hourly_settings.get("state", "idle"),
+                        "batt_mode": battery_mode,
+                        "batteryMode": battery_mode,  # Add alias for frontend compatibility
+                        "grid_charge": hourly_settings.get("grid_charge", False),
+                        "discharge_rate": hourly_settings.get("discharge_rate", 100),
+                        "dischargePowerRate": hourly_settings.get(
+                            "discharge_rate", 100
+                        ),  # Add alias
+                        "chargePowerRate": 100,  # Default charge power rate
+                        "strategic_intent": strategic_intent,
+                        "intent_description": (
+                            schedule_manager._get_intent_description(strategic_intent)
+                            if hasattr(schedule_manager, "_get_intent_description")
+                            else ""
+                        ),
+                        "action": action,
+                        "action_color": action_color,
+                        "battery_action": battery_action,
+                        "battery_action_kw": hourly_settings.get(
+                            "battery_action_kw", 0.0
+                        ),
+                        "batteryCharged": battery_charged,  # Add for frontend compatibility
+                        "batteryDischarged": battery_discharged,  # Add for frontend compatibility
+                        "soc": 50.0,
+                        "batterySocEnd": battery_soc_end,  # Add for frontend compatibility
+                        "price": price,
+                        "electricity_price": price,  # Add this for frontend compatibility
+                        "grid_power": 0,
+                        "is_current": hour == current_hour,
+                    }
+                )
 
             except Exception as e:
                 logger.error(f"Error processing hour {hour}: {e}")
-                schedule_data.append({
-                    "hour": hour,
-                    "mode": "idle",
-                    "batt_mode": "load-first",
-                    "batteryMode": "load-first",  # Add alias for frontend compatibility
-                    "grid_charge": False,
-                    "discharge_rate": 100,
-                    "dischargePowerRate": 100,  # Add alias
-                    "chargePowerRate": 100,  # Default charge power rate
-                    "strategic_intent": "IDLE",
-                    "intent_description": "",
-                    "action": "IDLE",
-                    "action_color": "gray",
-                    "battery_action": 0.0,
-                    "batteryCharged": 0.0,  # Add for frontend compatibility
-                    "batteryDischarged": 0.0,  # Add for frontend compatibility
-                    "soc": 50.0,
-                    "batterySocEnd": 50.0,  # Add for frontend compatibility
-                    "price": 1.0,
-                    "electricity_price": 1.0,
-                    "grid_power": 0,
-                    "is_current": hour == current_hour
-                })
+                schedule_data.append(
+                    {
+                        "hour": hour,
+                        "mode": "idle",
+                        "batt_mode": "load-first",
+                        "batteryMode": "load-first",  # Add alias for frontend compatibility
+                        "grid_charge": False,
+                        "discharge_rate": 100,
+                        "dischargePowerRate": 100,  # Add alias
+                        "chargePowerRate": 100,  # Default charge power rate
+                        "strategic_intent": "IDLE",
+                        "intent_description": "",
+                        "action": "IDLE",
+                        "action_color": "gray",
+                        "battery_action": 0.0,
+                        "batteryCharged": 0.0,  # Add for frontend compatibility
+                        "batteryDischarged": 0.0,  # Add for frontend compatibility
+                        "soc": 50.0,
+                        "batterySocEnd": 50.0,  # Add for frontend compatibility
+                        "price": 1.0,
+                        "electricity_price": 1.0,
+                        "grid_power": 0,
+                        "is_current": hour == current_hour,
+                    }
+                )
                 idle_hours += 1
 
         response = {
@@ -976,19 +1163,23 @@ async def get_growatt_detailed_schedule():
 async def get_tou_settings():
     """Get current TOU (Time of Use) settings with strategic intent information."""
     from app import bess_controller
-    
+
     logger.info("/api/growatt/tou_settings")
 
     try:
         # Safety checks
         if not hasattr(bess_controller, "system") or bess_controller.system is None:
             logger.error("Battery system not initialized")
-            raise HTTPException(status_code=503, detail="Battery system not initialized")
-            
+            raise HTTPException(
+                status_code=503, detail="Battery system not initialized"
+            )
+
         if not hasattr(bess_controller.system, "_schedule_manager"):
             logger.error("Schedule manager not initialized")
-            raise HTTPException(status_code=503, detail="Schedule manager not initialized")
-            
+            raise HTTPException(
+                status_code=503, detail="Schedule manager not initialized"
+            )
+
         schedule_manager = bess_controller.system._schedule_manager
         tou_intervals = schedule_manager.get_daily_TOU_settings()
         current_hour = datetime.now().hour
@@ -1001,12 +1192,16 @@ async def get_tou_settings():
             try:
                 settings = schedule_manager.get_hourly_settings(start_hour)
                 enhanced_interval["grid_charge"] = settings.get("grid_charge", False)
-                enhanced_interval["discharge_rate"] = settings.get("discharge_rate", 100)
+                enhanced_interval["discharge_rate"] = settings.get(
+                    "discharge_rate", 100
+                )
                 enhanced_interval["strategic_intent"] = settings.get(
                     "strategic_intent", "IDLE"
                 )
             except Exception as e:
-                logger.error(f"Error getting hourly settings for hour {start_hour}: {e}")
+                logger.error(
+                    f"Error getting hourly settings for hour {start_hour}: {e}"
+                )
                 enhanced_interval["grid_charge"] = False
                 enhanced_interval["discharge_rate"] = 100
                 enhanced_interval["strategic_intent"] = "IDLE"
@@ -1034,17 +1229,21 @@ async def get_tou_settings():
 async def get_strategic_intents():
     """Get strategic intent information for the current schedule."""
     from app import bess_controller
-    
+
     try:
         # Safety checks
         if not hasattr(bess_controller, "system") or bess_controller.system is None:
             logger.error("Battery system not initialized")
-            raise HTTPException(status_code=503, detail="Battery system not initialized")
-            
+            raise HTTPException(
+                status_code=503, detail="Battery system not initialized"
+            )
+
         if not hasattr(bess_controller.system, "_schedule_manager"):
             logger.error("Schedule manager not initialized")
-            raise HTTPException(status_code=503, detail="Schedule manager not initialized")
-            
+            raise HTTPException(
+                status_code=503, detail="Schedule manager not initialized"
+            )
+
         schedule_manager = bess_controller.system._schedule_manager
 
         # Get strategic intent summary
@@ -1100,7 +1299,7 @@ async def get_strategic_intents():
     except Exception as e:
         logger.error(f"Error getting strategic intents: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
-    
+
 
 @router.get("/api/system-health")
 async def get_system_health():
@@ -1118,6 +1317,7 @@ async def get_system_health():
         logger.error(f"Error getting system health: {e}")
         # Return error state that frontend can handle
         from datetime import datetime
+
         error_result = {
             "timestamp": datetime.now().isoformat(),
             "system_mode": "unknown",
@@ -1127,7 +1327,7 @@ async def get_system_health():
                 "ok_components": 0,
                 "warning_components": 0,
                 "error_components": 1,
-                "overall_status": "ERROR"
-            }
+                "overall_status": "ERROR",
+            },
         }
         return convert_keys_to_camel_case(error_result)

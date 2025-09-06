@@ -424,8 +424,8 @@ def _calculate_reward(
 
     # ============================================================================
     # REWARD CALCULATION
-    # ============================================================================    
-    
+    # ============================================================================
+
     # Calculate immediate economic reward (negative of total cost)
     import_cost = energy_data.grid_imported * current_buy_price
     export_revenue = energy_data.grid_exported * current_sell_price
@@ -438,8 +438,7 @@ def _calculate_reward(
 
     # ============================================================================
     # DECISION DATA CREATION
-    # ============================================================================    
-
+    # ============================================================================
 
     decision_data = create_decision_data(
         power=power,
@@ -454,7 +453,7 @@ def _calculate_reward(
 
     # ============================================================================
     # ECONOMIC DATA CREATION
-    # ============================================================================    
+    # ============================================================================
 
     grid_cost = import_cost - export_revenue
     hourly_cost = grid_cost + battery_wear_cost

@@ -45,14 +45,17 @@ When using a remote/production HomeAssistant:
 Example `.env` configuration:
 
 ```bash
+
 # Local development
+
 HA_URL=http://localhost:8123
 HA_TOKEN=  # Not needed for local development
 
 # OR Production environment
+
 HA_URL=https://your-ha-instance.com
 HA_TOKEN=your_long_lived_access_token_here
-```
+```text
 
 ### Initial Setup
 
@@ -61,29 +64,32 @@ HA_TOKEN=your_long_lived_access_token_here
    ```bash
    git clone https://github.com/johanzander/bess-manager.git
    cd bess-manager
-   ```
+```text
 
 2. Create Environment File:
 
    ```bash
+
    # Create .env in root directory
+
    HA_URL=http://host.docker.internal:8123
    HA_TOKEN=your_long_lived_access_token_here
    FLASK_DEBUG=true
    PORT=8080
 
    # Optional database settings
+
    HA_DB_URL=http://homeassistant.local:8086/api/v2/query
    HA_DB_USER_NAME=your_db_username
    HA_DB_PASSWORD=your_db_password
-   ```
+```text
 
 3. Install Dependencies:
 
    ```bash
    pip install -r backend/requirements.txt
    cd frontend && npm install && cd ..
-   ```
+```text
 
 ### Running the Development Environment
 
@@ -93,7 +99,7 @@ HA_TOKEN=your_long_lived_access_token_here
 
    ```bash
    docker-compose up -d
-   ```
+```text
 
 2. Access the services:
 
@@ -106,14 +112,14 @@ HA_TOKEN=your_long_lived_access_token_here
 
    ```bash
    ./dev-run.sh
-   ```
+```text
 
 2. Start the frontend (in a separate terminal):
 
    ```bash
    cd frontend
    npm run dev
-   ```
+```text
 
 3. Access the services:
 
@@ -142,7 +148,7 @@ If using VS Code with Remote-Containers:
 └── build/           # Build output (created by package-addon.sh)
     ├── bess_manager/ # Add-on build
     └── repository/   # Repository build
-```
+```text
 
 ## Development Workflow
 
@@ -157,7 +163,7 @@ If using VS Code with Remote-Containers:
    ```bash
    cd frontend
    npm run generate-api
-   ```
+```text
 
 ### Frontend Development
 
@@ -171,35 +177,43 @@ If using VS Code with Remote-Containers:
 
    ```bash
    npm run build
-   ```
+```text
 
 ### Testing
 
 ```bash
+
 # Run all tests
+
 pytest
 
 # Run specific categories
+
 pytest core/bess/tests/unit/
 pytest core/bess/tests/integration/
 
 # Run with coverage
+
 pytest --cov=core.bess
-```
+```text
 
 ### Code Quality
 
 ```bash
+
 # Format code
+
 black .
 ruff check --fix .
 
 # Type checking
+
 mypy .
 
 # Run all pre-commit hooks
+
 pre-commit run --all-files
-```
+```text
 
 ## Debugging
 
@@ -209,7 +223,7 @@ pre-commit run --all-files
 
   ```bash
   docker-compose logs -f
-  ```
+```text
 
 - Set `FLASK_DEBUG=true` in `.env` for debug mode
 
@@ -251,13 +265,13 @@ pre-commit run --all-files
 
    ```bash
    chmod +x package-addon.sh
-   ```
+```text
 
 2. Build the add-on:
 
    ```bash
    ./package-addon.sh
-   ```
+```text
 
 The build output will be in:
 

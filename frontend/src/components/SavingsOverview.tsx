@@ -2,9 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Zap } from 'lucide-react';
 import api from '../lib/api';
 
-interface SavingsOverviewProps {
-  // Empty props interface for future extensions if needed
-}
+type SavingsOverviewProps = Record<string, never>
 
 interface DashboardResponse {
   currentHour: number;

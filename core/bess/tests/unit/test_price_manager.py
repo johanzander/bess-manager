@@ -64,7 +64,12 @@ def test_controller_price_fetching():
     def mock_api_request(method, path):
         if "sensor.nordpool_kwh_se4_sek_2_10_025" in path:
             # Return both today and tomorrow data for the same entity
-            return {"attributes": {"raw_today": raw_today_data, "raw_tomorrow": raw_tomorrow_data}}
+            return {
+                "attributes": {
+                    "raw_today": raw_today_data,
+                    "raw_tomorrow": raw_tomorrow_data,
+                }
+            }
         return None
 
     def mock_get_entity_for_service(sensor_key):

@@ -178,20 +178,21 @@ const InverterStatusDashboard: React.FC = () => {
       });
     }
     
-    // Sort: segments 1-9 in numerical order, then default segments by time
+    // Sort ALL segments by time (chronological order)
     return schedule.sort((a, b) => {
-      // If both are default segments, sort by time
-      if (a.isDefault && b.isDefault) {
-        const aStart = parseInt(a.startTime.split(':')[0]);
-        const bStart = parseInt(b.startTime.split(':')[0]);
+      const aStart = parseInt(a.startTime.split(':')[0]);
+      const bStart = parseInt(b.startTime.split(':')[0]);
+      
+      // Primary sort: by start time
+      if (aStart !== bStart) {
         return aStart - bStart;
       }
       
-      // Default segments go last
-      if (a.isDefault) return 1;
-      if (b.isDefault) return -1;
+      // Secondary sort: if same start time, put configured segments before empty ones
+      if (a.isEmpty && !b.isEmpty) return 1;
+      if (!a.isEmpty && b.isEmpty) return -1;
       
-      // TOU segments (both empty and configured) sort by segment ID
+      // Tertiary sort: if both same type, sort by segment ID (for empty segments) or keep order
       return a.segmentId - b.segmentId;
     });
   };

@@ -90,15 +90,6 @@ class ScheduleStore:
 
         return stored_schedule
 
-    def store_optimization_result(
-        self,
-        optimization_hour: int,
-        optimization_result: OptimizationResult,
-        scenario: str,
-    ) -> StoredSchedule:
-        """Store optimization result directly - just calls store_schedule with parameter order."""
-        return self.store_schedule(optimization_result, optimization_hour, scenario)
-
     def get_latest_schedule(self) -> StoredSchedule | None:
         """Get the most recently created schedule.
 
@@ -109,23 +100,6 @@ class ScheduleStore:
             return None
 
         return max(self._schedules, key=lambda s: s.timestamp)
-
-    def get_schedule_at_time(self, target_time: datetime) -> StoredSchedule | None:
-        """Get schedule that was active at a specific time.
-
-        Args:
-            target_time: Time to query
-
-        Returns:
-            StoredSchedule | None: Schedule active at that time, or None
-        """
-        # Find the most recent schedule before or at the target time
-        valid_schedules = [s for s in self._schedules if s.timestamp <= target_time]
-
-        if not valid_schedules:
-            return None
-
-        return max(valid_schedules, key=lambda s: s.timestamp)
 
     def get_all_schedules_today(self) -> list[StoredSchedule]:
         """Get all schedules created today.

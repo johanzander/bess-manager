@@ -36,7 +36,6 @@ def run_request(http_method, *args, **kwargs):
         raise
 
 
-
 class HomeAssistantAPIController:
     """A class for interacting with Inverter controls via Home Assistant REST API."""
 
@@ -77,23 +76,6 @@ class HomeAssistantAPIController:
         method_info = cls.METHOD_SENSOR_MAP.get(method_name)
         return method_info["sensor_key"] if method_info else None
 
-    @classmethod
-    def get_methods_by_category(cls, category: str) -> list[str]:
-        """Get method names by category (based on comment groupings)."""
-        # This could be extended to include category metadata in the future
-        if category == "battery_monitoring":
-            return ["get_battery_soc", "get_battery_charge_power", "get_battery_discharge_power"]
-        elif category == "energy_tracking":
-            return [
-                "get_battery_charge_today", "get_battery_discharge_today", "get_solar_generation_today",
-                "get_export_to_grid_today", "get_load_consumption_today", "get_import_from_grid_today", 
-                "get_grid_to_battery_today", "get_ev_energy_today"
-            ]
-        elif category == "prediction":
-            return ["get_solar_forecast_today", "get_solar_forecast_tomorrow", "get_estimated_consumption"]
-        else:
-            return []
-
     def __init__(self, ha_url: str, token: str, sensor_config: dict | None = None):
         """Initialize the Controller with Home Assistant API access.
 
@@ -123,56 +105,145 @@ class HomeAssistantAPIController:
     # Class-level sensor mapping - immutable mapping
     METHOD_SENSOR_MAP: ClassVar[dict[str, dict[str, str]]] = {
         # Battery control methods
-        "get_battery_soc": {"sensor_key": "battery_soc", "name": "Battery State of Charge"},
-        "get_charging_power_rate": {"sensor_key": "battery_charging_power_rate", "name": "Battery Charging Power Rate"},
-        "get_discharging_power_rate": {"sensor_key": "battery_discharging_power_rate", "name": "Battery Discharging Power Rate"},
-        "get_charge_stop_soc": {"sensor_key": "battery_charge_stop_soc", "name": "Battery Charge Stop SOC"},
-        "get_discharge_stop_soc": {"sensor_key": "battery_discharge_stop_soc", "name": "Battery Discharge Stop SOC"},
-        "grid_charge_enabled": {"sensor_key": "grid_charge", "name": "Grid Charge Enabled"},
+        "get_battery_soc": {
+            "sensor_key": "battery_soc",
+            "name": "Battery State of Charge",
+        },
+        "get_charging_power_rate": {
+            "sensor_key": "battery_charging_power_rate",
+            "name": "Battery Charging Power Rate",
+        },
+        "get_discharging_power_rate": {
+            "sensor_key": "battery_discharging_power_rate",
+            "name": "Battery Discharging Power Rate",
+        },
+        "get_charge_stop_soc": {
+            "sensor_key": "battery_charge_stop_soc",
+            "name": "Battery Charge Stop SOC",
+        },
+        "get_discharge_stop_soc": {
+            "sensor_key": "battery_discharge_stop_soc",
+            "name": "Battery Discharge Stop SOC",
+        },
+        "grid_charge_enabled": {
+            "sensor_key": "grid_charge",
+            "name": "Grid Charge Enabled",
+        },
         # Power monitoring methods
         "get_pv_power": {"sensor_key": "pv_power", "name": "Solar Power"},
         "get_import_power": {"sensor_key": "import_power", "name": "Grid Import Power"},
         "get_export_power": {"sensor_key": "export_power", "name": "Grid Export Power"},
-        "get_local_load_power": {"sensor_key": "local_load_power", "name": "Home Load Power"},
+        "get_local_load_power": {
+            "sensor_key": "local_load_power",
+            "name": "Home Load Power",
+        },
         "get_ac_power": {"sensor_key": "ac_power", "name": "AC Power"},
         "get_output_power": {"sensor_key": "output_power", "name": "Output Power"},
         "get_self_power": {"sensor_key": "self_power", "name": "Self Power"},
         "get_system_power": {"sensor_key": "system_power", "name": "System Power"},
-        "get_battery_charge_power": {"sensor_key": "battery_charge_power", "name": "Battery Charging Power"},
-        "get_battery_discharge_power": {"sensor_key": "battery_discharge_power", "name": "Battery Discharging Power"},
+        "get_battery_charge_power": {
+            "sensor_key": "battery_charge_power",
+            "name": "Battery Charging Power",
+        },
+        "get_battery_discharge_power": {
+            "sensor_key": "battery_discharge_power",
+            "name": "Battery Discharging Power",
+        },
         "get_l1_current": {"sensor_key": "current_l1", "name": "Current L1"},
         "get_l2_current": {"sensor_key": "current_l2", "name": "Current L2"},
         "get_l3_current": {"sensor_key": "current_l3", "name": "Current L3"},
         # Energy totals
-        "get_battery_charge_today": {"sensor_key": "battery_charged_today", "name": "Battery Energy Charged Today"},
-        "get_battery_discharge_today": {"sensor_key": "battery_discharged_today", "name": "Battery Energy Discharged Today"},
-        "get_solar_generation_today": {"sensor_key": "solar_production_today", "name": "Solar Energy Generated Today"},
-        "get_load_consumption_today": {"sensor_key": "load_consumption_today", "name": "Total Load Consumption Today"},
-        "get_import_from_grid_today": {"sensor_key": "import_from_grid_today", "name": "Energy Imported from Grid Today"},
-        "get_export_to_grid_today": {"sensor_key": "export_to_grid_today", "name": "Energy Exported to Grid Today"},
-        "get_grid_to_battery_today": {"sensor_key": "batteries_charged_from_grid_today", "name": "Grid to Battery Energy Today"},
-        "get_ev_energy_today": {"sensor_key": "ev_energy_today", "name": "EV Charging Energy Total"},
         # Price sensors
-        "get_nordpool_prices_today": {"sensor_key": "nordpool_kwh_today", "name": "Nord Pool Prices Today"},
-        "get_nordpool_prices_tomorrow": {"sensor_key": "nordpool_kwh_tomorrow", "name": "Nord Pool Prices Tomorrow"},
+        "get_nordpool_prices_today": {
+            "sensor_key": "nordpool_kwh_today",
+            "name": "Nord Pool Prices Today",
+        },
+        "get_nordpool_prices_tomorrow": {
+            "sensor_key": "nordpool_kwh_tomorrow",
+            "name": "Nord Pool Prices Tomorrow",
+        },
         # Home consumption forecast
-        "get_estimated_consumption": {"sensor_key": "48h_avg_grid_import", "name": "Average Hourly Power Consumption"},
+        "get_estimated_consumption": {
+            "sensor_key": "48h_avg_grid_import",
+            "name": "Average Hourly Power Consumption",
+        },
         # Solar forecast
-        "get_solar_forecast": {"sensor_key": "solar_forecast_today", "name": "Solar Forecast"},
-        "get_solar_forecast_today": {"sensor_key": "solar_forecast_today", "name": "Solar Forecast Today"},
-        "get_solar_forecast_tomorrow": {"sensor_key": "solar_forecast_tomorrow", "name": "Solar Forecast Tomorrow"},    
+        "get_solar_forecast": {
+            "sensor_key": "solar_forecast_today",
+            "name": "Solar Forecast",
+        },
+        # Lifetime and meter sensors (added for abstraction)
+        "get_battery_charged_lifetime": {
+            "sensor_key": "lifetime_battery_charged",
+            "name": "Lifetime Total Battery Charged",
+        },
+        "get_battery_discharged_lifetime": {
+            "sensor_key": "lifetime_battery_discharged",
+            "name": "Lifetime Total Battery Discharged",
+        },
+        "get_solar_production_lifetime": {
+            "sensor_key": "lifetime_solar_energy",
+            "name": "Lifetime Total Solar Energy",
+        },
+        "get_grid_import_lifetime": {
+            "sensor_key": "lifetime_import_from_grid",
+            "name": "Lifetime Import from Grid",
+        },
+        "get_grid_export_lifetime": {
+            "sensor_key": "lifetime_export_to_grid",
+            "name": "Lifetime Total Export to Grid",
+        },
+        "get_load_consumption_lifetime": {
+            "sensor_key": "lifetime_load_consumption",
+            "name": "Lifetime Total Load Consumption",
+        },
+        "get_system_production_lifetime": {
+            "sensor_key": "lifetime_system_production",
+            "name": "Lifetime System Production",
+        },
+        "get_self_consumption_lifetime": {
+            "sensor_key": "lifetime_self_consumption",
+            "name": "Lifetime Self Consumption",
+        },
+        "get_ev_energy_meter": {
+            "sensor_key": "ev_energy_meter",
+            "name": "EV Energy Meter",
+        },
     }
 
-    def _resolve_entity_id(self, sensor_key: str, for_service: bool = False) -> tuple[str, str]:
+    def resolve_sensor_for_influxdb(self, sensor_key: str) -> str | None:
+        """Resolve sensor key to entity ID formatted for InfluxDB (without 'sensor.' prefix).
+
+        Args:
+            sensor_key: The sensor key from config
+
+        Returns:
+            Entity ID without 'sensor.' prefix, or None if not configured
+
+        Raises:
+            TypeError: If sensor_key is not a string
+        """
+        if not isinstance(sensor_key, str):
+            raise TypeError(f"sensor_key must be a string, got {type(sensor_key)}")
+
+        try:
+            entity_id, _ = self._resolve_entity_id(sensor_key, for_service=False)
+            return entity_id[7:] if entity_id.startswith("sensor.") else entity_id
+        except ValueError:
+            return None
+
+    def _resolve_entity_id(
+        self, sensor_key: str, for_service: bool = False
+    ) -> tuple[str, str]:
         """Unified entity ID resolution with consistent logic.
-        
+
         Args:
             sensor_key: The sensor key to resolve
             for_service: If True, raises error on missing config (for write operations)
-            
+
         Returns:
             tuple: (entity_id, resolution_method)
-            
+
         Raises:
             ValueError: If sensor_key not found and for_service=True
         """
@@ -180,7 +251,7 @@ class HomeAssistantAPIController:
         if sensor_key in self.sensors:
             entity_id = self.sensors[sensor_key]
             return entity_id, "configured"
-        
+
         # Require explicit configuration for all operations
         # This ensures proper sensor mapping and prevents silent failures
         raise ValueError(f"No entity ID configured for sensor '{sensor_key}'")
@@ -195,12 +266,14 @@ class HomeAssistantAPIController:
                 "sensor_key": None,
                 "entity_id": None,
                 "status": "unknown_method",
-                "error": f"Method '{method_name}' not found in sensor mapping"
+                "error": f"Method '{method_name}' not found in sensor mapping",
             }
 
         sensor_key = method_info["sensor_key"]
         try:
-            entity_id, resolution_method = self._resolve_entity_id(sensor_key, for_service=False)
+            entity_id, resolution_method = self._resolve_entity_id(
+                sensor_key, for_service=False
+            )
         except ValueError as e:
             return {
                 "method_name": method_name,
@@ -209,7 +282,7 @@ class HomeAssistantAPIController:
                 "entity_id": "Not configured",
                 "status": "not_configured",
                 "error": str(e),
-                "current_value": None
+                "current_value": None,
             }
 
         result = {
@@ -220,31 +293,34 @@ class HomeAssistantAPIController:
             "status": "unknown",
             "error": None,
             "current_value": None,
-            "resolution_method": resolution_method
+            "resolution_method": resolution_method,
         }
 
         try:
             response = self._api_request("get", f"/api/states/{entity_id}")
             if not response:
-                result.update({
-                    "status": "entity_missing",
-                    "error": f"Entity '{entity_id}' does not exist in Home Assistant"
-                })
+                result.update(
+                    {
+                        "status": "entity_missing",
+                        "error": f"Entity '{entity_id}' does not exist in Home Assistant",
+                    }
+                )
             elif response.get("state") in ["unavailable", "unknown"]:
-                result.update({
-                    "status": "entity_unavailable",
-                    "error": f"Entity '{entity_id}' state is '{response.get('state')}'"
-                })
+                result.update(
+                    {
+                        "status": "entity_unavailable",
+                        "error": f"Entity '{entity_id}' state is '{response.get('state')}'",
+                    }
+                )
             else:
-                result.update({
-                    "status": "ok",
-                    "current_value": response.get("state")
-                })
+                result.update({"status": "ok", "current_value": response.get("state")})
         except Exception as e:
-            result.update({
-                "status": "error",
-                "error": f"Failed to check entity '{entity_id}': {e!s}"
-            })
+            result.update(
+                {
+                    "status": "error",
+                    "error": f"Failed to check entity '{entity_id}': {e!s}",
+                }
+            )
         return result
 
     def validate_methods_sensors(self, method_list: list) -> list:
@@ -391,7 +467,9 @@ class HomeAssistantAPIController:
     def _get_sensor_value(self, sensor_name):
         """Get value from any sensor by name using unified entity resolution."""
         try:
-            entity_id, resolution_method = self._resolve_entity_id(sensor_name, for_service=False)
+            entity_id, resolution_method = self._resolve_entity_id(
+                sensor_name, for_service=False
+            )
             logger.debug(
                 f"Resolving sensor '{sensor_name}' to entity '{entity_id}' (method: {resolution_method})"
             )
@@ -420,38 +498,6 @@ class HomeAssistantAPIController:
         """Get estimated hourly consumption for 24 hours."""
         avg_consumption = self._get_sensor_value("48h_avg_grid_import") / 1000
         return [avg_consumption] * 24
-
-    def get_solar_generation_today(self):
-        """Get the current solar generation reading (cumulative for today)."""
-        return self._get_sensor_value("solar_production_today")
-
-    def get_battery_charge_today(self):
-        """Get total battery charging for today in kWh."""
-        return self._get_sensor_value("battery_charged_today")
-
-    def get_battery_discharge_today(self):
-        """Get total battery discharging for today in kWh."""
-        return self._get_sensor_value("battery_discharged_today")
-
-    def get_export_to_grid_today(self):
-        """Get total export to grid for today in kWh."""
-        return self._get_sensor_value("export_to_grid_today")
-
-    def get_load_consumption_today(self):
-        """Get total home load consumption for today in kWh."""
-        return self._get_sensor_value("load_consumption_today")
-
-    def get_import_from_grid_today(self):
-        """Get total import from grid for today in kWh."""
-        return self._get_sensor_value("import_from_grid_today")
-
-    def get_grid_to_battery_today(self):
-        """Get total grid to battery charging for today in kWh."""
-        return self._get_sensor_value("batteries_charged_from_grid_today")
-
-    def get_ev_energy_today(self):
-        """Get total EV charging energy for today in kWh."""
-        return self._get_sensor_value("ev_energy_today")
 
     def get_battery_soc(self):
         """Get the battery state of charge (SOC)."""
@@ -619,12 +665,10 @@ class HomeAssistantAPIController:
         """Get the current load for L3."""
         return self._get_sensor_value("current_l3")
 
-    def get_solar_forecast(self, day_offset=0, confidence_level="estimate"):
+    def get_solar_forecast(self):
         """Get solar forecast data from Solcast integration."""
         # Determine which sensor key to use based on day_offset
         sensor_key = "solar_forecast_today"
-        if day_offset == 1:
-            sensor_key = "solar_forecast_tomorrow"
 
         # Get entity ID from sensor config
         entity_id = self.sensors.get(sensor_key)
@@ -650,7 +694,7 @@ class HomeAssistantAPIController:
             return [0.0] * 24  # Return zeros as fallback
 
         hourly_values = [0.0] * 24
-        pv_field = f"pv_{confidence_level}"
+        pv_field = "pv_estimate"
 
         for entry in hourly_data:
             # Handle period_start
@@ -764,7 +808,7 @@ class HomeAssistantAPIController:
 
         Note: This method only provides current sensor states, not historical data.
         Historical data is handled by InfluxDB integration in sensor_collector.py.
-        
+
         The end_time parameter is ignored - this method always returns current states.
 
         Args:
@@ -845,7 +889,7 @@ class HomeAssistantAPIController:
     def get_net_battery_power(self):
         """Get net battery power (positive = charging, negative = discharging) in watts."""
         charge_power = self.get_battery_charge_power()
-        discharge_power = self.get_battery_discharge_power()  
+        discharge_power = self.get_battery_discharge_power()
         return charge_power - discharge_power
 
     def get_net_grid_power(self):

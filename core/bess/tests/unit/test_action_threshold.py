@@ -5,7 +5,7 @@ Tests that fixed profit threshold correctly prevents low-profit actions
 while preserving high-profit opportunities.
 """
 
-import pytest
+import pytest  # type: ignore
 
 from core.bess.dp_battery_algorithm import optimize_battery_schedule
 from core.bess.settings import BatterySettings

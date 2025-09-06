@@ -3,6 +3,7 @@ import os
 from datetime import datetime
 
 import log_config  # noqa: F401
+import yaml
 
 # Import endpoints router
 from api import router as endpoints_router
@@ -19,8 +20,7 @@ from loguru import logger
 from core.bess.battery_system_manager import BatterySystemManager
 from core.bess.ha_api_controller import HomeAssistantAPIController
 
-#from core.bess.health_check import run_system_health_checks # TODO ADD health check
-from core.bess.price_manager import HomeAssistantSource
+# from core.bess.health_check import run_system_health_checks # TODO ADD health check
 
 # Get ingress prefix from environment variable
 INGRESS_PREFIX = os.environ.get("INGRESS_PREFIX", "")
@@ -28,31 +28,33 @@ INGRESS_PREFIX = os.environ.get("INGRESS_PREFIX", "")
 # Create FastAPI app with correct root_path
 app = FastAPI(root_path=INGRESS_PREFIX)
 
+
 # Add global exception handler to prevent server restarts
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):
     import traceback
 
     from fastapi.responses import JSONResponse
-    
+
     # Get the full stack trace
     tb_str = traceback.format_exception(type(exc), exc, exc.__traceback__)
     error_msg = "".join(tb_str)
-    
+
     # Log the full error details
     logger.error(f"Unhandled exception: {exc!s}")
     logger.error(f"Request path: {request.url.path}")
     logger.error(f"Stack trace:\n{error_msg}")
-    
+
     # Return a 500 response but keep the server running
     return JSONResponse(
         status_code=500,
         content={
             "detail": str(exc),
             "type": str(type(exc).__name__),
-            "message": "The server encountered an internal error but is still running."
+            "message": "The server encountered an internal error but is still running.",
         },
     )
+
 
 # Now that logger patching is complete, log the ingress prefix
 logger.info(f"Ingress prefix: {INGRESS_PREFIX}")
@@ -95,13 +97,16 @@ class BESSController:
         self.ha_controller = self._init_ha_controller(sensor_config)
         self.ha_controller.set_test_mode(False)
 
-        # Extract settings for price manager
-        price_settings = options.get("electricity_price", {})
-        vat_multiplier = price_settings.get("vat_multiplier", 1.25)
+        # Extract nordpool configuration
+        nordpool_config = options.get("nordpool", {})
 
-        # Create Battery System Manager with configured VAT multiplier
-        price_source = HomeAssistantSource(self.ha_controller, vat_multiplier=vat_multiplier)
-        self.system = BatterySystemManager(self.ha_controller, price_source)
+        # Create Battery System Manager with nordpool configuration
+        # Let the system manager choose the appropriate price source
+        self.system = BatterySystemManager(
+            self.ha_controller,
+            price_source=None,  # Let system manager auto-select based on config
+            nordpool_config=nordpool_config,
+        )
 
         # Create scheduler with increased misfire grace time to avoid unnecessary warnings
         self.scheduler = BackgroundScheduler(
@@ -123,7 +128,7 @@ class BESSController:
 
     def _init_ha_controller(self, sensor_config):
         """Initialize Home Assistant API controller based on environment.
-        
+
         Args:
             sensor_config: Sensor configuration dictionary to use for the controller.
         """
@@ -144,14 +149,16 @@ class BESSController:
 
     def _load_and_apply_settings(self):
         """Load options and apply settings.
-        
+
         This method is kept for backwards compatibility, but all settings should now be
         applied early during initialization using _apply_settings().
         """
         try:
             options = self._load_options()
             if options:
-                logger.debug("Reapplying settings from _load_and_apply_settings (redundant)")
+                logger.debug(
+                    "Reapplying settings from _load_and_apply_settings (redundant)"
+                )
                 self._apply_settings(options)
             else:
                 logger.warning("No options found when reapplying settings")
@@ -160,7 +167,6 @@ class BESSController:
 
     def _load_options(self):
         """Load options from Home Assistant add-on config or environment vars."""
-        import yaml
 
         options_json = "/data/options.json"
         config_yaml = "/app/config.yaml"
@@ -199,7 +205,9 @@ class BESSController:
 
         # Hourly schedule update (every hour at xx:00)
         self.scheduler.add_job(
-            lambda: self.system.update_battery_schedule(current_hour=datetime.now().hour),
+            lambda: self.system.update_battery_schedule(
+                current_hour=datetime.now().hour
+            ),
             CronTrigger(minute=0),
             misfire_grace_time=30,  # Allow 30 seconds of misfire before warning
         )
@@ -224,10 +232,10 @@ class BESSController:
 
     def _apply_settings(self, options):
         """Apply all settings from the provided options dictionary.
-        
+
         This consolidates settings application in one place, ensuring settings
         are applied as early as possible in the initialization process.
-        
+
         Args:
             options: Dictionary containing all configuration options
         """
@@ -235,34 +243,54 @@ class BESSController:
             if not options:
                 logger.warning("No options provided for settings application")
                 return
-                
+
             logger.debug(f"Applying settings: {json.dumps(options, indent=2)}")
-            
+
             settings = {
                 "battery": {
-                    "totalCapacity": options.get("battery", {}).get("total_capacity", 30.0),
-                    "cycleCostPerKwh": options.get("battery", {}).get("cycle_cost", 0.50),  
-                    "maxChargePowerKw": options.get("battery", {}).get("max_charge_discharge_power", 15.0),    
-                    "maxDischargePowerKw": options.get("battery", {}).get("max_charge_discharge_power", 15.0),  
-                    "estimatedConsumption": options.get("home", {}).get("consumption", 3.5),
+                    "totalCapacity": options.get("battery", {}).get(
+                        "total_capacity", 30.0
+                    ),
+                    "cycleCostPerKwh": options.get("battery", {}).get(
+                        "cycle_cost", 0.50
+                    ),
+                    "maxChargePowerKw": options.get("battery", {}).get(
+                        "max_charge_discharge_power", 15.0
+                    ),
+                    "maxDischargePowerKw": options.get("battery", {}).get(
+                        "max_charge_discharge_power", 15.0
+                    ),
+                    "estimatedConsumption": options.get("home", {}).get(
+                        "consumption", 3.5
+                    ),
                 },
                 "consumption": {
                     "defaultHourly": options.get("home", {}).get("consumption", 3.5)
                 },
                 "price": {
                     "area": options.get("electricity_price", {}).get("area", "SE4"),
-                    "markupRate": options.get("electricity_price", {}).get("markup_rate", 0.08),
-                    "vatMultiplier": options.get("electricity_price", {}).get("vat_multiplier", 1.25),
-                    "additionalCosts": options.get("electricity_price", {}).get("additional_costs", 1.03),
-                    "taxReduction": options.get("electricity_price", {}).get("tax_reduction", 0.6518),
-                    "minProfit": options.get("electricity_price", {}).get("min_profit", 0.05),
+                    "markupRate": options.get("electricity_price", {}).get(
+                        "markup_rate", 0.08
+                    ),
+                    "vatMultiplier": options.get("electricity_price", {}).get(
+                        "vat_multiplier", 1.25
+                    ),
+                    "additionalCosts": options.get("electricity_price", {}).get(
+                        "additional_costs", 1.03
+                    ),
+                    "taxReduction": options.get("electricity_price", {}).get(
+                        "tax_reduction", 0.6518
+                    ),
+                    "minProfit": options.get("electricity_price", {}).get(
+                        "min_profit", 0.05
+                    ),
                 },
             }
-            
+
             logger.debug(f"Formatted settings: {json.dumps(settings, indent=2)}")
             self.system.update_settings(settings)
             logger.info("All settings applied successfully")
-            
+
         except Exception as e:
             logger.error(f"Error applying settings: {e}", exc_info=True)
 
@@ -280,6 +308,7 @@ bess_controller.start()
 
 # Get ingress base path, important for Home Assistant ingress
 ingress_base_path = os.environ.get("INGRESS_BASE_PATH", "/local_bess_manager/ingress")
+
 
 @app.on_event("startup")
 async def startup_debug():
@@ -302,7 +331,6 @@ async def root_index():
     logger.info("Root path requested")
     return FileResponse("/app/frontend/index.html")
 
+
 # All API endpoints are found in api.py and are imported via the router
 # The endpoints router is included in the app instance at the top of this file
-
-

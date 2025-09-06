@@ -89,28 +89,24 @@ class HomePowerMonitor:
         # Define what controller methods this component uses
         power_methods = [
             "get_l1_current",
-            "get_l2_current", 
+            "get_l2_current",
             "get_l3_current",
-            "get_charging_power_rate"
+            "get_charging_power_rate",
         ]
-        
+
         # For power monitoring, L1/L2/L3 current are required for basic functionality
         # charging_power_rate is optional (enhancement)
-        required_power_methods = [
-            "get_l1_current",
-            "get_l2_current", 
-            "get_l3_current"
-        ]
-        
+        required_power_methods = ["get_l1_current", "get_l2_current", "get_l3_current"]
+
         health_check = perform_health_check(
             component_name="Power Monitoring",
             description="Monitors home power consumption and adapts battery charging",
             is_required=False,
             controller=self.controller,
             all_methods=power_methods,
-            required_methods=required_power_methods
+            required_methods=required_power_methods,
         )
-        
+
         return [health_check]
 
     def get_current_phase_loads_w(self) -> tuple[float, float, float]:

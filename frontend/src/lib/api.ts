@@ -6,7 +6,7 @@ const getBaseUrl = () => {
   const currentPath = window.location.pathname;
   
   // Check for Home Assistant ingress pattern
-  const ingressMatch = currentPath.match(/^(\/api\/hassio_ingress\/[^\/]+\/)/);
+  const ingressMatch = currentPath.match(/^(\/api\/hassio_ingress\/[^/]+\/)/);
   if (ingressMatch && ingressMatch[1]) {
     return ingressMatch[1].slice(0, -1); // Remove trailing slash
   }

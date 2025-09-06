@@ -23,7 +23,7 @@ class HistoricalDataStore:
         """
         # Primary storage - unified data structure
         self._records: dict[int, HourlyData] = {}
-        
+
         # Store battery capacity for SOC calculations
         self.total_capacity = battery_capacity_kwh
 
@@ -115,7 +115,7 @@ class HistoricalDataStore:
 
     def get_latest_battery_state(self) -> tuple[float, float]:
         """Get the latest battery SOC and SOE state.
-        
+
         TODO: DEPRECATED - Mark for deletion. This method appears to never be used
         in practice since the controller SOC reading is reliable. The fallback
         code path in battery_system_manager.py has been replaced with a warning.
@@ -127,7 +127,7 @@ class HistoricalDataStore:
             "get_latest_battery_state() called - this method is deprecated and "
             "should be removed if fallback code path is never used"
         )
-        
+
         if not self._records:
             # No records, return default state
             return 20.0, 6.0  # 20% SOC, 6 kWh SOE

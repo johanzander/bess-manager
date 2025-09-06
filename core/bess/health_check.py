@@ -6,31 +6,33 @@ from .influxdb_helper import get_influxdb_config, get_sensor_data
 logger = logging.getLogger(__name__)
 
 
-def determine_health_status(sensor_diagnostics: list, working_sensors: int, required_methods: list | None = None) -> str:
+def determine_health_status(
+    sensor_diagnostics: list, working_sensors: int, required_methods: list | None = None
+) -> str:
     """Generic method to determine health check status based on required vs optional sensors.
-    
+
     Args:
         sensor_diagnostics: List of sensor diagnostic results
         working_sensors: Count of working sensors
         required_methods: List of method names that are required (optional sensors are non-required)
-        
+
     Returns:
         Status string: "OK", "WARNING", or "ERROR"
     """
     if not required_methods:
         # If no required methods specified, all methods are optional
         required_methods = []
-    
+
     # Count required vs optional sensors that are actually working
     required_working = 0
     required_total = 0
     optional_working = 0
     optional_total = 0
-    
+
     for method_info in sensor_diagnostics:
         method_name = method_info["method_name"]
         is_working = method_info["status"] == "ok"
-        
+
         if method_name in required_methods:
             required_total += 1
             if is_working:
@@ -39,9 +41,9 @@ def determine_health_status(sensor_diagnostics: list, working_sensors: int, requ
             optional_total += 1
             if is_working:
                 optional_working += 1
-    
+
     # ERROR if not all required sensors are working
-    # WARNING if any optional sensor is not working  
+    # WARNING if any optional sensor is not working
     # OK if all sensors are working
     if required_working < required_total:
         return "ERROR"
@@ -52,15 +54,15 @@ def determine_health_status(sensor_diagnostics: list, working_sensors: int, requ
 
 
 def perform_health_check(
-    component_name: str, 
-    description: str, 
+    component_name: str,
+    description: str,
     is_required: bool,
     controller,
     all_methods: list[str],
-    required_methods: list[str] | None = None
+    required_methods: list[str] | None = None,
 ) -> dict:
     """Generic health check function that can be used by any component.
-    
+
     Args:
         component_name: Name of the component being checked
         description: Description of what the component does
@@ -68,7 +70,7 @@ def perform_health_check(
         controller: The controller instance with validate_methods_sensors method
         all_methods: List of all method names this component uses
         required_methods: List of method names that are required (None = all required)
-        
+
     Returns:
         Health check result dictionary
     """
@@ -92,83 +94,102 @@ def perform_health_check(
             "entity_id": method_info.get("entity_id", "Not mapped"),
             "status": "UNKNOWN",
             "value": None,
-            "error": None
+            "error": None,
         }
-        
+
         if method_info["status"] == "ok":
             # Test the actual method
             try:
                 method = getattr(controller, method_info["method_name"])
                 value = method()
-                
+
                 # Handle different return types
                 if isinstance(value, list):
                     # Handle list values (like predictions)
                     import math
+
                     if len(value) == 0:
-                        check_result.update({
-                            "status": "WARNING",
-                            "error": "Empty list returned",
-                            "value": "N/A"
-                        })
+                        check_result.update(
+                            {
+                                "status": "WARNING",
+                                "error": "Empty list returned",
+                                "value": "N/A",
+                            }
+                        )
                     else:
-                        nan_count = sum(1 for v in value if isinstance(v, float) and math.isnan(v))
+                        nan_count = sum(
+                            1 for v in value if isinstance(v, float) and math.isnan(v)
+                        )
                         if nan_count == 0:
-                            check_result.update({
-                                "status": "OK",
-                                "value": f"List with {len(value)} values"
-                            })
+                            check_result.update(
+                                {
+                                    "status": "OK",
+                                    "value": f"List with {len(value)} values",
+                                }
+                            )
                             working_sensors += 1
                         else:
-                            check_result.update({
-                                "status": "WARNING",
-                                "error": f"List contains {nan_count}/{len(value)} NaN values",
-                                "value": "Contains NaN"
-                            })
+                            check_result.update(
+                                {
+                                    "status": "WARNING",
+                                    "error": f"List contains {nan_count}/{len(value)} NaN values",
+                                    "value": "Contains NaN",
+                                }
+                            )
                 elif value is not None:
                     import math
+
                     if isinstance(value, int | float) and math.isnan(value):
-                        check_result.update({
-                            "status": "WARNING",
-                            "error": "Sensor returns NaN value",
-                            "value": "NaN"
-                        })
+                        check_result.update(
+                            {
+                                "status": "WARNING",
+                                "error": "Sensor returns NaN value",
+                                "value": "NaN",
+                            }
+                        )
                     elif value >= 0:
-                        check_result.update({
-                            "status": "OK",
-                            "value": value
-                        })
+                        check_result.update({"status": "OK", "value": value})
                         working_sensors += 1
                     else:
-                        check_result.update({
-                            "status": "WARNING",
-                            "error": f"Invalid value: {value}",
-                            "value": "N/A"
-                        })
+                        check_result.update(
+                            {
+                                "status": "WARNING",
+                                "error": f"Invalid value: {value}",
+                                "value": "N/A",
+                            }
+                        )
                 else:
-                    check_result.update({
-                        "status": "WARNING",
-                        "error": "Method returned None",
-                        "value": "N/A"
-                    })
+                    check_result.update(
+                        {
+                            "status": "WARNING",
+                            "error": "Method returned None",
+                            "value": "N/A",
+                        }
+                    )
             except Exception as e:
-                check_result.update({
-                    "status": "ERROR",
-                    "error": f"Method call failed: {e!s}",
-                    "value": "N/A"
-                })
+                check_result.update(
+                    {
+                        "status": "ERROR",
+                        "error": f"Method call failed: {e!s}",
+                        "value": "N/A",
+                    }
+                )
         else:
-            check_result.update({
-                "status": "ERROR",
-                "error": method_info.get("error", "Unknown error"),
-                "value": "N/A"
-            })
+            check_result.update(
+                {
+                    "status": "ERROR",
+                    "error": method_info.get("error", "Unknown error"),
+                    "value": "N/A",
+                }
+            )
         health_check["checks"].append(check_result)
 
     # Determine overall status using the generic method
-    status = determine_health_status(sensor_diagnostics, working_sensors, required_methods)
+    status = determine_health_status(
+        sensor_diagnostics, working_sensors, required_methods
+    )
     health_check["status"] = status
-    
+
     return health_check
 
 
@@ -191,7 +212,9 @@ def run_system_health_checks(system_manager):
     all_component_checks.extend(price_checks)
 
     # 2. Growatt Schedule Manager (Battery Control) - core control system
-    growatt_checks = system_manager._schedule_manager.check_health(system_manager._controller)
+    growatt_checks = system_manager._schedule_manager.check_health(
+        system_manager._controller
+    )
     all_component_checks.extend(growatt_checks)
 
     # 3. & 4. SensorCollector (Battery Monitoring + Energy Monitoring) - operational sensors
@@ -201,7 +224,7 @@ def run_system_health_checks(system_manager):
     # 5. Power Monitor (Power Monitoring) - real-time power flow tracking
     power_checks = system_manager._power_monitor.check_health()
     all_component_checks.extend(power_checks)
-    
+
     # 6. Historic data access
     history_checks = check_historical_data_access()
     all_component_checks.extend(history_checks)
@@ -263,7 +286,9 @@ def check_historical_data_access():
     if isinstance(config_check, dict):
         result["checks"].append(config_check)
     else:
-        logger.error(f"Non-dict config_check encountered in historical data access: {config_check} (type: {type(config_check)})")
+        logger.error(
+            f"Non-dict config_check encountered in historical data access: {config_check} (type: {type(config_check)})"
+        )
 
     # Test data retrieval if configuration is OK
     if config_check["status"] == "OK":
@@ -281,16 +306,20 @@ def check_historical_data_access():
             one_hour_ago = datetime.now() - timedelta(hours=1)
             # Test with any available sensor - InfluxDB connectivity is what matters
             # The actual sensor data availability will be tested by the sensor collector
-            test_sensors = ["battery_soc"]  # Use generic key, let the system handle mapping
+            test_sensors = [
+                "battery_soc"
+            ]  # Use generic key, let the system handle mapping
 
             response = get_sensor_data(test_sensors, stop_time=one_hour_ago)
 
             if response["status"] == "success":
-                data_check["status"] = "OK" 
+                data_check["status"] = "OK"
                 data_check["value"] = "InfluxDB connection successful"
             else:
                 data_check["status"] = "WARNING"
-                data_check["error"] = f"InfluxDB connectivity issue: {response.get('message', 'Unknown error')}"
+                data_check["error"] = (
+                    f"InfluxDB connectivity issue: {response.get('message', 'Unknown error')}"
+                )
         except Exception as e:
             data_check["status"] = "ERROR"
             data_check["error"] = f"Failed to connect to InfluxDB: {e}"

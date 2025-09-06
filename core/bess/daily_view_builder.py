@@ -10,7 +10,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime
 
-from core.bess.models import DecisionData, EconomicData, EnergyData, HourlyData
+from core.bess.models import DecisionData, EconomicData, HourlyData
 
 from .historical_data_store import HistoricalDataStore
 from .schedule_store import ScheduleStore
@@ -548,52 +548,6 @@ class DailyViewBuilder:
             f"{daily_view.predicted_hours_count} predicted hours ({predicted_savings:.2f} SEK)"
         )
 
-    def _get_list_item(
-        self, data_list: list | None, index: int, field_name: str, default=None
-    ) -> float:
-        """Get item from a list with proper error handling.
-
-        Args:
-            data_list: List to extract from
-            index: Index to extract
-            field_name: Name of field for error reporting
-            default: Default value if extraction fails and default is not None
-
-        Returns:
-            float: Value from list or default
-
-        Raises:
-            ValueError if list is None or index out of bounds and no default is provided
-        """
-        if data_list is None:
-            if default is not None:
-                return default
-            raise ValueError(f"Missing {field_name} list in schedule")
-
-        if not isinstance(data_list, list):
-            if default is not None:
-                return default
-            raise ValueError(f"{field_name} is not a list: {type(data_list)}")
-
-        if not 0 <= index < len(data_list):
-            if default is not None:
-                return default
-            raise ValueError(
-                f"{field_name} index {index} out of bounds (0-{len(data_list)-1})"
-            )
-
-        value = data_list[index]
-        if value is None:
-            if default is not None:
-                return default
-            raise ValueError(f"{field_name}[{index}] is None")
-
-        try:
-            return float(value)
-        except (ValueError, TypeError) as e:
-            if default is not None:
-                return default
-            raise ValueError(f"Error parsing {field_name}[{index}]: {e}") from e
 
     def _get_previous_hour_soc(self, hour: int) -> float:
         """Get the start SOC for an hour from the ending SOC of the previous hour.

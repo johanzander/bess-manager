@@ -10,29 +10,29 @@ from api_conversion import APIConverter
 @dataclass
 class APIBatterySettings:
     """Battery settings with clear SOC/SOE naming."""
-    
-    totalCapacity: float        # kWh - total battery capacity
-    reservedCapacity: float     # kWh - reserved capacity
-    
+
+    totalCapacity: float  # kWh - total battery capacity
+    reservedCapacity: float  # kWh - reserved capacity
+
     # State of Charge limits (%)
-    minSoc: float              # % (0-100) - minimum charge percentage
-    maxSoc: float              # % (0-100) - maximum charge percentage  
-    
+    minSoc: float  # % (0-100) - minimum charge percentage
+    maxSoc: float  # % (0-100) - maximum charge percentage
+
     # State of Energy limits (kWh) - calculated from SOC
-    minSoeKwh: float           # kWh - minimum energy (calculated)
-    maxSoeKwh: float           # kWh - maximum energy (calculated)
-    
+    minSoeKwh: float  # kWh - minimum energy (calculated)
+    maxSoeKwh: float  # kWh - maximum energy (calculated)
+
     # Power limits (kW)
-    maxChargePowerKw: float    # kW - maximum charge power
-    maxDischargePowerKw: float # kW - maximum discharge power
-    
+    maxChargePowerKw: float  # kW - maximum charge power
+    maxDischargePowerKw: float  # kW - maximum discharge power
+
     # Economic settings
-    cycleCostPerKwh: float     # SEK/kWh - cost per cycle
-    chargingPowerRate: float   # % - charging power rate
-    efficiencyCharge: float    # % - charging efficiency
-    efficiencyDischarge: float # % - discharge efficiency
-    estimatedConsumption: float # kWh - estimated daily consumption
-    
+    cycleCostPerKwh: float  # SEK/kWh - cost per cycle
+    chargingPowerRate: float  # % - charging power rate
+    efficiencyCharge: float  # % - charging efficiency
+    efficiencyDischarge: float  # % - discharge efficiency
+    estimatedConsumption: float  # kWh - estimated daily consumption
+
     @classmethod
     def from_internal(cls, battery, estimated_consumption: float) -> APIBatterySettings:
         """Convert from internal snake_case to canonical camelCase."""
@@ -49,9 +49,9 @@ class APIBatterySettings:
             chargingPowerRate=battery.charging_power_rate,
             efficiencyCharge=battery.efficiency_charge,
             efficiencyDischarge=battery.efficiency_discharge,
-            estimatedConsumption=estimated_consumption
+            estimatedConsumption=estimated_consumption,
         )
-    
+
     def to_internal_update(self) -> dict:
         """Convert API updates back to internal snake_case."""
         return {
@@ -67,10 +67,10 @@ class APIBatterySettings:
         }
 
 
-@dataclass 
+@dataclass
 class APIPriceSettings:
     """API response dataclass with canonical camelCase fields."""
-    
+
     area: str
     markupRate: float
     vatMultiplier: float
@@ -78,7 +78,7 @@ class APIPriceSettings:
     taxReduction: float
     minProfit: float
     useActualPrice: bool
-    
+
     @classmethod
     def from_internal(cls, price) -> APIPriceSettings:
         """Convert from internal snake_case to canonical camelCase."""
@@ -89,9 +89,9 @@ class APIPriceSettings:
             additionalCosts=price.additional_costs,
             taxReduction=price.tax_reduction,
             minProfit=price.min_profit,
-            useActualPrice=price.use_actual_price
+            useActualPrice=price.use_actual_price,
         )
-    
+
     def to_internal_update(self) -> dict:
         """Convert API updates back to internal snake_case."""
         return {
@@ -108,7 +108,7 @@ class APIPriceSettings:
 @dataclass
 class APIHomeSettings:
     """API response dataclass with canonical camelCase fields for home settings."""
-    
+
     maxFuseCurrent: int
     voltage: int
     safetyMargin: float
@@ -116,7 +116,7 @@ class APIHomeSettings:
     minValid: float
     powerAdjustmentStep: int
     estimatedConsumption: float
-    
+
     @classmethod
     def from_internal(cls, home) -> APIHomeSettings:
         """Convert from internal snake_case to canonical camelCase."""
@@ -127,9 +127,9 @@ class APIHomeSettings:
             defaultHourly=home.default_hourly,
             minValid=home.min_valid,
             powerAdjustmentStep=home.power_adjustment_step,
-            estimatedConsumption=home.default_hourly  # Alias for frontend compatibility
+            estimatedConsumption=home.default_hourly,  # Alias for frontend compatibility
         )
-    
+
     def to_internal_update(self) -> dict:
         """Convert API updates back to internal snake_case."""
         return {
@@ -145,7 +145,7 @@ class APIHomeSettings:
 @dataclass
 class APIRealTimePower:
     """Real-time power data with canonical camelCase fields."""
-    
+
     solarPowerW: float
     homeLoadPowerW: float
     gridImportPowerW: float
@@ -156,7 +156,7 @@ class APIRealTimePower:
     netGridPowerW: float
     acPowerW: float
     selfPowerW: float
-    
+
     @classmethod
     def from_controller(cls, controller) -> APIRealTimePower:
         """Convert from controller readings to canonical camelCase."""
@@ -170,7 +170,7 @@ class APIRealTimePower:
             netBatteryPowerW=controller.get_net_battery_power(),
             netGridPowerW=controller.get_net_grid_power(),
             acPowerW=controller.get_ac_power(),
-            selfPowerW=controller.get_self_power()
+            selfPowerW=controller.get_self_power(),
         )
 
 

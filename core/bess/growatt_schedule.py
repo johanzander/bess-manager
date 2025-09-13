@@ -521,6 +521,7 @@ class GrowattScheduleManager:
                         "start_time": start_time,
                         "end_time": end_time,
                         "enabled": True,
+                        "strategic_intent": self._get_period_intent_summary(period[0], period[-1]),
                     }
                 )
 
@@ -672,6 +673,7 @@ class GrowattScheduleManager:
                     "start_time": segment.get("start_time", "00:00"),
                     "end_time": segment.get("end_time", "23:59"),
                     "enabled": is_enabled,
+                    "strategic_intent": "existing_schedule",
                 }
             )
 

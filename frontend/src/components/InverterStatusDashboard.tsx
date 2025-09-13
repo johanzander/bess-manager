@@ -6,7 +6,12 @@ import {
   Clock, 
   Settings, 
   TrendingUp,
-  Calendar
+  Calendar,
+  TrendingDown,
+  CheckCircle,
+  AlertTriangle,
+  Home,
+  Sun
 } from 'lucide-react';
 import api from '../lib/api';
 
@@ -62,9 +67,161 @@ interface GrowattSchedule {
   lastUpdated: string;
 }
 
+// StatusCard component for focused cards
+interface StatusCardProps {
+  title: string;
+  keyMetric: string;
+  keyValue: number | string;
+  keyUnit: string;
+  status: {
+    icon: React.ComponentType<{ className?: string }>;
+    text: string;
+    color: 'green' | 'red' | 'yellow' | 'blue';
+  };
+  metrics: Array<{
+    label: string;
+    value: number | string;
+    unit: string;
+    icon?: React.ComponentType<{ className?: string }>;
+    color?: 'green' | 'red' | 'yellow' | 'blue';
+  }>;
+  color: 'blue' | 'green' | 'yellow' | 'red' | 'purple';
+  icon: React.ComponentType<{ className?: string }>;
+  className?: string;
+}
+
+const StatusCard: React.FC<StatusCardProps> = ({
+  title,
+  icon: Icon,
+  color,
+  keyMetric,
+  keyValue,
+  keyUnit,
+  metrics,
+  status,
+  className = ""
+}) => {
+  const colorClasses = {
+    blue: 'bg-blue-50 border-blue-200 dark:bg-blue-900/20 dark:border-blue-800',
+    green: 'bg-green-50 border-green-200 dark:bg-green-900/20 dark:border-green-800',
+    red: 'bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800',
+    yellow: 'bg-yellow-50 border-yellow-200 dark:bg-yellow-900/20 dark:border-yellow-800',
+    purple: 'bg-purple-50 border-purple-200 dark:bg-purple-900/20 dark:border-purple-800'
+  };
+
+  const iconColorClasses = {
+    blue: 'text-blue-600 dark:text-blue-400',
+    green: 'text-green-600 dark:text-green-400',
+    red: 'text-red-600 dark:text-red-400',
+    yellow: 'text-yellow-600 dark:text-yellow-400',
+    purple: 'text-purple-600 dark:text-purple-400'
+  };
+
+  const metricColorClasses: Record<string, string> = {
+    green: 'text-green-600 dark:text-green-400',
+    red: 'text-red-600 dark:text-red-400',
+    yellow: 'text-yellow-600 dark:text-yellow-400',
+    blue: 'text-blue-600 dark:text-blue-400'
+  };
+
+  return (
+    <div className={`border rounded-lg p-6 ${colorClasses[color]} ${className}`}>
+      {/* Header */}
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center">
+          <Icon className={`h-6 w-6 ${iconColorClasses[color]} mr-3`} />
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{title}</h3>
+        </div>
+        {status && (
+          <div className={`flex items-center text-sm px-2 py-1 rounded-md ${
+            status.color === 'green' ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' :
+            status.color === 'red' ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400' :
+            status.color === 'yellow' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' :
+            'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400'
+          }`}>
+            <status.icon className="h-4 w-4 mr-1" />
+            <span className="font-medium">{status.text}</span>
+          </div>
+        )}
+      </div>
+
+      {/* Key Metric */}
+      <div className="mb-6">
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">{keyMetric}</p>
+        <p className="text-3xl font-bold text-gray-900 dark:text-gray-100">
+          {typeof keyValue === 'number' ? keyValue.toFixed(1) : keyValue}
+          <span className="text-lg font-normal text-gray-600 dark:text-gray-400 ml-2">{keyUnit}</span>
+        </p>
+      </div>
+
+      {/* Metrics */}
+      <div className="space-y-3">
+        {metrics.map((metric, index) => (
+          <div key={index} className="flex items-center justify-between">
+            <div className="flex items-center">
+              {metric.icon && <metric.icon className="h-4 w-4 mr-2 text-gray-500 dark:text-gray-400" />}
+              <span className="text-sm text-gray-700 dark:text-gray-300">{metric.label}</span>
+            </div>
+            <span className={`text-sm font-semibold ${
+              metric.color ? metricColorClasses[metric.color] : 'text-gray-900 dark:text-gray-100'
+            }`}>
+              {typeof metric.value === 'number' 
+                ? metric.value.toFixed(1)
+                : metric.value}
+              {metric.unit && <span className="opacity-70 ml-1">{metric.unit}</span>}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+// Helper function for battery mode formatting
+const formatBatteryMode = (mode: string): string => {
+  switch (mode.toLowerCase()) {
+    case 'load-first':
+      return 'Load First';
+    case 'battery-first':
+      return 'Battery First';
+    case 'grid-first':
+      return 'Grid First';
+    default:
+      return mode.charAt(0).toUpperCase() + mode.slice(1);
+  }
+};
+
+interface BatterySettings {
+  totalCapacity: number;
+  reservedCapacity: number;
+  minSoc: number;
+  maxSoc: number;
+  minSoeKwh: number;
+  maxSoeKwh: number;
+  maxChargePowerKw: number;
+  maxDischargePowerKw: number;
+  cycleCostPerKwh: number;
+  chargingPowerRate: number;
+  efficiencyCharge: number;
+  efficiencyDischarge: number;
+  estimatedConsumption: number;
+}
+
+interface DashboardData {
+  hourlyData: Array<{
+    hour: number;
+    strategicIntent?: string;
+    batteryAction?: number;
+    dataSource?: string;
+    isActual?: boolean;
+  }>;
+}
+
 const InverterStatusDashboard: React.FC = () => {
   const [inverterStatus, setInverterStatus] = useState<InverterStatus | null>(null);
   const [growattSchedule, setGrowattSchedule] = useState<GrowattSchedule | null>(null);
+  const [batterySettings, setBatterySettings] = useState<BatterySettings | null>(null);
+  const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [, setError] = useState<string | null>(null);
   const [, setLastUpdate] = useState<Date>(new Date());
@@ -79,6 +236,16 @@ const InverterStatusDashboard: React.FC = () => {
     const response = await api.get('/api/growatt/detailed_schedule');
     return response.data;
   };
+
+  const fetchBatterySettings = async (): Promise<BatterySettings> => {
+    const response = await api.get('/api/settings/battery');
+    return response.data;
+  };
+
+  const fetchDashboardData = async (): Promise<DashboardData> => {
+    const response = await api.get('/api/dashboard');
+    return response.data;
+  };
   
   const loadData = async (isManualRefresh = false): Promise<void> => {
     try {
@@ -87,13 +254,17 @@ const InverterStatusDashboard: React.FC = () => {
       }
       setError(null);
       
-      const [statusData, scheduleData] = await Promise.all([
+      const [statusData, scheduleData, batteryData, dashboardDataResult] = await Promise.all([
         fetchInverterStatus(),
-        fetchGrowattSchedule()
+        fetchGrowattSchedule(),
+        fetchBatterySettings(),
+        fetchDashboardData()
       ]);
       
       setInverterStatus(statusData);
       setGrowattSchedule(scheduleData);
+      setBatterySettings(batteryData);
+      setDashboardData(dashboardDataResult);
       setLastUpdate(new Date());
       
       if (isInitialLoad) {
@@ -226,6 +397,26 @@ const InverterStatusDashboard: React.FC = () => {
 
   const currentBatteryMode = getCurrentBatteryMode();
 
+  // Merge dashboard data with schedule data to get correct strategic intents
+  const getMergedHourData = (hour: number) => {
+    const scheduleHour = growattSchedule?.scheduleData?.find(h => h.hour === hour);
+    const dashboardHour = dashboardData?.hourlyData?.find(h => h.hour === hour);
+    
+    if (!scheduleHour) return null;
+    
+    return {
+      ...scheduleHour,
+      // Override with dashboard data if available (has actual + predicted data)
+      strategicIntent: dashboardHour?.strategicIntent || scheduleHour.strategicIntent,
+      batteryAction: dashboardHour?.batteryAction !== undefined ? dashboardHour.batteryAction : scheduleHour.batteryAction,
+      batteryCharged: dashboardHour?.batteryCharged !== undefined ? dashboardHour.batteryCharged : scheduleHour.batteryCharged,
+      batteryDischarged: dashboardHour?.batteryDischarged !== undefined ? dashboardHour.batteryDischarged : scheduleHour.batteryDischarged,
+      batterySocEnd: dashboardHour?.batterySocEnd !== undefined ? dashboardHour.batterySocEnd : scheduleHour.batterySocEnd,
+      dataSource: dashboardHour?.dataSource || 'predicted',
+      isActual: dashboardHour?.dataSource === 'actual'
+    };
+  };
+
   // Rest of existing functions...
   const getBatteryModeDisplay = (mode: string) => {
     const modes: Record<string, { label: string; color: string }> = {
@@ -268,122 +459,151 @@ const InverterStatusDashboard: React.FC = () => {
     );
   }
 
-  const currentHourData = growattSchedule?.scheduleData?.find(h => h.hour === growattSchedule.currentHour);
+  const currentHour = new Date().getHours();
+  const currentHourData = getMergedHourData(currentHour);
 
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
         <div className="p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Inverter Status</h1>
-              <p className="text-gray-600 dark:text-gray-400">Real-time system monitoring and control</p>
-            </div>
-            <button
-              onClick={() => loadData(true)}
-              disabled={loading}
-              className="flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg transition-colors"
-            >
-              <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-              {loading ? 'Refreshing...' : 'Refresh'}
-            </button>
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Inverter and Battery Insights</h1>
+            <p className="text-gray-600 dark:text-gray-400">Real-time energy and battery performance monitoring</p>
           </div>
         </div>
       </div>
 
-      {/* ✅ FIXED: First 4 Cards using calculated values */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {/* Current Strategy */}
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Current Strategy</h3>
-            <TrendingUp className="h-6 w-6 text-green-600" />
-          </div>
-          {currentHourData ? (
-            <div className="space-y-2">
-              <div className={`px-3 py-1 rounded text-sm font-medium ${getIntentColor(currentHourData.strategicIntent || 'IDLE')}`}>
-                {currentHourData.strategicIntent?.replace('_', ' ') || 'IDLE'}
-              </div>
-              <div className="text-sm text-gray-600 dark:text-gray-400">
-                Hour {currentHourData.hour}:00 - Target SOC: {currentHourData.batterySocEnd?.toFixed(1)}%
-              </div>
-            </div>
-          ) : (
-            <div className="text-gray-500 dark:text-gray-400 text-sm">No strategy data</div>
-          )}
-        </div>
+      {/* Focused Status Cards */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Energy & Power Card */}
+        <StatusCard
+          title="Energy & Power"
+          icon={Zap}
+          color="green"
+          keyMetric="State of Charge"
+          keyValue={inverterStatus?.batterySoc || 0}
+          keyUnit="%"
+          status={{
+            icon: netBatteryPower > 0.01 ? TrendingUp :
+                  netBatteryPower < -0.01 ? TrendingDown : CheckCircle,
+            text: netBatteryPower > 0.01 ? 
+              `Charging ${(Math.abs(netBatteryPower) / 1000).toFixed(1)}kW` :
+              netBatteryPower < -0.01 ? 
+              `Discharging ${(Math.abs(netBatteryPower) / 1000).toFixed(1)}kW` : 
+              'Idle',
+            color: netBatteryPower > 0.01 ? 'green' :
+                   netBatteryPower < -0.01 ? 'yellow' : 'blue'
+          }}
+          metrics={[
+            {
+              label: "State of Energy",
+              value: `${parseFloat((inverterStatus?.batterySoe || 0).toFixed(1))}/${parseFloat((batterySettings?.totalCapacity || 0).toFixed(1))}`,
+              unit: "kWh",
+              icon: Battery
+            },
+            {
+              label: netBatteryPower > 0.01 ? 'Charging Power' :
+                     netBatteryPower < -0.01 ? 'Discharging Power' : 'Battery Power',
+              value: parseFloat((Math.abs(netBatteryPower) / 1000).toFixed(1)),
+              unit: "kW",
+              icon: netBatteryPower > 0.01 ? TrendingUp :
+                    netBatteryPower < -0.01 ? TrendingDown : Zap,
+              color: netBatteryPower > 0.01 ? 'green' :
+                     netBatteryPower < -0.01 ? 'yellow' : undefined
+            },
+            {
+              label: "Solar Production", 
+              value: dashboardData?.realTimePower?.solarPowerW 
+                ? (dashboardData.realTimePower.solarPowerW / 1000).toFixed(1) 
+                : '0.0',
+              unit: "kW",
+              icon: Sun
+            }
+          ]}
+        />
 
-        {/* ✅ FIXED: System Status using calculated battery mode */}
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">System Status</h3>
-            <Settings className="h-6 w-6 text-gray-600" />
-          </div>
-          <div className="space-y-2">
-            <div className="text-lg font-medium text-gray-900 dark:text-white">
-              {inverterStatus?.systemStatus || 'Online'}
-            </div>
-            <div className="text-sm text-gray-600 dark:text-gray-400">
-              Mode: {getBatteryModeDisplay(currentBatteryMode)}
-            </div>
-          </div>
-        </div>
+        {/* Current Strategy Card */}
+        <StatusCard
+          title="Current Strategy"
+          icon={TrendingUp}
+          color="green"
+          keyMetric="Strategic Intent"
+          keyValue={currentHourData?.strategicIntent?.replace('_', ' ') || 'IDLE'}
+          keyUnit=""
+          status={{
+            icon: currentHourData?.batteryAction ? 
+              (currentHourData.batteryAction > 0 ? TrendingUp : TrendingDown) : CheckCircle,
+            text: `Hour ${currentHourData?.hour || 0}:00`,
+            color: 'blue'
+          }}
+          metrics={[
+            {
+              label: "Current Mode",
+              value: formatBatteryMode(currentBatteryMode),
+              unit: "",
+              icon: Battery
+            },
+            {
+              label: "Battery Action",
+              value: currentHourData?.batteryAction !== undefined && currentHourData.batteryAction !== null ? 
+                Math.abs(currentHourData.batteryAction).toFixed(1) : '0.0',
+              unit: currentHourData?.batteryAction && Math.abs(currentHourData.batteryAction) > 0.01 ? 
+                (currentHourData.batteryAction > 0 ? "kWh Charge" : "kWh Discharge") : "kWh",
+              icon: currentHourData?.batteryAction && Math.abs(currentHourData.batteryAction) > 0.01 ? 
+                (currentHourData.batteryAction > 0 ? TrendingUp : TrendingDown) : Zap,
+              color: currentHourData?.batteryAction && Math.abs(currentHourData.batteryAction) > 0.01 ? 
+                (currentHourData.batteryAction > 0 ? 'green' : 'yellow') : undefined
+            },
+            {
+              label: "Target SOC",
+              value: currentHourData?.batterySocEnd?.toFixed(1) || 'N/A',
+              unit: "%",
+              icon: CheckCircle
+            }
+          ]}
+        />
 
-        {/* Battery SOC/SOE */}
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Battery Level</h3>
-            <Battery className={`h-6 w-6 ${
-              (inverterStatus?.batterySoc || 0) > 80 ? 'text-green-600' :
-              (inverterStatus?.batterySoc || 0) > 40 ? 'text-yellow-600' : 'text-red-600'
-            }`} />
-          </div>
-          <div className="space-y-3">
-            <div>
-              <div className="text-3xl font-bold text-gray-900 dark:text-white">
-                {inverterStatus?.batterySoc?.toFixed(1) || 'N/A'}%
-              </div>
-              <div className="text-sm text-gray-600 dark:text-gray-400">
-                SOC ({(inverterStatus?.batterySoe || 0).toFixed(1)} kWh)
-              </div>
-            </div>
-            <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-              <div 
-                className={`h-2 rounded-full transition-all duration-300 ${
-                  (inverterStatus?.batterySoc || 0) > 80 ? 'bg-green-600' :
-                  (inverterStatus?.batterySoc || 0) > 40 ? 'bg-yellow-600' : 'bg-red-600'
-                }`}
-                style={{ width: `${Math.min(100, Math.max(0, inverterStatus?.batterySoc || 0))}%` }}
-              ></div>
-            </div>
-          </div>
-        </div>
-
-        {/* ✅ FIXED: Battery Power using calculated net power */}
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Battery Power</h3>
-            <Zap className="h-6 w-6 text-blue-600" />
-          </div>
-          <div className="space-y-3">
-            <div>
-              <div className="text-3xl font-bold text-gray-900 dark:text-white">
-                {Math.abs(netBatteryPower).toFixed(1)}kW
-              </div>
-              <div className="text-sm text-gray-600 dark:text-gray-400">
-                {Math.abs(netBatteryPower * 1000).toFixed(0)}W
-              </div>
-            </div>
-            <div className={`text-sm font-medium ${
-              netBatteryPower > 0.01 ? 'text-green-600' :
-              netBatteryPower < -0.01 ? 'text-orange-600' : 'text-gray-500'
-            }`}>
-              {netBatteryPower > 0.01 ? 'Charging' :
-               netBatteryPower < -0.01 ? 'Discharging' : 'Idle'}
-            </div>
-          </div>
-        </div>
+        {/* Battery Settings Card */}
+        <StatusCard
+          title="Battery Settings"
+          icon={Settings}
+          color="green"
+          keyMetric=""
+          keyValue=""
+          keyUnit=""
+          status={{
+            icon: inverterStatus?.gridChargeEnabled ? CheckCircle : AlertTriangle,
+            text: inverterStatus?.gridChargeEnabled ? 'Grid Charge ON' : 'Grid Charge OFF',
+            color: inverterStatus?.gridChargeEnabled ? 'green' : 'yellow'
+          }}
+          metrics={[
+            {
+              label: "Charge Stop SOC",
+              value: inverterStatus?.chargeStopSoc || 0,
+              unit: "%",
+              icon: Battery
+            },
+            {
+              label: "Discharge Stop SOC",
+              value: inverterStatus?.dischargeStopSoc || 0,
+              unit: "%",
+              icon: Battery
+            },
+            {
+              label: "Charge Power Rate",
+              value: batterySettings?.chargingPowerRate || 0,
+              unit: "%",
+              icon: TrendingUp
+            },
+            {
+              label: "Discharge Power Rate",
+              value: inverterStatus?.dischargePowerRate || 0,
+              unit: "%",
+              icon: TrendingDown
+            }
+          ]}
+        />
       </div>
 
       {/* 24-Hour Schedule */}
@@ -395,51 +615,71 @@ const InverterStatusDashboard: React.FC = () => {
           </div>
           
           {growattSchedule?.scheduleData ? (
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto bg-white dark:bg-gray-800 rounded-lg shadow">
               <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
                 <thead className="bg-gray-50 dark:bg-gray-700">
                   <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                      Hour
+                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                      <div className="flex items-center">
+                        <Clock className="h-4 w-4 mr-1" />
+                        Time
+                      </div>
                     </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider" colSpan={3}>
-                      Strategic Intent & Goals
+                    <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider border-r border-gray-300 dark:border-gray-600" colSpan={3}>
+                      <div className="flex items-center justify-center">
+                        <TrendingUp className="h-4 w-4 mr-1" />
+                        Algorithm Strategy
+                      </div>
                     </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider" colSpan={3}>
-                      Inverter Settings
+                    <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider" colSpan={3}>
+                      <div className="flex items-center justify-center">
+                        <Settings className="h-4 w-4 mr-1" />
+                        Inverter Settings
+                      </div>
                     </th>
                   </tr>
                   <tr className="bg-gray-50 dark:bg-gray-700">
-                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-400 dark:text-gray-400">Time</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-400 dark:text-gray-400">Intent</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-400 dark:text-gray-400">Action</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-400 dark:text-gray-400">Target SOC</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-400 dark:text-gray-400">Mode</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-400 dark:text-gray-400">Power Rate</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-400 dark:text-gray-400">Grid Charge</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-400 dark:text-gray-400">Hour</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-400 dark:text-gray-400">Intent</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-400 dark:text-gray-400">Target SOC</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-400 dark:text-gray-400 border-r border-gray-300 dark:border-gray-600">Action</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-400 dark:text-gray-400">Mode</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-400 dark:text-gray-400">Power Rate</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-400 dark:text-gray-400">Grid Charge</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                  {growattSchedule.scheduleData.map((hour, index) => {
-                    const isCurrentHour = hour.hour === growattSchedule.currentHour;
+                  {Array.from({length: 24}, (_, hour) => getMergedHourData(hour)).map((hour, index) => {
+                    if (!hour) return null;
+                    const isCurrentHour = hour.hour === growattSchedule?.currentHour;
                     
                     return (
                       <tr key={index} className={`${
                         isCurrentHour ? 'bg-blue-50 dark:bg-blue-900/20' : ''
-                      } ${hour.isPredicted ? 'opacity-75' : ''}`}>
-                        <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
+                      } ${!hour.isActual ? 'opacity-75' : ''}`}>
+                        <td className="px-3 py-4 whitespace-nowrap text-sm">
                           <div className="flex items-center">
-                            {isCurrentHour && <div className="w-2 h-2 bg-blue-500 rounded-full mr-2"></div>}
-                            <span className="font-medium">{hour.hour}:00</span>
-                            {hour.isPredicted && <span className="ml-1 text-xs text-gray-500">★</span>}
+                            <div>
+                              <div className="font-medium text-gray-900 dark:text-white text-right">
+                                <div>{hour.hour.toString().padStart(2, '0')}:00</div>
+                                <div className="text-xs text-gray-400 dark:text-gray-500 font-normal">-{hour.hour.toString().padStart(2, '0')}:59</div>
+                              </div>
+                              <div className="text-xs text-gray-500 dark:text-gray-400">
+                                {isCurrentHour ? 'Current' : 
+                                 hour.isActual ? 'Actual' : 'Predicted'}
+                              </div>
+                            </div>
                           </div>
                         </td>
-                        <td className="px-4 py-4 whitespace-nowrap text-sm">
-                          <div className={`px-2 py-1 rounded text-xs font-medium ${getIntentColor(hour.strategicIntent || 'IDLE')}`}>
+                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
+                          <span className="font-medium">
                             {hour.strategicIntent?.replace('_', ' ') || 'IDLE'}
-                          </div>
+                          </span>
                         </td>
-                        <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
+                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
+                          <span className="font-medium">{hour.batterySocEnd?.toFixed(1) || 'N/A'}%</span>
+                        </td>
+                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
                           {hour.batteryCharged > 0 && (
                             <div className="flex items-center text-green-600">
                               <span className="text-xs mr-1">⚡</span>
@@ -459,39 +699,38 @@ const InverterStatusDashboard: React.FC = () => {
                             </div>
                           )}
                         </td>
-                        <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
-                          <div className="flex items-center">
-                            <div className={`w-3 h-3 rounded-full mr-2 ${
-                              (hour.batterySocEnd || 0) > 80 ? 'bg-green-500' :
-                              (hour.batterySocEnd || 0) > 40 ? 'bg-yellow-500' : 'bg-red-500'
-                            }`}></div>
-                            <span className="font-medium">{hour.batterySocEnd?.toFixed(1) || 'N/A'}%</span>
-                          </div>
+                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
+                          <span className="font-medium">
+                            {hour.isActual ? 'N/A' : (
+                              hour.batteryMode === 'load-first' ? 'Load First' :
+                              hour.batteryMode === 'battery-first' ? 'Battery First' :
+                              hour.batteryMode === 'grid-first' ? 'Grid First' : hour.batteryMode
+                            )}
+                          </span>
                         </td>
-                        <td className="px-4 py-4 whitespace-nowrap text-sm">
-                          {getBatteryModeDisplay(hour.batteryMode)}
-                        </td>
-                        <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
+                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
                           <div className="space-y-1">
-                            {hour.chargePowerRate > 0 && (
-                              <div className="text-green-600">C: {hour.chargePowerRate}%</div>
-                            )}
-                            {hour.dischargePowerRate > 0 && (
-                              <div className="text-orange-600">D: {hour.dischargePowerRate}%</div>
-                            )}
-                            {hour.chargePowerRate === 0 && hour.dischargePowerRate === 0 && (
-                              <div className="text-gray-500 dark:text-gray-400">0%</div>
+                            {hour.isActual ? (
+                              <div className="text-gray-500 dark:text-gray-400">N/A</div>
+                            ) : (
+                              <>
+                                {hour.batteryCharged > 0.1 && (
+                                  <div className="text-green-600">C: {batterySettings?.chargingPowerRate || 40}%</div>
+                                )}
+                                {hour.batteryDischarged > 0.1 && (
+                                  <div className="text-orange-600">D: {batterySettings?.dischargingPowerRate || 100}%</div>
+                                )}
+                                {(hour.batteryCharged <= 0.1 && hour.batteryDischarged <= 0.1) && (
+                                  <div className="text-gray-500 dark:text-gray-400">0%</div>
+                                )}
+                              </>
                             )}
                           </div>
                         </td>
-                        <td className="px-4 py-4 whitespace-nowrap text-sm">
-                          <div className={`px-2 py-1 rounded text-xs font-medium ${
-                            hour.gridCharge 
-                              ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300' 
-                              : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300'
-                          }`}>
-                            {hour.gridCharge ? '✓ Enabled' : '✗ Disabled'}
-                          </div>
+                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
+                          <span className="font-medium">
+                            {hour.isActual ? 'N/A' : (hour.gridCharge ? '✓ Enabled' : '✗ Disabled')}
+                          </span>
                         </td>
                       </tr>
                     );
@@ -565,53 +804,6 @@ const InverterStatusDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* Battery Configuration - Last and compact */}
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
-        <div className="p-6">
-          <div className="flex items-center mb-4">
-            <Settings className="h-5 w-5 text-blue-600 mr-2" />
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Battery Configuration</h3>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="space-y-3">
-              <div className="flex justify-between">
-                <span className="text-gray-600 dark:text-gray-400">Charge Stop SOC:</span>
-                <span className="font-medium text-gray-900 dark:text-white">{inverterStatus?.chargeStopSoc || 'N/A'}%</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600 dark:text-gray-400">Discharge Stop SOC:</span>
-                <span className="font-medium text-gray-900 dark:text-white">{inverterStatus?.dischargeStopSoc || 'N/A'}%</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600 dark:text-gray-400">Total Capacity:</span>
-                <span className="font-medium text-gray-900 dark:text-white">{growattSchedule?.batteryCapacity || 'N/A'} kWh</span>
-              </div>
-            </div>
-            <div className="space-y-3">
-              <div className="flex justify-between">
-                <span className="text-gray-600 dark:text-gray-400">Max Charging Power:</span>
-                <span className="font-medium text-gray-900 dark:text-white">
-                  {inverterStatus?.maxChargingPower ? 
-                    `${(inverterStatus.maxChargingPower / 1000).toFixed(1)} kW` : 'N/A'}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600 dark:text-gray-400">Max Discharging Power:</span>
-                <span className="font-medium text-gray-900 dark:text-white">
-                  {inverterStatus?.maxDischargingPower ? 
-                    `${(inverterStatus.maxDischargingPower / 1000).toFixed(1)} kW` : 'N/A'}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600 dark:text-gray-400">Cycle Cost:</span>
-                <span className="font-medium text-gray-900 dark:text-white">
-                  {inverterStatus?.cycleCost ? `${inverterStatus.cycleCost} SEK/kWh` : 'N/A'}
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
     </div>
   );
 };

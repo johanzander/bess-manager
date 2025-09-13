@@ -14,6 +14,10 @@ from .dp_battery_algorithm import (
     print_optimization_results,
 )
 from .dp_schedule import DPSchedule
+from .exceptions import (
+    PriceDataUnavailableError,
+    SystemConfigurationError,
+)
 from .growatt_schedule import GrowattScheduleManager
 from .ha_api_controller import HomeAssistantAPIController
 from .health_check import run_system_health_checks
@@ -84,7 +88,9 @@ class BatterySystemManager:
         # Initialize price manager
         if not price_source:
             # Check if official Nordpool integration should be used
-            nordpool_config = getattr(self, "_nordpool_config", {})
+            nordpool_config = getattr(self, "_nordpool_config", None)
+            if nordpool_config is None:
+                nordpool_config = {}
             use_official = nordpool_config.get("use_official_integration", False)
             config_entry_id = nordpool_config.get("config_entry_id")
 
@@ -170,7 +176,9 @@ class BatterySystemManager:
         # Input validation
         if not 0 <= current_hour <= 23:
             logger.error("Invalid hour: %d (must be 0-23)", current_hour)
-            raise ValueError(f"Invalid hour: {current_hour} (must be 0-23)")
+            raise SystemConfigurationError(
+                message=f"Invalid hour: {current_hour} (must be 0-23)"
+            )
 
         if prepare_next_day:
             logger.info("Preparing schedule for next day at hour %02d:00", current_hour)
@@ -290,7 +298,7 @@ class BatterySystemManager:
         try:
             daily_view = self.get_current_daily_view(current_hour=current_hour)
             self.daily_view_builder.log_complete_daily_schedule(daily_view)
-        except ValueError as e:
+        except (SystemConfigurationError, PriceDataUnavailableError) as e:
             logger.warning(f"Daily view unavailable: {e}")
 
         self._schedule_manager.log_current_TOU_schedule("=== GROWATT TOU SCHEDULE ===")
@@ -1407,7 +1415,9 @@ class BatterySystemManager:
             current_hour = datetime.now().hour
 
         if not 0 <= current_hour <= 23:
-            raise ValueError(f"current_hour must be 0-23, got {current_hour}")
+            raise SystemConfigurationError(
+                message=f"current_hour must be 0-23, got {current_hour}"
+            )
 
         today_prices = self._price_manager.get_today_prices()
         buy_price = [p["buyPrice"] for p in today_prices]
@@ -1457,7 +1467,9 @@ class BatterySystemManager:
 
         except Exception as e:
             logger.error(f"Failed to update settings: {e}")
-            raise ValueError(f"Invalid settings: {e}") from e
+            raise SystemConfigurationError(
+                message=f"Invalid settings: {e}"
+            ) from e
 
     def _log_battery_system_config(self) -> None:
         """Log the current battery configuration - reproduces original functionality."""

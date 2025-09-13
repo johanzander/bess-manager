@@ -2,27 +2,7 @@
 
 ## 🔴 **CRITICAL PRIORITY** (System Reliability)
 
-### 0. **Proper Exception Class Hierarchy**
-
-**Impact**: High | **Effort**: Low | **Dependencies**: Core error handling patterns
-
-**Description**: Replace string-based error catching with proper exception classes. Current error handling uses fragile ValueError string matching which breaks when error messages change.
-
-**Implementation Steps**:
-
-- Create `PriceDataUnavailableError`, `ScheduleNotFoundError`, `SystemConfigurationError` exception classes
-- Update price manager and battery system manager to raise specific exceptions
-- Update API layer to catch specific exception types instead of string matching
-- Follow existing codebase patterns for exception handling
-
-**Files to modify**:
-
-- `core/bess/exceptions.py` (new file)
-- `core/bess/price_manager.py`
-- `core/bess/battery_system_manager.py`  
-- `backend/api.py`
-
-### 1. **Extended Horizon Optimization**
+### 0. **Extended Horizon Optimization**
 
 **Impact**: High | **Effort**: Medium | **Dependencies**: Price manager, DP algorithm
 
@@ -37,7 +17,7 @@
 
 **Economic Impact**: Significant - enables optimal charging/discharging decisions that span multiple days
 
-### 2. **Ensure No Code Uses Sensor Names Directly**
+### 1. **Ensure No Code Uses Sensor Names Directly**
 
 **Impact**: High | **Effort**: Medium | **Dependencies**: Core system reliability
 
@@ -60,7 +40,7 @@
 
 ## 🟡 **HIGH PRIORITY** (Core Functionality)
 
-### 3. **Improve Battery SOC and Actions Component**
+### 2. **Improve Battery SOC and Actions Component**
 
 **Impact**: Medium-High | **Effort**: High | **Dependencies**: Backend cost calculations
 
@@ -89,7 +69,7 @@
 
 ---
 
-### 4. **Move Relevant Parts of Daily Summary to Dashboard**
+### 3. **Move Relevant Parts of Daily Summary to Dashboard**
 
 **Impact**: Medium | **Effort**: Low-Medium | **Dependencies**: Dashboard layout
 
@@ -109,7 +89,7 @@
 
 ---
 
-### 5. **Fix Inverter Page Visual Style**
+### 4. **Fix Inverter Page Visual Style**
 
 **Impact**: Medium | **Effort**: Medium | **Dependencies**: UI consistency
 
@@ -124,7 +104,7 @@
 
 ---
 
-### 6. **Enhance Insights Page with Decision Detail**
+### 5. **Enhance Insights Page with Decision Detail**
 
 **Impact**: Medium | **Effort**: High | **Dependencies**: Backend decision logging
 
@@ -145,7 +125,7 @@
 
 ---
 
-### 7. **Demo Mode for Users Without Configured Sensors**
+### 6. **Demo Mode for Users Without Configured Sensors**
 
 **Impact**: Medium | **Effort**: Medium | **Dependencies**: Backend architecture, Mock data
 
@@ -169,7 +149,7 @@
 - Update frontend to show demo mode indicators
 - Ensure optimization algorithms work with mock data
 
-### 8. **Improve Sensor Unit Formatting Architecture**
+### 7. **Improve Sensor Unit Formatting Architecture**
 
 **Impact**: Medium | **Effort**: Medium | **Dependencies**: Backend sensor mapping, Frontend health components
 
@@ -213,7 +193,7 @@
 
 ## 🟢 **LOW PRIORITY** (Polish)
 
-### 9. **Move and consolidate all types and data fetching in frontend**
+### 8. **Move and consolidate all types and data fetching in frontend**
 
 **Current State**: Each component fetches it's own data, while there is basically only one endpoint (/api/dashboard). Could we centralize this to make cleaner code. Also there is an energy endpoint we've removed where we are still recreating the old data structures - this could be removed.
 

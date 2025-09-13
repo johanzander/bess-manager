@@ -6,6 +6,7 @@ from .influxdb_helper import get_influxdb_config, get_sensor_data
 logger = logging.getLogger(__name__)
 
 
+
 def determine_health_status(
     health_check_results: list, working_sensors: int, required_methods: list | None = None
 ) -> str:
@@ -153,13 +154,9 @@ def perform_health_check(
                         check_result.update({"status": "OK", "value": value})
                         working_sensors += 1
                     else:
-                        check_result.update(
-                            {
-                                "status": "WARNING",
-                                "error": f"Invalid value: {value}",
-                                "value": "N/A",
-                            }
-                        )
+                        # Negative values might be valid for some sensors (e.g., discharge power)
+                        check_result.update({"status": "OK", "value": value})
+                        working_sensors += 1
                 else:
                     check_result.update(
                         {

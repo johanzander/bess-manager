@@ -7,6 +7,8 @@ inversion.
 import logging
 from datetime import date, datetime, timedelta
 
+from .exceptions import PriceDataUnavailableError, SystemConfigurationError
+
 logger = logging.getLogger(__name__)
 
 
@@ -113,8 +115,8 @@ class HomeAssistantSource(PriceSource):
 
         # Only support today and tomorrow
         if target_date not in (current_date, tomorrow_date):
-            raise ValueError(
-                f"Can only fetch today's or tomorrow's prices, not {target_date}"
+            raise SystemConfigurationError(
+                message=f"Can only fetch today's or tomorrow's prices, not {target_date}"
             )
 
         try:
@@ -138,12 +140,14 @@ class HomeAssistantSource(PriceSource):
                     return prices
 
             # No prices found
-            raise ValueError(f"No price data available for {target_date}")
+            raise PriceDataUnavailableError(date=target_date)
 
         except Exception as e:
-            if isinstance(e, ValueError):
+            if isinstance(e, (PriceDataUnavailableError, SystemConfigurationError)):
                 raise
-            raise ValueError(f"Failed to get price data for {target_date}: {e}") from e
+            raise PriceDataUnavailableError(
+                date=target_date, message=f"Failed to get price data for {target_date}: {e}"
+            ) from e
 
     def _fetch_sensor_attributes(self, sensor_key):
         """Fetch attributes from the configured Nordpool sensor via HA controller's sensor mapping."""
@@ -255,8 +259,8 @@ class HomeAssistantSource(PriceSource):
             return prices
         else:
             # Unexpected count - fail fast instead of guessing
-            raise ValueError(
-                f"Unexpected price count: {len(prices)} hours. Expected 23, 24, or 25 for DST transitions."
+            raise PriceDataUnavailableError(
+                message=f"Unexpected price count: {len(prices)} hours. Expected 23, 24, or 25 for DST transitions."
             )
 
     def _get_sensor_diagnostic_info(self, sensor_data, sensor_name):
@@ -426,9 +430,9 @@ class PriceManager:
             return price_data
 
         except Exception as e:
-            if isinstance(e, ValueError):
-                raise  # Re-raise ValueError as-is
-            raise ValueError(f"Failed to get price data: {e}") from e
+            if isinstance(e, (PriceDataUnavailableError, SystemConfigurationError)):
+                raise  # Re-raise specific exceptions as-is
+            raise PriceDataUnavailableError(message=f"Failed to get price data: {e}") from e
 
     def get_today_prices(self) -> list:
         """Get prices for the current day.

@@ -128,7 +128,7 @@ export interface HealthCheckResult {
   key: string | null;
   entity_id?: string | null;
   status: HealthStatus;
-  value: any;
+  value: string | number | boolean | null; // Raw sensor values
   error: string | null;
 }
 

@@ -95,7 +95,7 @@ class BESSController:
         # Initialize Home Assistant API Controller with sensor config from options
         sensor_config = options.get("sensors", {})
         self.ha_controller = self._init_ha_controller(sensor_config)
-        self.ha_controller.set_test_mode(False)
+        self.ha_controller.set_test_mode(True)
 
         # Extract nordpool configuration
         nordpool_config = options.get("nordpool", {})

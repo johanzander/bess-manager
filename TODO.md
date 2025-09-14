@@ -321,34 +321,6 @@ Why cant they be the same?
 
 ## 🔧 **TECHNICAL DEBT**
 
-### Consolidate Energy Flow Calculation Implementations
-
-**Impact**: Medium | **Effort**: Medium | **Dependencies**: Core energy calculations
-
-**Current Problem**: Multiple duplicate energy flow calculation implementations scattered across codebase:
-- `EnergyFlowCalculator` - Sensor-based historical flows from cumulative readings  
-- `dp_battery_algorithm.calculate_energy_flows()` - Power-based flows for optimization
-- `models.EnergyData.__post_init__()` - Auto-calculation of detailed flows
-- Unused `EnergyFlowCalculator` instance in `battery_system_manager.py`
-
-**Proposed Solution**: Single unified architecture with:
-- `EnergyFlowCore` - Pure calculation functions (testable, no dependencies)
-- `HistoricalFlowCalculator` - Adapter for sensor-based calculations
-- `OptimizationFlowCalculator` - Adapter for power-based calculations  
-- Shared validation and derivation logic
-- Clear separation of concerns
-
-**Benefits**: Single source of truth, easier testing, consistent validation, reduced maintenance
-
-**Technical Tasks**:
-- Create `EnergyFlowCore` with pure calculation functions
-- Refactor `SensorCollector` to use `HistoricalFlowCalculator`  
-- Replace `dp_battery_algorithm.calculate_energy_flows()` with `OptimizationFlowCalculator`
-- Simplify `EnergyData.__post_init__()` to use core
-- Remove unused instances and dead code
-
----
-
 ### Other Technical Debt
 
 - Refactor all API endpoints to use dataclass-based serialization (with robust mapping for all field variants) for consistent, type-safe, and future-proof API responses. Ensure all details and fields are preserved as in the original dict-based implementation.

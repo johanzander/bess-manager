@@ -108,7 +108,7 @@ class TestDataStructureConsistency:
                 solar_production=[0.0] * 6
                 + [2.0, 4.0, 6.0, 8.0, 8.0, 6.0, 4.0, 2.0]
                 + [0.0] * 10,  # FIX: 6 + 8 + 10 = 24 elements
-                initial_soe=50.0,
+                initial_soe=15.0,  # Valid SOE within 30kWh battery capacity
                 battery_settings=battery_system.battery_settings,
             )
 
@@ -173,7 +173,7 @@ class TestDataStructureConsistency:
                 solar_production=[0.0] * 6
                 + [6.0] * 8
                 + [0.0] * 10,  # FIX: 6 + 8 + 10 = 24 elements
-                initial_soe=50.0,
+                initial_soe=15.0,  # Valid SOE within 30kWh battery capacity
                 battery_settings=battery_system.battery_settings,
             )
 
@@ -273,7 +273,7 @@ class TestComponentInteraction:
                 solar_production=[0.0] * 6
                 + [6.0] * 8
                 + [0.0] * 10,  # FIX: 6 + 8 + 10 = 24 elements
-                initial_soe=50.0,
+                initial_soe=15.0,  # Valid SOE within 30kWh battery capacity
                 battery_settings=battery_system.battery_settings,
             )
 
@@ -334,7 +334,7 @@ class TestErrorHandling:
                 sell_price=[1.0] * 24,
                 home_consumption=[4.0] * 24,
                 solar_production=[0.0] * 24,
-                initial_soe=50.0,
+                initial_soe=15.0,  # Valid SOE within 30kWh battery capacity
                 battery_settings=battery_system.battery_settings,
             )
             # If it doesn't raise an exception, verify it at least returns something reasonable

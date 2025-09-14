@@ -63,7 +63,6 @@ The algorithm returns comprehensive results including:
 """
 
 __all__ = [
-    "calculate_energy_flows",
     "optimize_battery_schedule",
     "print_optimization_results",
 ]
@@ -166,82 +165,6 @@ def _state_transition(
     return next_soe
 
 
-def calculate_energy_flows(
-    power: float,
-    home_consumption: float,
-    solar_production: float,
-    soe_start: float,  # State of Energy in kWh
-    soe_end: float,  # State of Energy in kWh
-    battery_settings: BatterySettings,  # For SOE->SOC conversion
-    dt: float = 1.0,
-    battery_charged: float | None = None,  # Optional: direct battery charged value
-    battery_discharged: (
-        float | None
-    ) = None,  # Optional: direct battery discharged value
-) -> EnergyData:
-    """
-    Calculate detailed energy flows with proper SOE->SOC conversion.
-
-    This is the canonical energy flow calculation function used throughout the system.
-    It can work in two modes:
-    1. Power-based (for optimization): Uses power and dt to calculate battery flows
-    2. Direct (for sensor data): Uses provided battery_charged/discharged values
-
-    Args:
-        power: Battery power in kW (+ charging, - discharging)
-        home_consumption: Home consumption in kWh
-        solar_production: Solar production in kWh
-        soe_start: Battery state of energy at start (kWh)
-        soe_end: Battery state of energy at end (kWh)
-        battery_settings: Battery settings for SOE->SOC conversion
-        dt: Time step in hours (default 1.0)
-        battery_charged: Optional direct battery charged value (kWh)
-        battery_discharged: Optional direct battery discharged value (kWh)
-
-    Returns:
-        EnergyData with all core and detailed flows calculated
-    """
-    from core.bess.models import EnergyData
-
-    # Calculate battery energy flows - either from power or use provided values
-    if battery_charged is None or battery_discharged is None:
-        # Power-based mode (optimization)
-        battery_charged = max(0, power * dt) if power > 0 else 0.0
-        battery_discharged = max(0, -power * dt) if power < 0 else 0.0
-
-    # Priority: Solar -> Home first, then remaining solar -> Battery/Grid
-    solar_to_home = min(solar_production, home_consumption)
-    remaining_solar = solar_production - solar_to_home
-    remaining_consumption = home_consumption - solar_to_home
-
-    # Solar allocation: battery charging takes priority over grid export
-    solar_to_battery = min(remaining_solar, battery_charged)
-    solar_to_grid = max(0, remaining_solar - solar_to_battery)
-
-    # Battery discharge allocation: home consumption takes priority
-    battery_to_home = min(battery_discharged, remaining_consumption)
-    battery_to_grid = max(0, battery_discharged - battery_to_home)
-
-    # Grid imports: fill remaining consumption and battery charging
-    grid_to_home = max(0, remaining_consumption - battery_to_home)
-    grid_to_battery = max(0, battery_charged - solar_to_battery)
-
-    # Calculate total grid flows
-    grid_imported = grid_to_home + grid_to_battery
-    grid_exported = solar_to_grid + battery_to_grid
-
-    return EnergyData(
-        solar_production=solar_production,
-        home_consumption=home_consumption,
-        grid_imported=grid_imported,
-        grid_exported=grid_exported,
-        battery_charged=battery_charged,
-        battery_discharged=battery_discharged,
-        battery_soe_start=soe_start,
-        battery_soe_end=soe_end,
-    )
-
-
 def _calculate_reward(
     power: float,
     soe: float,  # State of Energy in kWh
@@ -285,15 +208,25 @@ def _calculate_reward(
         sell_price[hour] if sell_price and hour < len(sell_price) else 0.0
     )
 
-    # Calculate energy flows
-    energy_data = calculate_energy_flows(
-        power=power,
-        home_consumption=home_consumption,
+    # Calculate battery flows from power
+    battery_charged = max(0, power * dt) if power > 0 else 0.0
+    battery_discharged = max(0, -power * dt) if power < 0 else 0.0
+    
+    # Simple energy balance for grid flows
+    energy_balance = solar_production + battery_discharged - home_consumption - battery_charged
+    grid_imported = max(0, -energy_balance)
+    grid_exported = max(0, energy_balance)
+    
+    # EnergyData calculates ALL detailed flows automatically
+    energy_data = EnergyData(
         solar_production=solar_production,
-        soe_start=soe,
-        soe_end=next_soe,
-        battery_settings=battery_settings,
-        dt=dt,
+        home_consumption=home_consumption,
+        battery_charged=battery_charged,
+        battery_discharged=battery_discharged,
+        grid_imported=grid_imported,
+        grid_exported=grid_exported,
+        battery_soe_start=soe,
+        battery_soe_end=next_soe,
     )
 
     # ============================================================================
@@ -779,96 +712,6 @@ def _run_dynamic_programming_with_storage(
     return V, policy, C, intents, stored_hourly_data
 
 
-def _simulate_battery_direct(
-    horizon: int,
-    policy: np.ndarray,
-    stored_hourly_data: dict,
-    battery_settings: BatterySettings,
-    initial_soe: float,
-    initial_cost_basis: float,
-) -> list[HourlyData]:
-    """
-    Simulation that uses HourlyData calculated during DP optimization directly.
-    This eliminates the dual cost calculation problem completely.
-    """
-
-    logger.debug("Starting simulation using stored DP results")
-
-    soe_levels = np.arange(
-        battery_settings.min_soe_kwh,
-        battery_settings.max_soe_kwh + SOE_STEP_KWH,
-        SOE_STEP_KWH,
-    )
-
-    simulation_results = []
-    current_soe = initial_soe
-
-    for t in range(horizon):
-        # Find current state index
-        i = round((current_soe - battery_settings.min_soe_kwh) / SOE_STEP_KWH)
-        i = min(max(0, i), len(soe_levels) - 1)
-
-        # Get the HourlyData calculated during DP
-        if (t, i) in stored_hourly_data:
-            hourly_data = stored_hourly_data[(t, i)]
-
-            # Update state for next iteration
-            current_soe = hourly_data.energy.battery_soe_end
-
-            simulation_results.append(hourly_data)
-
-            action = hourly_data.decision.battery_action or 0.0
-            if abs(action) > 0.01:
-                logger.debug(
-                    f"Hour {t}: SOE {current_soe:.1f}, Action {action:.2f}, "
-                    f"Cost basis {hourly_data.decision.cost_basis:.3f}, "
-                    f"Intent {hourly_data.decision.strategic_intent}"
-                )
-        else:
-            logger.error(f"Missing stored HourlyData for hour {t}, state {i}")
-            # Create a fallback IDLE HourlyData
-            energy_data = calculate_energy_flows(
-                power=0.0,
-                home_consumption=5.2,  # Default from scenario
-                solar_production=0.0,
-                soe_start=current_soe,
-                soe_end=current_soe,
-                battery_settings=battery_settings,
-            )
-
-            economic_data = EconomicData(
-                buy_price=2.0,  # Default
-                sell_price=1.4,  # Default
-                battery_cycle_cost=0.0,
-                hourly_cost=5.2 * 2.0,
-                grid_only_cost=5.2 * 2.0,
-                solar_only_cost=5.2 * 2.0,
-                hourly_savings=0.0,
-            )
-
-            decision_data = DecisionData(
-                strategic_intent="IDLE",
-                battery_action=0.0,
-                cost_basis=initial_cost_basis,
-            )
-
-            hourly_data = HourlyData(
-                hour=t,
-                energy=energy_data,
-                timestamp=datetime.now().replace(
-                    hour=t, minute=0, second=0, microsecond=0
-                ),
-                data_source="predicted",
-                economic=economic_data,
-                decision=decision_data,
-            )
-
-            simulation_results.append(hourly_data)
-
-    logger.debug("Direct simulation complete")
-    return simulation_results
-
-
 def optimize_battery_schedule(
     buy_price: list[float],
     sell_price: list[float],
@@ -893,12 +736,22 @@ def optimize_battery_schedule(
     if initial_cost_basis is None:
         initial_cost_basis = battery_settings.cycle_cost_per_kwh
 
+    # Validate inputs to prevent impossible scenarios
+    if initial_soe > battery_settings.max_soe_kwh:
+        raise ValueError(
+            f"Invalid initial_soe={initial_soe:.1f}kWh exceeds battery capacity={battery_settings.max_soe_kwh:.1f}kWh"
+        )
+    if initial_soe < battery_settings.min_soe_kwh:
+        raise ValueError(
+            f"Invalid initial_soe={initial_soe:.1f}kWh below minimum SOE={battery_settings.min_soe_kwh:.1f}kWh"
+        )
+    
     logger.info(
         f"Starting direct optimization: horizon={horizon}, initial_soe={initial_soe:.1f}, initial_cost_basis={initial_cost_basis:.3f}"
     )
 
     # Step 1: Run DP with HourlyData storage
-    V, policy, C, intents, stored_hourly_data = _run_dynamic_programming_with_storage(
+    _, _, _, _, stored_hourly_data = _run_dynamic_programming_with_storage(
         horizon=horizon,
         buy_price=buy_price,
         sell_price=sell_price,
@@ -909,15 +762,30 @@ def optimize_battery_schedule(
         initial_cost_basis=initial_cost_basis,
     )
 
-    # Step 2: Simulate using stored HourlyData directly
-    hourly_results = _simulate_battery_direct(
-        horizon=horizon,
-        policy=policy,
-        stored_hourly_data=stored_hourly_data,
-        battery_settings=battery_settings,
-        initial_soe=initial_soe,
-        initial_cost_basis=initial_cost_basis,
+    # Step 2: Extract optimal path results directly from stored DP data
+    hourly_results = []
+    current_soe = initial_soe
+    soe_levels = np.arange(
+        battery_settings.min_soe_kwh,
+        battery_settings.max_soe_kwh + SOE_STEP_KWH,
+        SOE_STEP_KWH,
     )
+    
+    for t in range(horizon):
+        # Find current state index (same logic as simulation)
+        i = round((current_soe - battery_settings.min_soe_kwh) / SOE_STEP_KWH)
+        i = min(max(0, i), len(soe_levels) - 1)
+        
+        # Get the HourlyData from DP results - should always exist with valid inputs
+        if (t, i) not in stored_hourly_data:
+            raise RuntimeError(
+                f"Missing DP result for hour {t}, state {i} (SOE={current_soe:.1f}). "
+                f"This indicates a bug in the DP algorithm or invalid inputs."
+            )
+            
+        hourly_data = stored_hourly_data[(t, i)]
+        hourly_results.append(hourly_data)
+        current_soe = hourly_data.energy.battery_soe_end
 
     # Step 3: Calculate economic summary directly from HourlyData
     total_base_cost = sum(

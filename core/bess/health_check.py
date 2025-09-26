@@ -6,6 +6,48 @@ from .influxdb_helper import get_influxdb_config, get_sensor_data
 logger = logging.getLogger(__name__)
 
 
+def format_sensor_value_with_unit(value, method_name: str, controller) -> str:
+    """Format sensor value with appropriate unit based on METHOD_SENSOR_MAP.
+
+    Args:
+        value: Raw sensor value
+        method_name: Method name to look up unit info
+        controller: Controller with METHOD_SENSOR_MAP
+
+    Returns:
+        Formatted string with unit (e.g., "20.0 %", "3.5 kWh")
+    """
+    if value is None:
+        return "N/A"
+
+    # Handle string values (like "List with 24 values")
+    if isinstance(value, str):
+        return value
+
+    # Handle boolean values
+    if isinstance(value, bool):
+        return "Enabled" if value else "Disabled"
+
+    # For numeric values, get unit from METHOD_SENSOR_MAP
+    try:
+        sensor_info = controller.METHOD_SENSOR_MAP.get(method_name, {})
+        unit = sensor_info.get("unit", "")
+
+        if isinstance(value, (int, float)):
+            # Get precision from METHOD_SENSOR_MAP (centralized formatting rules)
+            precision = sensor_info.get("precision", 2)  # Default to 2 decimal places
+
+            # Use precision from sensor map with thousands separators
+            formatted = f"{value:,.{precision}f}"
+        else:
+            formatted = str(value)
+
+        return f"{formatted} {unit}" if unit else formatted
+
+    except Exception:
+        # Fallback if unit lookup fails
+        return str(value)
+
 
 def determine_health_status(
     health_check_results: list, working_sensors: int, required_methods: list | None = None
@@ -96,7 +138,8 @@ def perform_health_check(
             "method_name": method_info.get("method_name"),
             "entity_id": method_info.get("entity_id", "Not mapped"),
             "status": "UNKNOWN",
-            "value": None,
+            "rawValue": None,
+            "displayValue": "N/A",
             "error": None,
         }
 
@@ -116,7 +159,8 @@ def perform_health_check(
                             {
                                 "status": "WARNING",
                                 "error": "Empty list returned",
-                                "value": "N/A",
+                                "rawValue": value,
+                                "displayValue": "Empty list",
                             }
                         )
                     else:
@@ -124,10 +168,12 @@ def perform_health_check(
                             1 for v in value if isinstance(v, float) and math.isnan(v)
                         )
                         if nan_count == 0:
+                            display_value = f"List with {len(value)} values"
                             check_result.update(
                                 {
                                     "status": "OK",
-                                    "value": f"List with {len(value)} values",
+                                    "rawValue": value,
+                                    "displayValue": display_value,
                                 }
                             )
                             working_sensors += 1
@@ -136,7 +182,8 @@ def perform_health_check(
                                 {
                                     "status": "WARNING",
                                     "error": f"List contains {nan_count}/{len(value)} NaN values",
-                                    "value": "Contains NaN",
+                                    "rawValue": value,
+                                    "displayValue": "Contains NaN",
                                 }
                             )
                 elif value is not None:
@@ -147,22 +194,26 @@ def perform_health_check(
                             {
                                 "status": "WARNING",
                                 "error": "Sensor returns NaN value",
-                                "value": "NaN",
+                                "rawValue": value,
+                                "displayValue": "NaN",
                             }
                         )
                     elif value >= 0:
-                        check_result.update({"status": "OK", "value": value})
+                        display_value = format_sensor_value_with_unit(value, method_info.get("method_name"), controller)
+                        check_result.update({"status": "OK", "rawValue": value, "displayValue": display_value})
                         working_sensors += 1
                     else:
                         # Negative values might be valid for some sensors (e.g., discharge power)
-                        check_result.update({"status": "OK", "value": value})
+                        display_value = format_sensor_value_with_unit(value, method_info.get("method_name"), controller)
+                        check_result.update({"status": "OK", "rawValue": value, "displayValue": display_value})
                         working_sensors += 1
                 else:
                     check_result.update(
                         {
                             "status": "WARNING",
                             "error": "Method returned None",
-                            "value": "N/A",
+                            "rawValue": None,
+                            "displayValue": "N/A",
                         }
                     )
             except Exception as e:
@@ -170,7 +221,8 @@ def perform_health_check(
                     {
                         "status": "ERROR",
                         "error": f"Method call failed: {e!s}",
-                        "value": "N/A",
+                        "rawValue": None,
+                        "displayValue": "N/A",
                     }
                 )
         else:
@@ -178,7 +230,8 @@ def perform_health_check(
                 {
                     "status": "ERROR",
                     "error": method_info.get("error", "Unknown error"),
-                    "value": "N/A",
+                    "rawValue": None,
+                    "displayValue": "N/A",
                 }
             )
         health_check["checks"].append(check_result)
@@ -259,6 +312,7 @@ def check_historical_data_access():
         "entity_id": None,
         "status": "UNKNOWN",
         "value": None,
+        "formatted_value": "N/A",
         "error": None,
     }
 
@@ -268,6 +322,7 @@ def check_historical_data_access():
         if config["url"] and config["username"] and config["password"]:
             config_check["status"] = "OK"
             config_check["value"] = f"URL: {config['url']}"
+            config_check["formatted_value"] = f"URL: {config['url']}"
         else:
             config_check["status"] = "ERROR"
             missing = []
@@ -297,6 +352,7 @@ def check_historical_data_access():
             "entity_id": None,
             "status": "UNKNOWN",
             "value": None,
+            "formatted_value": "N/A",
             "error": None,
         }
 
@@ -314,6 +370,7 @@ def check_historical_data_access():
             if response["status"] == "success":
                 data_check["status"] = "OK"
                 data_check["value"] = "InfluxDB connection successful"
+                data_check["formatted_value"] = "InfluxDB connection successful"
             else:
                 data_check["status"] = "WARNING"
                 data_check["error"] = (

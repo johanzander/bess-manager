@@ -719,6 +719,82 @@ class GrowattScheduleManager:
 
         return result
 
+    def get_all_tou_segments(self):
+        """Get all TOU segments with default intervals filling gaps for complete 24-hour coverage."""
+        if not self.tou_intervals:
+            # Return default load-first for entire day if no intervals configured
+            return [{
+                "segment_id": 0,
+                "start_time": "00:00",
+                "end_time": "23:59",
+                "batt_mode": "load-first",
+                "enabled": False,
+                "is_default": True
+            }]
+
+        # Get only active/enabled intervals and sort by start time
+        active_intervals = [
+            interval for interval in self.tou_intervals
+            if interval.get("enabled", False) and interval.get("start_time") and interval.get("end_time")
+        ]
+
+        # Sort by start time
+        active_intervals.sort(key=lambda x: self._time_to_minutes(x["start_time"]))
+
+        result = []
+        current_time_minutes = 0  # Start at midnight (00:00)
+
+        # Add intervals and fill gaps with defaults
+        for interval in active_intervals:
+            interval_start_minutes = self._time_to_minutes(interval["start_time"])
+            interval_end_minutes = self._time_to_minutes(interval["end_time"])
+
+            # Add default interval before this active interval if there's a gap
+            if current_time_minutes < interval_start_minutes:
+                result.append({
+                    "segment_id": 0,
+                    "start_time": self._minutes_to_time(current_time_minutes),
+                    "end_time": self._minutes_to_time(interval_start_minutes - 1),
+                    "batt_mode": "load-first",
+                    "enabled": False,
+                    "is_default": True
+                })
+
+            # Add the active interval
+            segment = interval.copy()
+            if "segment_id" not in segment:
+                segment["segment_id"] = len(result) + 1
+            result.append(segment)
+            current_time_minutes = interval_end_minutes + 1
+
+        # Add final default interval if day isn't complete
+        day_end_minutes = 24 * 60 - 1  # 23:59 in minutes
+        if current_time_minutes <= day_end_minutes:
+            result.append({
+                "segment_id": 0,
+                "start_time": self._minutes_to_time(current_time_minutes),
+                "end_time": "23:59",
+                "batt_mode": "load-first",
+                "enabled": False,
+                "is_default": True
+            })
+
+        return result
+
+    def _time_to_minutes(self, time_str: str) -> int:
+        """Convert time string (HH:MM) to minutes since midnight."""
+        try:
+            hours, minutes = map(int, time_str.split(":"))
+            return hours * 60 + minutes
+        except (ValueError, AttributeError):
+            return 0
+
+    def _minutes_to_time(self, minutes: int) -> str:
+        """Convert minutes since midnight to time string (HH:MM)."""
+        hours = minutes // 60
+        mins = minutes % 60
+        return f"{hours:02d}:{mins:02d}"
+
     def validate_tou_intervals_ordering(self, intervals=None, source="unknown"):
         """Validate that TOU intervals are in chronological order and log warnings if not.
 

@@ -42,6 +42,14 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
     tooltipBorder: isDarkMode ? '#4b5563' : '#d1d5db'
   };
 
+  // Extract values from FormattedValue objects or fallback to raw numbers
+  const getValue = (field: any) => {
+    if (typeof field === 'object' && field?.value !== undefined) {
+      return field.value;
+    }
+    return field || 0;
+  };
+
   // Transform daily view data to chart format
   const chartData = hourlyData.map((hour, index) => {
     // Check for missing keys and provide warnings
@@ -57,10 +65,10 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
     if (hour.dataSource === undefined) {
       console.warn(`Missing key: dataSource at index ${index}`);
     }
-    
-    const batteryAction = hour.batteryAction ?? 0;
-    const batterySocPercent = hour.batterySocEnd ?? 0;  // Use clear SOC field
-    const price = hour.buyPrice ?? 0;
+
+    const batteryAction = getValue(hour.batteryAction) ?? 0;
+    const batterySocPercent = getValue(hour.batterySocEnd); // Extract from FormattedValue
+    const price = getValue(hour.buyPrice); // Extract from FormattedValue
     const hourNum = typeof hour.hour === 'string' ? parseInt(hour.hour, 10) : (hour.hour || index);
     const dataSource = hour.dataSource ?? 'unknown';
     
@@ -73,7 +81,11 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
       price: price,
       dataSource: dataSource,
       isActual: dataSource === 'actual',
-      isPredicted: dataSource === 'predicted'
+      isPredicted: dataSource === 'predicted',
+      // Include FormattedValue objects for tooltip
+      batterySocEndFormatted: hour.batterySocEnd,
+      batteryActionFormatted: hour.batteryAction,
+      buyPriceFormatted: hour.buyPrice
     };
   });
     
@@ -101,7 +113,7 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
               stroke={colors.text}
               domain={[0, 100]} 
               tick={{ fontSize: 12 }}
-              tickFormatter={(value) => `${value.toFixed(0)}%`}
+              tickFormatter={(value) => `${Math.round(value)}%`}
               label={{ 
                 value: 'Battery SOC (%)', 
                 angle: -90, 
@@ -117,7 +129,7 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
               stroke={colors.text}
               domain={[0, Math.ceil(maxPrice * 1.2 * 10) / 10]}
               tick={{ fontSize: 11 }}
-              tickFormatter={(value) => `${value.toFixed(2)}`}
+              tickFormatter={(value) => value.toLocaleString('sv-SE', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
               label={{ 
                 value: 'Electricity Price (SEK/kWh)', 
                 angle: 90, 
@@ -133,7 +145,7 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
               stroke={colors.text}
               domain={[-maxAction * 1.2, maxAction * 1.2]}
               tick={{ fontSize: 12 }}
-              tickFormatter={(value) => `${value.toFixed(1)}`}
+              tickFormatter={(value) => value.toLocaleString('sv-SE', {minimumFractionDigits: 1, maximumFractionDigits: 1})}
               label={{ 
                 value: 'Battery Action (kWh)', 
                 angle: 90, 
@@ -150,18 +162,20 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
                 borderRadius: '8px',
                 color: colors.text
               }}
-              formatter={(value, name) => {
-                if (name === 'Electricity Price') return [`${Number(value).toFixed(2)} SEK/kWh`, 'Electricity Price'];
-                if (name === 'Battery SOC') return [`${Number(value).toFixed(0)}%`, 'Battery SOC'];
+              formatter={(value, name, props) => {
+                const payload = props?.payload;
+                if (name === 'Electricity Price') return [payload?.buyPriceFormatted?.text || 'N/A', 'Electricity Price'];
+                if (name === 'Battery SOC') return [payload?.batterySocEndFormatted?.text || 'N/A', 'Battery SOC'];
                 if (name === 'Battery Action') {
                   const actionValue = Number(value);
+                  const formattedText = payload?.batteryActionFormatted?.text || 'N/A';
                   if (actionValue >= 0) {
-                    return [`${actionValue.toFixed(2)} kWh`, 'Battery Charging'];
+                    return [formattedText, 'Battery Charging'];
                   } else {
-                    return [`${Math.abs(actionValue).toFixed(2)} kWh`, 'Battery Discharging'];
+                    return [formattedText, 'Battery Discharging'];
                   }
                 }
-                return [Number(value).toFixed(2), name];
+                return ['N/A', name];
               }}
               labelFormatter={(label, payload) => {
                 if (payload && payload.length > 0) {

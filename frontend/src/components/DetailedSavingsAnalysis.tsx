@@ -1,24 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import api from '../lib/api';
 import { DashboardHourlyData, DashboardSummary } from '../api/scheduleApi';
+import FormattedValueComponent from './FormattedValue';
 
 interface DetailedSavingsAnalysisProps {
   settings: any;
-}
-
-interface DashboardTotals {
-  totalSolarProduction: number;
-  totalHomeConsumption: number;
-  totalGridImport: number;
-  totalGridExport: number;
-  totalBatteryCharged: number;
-  totalBatteryDischarged: number;
-  totalGridOnlyCost: number;  // Updated name
-  totalSolarOnlyCost: number;
-  totalOptimizedCost: number;
-  totalSolarSavings: number;
-  totalBatterySavings: number;
-  totalOptimizationSavings: number;
 }
 
 interface DashboardResponse {
@@ -31,7 +17,6 @@ interface DashboardResponse {
   predictedHoursCount: number;
   hourlyData: DashboardHourlyData[];
   batteryCapacity?: number;
-  totals: DashboardTotals;
   summary: DashboardSummary;
 }
 
@@ -79,20 +64,18 @@ export const DetailedSavingsAnalysis: React.FC<DetailedSavingsAnalysisProps> = (
     );
   }
 
-  // Helper function to safely display numeric values
-  const displayValue = (value: number | string | null | undefined, fallback = "N/A", decimals = 2): string => {
-    if (value === null || value === undefined || value === "" || (typeof value === 'number' && isNaN(value))) {
+  // Helper function to safely display backend-formatted strings only
+  const displayValue = (value: string | null | undefined, fallback = "N/A"): string => {
+    if (value === null || value === undefined || value === "") {
       return fallback;
     }
-    if (typeof value === 'string') return value;
-    return Number(value).toFixed(decimals);
+    return value;
   };
 
-  // Get data from the backend totals
-  const totals = dashboardData.totals;
-  
-  // Use backend-calculated total optimization savings instead of calculating in frontend
-  const totalDailySavings = totals.totalOptimizationSavings;
+  // Use backend-calculated total optimization savings from summary instead of calculating in frontend
+  const totalDailySavings = typeof dashboardData.summary?.totalSavings === 'object'
+    ? dashboardData.summary.totalSavings.value || 0
+    : dashboardData.summary?.totalSavings || 0;
 
   return (
     <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow overflow-x-auto">
@@ -110,9 +93,13 @@ export const DetailedSavingsAnalysis: React.FC<DetailedSavingsAnalysisProps> = (
             <div className="flex items-center justify-center mb-1">
               <div className="px-2 py-1 bg-blue-200 dark:bg-blue-800 text-blue-800 dark:text-blue-200 rounded text-xs font-medium">GRID-ONLY</div>
             </div>
-            <div className="text-2xl font-bold text-gray-900 dark:text-white">
-              {displayValue(totals.totalGridOnlyCost)} <span className="text-sm font-medium text-gray-600 dark:text-gray-400">SEK</span>
-            </div>
+            <FormattedValueComponent
+              data={dashboardData.summary?.gridOnlyCost}
+              size="lg"
+              align="center"
+              color="default"
+              className="block"
+            />
             <div className="text-sm text-gray-600 dark:text-gray-300">Baseline Cost</div>
             <div className="text-xs text-gray-500 dark:text-gray-400 mt-3">
               All electricity purchased from grid at market price
@@ -124,21 +111,31 @@ export const DetailedSavingsAnalysis: React.FC<DetailedSavingsAnalysisProps> = (
             <div className="flex items-center justify-center mb-1">
               <div className="px-2 py-1 bg-yellow-200 dark:bg-yellow-800 text-yellow-800 dark:text-yellow-200 rounded text-xs font-medium">SOLAR-ONLY</div>
             </div>
-            <div className="text-2xl font-bold text-gray-900 dark:text-white">
-              {displayValue(totals.totalSolarOnlyCost)} <span className="text-sm font-medium text-gray-600 dark:text-gray-400">SEK</span>
-            </div>
+            <FormattedValueComponent
+              data={dashboardData.summary?.solarOnlyCost}
+              size="lg"
+              align="center"
+              color="warning"
+              className="block"
+            />
             <div className="text-sm text-gray-600 dark:text-gray-300">Solar-Only Cost</div>
             <div className="flex justify-between items-center mt-2 border-t border-yellow-200 dark:border-yellow-800 pt-2">
               <div className="text-left text-xs text-gray-600 dark:text-gray-300">Solar savings:</div>
-              <div className="text-right text-xs font-medium text-green-600 dark:text-green-400">{displayValue(totals.totalSolarSavings)} <span className="text-xs font-normal text-gray-600 dark:text-gray-400">SEK</span></div>
+              <FormattedValueComponent
+                data={dashboardData.summary?.solarSavings}
+                size="sm"
+                align="right"
+                color="success"
+                className="text-green-600 dark:text-green-400"
+              />
             </div>
             <div className="flex justify-between items-center">
               <div className="text-left text-xs text-gray-600 dark:text-gray-300">% Saved:</div>
-              <div className="text-right text-xs font-medium text-gray-700 dark:text-gray-200">{displayValue(((totals.totalSolarSavings / totals.totalGridOnlyCost) * 100), "0", 1)}%</div>
+              <div className="text-right text-xs font-medium text-gray-700 dark:text-gray-200">{dashboardData.summary?.solarSavingsPercentage?.text}</div>
             </div>
             <div className="flex justify-between items-center">
               <div className="text-left text-xs text-gray-600 dark:text-gray-300">Self-consumption:</div>
-              <div className="text-right text-xs font-medium text-gray-700 dark:text-gray-200">{displayValue((totals.totalSolarProduction / totals.totalHomeConsumption) * 100, "0", 0)}%</div>
+              <div className="text-right text-xs font-medium text-gray-700 dark:text-gray-200">{dashboardData.summary?.selfConsumptionPercentage?.text}</div>
             </div>
           </div>
           
@@ -147,21 +144,42 @@ export const DetailedSavingsAnalysis: React.FC<DetailedSavingsAnalysisProps> = (
             <div className="flex items-center justify-center mb-1">
               <div className="px-2 py-1 bg-green-200 dark:bg-green-800 text-green-800 dark:text-green-200 rounded text-xs font-medium">SOLAR+BATTERY</div>
             </div>
-            <div className="text-2xl font-bold text-gray-900 dark:text-white">
-              {displayValue(totals.totalOptimizedCost)} <span className="text-sm font-medium text-gray-600 dark:text-gray-400">SEK</span>
-            </div>
+            <FormattedValueComponent
+              data={dashboardData.summary?.optimizedCost}
+              size="lg"
+              align="center"
+              color="success"
+              className="block"
+            />
             <div className="text-sm text-gray-600 dark:text-gray-300">Optimized Cost</div>
             <div className="flex justify-between items-center mt-2 border-t border-green-200 dark:border-green-800 pt-2">
               <div className="text-left text-xs text-gray-600 dark:text-gray-300">Total savings:</div>
-              <div className="text-right text-xs font-medium text-green-600 dark:text-green-400">{displayValue(totalDailySavings)} <span className="text-xs font-normal text-gray-600 dark:text-gray-400">SEK</span></div>
+              <FormattedValueComponent
+                data={dashboardData.summary?.totalSavings}
+                size="sm"
+                align="right"
+                color="success"
+                className="text-green-600 dark:text-green-400"
+              />
             </div>
             <div className="flex justify-between items-center">
               <div className="text-left text-xs text-gray-600 dark:text-gray-300">% Saved:</div>
-              <div className="text-right text-xs font-medium text-gray-700 dark:text-gray-200">{displayValue(((totalDailySavings / totals.totalGridOnlyCost) * 100), "0", 1)}%</div>
+              <FormattedValueComponent
+                data={dashboardData.summary?.totalSavingsPercentage}
+                size="sm"
+                align="right"
+                color="default"
+              />
             </div>
             <div className="flex justify-between items-center">
               <div className="text-left text-xs text-gray-600 dark:text-gray-300">Battery contribution:</div>
-              <div className="text-right text-xs font-medium text-green-600 dark:text-green-400">{displayValue(dashboardData.summary.batterySavings)} <span className="text-xs font-normal text-gray-600 dark:text-gray-400">SEK</span></div>
+              <FormattedValueComponent
+                data={dashboardData.summary?.batterySavings}
+                size="sm"
+                align="right"
+                color="success"
+                className="text-green-600 dark:text-green-400"
+              />
             </div>
           </div>
         </div>
@@ -261,119 +279,129 @@ export const DetailedSavingsAnalysis: React.FC<DetailedSavingsAnalysisProps> = (
                 
                 {/* Common Data */}
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-center">
-                  <div className="font-medium">{displayValue(hour.buyPrice, "N/A", 3)}</div>
+                  <div>
+                    {hour.buyPrice?.display || '0.00'} / {hour.sellPrice?.display || '0.00'}
+                  </div>
                   <div className="text-xs text-gray-500 dark:text-gray-400">
-                    {displayValue(hour.sellPrice, "N/A", 3)} sell
+                    {hour.buyPrice?.unit || 'SEK/kWh'}
                   </div>
                 </td>
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-center">
-                  <div className="font-medium">{displayValue(hour.homeConsumption, "N/A", 1)}</div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">kWh</div>
+                  <div className="font-medium">{hour.homeConsumption?.display || '0.0'}</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">{hour.homeConsumption?.unit || 'kWh'}</div>
                 </td>
                 
                 {/* Grid-Only Data */}
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 bg-blue-50 dark:bg-blue-900/20 text-center">
                   <div className={`font-medium ${
-                    Math.abs(hour.gridOnlyCost) < 0.01 ? 'text-gray-900 dark:text-white' : 
-                    hour.gridOnlyCost > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'
+                    Math.abs(hour.gridOnlyCost?.value || 0) < 0.01 ? 'text-gray-900 dark:text-white' :
+                    (hour.gridOnlyCost?.value || 0) > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'
                   }`}>
-                    {displayValue(hour.gridOnlyCost)}
+                    {hour.gridOnlyCost?.display || '0.00'}
                   </div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">SEK</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">{hour.gridOnlyCost?.unit || 'SEK'}</div>
                 </td>
                 
                 {/* Solar-Only Data */}
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 bg-yellow-50 dark:bg-yellow-900/20 text-center">
-                  <div className="font-medium text-yellow-600 dark:text-yellow-400">{displayValue(hour.solarProduction, "N/A", 1)}</div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">kWh</div>
+                  <div className="font-medium text-yellow-600 dark:text-yellow-400">{hour.solarProduction?.display || '0.0'}</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">{hour.solarProduction?.unit || 'kWh'}</div>
                 </td>
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 bg-yellow-50 dark:bg-yellow-900/20 text-center">
-                  <div className="font-medium">{displayValue(hour.directSolar, "N/A", 1)}</div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">kWh</div>
-                </td>
-                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 bg-yellow-50 dark:bg-yellow-900/20 text-center">
-                  <div className={`font-medium ${hour.gridImportNeeded > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-400 dark:text-gray-500'}`}>
-                    {displayValue(hour.gridImportNeeded, "N/A", 1)}
-                  </div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">kWh</div>
-                </td>
-                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 bg-yellow-50 dark:bg-yellow-900/20 text-center">
-                  <div className={`font-medium ${hour.solarExcess > 0 ? 'text-green-600 dark:text-green-400' : 'text-gray-400 dark:text-gray-500'}`}>
-                    {displayValue(hour.solarExcess, "N/A", 1)}
-                  </div>
+                  <div className="font-medium">{hour.directSolar?.display || '0.0'}</div>
                   <div className="text-xs text-gray-500 dark:text-gray-400">kWh</div>
                 </td>
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 bg-yellow-50 dark:bg-yellow-900/20 text-center">
                   <div className={`font-medium ${
-                    Math.abs(hour.solarOnlyCost) < 0.01 ? 'text-gray-900 dark:text-white' : 
-                    hour.solarOnlyCost > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'
+                    (hour.gridImportNeeded?.value || 0) > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white'
                   }`}>
-                    {displayValue(hour.solarOnlyCost)}
+                    {hour.gridImportNeeded?.display || '0.0'}
                   </div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">SEK</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">{hour.gridImportNeeded?.unit || 'kWh'}</div>
                 </td>
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 bg-yellow-50 dark:bg-yellow-900/20 text-center">
                   <div className={`font-medium ${
-                    Math.abs(hour.solarSavings || 0) < 0.01 ? 'text-gray-900 dark:text-white' : 
-                    (hour.solarSavings || 0) > 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
+                    (hour.solarExcess?.value || 0) > 0 ? 'text-green-600 dark:text-green-400' : 'text-gray-900 dark:text-white'
                   }`}>
-                    {Math.abs(hour.solarSavings || 0) < 0.01 ? '0.00' : displayValue(hour.solarSavings || 0)}                  
+                    {hour.solarExcess?.display || '0.0'}
                   </div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">SEK</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">{hour.solarExcess?.unit || 'kWh'}</div>
+                </td>
+                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 bg-yellow-50 dark:bg-yellow-900/20 text-center">
+                  <div className={`font-medium ${
+                    Math.abs(hour.solarOnlyCost?.value || 0) < 0.01 ? 'text-gray-900 dark:text-white' :
+                    (hour.solarOnlyCost?.value || 0) > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'
+                  }`}>
+                    {hour.solarOnlyCost?.display || '0.00'}
+                  </div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">{hour.solarOnlyCost?.unit || 'SEK'}</div>
+                </td>
+                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 bg-yellow-50 dark:bg-yellow-900/20 text-center">
+                  <div className={`font-medium ${
+                    Math.abs(hour.solarSavings?.value || 0) < 0.01 ? 'text-gray-900 dark:text-white' :
+                    (hour.solarSavings?.value || 0) > 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
+                  }`}>
+                    {hour.solarSavings?.display || '0.00'}
+                  </div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">{hour.solarSavings?.unit || 'SEK'}</div>
                 </td>
                 
                 {/* Solar+Battery Data */}
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 bg-green-50 dark:bg-green-900/20 text-center">
-                  <div className={`font-medium ${
-                    Math.abs(batteryAction) < 0.01 ? 'text-gray-500 dark:text-gray-400' : 
-                    batteryAction > 0 ? 'text-blue-600 dark:text-blue-400' : 'text-orange-600 dark:text-orange-400'
-                  }`}>
-                    {(() => {
-                      if (Math.abs(batteryAction) < 0.01) {
-                        return '0.0';
-                      } else if (batteryAction > 0) {
-                        return `+${displayValue(batteryAction, "0.0", 1)}`;
-                      } else {
-                        return displayValue(batteryAction, "0.0", 1);
-                      }
-                    })()}
-                  </div>
+                  {(hour.batteryCharged?.value || 0) > 0.01 && (
+                    <div className="font-medium text-blue-600 dark:text-blue-400">
+                      +{hour.batteryCharged?.display || '0.0'}
+                    </div>
+                  )}
+                  {(hour.batteryDischarged?.value || 0) > 0.01 && (
+                    <div className="font-medium text-orange-600 dark:text-orange-400">
+                      -{hour.batteryDischarged?.display || '0.0'}
+                    </div>
+                  )}
+                  {(hour.batteryCharged?.value || 0) <= 0.01 && (hour.batteryDischarged?.value || 0) <= 0.01 && (
+                    <div className="font-medium text-gray-500 dark:text-gray-400">0.0</div>
+                  )}
+                  <div className="text-xs text-gray-500 dark:text-gray-400">{hour.batteryCharged?.unit || 'kWh'}</div>
                 </td>
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 bg-green-50 dark:bg-green-900/20 text-center">
-                  <div className="font-medium">{displayValue(batterySoc, "N/A", 0)}%</div>
+                  <div className="font-medium">{Math.round(hour.batterySocEnd?.value || 0)} %</div>
                   <div className="text-xs text-gray-500 dark:text-gray-400">
-                    {displayValue((batterySoc / 100) * (dashboardData.batteryCapacity || 10), "N/A", 1)} kWh
+                    {hour.batterySoeEnd?.display || '0.0'} {hour.batterySoeEnd?.unit || 'kWh'}
                   </div>
-                </td>
-                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 bg-green-50 dark:bg-green-900/20 text-center">
-                  <div className={`font-medium ${hour.gridImported > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-400 dark:text-gray-500'}`}>
-                    {displayValue(hour.gridImported, "N/A", 1)}
-                  </div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">kWh</div>
-                </td>
-                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 bg-green-50 dark:bg-green-900/20 text-center">
-                  <div className={`font-medium ${hour.gridExported > 0 ? 'text-green-600 dark:text-green-400' : 'text-gray-400 dark:text-gray-500'}`}>
-                    {displayValue(hour.gridExported, "N/A", 1)}
-                  </div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">kWh</div>
                 </td>
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 bg-green-50 dark:bg-green-900/20 text-center">
                   <div className={`font-medium ${
-                    Math.abs(hour.hourlyCost || 0) < 0.01 ? 'text-gray-900 dark:text-white' : 
-                    (hour.hourlyCost || 0) > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'
+                    (hour.gridImported?.value || 0) > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white'
                   }`}>
-                    {displayValue(hour.hourlyCost || 0)}
+                    {hour.gridImported?.display || '0.0'}
                   </div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">SEK</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">{hour.gridImported?.unit || 'kWh'}</div>
                 </td>
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 bg-green-50 dark:bg-green-900/20 text-center">
                   <div className={`font-medium ${
-                    Math.abs(hour.gridOnlyCost - (hour.hourlyCost || 0)) < 0.01 ? 'text-gray-900 dark:text-white' : 
-                    (hour.gridOnlyCost - (hour.hourlyCost || 0)) > 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
+                    (hour.gridExported?.value || 0) > 0 ? 'text-green-600 dark:text-green-400' : 'text-gray-900 dark:text-white'
                   }`}>
-                    {Math.abs(hour.gridOnlyCost - (hour.hourlyCost || 0)) < 0.01 ? '0.00' : displayValue(hour.gridOnlyCost - (hour.hourlyCost || 0))}
+                    {hour.gridExported?.display || '0.0'}
                   </div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">SEK</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">{hour.gridExported?.unit || 'kWh'}</div>
+                </td>
+                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 bg-green-50 dark:bg-green-900/20 text-center">
+                  <div className={`font-medium ${
+                    Math.abs(hour.hourlyCost?.value || 0) < 0.01 ? 'text-gray-900 dark:text-white' :
+                    (hour.hourlyCost?.value || 0) > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'
+                  }`}>
+                    {hour.hourlyCost?.display || '0.00'}
+                  </div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">{hour.hourlyCost?.unit || 'SEK'}</div>
+                </td>
+                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 bg-green-50 dark:bg-green-900/20 text-center">
+                  <div className={`font-medium ${
+                    Math.abs(hour.hourlySavings?.value || 0) < 0.01 ? 'text-gray-900 dark:text-white' :
+                    (hour.hourlySavings?.value || 0) > 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
+                  }`}>
+                    {hour.hourlySavings?.display || '0.00'}
+                  </div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">{hour.hourlySavings?.unit || 'SEK'}</div>
                 </td>
               </tr>
             );
@@ -388,89 +416,83 @@ export const DetailedSavingsAnalysis: React.FC<DetailedSavingsAnalysisProps> = (
               -
             </td>
             <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-600 text-center">
-              <div className="font-medium">{displayValue(totals.totalHomeConsumption, "N/A", 1)}</div>
-              <div className="text-xs text-gray-500 dark:text-gray-400">kWh</div>
+              <div className="font-medium">{dashboardData.summary?.totalHomeConsumption?.display || '0.0'}</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">{dashboardData.summary?.totalHomeConsumption?.unit || 'kWh'}</div>
             </td>
             <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 bg-blue-100 dark:bg-blue-900/30 text-center">
-              <div className={`font-medium ${
-                Math.abs(totals.totalGridOnlyCost) < 0.01 ? 'text-gray-900 dark:text-white' : 
-                totals.totalGridOnlyCost > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'
-              }`}>
-                {displayValue(totals.totalGridOnlyCost)}
+              <div className="font-medium text-red-600 dark:text-red-400">
+                {dashboardData.summary?.gridOnlyCost?.display || '0.00'}
               </div>
-              <div className="text-xs text-gray-500 dark:text-gray-400">SEK</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">{dashboardData.summary?.gridOnlyCost?.unit || 'SEK'}</div>
             </td>
             <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 bg-yellow-100 dark:bg-yellow-900/30 text-center">
-              <div className="font-medium">{displayValue(totals.totalSolarProduction, "N/A", 1)}</div>
-              <div className="text-xs text-gray-500 dark:text-gray-400">kWh</div>
+              <div className="font-medium text-yellow-600 dark:text-yellow-400">
+                {dashboardData.summary?.totalSolarProduction?.display || '0.0'}
+              </div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">{dashboardData.summary?.totalSolarProduction?.unit || 'kWh'}</div>
             </td>
             <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 bg-yellow-100 dark:bg-yellow-900/30 text-center">
               -
             </td>
             <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 bg-yellow-100 dark:bg-yellow-900/30 text-center">
-              <div className="font-medium">{displayValue(totals.totalGridImport, "N/A", 1)}</div>
-              <div className="text-xs text-gray-500 dark:text-gray-400">kWh</div>
-            </td>
-            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 bg-yellow-100 dark:bg-yellow-900/30 text-center">
-              <div className="font-medium">{displayValue(totals.totalGridExport, "N/A", 1)}</div>
-              <div className="text-xs text-gray-500 dark:text-gray-400">kWh</div>
-            </td>
-            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 bg-yellow-100 dark:bg-yellow-900/30 text-center">
-              <div className={`font-medium ${
-                Math.abs(totals.totalSolarOnlyCost) < 0.01 ? 'text-gray-900 dark:text-white' : 
-                totals.totalSolarOnlyCost > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'
-              }`}>
-                {displayValue(totals.totalSolarOnlyCost)}
+              <div className="font-medium text-red-600 dark:text-red-400">
+                {dashboardData.summary?.totalGridImported?.display || '0.0'}
               </div>
-              <div className="text-xs text-gray-500 dark:text-gray-400">SEK</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">{dashboardData.summary?.totalGridImported?.unit || 'kWh'}</div>
             </td>
             <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 bg-yellow-100 dark:bg-yellow-900/30 text-center">
-              <div className={`font-medium ${
-                Math.abs(totals.totalSolarSavings) < 0.01 ? 'text-gray-900 dark:text-white' : 
-                totals.totalSolarSavings > 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
-              }`}>
-                {displayValue(totals.totalSolarSavings)}
+              <div className="font-medium text-green-600 dark:text-green-400">
+                {dashboardData.summary?.totalGridExported?.display || '0.0'}
               </div>
-              <div className="text-xs text-gray-500 dark:text-gray-400">SEK</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">{dashboardData.summary?.totalGridExported?.unit || 'kWh'}</div>
+            </td>
+            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 bg-yellow-100 dark:bg-yellow-900/30 text-center">
+              <div className="font-medium text-red-600 dark:text-red-400">
+                {dashboardData.summary?.solarOnlyCost?.display || '0.00'}
+              </div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">{dashboardData.summary?.solarOnlyCost?.unit || 'SEK'}</div>
+            </td>
+            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 bg-yellow-100 dark:bg-yellow-900/30 text-center">
+              <div className="font-medium text-green-600 dark:text-green-400">
+                {dashboardData.summary?.solarSavings?.display || '0.00'}
+              </div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">{dashboardData.summary?.solarSavings?.unit || 'SEK'}</div>
             </td>
             <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 bg-green-100 dark:bg-green-900/30 text-center">
-              <div className="flex flex-col items-center">
-                <div className="text-xs mb-1 text-blue-600 dark:text-blue-400">
-                  +{displayValue(totals.totalBatteryCharged)} kWh
-                </div>
-                <div className="text-xs text-orange-600 dark:text-orange-400">
-                  -{displayValue(totals.totalBatteryDischarged)} kWh
-                </div>
+              <div className="font-medium text-blue-600 dark:text-blue-400">
+                +{dashboardData.summary?.totalBatteryCharged?.display || '0.0'}
               </div>
+              <div className="font-medium text-orange-600 dark:text-orange-400">
+                -{dashboardData.summary?.totalBatteryDischarged?.display || '0.0'}
+              </div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">{dashboardData.summary?.totalBatteryCharged?.unit || 'kWh'}</div>
             </td>
             <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 bg-green-100 dark:bg-green-900/30 text-center">
               -
             </td>
             <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 bg-green-100 dark:bg-green-900/30 text-center">
-              <div className="font-medium">{displayValue(totals.totalGridImport, "N/A", 1)}</div>
-              <div className="text-xs text-gray-500 dark:text-gray-400">kWh</div>
-            </td>
-            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 bg-green-100 dark:bg-green-900/30 text-center">
-              <div className="font-medium">{displayValue(totals.totalGridExport, "N/A", 1)}</div>
-              <div className="text-xs text-gray-500 dark:text-gray-400">kWh</div>
-            </td>
-            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 bg-green-100 dark:bg-green-900/30 text-center">
-              <div className={`font-medium ${
-                Math.abs(totals.totalOptimizedCost) < 0.01 ? 'text-gray-900 dark:text-white' : 
-                totals.totalOptimizedCost > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'
-              }`}>
-                {displayValue(totals.totalOptimizedCost)}
+              <div className="font-medium text-red-600 dark:text-red-400">
+                {dashboardData.summary?.totalGridImported?.display || '0.0'}
               </div>
-              <div className="text-xs text-gray-500 dark:text-gray-400">SEK</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">{dashboardData.summary?.totalGridImported?.unit || 'kWh'}</div>
             </td>
             <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 bg-green-100 dark:bg-green-900/30 text-center">
-              <div className={`font-medium ${
-                Math.abs(totals.totalOptimizationSavings) < 0.01 ? 'text-gray-900 dark:text-white' : 
-                totals.totalOptimizationSavings > 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
-              }`}>
-                {displayValue(totals.totalOptimizationSavings)}
+              <div className="font-medium text-green-600 dark:text-green-400">
+                {dashboardData.summary?.totalGridExported?.display || '0.0'}
               </div>
-              <div className="text-xs text-gray-500 dark:text-gray-400">SEK</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">{dashboardData.summary?.totalGridExported?.unit || 'kWh'}</div>
+            </td>
+            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 bg-green-100 dark:bg-green-900/30 text-center">
+              <div className="font-medium text-red-600 dark:text-red-400">
+                {dashboardData.summary?.optimizedCost?.display || '0.00'}
+              </div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">{dashboardData.summary?.optimizedCost?.unit || 'SEK'}</div>
+            </td>
+            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 bg-green-100 dark:bg-green-900/30 text-center">
+              <div className="font-medium text-green-600 dark:text-green-400">
+                {dashboardData.summary?.totalSavings?.display || '0.00'}
+              </div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">{dashboardData.summary?.totalSavings?.unit || 'SEK'}</div>
             </td>
           </tr>
         </tbody>

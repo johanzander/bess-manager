@@ -1,5 +1,6 @@
 // Unified API client for dashboard data
 import api from '../lib/api';
+import { FormattedValue } from '../types';
 
 /**
  * Fetch comprehensive dashboard data including schedule, energy flows, and financial metrics.
@@ -19,46 +20,38 @@ export const fetchDashboardData = async (date?: string) => {
 export interface DashboardHourlyData {
   hour: number;
   dataSource: 'actual' | 'predicted';
-  
-  // Core energy flows
-  solarProduction: number;
-  homeConsumption: number;
-  gridImported: number;
-  gridExported: number;
-  batteryCharged: number;
-  batteryDischarged: number;
-  
-  // Detailed energy flows (enhanced)
-  solarToHome?: number;
-  solarToBattery?: number;
-  solarToGrid?: number;
-  gridToHome?: number;
-  gridToBattery?: number;
-  batteryToHome?: number;
-  batteryToGrid?: number;
-  
-  // Battery state
-  batterySocStart: number;
-  batterySocEnd: number;
-  
-  // Financial data
-  buyPrice: number;
-  sellPrice: number;
-  hourlyCost: number;
-  hourlySavings: number;
-  batteryCycleCost: number;
-  
-  // Additional economic fields
-  gridOnlyCost: number;
-  solarOnlyCost: number;
-  solarSavings: number;
-  batterySavings?: number;
-  
-  // Detailed analysis fields
-  directSolar: number;
-  gridImportNeeded: number;
-  solarExcess: number;
-  
+
+  // Core energy flows - FormattedValue
+  solarProduction: FormattedValue;
+  homeConsumption: FormattedValue;
+  gridImported: FormattedValue;
+  gridExported: FormattedValue;
+  batteryCharged: FormattedValue;
+  batteryDischarged: FormattedValue;
+
+  // Battery state - FormattedValue
+  batterySocStart: FormattedValue;
+  batterySocEnd: FormattedValue;
+  batterySoeEnd: FormattedValue;
+
+  // Financial data - FormattedValue
+  buyPrice: FormattedValue;
+  sellPrice: FormattedValue;
+  hourlyCost: FormattedValue;
+  hourlySavings: FormattedValue;
+  batteryCycleCost: FormattedValue;
+
+  // Additional economic fields - FormattedValue
+  gridOnlyCost: FormattedValue;
+  solarOnlyCost: FormattedValue;
+  solarSavings: FormattedValue;
+  batterySavings?: FormattedValue;
+
+  // Detailed analysis fields - FormattedValue
+  directSolar?: FormattedValue;
+  gridImportNeeded: FormattedValue;
+  solarExcess: FormattedValue;
+
   // Control data
   batteryAction: number | null;
   strategicIntent?: string;
@@ -66,29 +59,51 @@ export interface DashboardHourlyData {
 
 export interface DashboardSummary {
   // Baseline costs (what scenarios would cost) - CANONICAL
-  gridOnlyCost: number;  
-  solarOnlyCost: number;
-  optimizedCost: number; 
-  
-  // Component costs (breakdown) - CANONICAL
-  totalGridCost: number; 
-  totalBatteryCycleCost: number; 
-  
+  gridOnlyCost: FormattedValue;
+  solarOnlyCost: FormattedValue;
+  optimizedCost: FormattedValue;
+
   // Savings calculations - CANONICAL
-  totalSavings: number;
-  solarSavings: number;
-  batterySavings: number;
-  
+  totalSavings: FormattedValue;
+  solarSavings: FormattedValue;
+  batterySavings: FormattedValue;
+
   // Energy totals - CANONICAL
-  totalSolarProduction: number;
-  totalHomeConsumption: number;
-  totalBatteryCharged: number;
-  totalBatteryDischarged: number;
-  totalGridImported: number;
-  totalGridExported: number;
-  
-  // Efficiency metrics - CANONICAL
-  cycleCount: number;
+  totalSolarProduction: FormattedValue;
+  totalHomeConsumption: FormattedValue;
+  totalBatteryCharged: FormattedValue;
+  totalBatteryDischarged: FormattedValue;
+  totalGridImported: FormattedValue;
+  totalGridExported: FormattedValue;
+
+  // Percentage fields - NEW
+  solarSavingsPercentage: FormattedValue;
+  selfConsumptionPercentage: FormattedValue;
+  totalSavingsPercentage: FormattedValue;
+
+  // Flow breakdowns - NEW
+  totalSolarToHome: FormattedValue;
+  totalSolarToBattery: FormattedValue;
+  totalSolarToGrid: FormattedValue;
+  totalGridToHome: FormattedValue;
+  totalGridToBattery: FormattedValue;
+  totalBatteryToHome: FormattedValue;
+  totalBatteryToGrid: FormattedValue;
+
+  // Percentage breakdowns - NEW
+  gridToHomePercentage: FormattedValue;
+  gridToBatteryPercentage: FormattedValue;
+  solarToGridPercentage: FormattedValue;
+  batteryToGridPercentage: FormattedValue;
+  solarToBatteryPercentage: FormattedValue;
+  gridToBatteryChargedPercentage: FormattedValue;
+  batteryToHomePercentage: FormattedValue;
+  batteryToGridDischargedPercentage: FormattedValue;
+
+  // Additional fields
+  averagePrice: FormattedValue;
+  netBatteryAction: FormattedValue;
+  finalBatterySoe: FormattedValue;
 }
 
 export interface DashboardTotals {
@@ -135,6 +150,39 @@ export interface DashboardResponse {
   totals: DashboardTotals;
   strategicIntentSummary: Record<string, number>;
   batteryCapacity: number;
+  
+  // Battery state
+  batterySoc: number;
+  batterySoe: number;
+  batterySocFormatted: string;
+  batterySoeFormatted: string;
+  
+  // Real-time power data
+  realTimePower: {
+    // Raw power values in Watts
+    solarPowerW: number;
+    homeLoadPowerW: number;
+    gridImportPowerW: number;
+    gridExportPowerW: number;
+    batteryChargePowerW: number;
+    batteryDischargePowerW: number;
+    netBatteryPowerW: number;
+    netGridPowerW: number;
+    acPowerW: number;
+    selfPowerW: number;
+    
+    // Formatted display values
+    solarPowerFormatted: string;
+    homeLoadPowerFormatted: string;
+    gridImportPowerFormatted: string;
+    gridExportPowerFormatted: string;
+    batteryChargePowerFormatted: string;
+    batteryDischargePowerFormatted: string;
+    netBatteryPowerFormatted: string;
+    netGridPowerFormatted: string;
+    acPowerFormatted: string;
+    selfPowerFormatted: string;
+  };
 }
 
 // Export default dashboard fetch function

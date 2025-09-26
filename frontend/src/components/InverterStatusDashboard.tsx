@@ -33,7 +33,8 @@ interface InverterStatus {
   cycleCost: number;
   systemStatus: string;
   lastUpdated: string;
-  // ❌ Removed: batteryMode (not provided by this API)
+  // Formatted fields
+  batterySoeCapacityFormatted?: string;
 }
 
 interface TOUInterval {
@@ -42,6 +43,8 @@ interface TOUInterval {
   endTime: string;
   battMode: string;
   enabled: boolean;
+  isEmpty?: boolean;
+  isDefault?: boolean;
 }
 
 interface ScheduleHour {
@@ -57,6 +60,11 @@ interface ScheduleHour {
   gridCharge: boolean;
   isActual: boolean;
   isPredicted: boolean;
+  // Action display fields
+  action?: string;
+  actionColor?: string;
+  // Formatted fields
+  batterySocEndFormatted?: string;
 }
 
 interface GrowattSchedule {
@@ -147,11 +155,20 @@ const StatusCard: React.FC<StatusCardProps> = ({
 
       {/* Key Metric */}
       <div className="mb-6">
-        <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">{keyMetric}</p>
-        <p className="text-3xl font-bold text-gray-900 dark:text-gray-100">
-          {typeof keyValue === 'number' ? keyValue.toFixed(1) : keyValue}
-          <span className="text-lg font-normal text-gray-600 dark:text-gray-400 ml-2">{keyUnit}</span>
-        </p>
+        {(keyMetric || keyValue) ? (
+          <>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">{keyMetric}</p>
+            <p className="text-3xl font-bold text-gray-900 dark:text-gray-100">
+              {keyValue}
+              {keyUnit && <span className="text-lg font-normal text-gray-600 dark:text-gray-400 ml-2">{keyUnit}</span>}
+            </p>
+          </>
+        ) : (
+          <>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-2 invisible">Placeholder</p>
+            <p className="text-3xl font-bold text-gray-900 dark:text-gray-100 invisible">Placeholder</p>
+          </>
+        )}
       </div>
 
       {/* Metrics */}
@@ -165,9 +182,7 @@ const StatusCard: React.FC<StatusCardProps> = ({
             <span className={`text-sm font-semibold ${
               metric.color ? metricColorClasses[metric.color] : 'text-gray-900 dark:text-gray-100'
             }`}>
-              {typeof metric.value === 'number' 
-                ? metric.value.toFixed(1)
-                : metric.value}
+              {metric.value}
               {metric.unit && <span className="opacity-70 ml-1">{metric.unit}</span>}
             </span>
           </div>
@@ -202,6 +217,7 @@ interface BatterySettings {
   maxDischargePowerKw: number;
   cycleCostPerKwh: number;
   chargingPowerRate: number;
+  dischargingPowerRate: number;
   efficiencyCharge: number;
   efficiencyDischarge: number;
   estimatedConsumption: number;
@@ -212,9 +228,31 @@ interface DashboardData {
     hour: number;
     strategicIntent?: string;
     batteryAction?: number;
+    batteryCharged?: number;
+    batteryDischarged?: number;
+    batterySocEnd?: number;
+    batterySoeEnd?: number;
+    solarProduction?: number;
     dataSource?: string;
     isActual?: boolean;
+    batteryChargedFormatted?: string;
+    batteryDischargedFormatted?: string;
+    batterySocEndFormatted?: string;
+    batteryActionFormatted?: string;
   }>;
+  realTimePower?: {
+    solarPower?: number;
+    gridPower?: number;
+    batteryPower?: number;
+    homePower?: number;
+    solarPowerFormatted?: string;
+    gridPowerFormatted?: string;
+    batteryPowerFormatted?: string;
+    homePowerFormatted?: string;
+    batteryChargePowerFormatted?: string;
+    batteryDischargePowerFormatted?: string;
+    netBatteryPowerFormatted?: string;
+  };
 }
 
 const InverterStatusDashboard: React.FC = () => {
@@ -223,9 +261,28 @@ const InverterStatusDashboard: React.FC = () => {
   const [batterySettings, setBatterySettings] = useState<BatterySettings | null>(null);
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [, setError] = useState<string | null>(null);
-  const [, setLastUpdate] = useState<Date>(new Date());
+  const [error, setError] = useState<string | null>(null);
+  const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
   const [isInitialLoad, setIsInitialLoad] = useState(true);
+
+  // Helper function to extract values from FormattedValue objects
+  const getValue = (field: any) => {
+    if (typeof field === 'object' && field?.value !== undefined) {
+      return field.value;
+    }
+    return field || 0;
+  };
+
+  // Helper function to get display text from FormattedValue objects
+  const getDisplayText = (field: any) => {
+    if (typeof field === 'object' && field?.text !== undefined) {
+      return field.text;
+    }
+    if (typeof field === 'object' && field?.display !== undefined) {
+      return field.display;
+    }
+    return field?.toString() || '-';
+  };
 
   const fetchInverterStatus = async (): Promise<InverterStatus> => {
     const response = await api.get('/api/growatt/inverter_status');
@@ -278,19 +335,19 @@ const InverterStatusDashboard: React.FC = () => {
     }
   };
 
-  // Generate complete 24-hour TOU schedule with ALL 9 possible segments plus defaults
-  const generateCompleteTOUSchedule = (touIntervals: TOUInterval[]) => {
-    const schedule: Array<TOUInterval & { isDefault?: boolean; isEmpty?: boolean }> = [];
-    
+  // Generate TOU schedule showing actual inverter configuration
+  const generateInverterTOUSchedule = (touIntervals: TOUInterval[]) => {
+    const schedule: Array<TOUInterval & { isEmpty?: boolean }> = [];
+
     // Create all 9 possible TOU segments (Growatt supports up to 9)
     for (let segmentId = 1; segmentId <= 9; segmentId++) {
       const existingSegment = touIntervals.find(interval => interval.segmentId === segmentId);
-      
+
       if (existingSegment) {
-        // Use the actual configured segment
+        // Use the actual configured segment from inverter
         schedule.push(existingSegment);
       } else {
-        // Create empty/disabled segment placeholder
+        // Create empty segment placeholder
         schedule.push({
           segmentId: segmentId,
           startTime: '00:00',
@@ -301,71 +358,9 @@ const InverterStatusDashboard: React.FC = () => {
         });
       }
     }
-    
-    // Create hourly coverage map to find gaps for default segments
-    const coverage = new Array(24).fill(false);
-    
-    // Mark hours covered by actual (non-empty) TOU intervals
-    touIntervals.forEach(interval => {
-      const startHour = parseInt(interval.startTime.split(':')[0]);
-      const endHour = parseInt(interval.endTime.split(':')[0]);
-      
-      for (let h = startHour; h <= endHour; h++) {
-        coverage[h] = true;
-      }
-    });
-    
-    // Add default segments for uncovered hours
-    let defaultStart = null;
-    for (let hour = 0; hour < 24; hour++) {
-      if (!coverage[hour]) {
-        if (defaultStart === null) {
-          defaultStart = hour;
-        }
-      } else {
-        if (defaultStart !== null) {
-          schedule.push({
-            segmentId: -1,
-            startTime: `${defaultStart.toString().padStart(2, '0')}:00`,
-            endTime: `${(hour - 1).toString().padStart(2, '0')}:59`,
-            battMode: 'load-first',
-            enabled: true,
-            isDefault: true
-          });
-          defaultStart = null;
-        }
-      }
-    }
-    
-    // Handle final default segment
-    if (defaultStart !== null) {
-      schedule.push({
-        segmentId: -1,
-        startTime: `${defaultStart.toString().padStart(2, '0')}:00`,
-        endTime: '23:59',
-        battMode: 'load-first',
-        enabled: true,
-        isDefault: true
-      });
-    }
-    
-    // Sort ALL segments by time (chronological order)
-    return schedule.sort((a, b) => {
-      const aStart = parseInt(a.startTime.split(':')[0]);
-      const bStart = parseInt(b.startTime.split(':')[0]);
-      
-      // Primary sort: by start time
-      if (aStart !== bStart) {
-        return aStart - bStart;
-      }
-      
-      // Secondary sort: if same start time, put configured segments before empty ones
-      if (a.isEmpty && !b.isEmpty) return 1;
-      if (!a.isEmpty && b.isEmpty) return -1;
-      
-      // Tertiary sort: if both same type, sort by segment ID (for empty segments) or keep order
-      return a.segmentId - b.segmentId;
-    });
+
+    // Sort by segment ID (inverter order)
+    return schedule.sort((a, b) => a.segmentId - b.segmentId);
   };
 
   // ✅ FIX 1: Calculate net battery power from separate charge/discharge values
@@ -401,19 +396,43 @@ const InverterStatusDashboard: React.FC = () => {
   const getMergedHourData = (hour: number) => {
     const scheduleHour = growattSchedule?.scheduleData?.find(h => h.hour === hour);
     const dashboardHour = dashboardData?.hourlyData?.find(h => h.hour === hour);
+
+    if (!scheduleHour && !dashboardHour) return null;
     
-    if (!scheduleHour) return null;
-    
+    // Base data from whichever source is available
+    const baseData = scheduleHour || {
+      hour,
+      batteryMode: 'load-first',
+      gridCharge: false,
+      strategicIntent: 'IDLE',
+      batteryAction: 0,
+      batteryCharged: 0,
+      batteryDischarged: 0,
+      batterySocEnd: 0
+    };
+
     return {
-      ...scheduleHour,
-      // Override with dashboard data if available (has actual + predicted data)
-      strategicIntent: dashboardHour?.strategicIntent || scheduleHour.strategicIntent,
-      batteryAction: dashboardHour?.batteryAction !== undefined ? dashboardHour.batteryAction : scheduleHour.batteryAction,
-      batteryCharged: dashboardHour?.batteryCharged !== undefined ? dashboardHour.batteryCharged : scheduleHour.batteryCharged,
-      batteryDischarged: dashboardHour?.batteryDischarged !== undefined ? dashboardHour.batteryDischarged : scheduleHour.batteryDischarged,
-      batterySocEnd: dashboardHour?.batterySocEnd !== undefined ? dashboardHour.batterySocEnd : scheduleHour.batterySocEnd,
+      ...baseData,
+      // Use dashboard data for strategic intent first (actual data), then schedule data
+      strategicIntent: dashboardHour?.strategicIntent || scheduleHour?.strategicIntent || baseData.strategicIntent,
+      batteryAction: dashboardHour?.batteryAction !== undefined ? getValue(dashboardHour.batteryAction) : (scheduleHour?.batteryAction !== undefined ? scheduleHour.batteryAction : getValue(baseData.batteryAction)),
+      batteryCharged: dashboardHour?.batteryCharged !== undefined ? getValue(dashboardHour.batteryCharged) : getValue(baseData.batteryCharged),
+      batteryDischarged: dashboardHour?.batteryDischarged !== undefined ? getValue(dashboardHour.batteryDischarged) : getValue(baseData.batteryDischarged),
+      batterySocEnd: scheduleHour?.batterySocEnd !== undefined ? scheduleHour.batterySocEnd : (dashboardHour?.batterySocEnd !== undefined ? getValue(dashboardHour.batterySocEnd) : getValue(baseData.batterySocEnd)),
       dataSource: dashboardHour?.dataSource || 'predicted',
-      isActual: dashboardHour?.dataSource === 'actual'
+      isActual: dashboardHour?.dataSource === 'actual',
+      // Use schedule data for display fields when available, with formatted fallbacks from dashboard
+      action: scheduleHour?.action || 'IDLE',
+      actionColor: scheduleHour?.actionColor || 'gray',
+      dischargePowerRate: scheduleHour?.dischargePowerRate || 0,
+      chargePowerRate: scheduleHour?.chargePowerRate || 100,
+      gridCharge: scheduleHour?.gridCharge || false,
+      batteryMode: scheduleHour?.batteryMode || 'load-first',
+      // Add formatted fields from dashboard data (they ARE the FormattedValue objects)
+      batteryActionFormatted: dashboardHour?.batteryAction,
+      batteryChargedFormatted: dashboardHour?.batteryCharged,
+      batteryDischargedFormatted: dashboardHour?.batteryDischarged,
+      batterySocEndFormatted: dashboardHour?.batterySocEnd
     };
   };
 
@@ -482,15 +501,15 @@ const InverterStatusDashboard: React.FC = () => {
           icon={Zap}
           color="green"
           keyMetric="State of Charge"
-          keyValue={inverterStatus?.batterySoc || 0}
+          keyValue={inverterStatus?.batterySoc}
           keyUnit="%"
           status={{
             icon: netBatteryPower > 0.01 ? TrendingUp :
                   netBatteryPower < -0.01 ? TrendingDown : CheckCircle,
-            text: netBatteryPower > 0.01 ? 
-              `Charging ${(Math.abs(netBatteryPower) / 1000).toFixed(1)}kW` :
-              netBatteryPower < -0.01 ? 
-              `Discharging ${(Math.abs(netBatteryPower) / 1000).toFixed(1)}kW` : 
+            text: netBatteryPower > 0.01 ?
+              'Charging' :
+              netBatteryPower < -0.01 ?
+              'Discharging' :
               'Idle',
             color: netBatteryPower > 0.01 ? 'green' :
                    netBatteryPower < -0.01 ? 'yellow' : 'blue'
@@ -498,26 +517,28 @@ const InverterStatusDashboard: React.FC = () => {
           metrics={[
             {
               label: "State of Energy",
-              value: `${parseFloat((inverterStatus?.batterySoe || 0).toFixed(1))}/${parseFloat((batterySettings?.totalCapacity || 0).toFixed(1))}`,
-              unit: "kWh",
+              value: getDisplayText(dashboardData?.hourlyData?.find(h => h.hour === new Date().getHours())?.batterySoeEnd),
+              unit: "",
               icon: Battery
             },
             {
               label: netBatteryPower > 0.01 ? 'Charging Power' :
                      netBatteryPower < -0.01 ? 'Discharging Power' : 'Battery Power',
-              value: parseFloat((Math.abs(netBatteryPower) / 1000).toFixed(1)),
-              unit: "kW",
+              value: netBatteryPower > 0.01 ?
+                inverterStatus?.batteryChargePower :
+                netBatteryPower < -0.01 ?
+                inverterStatus?.batteryDischargePower :
+                0,
+              unit: "W",
               icon: netBatteryPower > 0.01 ? TrendingUp :
                     netBatteryPower < -0.01 ? TrendingDown : Zap,
               color: netBatteryPower > 0.01 ? 'green' :
                      netBatteryPower < -0.01 ? 'yellow' : undefined
             },
             {
-              label: "Solar Production", 
-              value: dashboardData?.realTimePower?.solarPowerW 
-                ? (dashboardData.realTimePower.solarPowerW / 1000).toFixed(1) 
-                : '0.0',
-              unit: "kW",
+              label: "Solar Production",
+              value: getDisplayText(dashboardData?.hourlyData?.find(h => h.hour === new Date().getHours())?.solarProduction),
+              unit: "",
               icon: Sun
             }
           ]}
@@ -532,8 +553,8 @@ const InverterStatusDashboard: React.FC = () => {
           keyValue={currentHourData?.strategicIntent?.replace('_', ' ') || 'IDLE'}
           keyUnit=""
           status={{
-            icon: currentHourData?.batteryAction ? 
-              (currentHourData.batteryAction > 0 ? TrendingUp : TrendingDown) : CheckCircle,
+            icon: getValue(currentHourData?.batteryAction) ?
+              (getValue(currentHourData?.batteryAction) > 0 ? TrendingUp : TrendingDown) : CheckCircle,
             text: `Hour ${currentHourData?.hour || 0}:00`,
             color: 'blue'
           }}
@@ -546,19 +567,17 @@ const InverterStatusDashboard: React.FC = () => {
             },
             {
               label: "Battery Action",
-              value: currentHourData?.batteryAction !== undefined && currentHourData.batteryAction !== null ? 
-                Math.abs(currentHourData.batteryAction).toFixed(1) : '0.0',
-              unit: currentHourData?.batteryAction && Math.abs(currentHourData.batteryAction) > 0.01 ? 
-                (currentHourData.batteryAction > 0 ? "kWh Charge" : "kWh Discharge") : "kWh",
-              icon: currentHourData?.batteryAction && Math.abs(currentHourData.batteryAction) > 0.01 ? 
-                (currentHourData.batteryAction > 0 ? TrendingUp : TrendingDown) : Zap,
-              color: currentHourData?.batteryAction && Math.abs(currentHourData.batteryAction) > 0.01 ? 
-                (currentHourData.batteryAction > 0 ? 'green' : 'yellow') : undefined
+              value: getDisplayText(dashboardData?.hourlyData?.find(h => h.hour === new Date().getHours())?.batteryAction),
+              unit: "",
+              icon: getValue(dashboardData?.hourlyData?.find(h => h.hour === new Date().getHours())?.batteryAction) && Math.abs(getValue(dashboardData?.hourlyData?.find(h => h.hour === new Date().getHours())?.batteryAction)) > 0.01 ?
+                (getValue(dashboardData?.hourlyData?.find(h => h.hour === new Date().getHours())?.batteryAction) > 0 ? TrendingUp : TrendingDown) : Zap,
+              color: getValue(dashboardData?.hourlyData?.find(h => h.hour === new Date().getHours())?.batteryAction) && Math.abs(getValue(dashboardData?.hourlyData?.find(h => h.hour === new Date().getHours())?.batteryAction)) > 0.01 ?
+                (getValue(dashboardData?.hourlyData?.find(h => h.hour === new Date().getHours())?.batteryAction) > 0 ? 'green' : 'yellow') : undefined
             },
             {
               label: "Target SOC",
-              value: currentHourData?.batterySocEnd?.toFixed(1) || 'N/A',
-              unit: "%",
+              value: getDisplayText(dashboardData?.hourlyData?.find(h => h.hour === new Date().getHours())?.batterySocEnd),
+              unit: "",
               icon: CheckCircle
             }
           ]}
@@ -614,7 +633,7 @@ const InverterStatusDashboard: React.FC = () => {
             <h3 className="text-lg font-semibold text-gray-900 dark:text-white">24-Hour Schedule Overview</h3>
           </div>
           
-          {growattSchedule?.scheduleData ? (
+          {growattSchedule?.scheduleData && dashboardData?.hourlyData ? (
             <div className="overflow-x-auto bg-white dark:bg-gray-800 rounded-lg shadow">
               <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
                 <thead className="bg-gray-50 dark:bg-gray-700">
@@ -677,27 +696,43 @@ const InverterStatusDashboard: React.FC = () => {
                           </span>
                         </td>
                         <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
-                          <span className="font-medium">{hour.batterySocEnd?.toFixed(1) || 'N/A'}%</span>
+                          <span className="font-medium">{getDisplayText(hour.batterySocEndFormatted)}</span>
                         </td>
                         <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
-                          {hour.batteryCharged > 0 && (
-                            <div className="flex items-center text-green-600">
-                              <span className="text-xs mr-1">⚡</span>
-                              <span className="font-medium">+{hour.batteryCharged.toFixed(1)}kWh</span>
-                            </div>
-                          )}
-                          {hour.batteryDischarged > 0 && (
-                            <div className="flex items-center text-orange-600">
-                              <span className="text-xs mr-1">⚡</span>
-                              <span className="font-medium">-{hour.batteryDischarged.toFixed(1)}kWh</span>
-                            </div>
-                          )}
-                          {hour.batteryCharged === 0 && hour.batteryDischarged === 0 && (
-                            <div className="flex items-center text-gray-500 dark:text-gray-400">
-                              <span className="text-xs mr-1">⏸️</span>
-                              <span>Idle</span>
-                            </div>
-                          )}
+                          {(() => {
+                            const batteryAction = hour.batteryAction || 0;
+                            const formattedAction = getDisplayText(hour.batteryActionFormatted);
+
+                            // Prioritize actual battery action value over schedule action
+                            if (batteryAction > 0.01) {
+                              return (
+                                <div className="flex items-center text-green-600">
+                                  <span className="text-xs mr-1">⚡</span>
+                                  <span className="font-medium">
+                                    {formattedAction || `Charge ${batteryAction.toFixed(1)} kWh`}
+                                  </span>
+                                </div>
+                              );
+                            }
+
+                            if (batteryAction < -0.01) {
+                              return (
+                                <div className="flex items-center text-orange-600">
+                                  <span className="text-xs mr-1">⚡</span>
+                                  <span className="font-medium">
+                                    {formattedAction || `Discharge ${Math.abs(batteryAction).toFixed(1)} kWh`}
+                                  </span>
+                                </div>
+                              );
+                            }
+
+                            return (
+                              <div className="flex items-center text-gray-500 dark:text-gray-400">
+                                <span className="text-xs mr-1">⏸️</span>
+                                <span>Idle</span>
+                              </div>
+                            );
+                          })()}
                         </td>
                         <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
                           <span className="font-medium">
@@ -714,13 +749,13 @@ const InverterStatusDashboard: React.FC = () => {
                               <div className="text-gray-500 dark:text-gray-400">N/A</div>
                             ) : (
                               <>
-                                {hour.batteryCharged > 0.1 && (
-                                  <div className="text-green-600">C: {batterySettings?.chargingPowerRate || 40}%</div>
+                                {hour.action === 'CHARGE' && hour.chargePowerRate > 0 && (
+                                  <div className="text-green-600">C: {hour.chargePowerRate}%</div>
                                 )}
-                                {hour.batteryDischarged > 0.1 && (
-                                  <div className="text-orange-600">D: {batterySettings?.dischargingPowerRate || 100}%</div>
+                                {(hour.action === 'DISCHARGE' || hour.action === 'EXPORT') && hour.dischargePowerRate > 0 && (
+                                  <div className="text-orange-600">D: {hour.dischargePowerRate}%</div>
                                 )}
-                                {(hour.batteryCharged <= 0.1 && hour.batteryDischarged <= 0.1) && (
+                                {(hour.action === 'IDLE' || hour.chargePowerRate === 0 || hour.dischargePowerRate === 0) && (
                                   <div className="text-gray-500 dark:text-gray-400">0%</div>
                                 )}
                               </>
@@ -753,45 +788,43 @@ const InverterStatusDashboard: React.FC = () => {
           </div>
           {growattSchedule?.touIntervals ? (
             <div className="space-y-2">
-              {generateCompleteTOUSchedule(growattSchedule.touIntervals).map((interval, index) => (
+              {growattSchedule.touIntervals.map((interval, index) => (
                 <div key={index} className={`flex justify-between items-center p-3 rounded-lg ${
-                  interval.isEmpty
-                    ? 'bg-gray-100 dark:bg-gray-700/50 opacity-40'
-                    : interval.isDefault 
-                    ? 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600' 
-                    : interval.enabled 
-                    ? 'bg-gray-50 dark:bg-gray-700'
-                    : 'bg-gray-100 dark:bg-gray-700/50 opacity-60'
+                  interval.isDefault
+                    ? 'bg-gray-50 dark:bg-gray-800/30 border border-gray-200 dark:border-gray-700 opacity-50'
+                    : interval.isEmpty
+                    ? 'bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 opacity-60'
+                    : interval.enabled
+                    ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800'
+                    : 'bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800'
                 }`}>
                   <div className="flex items-center space-x-4">
                     <div className="font-medium text-gray-900 dark:text-white">
-                      {interval.isEmpty 
-                        ? `Segment #${interval.segmentId}` 
-                        : interval.isDefault 
-                        ? 'Default' 
+                      {interval.isDefault
+                        ? 'Default'
                         : `Segment #${interval.segmentId}`}
                     </div>
                     <div className="text-sm text-gray-600 dark:text-gray-400">
-                      {interval.isEmpty 
-                        ? 'Not configured' 
+                      {interval.isEmpty
+                        ? 'Not configured'
                         : `${interval.startTime} - ${interval.endTime}`}
                     </div>
                   </div>
                   <div className="flex items-center space-x-3">
                     {!interval.isEmpty && getBatteryModeDisplay(interval.battMode)}
                     <span className={`px-2 py-1 rounded text-xs font-medium ${
-                      interval.isEmpty
-                        ? 'bg-gray-100 text-gray-500 dark:bg-gray-600 dark:text-gray-400'
-                        : interval.isDefault
-                        ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300'
-                        : interval.enabled 
-                        ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300' 
-                        : 'bg-gray-100 text-gray-800 dark:bg-gray-600 dark:text-gray-300'
+                      interval.isDefault
+                        ? 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
+                        : interval.isEmpty
+                        ? 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
+                        : interval.enabled
+                        ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300'
+                        : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300'
                     }`}>
-                      {interval.isEmpty 
-                        ? 'Empty' 
-                        : interval.isDefault 
-                        ? 'Default' 
+                      {interval.isDefault
+                        ? 'Load First'
+                        : interval.isEmpty
+                        ? 'Empty'
                         : (interval.enabled ? 'Active' : 'Disabled')}
                     </span>
                   </div>

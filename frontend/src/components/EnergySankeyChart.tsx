@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { Info } from 'lucide-react';
 
+
 // We'll use React Plotly for the Sankey diagram
 declare global {
   interface Window {
@@ -72,7 +73,13 @@ export const EnergySankeyChart: React.FC<EnergySankeyChartProps> = ({
       gridToHome: data.totals.totalGridToHome || 0,
       gridToBattery: data.totals.totalGridToBattery || 0,
       batteryToHome: data.totals.totalBatteryToHome || 0,
-      batteryToGrid: data.totals.totalBatteryToGrid || 0
+      batteryToGrid: data.totals.totalBatteryToGrid || 0,
+      
+      // Formatted fields from backend
+      solarProductionFormatted: data.totals.totalSolarProductionFormatted,
+      homeConsumptionFormatted: data.totals.totalHomeConsumptionFormatted,
+      gridImportedFormatted: data.totals.totalGridImportFormatted,
+      batteryChargedFormatted: data.totals.totalBatteryChargedFormatted
     };
   };
 
@@ -85,10 +92,10 @@ export const EnergySankeyChart: React.FC<EnergySankeyChartProps> = ({
 
     // Define nodes
     const nodes = [
-      { label: `Solar<br>${flows.solarProduction.toFixed(1)} kWh`, color: "#fbbf24" },
-      { label: `Grid<br>±${Math.max(flows.gridImport, flows.gridExport).toFixed(1)} kWh`, color: "#3b82f6" },
-      { label: `Battery<br>±${Math.max(flows.totalCharged, flows.totalDischarged).toFixed(1)} kWh`, color: "#10b981" },
-      { label: `Home<br>${flows.homeConsumption.toFixed(1)} kWh`, color: "#ef4444" }
+      { label: `Solar<br>${flows.solarProductionFormatted}`, color: "#fbbf24" },
+      { label: `Grid<br>±${flows.gridImportedFormatted}`, color: "#3b82f6" },
+      { label: `Battery<br>±${flows.batteryChargedFormatted}`, color: "#10b981" },
+      { label: `Home<br>${flows.homeConsumptionFormatted}`, color: "#ef4444" }
     ];
 
     // Define links (source -> target)

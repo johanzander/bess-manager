@@ -6,7 +6,12 @@ API endpoints for battery and electricity settings, dashboard data, and decision
 from datetime import datetime
 
 from api_conversion import convert_keys_to_camel_case
-from api_dataclasses import APIBatterySettings, APIPriceSettings, APIRealTimePower
+from api_dataclasses import (
+    APIBatterySettings,
+    APIDashboardHourlyData,
+    APIDashboardResponse,
+    APIPriceSettings,
+)
 from fastapi import APIRouter, HTTPException, Query
 from loguru import logger
 
@@ -87,10 +92,7 @@ async def update_electricity_price_settings(settings: dict):
 
 @router.get("/api/dashboard")
 async def get_dashboard_data(date: str = Query(None)):
-    """Unified dashboard endpoint returning canonical camelCase data directly."""
-    # Import at function level to avoid circular imports
-    from api_dataclasses import flatten_hourly_data
-
+    """Unified dashboard endpoint using dataclass-based implementation for type safety."""
     from app import bess_controller
 
     try:
@@ -98,189 +100,85 @@ async def get_dashboard_data(date: str = Query(None)):
 
         # Get daily view data
         daily_view = bess_controller.system.get_current_daily_view()
-        logger.debug(
-            f"Daily view retrieved successfully with {len(daily_view.hourly_data)} hours"
-        )
+        logger.debug(f"Daily view retrieved with {len(daily_view.hourly_data)} hours")
 
-        # Get settings for additional calculations
+        # Get system components
+        controller = bess_controller.ha_controller
         settings = bess_controller.system.get_settings()
         battery_capacity = settings["battery"].total_capacity
-        logger.debug(f"Retrieved battery capacity: {battery_capacity}")
+        # PURE DATACLASS APPROACH - No api_conversion.py usage
+        # Create dataclass instances directly (no intermediate dicts)
+        hourly_dataclass_instances = [
+            APIDashboardHourlyData.from_internal(hour_data, battery_capacity)
+            for hour_data in daily_view.hourly_data
+        ]
 
-        # Process hourly data using values directly from the HourlyData objects
-        api_hourly_data = []
-        for i, hour_data in enumerate(daily_view.hourly_data):
-            # Get the flattened data with all fields directly from the model
-            flattened = flatten_hourly_data(hour_data, battery_capacity)
+        # Calculate basic totals from dataclass fields directly (no dict access)
+        basic_totals = {
+            "totalSolarProduction": sum(h.solarProduction.value for h in hourly_dataclass_instances),
+            "totalHomeConsumption": sum(h.homeConsumption.value for h in hourly_dataclass_instances),
+            "totalBatteryCharged": sum(
+                max(0, h.batteryAction.value) for h in hourly_dataclass_instances
+            ),
+            "totalBatteryDischarged": sum(
+                abs(min(0, h.batteryAction.value)) for h in hourly_dataclass_instances
+            ),
+            "totalGridImport": sum(h.gridImported.value for h in hourly_dataclass_instances),
+            "totalGridExport": sum(h.gridExported.value for h in hourly_dataclass_instances),
+            "avgBuyPrice": (
+                sum(h.buyPrice.value for h in hourly_dataclass_instances)
+                / len(hourly_dataclass_instances)
+                if hourly_dataclass_instances
+                else 0
+            ),
+        }
 
-            # Only calculate UI-specific derived fields that aren't in the model
-            home_consumption = flattened.get("homeConsumption", 0)
-            solar_production = flattened.get("solarProduction", 0)
+        # Calculate costs from dataclass fields directly - using ACTUAL backend calculations
+        total_optimized_cost = sum(h.hourlyCost.value for h in hourly_dataclass_instances)
+        total_grid_only_cost = sum(h.gridOnlyCost.value for h in hourly_dataclass_instances)
+        total_solar_only_cost = sum(h.solarOnlyCost.value for h in hourly_dataclass_instances)
 
-            # Calculate derived display fields that aren't part of the core model
-            # These are purely for UI convenience
-            direct_solar = min(solar_production, home_consumption)
-            grid_import_needed = max(0, home_consumption - direct_solar)
-            solar_excess = max(0, solar_production - home_consumption)
+        costs = {
+            "gridOnly": total_grid_only_cost,
+            "solarOnly": total_solar_only_cost,
+            "optimized": total_optimized_cost,
+        }
 
-            # Update only UI-specific derived fields
-            flattened.update(
-                {
-                    "directSolar": direct_solar,
-                    "gridImportNeeded": grid_import_needed,
-                    "solarExcess": solar_excess,
-                }
-            )
-
-            api_hourly_data.append(flattened)
-            if i == 0:  # Log first hour as sample
-                logger.debug(f"Sample hour data: {flattened}")
-
-        logger.debug(f"Processed {len(api_hourly_data)} hours of data")
-
-        # Get battery information
-        controller = bess_controller.system.controller
+        # Get battery state
         battery_soc = controller.get_battery_soc()
-        battery_soe = (battery_soc / 100.0) * battery_capacity
-        logger.debug(f"Battery SOC: {battery_soc}%, SOE: {battery_soe} kWh")
 
-        # Get real-time power data for Live Power Flow card
-        real_time_power_data = APIRealTimePower.from_controller(controller)
+        # Strategic intent summary from actual schedule data
+        try:
+            schedule_manager = bess_controller.system._schedule_manager
+            strategic_summary_data = schedule_manager.get_strategic_intent_summary()
+            # Convert to count format expected by frontend
+            strategic_summary = {
+                intent: data.get("count", 0) for intent, data in strategic_summary_data.items()
+            }
+        except Exception as e:
+            logger.warning(f"Failed to get strategic intent summary: {e}")
+            # Fallback to empty summary
+            strategic_summary = {}
 
-        # Calculate totals from hourly data - using only canonical camelCase field names
-        totals = {
-            # Main energy sources and sinks
-            "totalSolarProduction": sum(
-                h.get("solarProduction", 0) for h in api_hourly_data
-            ),
-            "totalHomeConsumption": sum(
-                h.get("homeConsumption", 0) for h in api_hourly_data
-            ),
-            "totalGridImport": sum(h.get("gridImported", 0) for h in api_hourly_data),
-            "totalGridExport": sum(h.get("gridExported", 0) for h in api_hourly_data),
-            # Detailed energy flows - Solar origin
-            "totalSolarToHome": sum(h.get("solarToHome", 0) for h in api_hourly_data),
-            "totalSolarToBattery": sum(
-                h.get("solarToBattery", 0) for h in api_hourly_data
-            ),
-            "totalSolarToGrid": sum(h.get("solarToGrid", 0) for h in api_hourly_data),
-            # Detailed energy flows - Grid origin
-            "totalGridToHome": sum(h.get("gridToHome", 0) for h in api_hourly_data),
-            "totalGridToBattery": sum(
-                h.get("gridToBattery", 0) for h in api_hourly_data
-            ),
-            # Detailed energy flows - Battery origin
-            "totalBatteryToHome": sum(
-                h.get("batteryToHome", 0) for h in api_hourly_data
-            ),
-            "totalBatteryToGrid": sum(
-                h.get("batteryToGrid", 0) for h in api_hourly_data
-            ),
-            # Economic data - Costs
-            "totalGridOnlyCost": sum(h.get("gridOnlyCost", 0) for h in api_hourly_data),
-            "totalSolarOnlyCost": sum(
-                h.get("solarOnlyCost", 0) for h in api_hourly_data
-            ),
-            "totalOptimizedCost": sum(h.get("hourlyCost", 0) for h in api_hourly_data),
-            # Economic data - Savings (calculate from hourly sums)
-            "totalBatterySavings": sum(
-                h.get("batterySavings", 0) for h in api_hourly_data
-            ),
-        }
-
-        # Calculate battery totals from flow components (more reliable than direct hourly sums)
-        totals["totalBatteryCharged"] = (
-            totals["totalSolarToBattery"] + totals["totalGridToBattery"]
-        )
-        totals["totalBatteryDischarged"] = (
-            totals["totalBatteryToHome"] + totals["totalBatteryToGrid"]
+        # Create the dataclass response using pre-created hourly instances
+        response = APIDashboardResponse.from_dashboard_data(
+            daily_view=daily_view,
+            controller=controller,
+            totals=basic_totals,
+            costs=costs,
+            strategic_summary=strategic_summary,
+            battery_soc=battery_soc,
+            battery_capacity=battery_capacity,
+            hourly_data_instances=hourly_dataclass_instances,
         )
 
-        # Calculate total savings correctly from cost differences
-        totals["totalSolarSavings"] = (
-            totals["totalGridOnlyCost"] - totals["totalSolarOnlyCost"]
-        )
-        totals["totalOptimizationSavings"] = (
-            totals["totalGridOnlyCost"] - totals["totalOptimizedCost"]
-        )
-        logger.debug("Calculated totals successfully")
+        logger.debug("Dashboard response created successfully using dataclasses")
 
-        # Use values from totals where available - BUT calculate savings directly from hourly data
-        total_grid_only_cost = totals["totalGridOnlyCost"]
-        total_solar_only_cost = totals["totalSolarOnlyCost"]
-        total_optimized_cost = totals["totalOptimizedCost"]
-
-        # Get battery costs directly from hourly data
-        total_battery_costs = sum(h.get("batteryCycleCost", 0) for h in api_hourly_data)
-
-        # Calculate grid costs (net cost of grid interactions)
-        total_grid_costs = sum(h.get("gridCost", 0) for h in api_hourly_data)
-
-        # Calculate savings directly from cost totals (ignore pre-calculated fields)
-        solar_savings_calculated = (
-            total_grid_only_cost - total_solar_only_cost
-        )  # Grid-Only → Solar-Only
-        battery_savings_calculated = (
-            total_solar_only_cost - total_optimized_cost
-        )  # Solar-Only → Solar+Battery
-        total_savings_calculated = (
-            total_grid_only_cost - total_optimized_cost
-        )  # Grid-Only → Solar+Battery
-
-        logger.debug("Calculated costs and savings")
-
-        # Build canonical summary with consistent field names
-        summary = {
-            # Baseline costs (what scenarios would cost) - CANONICAL
-            "gridOnlyCost": total_grid_only_cost,
-            "solarOnlyCost": total_solar_only_cost,
-            "optimizedCost": total_optimized_cost,
-            # Component costs (breakdown) - CANONICAL
-            "totalGridCost": total_grid_costs,
-            "totalBatteryCycleCost": total_battery_costs,
-            # Savings calculations - CANONICAL (use correct calculations)
-            "totalSavings": total_savings_calculated,  # Grid-Only → Solar+Battery total savings
-            "solarSavings": solar_savings_calculated,  # Grid-Only → Solar-Only savings
-            "batterySavings": battery_savings_calculated,  # Solar-Only → Solar+Battery additional savings
-            # Energy totals - CANONICAL
-            "totalSolarProduction": totals["totalSolarProduction"],
-            "totalHomeConsumption": totals["totalHomeConsumption"],
-            "totalBatteryCharged": totals["totalBatteryCharged"],
-            "totalBatteryDischarged": totals["totalBatteryDischarged"],
-            "totalGridImported": totals["totalGridImport"],
-            "totalGridExported": totals["totalGridExport"],
-            # Efficiency metrics - CANONICAL
-            "cycleCount": (
-                totals["totalBatteryCharged"] / battery_capacity
-                if battery_capacity > 0
-                else 0.0
-            ),
-        }
-
-        result = {
-            "date": daily_view.date.isoformat(),
-            "currentHour": daily_view.current_hour,
-            "totalDailySavings": daily_view.total_daily_savings,
-            "actualSavingsSoFar": daily_view.actual_savings_so_far,
-            "predictedRemainingSavings": daily_view.predicted_remaining_savings,
-            "actualHoursCount": daily_view.actual_hours_count,
-            "predictedHoursCount": daily_view.predicted_hours_count,
-            "dataSources": daily_view.data_sources,
-            "hourlyData": api_hourly_data,
-            "summary": summary,
-            "totals": totals,
-            "batteryCapacity": battery_capacity,
-            "batterySoc": battery_soc,
-            "batterySoe": battery_soe,
-            "realTimePower": real_time_power_data.__dict__,
-        }
-
-        logger.debug("Dashboard data prepared successfully")
-        return result
+        # Return dataclass directly - already has camelCase fields
+        return response.__dict__
 
     except Exception as e:
         logger.error(f"Error generating dashboard data: {e}")
-        logger.exception("Full dashboard error traceback:")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
@@ -291,15 +189,16 @@ async def get_dashboard_data(date: str = Query(None)):
 
 def convert_real_data_to_mock_format(hourly_data_list, current_hour):
     """
-    Convert real HourlyData with enhanced DecisionData to exact mock format.
+    Convert real HourlyData with enhanced DecisionData to proper FormattedValue format.
 
     Args:
         hourly_data_list: List of HourlyData from optimization (with enhanced DecisionData)
         current_hour: Current hour for marking is_current_hour
 
     Returns:
-        Dictionary matching exact mock decision intelligence format
+        Dictionary with FormattedValue objects for proper frontend display
     """
+    from api_dataclasses import create_formatted_value
     patterns = []
 
     for hourly_data in hourly_data_list:
@@ -312,59 +211,60 @@ def convert_real_data_to_mock_format(hourly_data_list, current_hour):
         is_current = hour == current_hour
         is_actual = hourly_data.data_source == "actual"
 
-        # Create flows dictionary matching exact mock format
+        # Create flows dictionary with FormattedValue objects
         flows = {
-            "solar_to_home": energy.solar_to_home,
-            "solar_to_battery": energy.solar_to_battery,
-            "solar_to_grid": energy.solar_to_grid,
-            "grid_to_home": energy.grid_to_home,
-            "grid_to_battery": energy.grid_to_battery,
-            "battery_to_home": energy.battery_to_home,
-            "battery_to_grid": energy.battery_to_grid,
+            "solar_to_home": create_formatted_value(energy.solar_to_home, "energy_kwh_only"),
+            "solar_to_battery": create_formatted_value(energy.solar_to_battery, "energy_kwh_only"),
+            "solar_to_grid": create_formatted_value(energy.solar_to_grid, "energy_kwh_only"),
+            "grid_to_home": create_formatted_value(energy.grid_to_home, "energy_kwh_only"),
+            "grid_to_battery": create_formatted_value(energy.grid_to_battery, "energy_kwh_only"),
+            "battery_to_home": create_formatted_value(energy.battery_to_home, "energy_kwh_only"),
+            "battery_to_grid": create_formatted_value(energy.battery_to_grid, "energy_kwh_only"),
         }
 
         # Create immediate_flow_values matching mock format (economic value of each flow)
         immediate_flow_values = {}
 
-        # Add flow values only for significant flows (> 0.1 kWh)
+        # Add flow values only for significant flows (> 0.1 kWh) with FormattedValue objects
         if energy.solar_to_home > 0.1:
-            immediate_flow_values["solar_to_home"] = (
-                energy.solar_to_home * economic.buy_price
+            immediate_flow_values["solar_to_home"] = create_formatted_value(
+                energy.solar_to_home * economic.buy_price, "currency"
             )
 
         if energy.grid_to_home > 0.1:
-            immediate_flow_values["grid_to_home"] = -(
-                energy.grid_to_home * economic.buy_price
+            immediate_flow_values["grid_to_home"] = create_formatted_value(
+                -(energy.grid_to_home * economic.buy_price), "currency"
             )
 
         if energy.grid_to_battery > 0.1:
-            immediate_flow_values["grid_to_battery"] = -(
-                energy.grid_to_battery * economic.buy_price
+            immediate_flow_values["grid_to_battery"] = create_formatted_value(
+                -(energy.grid_to_battery * economic.buy_price), "currency"
             )
 
         if energy.battery_to_home > 0.1:
-            immediate_flow_values["battery_to_home"] = (
-                energy.battery_to_home * economic.buy_price
+            immediate_flow_values["battery_to_home"] = create_formatted_value(
+                energy.battery_to_home * economic.buy_price, "currency"
             )
 
         if energy.battery_to_grid > 0.1:
-            immediate_flow_values["battery_to_grid"] = (
-                energy.battery_to_grid * economic.sell_price
+            immediate_flow_values["battery_to_grid"] = create_formatted_value(
+                energy.battery_to_grid * economic.sell_price, "currency"
             )
 
         if energy.solar_to_grid > 0.1:
-            immediate_flow_values["solar_to_grid"] = (
-                energy.solar_to_grid * economic.sell_price
+            immediate_flow_values["solar_to_grid"] = create_formatted_value(
+                energy.solar_to_grid * economic.sell_price, "currency"
             )
 
-        # Calculate immediate_total_value as sum of all flow values
-        immediate_total_value = sum(immediate_flow_values.values())
+        # Calculate immediate_total_value as sum of all flow values (extract numeric values)
+        total_value = sum(fv.value for fv in immediate_flow_values.values())
+        immediate_total_value = create_formatted_value(total_value, "currency")
 
-        # Create future_opportunity matching mock format
+        # Create future_opportunity with FormattedValue objects
         future_opportunity = {
             "description": f"Future value realization from {decision.strategic_intent.lower().replace('_', ' ')} strategy",
             "target_hours": [],
-            "expected_value": decision.future_value or 0.0,
+            "expected_value": create_formatted_value(decision.future_value or 0.0, "currency"),
             "dependencies": [
                 "Price forecast accuracy",
                 "Battery state management",
@@ -385,8 +285,8 @@ def convert_real_data_to_mock_format(hourly_data_list, current_hour):
             "future_opportunity": future_opportunity,
             "economic_chain": decision.economic_chain
             or f"Hour {hour:02d}: No enhanced economic reasoning available",
-            "net_strategy_value": decision.net_strategy_value or 0.0,
-            "electricity_price": economic.buy_price,
+            "net_strategy_value": create_formatted_value(decision.net_strategy_value or 0.0, "currency"),
+            "electricity_price": create_formatted_value(economic.buy_price, "currency"),
             "is_current_hour": is_current,
             "is_actual": is_actual,
         }
@@ -395,13 +295,14 @@ def convert_real_data_to_mock_format(hourly_data_list, current_hour):
 
     # Calculate summary statistics matching mock format
     if patterns:
-        total_net_value = sum(p["net_strategy_value"] for p in patterns)
+        # Extract numeric values from FormattedValue objects before summing
+        total_net_value = sum(p["net_strategy_value"].value for p in patterns)
         actual_patterns = [p for p in patterns if p["is_actual"]]
         predicted_patterns = [p for p in patterns if not p["is_actual"]]
-        best_decision = max(patterns, key=lambda p: p["net_strategy_value"])
+        best_decision = max(patterns, key=lambda p: p["net_strategy_value"].value)
 
         summary = {
-            "total_net_value": total_net_value,
+            "total_net_value": create_formatted_value(total_net_value, "currency"),
             "best_decision_hour": best_decision["hour"],
             "best_decision_value": best_decision["net_strategy_value"],
             "actual_hours_count": len(actual_patterns),
@@ -409,9 +310,9 @@ def convert_real_data_to_mock_format(hourly_data_list, current_hour):
         }
     else:
         summary = {
-            "total_net_value": 0.0,
+            "total_net_value": create_formatted_value(0.0, "currency"),
             "best_decision_hour": 0,
-            "best_decision_value": 0.0,
+            "best_decision_value": create_formatted_value(0.0, "currency"),
             "actual_hours_count": 0,
             "predicted_hours_count": 0,
         }
@@ -979,7 +880,7 @@ async def get_growatt_detailed_schedule():
 
         # Get TOU intervals directly from schedule manager
         try:
-            tou_intervals = schedule_manager.get_daily_TOU_settings()
+            tou_intervals = schedule_manager.get_all_tou_segments()
         except Exception as e:
             logger.error(f"Failed to get TOU intervals: {e}")
             tou_intervals = []
@@ -1183,7 +1084,7 @@ async def get_tou_settings():
             )
 
         schedule_manager = bess_controller.system._schedule_manager
-        tou_intervals = schedule_manager.get_daily_TOU_settings()
+        tou_intervals = schedule_manager.get_all_tou_segments()
         current_hour = datetime.now().hour
 
         # Enhanced TOU intervals with hourly settings and strategic intents
@@ -1311,7 +1212,10 @@ async def get_system_health():
 
     try:
         logger.debug("Starting system health check")
+
+        # Run actual health checks
         health_results = run_system_health_checks(bess_controller.system)
+
         logger.debug(f"Health check completed: {health_results}")
         return convert_keys_to_camel_case(health_results)
     except Exception as e:
@@ -1337,60 +1241,70 @@ async def get_system_health():
 @router.get("/api/dashboard-health-summary")
 async def get_dashboard_health_summary():
     """Get lightweight health summary for dashboard alert banner - only critical issues."""
-    
+
     from app import bess_controller
-    
+
     try:
         logger.debug("Starting dashboard health summary check")
-        
+
         # Check if system is in degraded mode first
-        if hasattr(bess_controller.system, 'has_critical_sensor_failures') and bess_controller.system.has_critical_sensor_failures():
+        if (
+            hasattr(bess_controller.system, "has_critical_sensor_failures")
+            and bess_controller.system.has_critical_sensor_failures()
+        ):
             # System is in degraded mode due to critical sensor failures
             critical_failures = bess_controller.system.get_critical_sensor_failures()
             critical_issues = []
             for failure in critical_failures:
-                critical_issues.append({
-                    "component": failure,
-                    "description": "Critical sensor configuration issue detected",
-                    "status": "ERROR"
-                })
-            
+                critical_issues.append(
+                    {
+                        "component": failure,
+                        "description": "Critical sensor configuration issue detected",
+                        "status": "ERROR",
+                    }
+                )
+
             summary = {
                 "has_critical_errors": True,
                 "critical_issues": critical_issues,
                 "total_critical_issues": len(critical_issues),
                 "timestamp": datetime.now().isoformat(),
-                "system_mode": "degraded"
+                "system_mode": "degraded",
             }
         else:
             # System is healthy, run full health check
             health_results = run_system_health_checks(bess_controller.system)
-            
+
             # Extract only critical information
             critical_issues = []
             has_critical_error = False
-            
+
             for component in health_results.get("checks", []):
                 # Only care about required components with ERROR status
-                if component.get("required", False) and component.get("status") == "ERROR":
+                if (
+                    component.get("required", False)
+                    and component.get("status") == "ERROR"
+                ):
                     has_critical_error = True
-                    critical_issues.append({
-                        "component": component.get("name", "Unknown"),
-                        "description": component.get("description", ""),
-                        "status": component.get("status", "UNKNOWN")
-                    })
-            
+                    critical_issues.append(
+                        {
+                            "component": component.get("name", "Unknown"),
+                            "description": component.get("description", ""),
+                            "status": component.get("status", "UNKNOWN"),
+                        }
+                    )
+
             summary = {
                 "has_critical_errors": has_critical_error,
                 "critical_issues": critical_issues,
                 "total_critical_issues": len(critical_issues),
                 "timestamp": datetime.now().isoformat(),
-                "system_mode": health_results.get("system_mode", "normal")
+                "system_mode": health_results.get("system_mode", "normal"),
             }
-        
+
         logger.debug(f"Dashboard health summary: {summary}")
         return convert_keys_to_camel_case(summary)
-        
+
     except Exception as e:
         logger.error(f"Error getting dashboard health summary: {e}")
         # Return safe error state
@@ -1400,11 +1314,11 @@ async def get_dashboard_health_summary():
                 {
                     "component": "System Health Check",
                     "description": "Unable to perform health check",
-                    "status": "ERROR"
+                    "status": "ERROR",
                 }
             ],
             "total_critical_issues": 1,
             "timestamp": datetime.now().isoformat(),
-            "system_mode": "unknown"
+            "system_mode": "unknown",
         }
         return convert_keys_to_camel_case(error_summary)

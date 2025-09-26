@@ -156,6 +156,73 @@ cd frontend && npm run lint:fix  # Fix TypeScript issues
 
 ### Core Development Principles
 
+#### Mandatory Codebase Review Before Refactoring
+
+**CRITICAL**: Before starting any refactoring, architectural changes, or adding new functionality, you MUST perform a comprehensive codebase analysis to understand existing patterns and avoid duplication.
+
+**Required Analysis Steps**:
+
+1. **Search for Existing Implementations**:
+   ```bash
+   # Search for similar functionality
+   grep -r "dataclass\|serialization\|formatting" --include="*.py"
+   grep -r "HealthStatus\|SystemHealth" --include="*.ts" --include="*.tsx" 
+   find . -name "*api*" -name "*model*" -name "*conversion*"
+   ```
+
+1. **Examine Related Files**:
+   - `backend/api_dataclasses.py` - existing API models
+   - `backend/api_conversion.py` - serialization utilities  
+   - `frontend/src/types.ts` - TypeScript interfaces
+   - `core/bess/` - domain models and services
+   - Any files matching the functionality you plan to add
+
+1. **Understand Existing Patterns**:
+   - How does the codebase currently handle the problem you're solving?
+   - What naming conventions and architectural patterns are used?
+   - Are there existing utilities, services, or models you should extend?
+
+1. **Document Existing Infrastructure**:
+   - List what already exists and works
+   - Identify what's actually missing vs what you assumed was missing
+   - Plan minimal additions that integrate with existing code
+
+**Red Flags That Indicate Insufficient Analysis**:
+
+- Creating files with names similar to existing files (`api_models.py` when `api_dataclasses.py` exists)
+- Recreating functionality that already exists (serialization, enum definitions)
+- Writing code that doesn't follow existing patterns
+- Adding new dependencies when existing ones could be used
+
+**Example of Proper Analysis**:
+
+```markdown
+## Codebase Analysis for Sensor Formatting
+
+### Existing Infrastructure Found:
+- ✅ API Dataclasses: `backend/api_dataclasses.py` 
+- ✅ Serialization: `backend/api_conversion.py`
+- ✅ Health Types: `frontend/src/types.ts`
+- ✅ Health Endpoint: `/api/system-health` in `backend/api.py`
+
+### What's Actually Missing:
+- ❌ Centralized sensor unit formatting (only frontend string matching exists)
+- ❌ Unit metadata in METHOD_SENSOR_MAP
+
+### Minimal Required Changes:
+1. Add unit metadata to existing METHOD_SENSOR_MAP
+2. Create SensorFormattingService 
+3. Integrate with existing health check system
+```
+
+**Consequences of Skipping This Analysis**:
+
+- Duplicate code that needs to be removed
+- Inconsistent architecture
+- Wasted development time
+- Technical debt creation
+- Loss of user trust
+
 #### Code Preservation and Evolution
 
 - **Never remove or modify existing functionality or comments** unless explicitly asked to

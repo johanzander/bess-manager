@@ -16,44 +16,7 @@ const StatusIcon: React.FC<{ status: HealthStatus }> = ({ status }) => {
   }
 };
 
-// Simple utility to format raw sensor values for display (like other components do)
-const formatSensorValue = (value: string | number | boolean | null, sensorName: string): string => {
-  if (value === null || value === undefined || value === 'N/A') {
-    return 'N/A';
-  }
-
-  // Handle string values (like "List with 24 values")
-  if (typeof value === 'string') {
-    return value;
-  }
-
-  // Handle boolean values
-  if (typeof value === 'boolean') {
-    return value ? 'Enabled' : 'Disabled';
-  }
-
-  // Handle numeric values based on sensor type (same logic as dashboard)
-  const lowerName = sensorName.toLowerCase();
-  
-  if (lowerName.includes('soc') || lowerName.includes('rate')) {
-    return `${value}%`;
-  }
-  
-  if (lowerName.includes('power')) {
-    return value >= 1000 ? `${(value / 1000).toFixed(2)} kW` : `${value.toFixed(0)} W`;
-  }
-  
-  if (lowerName.includes('current')) {
-    return `${value.toFixed(2)} A`;
-  }
-  
-  if (lowerName.includes('energy') || lowerName.includes('lifetime')) {
-    return `${value.toFixed(2)} kWh`;
-  }
-
-  // Default number formatting
-  return typeof value === 'number' && value % 1 !== 0 ? value.toFixed(2) : value.toString();
-};
+// No fallback formatting - backend must provide display field with proper units
 
 const SystemHealthComponent: React.FC = () => {
   const [healthData, setHealthData] = useState<SystemHealthData | null>(null);
@@ -222,9 +185,9 @@ const SystemHealthComponent: React.FC = () => {
                               Entity ID: <code className="bg-gray-100 dark:bg-gray-600 px-1 rounded text-xs">{check.entity_id}</code>
                             </p>
                           )}
-                          {check.value !== null && check.value !== undefined && check.value !== 'N/A' && (
+                          {check.displayValue && (
                             <p className="text-xs text-gray-600 dark:text-gray-300 mt-1">
-                              Value: <span className="font-medium">{formatSensorValue(check.value, check.name)}</span>
+                              Value: <span className="font-medium">{check.displayValue}</span>
                             </p>
                           )}
                           {check.error && (

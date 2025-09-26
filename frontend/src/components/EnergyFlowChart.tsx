@@ -23,23 +23,42 @@ const CustomTooltip = ({ active, payload, label }: any) => {
       // Skip tooltip for the empty starting point
       return null;
     }
-    
+
     const startHour = (label - 1) % 24; // Convert timeline position back to actual hour
     const endHour = label % 24;
     const timeRange = `${startHour.toString().padStart(2, '0')}:00-${endHour.toString().padStart(2, '0')}:00`;
-    
+
+    // Map chart dataKeys to their corresponding FormattedValue fields
+    const getFormattedText = (dataKey: string): string => {
+      switch (dataKey) {
+        case 'solar':
+          return data.solarProductionFormatted?.text || 'N/A';
+        case 'home':
+          return data.homeConsumptionFormatted?.text || 'N/A';
+        case 'batteryOut':
+        case 'batteryIn':
+          return data.batteryActionFormatted?.text || 'N/A';
+        case 'gridIn':
+          return data.gridImportedFormatted?.text || 'N/A';
+        case 'gridOut':
+          return data.gridExportedFormatted?.text || 'N/A';
+        default:
+          return 'N/A';
+      }
+    };
+
     // Filter out entries with zero values and price (since we handle price separately)
     // Also separate into sources and consumption
-    const energyEntries = payload.filter((entry: any) => 
+    const energyEntries = payload.filter((entry: any) =>
       entry.dataKey !== 'price' && Math.abs(entry.value) > 0
     );
     const sources = energyEntries.filter((entry: any) => entry.value > 0);
     const consumption = energyEntries.filter((entry: any) => entry.value < 0);
-    
+
     if (energyEntries.length === 0) {
       return null; // Don't show tooltip if all energy values are zero
     }
-    
+
     return (
       <div className="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg p-3 shadow-lg">
         <p className="font-semibold mb-2 text-gray-900 dark:text-white">
@@ -51,7 +70,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
               <p className="font-medium text-gray-700 dark:text-gray-300">Energy Sources:</p>
               {sources.map((entry: any, index: number) => (
                 <p key={index} style={{ color: entry.color }} className="ml-2">
-                  {entry.name}: {Math.abs(entry.value).toFixed(2)} kWh
+                  {entry.name}: {getFormattedText(entry.dataKey)}
                 </p>
               ))}
             </>
@@ -61,14 +80,14 @@ const CustomTooltip = ({ active, payload, label }: any) => {
               <p className="font-medium text-gray-700 dark:text-gray-300 mt-2">Energy Consumption:</p>
               {consumption.map((entry: any, index: number) => (
                 <p key={index} style={{ color: entry.color }} className="ml-2">
-                  {entry.name}: {Math.abs(entry.value).toFixed(2)} kWh
+                  {entry.name}: {getFormattedText(entry.dataKey)}
                 </p>
               ))}
             </>
           )}
-          {data.price > 0 && (
+          {data.buyPriceFormatted && (
             <p className="text-gray-600 dark:text-gray-400 mt-2">
-              Price: {data.price.toFixed(2)} SEK/kWh
+              Price: {data.buyPriceFormatted.text}
             </p>
           )}
         </div>
@@ -139,16 +158,38 @@ const CustomTooltip = ({ active, payload, label }: any) => {
       return hourValue === dataHour;
     });
     const isActual = dailyViewHour?.dataSource === 'actual';
+    // Extract values from FormattedValue objects or fallback to raw numbers
+    const getValue = (field: any) => {
+      if (typeof field === 'object' && field?.value !== undefined) {
+        return field.value;
+      }
+      return field || 0;
+    };
+
+    // Map unified API data format to chart format
+    const solarProduction = getValue(dailyViewHour?.solarProduction);
+    const homeConsumption = getValue(dailyViewHour?.homeConsumption);
+    const batteryAction = getValue(dailyViewHour?.batteryAction) || 0; // positive = charge, negative = discharge
+    const gridImported = getValue(dailyViewHour?.gridImported) || 0; // actual grid import
+    const gridExported = getValue(dailyViewHour?.gridExported) || 0; // actual grid export
+
     return {
       hour: index,
-      solar: dailyViewHour?.solarProduction || 0,
-      batteryOut: dailyViewHour?.batteryDischarged || 0,
-      gridIn: dailyViewHour?.gridImported || 0,
-      home: -(dailyViewHour?.homeConsumption || 0),
-      batteryIn: -(dailyViewHour?.batteryCharged || 0),
-      gridOut: -(dailyViewHour?.gridExported || 0),
+      solar: solarProduction,
+      batteryOut: batteryAction < 0 ? -batteryAction : 0, // discharge (negative battery action)
+      gridIn: gridImported,
+      home: -homeConsumption, // negative for consumption display
+      batteryIn: batteryAction > 0 ? -batteryAction : 0, // charge (positive battery action, negative for display)
+      gridOut: gridExported > 0 ? -gridExported : 0, // grid export (negative for display)
       isActual,
-      price: dailyViewHour?.buyPrice || 0,
+      price: getValue(dailyViewHour?.buyPrice),
+      // Include FormattedValue objects for tooltip
+      solarProductionFormatted: dailyViewHour?.solarProduction,
+      homeConsumptionFormatted: dailyViewHour?.homeConsumption,
+      batteryActionFormatted: dailyViewHour?.batteryAction,
+      gridImportedFormatted: dailyViewHour?.gridImported,
+      gridExportedFormatted: dailyViewHour?.gridExported,
+      buyPriceFormatted: dailyViewHour?.buyPrice,
     };
   });
 
@@ -237,7 +278,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
               orientation="right"
               stroke={colors.text}
               tick={{ fontSize: 11 }}
-              tickFormatter={(value) => `${value.toFixed(2)}`}
+              tickFormatter={(value) => value.toLocaleString('sv-SE', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
               label={{ 
                 value: 'Electricity Price (SEK/kWh)', 
                 angle: 90, 

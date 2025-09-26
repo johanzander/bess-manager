@@ -166,14 +166,36 @@ function App() {
     mediaQuery.addEventListener('change', handleSystemThemeChange);
     return () => mediaQuery.removeEventListener('change', handleSystemThemeChange);
   }, []);
-  
+
+  // Hook calls must be at the top level - never inside try-catch blocks
+  const {
+    batterySettings,
+    electricitySettings,
+    isLoading: settingsLoading,
+    error: settingsError
+  } = useSettings();
+
+  // Validate that we have required settings - no fallbacks allowed
+  // This must be at top level to maintain hook call order
+  const mergedSettings = useMemo(() => {
+    // Only validate when not loading to avoid premature errors
+    if (settingsLoading) {
+      return null;
+    }
+
+    // Fail fast if settings are not available after loading
+    if (!batterySettings || !electricitySettings) {
+      throw new Error(`Critical settings missing: ${!batterySettings ? 'battery settings' : ''} ${!electricitySettings ? 'electricity settings' : ''}`.trim());
+    }
+
+    // Merge settings without fallbacks
+    return {
+      ...batterySettings,
+      ...electricitySettings
+    };
+  }, [batterySettings, electricitySettings, settingsLoading]);
+
   try {
-    const { 
-      batterySettings, 
-      electricitySettings, 
-      isLoading: settingsLoading,
-      error: settingsError 
-    } = useSettings();
 
     console.log('App state:', {
       settingsLoading,
@@ -182,41 +204,7 @@ function App() {
       hasElectricitySettings: !!electricitySettings
     });
 
-    // Safely create settings with fallbacks
-    const mergedSettings = useMemo(() => {
-      const defaultSettings = {
-        totalCapacity: 10,
-        reservedCapacity: 2,
-        estimatedConsumption: 1.5,
-        maxChargePowerKw: 6,        
-        maxDischargePowerKw: 6,     
-        cycleCostPerKwh: 10,        
-        chargingPowerRate: 90,
-        minSoc: 20,                 
-        maxSoc: 95,                 
-        efficiencyCharge: 95,       
-        efficiencyDischarge: 95,
-        useActualPrice: true,
-        markupRate: 0.05,
-        vatMultiplier: 1.25,
-        additionalCosts: 0.45,
-        taxReduction: 0.1,
-        area: 'SE3' as const
-      };
-    
-      // If we don't have any settings at all, return defaults
-      if (!batterySettings && !electricitySettings) {
-        return defaultSettings;
-      }
-    
-      // Merge available settings with defaults for any missing properties
-      return {
-        ...defaultSettings,
-        ...(batterySettings || {}),
-        ...(electricitySettings || {})
-      };
-    }, [batterySettings, electricitySettings]);
-
+    // Early return for loading state
     if (settingsLoading) {
       console.log('Rendering loading state');
       return (

@@ -4,43 +4,54 @@
  * - SOC (State of Charge): Relative charge in % (0-100%)
  * - USE batterySocEnd for battery level displays (clear and unambiguous)
  */
+
+/**
+ * Unified formatting interface for all user-facing values
+ */
+export interface FormattedValue {
+  value: number;        // Raw numeric value for calculations/sorting
+  display: string;      // Formatted number without unit ("84.87", "700")
+  unit: string;         // Unit label ("SEK", "kWh", "Wh", "%")
+  text: string;         // Complete formatted text ("84.87 SEK", "700 Wh")
+}
 export interface HourlyData {
   // Core display fields (use these for UI)
   hour: string | number;
-  buyPrice?: number;           // SEK/kWh
-  
-  // Energy flows (use these for all energy calculations)  
-  solarProduction?: number;    // kWh
-  homeConsumption?: number;    // kWh
-  gridImported?: number;       // kWh
-  gridExported?: number;       // kWh  
-  batteryCharged?: number;     // kWh
-  batteryDischarged?: number;  // kWh
-  
+
   // Economic fields (use these for cost calculations)
   batteryCycleCost?: number;   // SEK battery wear
   gridCost?: number;           // SEK net grid cost
   hourlyCost?: number;         // SEK total cost
   hourlySavings?: number;      // SEK savings
-  
+
   // Battery state (established in SOC/SOE naming fix)
-  batterySoeStart?: number;    // kWh 
+  batterySoeStart?: number;    // kWh
   batterySoeEnd?: number;      // kWh
-  batterySocStart?: number;    // %
-  batterySocEnd?: number;      // %
-  
+
   // Detailed energy flows
   solarToHome?: number;        // kWh
-  solarToBattery?: number;     // kWh  
+  solarToBattery?: number;     // kWh
   solarToGrid?: number;        // kWh
   gridToHome?: number;         // kWh
   gridToBattery?: number;      // kWh
   batteryToHome?: number;      // kWh
   batteryToGrid?: number;      // kWh
-  
+
   // Control and decision fields
-  batteryAction?: number;      // kW (+ charge, - discharge)
   strategicIntent?: string;    // strategy name
+
+  // All user-facing data via FormattedValue - canonical naming
+  buyPrice?: FormattedValue;
+  sellPrice?: FormattedValue;
+  solarProduction?: FormattedValue;
+  homeConsumption?: FormattedValue;
+  gridImported?: FormattedValue;
+  gridExported?: FormattedValue;
+  batteryCharged?: FormattedValue;
+  batteryDischarged?: FormattedValue;
+  batterySocStart?: FormattedValue;
+  batterySocEnd?: FormattedValue;
+  batteryAction?: FormattedValue;
   
   // Additional economic fields
   solarOnlyCost?: number;      // SEK
@@ -96,6 +107,7 @@ export interface BatterySettings {
   // Economic settings
   cycleCostPerKwh: number;      // SEK/kWh wear cost
   chargingPowerRate: number;    // % of max power to use
+  dischargingPowerRate: number; // % of max power to use for discharge
   
   // Efficiency settings (%)
   efficiencyCharge: number;     // % charging efficiency
@@ -128,7 +140,8 @@ export interface HealthCheckResult {
   key: string | null;
   entity_id?: string | null;
   status: HealthStatus;
-  value: string | number | boolean | null; // Raw sensor values
+  rawValue: any; // Original sensor value for logic/comparisons
+  displayValue: string; // Human-readable with units (required, no fallbacks)
   error: string | null;
 }
 

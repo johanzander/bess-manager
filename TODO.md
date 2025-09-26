@@ -17,30 +17,9 @@
 
 **Economic Impact**: Significant - enables optimal charging/discharging decisions that span multiple days
 
-### 1. **Ensure No Code Uses Sensor Names Directly**
-
-**Impact**: High | **Effort**: Medium | **Dependencies**: Core system reliability
-
-**Why Second**: Critical technical debt - direct sensor usage creates fragile coupling, hard to maintain
-
-**Current State**: Code may reference HA sensor entity IDs directly instead of abstraction layer
-
-- Risk of system breakage when sensors change
-- Hard to reconfigure without code changes
-
-**Technical Tasks**:
-
-- Audit all `.py` files for direct sensor name references (search for `sensor.` patterns)
-- Ensure all access uses `ha_api_controller.get_sensor_value(sensor_name)`
-- Update hardcoded entity IDs to use sensor configuration
-- Add sensor validation and error handling
-- Document sensor abstraction patterns
-
----
-
 ## 🟡 **HIGH PRIORITY** (Core Functionality)
 
-### 2. **Improve Battery SOC and Actions Component**
+### 1. **Improve Battery SOC and Actions Component**
 
 **Impact**: Medium-High | **Effort**: High | **Dependencies**: Backend cost calculations
 
@@ -313,11 +292,6 @@ But at noon every day we get tomorrows schedule. We could use this information t
 - Optimization decision logs with reasoning export
 - Integration with external analytics tools (Grafana, etc.)
 
-### 15. Consolidate HourlyData and HourlyEvent
-
-Why cant they be the same?
-
----
 
 ## 🔧 **TECHNICAL DEBT**
 

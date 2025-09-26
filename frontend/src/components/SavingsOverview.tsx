@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Zap } from 'lucide-react';
 import api from '../lib/api';
+import { FormattedValue } from '../types';
+import FormattedValueComponent from './FormattedValue';
+import { DashboardSummary, DashboardHourlyData } from '../api/scheduleApi';
 
 type SavingsOverviewProps = Record<string, never>
 
@@ -8,27 +11,52 @@ interface DashboardResponse {
   currentHour: number;
   totalDailySavings: number;
   batteryCapacity?: number;
-  hourlyData: Array<{
-    hour: number;
-    isActual?: boolean;
-    dataSource?: string;
-    homeConsumption: number;
-    solarProduction: number;
-    gridImported: number;
-    gridExported: number;
-    batteryCharged: number;
-    batteryDischarged: number;
-    batterySocEnd: number;
-    buyPrice: number;
-    hourlyCost: number;
-    hourlySavings: number;
-  }>;
+  summary?: DashboardSummary;
+  hourlyData: DashboardHourlyData[];
 }
 
 export const SavingsOverview: React.FC<SavingsOverviewProps> = () => {
   const [dashboardData, setDashboardData] = useState<DashboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Helper function to get numeric value from FormattedValue objects (for calculations)
+  const getNumericValue = (field: any) => {
+    if (typeof field === 'object' && field?.value !== undefined) {
+      return field.value;
+    }
+    return field || 0;
+  };
+
+  // Helper function to get formatted text from FormattedValue objects (for display)
+  const getFormattedText = (field: any) => {
+    if (typeof field === 'object' && field?.text !== undefined) {
+      return field.text;
+    }
+    // Fallback for legacy or raw numeric values
+    if (typeof field === 'number') {
+      return field.toFixed(2);
+    }
+    return field || 'N/A';
+  };
+
+  // Helper function to get display value (without unit) from FormattedValue objects
+  const getDisplayValue = (field: any) => {
+    if (typeof field === 'object' && field?.display !== undefined) {
+      return field.display;
+    }
+    return field || 'N/A';
+  };
+
+  // Helper function to get unit from FormattedValue objects
+  const getUnit = (field: any, fallbackUnit: string = '') => {
+    if (typeof field === 'object' && field?.unit !== undefined) {
+      // Convert Wh to kWh for display
+      return field.unit === 'Wh' ? 'kWh' : field.unit;
+    }
+    // Convert Wh to kWh for fallback units too
+    return fallbackUnit === 'Wh' ? 'kWh' : fallbackUnit;
+  };
 
   useEffect(() => {
     const fetchData = async () => {
@@ -84,36 +112,10 @@ export const SavingsOverview: React.FC<SavingsOverviewProps> = () => {
     );
   }
 
-  // Calculate summary data from the hourly data using canonical field names
-  const totalHomeConsumption = dashboardData.hourlyData.reduce((sum: number, h: any) => sum + (h.homeConsumption || 0), 0);
-  const totalSolarProduction = dashboardData.hourlyData.reduce((sum: number, h: any) => sum + (h.solarProduction || 0), 0);
-  const totalGridImport = dashboardData.hourlyData.reduce((sum: number, h: any) => sum + h.gridImported, 0);
-  const totalGridExport = dashboardData.hourlyData.reduce((sum: number, h: any) => sum + h.gridExported, 0);
-  const totalBatteryCharged = dashboardData.hourlyData.reduce((sum: number, h: any) => sum + h.batteryCharged, 0);
-  const totalBatteryDischarged = dashboardData.hourlyData.reduce((sum: number, h: any) => sum + h.batteryDischarged, 0);
-  const netBatteryAction = totalBatteryCharged - totalBatteryDischarged;
-  
-  // Use the backend-calculated grid-only cost instead of manual calculation
-  const gridOnlyCost = dashboardData.hourlyData.reduce((sum: number, h: any) => sum + (h.gridOnlyCost || 0), 0);
-  
-  // Actual optimized cost
-  const optimizedCost = dashboardData.hourlyData.reduce((sum: number, h: any) => sum + h.hourlyCost, 0);
-  
-  // Calculate total savings as base cost minus optimized cost (grid-only vs optimized)
-  const totalSavings = gridOnlyCost - optimizedCost;
+  // Use backend-calculated summary data instead of frontend calculations
 
-  // Average price
-  const avgPrice = dashboardData.hourlyData.reduce((sum: number, h: any) => sum + h.buyPrice, 0) / dashboardData.hourlyData.length;
-
-  const summary = {
-    gridOnlyCost,
-    optimizedCost,
-    totalSavings: totalSavings  // Use canonical field name
-  };
-
-  // Calculate final SOE for the totals row
+  // Get final hour for SOC display
   const finalHour = dashboardData.hourlyData[dashboardData.hourlyData.length - 1];
-  const finalSOE = finalHour ? (finalHour.batterySocEnd / 100) * (dashboardData.batteryCapacity || 30) : 0;
 
   return (
     <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow overflow-x-auto">
@@ -127,27 +129,46 @@ export const SavingsOverview: React.FC<SavingsOverviewProps> = () => {
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
         <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg text-center border border-blue-200 dark:border-blue-800">
-          <div className="text-2xl font-bold text-gray-900 dark:text-white">
-            {gridOnlyCost.toFixed(2)} <span className="text-sm font-medium text-gray-600 dark:text-gray-400">SEK</span>
-          </div>
+          <FormattedValueComponent
+            data={dashboardData.summary?.gridOnlyCost || 'N/A'}
+            size="lg"
+            align="center"
+            color="default"
+            className="block"
+          />
           <div className="text-sm text-gray-600 dark:text-gray-300">Grid-Only Cost</div>
           <div className="text-xs text-gray-500 dark:text-gray-400">Without solar or battery</div>
         </div>
-        
+
         <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-lg text-center border border-green-200 dark:border-green-800">
-          <div className="text-2xl font-bold text-gray-900 dark:text-white">
-            {optimizedCost.toFixed(2)} <span className="text-sm font-medium text-gray-600 dark:text-gray-400">SEK</span>
-          </div>
+          <FormattedValueComponent
+            data={dashboardData.summary?.optimizedCost || 'N/A'}
+            size="lg"
+            align="center"
+            color="default"
+            className="block"
+          />
           <div className="text-sm text-gray-600 dark:text-gray-300">Optimized Cost</div>
           <div className="text-xs text-gray-500 dark:text-gray-400">With solar & battery</div>
         </div>
 
         <div className="bg-purple-50 dark:bg-purple-900/20 p-4 rounded-lg text-center border border-purple-200 dark:border-purple-800">
-          <div className="text-2xl font-bold text-gray-900 dark:text-white">
-            {totalSavings.toFixed(2)} <span className="text-sm font-medium text-gray-600 dark:text-gray-400">SEK</span>
-          </div>
+          <FormattedValueComponent
+            data={dashboardData.summary?.totalSavings || 'N/A'}
+            size="lg"
+            align="center"
+            color="default"
+            className="block"
+          />
           <div className="text-sm text-gray-600 dark:text-gray-300">Total Savings</div>
-          <div className="text-xs text-gray-500 dark:text-gray-400">{((totalSavings / gridOnlyCost) * 100).toFixed(1)}% saved</div>
+          <div className="text-xs text-gray-500 dark:text-gray-400">
+            <FormattedValueComponent
+              data={dashboardData.summary?.totalSavingsPercentage || 'N/A'}
+              size="sm"
+              align="center"
+              color="default"
+            />
+          </div>
         </div>
       </div>
 
@@ -229,35 +250,37 @@ export const SavingsOverview: React.FC<SavingsOverviewProps> = () => {
                 </td>
                 
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
-                  <div className="font-medium">{hour.buyPrice.toFixed(2)}</div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">SEK/kWh</div>
+                  <div className="font-medium">{getDisplayValue(hour.buyPrice)}</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(hour.buyPrice, 'SEK/kWh')}</div>
                 </td>
                 
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
-                  <div className="font-medium text-yellow-600 dark:text-yellow-400">{hour.solarProduction.toFixed(1)}</div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">kWh</div>
+                  <div className={`font-medium ${getNumericValue(hour.solarProduction) > 0 ? 'text-yellow-600 dark:text-yellow-400' : 'text-gray-400 dark:text-gray-500'}`}>
+                    {getDisplayValue(hour.solarProduction)}
+                  </div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(hour.solarProduction, 'kWh')}</div>
                 </td>
                 
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
-                  <div className="font-medium">{hour.homeConsumption.toFixed(1)}</div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">kWh</div>
+                  <div className="font-medium">{getDisplayValue(hour.homeConsumption)}</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(hour.homeConsumption, 'kWh')}</div>
                 </td>
                 
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
-                  <div className="flex items-center justify-center">
-                    {hour.batteryCharged > 0.01 && (
-                      <span className="text-sm font-medium text-green-600 dark:text-green-400 bg-green-100 dark:bg-green-900/30 px-2 py-1 rounded flex items-center">
+                  <div className="flex flex-col items-center space-y-1">
+                    {getNumericValue(hour.batteryCharged) > 0.01 && (
+                      <span className="text-sm font-medium text-blue-600 dark:text-blue-400 bg-blue-100 dark:bg-blue-900/30 px-2 py-1 rounded flex items-center">
                         <Zap className="h-3 w-3 mr-1" />
-                        +{hour.batteryCharged.toFixed(1)}
+                        +{getDisplayValue(hour.batteryCharged)}
                       </span>
                     )}
-                    {hour.batteryDischarged > 0.01 && (
-                      <span className="text-sm font-medium text-red-600 dark:text-red-400 bg-red-100 dark:bg-red-900/30 px-2 py-1 rounded flex items-center">
+                    {getNumericValue(hour.batteryDischarged) > 0.01 && (
+                      <span className="text-sm font-medium text-orange-600 dark:text-orange-400 bg-orange-100 dark:bg-orange-900/30 px-2 py-1 rounded flex items-center">
                         <Zap className="h-3 w-3 mr-1" />
-                        -{hour.batteryDischarged.toFixed(1)}
+                        -{getDisplayValue(hour.batteryDischarged)}
                       </span>
                     )}
-                    {hour.batteryCharged <= 0.01 && hour.batteryDischarged <= 0.01 && (
+                    {getNumericValue(hour.batteryCharged) <= 0.01 && getNumericValue(hour.batteryDischarged) <= 0.01 && (
                       <span className="text-sm text-gray-500 dark:text-gray-400">—</span>
                     )}
                   </div>
@@ -265,45 +288,44 @@ export const SavingsOverview: React.FC<SavingsOverviewProps> = () => {
                 </td>
                 
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
-                  <div className="font-medium">{hour.batterySocEnd.toFixed(0)}%</div>
+                  <div className="font-medium">{getFormattedText(hour.batterySocEnd)}</div>
                   <div className="text-xs text-gray-500 dark:text-gray-400">
-                    {((hour.batterySocEnd / 100) * (dashboardData.batteryCapacity || 30)).toFixed(1)} kWh
+                    {getFormattedText(hour.batterySoeEnd) || 'N/A'}
                   </div>
                 </td>
                 
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
-                  <div className={`font-medium ${hour.gridImported > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-400 dark:text-gray-500'}`}>
-                    {hour.gridImported.toFixed(1)}
+                  <div className={`font-medium ${getNumericValue(hour.gridImportNeeded) > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-400 dark:text-gray-500'}`}>
+                    {getDisplayValue(hour.gridImportNeeded)}
                   </div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">kWh</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(hour.gridImportNeeded, 'kWh')}</div>
                 </td>
                 
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
-                  <div className={`font-medium ${hour.gridExported > 0 ? 'text-green-600 dark:text-green-400' : 'text-gray-400 dark:text-gray-500'}`}>
-                    {hour.gridExported.toFixed(1)}
+                  <div className={`font-medium ${getNumericValue(hour.gridExported) > 0 ? 'text-green-600 dark:text-green-400' : 'text-gray-400 dark:text-gray-500'}`}>
+                    {getDisplayValue(hour.gridExported)}
                   </div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">kWh</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(hour.gridExported, 'kWh')}</div>
                 </td>
                 
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
                   <div className={`font-medium ${
-                    Math.abs(hour.hourlyCost) < 0.01 ? 'text-gray-900 dark:text-white' : 
-                    hour.hourlyCost > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'
+                    Math.abs(getNumericValue(hour.hourlyCost)) < 0.01 ? 'text-gray-900 dark:text-white' :
+                    getNumericValue(hour.hourlyCost) > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white'
                   }`}>
-                    {hour.hourlyCost.toFixed(2)}
+                    {getDisplayValue(hour.hourlyCost)}
                   </div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">SEK</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(hour.hourlyCost, 'SEK')}</div>
                 </td>
                 
                 <td className="px-3 py-2 whitespace-nowrap text-sm border border-gray-300 dark:border-gray-600 text-center">
                   <div className={`font-medium ${
-                    Math.abs(hour.hourlySavings) < 0.01 ? 'text-gray-900 dark:text-white' : 
-                    hour.hourlySavings > 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
+                    Math.abs(getNumericValue(hour.hourlySavings)) < 0.01 ? 'text-gray-900 dark:text-white' :
+                    getNumericValue(hour.hourlySavings) > 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
                   }`}>
-                    {Math.abs(hour.hourlySavings) < 0.01 ? '0.00' : 
-                     hour.hourlySavings > 0 ? `+${hour.hourlySavings.toFixed(2)}` : hour.hourlySavings.toFixed(2)}
+                    {getDisplayValue(hour.hourlySavings)}
                   </div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">SEK</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(hour.hourlySavings, 'SEK')}</div>
                 </td>
               </tr>
             );
@@ -317,31 +339,37 @@ export const SavingsOverview: React.FC<SavingsOverviewProps> = () => {
             
             <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
               <div className="text-xs text-gray-500 dark:text-gray-400">AVG</div>
-              <div>{avgPrice.toFixed(2)}</div>
+              <div className="font-medium">{getDisplayValue(dashboardData.summary?.averagePrice)}</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(dashboardData.summary?.averagePrice, 'SEK/kWh')}</div>
             </td>
-            
+
             <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
               <div className="font-medium text-yellow-600 dark:text-yellow-400">
-                {totalSolarProduction.toFixed(1)}
+                {getDisplayValue(dashboardData.summary?.totalSolarProduction)}
               </div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(dashboardData.summary?.totalSolarProduction, 'kWh')}</div>
             </td>
-            
+
             <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
               <div className="font-medium">
-                {totalHomeConsumption.toFixed(1)}
+                {getDisplayValue(dashboardData.summary?.totalHomeConsumption)}
               </div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(dashboardData.summary?.totalHomeConsumption, 'kWh')}</div>
             </td>
             
             <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
               <div className="flex flex-col items-center">
-                <div className="text-xs mb-1 text-blue-600 dark:text-blue-400">
-                  +{totalBatteryCharged.toFixed(1)} kWh
+                <div className="text-sm mb-1 text-blue-600 dark:text-blue-400 font-medium">
+                  +{getDisplayValue(dashboardData.summary?.totalBatteryCharged)}
                 </div>
-                <div className="text-xs text-orange-600 dark:text-orange-400">
-                  -{totalBatteryDischarged.toFixed(1)} kWh
+                <div className="text-sm text-orange-600 dark:text-orange-400 font-medium">
+                  -{getDisplayValue(dashboardData.summary?.totalBatteryDischarged)}
                 </div>
                 <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  Net: {netBatteryAction.toFixed(1)} kWh
+                  {getUnit(dashboardData.summary?.totalBatteryCharged, 'kWh')}
+                </div>
+                <div className="text-xs text-gray-500 dark:text-gray-400">
+                  Net: {getDisplayValue(dashboardData.summary?.netBatteryAction)}
                 </div>
               </div>
             </td>
@@ -349,46 +377,39 @@ export const SavingsOverview: React.FC<SavingsOverviewProps> = () => {
             <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
               <div className="text-xs text-gray-500 dark:text-gray-400">Final</div>
               <div className="font-medium">
-                {finalHour?.batterySocEnd.toFixed(0) || '-'}%
+                {finalHour ? getFormattedText(finalHour.batterySocEnd) : '-'}
               </div>
               <div className="text-xs text-gray-500 dark:text-gray-400">
-                {finalSOE.toFixed(1)} kWh
+                {getFormattedText(dashboardData.summary?.finalBatterySoe) || getFormattedText(finalHour?.batterySoeEnd) || 'N/A'}
               </div>
             </td>
             
             <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
               <div className="font-medium text-red-600 dark:text-red-400">
-                {totalGridImport.toFixed(1)}
+                {getDisplayValue(dashboardData.summary?.totalGridImported)}
               </div>
-              <div className="text-xs text-gray-500 dark:text-gray-400">kWh</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(dashboardData.summary?.totalGridImported, 'kWh')}</div>
             </td>
-            
+
             <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
               <div className="font-medium text-green-600 dark:text-green-400">
-                {totalGridExport.toFixed(1)}
+                {getDisplayValue(dashboardData.summary?.totalGridExported)}
               </div>
-              <div className="text-xs text-gray-500 dark:text-gray-400">kWh</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(dashboardData.summary?.totalGridExported, 'kWh')}</div>
             </td>
-            
+
             <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
-              <div className={`font-medium ${
-                Math.abs(summary.optimizedCost) < 0.01 ? 'text-gray-900 dark:text-white' : 
-                summary.optimizedCost > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'
-              }`}>
-                {summary.optimizedCost.toFixed(2)}
+              <div className="font-medium text-red-600 dark:text-red-400">
+                {getDisplayValue(dashboardData.summary?.optimizedCost)}
               </div>
-              <div className="text-xs text-gray-500 dark:text-gray-400">SEK</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(dashboardData.summary?.optimizedCost, 'SEK')}</div>
             </td>
-            
+
             <td className="px-3 py-2 whitespace-nowrap text-sm border border-gray-300 dark:border-gray-600 text-center">
-              <div className={`font-medium ${
-                Math.abs(summary.totalSavings) < 0.01 ? 'text-gray-900 dark:text-white' : 
-                summary.totalSavings > 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
-              }`}>
-                {Math.abs(summary.totalSavings) < 0.01 ? '0.00' : 
-                 summary.totalSavings > 0 ? `+${summary.totalSavings.toFixed(2)}` : summary.totalSavings.toFixed(2)}
+              <div className="font-medium text-green-600 dark:text-green-400">
+                {getDisplayValue(dashboardData.summary?.totalSavings)}
               </div>
-              <div className="text-xs text-gray-500 dark:text-gray-400">SEK</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(dashboardData.summary?.totalSavings, 'SEK')}</div>
             </td>
           </tr>
         </tbody>
@@ -397,8 +418,8 @@ export const SavingsOverview: React.FC<SavingsOverviewProps> = () => {
       {/* Explanation */}
       <div className="mt-4 p-3 bg-gray-50 dark:bg-gray-700 rounded-lg text-sm">
         <p className="text-gray-600 dark:text-gray-300">
-          Battery actions: <span className="bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 px-1 rounded">green = charging</span>, 
-          <span className="bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300 px-1 rounded">red = discharging</span>.
+          Battery actions: <span className="bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 px-1 rounded">blue = charging</span>,
+          <span className="bg-orange-100 dark:bg-orange-900/30 text-orange-800 dark:text-orange-300 px-1 rounded">orange = discharging</span>.
           The "Savings" column shows hourly optimization: positive (green) = money saved, 
           zero (black) = break-even, negative (red) = additional cost that hour.
         </p>

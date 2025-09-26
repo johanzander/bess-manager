@@ -77,7 +77,7 @@ const DateSelector = ({
           <div className="p-2">
             <DatePicker
               selected={selectedDate}
-              onChange={(date) => {
+              onChange={(date: Date | null) => {
                 if (date) {
                   onDateChange(date);
                   setIsOpen(false);

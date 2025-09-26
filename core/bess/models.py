@@ -53,30 +53,41 @@ class EnergyData:
 
     def _calculate_detailed_flows(self) -> None:
         """
-        Internal method: Calculate detailed energy flows using physical constraints.
+        Calculate detailed energy flows using energy accounting for hourly aggregated data.
 
-        PHYSICAL CONSTRAINTS IMPLEMENTED:
-        1. HOME LOAD PRIORITY - Electrical loads satisfied before grid export
-        2. NO SIMULTANEOUS IMPORT/EXPORT - Physical system limitation
-        3. BATTERY vs GRID PRIORITY - Typical residential inverter behavior
+        CORRECTED APPROACH FOR HOURLY DATA:
+        - Removes invalid "no simultaneous import/export" constraint
+        - Uses actual grid_imported/grid_exported totals from sensor data
+        - Distributes flows based on energy priorities and accounting principles
+        - Ensures detailed flows always sum to measured totals
         """
 
-        # Priority: Solar -> Home first, then remaining solar -> Battery/Grid
+        # Step 1: Solar allocation (home has highest priority)
         solar_to_home = min(self.solar_production, self.home_consumption)
         remaining_solar = self.solar_production - solar_to_home
         remaining_consumption = self.home_consumption - solar_to_home
 
-        # Solar allocation: battery charging takes priority over grid export
+        # Solar priority: home first, then battery charging, then grid export
         solar_to_battery = min(remaining_solar, self.battery_charged)
         solar_to_grid = max(0, remaining_solar - solar_to_battery)
 
-        # Battery discharge allocation: home consumption takes priority
+        # Step 2: Battery discharge allocation (home consumption priority)
         battery_to_home = min(self.battery_discharged, remaining_consumption)
-        battery_to_grid = max(0, self.battery_discharged - battery_to_home)
+        remaining_consumption -= battery_to_home
 
-        # Grid imports: fill remaining consumption and battery charging
-        grid_to_home = max(0, remaining_consumption - battery_to_home)
-        grid_to_battery = max(0, self.battery_charged - solar_to_battery)
+        # Remaining battery discharge goes to grid export
+        battery_to_grid = self.battery_discharged - battery_to_home
+
+        # Step 3: Grid flow allocation (uses actual measured totals)
+        # Grid import covers remaining home consumption first, then battery charging
+        grid_to_home = min(self.grid_imported, remaining_consumption)
+        grid_to_battery = self.grid_imported - grid_to_home
+
+        # Step 4: Export flow reconciliation (ensure exports match measured total)
+        calculated_export = solar_to_grid + battery_to_grid
+        if self.grid_exported != calculated_export:
+            # Adjust battery_to_grid to match actual grid export total
+            battery_to_grid = self.grid_exported - solar_to_grid
 
         # Assign calculated flows
         self.solar_to_home = solar_to_home

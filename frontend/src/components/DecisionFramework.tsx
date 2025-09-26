@@ -21,7 +21,28 @@ import {
 import { fetchDecisionIntelligence } from '../lib/decisionIntelligenceAPI';
 import { FlowPattern } from '../types/decisionFramework';
 
-// Utility functions
+// Utility functions - NO FORMATTING LOGIC, just display helpers
+const getDisplayValue = (field: any) => {
+  if (typeof field === 'object' && field?.display !== undefined) {
+    return field.display;
+  }
+  return field?.toString() || '0';
+};
+
+const getDisplayUnit = (field: any) => {
+  if (typeof field === 'object' && field?.unit !== undefined) {
+    return field.unit;
+  }
+  return '';
+};
+
+const getDisplayText = (field: any) => {
+  if (typeof field === 'object' && field?.text !== undefined) {
+    return field.text;
+  }
+  return field?.toString() || '-';
+};
+
 const getFlowIcon = (flowType: string) => {
   if (flowType.toLowerCase().includes('solar')) return Sun;
   if (flowType.toLowerCase().includes('grid')) return Grid;
@@ -48,43 +69,51 @@ const DetailedFlowPatternCard: React.FC<{ pattern: FlowPattern }> = ({ pattern }
     return 'border-l-4 border-transparent';
   };
 
-  const getValueColor = (value: number) => {
-    if (value > 0) return 'text-green-600 dark:text-green-400';
-    if (value < 0) return 'text-red-600 dark:text-red-400';
+  const getValueColor = (value: any) => {
+    const numValue = typeof value === 'object' ? value.value : value;
+    if (numValue > 0) return 'text-green-600 dark:text-green-400';
+    if (numValue < 0) return 'text-red-600 dark:text-red-400';
     return 'text-gray-600 dark:text-gray-400';
   };
 
-  const formatCurrency = (value: number) => {
-    return `${value >= 0 ? '+' : ''}${value.toFixed(2)}`;
-  };
 
   const getBatteryAction = () => {
-    const charging = pattern.flows.gridToBattery + pattern.flows.solarToBattery;
-    const discharging = pattern.flows.batteryToHome + pattern.flows.batteryToGrid;
-    
-    if (charging > 0.1 && discharging < 0.1) {
+    // Helper function to safely get numeric value
+    const getNumericValue = (field: any): number => {
+      if (!field) return 0;
+      return typeof field === 'object' ? (field.value || 0) : (field || 0);
+    };
+
+    const chargingValue = getNumericValue(pattern.flows.gridToBattery) + getNumericValue(pattern.flows.solarToBattery);
+    const dischargingValue = getNumericValue(pattern.flows.batteryToHome) + getNumericValue(pattern.flows.batteryToGrid);
+
+    const charging = { value: chargingValue, display: chargingValue.toFixed(1), unit: 'kWh', text: `${chargingValue.toFixed(1)} kWh` };
+    const discharging = { value: dischargingValue, display: dischargingValue.toFixed(1), unit: 'kWh', text: `${dischargingValue.toFixed(1)} kWh` };
+
+    if (chargingValue > 0.1 && dischargingValue < 0.1) {
       return {
         action: 'Charge',
         amount: charging,
         icon: Battery,
         color: 'text-blue-600 dark:text-blue-400',
-        description: `+${charging.toFixed(1)} kWh`
+        description: getDisplayText(charging)
       };
-    } else if (discharging > 0.1 && charging < 0.1) {
+    } else if (dischargingValue > 0.1 && chargingValue < 0.1) {
       return {
         action: 'Discharge',
         amount: discharging,
         icon: Battery,
         color: 'text-orange-600 dark:text-orange-400',
-        description: `-${discharging.toFixed(1)} kWh`
+        description: getDisplayText(discharging)
       };
-    } else if (charging > 0.1 && discharging > 0.1) {
+    } else if (chargingValue > 0.1 && dischargingValue > 0.1) {
+      const mixedAmount = { value: chargingValue + dischargingValue, display: (chargingValue + dischargingValue).toFixed(1), unit: 'kWh', text: `${(chargingValue + dischargingValue).toFixed(1)} kWh` };
       return {
         action: 'Mixed',
-        amount: charging + discharging,
+        amount: mixedAmount,
         icon: Activity,
         color: 'text-purple-600 dark:text-purple-400',
-        description: `+${charging.toFixed(1)} / -${discharging.toFixed(1)} kWh`
+        description: `${getDisplayText(charging)} / ${getDisplayText(discharging)}`
       };
     } else {
       return {
@@ -98,20 +127,26 @@ const DetailedFlowPatternCard: React.FC<{ pattern: FlowPattern }> = ({ pattern }
   };
 
   const getEnergyFlowsSummary = () => {
+    // Helper function to safely get numeric value
+    const getNumericValue = (field: any): number => {
+      if (!field) return 0;
+      return typeof field === 'object' ? (field.value || 0) : (field || 0);
+    };
+
     const flows = [];
-    if (pattern.flows.solarToHome > 0.1) flows.push(`Solar→Home: ${pattern.flows.solarToHome.toFixed(1)}`);
-    if (pattern.flows.solarToBattery > 0.1) flows.push(`Solar→Battery: ${pattern.flows.solarToBattery.toFixed(1)}`);
-    if (pattern.flows.solarToGrid > 0.1) flows.push(`Solar→Grid: ${pattern.flows.solarToGrid.toFixed(1)}`);
-    if (pattern.flows.gridToHome > 0.1) flows.push(`Grid→Home: ${pattern.flows.gridToHome.toFixed(1)}`);
-    if (pattern.flows.gridToBattery > 0.1) flows.push(`Grid→Battery: ${pattern.flows.gridToBattery.toFixed(1)}`);
-    if (pattern.flows.batteryToHome > 0.1) flows.push(`Battery→Home: ${pattern.flows.batteryToHome.toFixed(1)}`);
-    if (pattern.flows.batteryToGrid > 0.1) flows.push(`Battery→Grid: ${pattern.flows.batteryToGrid.toFixed(1)}`);
-    
+    if (getNumericValue(pattern.flows.solarToHome) > 0.1) flows.push(`Solar→Home: ${getDisplayText(pattern.flows.solarToHome)}`);
+    if (getNumericValue(pattern.flows.solarToBattery) > 0.1) flows.push(`Solar→Battery: ${getDisplayText(pattern.flows.solarToBattery)}`);
+    if (getNumericValue(pattern.flows.solarToGrid) > 0.1) flows.push(`Solar→Grid: ${getDisplayText(pattern.flows.solarToGrid)}`);
+    if (getNumericValue(pattern.flows.gridToHome) > 0.1) flows.push(`Grid→Home: ${getDisplayText(pattern.flows.gridToHome)}`);
+    if (getNumericValue(pattern.flows.gridToBattery) > 0.1) flows.push(`Grid→Battery: ${getDisplayText(pattern.flows.gridToBattery)}`);
+    if (getNumericValue(pattern.flows.batteryToHome) > 0.1) flows.push(`Battery→Home: ${getDisplayText(pattern.flows.batteryToHome)}`);
+    if (getNumericValue(pattern.flows.batteryToGrid) > 0.1) flows.push(`Battery→Grid: ${getDisplayText(pattern.flows.batteryToGrid)}`);
+
     return flows.length > 0 ? flows.join(', ') : 'No significant flows';
   };
 
   const significantFlows = Object.entries(pattern.flows)
-    .filter(([_, value]) => Math.abs(value) >= 0.1)
+    .filter(([_, value]) => Math.abs(typeof value === 'object' ? value.value : value) >= 0.1)
     .map(([key, value]) => {
       // Convert the camelCase key to a display-friendly format
       const displayKey = key
@@ -144,7 +179,10 @@ const DetailedFlowPatternCard: React.FC<{ pattern: FlowPattern }> = ({ pattern }
                   {pattern.hour.toString().padStart(2, '0')}:00
                 </div>
                 <div className="text-xs text-gray-500 dark:text-gray-400">
-                  {pattern.electricityPrice.toFixed(2)} SEK/kWh
+                    <span>
+                      <span className="font-medium">{getDisplayValue(pattern.electricityPrice)}</span>
+                      <span className="text-xs ml-1 opacity-70">{getDisplayUnit(pattern.electricityPrice)}</span>
+                    </span>
                 </div>
               </div>
             </div>
@@ -196,21 +234,29 @@ const DetailedFlowPatternCard: React.FC<{ pattern: FlowPattern }> = ({ pattern }
             <div className="flex items-center justify-between">
               <div className="text-right flex-1">
                 <div className={`text-lg font-bold ${getValueColor(pattern.netStrategyValue)}`}>
-                  {formatCurrency(pattern.netStrategyValue)}
-                  <span className="text-xs text-gray-500 dark:text-gray-400 ml-1">SEK</span>
+                    <span>
+                      <span>{getDisplayValue(pattern.netStrategyValue)}</span>
+                      <span className="text-sm font-normal ml-1 opacity-70">{getDisplayUnit(pattern.netStrategyValue)}</span>
+                    </span>
                 </div>
-                
+
                 <div className="flex justify-end space-x-3 mt-1">
                   <div className="text-center">
                     <div className="text-xs text-gray-500 dark:text-gray-400">Now</div>
                     <div className={`text-xs font-medium ${getValueColor(pattern.immediateTotalValue)}`}>
-                      {formatCurrency(pattern.immediateTotalValue)}
+                        <span>
+                          <span>{getDisplayValue(pattern.immediateTotalValue)}</span>
+                          <span className="text-xs ml-1 opacity-70">{getDisplayUnit(pattern.immediateTotalValue)}</span>
+                        </span>
                     </div>
                   </div>
                   <div className="text-center">
                     <div className="text-xs text-gray-500 dark:text-gray-400">Future</div>
                     <div className={`text-xs font-medium ${getValueColor(pattern.futureOpportunity.expectedValue)}`}>
-                      {formatCurrency(pattern.futureOpportunity.expectedValue)}
+                        <span>
+                          <span>{getDisplayValue(pattern.futureOpportunity.expectedValue)}</span>
+                          <span className="text-xs ml-1 opacity-70">{getDisplayUnit(pattern.futureOpportunity.expectedValue)}</span>
+                        </span>
                     </div>
                   </div>
                 </div>
@@ -280,13 +326,18 @@ const DetailedFlowPatternCard: React.FC<{ pattern: FlowPattern }> = ({ pattern }
                   </div>
                   
                   <div className="col-span-2 py-2 border-t border-gray-200 dark:border-gray-600 font-mono text-xs text-gray-600 dark:text-gray-400">
-                    {Math.abs(flow.value).toFixed(1)} kWh
+                      <span>
+                        <span className="font-medium">{getDisplayValue(flow.value)}</span>
+                        <span className="ml-1 opacity-70">{getDisplayUnit(flow.value)}</span>
+                      </span>
                   </div>
                   
                   <div className="col-span-3 py-2 border-t border-gray-200 dark:border-gray-600 text-right">
                     <div className={`font-medium ${getValueColor(flow.economicValue)}`}>
-                      {formatCurrency(flow.economicValue)}
-                      <span className="text-xs text-gray-500 dark:text-gray-400 ml-1">SEK</span>
+                        <span>
+                          <span>{getDisplayValue(flow.economicValue)}</span>
+                          <span className="text-xs ml-1 opacity-70">{getDisplayUnit(flow.economicValue)}</span>
+                        </span>
                     </div>
                   </div>
                 </React.Fragment>
@@ -437,9 +488,16 @@ const DecisionFramework: React.FC = () => {
     return true;
   });
 
-  const totalNetValue = filteredData.reduce((sum, pattern) => sum + pattern.netStrategyValue, 0);
-  const bestDecision = filteredData.reduce((best, current) => 
-    current.netStrategyValue > best.netStrategyValue ? current : best, 
+  // Helper function to safely get numeric value from strategy value
+  const getStrategyValue = (field: any): number => {
+    if (!field) return 0;
+    return typeof field === 'object' ? (field.value || 0) : (field || 0);
+  };
+
+  const totalNetValueNum = filteredData.reduce((sum, pattern) => sum + getStrategyValue(pattern.netStrategyValue), 0);
+  const totalNetValue = { value: totalNetValueNum, display: totalNetValueNum.toFixed(2), unit: 'SEK', text: `${totalNetValueNum.toFixed(2)} SEK` };
+  const bestDecision = filteredData.reduce((best, current) =>
+    getStrategyValue(current.netStrategyValue) > getStrategyValue(best.netStrategyValue) ? current : best,
     filteredData[0]
   );
 
@@ -476,8 +534,9 @@ const DecisionFramework: React.FC = () => {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-gray-600 dark:text-gray-400">Total Net Strategy Value</p>
-              <p className={`text-xl font-bold ${totalNetValue >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                {totalNetValue >= 0 ? '+' : ''}{totalNetValue.toFixed(2)} SEK
+              <p className={`text-xl font-bold ${getDisplayValue(totalNetValue) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                <span>{getDisplayValue(totalNetValue)}</span>
+                <span className="text-sm font-normal ml-1 opacity-70">{getDisplayUnit(totalNetValue)}</span>
               </p>
             </div>
             <DollarSign className="h-6 w-6 text-green-600 dark:text-green-400" />
@@ -492,7 +551,12 @@ const DecisionFramework: React.FC = () => {
                 {bestDecision?.hour.toString().padStart(2, '0')}:00
               </p>
               <p className="text-sm text-green-600 dark:text-green-400">
-                +{bestDecision?.netStrategyValue.toFixed(2)} SEK
+                {bestDecision ? (
+                  <span>
+                    <span>+{getDisplayValue(bestDecision.netStrategyValue)}</span>
+                    <span className="text-xs ml-1 opacity-70">{getDisplayUnit(bestDecision.netStrategyValue)}</span>
+                  </span>
+                ) : 'N/A'}
               </p>
             </div>
             <TrendingUp className="h-6 w-6 text-blue-600 dark:text-blue-400" />

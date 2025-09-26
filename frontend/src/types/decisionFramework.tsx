@@ -28,7 +28,7 @@ export interface FlowPattern {
   futureOpportunity: FutureOpportunity;
   economicChain: string;
   netStrategyValue: number;
-  riskFactors: string[];
+  riskFactors?: string[];
   electricityPrice: number;
   isCurrentHour: boolean;
   isActual: boolean;

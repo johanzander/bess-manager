@@ -5,6 +5,7 @@ import api from '../lib/api';
 interface FlowItem {
   label: string;
   value: number;
+  valueFormatted: string;
   unit: string;
   direction: 'to' | 'from';
   icon: React.ElementType;
@@ -13,13 +14,16 @@ interface FlowItem {
 interface SectionItem {
   label: string;
   value: number;
+  valueFormatted: string;
   percentage: number;
+  percentageFormatted: string;
   icon: React.ElementType;
 }
 
 interface FlowSection {
   title: string;
   total: number;
+  totalFormatted: string;
   unit: string;
   color: 'blue' | 'green' | 'red' | 'yellow' | 'purple';
   items: SectionItem[];
@@ -39,37 +43,59 @@ interface EnergyFlowCard {
 interface EnergyFlowData {
   solarGeneration?: {
     solarProduction: number;
+    solarProductionFormatted: string;
     toHome: number;
+    toHomeFormatted: string;
     toGrid: number;
+    toGridFormatted: string;
     toBattery: number;
+    toBatteryFormatted: string;
   };
   homeConsumption?: {
     homeConsumption: number;
+    homeConsumptionFormatted: string;
     fromSolar: number;
+    fromSolarFormatted: string;
     fromGrid: number;
+    fromGridFormatted: string;
     fromBattery: number;
+    fromBatteryFormatted: string;
   };
   gridFlow?: {
     importEnergy: number;
+    importEnergyFormatted: string;
     exportEnergy: number;
+    exportEnergyFormatted: string;
     gridToHome: number;
+    gridToHomeFormatted: string;
     gridToBattery: number;
+    gridToBatteryFormatted: string;
     solarToGrid: number;
+    solarToGridFormatted: string;
     batteryToGrid: number;
+    batteryToGridFormatted: string;
   };
   batteryFlow?: {
     chargedToday: number;
+    chargedTodayFormatted: string;
     dischargedToday: number;
+    dischargedTodayFormatted: string;
     solarToBattery: number;
+    solarToBatteryFormatted: string;
     gridToBattery: number;
+    gridToBatteryFormatted: string;
     batteryToHome: number;
+    batteryToHomeFormatted: string;
     batteryToGrid: number;
+    batteryToGridFormatted: string;
   };
   efficiency?: {
     solarUtilization: number;
     gridIndependence: number;
     batteryEfficiency: number;
   };
+  // Store API summary data for percentage formatting
+  apiSummary?: Record<string, any>;
 }
 
 const colorClasses = {
@@ -97,7 +123,7 @@ const EnergyFlowCard: React.FC<{ card: EnergyFlowCard }> = ({ card }) => {
       
       <div className="mb-4">
         <div className="text-2xl font-bold text-gray-900 dark:text-white">
-          {typeof card.keyValue === 'number' ? `${card.keyValue.toFixed(1)} ${card.keyUnit}` : `${card.keyValue} ${card.keyUnit}`}
+          {card.keyValue} {card.keyUnit}
         </div>
       </div>
 
@@ -112,7 +138,7 @@ const EnergyFlowCard: React.FC<{ card: EnergyFlowCard }> = ({ card }) => {
                 </span>
               </div>
               <span className="font-medium text-gray-900 dark:text-gray-100">
-                {flow.value.toFixed(1)} {flow.unit}
+                {flow.valueFormatted}
               </span>
             </div>
           ))}
@@ -128,7 +154,7 @@ const EnergyFlowCard: React.FC<{ card: EnergyFlowCard }> = ({ card }) => {
                   {section.title}
                 </span>
                 <span className="text-sm font-bold text-gray-900 dark:text-gray-100">
-                  {section.total.toFixed(1)} {section.unit}
+                  {section.totalFormatted}
                 </span>
               </div>
               <div className="space-y-1">
@@ -140,10 +166,10 @@ const EnergyFlowCard: React.FC<{ card: EnergyFlowCard }> = ({ card }) => {
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="text-gray-500 dark:text-gray-400">
-                        {item.percentage.toFixed(0)}%
+                        {item.percentageFormatted}%
                       </span>
                       <span className="font-medium text-gray-900 dark:text-gray-100">
-                        {item.value.toFixed(1)}
+                        {item.valueFormatted}
                       </span>
                     </div>
                   </div>
@@ -172,15 +198,24 @@ const EnergyFlowCards: React.FC<EnergyFlowCardsProps> = ({ className = "" }) => 
         setIsLoading(true);
         const response = await api.get('/api/dashboard');
         const apiData = response.data;
-        
+
+        // Validate API response structure
+        if (!apiData || typeof apiData !== 'object' || apiData.detail) {
+          throw new Error(`Invalid dashboard data: ${apiData?.detail || 'Unknown error'}`);
+        }
+
         console.log('=== ENERGYFLOWCARDS DEBUG ===');
         console.log('Full API Response:', apiData);
         console.log('apiData.totals:', apiData.totals);
+        console.log('apiData.summary:', apiData.summary);
         if (apiData.totals) {
           console.log('Available totals keys:', Object.keys(apiData.totals));
         }
+        if (apiData.summary) {
+          console.log('Available summary keys:', Object.keys(apiData.summary));
+        }
 
-        // Use only canonical camelCase field names
+        // Use only canonical camelCase field names from totals
         const totals = {
           solarProduction: apiData.totals?.totalSolarProduction || 0,
           homeConsumption: apiData.totals?.totalHomeConsumption || 0,
@@ -200,6 +235,7 @@ const EnergyFlowCards: React.FC<EnergyFlowCardsProps> = ({ className = "" }) => 
           batteryToHome: apiData.totals?.totalBatteryToHome || 0,
           batteryToGrid: apiData.totals?.totalBatteryToGrid || 0
         };
+
         
         console.log('✅ Final totals used:', totals);
         console.log('✅ Battery operations check:', {
@@ -214,41 +250,60 @@ const EnergyFlowCards: React.FC<EnergyFlowCardsProps> = ({ className = "" }) => 
 
         const transformedData: EnergyFlowData = {
           solarGeneration: {
-            solarProduction: totals.solarProduction,  
+            solarProduction: totals.solarProduction,
+            solarProductionFormatted: apiData.summary?.totalSolarProduction?.text,
             toHome: totals.solarToHome,
+            toHomeFormatted: apiData.summary?.totalSolarToHome?.text,
             toGrid: totals.solarToGrid,
-            toBattery: totals.solarToBattery
+            toGridFormatted: apiData.summary?.totalSolarToGrid?.text,
+            toBattery: totals.solarToBattery,
+            toBatteryFormatted: apiData.summary?.totalSolarToBattery?.text
           },
           homeConsumption: {
-            homeConsumption: totals.homeConsumption,  
+            homeConsumption: totals.homeConsumption,
+            homeConsumptionFormatted: apiData.summary?.totalHomeConsumption?.text,
             fromSolar: totals.solarToHome,
+            fromSolarFormatted: apiData.summary?.totalSolarToHome?.text,
             fromGrid: totals.gridToHome,
-            fromBattery: totals.batteryToHome
+            fromGridFormatted: apiData.summary?.totalGridToHome?.text,
+            fromBattery: totals.batteryToHome,
+            fromBatteryFormatted: apiData.summary?.totalBatteryToHome?.text
           },
           gridFlow: {
             importEnergy: totals.gridImport,
+            importEnergyFormatted: apiData.summary?.totalGridImported?.text,
             exportEnergy: totals.gridExport,
+            exportEnergyFormatted: apiData.summary?.totalGridExported?.text,
             gridToHome: totals.gridToHome,
+            gridToHomeFormatted: apiData.summary?.totalGridToHome?.display,
             gridToBattery: totals.gridToBattery,
+            gridToBatteryFormatted: apiData.summary?.totalGridToBattery?.display,
             solarToGrid: totals.solarToGrid,
-            batteryToGrid: totals.batteryToGrid
+            solarToGridFormatted: apiData.summary?.totalSolarToGrid?.display,
+            batteryToGrid: totals.batteryToGrid,
+            batteryToGridFormatted: apiData.summary?.totalBatteryToGrid?.display
           },
           batteryFlow: {
             chargedToday: totals.batteryCharged,
+            chargedTodayFormatted: apiData.summary?.totalBatteryCharged?.text,
             dischargedToday: totals.batteryDischarged,
+            dischargedTodayFormatted: apiData.summary?.totalBatteryDischarged?.text,
             solarToBattery: totals.solarToBattery,
+            solarToBatteryFormatted: apiData.summary?.totalSolarToBattery?.display,
             gridToBattery: totals.gridToBattery,
+            gridToBatteryFormatted: apiData.summary?.totalGridToBattery?.display,
             batteryToHome: totals.batteryToHome,
-            batteryToGrid: totals.batteryToGrid
+            batteryToHomeFormatted: apiData.summary?.totalBatteryToHome?.display,
+            batteryToGrid: totals.batteryToGrid,
+            batteryToGridFormatted: apiData.summary?.totalBatteryToGrid?.display
           },
           efficiency: {
-            solarUtilization: totals.solarProduction > 0 ? 
-              ((totals.solarToHome + totals.solarToBattery) / totals.solarProduction) * 100 : 0,
-            gridIndependence: totals.homeConsumption > 0 ? 
-              ((totals.solarToHome + totals.batteryToHome) / totals.homeConsumption) * 100 : 0,
-            batteryEfficiency: totals.batteryCharged > 0 ? 
-              (totals.batteryDischarged / totals.batteryCharged) * 100 : 0
-          }
+            solarUtilization: 0,  // Not used in UI, backend should provide if needed
+            gridIndependence: 0,  // Not used in UI, backend should provide if needed
+            batteryEfficiency: 0  // Not used in UI, backend should provide if needed
+          },
+          // Store the API summary data for use in cards
+          apiSummary: apiData.summary || {}
         };
         
         setEnergyData(transformedData);
@@ -297,58 +352,64 @@ const EnergyFlowCards: React.FC<EnergyFlowCardsProps> = ({ className = "" }) => 
       icon: Sun,
       color: "yellow" as const,
       keyMetric: "Total Production",
-      keyValue: energyData.solarGeneration?.solarProduction || 0,
-      keyUnit: "kWh",
+      keyValue: energyData.solarGeneration?.solarProductionFormatted,
+      keyUnit: "",
       flows: [
         {
           label: "Home",
           value: energyData.solarGeneration?.toHome || 0,
-          unit: "kWh",
+          valueFormatted: energyData.solarGeneration?.toHomeFormatted,
+          unit: "",
           direction: "to" as const,
           icon: Home
         },
         {
           label: "Grid",
           value: energyData.solarGeneration?.toGrid || 0,
-          unit: "kWh", 
+          valueFormatted: energyData.solarGeneration?.toGridFormatted,
+          unit: "", 
           direction: "to" as const,
           icon: Grid
         },
         {
           label: "Battery",
           value: energyData.solarGeneration?.toBattery || 0,
-          unit: "kWh",
+          valueFormatted: energyData.solarGeneration?.toBatteryFormatted,
+          unit: "",
           direction: "to" as const,
           icon: Battery
         }
       ]
     },
     {
-      title: "Home Consumption", 
+      title: "Home Consumption",
       icon: Home,
       color: "blue" as const,
       keyMetric: "Total Consumption",
-      keyValue: energyData.homeConsumption?.homeConsumption || 0,
-      keyUnit: "kWh",
+      keyValue: energyData.homeConsumption?.homeConsumptionFormatted,
+      keyUnit: "",
       flows: [
         {
           label: "Solar",
           value: energyData.homeConsumption?.fromSolar || 0,
-          unit: "kWh",
+          valueFormatted: energyData.homeConsumption?.fromSolarFormatted,
+          unit: "",
           direction: "from" as const,
           icon: Sun
         },
         {
           label: "Grid",
           value: energyData.homeConsumption?.fromGrid || 0,
-          unit: "kWh",
+          valueFormatted: energyData.homeConsumption?.fromGridFormatted,
+          unit: "",
           direction: "from" as const,
           icon: Grid
         },
         {
           label: "Battery",
           value: energyData.homeConsumption?.fromBattery || 0,
-          unit: "kWh",
+          valueFormatted: energyData.homeConsumption?.fromBatteryFormatted,
+          unit: "",
           direction: "from" as const,
           icon: Battery
         }
@@ -359,28 +420,31 @@ const EnergyFlowCards: React.FC<EnergyFlowCardsProps> = ({ className = "" }) => 
       icon: Grid,
       color: "purple" as const,
       keyMetric: "Import / Export",
-      keyValue: `${(energyData.gridFlow?.importEnergy || 0).toFixed(1)} / ${(energyData.gridFlow?.exportEnergy || 0).toFixed(1)}`,
-      keyUnit: "kWh",
+      keyValue: `${energyData.gridFlow?.importEnergyFormatted} / ${energyData.gridFlow?.exportEnergyFormatted}`,
+      keyUnit: "",
       // Special Grid sections
       sections: [
         {
           title: "Import",
           total: energyData.gridFlow?.importEnergy || 0,
-          unit: "kWh",
+          totalFormatted: energyData.gridFlow?.importEnergyFormatted,
+          unit: "",
           color: "blue" as const,
           items: [
             {
               label: "To Home",
               value: energyData.gridFlow?.gridToHome || 0,
-              percentage: (energyData.gridFlow?.importEnergy || 0) > 0 ? 
-                ((energyData.gridFlow?.gridToHome || 0) / (energyData.gridFlow?.importEnergy || 1)) * 100 : 0,
+              valueFormatted: energyData.gridFlow?.gridToHomeFormatted,
+              percentage: energyData.apiSummary?.gridToHomePercentage?.value || 0,
+              percentageFormatted: energyData.apiSummary?.gridToHomePercentage?.display,
               icon: Home
             },
             {
               label: "To Battery",
               value: energyData.gridFlow?.gridToBattery || 0,
-              percentage: (energyData.gridFlow?.importEnergy || 0) > 0 ? 
-                ((energyData.gridFlow?.gridToBattery || 0) / (energyData.gridFlow?.importEnergy || 1)) * 100 : 0,
+              valueFormatted: energyData.gridFlow?.gridToBatteryFormatted,
+              percentage: energyData.apiSummary?.gridToBatteryPercentage?.value || 0,
+              percentageFormatted: energyData.apiSummary?.gridToBatteryPercentage?.display,
               icon: Battery
             }
           ]
@@ -388,21 +452,24 @@ const EnergyFlowCards: React.FC<EnergyFlowCardsProps> = ({ className = "" }) => 
         {
           title: "Export",
           total: energyData.gridFlow?.exportEnergy || 0,
-          unit: "kWh",
+          totalFormatted: energyData.gridFlow?.exportEnergyFormatted,
+          unit: "",
           color: "green" as const,
           items: [
             {
               label: "From Solar",
               value: energyData.gridFlow?.solarToGrid || 0,
-              percentage: (energyData.gridFlow?.exportEnergy || 0) > 0 ? 
-                ((energyData.gridFlow?.solarToGrid || 0) / (energyData.gridFlow?.exportEnergy || 1)) * 100 : 0,
+              valueFormatted: energyData.gridFlow?.solarToGridFormatted,
+              percentage: energyData.apiSummary?.solarToGridPercentage?.value || 0,
+              percentageFormatted: energyData.apiSummary?.solarToGridPercentage?.display,
               icon: Sun
             },
             {
               label: "From Battery",
               value: energyData.gridFlow?.batteryToGrid || 0,
-              percentage: (energyData.gridFlow?.exportEnergy || 0) > 0 ? 
-                ((energyData.gridFlow?.batteryToGrid || 0) / (energyData.gridFlow?.exportEnergy || 1)) * 100 : 0,
+              valueFormatted: energyData.gridFlow?.batteryToGridFormatted,
+              percentage: energyData.apiSummary?.batteryToGridPercentage?.value || 0,
+              percentageFormatted: energyData.apiSummary?.batteryToGridPercentage?.display,
               icon: Battery
             }
           ]
@@ -414,28 +481,31 @@ const EnergyFlowCards: React.FC<EnergyFlowCardsProps> = ({ className = "" }) => 
       icon: Battery,
       color: "green" as const,
       keyMetric: "Charged / Discharged",
-      keyValue: `${(energyData.batteryFlow?.chargedToday || 0).toFixed(1)} / ${(energyData.batteryFlow?.dischargedToday || 0).toFixed(1)}`,
-      keyUnit: "kWh",
+      keyValue: `${energyData.batteryFlow?.chargedTodayFormatted} / ${energyData.batteryFlow?.dischargedTodayFormatted}`,
+      keyUnit: "",
       // Special Battery sections
       sections: [
         {
           title: "Charged",
           total: energyData.batteryFlow?.chargedToday || 0,
-          unit: "kWh",
+          totalFormatted: energyData.batteryFlow?.chargedTodayFormatted,
+          unit: "",
           color: "green" as const,
           items: [
             {
               label: "From Solar",
               value: energyData.batteryFlow?.solarToBattery || 0,
-              percentage: (energyData.batteryFlow?.chargedToday || 0) > 0 ? 
-                ((energyData.batteryFlow?.solarToBattery || 0) / (energyData.batteryFlow?.chargedToday || 1)) * 100 : 0,
+              valueFormatted: energyData.batteryFlow?.solarToBatteryFormatted,
+              percentage: energyData.apiSummary?.solarToBatteryPercentage?.value || 0,
+              percentageFormatted: energyData.apiSummary?.solarToBatteryPercentage?.display,
               icon: Sun
             },
             {
               label: "From Grid",
               value: energyData.batteryFlow?.gridToBattery || 0,
-              percentage: (energyData.batteryFlow?.chargedToday || 0) > 0 ? 
-                ((energyData.batteryFlow?.gridToBattery || 0) / (energyData.batteryFlow?.chargedToday || 1)) * 100 : 0,
+              valueFormatted: energyData.batteryFlow?.gridToBatteryFormatted,
+              percentage: energyData.apiSummary?.gridToBatteryChargedPercentage?.value || 0,
+              percentageFormatted: energyData.apiSummary?.gridToBatteryChargedPercentage?.display,
               icon: Grid
             }
           ]
@@ -443,21 +513,24 @@ const EnergyFlowCards: React.FC<EnergyFlowCardsProps> = ({ className = "" }) => 
         {
           title: "Discharged",
           total: energyData.batteryFlow?.dischargedToday || 0,
-          unit: "kWh",
+          totalFormatted: energyData.batteryFlow?.dischargedTodayFormatted,
+          unit: "",
           color: "red" as const,
           items: [
             {
               label: "To Home",
               value: energyData.batteryFlow?.batteryToHome || 0,
-              percentage: (energyData.batteryFlow?.dischargedToday || 0) > 0 ? 
-                ((energyData.batteryFlow?.batteryToHome || 0) / (energyData.batteryFlow?.dischargedToday || 1)) * 100 : 0,
+              valueFormatted: energyData.batteryFlow?.batteryToHomeFormatted,
+              percentage: energyData.apiSummary?.batteryToHomePercentage?.value || 0,
+              percentageFormatted: energyData.apiSummary?.batteryToHomePercentage?.display,
               icon: Home
             },
             {
               label: "To Grid",
               value: energyData.batteryFlow?.batteryToGrid || 0,
-              percentage: (energyData.batteryFlow?.dischargedToday || 0) > 0 ? 
-                ((energyData.batteryFlow?.batteryToGrid || 0) / (energyData.batteryFlow?.dischargedToday || 1)) * 100 : 0,
+              valueFormatted: energyData.batteryFlow?.batteryToGridFormatted,
+              percentage: energyData.apiSummary?.batteryToGridDischargedPercentage?.value || 0,
+              percentageFormatted: energyData.apiSummary?.batteryToGridDischargedPercentage?.display,
               icon: Grid
             }
           ]

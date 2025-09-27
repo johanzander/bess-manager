@@ -382,6 +382,8 @@ def _calculate_reward(
         import_cost=import_cost,
         export_revenue=export_revenue,
         battery_wear_cost=battery_wear_cost,
+        buy_price=current_buy_price,
+        sell_price=current_sell_price,
     )
 
     # ============================================================================

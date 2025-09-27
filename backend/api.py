@@ -156,9 +156,8 @@ async def get_dashboard_data(date: str = Query(None)):
                 intent: data.get("count", 0) for intent, data in strategic_summary_data.items()
             }
         except Exception as e:
-            logger.warning(f"Failed to get strategic intent summary: {e}")
-            # Fallback to empty summary
-            strategic_summary = {}
+            logger.error(f"Failed to get strategic intent summary: {e}")
+            raise ValueError(f"Strategic intent summary is required but failed to load: {e}") from e
 
         # Create the dataclass response using pre-created hourly instances
         response = APIDashboardResponse.from_dashboard_data(
@@ -222,48 +221,25 @@ def convert_real_data_to_mock_format(hourly_data_list, current_hour):
             "battery_to_grid": create_formatted_value(energy.battery_to_grid, "energy_kwh_only"),
         }
 
-        # Create immediate_flow_values matching mock format (economic value of each flow)
+        # Create immediate_flow_values using enhanced decision intelligence data
         immediate_flow_values = {}
 
-        # Add flow values only for significant flows (> 0.1 kWh) with FormattedValue objects
-        if energy.solar_to_home > 0.1:
-            immediate_flow_values["solar_to_home"] = create_formatted_value(
-                energy.solar_to_home * economic.buy_price, "currency"
-            )
+        # Enhanced decision intelligence should always provide detailed flow values
+        if not decision.detailed_flow_values:
+            raise ValueError(f"Missing detailed_flow_values for hour {hourly_data.hour}. Enhanced decision intelligence should always provide this data.")
 
-        if energy.grid_to_home > 0.1:
-            immediate_flow_values["grid_to_home"] = create_formatted_value(
-                -(energy.grid_to_home * economic.buy_price), "currency"
-            )
-
-        if energy.grid_to_battery > 0.1:
-            immediate_flow_values["grid_to_battery"] = create_formatted_value(
-                -(energy.grid_to_battery * economic.buy_price), "currency"
-            )
-
-        if energy.battery_to_home > 0.1:
-            immediate_flow_values["battery_to_home"] = create_formatted_value(
-                energy.battery_to_home * economic.buy_price, "currency"
-            )
-
-        if energy.battery_to_grid > 0.1:
-            immediate_flow_values["battery_to_grid"] = create_formatted_value(
-                energy.battery_to_grid * economic.sell_price, "currency"
-            )
-
-        if energy.solar_to_grid > 0.1:
-            immediate_flow_values["solar_to_grid"] = create_formatted_value(
-                energy.solar_to_grid * economic.sell_price, "currency"
-            )
+        # Use the advanced flow value calculations from decision intelligence
+        for flow_name, flow_value in decision.detailed_flow_values.items():
+            immediate_flow_values[flow_name] = create_formatted_value(flow_value, "currency")
 
         # Calculate immediate_total_value as sum of all flow values (extract numeric values)
         total_value = sum(fv.value for fv in immediate_flow_values.values())
         immediate_total_value = create_formatted_value(total_value, "currency")
 
-        # Create future_opportunity with FormattedValue objects
+        # Create future_opportunity with enhanced data
         future_opportunity = {
             "description": f"Future value realization from {decision.strategic_intent.lower().replace('_', ' ')} strategy",
-            "target_hours": [],
+            "target_hours": decision.future_target_hours if decision.future_target_hours else [],
             "expected_value": create_formatted_value(decision.future_value or 0.0, "currency"),
             "dependencies": [
                 "Price forecast accuracy",
@@ -272,7 +248,7 @@ def convert_real_data_to_mock_format(hourly_data_list, current_hour):
             ],
         }
 
-        # Create the pattern object matching exact mock format
+        # Create the pattern object with enhanced decision intelligence fields
         pattern = {
             "hour": hour,
             "pattern_name": decision.pattern_name
@@ -289,6 +265,9 @@ def convert_real_data_to_mock_format(hourly_data_list, current_hour):
             "electricity_price": create_formatted_value(economic.buy_price, "currency"),
             "is_current_hour": is_current,
             "is_actual": is_actual,
+
+            # Simple enhanced fields that actually work
+            "advanced_flow_pattern": decision.advanced_flow_pattern or "NO_PATTERN_DETECTED",
         }
 
         patterns.append(pattern)
@@ -356,18 +335,7 @@ async def get_decision_intelligence():
 
     except Exception as e:
         logger.error(f"Error generating decision intelligence from real data: {e}")
-        # Fallback to empty response on error
-        empty_response = {
-            "patterns": [],
-            "summary": {
-                "total_net_value": 0.0,
-                "best_decision_hour": 0,
-                "best_decision_value": 0.0,
-                "actual_hours_count": 0,
-                "predicted_hours_count": 0,
-            },
-        }
-        return convert_keys_to_camel_case(empty_response)
+        raise ValueError(f"Decision intelligence data is required but failed to generate: {e}") from e
 
 
 # @router.get("/api/decision-intelligence")
@@ -1178,19 +1146,8 @@ async def get_strategic_intents():
                     }
                 )
             except Exception as e:
-                logger.warning(f"Error getting hourly settings for hour {hour}: {e}")
-                # Add fallback data
-                hourly_intents.append(
-                    {
-                        "hour": hour,
-                        "intent": "UNKNOWN",
-                        "description": "Data unavailable",
-                        "battery_action": 0.0,
-                        "grid_charge": False,
-                        "discharge_rate": 100,
-                        "is_current": hour == datetime.now().hour,
-                    }
-                )
+                logger.error(f"Error getting hourly settings for hour {hour}: {e}")
+                raise ValueError(f"Hourly settings data is required for hour {hour} but failed to load: {e}") from e
 
         response = {
             "summary": strategic_summary,

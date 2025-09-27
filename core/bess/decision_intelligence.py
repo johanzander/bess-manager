@@ -39,11 +39,89 @@ def determine_strategic_intent(power: float, energy_data: EnergyData) -> str:
         return "IDLE"
 
 
+def generate_advanced_flow_pattern_name(energy_data: EnergyData) -> str:
+    """
+    Generate detailed flow-based pattern name from energy flow analysis.
+
+    Implements the comprehensive flow pattern naming convention from decisionframework.md:
+    - Single-source patterns: SOLAR_TO_HOME, GRID_TO_BATTERY, etc.
+    - Multi-destination patterns: SOLAR_TO_HOME_AND_BATTERY, BATTERY_TO_HOME_AND_GRID
+    - Multi-source patterns: SOLAR_TO_HOME_PLUS_GRID_TO_BATTERY
+
+    Args:
+        energy_data: Complete energy flow data
+
+    Returns:
+        Detailed flow pattern name based on significant energy flows (>0.1 kWh)
+
+    Examples:
+        - "SOLAR_TO_HOME_AND_BATTERY"
+        - "GRID_TO_HOME_AND_BATTERY"
+        - "BATTERY_TO_HOME_AND_GRID"
+        - "SOLAR_TO_HOME_PLUS_BATTERY_TO_GRID"
+        - "SOLAR_TO_GRID_PLUS_BATTERY_TO_HOME"
+    """
+    threshold = 0.1  # kWh threshold for significant flows
+    patterns = []
+
+    # Solar source patterns
+    solar_destinations = []
+    if energy_data.solar_to_home > threshold:
+        solar_destinations.append("HOME")
+    if energy_data.solar_to_battery > threshold:
+        solar_destinations.append("BATTERY")
+    if energy_data.solar_to_grid > threshold:
+        solar_destinations.append("GRID")
+
+    if solar_destinations:
+        if len(solar_destinations) == 1:
+            patterns.append(f"SOLAR_TO_{solar_destinations[0]}")
+        else:
+            patterns.append(f"SOLAR_TO_{'_AND_'.join(solar_destinations)}")
+
+    # Grid source patterns (imports only)
+    grid_destinations = []
+    if energy_data.grid_to_home > threshold:
+        grid_destinations.append("HOME")
+    if energy_data.grid_to_battery > threshold:
+        grid_destinations.append("BATTERY")
+
+    if grid_destinations:
+        if len(grid_destinations) == 1:
+            patterns.append(f"GRID_TO_{grid_destinations[0]}")
+        else:
+            patterns.append(f"GRID_TO_{'_AND_'.join(grid_destinations)}")
+
+    # Battery source patterns (discharge only)
+    battery_destinations = []
+    if energy_data.battery_to_home > threshold:
+        battery_destinations.append("HOME")
+    if energy_data.battery_to_grid > threshold:
+        battery_destinations.append("GRID")
+
+    if battery_destinations:
+        if len(battery_destinations) == 1:
+            patterns.append(f"BATTERY_TO_{battery_destinations[0]}")
+        else:
+            patterns.append(f"BATTERY_TO_{'_AND_'.join(battery_destinations)}")
+
+    # Combine patterns with PLUS for multi-source scenarios
+    if len(patterns) == 0:
+        return "NO_SIGNIFICANT_FLOWS"
+    elif len(patterns) == 1:
+        return patterns[0]
+    else:
+        return "_PLUS_".join(patterns)
+
+
 def generate_strategic_pattern_name(
     strategic_intent: str, energy_data: EnergyData
 ) -> str:
     """
     Generate high-level strategic pattern name based on action and intent.
+
+    This provides the high-level strategy while generate_advanced_flow_pattern_name
+    provides the detailed flow analysis.
 
     Args:
         strategic_intent: Strategic intent (GRID_CHARGING, SOLAR_STORAGE, etc.)
@@ -250,6 +328,73 @@ def generate_economic_chain(
         )
 
 
+def calculate_detailed_flow_values(
+    energy_data: EnergyData, buy_price: float, sell_price: float
+) -> dict[str, float]:
+    """
+    Calculate economic value for each individual energy flow.
+
+    Implements detailed flow value analysis from decisionframework.md showing
+    the economic impact of each energy pathway.
+
+    Args:
+        energy_data: Complete energy flow data
+        buy_price: Current electricity purchase price (SEK/kWh)
+        sell_price: Current electricity sale price (SEK/kWh)
+
+    Returns:
+        Dict mapping flow names to economic values (SEK)
+
+    Examples:
+        {
+            "solar_to_home": +2.34,  # Avoided grid cost
+            "battery_to_home": +1.89,  # Avoided grid cost
+            "battery_to_grid": +0.87,  # Export revenue
+            "grid_to_home": -1.45,  # Import cost
+            "grid_to_battery": -0.67  # Import cost
+        }
+    """
+    flow_values = {}
+    threshold = 0.1  # kWh threshold for reporting
+
+    # Solar flows (always positive - free energy or avoided costs)
+    if energy_data.solar_to_home > threshold:
+        # Solar to home avoids grid purchase
+        flow_values["solar_to_home"] = energy_data.solar_to_home * buy_price
+
+    if energy_data.solar_to_battery > threshold:
+        # Solar to battery stores free energy (value realized when discharged)
+        # For immediate calculation, use average of buy/sell as storage value
+        storage_value = (buy_price + sell_price) / 2
+        flow_values["solar_to_battery"] = energy_data.solar_to_battery * storage_value
+
+    if energy_data.solar_to_grid > threshold:
+        # Solar to grid earns export revenue
+        flow_values["solar_to_grid"] = energy_data.solar_to_grid * sell_price
+
+    # Grid flows
+    if energy_data.grid_to_home > threshold:
+        # Grid to home is import cost (negative)
+        flow_values["grid_to_home"] = -(energy_data.grid_to_home * buy_price)
+
+    if energy_data.grid_to_battery > threshold:
+        # Grid to battery is import cost for storage (negative)
+        flow_values["grid_to_battery"] = -(energy_data.grid_to_battery * buy_price)
+
+    # Battery flows (discharge - realizing stored value)
+    if energy_data.battery_to_home > threshold:
+        # Battery to home avoids grid purchase (positive)
+        flow_values["battery_to_home"] = energy_data.battery_to_home * buy_price
+
+    if energy_data.battery_to_grid > threshold:
+        # Battery to grid earns export revenue (positive)
+        flow_values["battery_to_grid"] = energy_data.battery_to_grid * sell_price
+
+    return flow_values
+
+
+
+
 def extract_economic_values_from_reward(
     reward: float,
     import_cost: float,
@@ -296,12 +441,15 @@ def create_decision_data(
     import_cost: float,
     export_revenue: float,
     battery_wear_cost: float,
+    buy_price: float,
+    sell_price: float,
 ) -> DecisionData:
     """
     Create enhanced DecisionData with rich pattern analysis and economic reasoning.
 
     Now determines strategic intent in the decision framework for better separation of concerns.
     Uses meaningful economic variables from _calculate_reward (excludes technical optimization details).
+    Implements advanced flow pattern analysis from decisionframework.md.
 
     Args:
         power: Battery power action (+ charge, - discharge)
@@ -312,9 +460,11 @@ def create_decision_data(
         import_cost: Grid import cost (energy_data.grid_imported * current_buy_price)
         export_revenue: Grid export revenue (energy_data.grid_exported * current_sell_price)
         battery_wear_cost: Battery degradation cost
+        buy_price: Current electricity purchase price (SEK/kWh)
+        sell_price: Current electricity sale price (SEK/kWh)
 
     Returns:
-        Enhanced DecisionData with all fields populated
+        Enhanced DecisionData with all fields populated including advanced flow patterns
     """
     # Determine strategic intent in decision framework (moved from dp_algorithm)
     strategic_intent = determine_strategic_intent(power, energy_data)
@@ -346,7 +496,24 @@ def create_decision_data(
         cost_basis=cost_basis,
     )
 
-    # Create enhanced DecisionData using existing model fields
+    # Advanced flow pattern analysis from decisionframework.md
+    advanced_flow_pattern = generate_advanced_flow_pattern_name(energy_data)
+
+    # Calculate detailed flow values
+    detailed_flow_values = calculate_detailed_flow_values(
+        energy_data=energy_data, buy_price=buy_price, sell_price=sell_price
+    )
+
+    # Simple heuristic for future target hours
+    future_target_hours = []
+    if strategic_intent in ["GRID_CHARGING", "SOLAR_STORAGE"]:
+        # For charging strategies, target typical high-price evening hours
+        future_target_hours = [18, 19, 20, 21]
+    elif strategic_intent == "EXPORT_ARBITRAGE":
+        # For export strategies, this is the realization hour
+        future_target_hours = [hour]
+
+    # Create simplified DecisionData with only fields we can implement well
     return DecisionData(
         strategic_intent=strategic_intent,
         battery_action=power,
@@ -358,4 +525,8 @@ def create_decision_data(
         immediate_value=immediate_value,
         future_value=future_value,
         net_strategy_value=net_strategy_value,
+        # NEW: Simple enhanced fields that actually work
+        advanced_flow_pattern=advanced_flow_pattern,
+        detailed_flow_values=detailed_flow_values,
+        future_target_hours=future_target_hours,
     )

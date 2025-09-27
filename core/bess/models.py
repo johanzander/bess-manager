@@ -192,6 +192,11 @@ class DecisionData:
     future_value: float = 0.0  # Future economic value
     net_strategy_value: float = 0.0  # Net strategic value
 
+    # Simple enhanced fields that we can actually implement
+    advanced_flow_pattern: str = ""  # Detailed flow pattern (e.g., SOLAR_TO_HOME_AND_BATTERY)
+    detailed_flow_values: dict[str, float] = field(default_factory=dict)  # Value per flow (SEK)
+    future_target_hours: list[int] = field(default_factory=list)  # When future opportunity occurs
+
 
 @dataclass
 class HourlyData:

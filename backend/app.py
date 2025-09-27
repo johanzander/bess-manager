@@ -1,5 +1,6 @@
 import json
 import os
+from contextlib import asynccontextmanager
 from datetime import datetime
 
 import log_config  # noqa: F401
@@ -25,8 +26,28 @@ from core.bess.ha_api_controller import HomeAssistantAPIController
 # Get ingress prefix from environment variable
 INGRESS_PREFIX = os.environ.get("INGRESS_PREFIX", "")
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan manager for FastAPI app."""
+    # Startup
+    routes = []
+    for route in app.routes:
+        path = getattr(route, "path", getattr(route, "mount_path", "Unknown path"))
+        methods = getattr(route, "methods", None)
+        if methods is not None:
+            routes.append(f"{path} - {methods}")
+        else:
+            routes.append(f"{path} - Mounted route or no methods")
+    logger.info(f"Registered routes: {routes}")
+    logger.info(f"Using ingress base path: {os.environ.get('INGRESS_BASE_PATH', '/local_bess_manager/ingress')}")
+
+    yield
+
+    # Shutdown (if needed in the future)
+    pass
+
 # Create FastAPI app with correct root_path
-app = FastAPI(root_path=INGRESS_PREFIX)
+app = FastAPI(root_path=INGRESS_PREFIX, lifespan=lifespan)
 
 
 # Add global exception handler to prevent server restarts
@@ -95,7 +116,7 @@ class BESSController:
         # Initialize Home Assistant API Controller with sensor config from options
         sensor_config = options.get("sensors", {})
         self.ha_controller = self._init_ha_controller(sensor_config)
-        self.ha_controller.set_test_mode(True)
+        self.ha_controller.set_test_mode(False)
 
         # Extract nordpool configuration
         nordpool_config = options.get("nordpool", {})
@@ -310,19 +331,6 @@ bess_controller.start()
 ingress_base_path = os.environ.get("INGRESS_BASE_PATH", "/local_bess_manager/ingress")
 
 
-@app.on_event("startup")
-async def startup_debug():
-    """Print all registered routes for debugging."""
-    routes = []
-    for route in app.routes:
-        path = getattr(route, "path", getattr(route, "mount_path", "Unknown path"))
-        methods = getattr(route, "methods", None)
-        if methods is not None:
-            routes.append(f"{path} - {methods}")
-        else:
-            routes.append(f"{path} - Mounted route or no methods")
-    logger.info(f"Registered routes: {routes}")
-    logger.info(f"Using ingress base path: {ingress_base_path}")
 
 
 # Handle root and ingress paths

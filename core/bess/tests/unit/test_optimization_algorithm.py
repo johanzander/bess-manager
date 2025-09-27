@@ -175,7 +175,7 @@ def test_battery_constraints_respected():
         assert balance_error < 0.1, f"Energy balance error too large: {balance_error}"
 
 
-def SKIP_test_strategic_intent_assignment():  # TODO: Fix this test
+def SKIP_test_strategic_intent_assignment():  # TODO: Improve test to validate correct strategic decisions, not just presence of intents
     """
     Test that strategic intents are assigned correctly using new APIs.
     """

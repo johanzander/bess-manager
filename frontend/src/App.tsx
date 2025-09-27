@@ -115,7 +115,6 @@ const Navigation = () => {
 };
 
 function App() {
-  console.log('App component rendering');
   
   // Function to toggle dark mode
   const toggleDarkMode = () => {
@@ -197,16 +196,9 @@ function App() {
 
   try {
 
-    console.log('App state:', {
-      settingsLoading,
-      settingsError,
-      hasBatterySettings: !!batterySettings,
-      hasElectricitySettings: !!electricitySettings
-    });
 
     // Early return for loading state
     if (settingsLoading) {
-      console.log('Rendering loading state');
       return (
         <div className="flex items-center justify-center min-h-screen dark:bg-gray-900">
           <div className="p-6 max-w-sm bg-white dark:bg-gray-800 rounded-lg shadow-lg">
@@ -269,7 +261,7 @@ function App() {
               <Routes>
                 <Route path="/" element={
                   <DashboardPage 
-                    onLoadingChange={(loading: boolean) => console.log('Dashboard loading:', loading)}
+                    onLoadingChange={(loading: boolean) => {}}
                     settings={mergedSettings}
                   />
                 } />

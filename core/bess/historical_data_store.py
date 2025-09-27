@@ -113,36 +113,6 @@ class HistoricalDataStore:
 
         return self._records.get(hour)
 
-    def get_latest_battery_state(self) -> tuple[float, float]:
-        """Get the latest battery SOC and SOE state.
-
-        TODO: DEPRECATED - Mark for deletion. This method appears to never be used
-        in practice since the controller SOC reading is reliable. The fallback
-        code path in battery_system_manager.py has been replaced with a warning.
-
-        Returns:
-            tuple[float, float]: (soc_percent, soe_kwh)
-        """
-        logger.warning(
-            "get_latest_battery_state() called - this method is deprecated and "
-            "should be removed if fallback code path is never used"
-        )
-
-        if not self._records:
-            # No records, return default state
-            return 20.0, 6.0  # 20% SOC, 6 kWh SOE
-
-        # Get the most recent hour
-        latest_hour = max(self._records.keys())
-        latest_record = self._records[latest_hour]
-
-        # Return end state from the latest record
-        soc_percent = (
-            latest_record.energy.battery_soe_end / self.total_capacity
-        ) * 100.0
-        soe_kwh = latest_record.energy.battery_soe_end
-
-        return soc_percent, soe_kwh
 
     def has_data_for_hour(self, hour: int) -> bool:
         """Check if historical data exists for the given hour.

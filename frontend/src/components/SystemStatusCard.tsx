@@ -242,11 +242,6 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "" }) =
         // Get actual battery mode from inverter status (not schedule)
         const actualBatteryMode = inverterStatusData.batteryMode || 'load-first';
 
-        // Debug log to see all available fields in the currentHourData
-        if (currentHourData) {
-          console.log("Current hour data fields:", Object.keys(currentHourData));
-        }
-        console.log("Actual inverter battery mode:", actualBatteryMode);
 
         // Check for missing keys in hourly data
         if (currentHourData && currentHourData.batteryAction === undefined) {
@@ -272,18 +267,9 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "" }) =
           batteryCapacity: dashboardData.batteryCapacity
         };
         
-        // Debug log to check hourly data structure
-        console.log('SystemStatusCard: Current hour data', currentHourData);
         
         setStatusData(transformedData);
         setError(null);
-        console.log('SystemStatusCard: Data loaded successfully', {
-          dashboardAvailable: !!dashboardData,
-          batteryDataAvailable: !!dashboardData.batterySoc,
-          currentSOC,
-          currentSOE,
-          batteryCapacity
-        });
       } catch (err) {
         console.error('Failed to fetch system status data:', err);
         const errorMessage = err instanceof Error ? err.message : 'Unknown error';

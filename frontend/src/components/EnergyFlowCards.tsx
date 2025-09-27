@@ -204,16 +204,6 @@ const EnergyFlowCards: React.FC<EnergyFlowCardsProps> = ({ className = "" }) => 
           throw new Error(`Invalid dashboard data: ${apiData?.detail || 'Unknown error'}`);
         }
 
-        console.log('=== ENERGYFLOWCARDS DEBUG ===');
-        console.log('Full API Response:', apiData);
-        console.log('apiData.totals:', apiData.totals);
-        console.log('apiData.summary:', apiData.summary);
-        if (apiData.totals) {
-          console.log('Available totals keys:', Object.keys(apiData.totals));
-        }
-        if (apiData.summary) {
-          console.log('Available summary keys:', Object.keys(apiData.summary));
-        }
 
         // Use only canonical camelCase field names from totals
         const totals = {
@@ -236,17 +226,6 @@ const EnergyFlowCards: React.FC<EnergyFlowCardsProps> = ({ className = "" }) => 
           batteryToGrid: apiData.totals?.totalBatteryToGrid || 0
         };
 
-        
-        console.log('✅ Final totals used:', totals);
-        console.log('✅ Battery operations check:', {
-          charged: totals.batteryCharged,
-          discharged: totals.batteryDischarged,
-          solarToBattery: totals.solarToBattery,
-          gridToBattery: totals.gridToBattery,
-          batteryToHome: totals.batteryToHome,
-          batteryToGrid: totals.batteryToGrid
-        });
-        console.log('=== END DEBUG ===');
 
         const transformedData: EnergyFlowData = {
           solarGeneration: {
@@ -308,7 +287,6 @@ const EnergyFlowCards: React.FC<EnergyFlowCardsProps> = ({ className = "" }) => 
         
         setEnergyData(transformedData);
         setError(null);
-        console.log('✅ EnergyFlowCards: Data loaded successfully', transformedData);
       } catch (err) {
         console.error('Failed to fetch energy flow data:', err);
         setError('Failed to load energy flow data');

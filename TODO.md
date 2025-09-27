@@ -2,7 +2,13 @@
 
 ## 🔴 **CRITICAL PRIORITY** (System Reliability)
 
-### 0. **Extended Horizon Optimization**
+### 0. **Fix Battery Discharge Power Control Bug**
+
+**Impact**: High | **Effort**: Medium | **Dependencies**: Growatt inverter control
+
+**Description**: Discharge power seems to always be 100% leading to higher export than intended during EXPORT_ARBITRAGE operations.
+
+### 1. **Extended Horizon Optimization**
 
 **Impact**: High | **Effort**: Medium | **Dependencies**: Price manager, DP algorithm
 
@@ -37,7 +43,7 @@
   Grid cost:         -14.90 SEK (Actual: 28.13 + Predicted: -43.03)
   Battery wear cost:   9.89 SEK (Actual: 2.60 + Predicted: 7.29)
   Total savings:      80.59 SEK (Actual: -1.07 + Predicted: 81.67)
-```text
+```
 
 **Technical Tasks**:
 
@@ -67,7 +73,6 @@
 - Remove duplicate information
 
 ---
-
 
 ### 5. **Enhance Insights Page with Decision Detail**
 
@@ -114,28 +119,22 @@
 - Update frontend to show demo mode indicators
 - Ensure optimization algorithms work with mock data
 
-
 ## 🟢 **LOW PRIORITY** (Polish)
 
-~~### 8. **Move and consolidate all types and data fetching in frontend** ✅ *COMPLETE*~~
+### 7. Add Prediction accuracy and history
 
-~~**COMPLETED**: Removed fallback patterns, legacy data transformations, and standardized API data access across all frontend components. EnergyFlowCards now uses API FormattedValue objects directly. Cost display bug fixed.~~
-
-### 8. Add Prediction accuracy and history
-
-### 9. Intent is not always correct for historical data
+### 8. Intent is not always correct for historical data
 
 **Current State**: The inverter sometimes charges/discharges small amounts like 0.1kW. Or its a rounding error or inefficiencies losses when calculating flows. I don't think its a strategic intent, but it is interpreted as one.
 
-### 10. Add multi day view
+### 9. Add multi day view
 
 **Problem**: Today we only operate on 24h intervals.
 But at noon every day we get tomorrows schedule. We could use this information to take better economic decisions. It would mean changing a lot of places where 24h is hard coded.
 
-
 ## 🔄 **ARCHITECTURAL IMPROVEMENTS** (From Historical Design Analysis)
 
-### 11. **Machine Learning Predictions**
+### 10. **Machine Learning Predictions**
 
 **Impact**: Medium | **Effort**: High | **Dependencies**: Historical data, ML framework
 
@@ -148,33 +147,7 @@ But at noon every day we get tomorrows schedule. We could use this information t
 - Adaptive prediction models with confidence scoring
 - Accuracy tracking and model performance metrics
 
-### 12. **Grid Export Optimization**
-
-**Impact**: Medium | **Effort**: Medium | **Dependencies**: DP algorithm extension
-
-**Description**: Optimize battery discharge for grid export during high-price periods, not just home consumption.
-
-**Implementation**:
-
-- Extend DP algorithm to consider export revenues in addition to consumption savings
-- Dynamic export/local consumption decision making
-- Integration with grid feed-in tariff structures
-- Export power limit and grid connection constraints
-
-### 13. **Advanced Economic Modeling**
-
-**Impact**: Low-Medium | **Effort**: High | **Dependencies**: Battery degradation data
-
-**Description**: More sophisticated economic models including battery degradation curves and efficiency modeling.
-
-**Implementation**:
-
-- Battery degradation modeling based on usage patterns (cycle depth, temperature, age)
-- Efficiency curve modeling for charge/discharge losses at different power levels
-- Time-of-use optimization for battery longevity vs immediate profit
-- Long-term ROI calculations including replacement costs
-
-### 14. **Performance Monitoring and Metrics**
+### 11. **Performance Monitoring and Metrics**
 
 **Impact**: Medium | **Effort**: Medium | **Dependencies**: Analytics framework
 
@@ -188,20 +161,7 @@ But at noon every day we get tomorrows schedule. We could use this information t
 - Component timing and performance metrics collection
 - Automated reporting and alerting for anomalies
 
-### 15. **Advanced Input Validation**
-
-**Impact**: Medium | **Effort**: Low-Medium | **Dependencies**: Settings framework
-
-**Description**: Comprehensive validation for all user settings preventing invalid configurations.
-
-**Implementation**:
-
-- Enhanced settings.py validation methods with clear error messages
-- Real-time validation feedback in UI with specific guidance
-- Configuration export/import with validation
-- Dependency validation (e.g., min_soc < max_soc, power limits realistic)
-
-### 16. **Data Export and Analysis Tools**
+### 12. **Data Export and Analysis Tools**
 
 **Impact**: Low | **Effort**: Medium | **Dependencies**: Data stores
 
@@ -214,7 +174,6 @@ But at noon every day we get tomorrows schedule. We could use this information t
 - Optimization decision logs with reasoning export
 - Integration with external analytics tools (Grafana, etc.)
 
-
 ## 🔧 **TECHNICAL DEBT**
 
 ### Other Technical Debt
@@ -223,8 +182,6 @@ But at noon every day we get tomorrows schedule. We could use this information t
 - Add power monitoring sensors to health check.
 - Check if all sensors in config.yaml are actually needed and used (lifetime e.g.)
 - Fix dark mode button
-
-## 📝 **IMPLEMENTATION NOTES**
 
 **Sensor Collector InfluxDB Usage**:
 Based on the code analysis: The function `_get_hour_readings` in SensorCollector is called by `collect_energy_data(hour)`. This is not called every hour automatically by the system; it is called when the system wants to collect and record data for a specific hour. The actual historical data for the dashboard is served from the HistoricalDataStore, which is an in-memory store populated by calls to `record_energy_data` (which uses the output of `collect_energy_data`).

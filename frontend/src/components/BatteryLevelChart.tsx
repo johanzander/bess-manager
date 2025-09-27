@@ -183,14 +183,11 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
                 }
                 return ['N/A', name];
               }}
-              labelFormatter={(label, payload) => {
-                if (payload && payload.length > 0) {
-                  const data = payload[0].payload;
-                  const startHour = data.hourNum;
-                  const endHour = (startHour + 1) % 24;
-                  return `${startHour.toString().padStart(2, '0')}:00 - ${endHour.toString().padStart(2, '0')}:00`;
-                }
-                return `Hour: ${label}`;
+              labelFormatter={(label) => {
+                // label should be the hour value from the data
+                const hourNum = Math.floor(Number(label));
+                const endHour = (hourNum + 1) % 24;
+                return `${hourNum.toString().padStart(2, '0')}:00 - ${endHour.toString().padStart(2, '0')}:00`;
               }}
               labelStyle={{ color: colors.text }}
             />

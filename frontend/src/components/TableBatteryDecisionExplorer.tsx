@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useMemo } from 'react';
 import { Clock, Sun, Battery, TrendingUp } from 'lucide-react';
-import api from '../lib/api';
 import FormattedValueComponent from './FormattedValue';
 import { FormattedValue } from '../types';
+import { useDashboardData } from '../hooks/useDashboardData';
 
 interface BatteryDecision {
   hour: number;
@@ -30,48 +30,9 @@ interface BatteryDecision {
   hourlySavings: FormattedValue;
 }
 
-interface DashboardResponse {
-  currentHour: number;
-  totalDailySavings: number;
-  hourlyData: Array<{
-    hour: number;
-    isActual?: boolean;
-    dataSource?: string;
-    // All data provided via FormattedValue objects - canonical naming
-    buyPrice?: FormattedValue;
-    batteryAction?: FormattedValue;
-    solarProduction?: FormattedValue;
-    solarBalance?: FormattedValue;
-    batterySocStart?: FormattedValue;
-    batterySocEnd?: FormattedValue;
-    opportunityScore?: FormattedValue;
-    hourlySavings?: FormattedValue;
-    homeConsumption?: FormattedValue;
-  }>;
-}
 
 export const TableBatteryDecisionExplorer: React.FC = () => {
-  const [dashboardData, setDashboardData] = useState<DashboardResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setLoading(true);
-        const response = await api.get('/api/dashboard');
-        setDashboardData(response.data);
-        setError(null);
-      } catch (err) {
-        console.error('Error fetching dashboard data:', err);
-        setError(err instanceof Error ? err.message : 'Unknown error');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchData();
-  }, []);
+  const { data: dashboardData, loading, error } = useDashboardData();
 
   if (loading || !dashboardData) {
     return (
@@ -95,18 +56,33 @@ export const TableBatteryDecisionExplorer: React.FC = () => {
   }
 
   // Transform dashboard data into decision format
-  const batteryDecisions: BatteryDecision[] = dashboardData.hourlyData.map((hour: any) => {
+  const batteryDecisions: BatteryDecision[] = useMemo(() => {
+    if (!dashboardData) return [];
+
+    return dashboardData.hourlyData.map((hour: any) => {
     // Extract raw values from FormattedValue objects for calculations
-    const batteryAction = hour.batteryAction?.value || 0;
+    if (!hour.batteryAction || hour.batteryAction.value === undefined) {
+      throw new Error(`MISSING DATA: batteryAction.value is required but missing for hour ${hour.hour}`);
+    }
+    const batteryAction = hour.batteryAction.value;
     let action: 'charge' | 'discharge' | 'hold' = 'hold';
     if (batteryAction > 0.1) action = 'charge';
     else if (batteryAction < -0.1) action = 'discharge';
 
     // Extract values from FormattedValue objects
-    const solarProduction = hour.solarProduction?.value || 0;
-    const homeConsumption = hour.homeConsumption?.value || 0;
+    if (!hour.solarProduction || hour.solarProduction.value === undefined) {
+      throw new Error(`MISSING DATA: solarProduction.value is required but missing for hour ${hour.hour}`);
+    }
+    if (!hour.homeConsumption || hour.homeConsumption.value === undefined) {
+      throw new Error(`MISSING DATA: homeConsumption.value is required but missing for hour ${hour.hour}`);
+    }
+    const solarProduction = hour.solarProduction.value;
+    const homeConsumption = hour.homeConsumption.value;
     const solarBalance = solarProduction - homeConsumption;
-    const price = hour.buyPrice?.value || 0;
+    if (!hour.buyPrice || hour.buyPrice.value === undefined) {
+      throw new Error(`MISSING DATA: buyPrice.value is required but missing for hour ${hour.hour}`);
+    }
+    const price = hour.buyPrice.value;
     
     // Generate primary reason based on action and context
     let primaryReason = 'Grid balancing';
@@ -152,12 +128,27 @@ export const TableBatteryDecisionExplorer: React.FC = () => {
       buyPriceValue: price,
       solarProductionValue: solarProduction,
       solarBalanceValue: solarBalance,
-      batterySocStartValue: hour.batterySocStart?.value || 50,
-      batterySocEndValue: hour.batterySocEnd?.value || 50,
+      batterySocStartValue: (() => {
+        if (!hour.batterySocStart || hour.batterySocStart.value === undefined) {
+          throw new Error(`MISSING DATA: batterySocStart.value is required but missing for hour ${hour.hour}`);
+        }
+        return hour.batterySocStart.value;
+      })(),
+      batterySocEndValue: (() => {
+        if (!hour.batterySocEnd || hour.batterySocEnd.value === undefined) {
+          throw new Error(`MISSING DATA: batterySocEnd.value is required but missing for hour ${hour.hour}`);
+        }
+        return hour.batterySocEnd.value;
+      })(),
       primaryReason,
       economicContext,
       opportunityScoreValue: opportunityScore,
-      hourlySavingsValue: hour.hourlySavings?.value || 0,
+      hourlySavingsValue: (() => {
+        if (!hour.hourlySavings || hour.hourlySavings.value === undefined) {
+          throw new Error(`MISSING DATA: hourlySavings.value is required but missing for hour ${hour.hour}`);
+        }
+        return hour.hourlySavings.value;
+      })(),
       isActual: hour.isActual || hour.dataSource === 'actual' || false,
       isCurrentHour: hour.hour === dashboardData.currentHour,
 
@@ -171,7 +162,8 @@ export const TableBatteryDecisionExplorer: React.FC = () => {
       opportunityScore: hour.opportunityScore!,
       hourlySavings: hour.hourlySavings!
     };
-  });
+    });
+  }, [dashboardData]);
 
   const getScoreColor = (score: number) => {
     if (score >= 0.8) return 'text-green-600 dark:text-green-400';

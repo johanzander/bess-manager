@@ -400,16 +400,10 @@ const InverterStatusDashboard: React.FC = () => {
     if (!scheduleHour && !dashboardHour) return null;
     
     // Base data from whichever source is available
-    const baseData = scheduleHour || {
-      hour,
-      batteryMode: 'load-first',
-      gridCharge: false,
-      strategicIntent: 'IDLE',
-      batteryAction: 0,
-      batteryCharged: 0,
-      batteryDischarged: 0,
-      batterySocEnd: 0
-    };
+    if (!scheduleHour) {
+      throw new Error(`MISSING DATA: scheduleHour is required but missing for hour ${hour}`);
+    }
+    const baseData = scheduleHour;
 
     return {
       ...baseData,
@@ -444,7 +438,10 @@ const InverterStatusDashboard: React.FC = () => {
       'grid-first': { label: 'Grid First', color: 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300' }
     };
     
-    const modeInfo = modes[mode] || { label: mode, color: 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300' };
+    if (!modes[mode]) {
+      throw new Error(`MISSING DATA: Unknown battery mode '${mode}' - must be one of: ${Object.keys(modes).join(', ')}`);
+    }
+    const modeInfo = modes[mode];
     return (
       <span className={`px-2 py-1 rounded text-xs font-medium ${modeInfo.color}`}>
         {modeInfo.label}

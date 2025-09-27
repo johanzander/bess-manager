@@ -68,20 +68,6 @@
 
 ---
 
-### 4. **Fix Inverter Page Visual Style**
-
-**Impact**: Medium | **Effort**: Medium | **Dependencies**: UI consistency
-
-**Current State**: InverterPage doesn't match dashboard visual design
-
-**Technical Tasks**:
-
-- Apply dashboard-style card layouts
-- Use consistent color scheme and spacing
-- Fix mobile responsiveness
-- Match typography patterns
-
----
 
 ### 5. **Enhance Insights Page with Decision Detail**
 
@@ -128,92 +114,28 @@
 - Update frontend to show demo mode indicators
 - Ensure optimization algorithms work with mock data
 
-### 7. **Improve Sensor Unit Formatting Architecture**
-
-**Impact**: Medium | **Effort**: Medium | **Dependencies**: Backend sensor mapping, Frontend health components
-
-**Description**: Replace fragile frontend string-based unit formatting with proper backend unit metadata system.
-
-**Current Problem**: Frontend uses brittle string matching to determine sensor units:
-- Business logic mixed with UI presentation
-- Fragile sensor name pattern matching (`lowerName.includes('power')`)
-- Duplicated formatting logic across components
-- Hard to maintain when adding new sensors
-- No type safety or guarantees about actual sensor units
-
-**Proposed Solution**: Backend unit metadata approach
-- Add `unit` and `display_unit` fields to `METHOD_SENSOR_MAP` in `ha_api_controller.py`
-- Backend provides formatted values with correct units
-- Frontend simply displays the formatted strings
-- Centralized unit conversion logic
-- Easy to extend for new sensor types
-
-**Implementation**:
-
-- Update `METHOD_SENSOR_MAP` with unit metadata:
-
-```python
-"get_battery_discharge_power": {
-    "sensor_key": "battery_discharge_power",
-    "name": "Battery Discharging Power", 
-    "unit": "W",
-    "display_unit": "auto"  # auto-convert W/kW based on value
-}
-```
-
-- Create backend formatting service for health check values
-- Update health check API to return formatted values
-- Simplify frontend `SystemHealth.tsx` to remove unit conversion logic
-- Add unit support to other components using sensor data
-
-**Benefits**: Cleaner separation of concerns, easier maintenance, consistent unit handling, type safety
-
----
 
 ## 🟢 **LOW PRIORITY** (Polish)
 
-### 8. **Move and consolidate all types and data fetching in frontend**
+~~### 8. **Move and consolidate all types and data fetching in frontend** ✅ *COMPLETE*~~
 
-**Current State**: Each component fetches it's own data, while there is basically only one endpoint (/api/dashboard). Could we centralize this to make cleaner code. Also there is an energy endpoint we've removed where we are still recreating the old data structures - this could be removed.
+~~**COMPLETED**: Removed fallback patterns, legacy data transformations, and standardized API data access across all frontend components. EnergyFlowCards now uses API FormattedValue objects directly. Cost display bug fixed.~~
 
-### 10. Add Prediction accuracy and history
+### 8. Add Prediction accuracy and history
 
-### 11. Intent is not always correct for historical data
+### 9. Intent is not always correct for historical data
 
 **Current State**: The inverter sometimes charges/discharges small amounts like 0.1kW. Or its a rounding error or inefficiencies losses when calculating flows. I don't think its a strategic intent, but it is interpreted as one.
 
-### 12. Add multi day view
+### 10. Add multi day view
 
 **Problem**: Today we only operate on 24h intervals.
 But at noon every day we get tomorrows schedule. We could use this information to take better economic decisions. It would mean changing a lot of places where 24h is hard coded.
 
-### 15. **Error/Warning Banner in Frontend**
-
-**Impact**: Medium | **Effort**: Medium | **Dependencies**: Backend logging, Frontend UI
-
-**Description**: Display recent system errors and warnings from logs as a banner in the frontend UI for better debugging visibility.
-
-**Implementation**:
-
-- Create `/api/system-status` endpoint that returns recent errors/warnings from logs
-- Add log parsing to extract ERROR and WARNING level messages with timestamps
-- Create dismissible banner component in frontend (similar to alert banners)
-- Show critical issues like:
-
-  - TOU interval ordering problems
-  - Sensor communication failures  
-  - Optimization errors
-  - Hardware communication issues
-
-- Auto-refresh banner every 30 seconds
-- Allow manual refresh and dismissal
-- Limit to last 10 errors/warnings from past 24 hours
-
-**Benefits**: Users can immediately see system issues without checking HA logs, better debugging experience, proactive issue detection
 
 ## 🔄 **ARCHITECTURAL IMPROVEMENTS** (From Historical Design Analysis)
 
-### 16. **Machine Learning Predictions**
+### 11. **Machine Learning Predictions**
 
 **Impact**: Medium | **Effort**: High | **Dependencies**: Historical data, ML framework
 
@@ -226,7 +148,7 @@ But at noon every day we get tomorrows schedule. We could use this information t
 - Adaptive prediction models with confidence scoring
 - Accuracy tracking and model performance metrics
 
-### 17. **Grid Export Optimization**
+### 12. **Grid Export Optimization**
 
 **Impact**: Medium | **Effort**: Medium | **Dependencies**: DP algorithm extension
 
@@ -239,7 +161,7 @@ But at noon every day we get tomorrows schedule. We could use this information t
 - Integration with grid feed-in tariff structures
 - Export power limit and grid connection constraints
 
-### 18. **Advanced Economic Modeling**
+### 13. **Advanced Economic Modeling**
 
 **Impact**: Low-Medium | **Effort**: High | **Dependencies**: Battery degradation data
 
@@ -252,7 +174,7 @@ But at noon every day we get tomorrows schedule. We could use this information t
 - Time-of-use optimization for battery longevity vs immediate profit
 - Long-term ROI calculations including replacement costs
 
-### 19. **Performance Monitoring and Metrics**
+### 14. **Performance Monitoring and Metrics**
 
 **Impact**: Medium | **Effort**: Medium | **Dependencies**: Analytics framework
 
@@ -266,7 +188,7 @@ But at noon every day we get tomorrows schedule. We could use this information t
 - Component timing and performance metrics collection
 - Automated reporting and alerting for anomalies
 
-### 20. **Advanced Input Validation**
+### 15. **Advanced Input Validation**
 
 **Impact**: Medium | **Effort**: Low-Medium | **Dependencies**: Settings framework
 
@@ -279,7 +201,7 @@ But at noon every day we get tomorrows schedule. We could use this information t
 - Configuration export/import with validation
 - Dependency validation (e.g., min_soc < max_soc, power limits realistic)
 
-### 21. **Data Export and Analysis Tools**
+### 16. **Data Export and Analysis Tools**
 
 **Impact**: Low | **Effort**: Medium | **Dependencies**: Data stores
 

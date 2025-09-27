@@ -1,47 +1,14 @@
-import React, { useState, useEffect } from 'react';
-import api from '../lib/api';
-import { DashboardHourlyData, DashboardSummary } from '../api/scheduleApi';
+import React from 'react';
 import FormattedValueComponent from './FormattedValue';
+import { useDashboardData } from '../hooks/useDashboardData';
 
 interface DetailedSavingsAnalysisProps {
   settings: any;
 }
 
-interface DashboardResponse {
-  date: string;
-  currentHour: number;
-  totalDailySavings: number;
-  actualSavingsSoFar: number;
-  predictedRemainingSavings: number;
-  actualHoursCount: number;
-  predictedHoursCount: number;
-  hourlyData: DashboardHourlyData[];
-  batteryCapacity?: number;
-  summary: DashboardSummary;
-}
 
 export const DetailedSavingsAnalysis: React.FC<DetailedSavingsAnalysisProps> = () => {
-  const [dashboardData, setDashboardData] = useState<DashboardResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const fetchDashboardData = async () => {
-      try {
-        setLoading(true);
-        const response = await api.get('/api/dashboard');
-        setDashboardData(response.data);
-        setError(null);
-      } catch (err) {
-        console.error('Error fetching dashboard data:', err);
-        setError(err instanceof Error ? err.message : 'Unknown error');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchDashboardData();
-  }, []);
+  const { data: dashboardData, loading, error } = useDashboardData();
 
   if (loading) {
     return (
@@ -73,9 +40,9 @@ export const DetailedSavingsAnalysis: React.FC<DetailedSavingsAnalysisProps> = (
   };
 
   // Use backend-calculated total optimization savings from summary instead of calculating in frontend
-  const totalDailySavings = typeof dashboardData.summary?.totalSavings === 'object'
+  const totalDailySavings = typeof dashboardData?.summary?.totalSavings === 'object'
     ? dashboardData.summary.totalSavings.value || 0
-    : dashboardData.summary?.totalSavings || 0;
+    : dashboardData?.summary?.totalSavings || 0;
 
   return (
     <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow overflow-x-auto">

@@ -1,24 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { Zap } from 'lucide-react';
-import api from '../lib/api';
 import { FormattedValue } from '../types';
 import FormattedValueComponent from './FormattedValue';
-import { DashboardSummary, DashboardHourlyData } from '../api/scheduleApi';
+import { useDashboardData } from '../hooks/useDashboardData';
 
 type SavingsOverviewProps = Record<string, never>
 
-interface DashboardResponse {
-  currentHour: number;
-  totalDailySavings: number;
-  batteryCapacity?: number;
-  summary?: DashboardSummary;
-  hourlyData: DashboardHourlyData[];
-}
-
 export const SavingsOverview: React.FC<SavingsOverviewProps> = () => {
-  const [dashboardData, setDashboardData] = useState<DashboardResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { data: dashboardData, loading, error } = useDashboardData();
 
   // Helper function to get numeric value from FormattedValue objects (for calculations)
   const getNumericValue = (field: any) => {
@@ -58,23 +47,6 @@ export const SavingsOverview: React.FC<SavingsOverviewProps> = () => {
     return fallbackUnit === 'Wh' ? 'kWh' : fallbackUnit;
   };
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setLoading(true);
-        const response = await api.get('/api/dashboard');
-        setDashboardData(response.data);
-        setError(null);
-      } catch (err) {
-        console.error('Error fetching dashboard data:', err);
-        setError(err instanceof Error ? err.message : 'Unknown error');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchData();
-  }, []);
 
   if (loading) {
     return (

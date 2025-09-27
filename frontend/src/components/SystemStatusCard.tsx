@@ -1,5 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import api from '../lib/api';
+import { useDashboardData } from '../hooks/useDashboardData';
+import { FormattedValue } from '../types';
+import { DashboardResponse } from '../api/scheduleApi';
 import { 
   DollarSign, 
   Battery, 
@@ -11,43 +14,7 @@ import {
   Home
 } from 'lucide-react';
 
-// FormattedValue interface for unified API format
-interface FormattedValue {
-  value: number;
-  display: string;
-  unit: string;
-  text: string;
-}
 
-// System status data structure
-interface SystemStatusData {
-  costAndSavings?: {
-    todaysCost: FormattedValue;
-    todaysSavings: FormattedValue;
-    gridOnlyCost: FormattedValue;
-    percentageSaved: FormattedValue;
-  };
-  batteryStatus?: {
-    soc: FormattedValue;
-    soe: FormattedValue;
-    power: number;
-    status: 'charging' | 'discharging' | 'idle';
-    batteryMode?: string; // Current operating mode (e.g., "load-first", "battery-first")
-  };
-  realTimePower?: {
-    solarPower: FormattedValue;
-    homeLoadPower: FormattedValue;
-    gridImportPower: FormattedValue;
-    gridExportPower: FormattedValue;
-    batteryChargePower: FormattedValue;
-    batteryDischargePower: FormattedValue;
-    netBatteryPower: FormattedValue;
-    netGridPower: FormattedValue;
-    acPower: FormattedValue;
-    selfPower: FormattedValue;
-  };
-  batteryCapacity?: number;
-}
 
 // StatusCard component
 interface StatusCardProps {
@@ -161,126 +128,156 @@ interface SystemStatusCardProps {
   className?: string;
 }
 
-// Helper functions for battery mode formatting
-const formatBatteryMode = (mode: string): string => {
-  switch (mode.toLowerCase()) {
-    case 'load-first':
-      return 'Load First';
-    case 'battery-first':
-      return 'Battery First';
-    case 'grid-first':
-      return 'Grid First';
-    default:
-      return mode.charAt(0).toUpperCase() + mode.slice(1);
-  }
-};
 
 const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "" }) => {
-  const [statusData, setStatusData] = useState<SystemStatusData>({});
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { data: dashboardData, loading: dashboardLoading, error: dashboardError } = useDashboardData();
+  const [inverterData, setInverterData] = useState<any>(null);
+  const [inverterLoading, setInverterLoading] = useState(true);
+  const [inverterError, setInverterError] = useState<string | null>(null);
 
   useEffect(() => {
-    const fetchStatusData = async () => {
+    const fetchInverterData = async () => {
       try {
-        setIsLoading(true);
-        
-        // Fetch dashboard data (now includes battery state)
-        const dashboardResponse = await api.get('/api/dashboard');
-        const dashboardData = dashboardResponse.data;
-
-        // Validate dashboard data structure
-        if (!dashboardData || typeof dashboardData !== 'object' || dashboardData.detail) {
-          throw new Error(`Invalid dashboard data structure: ${dashboardData?.detail || 'Unknown error'}`);
-        }
-
-        // Fetch actual inverter status for correct battery mode and other real-time data
+        setInverterLoading(true);
         const inverterResponse = await api.get('/api/growatt/inverter_status');
-        const inverterStatusData = inverterResponse.data;
-
-        // Check for required battery data
-        if (dashboardData.batterySoc === undefined) {
-          console.warn('BACKEND ISSUE: Missing batterySoc in dashboardData');
-        }
-        if (dashboardData.batterySoe === undefined) {
-          console.warn('BACKEND ISSUE: Missing batterySoe in dashboardData');
-        }
-        if (dashboardData.batteryCapacity === undefined) {
-          console.warn('BACKEND ISSUE: Missing batteryCapacity in dashboardData');
-        }
-        
-        // Current battery state - these are dashboard-level fields (not hourly)
-        const currentSOC = dashboardData.batterySoc ?? 0;
-        const currentSOE = dashboardData.batterySoe ?? 0;
-        const batteryCapacity = dashboardData.batteryCapacity ?? 0;
-        
-        // Check for missing keys in summary data
-        if (dashboardData.summary?.batteryCycleCost === undefined) {
-          console.warn('Missing key: summary.batteryCycleCost in dashboardData');
-        }
-        if (dashboardData.summary?.gridOnlyCost === undefined) {
-          console.warn('Missing key: summary.gridOnlyCost in dashboardData');
-        }
-        if (dashboardData.summary?.optimizedCost === undefined) {
-          console.warn('Missing key: summary.optimizedCost in dashboardData');
-        }
-        if (dashboardData.totalDailySavings === undefined) {
-          console.warn('Missing key: totalDailySavings in dashboardData');
-        }
-        
-        // Use costAndSavings directly from dashboard API - no frontend calculations
-        
-        // Get current battery power and status
-        const currentHour = new Date().getHours();
-        const currentHourData = dashboardData.hourlyData?.find((h: any) => h.hour === currentHour);
-
-        // Validate hourlyData exists
-        if (!dashboardData.hourlyData || !Array.isArray(dashboardData.hourlyData)) {
-          console.warn('BACKEND ISSUE: Missing or invalid hourlyData array in dashboardData');
-        }
-        
-        // Get actual battery mode from inverter status (not schedule)
-        const actualBatteryMode = inverterStatusData.batteryMode || 'load-first';
-
-
-        // Check for missing keys in hourly data
-        if (currentHourData && currentHourData.batteryAction === undefined) {
-          console.warn('Missing key: batteryAction in currentHourData');
-        }
-
-        const batteryPower = Math.abs(currentHourData?.batteryAction ?? 0);
-        const batteryStatus = currentHourData?.batteryAction > 0.1 ? 'charging' :
-                            currentHourData?.batteryAction < -0.1 ? 'discharging' : 'idle';
-
-        // Real-time power data is now directly available from unified API format
-        const transformedData: SystemStatusData = {
-          costAndSavings: dashboardData.costAndSavings,
-          batteryStatus: {
-            soc: dashboardData.batterySoc,
-            soe: dashboardData.batterySoe,
-            power: batteryPower,
-            status: batteryStatus,
-            // Use the actual inverter battery mode instead of optimization schedule
-            batteryMode: actualBatteryMode
-          },
-          realTimePower: dashboardData.realTimePower,
-          batteryCapacity: dashboardData.batteryCapacity
-        };
-        
-        
-        setStatusData(transformedData);
-        setError(null);
+        setInverterData(inverterResponse.data);
+        setInverterError(null);
       } catch (err) {
-        console.error('Failed to fetch system status data:', err);
+        console.error('Failed to fetch inverter data:', err);
         const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-        setError(`Failed to load system status data: ${errorMessage}`);
+        setInverterError(`Failed to load inverter data: ${errorMessage}`);
       } finally {
-        setIsLoading(false);
+        setInverterLoading(false);
       }
     };
 
-    fetchStatusData();
+    fetchInverterData();
   }, []);
+
+  const statusData = useMemo(() => {
+    if (!dashboardData || !inverterData) return {};
+
+    // Validate dashboard data structure
+    if (typeof dashboardData !== 'object') {
+      console.error(`Invalid dashboard data structure: Unknown error`);
+      return {};
+    }
+
+    // Check for required battery data
+    if (dashboardData.batterySoc === undefined) {
+      console.warn('BACKEND ISSUE: Missing batterySoc in dashboardData');
+    }
+    if (dashboardData.batterySoe === undefined) {
+      console.warn('BACKEND ISSUE: Missing batterySoe in dashboardData');
+    }
+    if (dashboardData.batteryCapacity === undefined) {
+      console.warn('BACKEND ISSUE: Missing batteryCapacity in dashboardData');
+    }
+
+    // Check for missing keys in summary data (comment out missing field check)
+    // batteryCycleCost is not in the summary interface
+    if (dashboardData.summary?.gridOnlyCost === undefined) {
+      console.warn('Missing key: summary.gridOnlyCost in dashboardData');
+    }
+    if (dashboardData.summary?.optimizedCost === undefined) {
+      console.warn('Missing key: summary.optimizedCost in dashboardData');
+    }
+    if (dashboardData.totalDailySavings === undefined) {
+      console.warn('Missing key: totalDailySavings in dashboardData');
+    }
+
+    // Get current battery power and status
+    const currentHour = new Date().getHours();
+    const currentHourData = dashboardData.hourlyData?.find((h: any) => h.hour === currentHour);
+
+    // Validate hourlyData exists
+    if (!dashboardData.hourlyData || !Array.isArray(dashboardData.hourlyData)) {
+      console.warn('BACKEND ISSUE: Missing or invalid hourlyData array in dashboardData');
+    }
+
+    // Get actual battery mode from inverter status (not schedule)
+    if (!inverterData.batteryMode) {
+      throw new Error('MISSING DATA: inverterData.batteryMode is required but missing');
+    }
+    const actualBatteryMode = inverterData.batteryMode;
+
+    // Check for missing keys in hourly data
+    if (currentHourData && currentHourData.batteryAction === undefined) {
+      console.warn('Missing key: batteryAction in currentHourData');
+    }
+
+    if (!currentHourData) {
+      throw new Error('MISSING DATA: currentHourData is required but not found in hourlyData');
+    }
+    if (currentHourData.batteryAction === undefined) {
+      throw new Error('MISSING DATA: batteryAction is required but missing from currentHourData');
+    }
+    const batteryPower = Math.abs(currentHourData.batteryAction);
+    const batteryStatus = currentHourData.batteryAction > 0.1 ? 'charging' :
+                        currentHourData.batteryAction < -0.1 ? 'discharging' : 'idle';
+
+    return {
+      costAndSavings: {
+        todaysCost: (() => {
+          if (!dashboardData.summary?.optimizedCost) {
+            throw new Error('MISSING DATA: summary.optimizedCost is required for cost display');
+          }
+          return dashboardData.summary.optimizedCost;
+        })(),
+        todaysSavings: (() => {
+          if (!dashboardData.summary?.totalSavings) {
+            throw new Error('MISSING DATA: summary.totalSavings is required for savings display');
+          }
+          return dashboardData.summary.totalSavings;
+        })(),
+        gridOnlyCost: (() => {
+          if (!dashboardData.summary?.gridOnlyCost) {
+            throw new Error('MISSING DATA: summary.gridOnlyCost is required for cost comparison');
+          }
+          return dashboardData.summary.gridOnlyCost;
+        })(),
+        percentageSaved: (() => {
+          if (!dashboardData.summary?.totalSavingsPercentage) {
+            throw new Error('MISSING DATA: summary.totalSavingsPercentage is required for percentage display');
+          }
+          return dashboardData.summary.totalSavingsPercentage;
+        })()
+      },
+      batteryStatus: {
+        soc: (() => {
+          if (!dashboardData.batterySoc) {
+            throw new Error('MISSING DATA: batterySoc is required for battery status display');
+          }
+          return dashboardData.batterySoc as any;
+        })(),
+        soe: (() => {
+          if (!dashboardData.batterySoe) {
+            throw new Error('MISSING DATA: batterySoe is required for battery energy display');
+          }
+          return dashboardData.batterySoe as any;
+        })(),
+        power: batteryPower,
+        status: batteryStatus,
+        // Use the actual inverter battery mode instead of optimization schedule
+        batteryMode: actualBatteryMode
+      },
+      realTimePower: (() => {
+        if (!dashboardData.realTimePower) {
+          throw new Error('MISSING DATA: realTimePower is required for power flow display');
+        }
+        return dashboardData.realTimePower as any;
+      })(),
+      batteryCapacity: (() => {
+        if (!dashboardData.batteryCapacity) {
+          throw new Error('MISSING DATA: batteryCapacity is required for battery capacity display');
+        }
+        return dashboardData.batteryCapacity;
+      })()
+    };
+  }, [dashboardData, inverterData]);
+
+  const isLoading = dashboardLoading || inverterLoading;
+  const error = dashboardError || inverterError;
 
   if (isLoading) {
     return (
@@ -377,13 +374,26 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "" }) =
       metrics: [
         {
           label: "State of Charge",
-          value: statusData.batteryStatus?.soc?.display,
+          value: (() => {
+            if (!statusData.batteryStatus?.soc?.display) {
+              throw new Error('MISSING DATA: batterySoc.display is required for SOC display');
+            }
+            return statusData.batteryStatus.soc.display;
+          })(),
           unit: "%",
           icon: Battery
         },
         {
           label: "State of Energy",
-          value: `${statusData.batteryStatus?.soe?.display}/${statusData.batteryCapacity || 30}`,
+          value: (() => {
+            if (!statusData.batteryStatus?.soe?.display) {
+              throw new Error('MISSING DATA: batterySoe.display is required for SOE display');
+            }
+            if (!statusData.batteryCapacity) {
+              throw new Error('MISSING DATA: batteryCapacity is required for SOE display');
+            }
+            return `${statusData.batteryStatus.soe.display}/${statusData.batteryCapacity}`;
+          })(),
           unit: "kWh",
           icon: Zap
         },

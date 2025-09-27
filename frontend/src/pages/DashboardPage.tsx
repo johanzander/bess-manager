@@ -237,8 +237,8 @@ export default function DashboardPage({
             <div>
               {/* Energy Flow Chart */}
               <div className="mb-8">
-                <EnergyFlowChart 
-                  dailyViewData={dashboardData.hourlyData}
+                <EnergyFlowChart
+                  dailyViewData={dashboardData.hourlyData as any}
                   currentHour={currentHour}
                 />
               </div>
@@ -249,9 +249,9 @@ export default function DashboardPage({
           <div>
             <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">Battery SOC and Actions</h2>
             <div className="mb-8">
-              <BatteryLevelChart 
-                hourlyData={dashboardData.hourlyData} 
-                settings={settings} 
+              <BatteryLevelChart
+                hourlyData={dashboardData.hourlyData as any}
+                settings={settings}
               />
             </div>
           </div>

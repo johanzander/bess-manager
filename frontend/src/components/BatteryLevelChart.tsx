@@ -66,11 +66,17 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
       console.warn(`Missing key: dataSource at index ${index}`);
     }
 
-    const batteryAction = getValue(hour.batteryAction) ?? 0;
+    if (hour.batteryAction === undefined) {
+      throw new Error(`MISSING DATA: batteryAction is required but missing at index ${index}`);
+    }
+    const batteryAction = getValue(hour.batteryAction);
     const batterySocPercent = getValue(hour.batterySocEnd); // Extract from FormattedValue
     const price = getValue(hour.buyPrice); // Extract from FormattedValue
     const hourNum = typeof hour.hour === 'string' ? parseInt(hour.hour, 10) : (hour.hour || index);
-    const dataSource = hour.dataSource ?? 'unknown';
+    if (hour.dataSource === undefined) {
+      throw new Error(`MISSING DATA: dataSource is required but missing at index ${index}`);
+    }
+    const dataSource = hour.dataSource;
     
     return {
       hour: hourNum + 0.5,  // Center the bar in the middle of the hour period

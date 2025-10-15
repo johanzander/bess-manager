@@ -103,6 +103,7 @@ def test_all_scenarios(scenario_name):
         vat_multiplier=vat_multiplier,
         additional_costs=additional_costs,
         tax_reduction=tax_reduction,
+        area="SE4",
     )
 
     # Get buy and sell prices

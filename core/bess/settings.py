@@ -1,4 +1,18 @@
-"""Core configuration values and types for BESS using dataclasses."""
+"""Core configuration values and types for BESS using dataclasses.
+
+IMPORTANT: This file contains DEFAULT VALUES only.
+
+The values in this file serve as:
+1. Settings for unit tests and development
+2. Internal algorithm parameters not exposed to users
+
+All user-facing settings should be configured and overridden via config.yaml:
+- Battery settings (capacity, power, cycle_cost, min_action_profit_threshold)
+- Electricity price settings (area, markup_rate, vat_multiplier, additional_costs, tax_reduction)
+- Home settings (consumption, voltage, fuse_current, safety_margin_factor)
+
+For production configuration, all user-facing values must be properly configured in config.yaml.
+"""
 
 from dataclasses import dataclass, field
 from typing import Any
@@ -36,13 +50,11 @@ HOUSE_MAX_FUSE_CURRENT_A = 25  # Maximum fuse current in amperes
 HOUSE_VOLTAGE_V = 230  # Line voltage
 SAFETY_MARGIN_FACTOR = 0.95  # Safety margin for power calculations (95%)
 
-# Replace Enum with a simple constant
-AREA_CODES = ["SE1", "SE2", "SE3", "SE4"]
-
-
 @dataclass
 class PriceSettings:
-    """Price settings for electricity costs."""
+    """Price settings for electricity costs.
+    
+    """
 
     area: str = DEFAULT_AREA
     markup_rate: float = MARKUP_RATE

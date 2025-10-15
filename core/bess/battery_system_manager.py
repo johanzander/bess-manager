@@ -117,6 +117,7 @@ class BatterySystemManager:
             vat_multiplier=self.price_settings.vat_multiplier,
             additional_costs=self.price_settings.additional_costs,
             tax_reduction=self.price_settings.tax_reduction,
+            area=self.price_settings.area,
         )
 
         # Initialize monitors (created in start() if controller available)

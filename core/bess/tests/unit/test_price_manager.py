@@ -17,6 +17,7 @@ def test_direct_price_initialization():
         vat_multiplier=1.25,
         additional_costs=0.5,
         tax_reduction=0.2,
+        area="SE4",
     )
 
     # Check calculations with the updated formula:
@@ -78,13 +79,14 @@ def test_controller_price_fetching():
     mock_controller._api_request = mock_api_request
     mock_controller._get_entity_for_service = mock_get_entity_for_service
 
-    ha_source = HomeAssistantSource(mock_controller)
+    ha_source = HomeAssistantSource(mock_controller, vat_multiplier=1.25)
     pm = PriceManager(
         price_source=ha_source,
         markup_rate=0.1,
         vat_multiplier=1.25,
         additional_costs=0.5,
         tax_reduction=0.2,
+        area="SE4",
     )
 
     # Get today's prices
@@ -128,6 +130,7 @@ def test_mock_source():
         vat_multiplier=1.25,
         additional_costs=0.5,
         tax_reduction=0.2,
+        area="SE4",
     )
 
     # Get today's prices
@@ -176,7 +179,7 @@ def test_home_assistant_source_vat_parameter():
     mock_controller._get_entity_for_service = mock_get_entity_for_service
 
     # Test with default VAT multiplier (1.25)
-    ha_source_default = HomeAssistantSource(mock_controller)
+    ha_source_default = HomeAssistantSource(mock_controller, vat_multiplier=1.25)
     prices_default = ha_source_default.get_prices_for_date(today_date)
     assert prices_default[0] == 1.6  # 2.0 / 1.25 = 1.6
 

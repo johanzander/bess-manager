@@ -92,13 +92,13 @@ class HomeAssistantSource(PriceSource):
     consistently return VAT-exclusive prices.
     """
 
-    def __init__(self, ha_controller, vat_multiplier: float = 1.25) -> None:
+    def __init__(self, ha_controller, vat_multiplier: float) -> None:
         """Initialize with Home Assistant controller.
 
         Args:
             ha_controller: Controller with access to Home Assistant
             vat_multiplier: VAT multiplier used to convert VAT-inclusive prices to VAT-exclusive
-                            (default: 1.25 for 25% Swedish VAT)
+                            (must be provided from config.yaml)
         """
         self.ha_controller = ha_controller
         self.vat_multiplier = vat_multiplier
@@ -334,11 +334,11 @@ class PriceManager:
     def __init__(
         self,
         price_source: PriceSource,
-        markup_rate: float = 0.1,
-        vat_multiplier: float = 1.25,
-        additional_costs: float = 0.5,
-        tax_reduction: float = 0.2,
-        area: str = "SE3",
+        markup_rate: float,
+        vat_multiplier: float,
+        additional_costs: float,
+        tax_reduction: float,
+        area: str,
     ) -> None:
         """Initialize the price manager.
 

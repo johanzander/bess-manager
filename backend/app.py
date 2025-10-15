@@ -256,55 +256,64 @@ class BESSController:
 
         This consolidates settings application in one place, ensuring settings
         are applied as early as possible in the initialization process.
+        
+        All user-facing settings must be explicitly configured in config.yaml.
+        No fallback defaults are provided to ensure deterministic behavior.
 
         Args:
             options: Dictionary containing all configuration options
         """
         try:
             if not options:
-                logger.warning("No options provided for settings application")
-                return
+                raise ValueError("Configuration options are required but not provided")
 
             logger.debug(f"Applying settings: {json.dumps(options, indent=2)}")
 
+            # Validate required sections exist
+            required_sections = ["battery", "electricity_price", "home"]
+            for section in required_sections:
+                if section not in options:
+                    raise ValueError(f"Required configuration section '{section}' is missing from config.yaml")
+
+            # Validate required values without defaults
+            battery_config = options["battery"]
+            electricity_price_config = options["electricity_price"]
+            home_config = options["home"]
+            
+            # Required battery settings
+            required_battery_keys = ["total_capacity", "cycle_cost", "max_charge_discharge_power", "min_action_profit_threshold"]
+            for key in required_battery_keys:
+                if key not in battery_config:
+                    raise ValueError(f"Required battery setting '{key}' is missing from config.yaml")
+            
+            # Required electricity price settings
+            required_price_keys = ["area", "markup_rate", "vat_multiplier", "additional_costs", "tax_reduction"]
+            for key in required_price_keys:
+                if key not in electricity_price_config:
+                    raise ValueError(f"Required electricity_price setting '{key}' is missing from config.yaml")
+            
+            # Required home settings
+            if "consumption" not in home_config:
+                raise ValueError("Required home setting 'consumption' is missing from config.yaml")
+
             settings = {
                 "battery": {
-                    "totalCapacity": options.get("battery", {}).get(
-                        "total_capacity", 30.0
-                    ),
-                    "cycleCostPerKwh": options.get("battery", {}).get(
-                        "cycle_cost", 0.50
-                    ),
-                    "maxChargePowerKw": options.get("battery", {}).get(
-                        "max_charge_discharge_power", 15.0
-                    ),
-                    "maxDischargePowerKw": options.get("battery", {}).get(
-                        "max_charge_discharge_power", 15.0
-                    ),
-                    "estimatedConsumption": options.get("home", {}).get(
-                        "consumption", 3.5
-                    ),
+                    "totalCapacity": battery_config["total_capacity"],
+                    "cycleCostPerKwh": battery_config["cycle_cost"],
+                    "maxChargePowerKw": battery_config["max_charge_discharge_power"],
+                    "maxDischargePowerKw": battery_config["max_charge_discharge_power"],
+                    "minActionProfitThreshold": battery_config["min_action_profit_threshold"],
+                    "estimatedConsumption": home_config["consumption"],
                 },
                 "consumption": {
-                    "defaultHourly": options.get("home", {}).get("consumption", 3.5)
+                    "defaultHourly": home_config["consumption"]
                 },
                 "price": {
-                    "area": options.get("electricity_price", {}).get("area", "SE4"),
-                    "markupRate": options.get("electricity_price", {}).get(
-                        "markup_rate", 0.08
-                    ),
-                    "vatMultiplier": options.get("electricity_price", {}).get(
-                        "vat_multiplier", 1.25
-                    ),
-                    "additionalCosts": options.get("electricity_price", {}).get(
-                        "additional_costs", 1.03
-                    ),
-                    "taxReduction": options.get("electricity_price", {}).get(
-                        "tax_reduction", 0.6518
-                    ),
-                    "minProfit": options.get("electricity_price", {}).get(
-                        "min_profit", 0.05
-                    ),
+                    "area": electricity_price_config["area"],
+                    "markupRate": electricity_price_config["markup_rate"],
+                    "vatMultiplier": electricity_price_config["vat_multiplier"],
+                    "additionalCosts": electricity_price_config["additional_costs"],
+                    "taxReduction": electricity_price_config["tax_reduction"],
                 },
             }
 

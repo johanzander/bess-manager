@@ -21,7 +21,7 @@ class OfficialNordpoolSource(PriceSource):
     """
 
     def __init__(
-        self, ha_controller, config_entry_id: str, vat_multiplier: float = 1.25
+        self, ha_controller, config_entry_id: str, vat_multiplier: float
     ) -> None:
         """Initialize with Home Assistant controller and config entry ID.
 
@@ -219,7 +219,7 @@ class LegacyNordpoolSource(PriceSource):
     'today', 'tomorrow', 'raw_today', 'raw_tomorrow' attributes.
     """
 
-    def __init__(self, ha_controller, vat_multiplier: float = 1.25) -> None:
+    def __init__(self, ha_controller, vat_multiplier: float) -> None:
         """Initialize with Home Assistant controller.
 
         Args:

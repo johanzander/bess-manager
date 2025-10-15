@@ -601,7 +601,6 @@ class APIRealTimePower:
     batteryDischargePower: FormattedValue
     netBatteryPower: FormattedValue
     netGridPower: FormattedValue
-    acPower: FormattedValue
     selfPower: FormattedValue
 
     @classmethod
@@ -617,7 +616,6 @@ class APIRealTimePower:
         battery_discharge_power = controller.get_battery_discharge_power()
         net_battery_power = controller.get_net_battery_power()
         net_grid_power = controller.get_net_grid_power()
-        ac_power = controller.get_ac_power()
         self_power = controller.get_self_power()
         
         def create_formatted_power(value):
@@ -647,7 +645,6 @@ class APIRealTimePower:
             batteryDischargePower=create_formatted_power(battery_discharge_power),
             netBatteryPower=create_formatted_power(net_battery_power),
             netGridPower=create_formatted_power(net_grid_power),
-            acPower=create_formatted_power(ac_power),
             selfPower=create_formatted_power(self_power),
         )
 

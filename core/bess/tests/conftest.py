@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 
 class MockHomeAssistantController(HomeAssistantAPIController):
-    def _resolve_entity_id(self, sensor_key: str, for_service: bool = False):  # type: ignore[unused-argument]
+    def _resolve_entity_id(self, sensor_key: str):
         """Mock entity ID resolution: returns a dummy entity_id for any sensor_key."""
         # For testing, just return 'sensor.' + sensor_key (simulate real entity IDs)
         return f"sensor.{sensor_key}", "mock"

@@ -334,8 +334,20 @@ async def get_decision_intelligence():
         return convert_keys_to_camel_case(response)
 
     except Exception as e:
-        logger.error(f"Error generating decision intelligence from real data: {e}")
-        raise ValueError(f"Decision intelligence data is required but failed to generate: {e}") from e
+        logger.warning(f"Decision intelligence not available yet (insights page under construction): {e}")
+        # Return minimal empty response instead of crashing - insights page is under construction
+        return convert_keys_to_camel_case({
+            "hours": [],
+            "summary": {
+                "total_battery_actions": 0,
+                "charging_hours": 0,
+                "discharging_hours": 0,
+                "idle_hours": 0,
+                "peak_charge_rate": 0.0,
+                "peak_discharge_rate": 0.0,
+            },
+            "message": "Decision intelligence data not yet available - insights page under construction"
+        })
 
 
 # @router.get("/api/decision-intelligence")

@@ -17,9 +17,17 @@ if [ ! -f .env ]; then
   exit 1
 fi
 
+# Export environment variables from .env file (excluding comments and empty lines)
+echo "Loading environment variables from .env..."
+set -a  # automatically export all variables
+source <(grep -v '^#' .env | grep -v '^$' | sed 's/^\s*//')
+set +a  # stop automatically exporting
+
+# Display which HA instance we're connecting to
+echo "Connecting to Home Assistant at: $HA_URL"
+
 # Check if token is still the default
-TOKEN=$(grep "HA_TOKEN" .env | cut -d'=' -f2)
-if [[ "$TOKEN" == "your_long_lived_access_token_here" ]]; then
+if [[ "$HA_TOKEN" == "your_long_lived_access_token_here" ]]; then
   echo "Please edit .env file to add your Home Assistant token."
   exit 1
 fi

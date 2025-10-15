@@ -106,9 +106,7 @@ class SensorCollector:
         # Extract BOTH SOC readings from sensors - NO DEFAULTS
         # Use abstraction layer to resolve battery SOC sensor entity ID (without 'sensor.' prefix)
         try:
-            entity_id, _ = self.ha_controller._resolve_entity_id(
-                "battery_soc", for_service=False
-            )
+            entity_id, _ = self.ha_controller._resolve_entity_id("battery_soc")
             if entity_id.startswith("sensor."):
                 battery_soc_end_key = entity_id[7:]
             else:

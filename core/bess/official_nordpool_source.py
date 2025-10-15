@@ -86,19 +86,15 @@ class OfficialNordpoolSource(PriceSource):
             service_response = response["service_response"]
 
             # Extract price entries from service response
-            # Official integration returns data under area code (e.g., "SE4")
+            # Official integration returns data under area code key (e.g., "SE4", "NO2", "DK1")
             price_entries = []
 
-            # Look for data under area codes (SE1, SE2, SE3, SE4, etc.)
+            # Find the first list value in the response (should be the price data)
             for key, value in service_response.items():
-                if isinstance(value, list) and key.startswith("SE"):
+                if isinstance(value, list) and value:
                     price_entries = value
-                    logger.debug(f"Found price data under area code: {key}")
+                    logger.debug(f"Found price data under key: {key}")
                     break
-
-            # Fallback: try "prices" key (in case response format changes)
-            if not price_entries:
-                price_entries = service_response.get("prices", [])
 
             if not price_entries:
                 logger.error(f"Service response keys: {list(service_response.keys())}")
@@ -119,7 +115,7 @@ class OfficialNordpoolSource(PriceSource):
             # Convert 96 quarter-hourly prices to 24 hourly prices for backward compatibility
             if len(prices) == 96:
                 logger.info(
-                    f"Converting 96 quarter-hourly prices to 24 hourly prices by averaging"
+                    "Converting 96 quarter-hourly prices to 24 hourly prices by averaging"
                 )
                 hourly_prices = []
                 for hour in range(24):

@@ -43,13 +43,14 @@ class HomeAssistantAPIController:
         """Get display name for a sensor key from METHOD_SENSOR_MAP."""
         for method_info in self.METHOD_SENSOR_MAP.values():
             if method_info["sensor_key"] == sensor_key:
-                return method_info["name"]
+                name = method_info["name"]
+                return str(name) if name else f"sensor '{sensor_key}'"
         return f"sensor '{sensor_key}'"
 
     def _get_entity_for_service(self, sensor_key: str) -> str:
         """Get entity ID for service calls with proper error handling."""
         try:
-            entity_id, _ = self._resolve_entity_id(sensor_key, for_service=True)
+            entity_id, _ = self._resolve_entity_id(sensor_key)
             return entity_id
         except ValueError as e:
             description = self._get_sensor_display_name(sensor_key)
@@ -60,7 +61,7 @@ class HomeAssistantAPIController:
         return self.get_method_sensor_key(method_name)
 
     @classmethod
-    def get_method_info(cls, method_name: str) -> dict[str, str] | None:
+    def get_method_info(cls, method_name: str) -> dict[str, object] | None:
         """Get method information including sensor key and display name."""
         return cls.METHOD_SENSOR_MAP.get(method_name)
 
@@ -68,13 +69,19 @@ class HomeAssistantAPIController:
     def get_method_name(cls, method_name: str) -> str | None:
         """Get the display name for a method."""
         method_info = cls.METHOD_SENSOR_MAP.get(method_name)
-        return method_info["name"] if method_info else None
+        if method_info:
+            name = method_info["name"]
+            return str(name) if name else None
+        return None
 
     @classmethod
     def get_method_sensor_key(cls, method_name: str) -> str | None:
         """Get the sensor key for a method."""
         method_info = cls.METHOD_SENSOR_MAP.get(method_name)
-        return method_info["sensor_key"] if method_info else None
+        if method_info:
+            sensor_key = method_info["sensor_key"]
+            return str(sensor_key) if sensor_key else None
+        return None
 
     def __init__(self, ha_url: str, token: str, sensor_config: dict | None = None):
         """Initialize the Controller with Home Assistant API access.
@@ -103,7 +110,7 @@ class HomeAssistantAPIController:
         )
 
     # Class-level sensor mapping - immutable mapping
-    METHOD_SENSOR_MAP: ClassVar[dict[str, dict[str, str | int | None]]] = {
+    METHOD_SENSOR_MAP: ClassVar[dict[str, dict[str, object]]] = {
         # Battery control methods
         "get_battery_soc": {
             "sensor_key": "battery_soc",
@@ -172,13 +179,6 @@ class HomeAssistantAPIController:
         "get_local_load_power": {
             "sensor_key": "local_load_power",
             "name": "Home Load Power",
-            "unit": "W",
-            "precision": 0,
-            "conversion_threshold": 1000,
-        },
-        "get_ac_power": {
-            "sensor_key": "ac_power",
-            "name": "AC Power",
             "unit": "W",
             "precision": 0,
             "conversion_threshold": 1000,
@@ -367,25 +367,24 @@ class HomeAssistantAPIController:
             raise TypeError(f"sensor_key must be a string, got {type(sensor_key)}")
 
         try:
-            entity_id, _ = self._resolve_entity_id(sensor_key, for_service=False)
+            entity_id, _ = self._resolve_entity_id(sensor_key)
             return entity_id[7:] if entity_id.startswith("sensor.") else entity_id
         except ValueError:
             return None
 
     def _resolve_entity_id(
-        self, sensor_key: str, for_service: bool = False
+        self, sensor_key: str
     ) -> tuple[str, str]:
         """Unified entity ID resolution with consistent logic.
 
         Args:
             sensor_key: The sensor key to resolve
-            for_service: If True, raises error on missing config (for write operations)
 
         Returns:
             tuple: (entity_id, resolution_method)
 
         Raises:
-            ValueError: If sensor_key not found and for_service=True
+            ValueError: If sensor_key not found
         """
         # First check our sensor configuration
         if sensor_key in self.sensors:
@@ -409,11 +408,9 @@ class HomeAssistantAPIController:
                 "error": f"Method '{method_name}' not found in sensor mapping",
             }
 
-        sensor_key = method_info["sensor_key"]
+        sensor_key = str(method_info["sensor_key"])
         try:
-            entity_id, resolution_method = self._resolve_entity_id(
-                sensor_key, for_service=False
-            )
+            entity_id, resolution_method = self._resolve_entity_id(sensor_key)
         except ValueError as e:
             return {
                 "method_name": method_name,
@@ -615,9 +612,7 @@ class HomeAssistantAPIController:
     def _get_sensor_value(self, sensor_name):
         """Get value from any sensor by name using unified entity resolution."""
         try:
-            entity_id, resolution_method = self._resolve_entity_id(
-                sensor_name, for_service=False
-            )
+            entity_id, resolution_method = self._resolve_entity_id(sensor_name)
             logger.debug(
                 f"Resolving sensor '{sensor_name}' to entity '{entity_id}' (method: {resolution_method})"
             )
@@ -745,26 +740,26 @@ class HomeAssistantAPIController:
 
     def set_inverter_time_segment(
         self,
-        segment_id,
-        batt_mode,
-        start_time,
-        end_time,
-        enabled,
-    ):
-        """Set the inverter time segment with retry logic."""
-        # Convert batt_mode if it's a string name to integer for API
-        batt_mode_val = batt_mode
-        if isinstance(batt_mode, str):
-            # Map string mode names to integers if needed by API
-            mode_map = {"load-first": 0, "battery-first": 1, "grid-first": 2}
-            if batt_mode in mode_map:
-                batt_mode_val = mode_map[batt_mode]
+        segment_id: int,
+        batt_mode: str,
+        start_time: str,
+        end_time: str,
+        enabled: bool,
+    ) -> None:
+        """Set the inverter time segment.
 
+        Args:
+            segment_id: Segment number (1-10)
+            batt_mode: Battery mode ("load-first", "battery-first", or "grid-first")
+            start_time: Start time in "HH:MM" format
+            end_time: End time in "HH:MM" format
+            enabled: Whether the segment is enabled
+        """
         self._service_call_with_retry(
             "growatt_server",
-            "update_tlx_inverter_time_segment",
+            "update_time_segment",
             segment_id=segment_id,
-            batt_mode=batt_mode_val,
+            batt_mode=batt_mode,
             start_time=start_time,
             end_time=end_time,
             enabled=enabled,
@@ -776,7 +771,7 @@ class HomeAssistantAPIController:
             # Call the service and get the response
             result = self._service_call_with_retry(
                 "growatt_server",
-                "read_tlx_inverter_time_segments",
+                "read_time_segments",
                 return_response=True,  # Explicitly set return_response
             )
 
@@ -951,17 +946,14 @@ class HomeAssistantAPIController:
         """Get tomorrow's Nordpool prices from Home Assistant sensor."""
         return self._get_nordpool_prices(is_tomorrow=True)
 
-    def get_sensor_data(self, sensors_list, end_time=None):
+    def get_sensor_data(self, sensors_list):
         """Get current sensor data via Home Assistant REST API.
 
         Note: This method only provides current sensor states, not historical data.
         Historical data is handled by InfluxDB integration in sensor_collector.py.
 
-        The end_time parameter is ignored - this method always returns current states.
-
         Args:
             sensors_list: List of sensor names to fetch
-            end_time: Optional datetime parameter (ignored - always returns current states)
 
         Returns:
             Dictionary with current sensor data in the same format as influxdb_helper
@@ -973,7 +965,7 @@ class HomeAssistantAPIController:
             # For each sensor in the list, get the current state
             for sensor in sensors_list:
                 # Use unified entity resolution - require explicit configuration
-                entity_id, _ = self._resolve_entity_id(sensor, for_service=False)
+                entity_id, _ = self._resolve_entity_id(sensor)
 
                 # Get sensor state
                 response = self._api_request("get", f"/api/states/{entity_id}")

@@ -94,14 +94,15 @@ const Navigation = () => {
         <Zap className="h-5 w-5" />
         <span className="hidden sm:inline">Inverter</span>
       </Link>
-      <Link 
-        to="/insights" 
+      {/* Temporarily disabled - under construction */}
+      {/* <Link
+        to="/insights"
         className={`p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center space-x-1 ${isActive('/insights')}`}
         title="Decision analysis & intelligence"
       >
         <Brain className="h-5 w-5" />
         <span className="hidden sm:inline">Insights</span>
-      </Link>
+      </Link> */}
       <Link 
         to="/system-health" 
         className={`p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center space-x-1 ${isActive('/system-health')}`}

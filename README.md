@@ -59,11 +59,11 @@ The BESS Manager provides a comprehensive web interface organized into focused p
 ![Dashboard Overview](./assets/dashboard.png)
 *Beautiful energy flow visualization with real-time optimization results*
 
-![Battery Schedule](docs/images/battery-schedule.png)
-*Intelligent scheduling showing charge/discharge decisions with price predictions*
+![Savings Analysis](./assets/savings.png)  
+*Detailed savings breakdown with battery actions and ROi calculations*
 
-![Savings Analysis](docs/images/savings-analysis.png)  
-*Detailed savings breakdown with ROI calculations and performance metrics*
+![Battery Schedule](.assets/battery-schedule.png)
+*Intelligent scheduling showing charge/discharge decisions with price predictions*
 
 > 📸 **Screenshot placeholders** - Add actual screenshots to `docs/images/` directory
 

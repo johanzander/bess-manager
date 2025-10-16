@@ -56,7 +56,7 @@ The BESS Manager provides a comprehensive web interface organized into focused p
 
 ## Screenshots
 
-![Dashboard Overview](docs/images/dashboard-overview.png)
+![Dashboard Overview](./assets/dashboard.png)
 *Beautiful energy flow visualization with real-time optimization results*
 
 ![Battery Schedule](docs/images/battery-schedule.png)

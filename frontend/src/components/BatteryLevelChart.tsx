@@ -51,6 +51,15 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
   };
 
   // Transform daily view data to chart format
+  // Helper function to get currency unit from price data
+  const getCurrencyUnit = () => {
+    const firstPriceData = hourlyData.find(hour => hour.buyPrice?.unit);
+    return firstPriceData?.buyPrice?.unit || '???';
+  };
+
+  // Get the actual currency unit for the chart label
+  const currencyUnit = getCurrencyUnit();
+
   const chartData = hourlyData.map((hour, index) => {
     // Check for missing keys and provide warnings
     if (hour.batteryAction === undefined) {
@@ -128,7 +137,7 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
               }}
             />
             
-            {/* Right Y-axis for Electricity Price (SEK/kWh) */}
+            {/* Right Y-axis for Electricity Price */}
             <YAxis 
               yAxisId="right" 
               orientation="right" 
@@ -137,7 +146,7 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
               tick={{ fontSize: 11 }}
               tickFormatter={(value) => value.toLocaleString('sv-SE', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
               label={{ 
-                value: 'Electricity Price (SEK/kWh)', 
+                value: `Electricity Price (${currencyUnit}/kWh)`, 
                 angle: 90, 
                 position: 'insideRight', 
                 style: { textAnchor: 'middle', dominantBaseline: 'central' }

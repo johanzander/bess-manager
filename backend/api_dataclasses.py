@@ -8,19 +8,22 @@ from dataclasses import dataclass
 @dataclass
 class FormattedValue:
     """Formatted value structure for frontend display."""
+
     value: float
     display: str
     unit: str
     text: str
 
 
-def create_formatted_value(value: float, unit_type: str, battery_capacity: float = 30.0, precision: int | None = None) -> FormattedValue:
-    """Create FormattedValue with optional precision override.
+def create_formatted_value(
+    value: float, unit_type: str, currency: str, precision: int | None = None
+) -> FormattedValue:
+    """Create FormattedValue with currency parameter.
 
     Args:
         value: The numeric value to format
         unit_type: Type of unit ("currency", "energy_kwh_only", "percentage", "price", etc.)
-        battery_capacity: Battery capacity for SOE to SOC conversion
+        currency: Currency code (SEK, NOK, EUR, USD, etc.)
         precision: Override default decimal places (None = use defaults: currency=2, energy=2, percentage=1, price=2)
     """
     if unit_type == "currency":
@@ -28,8 +31,8 @@ def create_formatted_value(value: float, unit_type: str, battery_capacity: float
         return FormattedValue(
             value=value,
             display=f"{value:,.{prec}f}",
-            unit="SEK",
-            text=f"{value:,.{prec}f} SEK"
+            unit=currency,
+            text=f"{value:,.{prec}f} {currency}",
         )
     elif unit_type == "energy_kwh_only":
         # Always use kWh units to ensure consistency in savings view
@@ -39,7 +42,7 @@ def create_formatted_value(value: float, unit_type: str, battery_capacity: float
             value=value,
             display=f"{value:.{prec}f}",
             unit="kWh",
-            text=f"{value:.{prec}f} kWh"
+            text=f"{value:.{prec}f} kWh",
         )
     elif unit_type == "percentage":
         prec = precision if precision is not None else 0
@@ -47,23 +50,21 @@ def create_formatted_value(value: float, unit_type: str, battery_capacity: float
             value=value,
             display=f"{value:.{prec}f}",
             unit="%",
-            text=f"{value:.{prec}f} %"
+            text=f"{value:.{prec}f} %",
         )
     elif unit_type == "price":
         prec = precision if precision is not None else 2
+        price_unit = f"{currency}/kWh"
         return FormattedValue(
             value=value,
             display=f"{value:.{prec}f}",
-            unit="öre/kWh",
-            text=f"{value:.{prec}f} öre/kWh"
+            unit=price_unit,
+            text=f"{value:.{prec}f} {price_unit}",
         )
     else:
         # Default fallback
         return FormattedValue(
-            value=value,
-            display=f"{value:.2f}",
-            unit="",
-            text=f"{value:.2f}"
+            value=value, display=f"{value:.2f}", unit="", text=f"{value:.2f}"
         )
 
 
@@ -165,7 +166,6 @@ class APIPriceSettings:
         }
 
 
-
 @dataclass
 class APIDashboardHourlyData:
     """Dashboard hourly data with canonical FormattedValue interface."""
@@ -204,20 +204,25 @@ class APIDashboardHourlyData:
     batteryToGrid: FormattedValue
 
     # Solar-only scenario fields
-    gridImportNeeded: FormattedValue  # How much grid import needed in solar-only scenario
-    solarExcess: FormattedValue       # How much solar excess in solar-only scenario
-    solarSavings: FormattedValue      # Savings from solar vs grid-only
+    gridImportNeeded: (
+        FormattedValue  # How much grid import needed in solar-only scenario
+    )
+    solarExcess: FormattedValue  # How much solar excess in solar-only scenario
+    solarSavings: FormattedValue  # Savings from solar vs grid-only
 
     # Raw values for logic only
     strategicIntent: str
     directSolar: float
 
     @classmethod
-    def from_internal(cls, hourly, battery_capacity: float) -> APIDashboardHourlyData:
+    def from_internal(
+        cls, hourly, battery_capacity: float, currency: str
+    ) -> APIDashboardHourlyData:
         """Convert internal HourlyData to API format using pure dataclass approach."""
+
         def safe_format(value, unit_type):
             """Helper to safely format values using pure dataclass approach"""
-            return create_formatted_value(value or 0, unit_type, battery_capacity)
+            return create_formatted_value(value or 0, unit_type, currency)
 
         # Calculate derived values
         solar_production = hourly.energy.solar_production if hourly.energy else 0
@@ -229,111 +234,135 @@ class APIDashboardHourlyData:
             hour=hourly.hour,
             dataSource="actual" if hourly.data_source == "actual" else "predicted",
             timestamp=hourly.timestamp.isoformat() if hourly.timestamp else None,
-
             # Energy flows
             solarProduction=safe_format(solar_production, "energy_kwh_only"),
             homeConsumption=safe_format(home_consumption, "energy_kwh_only"),
-
             # Battery state
             batterySocStart=safe_format(
-                (hourly.energy.battery_soe_start / battery_capacity) * 100.0
-                if hasattr(hourly.energy, 'battery_soe_start') and hourly.energy
-                else getattr(hourly.energy, 'battery_soc_start', 0) if hourly.energy else 0,
-                "percentage"
+                (
+                    (hourly.energy.battery_soe_start / battery_capacity) * 100.0
+                    if hasattr(hourly.energy, "battery_soe_start") and hourly.energy
+                    else (
+                        getattr(hourly.energy, "battery_soc_start", 0)
+                        if hourly.energy
+                        else 0
+                    )
+                ),
+                "percentage",
             ),
             batterySocEnd=safe_format(
-                (hourly.energy.battery_soe_end / battery_capacity) * 100.0
-                if hasattr(hourly.energy, 'battery_soe_end') and hourly.energy
-                else getattr(hourly.energy, 'battery_soc_end', 0) if hourly.energy else 0,
-                "percentage"
+                (
+                    (hourly.energy.battery_soe_end / battery_capacity) * 100.0
+                    if hasattr(hourly.energy, "battery_soe_end") and hourly.energy
+                    else (
+                        getattr(hourly.energy, "battery_soc_end", 0)
+                        if hourly.energy
+                        else 0
+                    )
+                ),
+                "percentage",
             ),
             batterySoeStart=safe_format(
-                getattr(hourly.energy, 'battery_soe_start', 0) if hourly.energy else 0,
-                "energy_kwh_only"
+                getattr(hourly.energy, "battery_soe_start", 0) if hourly.energy else 0,
+                "energy_kwh_only",
             ),
             batterySoeEnd=safe_format(
-                getattr(hourly.energy, 'battery_soe_end', 0) if hourly.energy else 0,
-                "energy_kwh_only"
+                getattr(hourly.energy, "battery_soe_end", 0) if hourly.energy else 0,
+                "energy_kwh_only",
             ),
-
             # Economic data
-            buyPrice=safe_format(hourly.economic.buy_price if hourly.economic else 0, "price"),
-            sellPrice=safe_format(hourly.economic.sell_price if hourly.economic else 0, "price"),
-            hourlyCost=safe_format(hourly.economic.hourly_cost if hourly.economic else 0, "currency"),
-            hourlySavings=safe_format(hourly.economic.hourly_savings if hourly.economic else 0, "currency"),
-            gridOnlyCost=safe_format(hourly.economic.grid_only_cost if hourly.economic else 0, "currency"),
-            solarOnlyCost=safe_format(hourly.economic.solar_only_cost if hourly.economic else 0, "currency"),
-
+            buyPrice=safe_format(
+                hourly.economic.buy_price if hourly.economic else 0, "price"
+            ),
+            sellPrice=safe_format(
+                hourly.economic.sell_price if hourly.economic else 0, "price"
+            ),
+            hourlyCost=safe_format(
+                hourly.economic.hourly_cost if hourly.economic else 0, "currency"
+            ),
+            hourlySavings=safe_format(
+                hourly.economic.hourly_savings if hourly.economic else 0, "currency"
+            ),
+            gridOnlyCost=safe_format(
+                hourly.economic.grid_only_cost if hourly.economic else 0, "currency"
+            ),
+            solarOnlyCost=safe_format(
+                hourly.economic.solar_only_cost if hourly.economic else 0, "currency"
+            ),
             # Battery control
             batteryAction=safe_format(
-                getattr(hourly.decision, 'battery_action', 0) if hourly.decision else 0,
-                "energy_kwh_only"
+                getattr(hourly.decision, "battery_action", 0) if hourly.decision else 0,
+                "energy_kwh_only",
             ),
             batteryCharged=safe_format(
-                getattr(hourly.energy, 'battery_charged', 0) if hourly.energy else 0,
-                "energy_kwh_only"
+                getattr(hourly.energy, "battery_charged", 0) if hourly.energy else 0,
+                "energy_kwh_only",
             ),
             batteryDischarged=safe_format(
-                getattr(hourly.energy, 'battery_discharged', 0) if hourly.energy else 0,
-                "energy_kwh_only"
+                getattr(hourly.energy, "battery_discharged", 0) if hourly.energy else 0,
+                "energy_kwh_only",
             ),
-
             # Grid interactions
             gridImported=safe_format(
-                getattr(hourly.energy, 'grid_imported', 0) if hourly.energy else 0,
-                "energy_kwh_only"
+                getattr(hourly.energy, "grid_imported", 0) if hourly.energy else 0,
+                "energy_kwh_only",
             ),
             gridExported=safe_format(
-                getattr(hourly.energy, 'grid_exported', 0) if hourly.energy else 0,
-                "energy_kwh_only"
+                getattr(hourly.energy, "grid_exported", 0) if hourly.energy else 0,
+                "energy_kwh_only",
             ),
-
             # Detailed energy flows - using existing calculated fields from backend models
             solarToHome=safe_format(
-                getattr(hourly.energy, 'solar_to_home', 0) if hourly.energy else 0,
-                "energy_kwh_only"
+                getattr(hourly.energy, "solar_to_home", 0) if hourly.energy else 0,
+                "energy_kwh_only",
             ),
             solarToBattery=safe_format(
-                getattr(hourly.energy, 'solar_to_battery', 0) if hourly.energy else 0,
-                "energy_kwh_only"
+                getattr(hourly.energy, "solar_to_battery", 0) if hourly.energy else 0,
+                "energy_kwh_only",
             ),
             solarToGrid=safe_format(
-                getattr(hourly.energy, 'solar_to_grid', 0) if hourly.energy else 0,
-                "energy_kwh_only"
+                getattr(hourly.energy, "solar_to_grid", 0) if hourly.energy else 0,
+                "energy_kwh_only",
             ),
             gridToHome=safe_format(
-                getattr(hourly.energy, 'grid_to_home', 0) if hourly.energy else 0,
-                "energy_kwh_only"
+                getattr(hourly.energy, "grid_to_home", 0) if hourly.energy else 0,
+                "energy_kwh_only",
             ),
             gridToBattery=safe_format(
-                getattr(hourly.energy, 'grid_to_battery', 0) if hourly.energy else 0,
-                "energy_kwh_only"
+                getattr(hourly.energy, "grid_to_battery", 0) if hourly.energy else 0,
+                "energy_kwh_only",
             ),
             batteryToHome=safe_format(
-                getattr(hourly.energy, 'battery_to_home', 0) if hourly.energy else 0,
-                "energy_kwh_only"
+                getattr(hourly.energy, "battery_to_home", 0) if hourly.energy else 0,
+                "energy_kwh_only",
             ),
             batteryToGrid=safe_format(
-                getattr(hourly.energy, 'battery_to_grid', 0) if hourly.energy else 0,
-                "energy_kwh_only"
+                getattr(hourly.energy, "battery_to_grid", 0) if hourly.energy else 0,
+                "energy_kwh_only",
             ),
-
             # Solar-only scenario calculations
             gridImportNeeded=safe_format(
-                max(0, home_consumption - solar_production),  # Grid import needed if solar < consumption
-                "energy_kwh_only"
+                max(
+                    0, home_consumption - solar_production
+                ),  # Grid import needed if solar < consumption
+                "energy_kwh_only",
             ),
             solarExcess=safe_format(
-                max(0, solar_production - home_consumption),  # Solar excess if solar > consumption
-                "energy_kwh_only"
+                max(
+                    0, solar_production - home_consumption
+                ),  # Solar excess if solar > consumption
+                "energy_kwh_only",
             ),
             solarSavings=safe_format(
-                getattr(hourly.economic, 'solar_savings', 0) if hourly.economic else 0,
-                "currency"
+                getattr(hourly.economic, "solar_savings", 0) if hourly.economic else 0,
+                "currency",
             ),
-
             # Raw values for logic
-            strategicIntent=getattr(hourly.decision, 'strategic_intent', '') if hourly.decision else '',
+            strategicIntent=(
+                getattr(hourly.decision, "strategic_intent", "")
+                if hourly.decision
+                else ""
+            ),
             directSolar=direct_solar,
         )
 
@@ -341,10 +370,12 @@ class APIDashboardHourlyData:
 @dataclass
 class APICostAndSavings:
     """Cost and savings data for SystemStatusCard component."""
+
     todaysCost: FormattedValue
     todaysSavings: FormattedValue
     gridOnlyCost: FormattedValue
     percentageSaved: FormattedValue
+
 
 @dataclass
 class APIDashboardSummary:
@@ -398,7 +429,9 @@ class APIDashboardSummary:
     finalBatterySoe: FormattedValue
 
     @classmethod
-    def from_totals(cls, totals: dict, costs: dict, battery_capacity: float) -> APIDashboardSummary:
+    def from_totals(
+        cls, totals: dict, costs: dict, battery_capacity: float, currency: str
+    ) -> APIDashboardSummary:
         """Create summary from totals and cost calculations."""
         # Extract cost values
         total_grid_only_cost = costs["gridOnly"]
@@ -416,51 +449,158 @@ class APIDashboardSummary:
 
         return cls(
             # Cost scenarios
-            gridOnlyCost=create_formatted_value(total_grid_only_cost, "currency", battery_capacity),
-            solarOnlyCost=create_formatted_value(total_solar_only_cost, "currency", battery_capacity),
-            optimizedCost=create_formatted_value(total_optimized_cost, "currency", battery_capacity),
-
+            gridOnlyCost=create_formatted_value(
+                total_grid_only_cost, "currency", currency
+            ),
+            solarOnlyCost=create_formatted_value(
+                total_solar_only_cost, "currency", currency
+            ),
+            optimizedCost=create_formatted_value(
+                total_optimized_cost, "currency", currency
+            ),
             # Savings calculations
-            totalSavings=create_formatted_value(total_savings, "currency", battery_capacity),
-            solarSavings=create_formatted_value(solar_savings, "currency", battery_capacity),
-            batterySavings=create_formatted_value(battery_savings, "currency", battery_capacity),
-
+            totalSavings=create_formatted_value(total_savings, "currency", currency),
+            solarSavings=create_formatted_value(solar_savings, "currency", currency),
+            batterySavings=create_formatted_value(
+                battery_savings, "currency", currency
+            ),
             # Energy totals
-            totalSolarProduction=create_formatted_value(totals["totalSolarProduction"], "energy_kwh_only", battery_capacity),
-            totalHomeConsumption=create_formatted_value(totals["totalHomeConsumption"], "energy_kwh_only", battery_capacity),
-            totalBatteryCharged=create_formatted_value(totals["totalBatteryCharged"], "energy_kwh_only", battery_capacity),
-            totalBatteryDischarged=create_formatted_value(totals["totalBatteryDischarged"], "energy_kwh_only", battery_capacity),
-            totalGridImported=create_formatted_value(totals["totalGridImport"], "energy_kwh_only", battery_capacity),
-            totalGridExported=create_formatted_value(totals["totalGridExport"], "energy_kwh_only", battery_capacity),
-
+            totalSolarProduction=create_formatted_value(
+                totals["totalSolarProduction"], "energy_kwh_only", currency
+            ),
+            totalHomeConsumption=create_formatted_value(
+                totals["totalHomeConsumption"], "energy_kwh_only", currency
+            ),
+            totalBatteryCharged=create_formatted_value(
+                totals["totalBatteryCharged"], "energy_kwh_only", currency
+            ),
+            totalBatteryDischarged=create_formatted_value(
+                totals["totalBatteryDischarged"], "energy_kwh_only", currency
+            ),
+            totalGridImported=create_formatted_value(
+                totals["totalGridImport"], "energy_kwh_only", currency
+            ),
+            totalGridExported=create_formatted_value(
+                totals["totalGridExport"], "energy_kwh_only", currency
+            ),
             # Detailed energy flows
-            totalSolarToHome=create_formatted_value(totals["totalSolarToHome"], "energy_kwh_only", battery_capacity),
-            totalSolarToBattery=create_formatted_value(totals["totalSolarToBattery"], "energy_kwh_only", battery_capacity),
-            totalSolarToGrid=create_formatted_value(totals["totalSolarToGrid"], "energy_kwh_only", battery_capacity),
-            totalGridToHome=create_formatted_value(totals["totalGridToHome"], "energy_kwh_only", battery_capacity),
-            totalGridToBattery=create_formatted_value(totals["totalGridToBattery"], "energy_kwh_only", battery_capacity),
-            totalBatteryToHome=create_formatted_value(totals["totalBatteryToHome"], "energy_kwh_only", battery_capacity),
-            totalBatteryToGrid=create_formatted_value(totals["totalBatteryToGrid"], "energy_kwh_only", battery_capacity),
-
+            totalSolarToHome=create_formatted_value(
+                totals["totalSolarToHome"], "energy_kwh_only", currency
+            ),
+            totalSolarToBattery=create_formatted_value(
+                totals["totalSolarToBattery"], "energy_kwh_only", currency
+            ),
+            totalSolarToGrid=create_formatted_value(
+                totals["totalSolarToGrid"], "energy_kwh_only", currency
+            ),
+            totalGridToHome=create_formatted_value(
+                totals["totalGridToHome"], "energy_kwh_only", currency
+            ),
+            totalGridToBattery=create_formatted_value(
+                totals["totalGridToBattery"], "energy_kwh_only", currency
+            ),
+            totalBatteryToHome=create_formatted_value(
+                totals["totalBatteryToHome"], "energy_kwh_only", currency
+            ),
+            totalBatteryToGrid=create_formatted_value(
+                totals["totalBatteryToGrid"], "energy_kwh_only", currency
+            ),
             # Percentages
-            totalSavingsPercentage=create_formatted_value(safe_percentage(total_savings, total_grid_only_cost), "percentage", battery_capacity),
-            solarSavingsPercentage=create_formatted_value(safe_percentage(solar_savings, total_grid_only_cost), "percentage", battery_capacity),
-            batterySavingsPercentage=create_formatted_value(safe_percentage(battery_savings, total_solar_only_cost), "percentage", battery_capacity),
-            gridToHomePercentage=create_formatted_value(safe_percentage(totals["totalGridToHome"], totals["totalGridImport"]), "percentage", battery_capacity),
-            gridToBatteryPercentage=create_formatted_value(safe_percentage(totals["totalGridToBattery"], totals["totalGridImport"]), "percentage"),
-            solarToGridPercentage=create_formatted_value(safe_percentage(totals["totalSolarToGrid"], totals["totalGridExport"]), "percentage"),
-            batteryToGridPercentage=create_formatted_value(safe_percentage(totals["totalBatteryToGrid"], totals["totalGridExport"]), "percentage"),
-            solarToBatteryPercentage=create_formatted_value(safe_percentage(totals["totalSolarToBattery"], totals["totalBatteryCharged"]), "percentage"),
-            gridToBatteryChargedPercentage=create_formatted_value(safe_percentage(totals["totalGridToBattery"], totals["totalBatteryCharged"]), "percentage"),
-            batteryToHomePercentage=create_formatted_value(safe_percentage(totals["totalBatteryToHome"], totals["totalBatteryDischarged"]), "percentage"),
-            batteryToGridDischargedPercentage=create_formatted_value(safe_percentage(totals["totalBatteryToGrid"], totals["totalBatteryDischarged"]), "percentage"),
-            selfConsumptionPercentage=create_formatted_value(safe_percentage(totals["totalSolarProduction"], totals["totalHomeConsumption"]), "percentage"),
-
+            totalSavingsPercentage=create_formatted_value(
+                safe_percentage(total_savings, total_grid_only_cost),
+                "percentage",
+                currency,
+            ),
+            solarSavingsPercentage=create_formatted_value(
+                safe_percentage(solar_savings, total_grid_only_cost),
+                "percentage",
+                currency,
+            ),
+            batterySavingsPercentage=create_formatted_value(
+                safe_percentage(battery_savings, total_solar_only_cost),
+                "percentage",
+                currency,
+            ),
+            gridToHomePercentage=create_formatted_value(
+                safe_percentage(totals["totalGridToHome"], totals["totalGridImport"]),
+                "percentage",
+                currency,
+            ),
+            gridToBatteryPercentage=create_formatted_value(
+                safe_percentage(
+                    totals["totalGridToBattery"], totals["totalGridImport"]
+                ),
+                "percentage",
+                currency,
+            ),
+            solarToGridPercentage=create_formatted_value(
+                safe_percentage(totals["totalSolarToGrid"], totals["totalGridExport"]),
+                "percentage",
+                currency,
+            ),
+            batteryToGridPercentage=create_formatted_value(
+                safe_percentage(
+                    totals["totalBatteryToGrid"], totals["totalGridExport"]
+                ),
+                "percentage",
+                currency,
+            ),
+            solarToBatteryPercentage=create_formatted_value(
+                safe_percentage(
+                    totals["totalSolarToBattery"], totals["totalBatteryCharged"]
+                ),
+                "percentage",
+                currency,
+            ),
+            gridToBatteryChargedPercentage=create_formatted_value(
+                safe_percentage(
+                    totals["totalGridToBattery"], totals["totalBatteryCharged"]
+                ),
+                "percentage",
+                currency,
+            ),
+            batteryToHomePercentage=create_formatted_value(
+                safe_percentage(
+                    totals["totalBatteryToHome"], totals["totalBatteryDischarged"]
+                ),
+                "percentage",
+                currency,
+            ),
+            batteryToGridDischargedPercentage=create_formatted_value(
+                safe_percentage(
+                    totals["totalBatteryToGrid"], totals["totalBatteryDischarged"]
+                ),
+                "percentage",
+                currency,
+            ),
+            selfConsumptionPercentage=create_formatted_value(
+                safe_percentage(
+                    totals["totalSolarProduction"], totals["totalHomeConsumption"]
+                ),
+                "percentage",
+                currency,
+            ),
             # Efficiency metrics
-            cycleCount=create_formatted_value(totals["totalBatteryCharged"] / battery_capacity if battery_capacity > 0 else 0.0, "", battery_capacity),
-            netBatteryAction=create_formatted_value(totals["totalBatteryCharged"] - totals["totalBatteryDischarged"], "energy_kwh_only", battery_capacity),
-            averagePrice=create_formatted_value(totals.get("avgBuyPrice", 0), "price", battery_capacity),
-            finalBatterySoe=create_formatted_value(totals.get("finalBatterySoe", 0), "energy_kwh_only", battery_capacity),
+            cycleCount=create_formatted_value(
+                (
+                    totals["totalBatteryCharged"] / battery_capacity
+                    if battery_capacity > 0
+                    else 0.0
+                ),
+                "",
+                currency,
+            ),
+            netBatteryAction=create_formatted_value(
+                totals["totalBatteryCharged"] - totals["totalBatteryDischarged"],
+                "energy_kwh_only",
+                currency,
+            ),
+            averagePrice=create_formatted_value(
+                totals.get("avgBuyPrice", 0), "price", currency
+            ),
+            finalBatterySoe=create_formatted_value(
+                totals.get("finalBatterySoe", 0), "energy_kwh_only", currency
+            ),
         )
 
 
@@ -504,7 +644,8 @@ class APIDashboardResponse:
         strategic_summary: dict,
         battery_soc: float,
         battery_capacity: float,
-        hourly_data_instances: list | None = None
+        currency: str,
+        hourly_data_instances: list | None = None,
     ) -> APIDashboardResponse:
         """Create complete dashboard response from internal data."""
 
@@ -514,7 +655,7 @@ class APIDashboardResponse:
         else:
             # Fallback: create instances if not provided (for backward compatibility)
             hourly_data = [
-                APIDashboardHourlyData.from_internal(hour, battery_capacity)
+                APIDashboardHourlyData.from_internal(hour, battery_capacity, currency)
                 for hour in daily_view.hourly_data
             ]
 
@@ -534,7 +675,9 @@ class APIDashboardResponse:
         complete_totals = {**totals, **detailed_flow_totals}
 
         # Create summary
-        summary = APIDashboardSummary.from_totals(complete_totals, costs, battery_capacity)
+        summary = APIDashboardSummary.from_totals(
+            complete_totals, costs, battery_capacity, currency
+        )
 
         # Create real-time power data
         real_time_power = APIRealTimePower.from_controller(controller)
@@ -563,22 +706,18 @@ class APIDashboardResponse:
             # Core metadata
             date=daily_view.date.isoformat(),
             currentHour=current_hour,
-
             # Financial summary
             totalDailySavings=total_daily_savings,
             actualSavingsSoFar=actual_savings,
             predictedRemainingSavings=predicted_savings,
-
             # Data structure info
             actualHoursCount=len(actual_data),
             predictedHoursCount=len(predicted_data),
             dataSources=list({h.dataSource for h in hourly_data}),
-
             # Battery state
             batteryCapacity=battery_capacity,
-            batterySoc=create_formatted_value(battery_soc, "percentage", battery_capacity),
-            batterySoe=create_formatted_value(battery_soe, "energy_kwh_only", battery_capacity),
-
+            batterySoc=create_formatted_value(battery_soc, "percentage", currency),
+            batterySoe=create_formatted_value(battery_soe, "energy_kwh_only", currency),
             # Main data structures
             hourlyData=hourly_data,
             summary=summary,
@@ -606,7 +745,7 @@ class APIRealTimePower:
     @classmethod
     def from_controller(cls, controller) -> APIRealTimePower:
         """Convert from controller readings to canonical camelCase."""
-        
+
         # Get raw power values
         solar_power = controller.get_pv_power()
         home_load_power = controller.get_local_load_power()
@@ -617,7 +756,7 @@ class APIRealTimePower:
         net_battery_power = controller.get_net_battery_power()
         net_grid_power = controller.get_net_grid_power()
         self_power = controller.get_self_power()
-        
+
         def create_formatted_power(value):
             """Create formatted power value structure with thousands separators"""
             if abs(value) >= 1000:
@@ -625,14 +764,14 @@ class APIRealTimePower:
                     value=value,
                     display=f"{value/1000:.1f}",
                     unit="kW",
-                    text=f"{value/1000:.1f} kW"
+                    text=f"{value/1000:.1f} kW",
                 )
             else:
                 return FormattedValue(
                     value=value,
                     display=f"{value:,.0f}",
                     unit="W",
-                    text=f"{value:,.0f} W"
+                    text=f"{value:,.0f} W",
                 )
 
         return cls(
@@ -647,9 +786,3 @@ class APIRealTimePower:
             netGridPower=create_formatted_power(net_grid_power),
             selfPower=create_formatted_power(self_power),
         )
-
-
-
-
-
-

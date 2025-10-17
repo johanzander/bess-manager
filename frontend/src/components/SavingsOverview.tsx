@@ -37,14 +37,14 @@ export const SavingsOverview: React.FC<SavingsOverviewProps> = () => {
     return field || 'N/A';
   };
 
-  // Helper function to get unit from FormattedValue objects
-  const getUnit = (field: any, fallbackUnit: string = '') => {
+  // Helper function to get unit from FormattedValue objects - NO FALLBACKS for determinism
+  const getUnit = (field: any) => {
     if (typeof field === 'object' && field?.unit !== undefined) {
       // Convert Wh to kWh for display
       return field.unit === 'Wh' ? 'kWh' : field.unit;
     }
-    // Convert Wh to kWh for fallback units too
-    return fallbackUnit === 'Wh' ? 'kWh' : fallbackUnit;
+    // No fallback - if unit is missing, it indicates a backend configuration issue
+    return '???';
   };
 
 
@@ -223,19 +223,19 @@ export const SavingsOverview: React.FC<SavingsOverviewProps> = () => {
                 
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
                   <div className="font-medium">{getDisplayValue(hour.buyPrice)}</div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(hour.buyPrice, 'SEK/kWh')}</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(hour.buyPrice)}</div>
                 </td>
                 
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
                   <div className={`font-medium ${getNumericValue(hour.solarProduction) > 0 ? 'text-yellow-600 dark:text-yellow-400' : 'text-gray-400 dark:text-gray-500'}`}>
                     {getDisplayValue(hour.solarProduction)}
                   </div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(hour.solarProduction, 'kWh')}</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(hour.solarProduction)}</div>
                 </td>
                 
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
                   <div className="font-medium">{getDisplayValue(hour.homeConsumption)}</div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(hour.homeConsumption, 'kWh')}</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(hour.homeConsumption)}</div>
                 </td>
                 
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
@@ -270,14 +270,14 @@ export const SavingsOverview: React.FC<SavingsOverviewProps> = () => {
                   <div className={`font-medium ${getNumericValue(hour.gridImportNeeded) > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-400 dark:text-gray-500'}`}>
                     {getDisplayValue(hour.gridImportNeeded)}
                   </div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(hour.gridImportNeeded, 'kWh')}</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(hour.gridImportNeeded)}</div>
                 </td>
                 
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
                   <div className={`font-medium ${getNumericValue(hour.gridExported) > 0 ? 'text-green-600 dark:text-green-400' : 'text-gray-400 dark:text-gray-500'}`}>
                     {getDisplayValue(hour.gridExported)}
                   </div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(hour.gridExported, 'kWh')}</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(hour.gridExported)}</div>
                 </td>
                 
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
@@ -287,7 +287,7 @@ export const SavingsOverview: React.FC<SavingsOverviewProps> = () => {
                   }`}>
                     {getDisplayValue(hour.hourlyCost)}
                   </div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(hour.hourlyCost, 'SEK')}</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(hour.hourlyCost)}</div>
                 </td>
                 
                 <td className="px-3 py-2 whitespace-nowrap text-sm border border-gray-300 dark:border-gray-600 text-center">
@@ -297,7 +297,7 @@ export const SavingsOverview: React.FC<SavingsOverviewProps> = () => {
                   }`}>
                     {getDisplayValue(hour.hourlySavings)}
                   </div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(hour.hourlySavings, 'SEK')}</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(hour.hourlySavings)}</div>
                 </td>
               </tr>
             );
@@ -312,21 +312,21 @@ export const SavingsOverview: React.FC<SavingsOverviewProps> = () => {
             <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
               <div className="text-xs text-gray-500 dark:text-gray-400">AVG</div>
               <div className="font-medium">{getDisplayValue(dashboardData.summary?.averagePrice)}</div>
-              <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(dashboardData.summary?.averagePrice, 'SEK/kWh')}</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(dashboardData.summary?.averagePrice)}</div>
             </td>
 
             <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
               <div className="font-medium text-yellow-600 dark:text-yellow-400">
                 {getDisplayValue(dashboardData.summary?.totalSolarProduction)}
               </div>
-              <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(dashboardData.summary?.totalSolarProduction, 'kWh')}</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(dashboardData.summary?.totalSolarProduction)}</div>
             </td>
 
             <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
               <div className="font-medium">
                 {getDisplayValue(dashboardData.summary?.totalHomeConsumption)}
               </div>
-              <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(dashboardData.summary?.totalHomeConsumption, 'kWh')}</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(dashboardData.summary?.totalHomeConsumption)}</div>
             </td>
             
             <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
@@ -338,7 +338,7 @@ export const SavingsOverview: React.FC<SavingsOverviewProps> = () => {
                   -{getDisplayValue(dashboardData.summary?.totalBatteryDischarged)}
                 </div>
                 <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  {getUnit(dashboardData.summary?.totalBatteryCharged, 'kWh')}
+                  {getUnit(dashboardData.summary?.totalBatteryCharged)}
                 </div>
                 <div className="text-xs text-gray-500 dark:text-gray-400">
                   Net: {getDisplayValue(dashboardData.summary?.netBatteryAction)}
@@ -360,28 +360,28 @@ export const SavingsOverview: React.FC<SavingsOverviewProps> = () => {
               <div className="font-medium text-red-600 dark:text-red-400">
                 {getDisplayValue(dashboardData.summary?.totalGridImported)}
               </div>
-              <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(dashboardData.summary?.totalGridImported, 'kWh')}</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(dashboardData.summary?.totalGridImported)}</div>
             </td>
 
             <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
               <div className="font-medium text-green-600 dark:text-green-400">
                 {getDisplayValue(dashboardData.summary?.totalGridExported)}
               </div>
-              <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(dashboardData.summary?.totalGridExported, 'kWh')}</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(dashboardData.summary?.totalGridExported)}</div>
             </td>
 
             <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
               <div className="font-medium text-red-600 dark:text-red-400">
                 {getDisplayValue(dashboardData.summary?.optimizedCost)}
               </div>
-              <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(dashboardData.summary?.optimizedCost, 'SEK')}</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(dashboardData.summary?.optimizedCost)}</div>
             </td>
 
             <td className="px-3 py-2 whitespace-nowrap text-sm border border-gray-300 dark:border-gray-600 text-center">
               <div className="font-medium text-green-600 dark:text-green-400">
                 {getDisplayValue(dashboardData.summary?.totalSavings)}
               </div>
-              <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(dashboardData.summary?.totalSavings, 'SEK')}</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(dashboardData.summary?.totalSavings)}</div>
             </td>
           </tr>
         </tbody>

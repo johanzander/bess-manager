@@ -32,4 +32,3 @@ def convert_keys_to_camel_case(data: Any) -> Any:
         # Convert dataclass instance to dict, then convert keys
         return convert_keys_to_camel_case(asdict(data))
     return data
-

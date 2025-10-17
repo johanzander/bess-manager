@@ -100,6 +100,15 @@ const CustomTooltip = ({ active, payload, label }: any) => {
   currentHour: number;
 }> = ({ dailyViewData }) => {
   
+  // Helper function to get currency unit from price data
+  const getCurrencyUnit = () => {
+    const firstPriceData = dailyViewData.find(hour => hour.buyPrice?.unit);
+    return firstPriceData?.buyPrice?.unit || '???';
+  };
+
+  // Get the actual currency unit for the chart label
+  const currencyUnit = getCurrencyUnit();
+
   // Reactive dark mode detection
   const [isDarkMode, setIsDarkMode] = useState(
     document.documentElement.classList.contains('dark')
@@ -280,7 +289,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
               tick={{ fontSize: 11 }}
               tickFormatter={(value) => value.toLocaleString('sv-SE', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
               label={{ 
-                value: 'Electricity Price (SEK/kWh)', 
+                value: `Electricity Price (${currencyUnit}/kWh)`, 
                 angle: 90, 
                 position: 'insideRight',
                 style: { textAnchor: 'middle', dominantBaseline: 'central' }

@@ -113,7 +113,6 @@ class HistoricalDataStore:
 
         return self._records.get(hour)
 
-
     def has_data_for_hour(self, hour: int) -> bool:
         """Check if historical data exists for the given hour.
 

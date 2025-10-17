@@ -145,6 +145,24 @@ The system status card provides key metrics and health information:
 
 ## Troubleshooting Common Issues
 
+### View Logs for Troubleshooting
+
+When reporting issues or debugging problems, check the add-on logs for detailed information:
+
+1. Go to **Home Assistant** → **Settings** → **Add-ons** → **BESS Manager**
+2. Click on the **Log** tab
+3. Review the logs for errors or warnings
+
+The logs show:
+
+- Sensor data collection and validation
+- Optimization algorithm decisions and reasoning
+- Schedule creation and inverter communication
+- Price data fetching and processing
+- Component health checks and errors
+
+**Tip**: Use the **Refresh** button to see the latest log entries. For historical logs, you can use the Home Assistant system log viewer.
+
 ### "No optimization happening"
 
 **Symptoms**: Battery stays at same level, no strategic intents

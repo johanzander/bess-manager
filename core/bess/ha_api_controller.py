@@ -372,9 +372,7 @@ class HomeAssistantAPIController:
         except ValueError:
             return None
 
-    def _resolve_entity_id(
-        self, sensor_key: str
-    ) -> tuple[str, str]:
+    def _resolve_entity_id(self, sensor_key: str) -> tuple[str, str]:
         """Unified entity ID resolution with consistent logic.
 
         Args:
@@ -524,13 +522,17 @@ class HomeAssistantAPIController:
 
             except requests.RequestException as e:
                 # Don't retry on 404 (sensor not found) - fail fast for missing sensors
-                if hasattr(e, 'response') and e.response is not None and e.response.status_code == 404:
+                if (
+                    hasattr(e, "response")
+                    and e.response is not None
+                    and e.response.status_code == 404
+                ):
                     logger.error(
                         "API request to %s failed: Sensor not found (404). This indicates a missing or misconfigured sensor.",
-                        url
+                        url,
                     )
                     raise  # Fail immediately on 404
-                
+
                 if attempt < self.max_attempts - 1:  # Not the last attempt
                     logger.warning(
                         "API request to %s failed on attempt %d/%d: %s. Retrying in %d seconds...",

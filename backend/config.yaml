@@ -28,20 +28,21 @@ options:
     password: "your_db_password_here"
   home:
     consumption: 3.5                # default hourly consumption in kWh
+    currency: "SEK"                 # currency for price display and calculations
     max_fuse_current: 25            # Maximum fuse current in amperes
     voltage: 230                    # Line voltage in volts
     safety_margin_factor: 0.95      # Safety margin for power calculations (95%)
   battery:
     total_capacity: 30.0             # kWh
     max_charge_discharge_power: 15.0 # kW
-    cycle_cost: 0.50                 # 50 öre/kWh / charge/discharge cycle
-    min_action_profit_threshold: 1.5  # SEK fixed minimum profit threshold for any battery action
+    cycle_cost: 0.50                 # Battery wear cost per kWh (excl. VAT) - use your local currency
+    min_action_profit_threshold: 1.5  # Minimum profit threshold for any battery action (in your currency)
   electricity_price:
     area: "SE4"                      # Area for Nordpool pricing
-    markup_rate: 0.08                # 8 öre/kWh
+    markup_rate: 0.08                # Electricity markup per kWh (in your currency, e.g. 8 öre/kWh for SEK)
     vat_multiplier: 1.25             # 25% VAT
-    additional_costs: 1.03           # överföringsavgift: 28.90 öre, energiskatt: 53.50 öre + 25% moms
-    tax_reduction: 0.6518            # 60 öre skattereduktion + 5.18 öre förlustersättning
+    additional_costs: 1.03           # Additional costs per kWh in your currency (e.g. SE: 28.90 öre överföringsavgift + 53.50 öre energiskatt + moms)
+    tax_reduction: 0.6518            # Tax reduction for sold energy in your currency (e.g. SE: 60 öre skattereduktion + 5.18 öre förlustersättning)
   nordpool:
     use_official_integration: true  # Set to true to use official HA Nord Pool integration
     config_entry_id: "01K3Y99FD3MDZYVFX2XSWR4888"  # Required when use_official_integration is true

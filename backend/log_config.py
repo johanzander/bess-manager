@@ -7,12 +7,14 @@ from loguru import logger
 # Remove default handler
 logger.remove()
 
+
 # Configure Loguru with a format that separates module name from message
 def add_module_name(record):
     """Ensure every record has module_name in extra."""
     if "module_name" not in record["extra"]:
         record["extra"]["module_name"] = f"{record['name']}:{record['line']}"
     return True
+
 
 logger.add(
     sys.stderr,

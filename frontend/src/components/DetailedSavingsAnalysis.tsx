@@ -250,7 +250,7 @@ export const DetailedSavingsAnalysis: React.FC<DetailedSavingsAnalysisProps> = (
                     {hour.buyPrice?.display || '0.00'} / {hour.sellPrice?.display || '0.00'}
                   </div>
                   <div className="text-xs text-gray-500 dark:text-gray-400">
-                    {hour.buyPrice?.unit || 'SEK/kWh'}
+                    {hour.buyPrice?.unit || '???'}
                   </div>
                 </td>
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-center">
@@ -266,7 +266,7 @@ export const DetailedSavingsAnalysis: React.FC<DetailedSavingsAnalysisProps> = (
                   }`}>
                     {hour.gridOnlyCost?.display || '0.00'}
                   </div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">{hour.gridOnlyCost?.unit || 'SEK'}</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">{hour.gridOnlyCost?.unit || '???'}</div>
                 </td>
                 
                 {/* Solar-Only Data */}
@@ -301,7 +301,7 @@ export const DetailedSavingsAnalysis: React.FC<DetailedSavingsAnalysisProps> = (
                   }`}>
                     {hour.solarOnlyCost?.display || '0.00'}
                   </div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">{hour.solarOnlyCost?.unit || 'SEK'}</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">{hour.solarOnlyCost?.unit || '???'}</div>
                 </td>
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 bg-yellow-50 dark:bg-yellow-900/20 text-center">
                   <div className={`font-medium ${
@@ -310,7 +310,7 @@ export const DetailedSavingsAnalysis: React.FC<DetailedSavingsAnalysisProps> = (
                   }`}>
                     {hour.solarSavings?.display || '0.00'}
                   </div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">{hour.solarSavings?.unit || 'SEK'}</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">{hour.solarSavings?.unit || '???'}</div>
                 </td>
                 
                 {/* Solar+Battery Data */}
@@ -359,7 +359,7 @@ export const DetailedSavingsAnalysis: React.FC<DetailedSavingsAnalysisProps> = (
                   }`}>
                     {hour.hourlyCost?.display || '0.00'}
                   </div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">{hour.hourlyCost?.unit || 'SEK'}</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">{hour.hourlyCost?.unit || '???'}</div>
                 </td>
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 bg-green-50 dark:bg-green-900/20 text-center">
                   <div className={`font-medium ${
@@ -368,7 +368,7 @@ export const DetailedSavingsAnalysis: React.FC<DetailedSavingsAnalysisProps> = (
                   }`}>
                     {hour.hourlySavings?.display || '0.00'}
                   </div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">{hour.hourlySavings?.unit || 'SEK'}</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">{hour.hourlySavings?.unit || '???'}</div>
                 </td>
               </tr>
             );
@@ -390,7 +390,7 @@ export const DetailedSavingsAnalysis: React.FC<DetailedSavingsAnalysisProps> = (
               <div className="font-medium text-red-600 dark:text-red-400">
                 {dashboardData.summary?.gridOnlyCost?.display || '0.00'}
               </div>
-              <div className="text-xs text-gray-500 dark:text-gray-400">{dashboardData.summary?.gridOnlyCost?.unit || 'SEK'}</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">{dashboardData.summary?.gridOnlyCost?.unit || '???'}</div>
             </td>
             <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 bg-yellow-100 dark:bg-yellow-900/30 text-center">
               <div className="font-medium text-yellow-600 dark:text-yellow-400">
@@ -417,13 +417,13 @@ export const DetailedSavingsAnalysis: React.FC<DetailedSavingsAnalysisProps> = (
               <div className="font-medium text-red-600 dark:text-red-400">
                 {dashboardData.summary?.solarOnlyCost?.display || '0.00'}
               </div>
-              <div className="text-xs text-gray-500 dark:text-gray-400">{dashboardData.summary?.solarOnlyCost?.unit || 'SEK'}</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">{dashboardData.summary?.solarOnlyCost?.unit || '???'}</div>
             </td>
             <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 bg-yellow-100 dark:bg-yellow-900/30 text-center">
               <div className="font-medium text-green-600 dark:text-green-400">
                 {dashboardData.summary?.solarSavings?.display || '0.00'}
               </div>
-              <div className="text-xs text-gray-500 dark:text-gray-400">{dashboardData.summary?.solarSavings?.unit || 'SEK'}</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">{dashboardData.summary?.solarSavings?.unit || '???'}</div>
             </td>
             <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 bg-green-100 dark:bg-green-900/30 text-center">
               <div className="font-medium text-blue-600 dark:text-blue-400">
@@ -453,13 +453,13 @@ export const DetailedSavingsAnalysis: React.FC<DetailedSavingsAnalysisProps> = (
               <div className="font-medium text-red-600 dark:text-red-400">
                 {dashboardData.summary?.optimizedCost?.display || '0.00'}
               </div>
-              <div className="text-xs text-gray-500 dark:text-gray-400">{dashboardData.summary?.optimizedCost?.unit || 'SEK'}</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">{dashboardData.summary?.optimizedCost?.unit || '???'}</div>
             </td>
             <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 bg-green-100 dark:bg-green-900/30 text-center">
               <div className="font-medium text-green-600 dark:text-green-400">
                 {dashboardData.summary?.totalSavings?.display || '0.00'}
               </div>
-              <div className="text-xs text-gray-500 dark:text-gray-400">{dashboardData.summary?.totalSavings?.unit || 'SEK'}</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">{dashboardData.summary?.totalSavings?.unit || '???'}</div>
             </td>
           </tr>
         </tbody>

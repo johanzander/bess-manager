@@ -7,12 +7,13 @@ usage with string-based error detection patterns.
 
 class BESSException(Exception):
     """Base exception for all BESS system components."""
+
     pass
 
 
 class PriceDataUnavailableError(BESSException):
     """Raised when electricity price data is not available for the requested time period."""
-    
+
     def __init__(self, date=None, message=None):
         if message is None:
             if date:
@@ -25,7 +26,7 @@ class PriceDataUnavailableError(BESSException):
 
 class SystemConfigurationError(BESSException):
     """Raised when there are configuration or system setup issues."""
-    
+
     def __init__(self, component=None, message=None):
         if message is None:
             if component:

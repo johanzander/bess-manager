@@ -26,6 +26,7 @@ from core.bess.ha_api_controller import HomeAssistantAPIController
 # Get ingress prefix from environment variable
 INGRESS_PREFIX = os.environ.get("INGRESS_PREFIX", "")
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan manager for FastAPI app."""
@@ -39,12 +40,15 @@ async def lifespan(app: FastAPI):
         else:
             routes.append(f"{path} - Mounted route or no methods")
     logger.info(f"Registered routes: {routes}")
-    logger.info(f"Using ingress base path: {os.environ.get('INGRESS_BASE_PATH', '/local_bess_manager/ingress')}")
+    logger.info(
+        f"Using ingress base path: {os.environ.get('INGRESS_BASE_PATH', '/local_bess_manager/ingress')}"
+    )
 
     yield
 
     # Shutdown (if needed in the future)
     pass
+
 
 # Create FastAPI app with correct root_path
 app = FastAPI(root_path=INGRESS_PREFIX, lifespan=lifespan)
@@ -256,7 +260,7 @@ class BESSController:
 
         This consolidates settings application in one place, ensuring settings
         are applied as early as possible in the initialization process.
-        
+
         All user-facing settings must be explicitly configured in config.yaml.
         No fallback defaults are provided to ensure deterministic behavior.
 
@@ -273,28 +277,49 @@ class BESSController:
             required_sections = ["battery", "electricity_price", "home"]
             for section in required_sections:
                 if section not in options:
-                    raise ValueError(f"Required configuration section '{section}' is missing from config.yaml")
+                    raise ValueError(
+                        f"Required configuration section '{section}' is missing from config.yaml"
+                    )
 
             # Validate required values without defaults
             battery_config = options["battery"]
             electricity_price_config = options["electricity_price"]
             home_config = options["home"]
-            
+
             # Required battery settings
-            required_battery_keys = ["total_capacity", "cycle_cost", "max_charge_discharge_power", "min_action_profit_threshold"]
+            required_battery_keys = [
+                "total_capacity",
+                "cycle_cost",
+                "max_charge_discharge_power",
+                "min_action_profit_threshold",
+            ]
             for key in required_battery_keys:
                 if key not in battery_config:
-                    raise ValueError(f"Required battery setting '{key}' is missing from config.yaml")
-            
+                    raise ValueError(
+                        f"Required battery setting '{key}' is missing from config.yaml"
+                    )
+
             # Required electricity price settings
-            required_price_keys = ["area", "markup_rate", "vat_multiplier", "additional_costs", "tax_reduction"]
+            required_price_keys = [
+                "area",
+                "markup_rate",
+                "vat_multiplier",
+                "additional_costs",
+                "tax_reduction",
+            ]
             for key in required_price_keys:
                 if key not in electricity_price_config:
-                    raise ValueError(f"Required electricity_price setting '{key}' is missing from config.yaml")
-            
+                    raise ValueError(
+                        f"Required electricity_price setting '{key}' is missing from config.yaml"
+                    )
+
             # Required home settings
-            if "consumption" not in home_config:
-                raise ValueError("Required home setting 'consumption' is missing from config.yaml")
+            required_home_keys = ["consumption", "currency"]
+            for key in required_home_keys:
+                if key not in home_config:
+                    raise ValueError(
+                        f"Required home setting '{key}' is missing from config.yaml"
+                    )
 
             settings = {
                 "battery": {
@@ -302,11 +327,14 @@ class BESSController:
                     "cycleCostPerKwh": battery_config["cycle_cost"],
                     "maxChargePowerKw": battery_config["max_charge_discharge_power"],
                     "maxDischargePowerKw": battery_config["max_charge_discharge_power"],
-                    "minActionProfitThreshold": battery_config["min_action_profit_threshold"],
+                    "minActionProfitThreshold": battery_config[
+                        "min_action_profit_threshold"
+                    ],
                     "estimatedConsumption": home_config["consumption"],
                 },
-                "consumption": {
-                    "defaultHourly": home_config["consumption"]
+                "home": {
+                    "defaultHourly": home_config["consumption"],
+                    "currency": home_config["currency"],
                 },
                 "price": {
                     "area": electricity_price_config["area"],
@@ -338,8 +366,6 @@ bess_controller.start()
 
 # Get ingress base path, important for Home Assistant ingress
 ingress_base_path = os.environ.get("INGRESS_BASE_PATH", "/local_bess_manager/ingress")
-
-
 
 
 # Handle root and ingress paths

@@ -176,6 +176,20 @@ But at noon every day we get tomorrows schedule. We could use this information t
 
 ## 🔧 **TECHNICAL DEBT**
 
+### FormattingContext Architecture
+
+**Impact**: Low | **Effort**: Low (45 min) | **Dependencies**: None
+
+**Description**: Replace currency parameter passing with FormattingContext dataclass for better extensibility and i18n support.
+
+**Current State**: Currency passed as string parameter through call chain
+
+**Implementation**: Create frozen FormattingContext dataclass, update `create_formatted_value()` and dataclass `from_internal()` methods, modify API endpoints to create context from settings
+
+**Benefits**: Type safety, extensibility for locale/timezone/precision without signature changes, future-proof for internationalization
+
+**Files**: `backend/api_dataclasses.py`, `backend/api.py`
+
 ### Other Technical Debt
 
 - Refactor all API endpoints to use dataclass-based serialization (with robust mapping for all field variants) for consistent, type-safe, and future-proof API responses. Ensure all details and fields are preserved as in the original dict-based implementation.

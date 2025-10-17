@@ -144,7 +144,6 @@ class GrowattScheduleManager:
                 100, max(5, int((discharge_power / self.max_discharge_power_kw) * 100))
             )
 
-
         return charge_rate, discharge_rate
 
     def _calculate_hourly_settings_with_strategic_intents(self):
@@ -298,13 +297,13 @@ class GrowattScheduleManager:
 
         # Initialize new TOU intervals - preserve past intervals unless corrupted
         old_intervals = getattr(self, "tou_intervals", []).copy()
-        
+
         # RECOVERY: Check if existing intervals are corrupted and need clearing
         if old_intervals:
             intervals_valid = self.validate_tou_intervals_ordering(
                 old_intervals, "before_strategic_intent_conversion"
             )
-            
+
             if not intervals_valid:
                 logger.warning(
                     "🔄 TOU RECOVERY: Existing intervals are corrupted, clearing and rebuilding with strategic intents"
@@ -316,8 +315,10 @@ class GrowattScheduleManager:
                     )
                 # Clear corrupted intervals - we have strategic intents to rebuild properly
                 old_intervals = []
-                logger.info("✅ Corrupted intervals cleared, rebuilding from strategic intents")
-        
+                logger.info(
+                    "✅ Corrupted intervals cleared, rebuilding from strategic intents"
+                )
+
         self.tou_intervals = []
 
         # Copy past intervals (completely in the past)
@@ -434,7 +435,6 @@ class GrowattScheduleManager:
             "TOU conversion complete: %d total intervals", len(self.tou_intervals)
         )
 
-
     def _get_period_intent_summary(self, start_hour: int, end_hour: int) -> str:
         """Get a summary of intents for a period."""
         if not self.strategic_intents:
@@ -459,7 +459,6 @@ class GrowattScheduleManager:
         else:
             return f"{most_common[0]} (+{len(set(period_intents))-1} others)"
 
-
     def _strategic_intent_to_battery_mode(self, strategic_intent):
         """Convert strategic intent to Growatt battery mode."""
         intent_to_mode = {
@@ -469,7 +468,6 @@ class GrowattScheduleManager:
             "EXPORT_ARBITRAGE": "grid-first",
         }
         return intent_to_mode.get(strategic_intent, "load-first")
-
 
     def _consolidate_and_convert_fallback(self):
         """Fallback conversion when no strategic intents are available."""
@@ -521,7 +519,9 @@ class GrowattScheduleManager:
                         "start_time": start_time,
                         "end_time": end_time,
                         "enabled": True,
-                        "strategic_intent": self._get_period_intent_summary(period[0], period[-1]),
+                        "strategic_intent": self._get_period_intent_summary(
+                            period[0], period[-1]
+                        ),
                     }
                 )
 
@@ -723,19 +723,24 @@ class GrowattScheduleManager:
         """Get all TOU segments with default intervals filling gaps for complete 24-hour coverage."""
         if not self.tou_intervals:
             # Return default load-first for entire day if no intervals configured
-            return [{
-                "segment_id": 0,
-                "start_time": "00:00",
-                "end_time": "23:59",
-                "batt_mode": "load-first",
-                "enabled": False,
-                "is_default": True
-            }]
+            return [
+                {
+                    "segment_id": 0,
+                    "start_time": "00:00",
+                    "end_time": "23:59",
+                    "batt_mode": "load-first",
+                    "enabled": False,
+                    "is_default": True,
+                }
+            ]
 
         # Get only active/enabled intervals and sort by start time
         active_intervals = [
-            interval for interval in self.tou_intervals
-            if interval.get("enabled", False) and interval.get("start_time") and interval.get("end_time")
+            interval
+            for interval in self.tou_intervals
+            if interval.get("enabled", False)
+            and interval.get("start_time")
+            and interval.get("end_time")
         ]
 
         # Sort by start time
@@ -751,14 +756,16 @@ class GrowattScheduleManager:
 
             # Add default interval before this active interval if there's a gap
             if current_time_minutes < interval_start_minutes:
-                result.append({
-                    "segment_id": 0,
-                    "start_time": self._minutes_to_time(current_time_minutes),
-                    "end_time": self._minutes_to_time(interval_start_minutes - 1),
-                    "batt_mode": "load-first",
-                    "enabled": False,
-                    "is_default": True
-                })
+                result.append(
+                    {
+                        "segment_id": 0,
+                        "start_time": self._minutes_to_time(current_time_minutes),
+                        "end_time": self._minutes_to_time(interval_start_minutes - 1),
+                        "batt_mode": "load-first",
+                        "enabled": False,
+                        "is_default": True,
+                    }
+                )
 
             # Add the active interval
             segment = interval.copy()
@@ -770,14 +777,16 @@ class GrowattScheduleManager:
         # Add final default interval if day isn't complete
         day_end_minutes = 24 * 60 - 1  # 23:59 in minutes
         if current_time_minutes <= day_end_minutes:
-            result.append({
-                "segment_id": 0,
-                "start_time": self._minutes_to_time(current_time_minutes),
-                "end_time": "23:59",
-                "batt_mode": "load-first",
-                "enabled": False,
-                "is_default": True
-            })
+            result.append(
+                {
+                    "segment_id": 0,
+                    "start_time": self._minutes_to_time(current_time_minutes),
+                    "end_time": "23:59",
+                    "batt_mode": "load-first",
+                    "enabled": False,
+                    "is_default": True,
+                }
+            )
 
         return result
 

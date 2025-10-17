@@ -50,11 +50,13 @@ HOUSE_MAX_FUSE_CURRENT_A = 25  # Maximum fuse current in amperes
 HOUSE_VOLTAGE_V = 230  # Line voltage
 SAFETY_MARGIN_FACTOR = 0.95  # Safety margin for power calculations (95%)
 
+# Currency defaults
+DEFAULT_CURRENCY = "SEK"  # Default currency for price display
+
+
 @dataclass
 class PriceSettings:
-    """Price settings for electricity costs.
-    
-    """
+    """Price settings for electricity costs."""
 
     area: str = DEFAULT_AREA
     markup_rate: float = MARKUP_RATE
@@ -139,6 +141,7 @@ class HomeSettings:
     default_hourly: float = HOME_HOURLY_CONSUMPTION_KWH
     min_valid: float = MIN_CONSUMPTION
     power_adjustment_step: int = 10
+    currency: str = DEFAULT_CURRENCY
 
     def update(self, **kwargs: Any) -> None:
         """Update settings from dict."""
@@ -160,4 +163,5 @@ class HomeSettings:
             self.default_hourly = config["home"].get(
                 "consumption", HOME_HOURLY_CONSUMPTION_KWH
             )
+            self.currency = config["home"].get("currency", DEFAULT_CURRENCY)
         return self

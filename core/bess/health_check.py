@@ -33,7 +33,7 @@ def format_sensor_value_with_unit(value, method_name: str, controller) -> str:
         sensor_info = controller.METHOD_SENSOR_MAP.get(method_name, {})
         unit = sensor_info.get("unit", "")
 
-        if isinstance(value, (int, float)):
+        if isinstance(value, int | float):
             # Get precision from METHOD_SENSOR_MAP (centralized formatting rules)
             precision = sensor_info.get("precision", 2)  # Default to 2 decimal places
 
@@ -50,7 +50,9 @@ def format_sensor_value_with_unit(value, method_name: str, controller) -> str:
 
 
 def determine_health_status(
-    health_check_results: list, working_sensors: int, required_methods: list | None = None
+    health_check_results: list,
+    working_sensors: int,
+    required_methods: list | None = None,
 ) -> str:
     """Generic method to determine health check status based on required vs optional sensors.
 
@@ -199,13 +201,29 @@ def perform_health_check(
                             }
                         )
                     elif value >= 0:
-                        display_value = format_sensor_value_with_unit(value, method_info.get("method_name"), controller)
-                        check_result.update({"status": "OK", "rawValue": value, "displayValue": display_value})
+                        display_value = format_sensor_value_with_unit(
+                            value, method_info.get("method_name"), controller
+                        )
+                        check_result.update(
+                            {
+                                "status": "OK",
+                                "rawValue": value,
+                                "displayValue": display_value,
+                            }
+                        )
                         working_sensors += 1
                     else:
                         # Negative values might be valid for some sensors (e.g., discharge power)
-                        display_value = format_sensor_value_with_unit(value, method_info.get("method_name"), controller)
-                        check_result.update({"status": "OK", "rawValue": value, "displayValue": display_value})
+                        display_value = format_sensor_value_with_unit(
+                            value, method_info.get("method_name"), controller
+                        )
+                        check_result.update(
+                            {
+                                "status": "OK",
+                                "rawValue": value,
+                                "displayValue": display_value,
+                            }
+                        )
                         working_sensors += 1
                 else:
                     check_result.update(

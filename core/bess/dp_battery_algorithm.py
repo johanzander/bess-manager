@@ -211,12 +211,14 @@ def _calculate_reward(
     # Calculate battery flows from power
     battery_charged = max(0, power * dt) if power > 0 else 0.0
     battery_discharged = max(0, -power * dt) if power < 0 else 0.0
-    
+
     # Simple energy balance for grid flows
-    energy_balance = solar_production + battery_discharged - home_consumption - battery_charged
+    energy_balance = (
+        solar_production + battery_discharged - home_consumption - battery_charged
+    )
     grid_imported = max(0, -energy_balance)
     grid_exported = max(0, energy_balance)
-    
+
     # EnergyData calculates ALL detailed flows automatically
     energy_data = EnergyData(
         solar_production=solar_production,
@@ -747,7 +749,7 @@ def optimize_battery_schedule(
         raise ValueError(
             f"Invalid initial_soe={initial_soe:.1f}kWh below minimum SOE={battery_settings.min_soe_kwh:.1f}kWh"
         )
-    
+
     logger.info(
         f"Starting direct optimization: horizon={horizon}, initial_soe={initial_soe:.1f}, initial_cost_basis={initial_cost_basis:.3f}"
     )
@@ -772,19 +774,19 @@ def optimize_battery_schedule(
         battery_settings.max_soe_kwh + SOE_STEP_KWH,
         SOE_STEP_KWH,
     )
-    
+
     for t in range(horizon):
         # Find current state index (same logic as simulation)
         i = round((current_soe - battery_settings.min_soe_kwh) / SOE_STEP_KWH)
         i = min(max(0, i), len(soe_levels) - 1)
-        
+
         # Get the HourlyData from DP results - should always exist with valid inputs
         if (t, i) not in stored_hourly_data:
             raise RuntimeError(
                 f"Missing DP result for hour {t}, state {i} (SOE={current_soe:.1f}). "
                 f"This indicates a bug in the DP algorithm or invalid inputs."
             )
-            
+
         hourly_data = stored_hourly_data[(t, i)]
         hourly_results.append(hourly_data)
         current_soe = hourly_data.energy.battery_soe_end

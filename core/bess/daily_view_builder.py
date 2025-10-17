@@ -548,7 +548,6 @@ class DailyViewBuilder:
             f"{daily_view.predicted_hours_count} predicted hours ({predicted_savings:.2f} SEK)"
         )
 
-
     def _get_previous_hour_soc(self, hour: int) -> float:
         """Get the start SOC for an hour from the ending SOC of the previous hour.
 

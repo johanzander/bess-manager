@@ -367,11 +367,13 @@ const DetailedFlowPatternCard: React.FC<{ pattern: FlowPattern }> = ({ pattern }
                     }`}>
                       <div className="text-sm text-gray-700 dark:text-gray-300">
                         {segment.trim().split(' ').map((word: string, wordIndex: number) => {
-                          if (word.includes('SEK') || word.match(/[+-]\d+\.\d+/)) {
+                          // Highlight numeric values (currency amounts, etc.)
+                          const isNumericValue = word.match(/[+-]?\d+\.\d+/);
+                          if (isNumericValue) {
                             return (
                               <strong key={wordIndex} className={
-                                word.includes('-') || word.includes('cost') ? 
-                                'text-red-600 dark:text-red-400' : 
+                                word.includes('-') || word.includes('cost') ?
+                                'text-red-600 dark:text-red-400' :
                                 'text-green-600 dark:text-green-400'
                               }>
                                 {word + ' '}

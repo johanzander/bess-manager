@@ -143,10 +143,11 @@ class HomeAssistantSource(PriceSource):
             raise PriceDataUnavailableError(date=target_date)
 
         except Exception as e:
-            if isinstance(e, (PriceDataUnavailableError, SystemConfigurationError)):
+            if isinstance(e, PriceDataUnavailableError | SystemConfigurationError):
                 raise
             raise PriceDataUnavailableError(
-                date=target_date, message=f"Failed to get price data for {target_date}: {e}"
+                date=target_date,
+                message=f"Failed to get price data for {target_date}: {e}",
             ) from e
 
     def _fetch_sensor_attributes(self, sensor_key):
@@ -430,9 +431,11 @@ class PriceManager:
             return price_data
 
         except Exception as e:
-            if isinstance(e, (PriceDataUnavailableError, SystemConfigurationError)):
+            if isinstance(e, PriceDataUnavailableError | SystemConfigurationError):
                 raise  # Re-raise specific exceptions as-is
-            raise PriceDataUnavailableError(message=f"Failed to get price data: {e}") from e
+            raise PriceDataUnavailableError(
+                message=f"Failed to get price data: {e}"
+            ) from e
 
     def get_today_prices(self) -> list:
         """Get prices for the current day.

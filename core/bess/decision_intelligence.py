@@ -393,8 +393,6 @@ def calculate_detailed_flow_values(
     return flow_values
 
 
-
-
 def extract_economic_values_from_reward(
     reward: float,
     import_cost: float,

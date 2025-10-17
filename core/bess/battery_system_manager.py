@@ -1354,21 +1354,29 @@ class BatterySystemManager:
                     logger.info("-" * 40)
 
             logger.info("=" * 40)
-            
+
             # Check for critical failures but don't abort startup - allow graceful degradation
             critical_failures = []
             for component in health_results["checks"]:
                 if component.get("required", False) and component["status"] == "ERROR":
                     critical_failures.append(component["name"])
-            
+
             if critical_failures:
-                logger.error(f"⚠️ SYSTEM DEGRADED: Critical sensor failures detected in required components: {', '.join(critical_failures)}")
-                logger.error("⚠️ System will start in degraded mode. Some functionality may not work correctly.")
-                logger.error("⚠️ Please fix sensor configuration for full functionality.")
+                logger.error(
+                    f"⚠️ SYSTEM DEGRADED: Critical sensor failures detected in required components: {', '.join(critical_failures)}"
+                )
+                logger.error(
+                    "⚠️ System will start in degraded mode. Some functionality may not work correctly."
+                )
+                logger.error(
+                    "⚠️ Please fix sensor configuration for full functionality."
+                )
                 # Store critical failures for UI to display
                 self._critical_sensor_failures = critical_failures
             else:
-                logger.info("✓ All required sensors are functional - system fully operational")
+                logger.info(
+                    "✓ All required sensors are functional - system fully operational"
+                )
                 self._critical_sensor_failures = []
             return health_results
 
@@ -1468,9 +1476,7 @@ class BatterySystemManager:
 
         except Exception as e:
             logger.error(f"Failed to update settings: {e}")
-            raise SystemConfigurationError(
-                message=f"Invalid settings: {e}"
-            ) from e
+            raise SystemConfigurationError(message=f"Invalid settings: {e}") from e
 
     def _log_battery_system_config(self) -> None:
         """Log the current battery configuration - reproduces original functionality."""

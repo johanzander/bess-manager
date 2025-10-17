@@ -106,25 +106,33 @@ async def get_dashboard_data(date: str = Query(None)):
         controller = bess_controller.ha_controller
         settings = bess_controller.system.get_settings()
         battery_capacity = settings["battery"].total_capacity
-        # PURE DATACLASS APPROACH - No api_conversion.py usage
-        # Create dataclass instances directly (no intermediate dicts)
+        currency = bess_controller.system.home_settings.currency
+
         hourly_dataclass_instances = [
-            APIDashboardHourlyData.from_internal(hour_data, battery_capacity)
+            APIDashboardHourlyData.from_internal(hour_data, battery_capacity, currency)
             for hour_data in daily_view.hourly_data
         ]
 
         # Calculate basic totals from dataclass fields directly (no dict access)
         basic_totals = {
-            "totalSolarProduction": sum(h.solarProduction.value for h in hourly_dataclass_instances),
-            "totalHomeConsumption": sum(h.homeConsumption.value for h in hourly_dataclass_instances),
+            "totalSolarProduction": sum(
+                h.solarProduction.value for h in hourly_dataclass_instances
+            ),
+            "totalHomeConsumption": sum(
+                h.homeConsumption.value for h in hourly_dataclass_instances
+            ),
             "totalBatteryCharged": sum(
                 max(0, h.batteryAction.value) for h in hourly_dataclass_instances
             ),
             "totalBatteryDischarged": sum(
                 abs(min(0, h.batteryAction.value)) for h in hourly_dataclass_instances
             ),
-            "totalGridImport": sum(h.gridImported.value for h in hourly_dataclass_instances),
-            "totalGridExport": sum(h.gridExported.value for h in hourly_dataclass_instances),
+            "totalGridImport": sum(
+                h.gridImported.value for h in hourly_dataclass_instances
+            ),
+            "totalGridExport": sum(
+                h.gridExported.value for h in hourly_dataclass_instances
+            ),
             "avgBuyPrice": (
                 sum(h.buyPrice.value for h in hourly_dataclass_instances)
                 / len(hourly_dataclass_instances)
@@ -134,9 +142,15 @@ async def get_dashboard_data(date: str = Query(None)):
         }
 
         # Calculate costs from dataclass fields directly - using ACTUAL backend calculations
-        total_optimized_cost = sum(h.hourlyCost.value for h in hourly_dataclass_instances)
-        total_grid_only_cost = sum(h.gridOnlyCost.value for h in hourly_dataclass_instances)
-        total_solar_only_cost = sum(h.solarOnlyCost.value for h in hourly_dataclass_instances)
+        total_optimized_cost = sum(
+            h.hourlyCost.value for h in hourly_dataclass_instances
+        )
+        total_grid_only_cost = sum(
+            h.gridOnlyCost.value for h in hourly_dataclass_instances
+        )
+        total_solar_only_cost = sum(
+            h.solarOnlyCost.value for h in hourly_dataclass_instances
+        )
 
         costs = {
             "gridOnly": total_grid_only_cost,
@@ -153,11 +167,14 @@ async def get_dashboard_data(date: str = Query(None)):
             strategic_summary_data = schedule_manager.get_strategic_intent_summary()
             # Convert to count format expected by frontend
             strategic_summary = {
-                intent: data.get("count", 0) for intent, data in strategic_summary_data.items()
+                intent: data.get("count", 0)
+                for intent, data in strategic_summary_data.items()
             }
         except Exception as e:
             logger.error(f"Failed to get strategic intent summary: {e}")
-            raise ValueError(f"Strategic intent summary is required but failed to load: {e}") from e
+            raise ValueError(
+                f"Strategic intent summary is required but failed to load: {e}"
+            ) from e
 
         # Create the dataclass response using pre-created hourly instances
         response = APIDashboardResponse.from_dashboard_data(
@@ -168,6 +185,7 @@ async def get_dashboard_data(date: str = Query(None)):
             strategic_summary=strategic_summary,
             battery_soc=battery_soc,
             battery_capacity=battery_capacity,
+            currency=currency,
             hourly_data_instances=hourly_dataclass_instances,
         )
 
@@ -186,18 +204,20 @@ async def get_dashboard_data(date: str = Query(None)):
 ############################################################################################
 
 
-def convert_real_data_to_mock_format(hourly_data_list, current_hour):
+def convert_real_data_to_mock_format(hourly_data_list, current_hour, currency):
     """
     Convert real HourlyData with enhanced DecisionData to proper FormattedValue format.
 
     Args:
         hourly_data_list: List of HourlyData from optimization (with enhanced DecisionData)
         current_hour: Current hour for marking is_current_hour
+        currency: Currency code for formatting
 
     Returns:
         Dictionary with FormattedValue objects for proper frontend display
     """
     from api_dataclasses import create_formatted_value
+
     patterns = []
 
     for hourly_data in hourly_data_list:
@@ -212,13 +232,27 @@ def convert_real_data_to_mock_format(hourly_data_list, current_hour):
 
         # Create flows dictionary with FormattedValue objects
         flows = {
-            "solar_to_home": create_formatted_value(energy.solar_to_home, "energy_kwh_only"),
-            "solar_to_battery": create_formatted_value(energy.solar_to_battery, "energy_kwh_only"),
-            "solar_to_grid": create_formatted_value(energy.solar_to_grid, "energy_kwh_only"),
-            "grid_to_home": create_formatted_value(energy.grid_to_home, "energy_kwh_only"),
-            "grid_to_battery": create_formatted_value(energy.grid_to_battery, "energy_kwh_only"),
-            "battery_to_home": create_formatted_value(energy.battery_to_home, "energy_kwh_only"),
-            "battery_to_grid": create_formatted_value(energy.battery_to_grid, "energy_kwh_only"),
+            "solar_to_home": create_formatted_value(
+                energy.solar_to_home, "energy_kwh_only", currency
+            ),
+            "solar_to_battery": create_formatted_value(
+                energy.solar_to_battery, "energy_kwh_only", currency
+            ),
+            "solar_to_grid": create_formatted_value(
+                energy.solar_to_grid, "energy_kwh_only", currency
+            ),
+            "grid_to_home": create_formatted_value(
+                energy.grid_to_home, "energy_kwh_only", currency
+            ),
+            "grid_to_battery": create_formatted_value(
+                energy.grid_to_battery, "energy_kwh_only", currency
+            ),
+            "battery_to_home": create_formatted_value(
+                energy.battery_to_home, "energy_kwh_only", currency
+            ),
+            "battery_to_grid": create_formatted_value(
+                energy.battery_to_grid, "energy_kwh_only", currency
+            ),
         }
 
         # Create immediate_flow_values using enhanced decision intelligence data
@@ -226,21 +260,31 @@ def convert_real_data_to_mock_format(hourly_data_list, current_hour):
 
         # Enhanced decision intelligence should always provide detailed flow values
         if not decision.detailed_flow_values:
-            raise ValueError(f"Missing detailed_flow_values for hour {hourly_data.hour}. Enhanced decision intelligence should always provide this data.")
+            raise ValueError(
+                f"Missing detailed_flow_values for hour {hourly_data.hour}. Enhanced decision intelligence should always provide this data."
+            )
 
         # Use the advanced flow value calculations from decision intelligence
         for flow_name, flow_value in decision.detailed_flow_values.items():
-            immediate_flow_values[flow_name] = create_formatted_value(flow_value, "currency")
+            immediate_flow_values[flow_name] = create_formatted_value(
+                flow_value, "currency", currency
+            )
 
         # Calculate immediate_total_value as sum of all flow values (extract numeric values)
         total_value = sum(fv.value for fv in immediate_flow_values.values())
-        immediate_total_value = create_formatted_value(total_value, "currency")
+        immediate_total_value = create_formatted_value(
+            total_value, "currency", currency
+        )
 
         # Create future_opportunity with enhanced data
         future_opportunity = {
             "description": f"Future value realization from {decision.strategic_intent.lower().replace('_', ' ')} strategy",
-            "target_hours": decision.future_target_hours if decision.future_target_hours else [],
-            "expected_value": create_formatted_value(decision.future_value or 0.0, "currency"),
+            "target_hours": (
+                decision.future_target_hours if decision.future_target_hours else []
+            ),
+            "expected_value": create_formatted_value(
+                decision.future_value or 0.0, "currency", currency
+            ),
             "dependencies": [
                 "Price forecast accuracy",
                 "Battery state management",
@@ -261,13 +305,17 @@ def convert_real_data_to_mock_format(hourly_data_list, current_hour):
             "future_opportunity": future_opportunity,
             "economic_chain": decision.economic_chain
             or f"Hour {hour:02d}: No enhanced economic reasoning available",
-            "net_strategy_value": create_formatted_value(decision.net_strategy_value or 0.0, "currency"),
-            "electricity_price": create_formatted_value(economic.buy_price, "currency"),
+            "net_strategy_value": create_formatted_value(
+                decision.net_strategy_value or 0.0, "currency", currency
+            ),
+            "electricity_price": create_formatted_value(
+                economic.buy_price, "currency", currency
+            ),
             "is_current_hour": is_current,
             "is_actual": is_actual,
-
             # Simple enhanced fields that actually work
-            "advanced_flow_pattern": decision.advanced_flow_pattern or "NO_PATTERN_DETECTED",
+            "advanced_flow_pattern": decision.advanced_flow_pattern
+            or "NO_PATTERN_DETECTED",
         }
 
         patterns.append(pattern)
@@ -281,7 +329,9 @@ def convert_real_data_to_mock_format(hourly_data_list, current_hour):
         best_decision = max(patterns, key=lambda p: p["net_strategy_value"].value)
 
         summary = {
-            "total_net_value": create_formatted_value(total_net_value, "currency"),
+            "total_net_value": create_formatted_value(
+                total_net_value, "currency", currency
+            ),
             "best_decision_hour": best_decision["hour"],
             "best_decision_value": best_decision["net_strategy_value"],
             "actual_hours_count": len(actual_patterns),
@@ -289,9 +339,9 @@ def convert_real_data_to_mock_format(hourly_data_list, current_hour):
         }
     else:
         summary = {
-            "total_net_value": create_formatted_value(0.0, "currency"),
+            "total_net_value": create_formatted_value(0.0, "currency", currency),
             "best_decision_hour": 0,
-            "best_decision_value": create_formatted_value(0.0, "currency"),
+            "best_decision_value": create_formatted_value(0.0, "currency", currency),
             "actual_hours_count": 0,
             "predicted_hours_count": 0,
         }
@@ -325,29 +375,36 @@ async def get_decision_intelligence():
         # Get the daily view with real optimization data (same as dashboard)
         daily_view = bess_controller.system.get_current_daily_view()
 
+        # Get currency from settings
+        currency = bess_controller.system.home_settings.currency
+
         # Convert real HourlyData to mock format
         response = convert_real_data_to_mock_format(
-            daily_view.hourly_data, daily_view.current_hour
+            daily_view.hourly_data, daily_view.current_hour, currency
         )
 
         # Convert snake_case to camelCase for frontend (matching mock behavior)
         return convert_keys_to_camel_case(response)
 
     except Exception as e:
-        logger.warning(f"Decision intelligence not available yet (insights page under construction): {e}")
+        logger.warning(
+            f"Decision intelligence not available yet (insights page under construction): {e}"
+        )
         # Return minimal empty response instead of crashing - insights page is under construction
-        return convert_keys_to_camel_case({
-            "hours": [],
-            "summary": {
-                "total_battery_actions": 0,
-                "charging_hours": 0,
-                "discharging_hours": 0,
-                "idle_hours": 0,
-                "peak_charge_rate": 0.0,
-                "peak_discharge_rate": 0.0,
-            },
-            "message": "Decision intelligence data not yet available - insights page under construction"
-        })
+        return convert_keys_to_camel_case(
+            {
+                "hours": [],
+                "summary": {
+                    "total_battery_actions": 0,
+                    "charging_hours": 0,
+                    "discharging_hours": 0,
+                    "idle_hours": 0,
+                    "peak_charge_rate": 0.0,
+                    "peak_discharge_rate": 0.0,
+                },
+                "message": "Decision intelligence data not yet available - insights page under construction",
+            }
+        )
 
 
 # @router.get("/api/decision-intelligence")
@@ -1159,7 +1216,9 @@ async def get_strategic_intents():
                 )
             except Exception as e:
                 logger.error(f"Error getting hourly settings for hour {hour}: {e}")
-                raise ValueError(f"Hourly settings data is required for hour {hour} but failed to load: {e}") from e
+                raise ValueError(
+                    f"Hourly settings data is required for hour {hour} but failed to load: {e}"
+                ) from e
 
         response = {
             "summary": strategic_summary,

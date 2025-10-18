@@ -394,10 +394,10 @@ class DailyViewBuilder:
             "╔═══════╦════════════╦═══════╦═══════╦═══════╦═══════╦═══════╦═══════╦════════╦═════════╦═══════╦═══════╦═══════╦═══════╦═══════╗"
         )
         lines.append(
-            "║ Hour  ║   Prices   ║      Solar    ║ Grid  ║ Batt  ║ Home  ║ Grid  ║ Batt  ║Intent  ║SOC/SOE  ║ Base  ║Grid+  ║ Batt  ║ Total ║Savings║"
+            "║ Hour  ║   Prices   ║ Solar ║ Grid  ║ Batt  ║ Home  ║ Grid  ║ Batt  ║ Intent ║ SOC/SOE ║ Base  ║Grid+  ║ Batt  ║ Total ║Savings║"
         )
         lines.append(
-            "║       ║ Buy/Sell   ║   Generated   ║Import ║Dischg ║ Cons  ║Export ║Charge ║        ║  %/kWh  ║ Cost  ║Solar  ║ Wear  ║ Cost  ║  SEK  ║"
+            "║       ║ Buy/Sell   ║ Gertd ║Import ║Dischg ║ Cons  ║Export ║Charge ║        ║  %/kWh  ║ Cost  ║Solar  ║ Wear  ║ Cost  ║       ║"
         )
         lines.append(
             "╠═══════╬════════════╬═══════╬═══════╬═══════╬═══════╬═══════╬═══════╬════════╬═════════╬═══════╬═══════╬═══════╬═══════╬═══════╣"

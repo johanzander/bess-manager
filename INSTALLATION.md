@@ -51,13 +51,12 @@ Here is an example of a template sensor that predicts the future consumption bas
 Add to `configuration.yaml`:
 
 ```yaml
-sensor:
-  - platform: template
-    sensors:
-      filtered_grid_import_power:
-        friendly_name: "Filtered Grid Import Power"
+template:
+  - sensor:
+      - name: "Filtered Grid Import Power"
+        unique_id: filtered_grid_import_power
         unit_of_measurement: "W"
-        value_template: >
+        state: >
           {% if states('sensor.rkm0d7n04x_battery_1_charging_w') | float < 400 and
                 states('sensor.rkm0d7n04x_battery_1_discharging_w') | float < 400 %}
             {{ states('sensor.rkm0d7n04x_import_power') | float }}
@@ -65,8 +64,10 @@ sensor:
             {{ states('sensor.filtered_grid_import_power') | float(0) }}
           {% endif %}
 
+sensor:
   - platform: statistics
     name: "48h Average Grid Import Power"
+    unique_id: grid_import_power_48h_avg
     entity_id: sensor.filtered_grid_import_power
     state_characteristic: mean
     max_age:

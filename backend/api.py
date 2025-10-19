@@ -1303,22 +1303,31 @@ async def get_dashboard_health_summary():
             # System is healthy, run full health check
             health_results = run_system_health_checks(bess_controller.system)
 
-            # Extract only critical information
+            # Extract critical and warning information
             critical_issues = []
             has_critical_error = False
 
             for component in health_results.get("checks", []):
-                # Only care about required components with ERROR status
-                if (
-                    component.get("required", False)
-                    and component.get("status") == "ERROR"
-                ):
+                status = component.get("status", "UNKNOWN")
+                is_required = component.get("required", False)
+
+                # Show required components with ERROR status as critical
+                if is_required and status == "ERROR":
                     has_critical_error = True
                     critical_issues.append(
                         {
                             "component": component.get("name", "Unknown"),
                             "description": component.get("description", ""),
-                            "status": component.get("status", "UNKNOWN"),
+                            "status": status,
+                        }
+                    )
+                # Show all components (required or not) with WARNING or ERROR status
+                elif status in ["WARNING", "ERROR"]:
+                    critical_issues.append(
+                        {
+                            "component": component.get("name", "Unknown"),
+                            "description": component.get("description", ""),
+                            "status": status,
                         }
                     )
 
@@ -1350,3 +1359,42 @@ async def get_dashboard_health_summary():
             "system_mode": "unknown",
         }
         return convert_keys_to_camel_case(error_summary)
+
+
+@router.get("/api/historical-data-status")
+async def get_historical_data_status():
+    """Check if historical data is incomplete and needs attention.
+
+    Returns information about missing historical data that may affect
+    dashboard accuracy and optimization quality.
+    """
+
+    from app import bess_controller
+
+    try:
+        is_incomplete, missing_hours = (
+            bess_controller.system.historical_store.has_incomplete_historical_data()
+        )
+
+        completed_hours = bess_controller.system.historical_store.get_completed_hours()
+
+        status = {
+            "is_incomplete": is_incomplete,
+            "missing_hours": missing_hours,
+            "completed_hours": completed_hours,
+            "total_missing": len(missing_hours),
+            "total_completed": len(completed_hours),
+            "message": (
+                f"Missing historical data for {len(missing_hours)} hours. "
+                f"Dashboard values may be inaccurate until data collection is complete."
+                if is_incomplete
+                else "Historical data is complete for today."
+            ),
+            "timestamp": datetime.now().isoformat(),
+        }
+
+        return convert_keys_to_camel_case(status)
+
+    except Exception as e:
+        logger.error(f"Error checking historical data status: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e

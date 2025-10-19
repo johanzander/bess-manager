@@ -86,9 +86,28 @@ export default function DashboardPage({
   const [healthSummary, setHealthSummary] = useState<HealthSummary | null>(null);
   const [dismissedBanner, setDismissedBanner] = useState(false);
 
+  // Historical data status state
+  interface HistoricalDataStatus {
+    isIncomplete: boolean;
+    missingHours: number[];
+    completedHours: number[];
+    totalMissing: number;
+    totalCompleted: number;
+    message: string;
+    timestamp: string;
+  }
+
+  const [historicalDataStatus, setHistoricalDataStatus] = useState<HistoricalDataStatus | null>(null);
+  const [dismissedHistoricalWarning, setDismissedHistoricalWarning] = useState(false);
+
   // Handle banner dismissal
   const handleDismissBanner = useCallback(() => {
     setDismissedBanner(true);
+  }, []);
+
+  // Handle historical warning dismissal
+  const handleDismissHistoricalWarning = useCallback(() => {
+    setDismissedHistoricalWarning(true);
   }, []);
 
   // Memoize the fetchData function to avoid recreation on each render
@@ -100,13 +119,11 @@ export default function DashboardPage({
     setError(null);
 
     try {
-      // ✅ CRITICAL FIX: Don't clear data to prevent blinking
-      // setDashboardData(null); // ← REMOVED THIS LINE
-
-      // Fetch both dashboard data and health summary concurrently
-      const [dashboardResponse, healthResponse] = await Promise.all([
+      // Fetch dashboard data, health summary, and historical data status concurrently
+      const [dashboardResponse, healthResponse, historicalResponse] = await Promise.all([
         api.get('/api/dashboard'),
-        api.get('/api/dashboard-health-summary')
+        api.get('/api/dashboard-health-summary'),
+        api.get('/api/historical-data-status')
       ]);
 
       const response = dashboardResponse;
@@ -133,6 +150,15 @@ export default function DashboardPage({
         // Reset dismissed banner if there are new critical issues
         if (healthResponse.data.hasCriticalErrors) {
           setDismissedBanner(false);
+        }
+      }
+
+      // Process historical data status
+      if (historicalResponse?.data) {
+        setHistoricalDataStatus(historicalResponse.data);
+        // Reset dismissed warning if data is incomplete
+        if (historicalResponse.data.isIncomplete) {
+          setDismissedHistoricalWarning(false);
         }
       }
 
@@ -185,6 +211,44 @@ export default function DashboardPage({
           totalCriticalIssues={healthSummary.totalCriticalIssues}
           onDismiss={handleDismissBanner}
         />
+      )}
+
+      {/* Historical Data Warning Banner */}
+      {historicalDataStatus && historicalDataStatus.isIncomplete && !dismissedHistoricalWarning && (
+        <div className="bg-yellow-50 dark:bg-yellow-900/20 border-l-4 border-yellow-400 p-4 rounded shadow">
+          <div className="flex items-start">
+            <div className="flex-shrink-0">
+              <AlertCircle className="h-5 w-5 text-yellow-400" aria-hidden="true" />
+            </div>
+            <div className="ml-3 flex-1">
+              <h3 className="text-sm font-medium text-yellow-800 dark:text-yellow-200">
+                Incomplete Historical Data
+              </h3>
+              <div className="mt-2 text-sm text-yellow-700 dark:text-yellow-300">
+                <p>{historicalDataStatus.message}</p>
+                <p className="mt-1">
+                  Missing data for {historicalDataStatus.totalMissing} hour{historicalDataStatus.totalMissing !== 1 ? 's' : ''}: {historicalDataStatus.missingHours.join(', ')}
+                </p>
+                <p className="mt-2 text-xs">
+                  This usually happens after system restart when InfluxDB is not configured.
+                  The dashboard will skip these hours and only show data from the current hour onwards.
+                  Optimization continues to work normally starting from the current hour.
+                </p>
+              </div>
+            </div>
+            <div className="ml-auto pl-3">
+              <button
+                onClick={handleDismissHistoricalWarning}
+                className="inline-flex rounded-md bg-yellow-50 dark:bg-yellow-900/20 p-1.5 text-yellow-500 hover:bg-yellow-100 dark:hover:bg-yellow-900/40 focus:outline-none focus:ring-2 focus:ring-yellow-600 focus:ring-offset-2"
+              >
+                <span className="sr-only">Dismiss</span>
+                <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                  <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
       
       {/* System Status Header */}

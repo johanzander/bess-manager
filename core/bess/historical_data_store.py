@@ -165,3 +165,32 @@ class HistoricalDataStore:
             list[int]: Sorted list of hours (0-23) that have recorded data
         """
         return sorted(self._records.keys())
+
+    def has_incomplete_historical_data(self) -> tuple[bool, list[int]]:
+        """Check if historical data is incomplete for the current day.
+
+        Returns:
+            tuple[bool, list[int]]: (is_incomplete, missing_hours)
+                - is_incomplete: True if we're missing historical data for completed hours
+                - missing_hours: List of hours that should have data but don't
+        """
+        from datetime import datetime
+
+        now = datetime.now()
+        current_hour = now.hour
+
+        # If current minute < 5, the previous hour might not be fully complete yet
+        if now.minute < 5 and current_hour > 0:
+            expected_hours = list(range(0, current_hour))
+        elif current_hour > 0:
+            expected_hours = list(range(0, current_hour))
+        else:
+            # Hour 0 and first 5 minutes - no historical data expected yet today
+            expected_hours = []
+
+        completed_hours = self.get_completed_hours()
+        missing_hours = [h for h in expected_hours if h not in completed_hours]
+
+        is_incomplete = len(missing_hours) > 0
+
+        return is_incomplete, missing_hours

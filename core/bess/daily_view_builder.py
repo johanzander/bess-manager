@@ -21,11 +21,16 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class DailyView:
-    """Complete 00-23 view combining actual and predicted data."""
+    """Daily view combining actual and predicted data.
+
+    May contain fewer than 24 hours when historical data is unavailable
+    (e.g., after restart when InfluxDB not configured). In such cases,
+    only hours with available data are included.
+    """
 
     date: datetime
     current_hour: int
-    hourly_data: list[HourlyData]  # Always 24 hours
+    hourly_data: list[HourlyData]  # May be less than 24 hours if data unavailable
 
     # Summary metrics
     total_daily_savings: float  # SEK
@@ -39,11 +44,13 @@ class DailyView:
 
 
 class DailyViewBuilder:
-    """Builds complete daily views combining historical actuals and current predictions.
+    """Builds daily views combining historical actuals and current predictions.
 
     This class takes actual data from HistoricalDataStore and predicted data from
-    ScheduleStore to create a complete 24-hour view. It also recalculates total
-    daily savings by combining actual and predicted scenarios.
+    ScheduleStore to create a daily view. When historical data is unavailable
+    (e.g., InfluxDB not configured), past hours are skipped and only future hours
+    from the current optimization are included. Total daily savings are recalculated
+    from the available data.
     """
 
     def __init__(
@@ -102,15 +109,14 @@ class DailyViewBuilder:
                 if not (schedule_start_hour <= hour <= schedule_end_hour):
                     missing_predicted_hours.append(hour)
 
-        # Fail hard if any actual hours are missing
+        # Warn if any actual hours are missing, but continue with degraded view
         if missing_actual_hours:
             error_message = (
                 f"Missing historical data for hours {missing_actual_hours}. "
-                f"System cannot provide reliable daily view. "
+                f"Dashboard will skip these hours and only show data from current hour onwards. "
                 f"Check sensor data collection and InfluxDB connectivity."
             )
-            logger.error(error_message)
-            raise ValueError(error_message)
+            logger.warning(error_message)
 
         if missing_predicted_hours:
             raise ValueError(
@@ -119,23 +125,34 @@ class DailyViewBuilder:
                 f"System cannot provide complete daily view."
             )
 
-        # Build complete 24-hour view
+        # Build daily view - only include hours with actual or predicted data
+        # Skip past hours without historical data (e.g., when InfluxDB not configured)
         hourly_data = []
         data_sources = []
 
         for hour in range(24):
             if hour < current_hour:
-                hour_data = self._build_actual_hour_data(
-                    hour, buy_price[hour], sell_price[hour]
-                )
-                data_sources.append("actual")
+                # Try to get actual historical data
+                try:
+                    hour_data = self._build_actual_hour_data(
+                        hour, buy_price[hour], sell_price[hour]
+                    )
+                    data_sources.append("actual")
+                    hourly_data.append(hour_data)
+                except ValueError:
+                    # Missing historical data - skip this hour (don't create fake data)
+                    logger.debug(f"Skipping hour {hour} - no historical data available")
+                    continue
             else:
-                hour_data = self._build_predicted_hour_data(
-                    hour, buy_price[hour], sell_price[hour], current_hour
-                )
-                data_sources.append("predicted")
-
-            hourly_data.append(hour_data)
+                # Future hours use predicted data from schedule
+                try:
+                    hour_data = self._build_predicted_hour_data(hour)
+                    data_sources.append("predicted")
+                    hourly_data.append(hour_data)
+                except ValueError:
+                    # Schedule doesn't cover this future hour - skip it
+                    logger.debug(f"Skipping hour {hour} - no schedule data available")
+                    continue
 
         # Sort and validate
         hourly_data.sort(key=lambda x: x.hour)
@@ -344,10 +361,15 @@ class DailyViewBuilder:
             "No actual battery state data available and no initial SOC in schedule"
         )
 
-    def _build_predicted_hour_data(
-        self, hour: int, buy_price: float, sell_price: float, current_hour: int
-    ) -> HourlyData:
-        """Build hour data from predicted schedule data - use optimization result as-is."""
+    def _build_predicted_hour_data(self, hour: int) -> HourlyData:
+        """Build hour data from predicted schedule data - use optimization result as-is.
+
+        Args:
+            hour: Hour of day (0-23)
+
+        Returns:
+            HourlyData from the optimization result for this hour
+        """
 
         latest_schedule = self.schedule_store.get_latest_schedule()
         if latest_schedule is None:

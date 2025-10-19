@@ -745,9 +745,13 @@ def optimize_battery_schedule(
         raise ValueError(
             f"Invalid initial_soe={initial_soe:.1f}kWh exceeds battery capacity={battery_settings.max_soe_kwh:.1f}kWh"
         )
+
+    # Allow optimization to start from below minimum SOC (can happen after restart or deep discharge)
+    # The optimizer will naturally work to bring SOE back above minimum through charging
     if initial_soe < battery_settings.min_soe_kwh:
-        raise ValueError(
-            f"Invalid initial_soe={initial_soe:.1f}kWh below minimum SOE={battery_settings.min_soe_kwh:.1f}kWh"
+        logger.warning(
+            f"Starting optimization with initial_soe={initial_soe:.1f}kWh below minimum SOE={battery_settings.min_soe_kwh:.1f}kWh. "
+            f"Optimizer will work to restore battery charge."
         )
 
     logger.info(

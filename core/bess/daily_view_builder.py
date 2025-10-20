@@ -311,8 +311,9 @@ class DailyViewBuilder:
             - solar_excess * sell_price  # Revenue from solar exports
         )
 
-        # Calculate savings vs solar-only baseline (algorithm baseline)
-        hourly_savings = grid_only_cost - solar_only_cost
+        # Calculate savings: grid-only cost vs actual cost with solar+battery
+        # This shows the total benefit of the system (solar + battery) vs no system
+        hourly_savings = grid_only_cost - battery_solar_cost
 
         final_economic = EconomicData(
             buy_price=buy_price,

@@ -267,10 +267,10 @@ export const SavingsOverview: React.FC<SavingsOverviewProps> = () => {
                 </td>
                 
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
-                  <div className={`font-medium ${getNumericValue(hour.gridImportNeeded) > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-400 dark:text-gray-500'}`}>
-                    {getDisplayValue(hour.gridImportNeeded)}
+                  <div className={`font-medium ${getNumericValue(hour.gridImported) > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-400 dark:text-gray-500'}`}>
+                    {getDisplayValue(hour.gridImported)}
                   </div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(hour.gridImportNeeded)}</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(hour.gridImported)}</div>
                 </td>
                 
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
@@ -283,7 +283,7 @@ export const SavingsOverview: React.FC<SavingsOverviewProps> = () => {
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
                   <div className={`font-medium ${
                     Math.abs(getNumericValue(hour.hourlyCost)) < 0.01 ? 'text-gray-900 dark:text-white' :
-                    getNumericValue(hour.hourlyCost) > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white'
+                    getNumericValue(hour.hourlyCost) > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'
                   }`}>
                     {getDisplayValue(hour.hourlyCost)}
                   </div>

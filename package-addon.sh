@@ -1,9 +1,14 @@
 #!/bin/bash
 # Script to build and package the BESS add-on for Home Assistant
+#
+# NOTE: This script is for LOCAL installation only.
+# For GitHub repository installation, use the bess_manager/ directory structure
+# which is automatically recognized by Home Assistant when adding:
+# https://github.com/johanzander/bess-manager
 
 set -e
 
-echo "Building BESS Manager add-on for Home Assistant..."
+echo "Building BESS Manager add-on for Home Assistant (local installation)..."
 
 echo "Cleaning old build directory..."
 BUILD_DIR="./build/bess_manager"

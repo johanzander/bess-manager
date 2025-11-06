@@ -1,0 +1,144 @@
+name: "BESS Manager"
+description: "Battery Energy Storage System optimization and management"
+version: "2.5.0"
+slug: "bess_manager"
+init: false
+arch:
+  - aarch64
+  - amd64
+  - armhf
+  - armv7
+  - i386
+startup: application
+boot: auto
+ports:
+  8080/tcp: 8080
+ingress: true
+ingress_port: 8080
+panel_icon: mdi:battery-charging
+panel_title: BESS Manager
+panel_admin: true
+hassio_api: true
+homeassistant_api: true
+auth_api: true
+options:
+  influxdb:
+    url: "http://homeassistant.local:8086/api/v2/query"
+    username: "your_db_username_here"
+    password: "your_db_password_here"
+  home:
+    consumption: 3.5                # default hourly consumption in kWh
+    currency: "SEK"                 # currency for price display and calculations
+    max_fuse_current: 25            # Maximum fuse current in amperes
+    voltage: 230                    # Line voltage in volts
+    safety_margin_factor: 0.95      # Safety margin for power calculations (95%)
+  battery:
+    total_capacity: 30.0             # kWh
+    max_charge_discharge_power: 15.0 # kW
+    cycle_cost: 0.50                 # Battery wear cost per kWh (excl. VAT) - use your local currency
+    min_action_profit_threshold: 1.5  # Minimum profit threshold for any battery action (in your currency)
+  electricity_price:
+    area: "SE4"                      # Area for Nordpool pricing
+    markup_rate: 0.08                # Electricity markup per kWh (in your currency, e.g. 8 öre/kWh for SEK)
+    vat_multiplier: 1.25             # 25% VAT
+    additional_costs: 1.03           # Additional costs per kWh in your currency (e.g. SE: 28.90 öre överföringsavgift + 53.50 öre energiskatt + moms)
+    tax_reduction: 0.6518            # Tax reduction for sold energy in your currency (e.g. SE: 60 öre skattereduktion + 5.18 öre förlustersättning)
+  nordpool:
+    use_official_integration: true  # Set to true to use official HA Nord Pool integration
+    config_entry_id: "01K3Y99FD3MDZYVFX2XSWR4888"  # Required when use_official_integration is true
+  sensors:
+    # === Battery Control & Status ===
+    battery_soc: "sensor.rkm0d7n04x_statement_of_charge_soc"
+    battery_charge_stop_soc: "number.rkm0d7n04x_charge_stop_soc_2"
+    battery_discharge_stop_soc: "number.rkm0d7n04x_discharge_stop_soc_2"
+    battery_charging_power_rate: "number.rkm0d7n04x_charge_power"
+    battery_discharging_power_rate: "number.rkm0d7n04x_discharge_power"
+    grid_charge: "switch.rkm0d7n04x_ac_charge"  
+    # === Real-time Power Sensors (Primary - Live Power Flow) ===
+    pv_power: "sensor.rkm0d7n04x_internal_wattage"                    # Total solar DC production
+    local_load_power: "sensor.rkm0d7n04x_local_load_power"           # Home consumption
+    import_power: "sensor.rkm0d7n04x_import_power"                   # Grid import
+    export_power: "sensor.rkm0d7n04x_export_power"                   # Grid export
+    battery_charge_power: "sensor.rkm0d7n04x_battery_1_charging_w"     # Battery charging power
+    battery_discharge_power: "sensor.rkm0d7n04x_battery_1_discharging_w"  # Battery discharging power 
+    # === Real-time Power Sensors (Advanced/Diagnostic - not required) ===
+    output_power: "sensor.rkm0d7n04x_output_power"                   # Output power
+    self_power: "sensor.rkm0d7n04x_self_power"                       # Solar contributing to AC loads
+    system_power: "sensor.rkm0d7n04x_system_power"                   # System power throughput 
+    # === Grid Current Monitoring (not required) ===
+    current_l1: "sensor.current_l1_gustavsgatan_32a"                 # Phase 1 current
+    current_l2: "sensor.current_l2_gustavsgatan_32a"                 # Phase 2 current
+    current_l3: "sensor.current_l3_gustavsgatan_32a"                 # Phase 3 current
+    # === Lifetime Energy Totals ===
+    lifetime_solar_energy: "sensor.rkm0d7n04x_lifetime_total_solar_energy"
+    lifetime_load_consumption: "sensor.rkm0d7n04x_lifetime_total_load_consumption"
+    lifetime_self_consumption: "sensor.rkm0d7n04x_lifetime_self_consumption"
+    lifetime_import_from_grid: "sensor.rkm0d7n04x_lifetime_import_from_grid"
+    lifetime_export_to_grid: "sensor.rkm0d7n04x_lifetime_total_export_to_grid"
+    lifetime_battery_charged: "sensor.rkm0d7n04x_lifetime_total_all_batteries_charged"
+    lifetime_battery_discharged: "sensor.rkm0d7n04x_lifetime_total_all_batteries_discharged"
+    lifetime_system_production: "sensor.rkm0d7n04x_lifetime_system_production"
+    ev_energy_meter: "sensor.zap263668_energy_meter"                 # EV charging energy (lifetime)
+    # === Electricity Pricing ===
+    nordpool_kwh_today: "sensor.nordpool_kwh_se4_sek_2_10_025"       # Today's NordPool prices
+    nordpool_kwh_tomorrow: "sensor.nordpool_kwh_se4_sek_2_10_025"    # Tomorrow's NordPool prices
+    # === Solar & Consumption Forecasting ===
+    48h_avg_grid_import: "sensor.48h_average_grid_import_power"       # 48h average consumption
+    solar_forecast_today: "sensor.solcast_pv_forecast_forecast_today" # Today's solar forecast
+schema:
+  influxdb:
+    url: str
+    username: str
+    password: str
+  home:
+    consumption: float
+    max_fuse_current: int
+    voltage: int
+    safety_margin_factor: float
+  battery:
+    total_capacity: float
+    max_charge_discharge_power: float
+    cycle_cost: float
+    min_action_profit_threshold: float
+  electricity_price:
+    area: str
+    markup_rate: float
+    vat_multiplier: float
+    additional_costs: float
+    tax_reduction: float
+  nordpool:
+    use_official_integration: bool
+    config_entry_id: str
+  sensors:
+    battery_soc: str
+    battery_charge_power: str
+    battery_discharge_power: str
+    battery_charge_stop_soc: str
+    battery_discharge_stop_soc: str
+    battery_charging_power_rate: str
+    battery_discharging_power_rate: str
+    grid_charge: str
+    current_l1: str
+    current_l2: str
+    current_l3: str
+    lifetime_battery_charged: str
+    lifetime_battery_discharged: str
+    lifetime_solar_energy: str
+    lifetime_export_to_grid: str
+    lifetime_load_consumption: str
+    lifetime_import_from_grid: str
+    lifetime_system_production: str
+    lifetime_self_consumption: str
+    ev_energy_meter: str
+    nordpool_kwh_today: str
+    nordpool_kwh_tomorrow: str
+    48h_avg_grid_import: str
+    solar_forecast_today: str
+    pv_power: str
+    local_load_power: str
+    import_power: str
+    export_power: str
+    ac_power: str
+    output_power: str
+    self_power: str
+    system_power: str

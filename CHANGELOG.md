@@ -5,6 +5,14 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.3] - 2025-11-06
+
+### Fixed
+
+- Fixed HACS/GitHub repository installation by configuring proper build context
+- Updated Dockerfile paths to reference repository root directories (backend/, core/, frontend/)
+- Added build.json configuration to specify parent directory as build context
+
 ## [2.5.2] - 2024-11-06
 
 ### Added

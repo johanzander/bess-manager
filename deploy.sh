@@ -29,6 +29,7 @@ if [ -f "$TARGET_PATH/config.yaml" ]; then
         
         echo "Updating version: $BUILD_VERSION → $NEW_VERSION"
         sed -i '' "s/version: \"$BUILD_VERSION\"/version: \"$NEW_VERSION\"/" backend/config.yaml
+        echo "Updated backend/config.yaml (bess_manager/config.yaml is a symlink)"
     fi
 fi
 

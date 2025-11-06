@@ -7,7 +7,5 @@
     "i386": "ghcr.io/home-assistant/i386-base:3.19"
   },
   "squash": false,
-  "context": "..",
-  "dockerfile": "bess_manager/Dockerfile",
   "args": {}
 }

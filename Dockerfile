@@ -35,13 +35,13 @@ RUN apk add --no-cache \
 # Set working directory
 WORKDIR /app
 
-# Copy Python application files (symlinked from backend directory)
-COPY app.py api.py api_conversion.py api_dataclasses.py log_config.py requirements.txt ./
+# Copy Python application files from backend directory
+COPY backend/app.py backend/api.py backend/api_conversion.py backend/api_dataclasses.py backend/log_config.py backend/requirements.txt ./
 
-# Copy core directory (symlinked)
+# Copy core directory
 COPY core/ /app/core/
 
-# Build and copy frontend (symlinked)
+# Build and copy frontend
 WORKDIR /tmp/frontend
 COPY frontend/package*.json ./
 RUN npm ci
@@ -55,8 +55,8 @@ RUN mkdir -p /app/frontend && mv dist/* /app/frontend/
 # Back to app directory
 WORKDIR /app
 
-# Copy run script (symlinked)
-COPY run.sh ./
+# Copy run script
+COPY backend/run.sh ./
 
 # Create and use virtual environment
 RUN python3 -m venv /app/venv

@@ -9,10 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Fixed HACS/GitHub repository installation by creating symlinks in bess_manager/ directory
-- Updated Dockerfile to use local symlinked paths instead of parent directory references
-- Symlinked all required source files (core/, frontend/, backend/*.py) into bess_manager/
-- Docker build now works correctly when Home Assistant builds from the repository
+- Fixed HACS/GitHub repository installation by restructuring to single add-on layout
+- Moved add-on configuration files (config.yaml, Dockerfile, build.json, DOCS.md) to repository root
+- Removed unnecessary bess_manager/ subdirectory (proper for single add-on repositories)
+- Dockerfile now correctly references backend/, core/, and frontend/ from repository root
+- Build context is now repository root, allowing direct access to all source directories
 
 ## [2.5.2] - 2024-11-06
 

@@ -14,8 +14,20 @@ All user-facing settings should be configured and overridden via config.yaml:
 For production configuration, all user-facing values must be properly configured in config.yaml.
 """
 
+import re
 from dataclasses import dataclass, field
 from typing import Any
+
+
+def _camel_to_snake(name: str) -> str:
+    """Convert camelCase to snake_case.
+
+    This matches the implementation in backend/api_conversion.py but is kept
+    separate to maintain architectural separation between core and backend layers.
+    """
+    s1 = re.sub("(.)([A-Z][a-z]+)", r"\1_\2", name)
+    return re.sub("([a-z0-9])([A-Z])", r"\1_\2", s1).lower()
+
 
 # Price settings defaults
 DEFAULT_AREA = "SE4"
@@ -69,8 +81,13 @@ class PriceSettings:
     def update(self, **kwargs: Any) -> None:
         """Update settings from dict."""
         for key, value in kwargs.items():
-            if hasattr(self, key):
-                setattr(self, key, value)
+            # Convert camelCase to snake_case for compatibility with API layer
+            snake_key = _camel_to_snake(key)
+            if not hasattr(self, snake_key):
+                raise AttributeError(
+                    f"PriceSettings has no attribute '{snake_key}' (from key '{key}')"
+                )
+            setattr(self, snake_key, value)
 
 
 @dataclass
@@ -101,11 +118,13 @@ class BatterySettings:
     def update(self, **kwargs: Any) -> None:
         """Update settings from dict."""
         for key, value in kwargs.items():
-            if hasattr(self, key):
-                setattr(self, key, value)
-                # Handle combined power settings
-                if key == "max_charge_power_kw":
-                    self.max_discharge_power_kw = value
+            # Convert camelCase to snake_case for compatibility with API layer
+            snake_key = _camel_to_snake(key)
+            if not hasattr(self, snake_key):
+                raise AttributeError(
+                    f"BatterySettings has no attribute '{snake_key}' (from key '{key}')"
+                )
+            setattr(self, snake_key, value)
 
         self.__post_init__()
 
@@ -146,8 +165,13 @@ class HomeSettings:
     def update(self, **kwargs: Any) -> None:
         """Update settings from dict."""
         for key, value in kwargs.items():
-            if hasattr(self, key):
-                setattr(self, key, value)
+            # Convert camelCase to snake_case for compatibility with API layer
+            snake_key = _camel_to_snake(key)
+            if not hasattr(self, snake_key):
+                raise AttributeError(
+                    f"HomeSettings has no attribute '{snake_key}' (from key '{key}')"
+                )
+            setattr(self, snake_key, value)
 
     def from_ha_config(self, config: dict) -> "HomeSettings":
         """Create instance from Home Assistant add-on config."""

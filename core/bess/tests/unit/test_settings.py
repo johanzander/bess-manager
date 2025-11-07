@@ -113,3 +113,55 @@ def test_battery_settings_action_threshold():
     }
     settings.from_ha_config(config)
     assert settings.min_action_profit_threshold == 2.0
+
+
+def test_battery_settings_camelcase_update():
+    """Test that update method handles camelCase keys from API layer."""
+    settings = BatterySettings()
+
+    # Update with camelCase keys (as sent from frontend/API)
+    settings.update(
+        totalCapacity=25.0,
+        maxChargePowerKw=8.0,
+        cycleCostPerKwh=0.55,
+        minActionProfitThreshold=1.2,
+    )
+
+    # Verify that values were correctly mapped to snake_case attributes
+    assert settings.total_capacity == 25.0
+    assert settings.max_charge_power_kw == 8.0
+    assert settings.cycle_cost_per_kwh == 0.55
+    assert settings.min_action_profit_threshold == 1.2
+
+    # Verify computed fields are updated
+    assert settings.reserved_capacity == 2.5  # 10% of 25
+
+
+def test_battery_settings_invalid_key_raises_error():
+    """Test that update method raises AttributeError for invalid keys."""
+    import pytest
+
+    settings = BatterySettings()
+
+    # Attempt to update with an invalid key should raise AttributeError
+    with pytest.raises(AttributeError) as exc_info:
+        settings.update(invalidKey=123)
+
+    assert "BatterySettings has no attribute 'invalid_key'" in str(exc_info.value)
+    assert "from key 'invalidKey'" in str(exc_info.value)
+
+
+def test_battery_settings_independent_charge_discharge_power():
+    """Test that charge and discharge power can be set independently."""
+    settings = BatterySettings()
+
+    # Test both orderings - should give same result regardless of key order
+    settings.update(maxChargePowerKw=10.0, maxDischargePowerKw=8.0)
+    assert settings.max_charge_power_kw == 10.0
+    assert settings.max_discharge_power_kw == 8.0
+
+    # Test reverse order - should NOT have dict ordering bugs
+    settings2 = BatterySettings()
+    settings2.update(maxDischargePowerKw=8.0, maxChargePowerKw=10.0)
+    assert settings2.max_charge_power_kw == 10.0
+    assert settings2.max_discharge_power_kw == 8.0

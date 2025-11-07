@@ -319,6 +319,42 @@ This script automatically checks:
 - Markdown formatting issues (trailing spaces, blank lines)
 - File encoding and common problems
 
+#### Git Commit Policy
+
+**CRITICAL**: Never commit files without explicit user approval.
+
+**Rules**:
+
+1. **Never commit automatically** - Always wait for the user to explicitly say "commit" or "please commit"
+2. **No AI attribution in commits** - Never include "Claude", "AI-generated", or similar references in commit messages
+3. **Show changes first** - Always show what will be committed and get approval before running git commit
+4. **Clean commit messages** - Write clear, professional commit messages that describe what changed and why
+
+**Examples**:
+
+Good commit message:
+
+```text
+Fix settings not updating from config.yaml due to camelCase/snake_case mismatch
+
+The update() method was checking for camelCase keys but dataclass attributes
+use snake_case. Added conversion to properly map keys before validation.
+```
+
+Bad commit messages:
+
+```text
+Fix issue 🤖 Generated with Claude Code
+Update settings (AI-assisted)
+Changes made by Claude
+```
+
+**When User Says "Don't Commit"**:
+
+- Keep changes staged or unstaged as appropriate
+- Do not create any git commits
+- Changes remain in working directory for user review
+
 #### Common Issues to Avoid
 
 - **Markdown**: Missing blank lines around headers, trailing spaces, multiple consecutive blank lines

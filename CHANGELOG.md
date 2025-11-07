@@ -5,6 +5,21 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.5] - 2025-11-07
+
+### Fixed
+
+- Fixed initial_cost_basis returning 0.0 when battery at reserved capacity, causing irrational grid charging at high prices
+- Fixed settings not updating from config.yaml due to camelCase/snake_case mismatch in update() methods
+- Fixed dict-ordering bug where max_discharge_power_kw would be overwritten by max_charge_power_kw depending on key order
+- Added explicit AttributeError for invalid setting keys instead of silent failures
+
+### Changed
+
+- Settings classes now convert camelCase API keys to snake_case attributes automatically
+- Removed silent hasattr() checks in favor of explicit error handling
+- Added Git Commit Policy to CLAUDE.md documentation
+
 ## [2.5.4] - 2025-11-07
 
 ### Fixed

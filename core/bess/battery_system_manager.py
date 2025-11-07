@@ -1228,20 +1228,6 @@ class BatterySystemManager:
 
     def _calculate_initial_cost_basis(self, current_hour: int) -> float:
         """Calculate cost basis using stored facts and shared calculation logic."""
-        try:
-            current_soc = self._get_current_battery_soc()
-            if current_soc is None:
-                logger.warning("No current SOC available for cost basis calculation")
-                return self.battery_settings.cycle_cost_per_kwh
-
-            current_soe = (current_soc / 100.0) * self.battery_settings.total_capacity
-        except Exception as e:
-            logger.warning(f"Failed to get current SOC: {e}")
-            return self.battery_settings.cycle_cost_per_kwh
-
-        if current_soe <= self.battery_settings.reserved_capacity + 0.1:
-            return 0.0
-
         completed_hours = self.historical_store.get_completed_hours()
         if not completed_hours:
             return self.battery_settings.cycle_cost_per_kwh

@@ -62,7 +62,6 @@ options:
     battery_charge_power: "sensor.rkm0d7n04x_battery_1_charging_w"     # Battery charging power
     battery_discharge_power: "sensor.rkm0d7n04x_battery_1_discharging_w"  # Battery discharging power 
     # === Real-time Power Sensors (Advanced/Diagnostic - not required) ===
-    ac_power: "sensor.rkm0d7n04x_ac_power"                           # AC power output
     output_power: "sensor.rkm0d7n04x_output_power"                   # Output power
     self_power: "sensor.rkm0d7n04x_self_power"                       # Solar contributing to AC loads
     system_power: "sensor.rkm0d7n04x_system_power"                   # System power throughput 

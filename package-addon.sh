@@ -32,7 +32,7 @@ cp backend/api_dataclasses.py "$BUILD_DIR/api_dataclasses.py"
 cp backend/log_config.py "$BUILD_DIR/log_config.py"
 cp backend/requirements.txt "$BUILD_DIR/requirements.txt"
 cp backend/run.sh "$BUILD_DIR/run.sh"
-cp backend/config.yaml "$BUILD_DIR/config.yaml"
+cp config.yaml "$BUILD_DIR/config.yaml"
 cp README.md "$BUILD_DIR/README.md"
 
 # Copy core files

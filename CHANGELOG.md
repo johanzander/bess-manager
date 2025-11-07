@@ -5,6 +5,20 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.4] - 2025-11-07
+
+### Fixed
+
+- Fixed test mode to properly block all hardware write operations using "deny by default" pattern
+- Fixed duplicate config.yaml files - now single source of truth in repository root
+- Removed unused ac_power sensor configuration
+
+### Changed
+
+- Test mode now controlled via HA_TEST_MODE environment variable instead of hardcoded
+- Updated docker-compose.yml to mount root config.yaml for development
+- Updated deploy.sh and package-addon.sh to use root config.yaml
+
 ## [2.5.3] - 2025-11-06
 
 ### Fixed

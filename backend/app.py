@@ -120,7 +120,12 @@ class BESSController:
         # Initialize Home Assistant API Controller with sensor config from options
         sensor_config = options.get("sensors", {})
         self.ha_controller = self._init_ha_controller(sensor_config)
-        self.ha_controller.set_test_mode(False)
+
+        # Enable test mode based on environment variable (defaults to False for production)
+        test_mode = os.environ.get("HA_TEST_MODE", "false").lower() in ("true", "1", "yes")
+        if test_mode:
+            logger.info("Enabling test mode - hardware writes will be simulated")
+        self.ha_controller.set_test_mode(test_mode)
 
         # Extract nordpool configuration
         nordpool_config = options.get("nordpool", {})

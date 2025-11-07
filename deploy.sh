@@ -13,23 +13,23 @@ fi
 # Auto-increment patch version if deploying same version
 if [ -f "$TARGET_PATH/config.yaml" ]; then
     CURRENT_VERSION=$(grep "^version:" "$TARGET_PATH/config.yaml" | cut -d'"' -f2)
-    BUILD_VERSION=$(grep "^version:" "backend/config.yaml" | cut -d'"' -f2)
-    
+    BUILD_VERSION=$(grep "^version:" "config.yaml" | cut -d'"' -f2)
+
     if [ "$CURRENT_VERSION" = "$BUILD_VERSION" ]; then
         echo "Same version detected ($BUILD_VERSION), auto-incrementing patch version..."
-        
+
         # Extract version parts
         MAJOR=$(echo $BUILD_VERSION | cut -d. -f1)
         MINOR=$(echo $BUILD_VERSION | cut -d. -f2)
         PATCH=$(echo $BUILD_VERSION | cut -d. -f3)
-        
+
         # Increment patch version
         NEW_PATCH=$((PATCH + 1))
         NEW_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
-        
+
         echo "Updating version: $BUILD_VERSION → $NEW_VERSION"
-        sed -i '' "s/version: \"$BUILD_VERSION\"/version: \"$NEW_VERSION\"/" backend/config.yaml
-        echo "Updated backend/config.yaml (bess_manager/config.yaml is a symlink)"
+        sed -i '' "s/version: \"$BUILD_VERSION\"/version: \"$NEW_VERSION\"/" config.yaml
+        echo "Updated config.yaml"
     fi
 fi
 

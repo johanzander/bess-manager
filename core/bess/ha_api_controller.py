@@ -565,23 +565,17 @@ class HomeAssistantAPIController:
             Response from service call or None
 
         """
-        # List of operations that modify state (write operations)
-        write_operations = [
-            ("growatt_server", "update_tlx_inverter_time_segment"),
-            ("switch", "turn_on"),
-            ("switch", "turn_off"),
-            ("number", "set_value"),
+        # List of read-only operations that are safe to execute in test mode
+        # In test mode, we block ALL operations EXCEPT these safe reads
+        safe_read_operations = [
+            ("growatt_server", "read_time_segments"),
+            ("nordpool", "get_prices_for_date"),
         ]
 
-        # List of operations that return data
-        read_operations = [("growatt_server", "read_tlx_inverter_time_segments")]
+        is_safe_read = (service_domain, service_name) in safe_read_operations
 
-        # Only block write operations in test mode
-        is_write_operation = (service_domain, service_name) in write_operations
-        is_read_operation = (service_domain, service_name) in read_operations
-
-        # Test mode only blocks write operations, never read operations
-        if self.test_mode and is_write_operation:
+        # Test mode blocks ALL operations except safe reads (deny by default)
+        if self.test_mode and not is_safe_read:
             logger.info(
                 "[TEST MODE] Would call service %s.%s with args: %s",
                 service_domain,
@@ -596,7 +590,7 @@ class HomeAssistantAPIController:
 
         # Add return_response query parameter for read operations
         query_params = {}
-        if json_data.pop("return_response", is_read_operation):
+        if json_data.pop("return_response", is_safe_read):
             query_params["return_response"] = "true"
 
         # Remove 'blocking' from payload
@@ -1011,10 +1005,6 @@ class HomeAssistantAPIController:
     def get_local_load_power(self):
         """Get current home load power in watts."""
         return self._get_sensor_value("local_load_power")
-
-    def get_ac_power(self):
-        """Get current AC power in watts."""
-        return self._get_sensor_value("ac_power")
 
     def get_output_power(self):
         """Get current output power in watts."""

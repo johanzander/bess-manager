@@ -483,7 +483,7 @@ else:
 - **pyproject.toml**: Python tooling (black, ruff, mypy) with BESS-specific settings
 - **frontend/package.json**: React/TypeScript dependencies and build scripts
 - **docker-compose.yml**: Development environment with HA integration
-- **backend/config.yaml**: Add-on configuration schema and defaults
+- **config.yaml**: Add-on configuration schema and defaults (root directory)
 
 ## Unit Testing Guidelines
 

@@ -1239,9 +1239,6 @@ class BatterySystemManager:
             logger.warning(f"Failed to get current SOC: {e}")
             return self.battery_settings.cycle_cost_per_kwh
 
-        if current_soe <= self.battery_settings.reserved_capacity + 0.1:
-            return 0.0
-
         completed_hours = self.historical_store.get_completed_hours()
         if not completed_hours:
             return self.battery_settings.cycle_cost_per_kwh

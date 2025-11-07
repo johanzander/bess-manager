@@ -55,8 +55,8 @@ RUN mkdir -p /app/frontend && mv dist/* /app/frontend/
 # Back to app directory
 WORKDIR /app
 
-# Copy run script from bess_manager directory
-COPY bess_manager/run.sh ./
+# Copy run script
+COPY backend/run.sh ./
 
 # Create and use virtual environment
 RUN python3 -m venv /app/venv

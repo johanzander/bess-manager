@@ -1,6 +1,6 @@
 name: "BESS Manager"
 description: "Battery Energy Storage System optimization and management"
-version: "2.5.5"
+version: "2.5.6"
 slug: "bess_manager"
 init: false
 arch:
@@ -92,6 +92,7 @@ schema:
     password: str
   home:
     consumption: float
+    currency: str
     max_fuse_current: int
     voltage: int
     safety_margin_factor: float

@@ -5,6 +5,19 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.7] - 2025-11-10
+
+### Fixed
+
+- Fixed critical bug where invalid estimatedConsumption field in battery settings prevented all settings from being applied
+- Fixed settings failures silently continuing with defaults instead of failing explicitly
+- Currency and other user configuration now properly applied on startup
+
+### Changed
+
+- Settings application now fails fast with clear error message when configuration is invalid
+- Removed estimatedConsumption from internal battery settings (now computed on-demand for API responses only)
+
 ## [2.5.5] - 2025-11-07
 
 ### Fixed

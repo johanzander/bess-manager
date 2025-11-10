@@ -335,7 +335,6 @@ class BESSController:
                     "minActionProfitThreshold": battery_config[
                         "min_action_profit_threshold"
                     ],
-                    "estimatedConsumption": home_config["consumption"],
                 },
                 "home": {
                     "defaultHourly": home_config["consumption"],
@@ -355,7 +354,14 @@ class BESSController:
             logger.info("All settings applied successfully")
 
         except Exception as e:
-            logger.error(f"Error applying settings: {e}", exc_info=True)
+            logger.error(
+                f"CRITICAL: Failed to apply settings from config.yaml: {e}",
+                exc_info=True
+            )
+            raise RuntimeError(
+                f"Settings application failed - system cannot start safely. "
+                f"Check config.yaml for invalid or missing settings. Error: {e}"
+            ) from e
 
     def start(self):
         """Start the scheduler."""

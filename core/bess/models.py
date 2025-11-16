@@ -18,6 +18,7 @@ __all__ = [
     "EconomicData",
     "EnergyData",
     "HourlyData",
+    "PeriodData",  # Alias for HourlyData (supports quarterly periods)
     "OptimizationResult",
 ]
 
@@ -278,6 +279,12 @@ class HourlyData:
             errors.append(f"Invalid end SOE: {self.energy.battery_soe_end}%")
 
         return errors
+
+
+# Type alias for quarterly period support
+# HourlyData works for both hourly and quarterly periods
+# (the 'hour' field is kept for backward compatibility: hour = period_index // 4)
+PeriodData = HourlyData
 
 
 @dataclass

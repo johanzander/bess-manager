@@ -1,19 +1,24 @@
-# core/bess/historical_data_store.py
-"""
-HistoricalDataStore - Immutable storage of what actually happened.
+"""HistoricalDataStore - Stores actual sensor data at quarterly resolution.
 
+Simplified storage using continuous period indices (0 = today 00:00).
+Only stores today's data in memory.
 """
 
 import logging
-from datetime import date, datetime
+from datetime import datetime
 
-from core.bess.models import DecisionData, EnergyData, HourlyData
+from core.bess.models import PeriodData
+from core.bess.time_utils import get_period_count, TIMEZONE
 
 logger = logging.getLogger(__name__)
 
 
 class HistoricalDataStore:
-    """Immutable storage of what actually happened each hour."""
+    """Stores actual sensor data at quarterly resolution.
+
+    Uses simple integer indices: 0 = today 00:00, 95 = today 23:45.
+    Only stores today's data in memory.
+    """
 
     def __init__(self, battery_capacity_kwh: float = 30.0):
         """Initialize the historical data store.
@@ -21,176 +26,80 @@ class HistoricalDataStore:
         Args:
             battery_capacity_kwh: Total battery capacity for SOC calculations
         """
-        # Primary storage - unified data structure
-        self._records: dict[int, HourlyData] = {}
+        # Simple storage: period_index → PeriodData
+        self._records: dict[int, PeriodData] = {}
 
         # Store battery capacity for SOC calculations
         self.total_capacity = battery_capacity_kwh
 
-        self._current_date: date | None = None
+        logger.info("Initialized HistoricalDataStore (quarterly resolution)")
 
-        logger.info(
-            "Initialized HistoricalDataStore",
-        )
-
-    def record_energy_data(
-        self,
-        hour: int,
-        energy_data: EnergyData,
-        data_source: str = "actual",
-        timestamp: datetime | None = None,
-    ) -> bool:
-        """Record energy data for a completed hour.
+    def record_period(self, period_index: int, period_data: PeriodData) -> None:
+        """Record actual sensor data for a period.
 
         Args:
-            hour: Hour of the day (0-23)
-            energy_data: Pure energy flow data from sensors
-            data_source: Source of the data ("actual" for sensor data)
-            timestamp: When this data was recorded
-
-        Returns:
-            bool: True if recording was successful
+            period_index: Continuous index from today 00:00 (0-95)
+            period_data: Sensor data with data_source="actual"
 
         Raises:
-            ValueError: If energy data is invalid
+            ValueError: If period_index is out of range for today
         """
-        if not 0 <= hour <= 23:
-            raise ValueError(f"Invalid hour: {hour}, must be 0-23")
+        # Validate period is within today's range
+        today = datetime.now(tz=TIMEZONE).date()
+        today_periods = get_period_count(today)
 
-        # Analyze strategic intent from energy flows
-        strategic_intent = self._analyze_intent_from_energy_data(energy_data)
-
-        # Create complete hourly data
-        hourly_data = HourlyData(
-            hour=hour,
-            energy=energy_data,
-            timestamp=timestamp or datetime.now(),
-            data_source=data_source,
-            decision=DecisionData(strategic_intent=strategic_intent),
-        )
-
-        # Validate the complete data
-        validation_errors = hourly_data.validate_data()
-        if validation_errors:
+        if not 0 <= period_index < today_periods:
             raise ValueError(
-                f"Invalid hourly data for hour {hour}: {validation_errors}"
+                f"Period index {period_index} out of range for today "
+                f"(0-{today_periods-1})"
             )
 
-        # Store the new format data
-        self._records[hour] = hourly_data
+        # Store
+        self._records[period_index] = period_data
 
-        # Update current date
-        if hourly_data.timestamp:
-            self._current_date = hourly_data.timestamp.date()
-
-        logger.info(
-            "Recorded hour %02d: SOC %.1f%% -> %.1f%%, Net: %.2f kWh, Solar: %.2f kWh, Load: %.2f kWh, Intent: %s",
-            hour,
-            energy_data.battery_soe_start,
-            energy_data.battery_soe_end,
-            energy_data.battery_net_change,
-            energy_data.solar_production,
-            energy_data.home_consumption,
-            strategic_intent,
+        logger.debug(
+            "Recorded period %d: SOC %.1f → %.1f kWh",
+            period_index,
+            period_data.energy.battery_soe_start,
+            period_data.energy.battery_soe_end,
         )
 
-        return True
-
-    def get_hour_record(self, hour: int) -> HourlyData | None:
-        """Get recorded data for specific hour using new data structure.
-
-        This is the new preferred method for retrieving hourly data.
+    def get_period(self, period_index: int) -> PeriodData | None:
+        """Get data for a specific period.
 
         Args:
-            hour: Hour to retrieve (0-23)
+            period_index: Continuous index from today 00:00
 
         Returns:
-            HourlyData | None: Complete hourly data for the hour, or None if not recorded
+            PeriodData if available, None if missing
         """
-        if not 0 <= hour <= 23:
-            logger.error("Invalid hour: %d", hour)
-            return None
+        return self._records.get(period_index)
 
-        return self._records.get(hour)
-
-    def has_data_for_hour(self, hour: int) -> bool:
-        """Check if historical data exists for the given hour.
-
-        Args:
-            hour: Hour to check (0-23)
+    def get_today_periods(self) -> list[PeriodData | None]:
+        """Get all periods for today (accounting for DST).
 
         Returns:
-            bool: True if data exists for the hour
+            List of 92-100 PeriodData (or None for missing periods)
+            Length depends on DST (92 = spring, 96 = normal, 100 = fall)
         """
-        return hour in self._records
+        today = datetime.now(tz=TIMEZONE).date()
+        num_periods = get_period_count(today)
 
-    def _analyze_intent_from_energy_data(
-        self, energy_data: EnergyData
-    ) -> str:  # TODO move out of data store
-        """Analyze strategic intent from energy flow patterns.
+        # Return list with data if available, None otherwise
+        return [self._records.get(i) for i in range(num_periods)]
 
-        Uses energy flow patterns to determine the primary strategic intent
-        of the battery system during this hour.
+    def clear(self) -> None:
+        """Clear all stored data.
 
-        Args:
-            energy_data: Energy data to analyze
+        Useful for testing or daily reset.
+        """
+        self._records.clear()
+        logger.info("Cleared all historical data")
+
+    def get_stored_count(self) -> int:
+        """Get count of stored periods.
 
         Returns:
-            str: Strategic intent classification
+            Number of periods currently stored
         """
-        net_battery = energy_data.battery_net_change
-
-        # Threshold for considering "significant" activity
-        threshold = 0.1  # kWh
-
-        if abs(net_battery) < threshold:
-            return "IDLE"
-        elif net_battery > threshold:  # Net charging
-            # Determine if charging from grid or storing solar
-            if energy_data.grid_imported > energy_data.battery_charged:
-                return "GRID_CHARGING"
-            else:
-                return "SOLAR_STORAGE"
-        else:  # Net discharging
-            # Determine if supporting load or exporting for arbitrage
-            if energy_data.grid_exported > 0:
-                return "EXPORT_ARBITRAGE"
-            else:
-                return "LOAD_SUPPORT"
-
-    def get_completed_hours(self) -> list[int]:
-        """Get list of hours that have been completed and recorded.
-
-        Returns:
-            list[int]: Sorted list of hours (0-23) that have recorded data
-        """
-        return sorted(self._records.keys())
-
-    def has_incomplete_historical_data(self) -> tuple[bool, list[int]]:
-        """Check if historical data is incomplete for the current day.
-
-        Returns:
-            tuple[bool, list[int]]: (is_incomplete, missing_hours)
-                - is_incomplete: True if we're missing historical data for completed hours
-                - missing_hours: List of hours that should have data but don't
-        """
-        from datetime import datetime
-
-        now = datetime.now()
-        current_hour = now.hour
-
-        # If current minute < 5, the previous hour might not be fully complete yet
-        if now.minute < 5 and current_hour > 0:
-            expected_hours = list(range(0, current_hour))
-        elif current_hour > 0:
-            expected_hours = list(range(0, current_hour))
-        else:
-            # Hour 0 and first 5 minutes - no historical data expected yet today
-            expected_hours = []
-
-        completed_hours = self.get_completed_hours()
-        missing_hours = [h for h in expected_hours if h not in completed_hours]
-
-        is_incomplete = len(missing_hours) > 0
-
-        return is_incomplete, missing_hours
+        return len(self._records)

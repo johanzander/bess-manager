@@ -289,19 +289,14 @@ class BatterySystemManager:
             return False
 
     def log_battery_schedule(self, current_hour: int) -> None:
-        """Log the current battery schedule with specified hour for daily view."""
+        """Log the current battery schedule."""
         if not self._current_schedule:
             logger.warning("No current schedule available for reporting")
             return
 
-        logger.info(f"Logging battery schedule with daily view for hour {current_hour}")
+        logger.info(f"Logging battery schedule for hour {current_hour}")
 
-        try:
-            daily_view = self.get_current_daily_view(current_hour=current_hour)
-            self.daily_view_builder.log_complete_daily_schedule(daily_view)
-        except (SystemConfigurationError, PriceDataUnavailableError) as e:
-            logger.warning(f"Daily view unavailable: {e}")
-
+        # Log Growatt TOU schedule and detailed schedule
         self._schedule_manager.log_current_TOU_schedule("=== GROWATT TOU SCHEDULE ===")
         self._schedule_manager.log_detailed_schedule(
             "=== GROWATT DETAILED SCHEDULE WITH STRATEGIC INTENTS ==="
@@ -1399,9 +1394,10 @@ class BatterySystemManager:
 
         Args:
             current_hour: Hour to get daily view for (0-23). If None, uses current system time.
+                         Converted to period index (hour * 4) internally.
 
         Returns:
-            DailyView: Complete 24-hour view combining actual and predicted data
+            DailyView: Complete daily view with quarterly periods combining actual and predicted data
 
         Raises:
             ValueError: If current_hour is not in valid range 0-23
@@ -1414,14 +1410,12 @@ class BatterySystemManager:
                 message=f"current_hour must be 0-23, got {current_hour}"
             )
 
-        today_prices = self._price_manager.get_today_prices()
-        buy_price = [p["buyPrice"] for p in today_prices]
-        sell_price = [p["sellPrice"] for p in today_prices]
+        # Convert hour to period index (quarterly periods: 0-95)
+        # Hour 0 = periods 0-3, Hour 1 = periods 4-7, etc.
+        current_period = current_hour * 4
 
-        # Build daily view with explicit current hour
-        return self.daily_view_builder.build_daily_view(
-            current_hour, buy_price, sell_price
-        )
+        # Build daily view with current period (simplified - no prices needed)
+        return self.daily_view_builder.build_daily_view(current_period)
 
     def adjust_charging_power(self) -> None:
         """Adjust charging power based on house consumption."""

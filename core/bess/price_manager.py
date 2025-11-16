@@ -514,6 +514,85 @@ class PriceManager:
             price_data = self.get_price_data(target_date)
             return [entry["sellPrice"] for entry in price_data]
 
+    def _expand_hourly_to_quarterly(self, hourly_prices: list[float]) -> list[float]:
+        """Expand hourly prices to quarterly resolution.
+
+        Electricity prices are constant within each hour, so we repeat each
+        hourly price 4 times to get 15-minute intervals.
+
+        Args:
+            hourly_prices: List of 24 hourly prices
+
+        Returns:
+            List of 96 quarterly prices (each hourly price repeated 4 times)
+        """
+        quarterly_prices = []
+        for hourly_price in hourly_prices:
+            # Repeat each hourly price 4 times for the 4 quarters in that hour
+            quarterly_prices.extend([hourly_price] * 4)
+        return quarterly_prices
+
+    def get_available_prices(self) -> tuple[list[float], list[float]]:
+        """Get all available prices at quarterly resolution starting at today 00:00.
+
+        Uses existing get_buy_prices() and get_sell_prices() methods (hourly),
+        then expands to quarterly resolution by repeating each hourly price 4 times.
+        Returns full arrays from 00:00 - caller slices as needed.
+        Automatically tries tomorrow, falls back to today only.
+
+        Returns:
+            (buy_prices, sell_prices) tuple where:
+            - Index 0 = today 00:00
+            - Index 96 = tomorrow 00:00 (if available)
+            - Length: 96 (today only) or 192 (today + tomorrow)
+
+        Example at 14:00:
+            buy, sell = get_available_prices()
+            # Returns 192 prices (96 today + 96 tomorrow)
+            # buy[0] = today 00:00
+            # buy[56] = today 14:00 (current period)
+            # buy[96] = tomorrow 00:00
+            # Caller slices: buy[56:] for optimization from now
+        """
+        today = datetime.now().date()
+        tomorrow = today + timedelta(days=1)
+
+        # Get today hourly prices - uses existing methods
+        hourly_buy = self.get_buy_prices(target_date=today)
+        hourly_sell = self.get_sell_prices(target_date=today)
+
+        # Expand to quarterly resolution
+        buy_prices = self._expand_hourly_to_quarterly(hourly_buy)
+        sell_prices = self._expand_hourly_to_quarterly(hourly_sell)
+
+        # Try tomorrow (full day from 00:00)
+        try:
+            tomorrow_hourly_buy = self.get_buy_prices(target_date=tomorrow)
+            tomorrow_hourly_sell = self.get_sell_prices(target_date=tomorrow)
+
+            # Expand tomorrow to quarterly
+            tomorrow_buy = self._expand_hourly_to_quarterly(tomorrow_hourly_buy)
+            tomorrow_sell = self._expand_hourly_to_quarterly(tomorrow_hourly_sell)
+
+            # Concatenate if tomorrow available
+            buy_prices = buy_prices + tomorrow_buy
+            sell_prices = sell_prices + tomorrow_sell
+
+            logger.info(
+                "Got prices for today + tomorrow (%d + %d periods)",
+                len(buy_prices) - len(tomorrow_buy),
+                len(tomorrow_buy),
+            )
+        except Exception as e:
+            # Tomorrow not available - just use today
+            logger.info(
+                "Tomorrow prices not available (%s), using today only (%d periods)",
+                str(e),
+                len(buy_prices),
+            )
+
+        return (buy_prices, sell_prices)
+
     @property
     def buy_prices(self) -> list:
         """Buy prices for today."""

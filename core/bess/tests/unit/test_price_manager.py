@@ -3,7 +3,7 @@ Test the PriceManager implementation.
 """
 
 from datetime import datetime, timedelta
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from core.bess.price_manager import HomeAssistantSource, MockSource, PriceManager
 
@@ -187,3 +187,119 @@ def test_home_assistant_source_vat_parameter():
     ha_source_custom = HomeAssistantSource(mock_controller, vat_multiplier=1.20)
     prices_custom = ha_source_custom.get_prices_for_date(today_date)
     assert round(prices_custom[0], 4) == round(2.0 / 1.20, 4)  # ~1.6667
+
+
+def test_get_available_prices_today_only():
+    """Should return today's prices at quarterly resolution when tomorrow unavailable."""
+    mock_source = MockSource(test_prices=[0.5] * 24)
+    pm = PriceManager(
+        price_source=mock_source,
+        markup_rate=0.05,
+        vat_multiplier=1.25,
+        additional_costs=0.0,
+        tax_reduction=0.0,
+        area="SE3",
+    )
+
+    with patch.object(mock_source, "get_prices_for_date") as mock_get:
+        # First call (today) succeeds, second (tomorrow) fails
+        mock_get.side_effect = [[0.5] * 24, Exception("No data for tomorrow")]
+
+        buy, sell = pm.get_available_prices()
+
+        # Should have 96 quarterly periods (24 hours * 4 quarters)
+        assert len(buy) == 96
+        assert len(sell) == 96
+
+        # Each hourly price should be repeated 4 times
+        assert buy[0] == buy[1] == buy[2] == buy[3]
+
+
+def test_get_available_prices_today_and_tomorrow():
+    """Should return today + tomorrow at quarterly resolution when both available."""
+    mock_source = MockSource(test_prices=[0.5] * 24)
+    pm = PriceManager(
+        price_source=mock_source,
+        markup_rate=0.05,
+        vat_multiplier=1.25,
+        additional_costs=0.0,
+        tax_reduction=0.0,
+        area="SE3",
+    )
+
+    with patch.object(mock_source, "get_prices_for_date") as mock_get:
+        # Price source is called:
+        # 1. Once for today (cached for both buy and sell)
+        # 2. Twice for tomorrow (once for buy, once for sell - tomorrow not cached)
+        mock_get.side_effect = [[0.5] * 24, [0.6] * 24, [0.6] * 24]
+
+        buy, sell = pm.get_available_prices()
+
+        # Should have today + tomorrow (192 quarterly periods)
+        assert len(buy) == 192
+        assert len(sell) == 192
+
+        # First 96 are today (each hourly price repeated 4 times)
+        assert all(b == pm._calculate_buy_price(0.5) for b in buy[:96])
+
+        # Last 96 are tomorrow
+        assert all(b == pm._calculate_buy_price(0.6) for b in buy[96:])
+
+
+def test_get_available_prices_returns_full_arrays_from_midnight():
+    """Should return quarterly arrays starting from 00:00 (not current time)."""
+    mock_source = MockSource(test_prices=[0.5] * 24)
+    pm = PriceManager(
+        price_source=mock_source,
+        markup_rate=0.05,
+        vat_multiplier=1.25,
+        additional_costs=0.0,
+        tax_reduction=0.0,
+        area="SE3",
+    )
+
+    # Create different hourly prices for each hour (0.00, 0.01, 0.02, ... 0.23)
+    today_hourly = [i / 100.0 for i in range(24)]
+
+    with patch.object(mock_source, "get_prices_for_date") as mock_get:
+        mock_get.side_effect = [today_hourly, Exception("No tomorrow")]
+
+        buy, sell = pm.get_available_prices()
+
+        # Index 0 should be first price (00:00 = hour 0, period 0)
+        assert buy[0] == pm._calculate_buy_price(0.0)
+        assert sell[0] == pm._calculate_sell_price(0.0)
+
+        # Index 56 should be period 56 (14:00 = hour 14, period 56)
+        # Period 56 = hour 14 (56 // 4 = 14), so price is 0.14
+        hour_14_price = 14 / 100.0
+        assert buy[56] == pm._calculate_buy_price(hour_14_price)
+
+        # All 4 quarters in hour 14 should have same price
+        assert buy[56] == buy[57] == buy[58] == buy[59]
+
+
+def test_get_available_prices_returns_tuple():
+    """Should return a tuple of (buy_prices, sell_prices)."""
+    mock_source = MockSource(test_prices=[0.5] * 24)
+    pm = PriceManager(
+        price_source=mock_source,
+        markup_rate=0.05,
+        vat_multiplier=1.25,
+        additional_costs=0.0,
+        tax_reduction=0.0,
+        area="SE3",
+    )
+
+    with patch.object(mock_source, "get_prices_for_date") as mock_get:
+        mock_get.side_effect = [[0.5] * 24, Exception("No tomorrow")]
+
+        result = pm.get_available_prices()
+
+        assert isinstance(result, tuple)
+        assert len(result) == 2
+        buy, sell = result
+        assert isinstance(buy, list)
+        assert isinstance(sell, list)
+        assert len(buy) == 96
+        assert len(sell) == 96

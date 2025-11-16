@@ -8,7 +8,7 @@ import logging
 from datetime import datetime
 
 from core.bess.models import PeriodData
-from core.bess.time_utils import get_period_count, TIMEZONE
+from core.bess.time_utils import TIMEZONE, get_period_count
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +20,7 @@ class HistoricalDataStore:
     Only stores today's data in memory.
     """
 
-    def __init__(self, battery_capacity_kwh: float = 30.0):
+    def __init__(self, battery_capacity_kwh: float):
         """Initialize the historical data store.
 
         Args:

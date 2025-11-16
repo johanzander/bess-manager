@@ -46,6 +46,8 @@ def get_period_count(target_date: date) -> int:
 def timestamp_to_period_index(dt: datetime) -> int:
     """Convert timestamp to continuous period index from today's 00:00.
 
+    Only supports today and tomorrow.
+
     Args:
         dt: Timestamp to convert (must be timezone-aware)
 
@@ -63,18 +65,26 @@ def timestamp_to_period_index(dt: datetime) -> int:
         58  # (14 * 4) + 2 = 58
 
     Raises:
-        ValueError: If dt is not timezone-aware
+        ValueError: If dt is not timezone-aware, or not today/tomorrow
     """
     if dt.tzinfo is None:
         raise ValueError("Timestamp must be timezone-aware")
 
     today = datetime.now(tz=TIMEZONE).date()
     target_date = dt.date()
-
-    # Calculate days from today
     days_from_today = (target_date - today).days
 
-    # Get periods elapsed within the target day
+    # Validate: only today and tomorrow supported
+    if days_from_today < 0:
+        raise ValueError(
+            f"Only today and tomorrow supported, got {target_date} (today is {today})"
+        )
+    if days_from_today > 1:
+        raise ValueError(
+            f"Only today and tomorrow supported, got {target_date} (today is {today})"
+        )
+
+    # Calculate period within the day
     day_start = datetime.combine(target_date, time(0, 0), tzinfo=dt.tzinfo)
     elapsed_minutes = (dt - day_start).total_seconds() / 60
     period_within_day = int(elapsed_minutes / INTERVAL_MINUTES)
@@ -82,31 +92,19 @@ def timestamp_to_period_index(dt: datetime) -> int:
     if days_from_today == 0:
         # Today
         return period_within_day
-    elif days_from_today == 1:
-        # Tomorrow - offset by today's period count
+    else:
+        # Tomorrow (days_from_today == 1)
         today_periods = get_period_count(today)
         return today_periods + period_within_day
-    elif days_from_today > 1:
-        # Future days (general case)
-        total_periods = 0
-        current_date = today
-        while current_date < target_date:
-            total_periods += get_period_count(current_date)
-            current_date += timedelta(days=1)
-        return total_periods + period_within_day
-    else:
-        # Past days (negative offset)
-        raise ValueError(
-            f"Cannot convert past timestamp {dt} to period index "
-            f"(today is {today}). Only today and future dates supported."
-        )
 
 
 def period_index_to_timestamp(period_index: int) -> datetime:
     """Convert period index to timestamp for debugging/display.
 
+    Only supports today and tomorrow (0-191).
+
     Args:
-        period_index: Continuous index from today 00:00
+        period_index: Continuous index from today 00:00 (0-191)
 
     Returns:
         Timestamp for this period
@@ -120,7 +118,7 @@ def period_index_to_timestamp(period_index: int) -> datetime:
         datetime(2025, 11, 16, 0, 0, tzinfo=ZoneInfo('Europe/Stockholm'))
 
     Raises:
-        ValueError: If period_index is negative
+        ValueError: If period_index is negative or > 191 (beyond tomorrow)
     """
     if period_index < 0:
         raise ValueError(f"Period index must be non-negative, got {period_index}")
@@ -129,21 +127,25 @@ def period_index_to_timestamp(period_index: int) -> datetime:
     today_periods = get_period_count(today)
 
     if period_index < today_periods:
-        # Today
+        # Today (0-95 normally)
         day_start = datetime.combine(today, time(0, 0), tzinfo=TIMEZONE)
         delta = timedelta(minutes=period_index * INTERVAL_MINUTES)
         return day_start + delta
     else:
-        # Tomorrow or later - walk through days
-        current_date = today
-        periods_to_skip = period_index
+        # Tomorrow
+        tomorrow = today + timedelta(days=1)
+        tomorrow_periods = get_period_count(tomorrow)
+        max_period = today_periods + tomorrow_periods - 1
 
-        while periods_to_skip >= get_period_count(current_date):
-            periods_to_skip -= get_period_count(current_date)
-            current_date += timedelta(days=1)
+        if period_index > max_period:
+            raise ValueError(
+                f"Period index {period_index} beyond tomorrow "
+                f"(max: {max_period} = today {today_periods} + tomorrow {tomorrow_periods})"
+            )
 
-        day_start = datetime.combine(current_date, time(0, 0), tzinfo=TIMEZONE)
-        delta = timedelta(minutes=periods_to_skip * INTERVAL_MINUTES)
+        period_within_tomorrow = period_index - today_periods
+        day_start = datetime.combine(tomorrow, time(0, 0), tzinfo=TIMEZONE)
+        delta = timedelta(minutes=period_within_tomorrow * INTERVAL_MINUTES)
         return day_start + delta
 
 

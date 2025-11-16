@@ -129,8 +129,28 @@ def test_past_timestamp_raises_error(mock_datetime):
 
     # Try to convert yesterday
     yesterday = datetime(2025, 11, 14, 12, 0, tzinfo=TIMEZONE)
-    with pytest.raises(ValueError, match="past timestamp"):
+    with pytest.raises(ValueError, match="Only today and tomorrow supported"):
         timestamp_to_period_index(yesterday)
+
+
+@patch('core.bess.time_utils.datetime')
+def test_future_beyond_tomorrow_raises_error(mock_datetime):
+    """Should raise error for timestamps beyond tomorrow."""
+    # Mock "today" as 2025-11-15
+    mock_now = datetime(2025, 11, 15, 12, 0, tzinfo=TIMEZONE)
+    mock_datetime.now.return_value = mock_now
+    mock_datetime.combine = datetime.combine
+
+    # Try to convert day after tomorrow
+    day_after_tomorrow = datetime(2025, 11, 17, 12, 0, tzinfo=TIMEZONE)
+    with pytest.raises(ValueError, match="Only today and tomorrow supported"):
+        timestamp_to_period_index(day_after_tomorrow)
+
+
+def test_period_index_beyond_tomorrow_raises_error():
+    """Should raise error for period indices beyond tomorrow."""
+    with pytest.raises(ValueError, match="beyond tomorrow"):
+        period_index_to_timestamp(200)  # Way beyond tomorrow
 
 
 @patch('core.bess.time_utils.datetime')

@@ -126,19 +126,29 @@ class HomePowerMonitor:
         # Get current loads in watts
         l1, l2, l3 = self.get_current_phase_loads_w()
 
-        # Calculate current usage as percentage of max safe current
+        # Calculate current usage as percentage of max safe current (for logging)
         l1_pct = (l1 / self.max_power_per_phase) * 100
         l2_pct = (l2 / self.max_power_per_phase) * 100
         l3_pct = (l3 / self.max_power_per_phase) * 100
 
-        # Find most loaded phase
-        max_load_pct = max(l1_pct, l2_pct, l3_pct)
+        # Find most loaded phase in watts
+        max_load_w = max(l1, l2, l3)
+        max_load_pct = (max_load_w / self.max_power_per_phase) * 100
 
-        # Available capacity is what's left from 100%
-        available_pct = 100 - max_load_pct
+        # Calculate available power on most loaded phase
+        available_power_w = self.max_power_per_phase - max_load_w
 
-        # Convert to charging power percentage (limit by target charging power)
-        # This is the key change - use target_charging_power_pct instead of battery_settings.charging_power_rate
+        # Max battery power per phase (assuming equal distribution across 3 phases)
+        max_battery_power_per_phase_w = self.max_charge_power_w / 3
+
+        # Calculate available charging power as percentage of battery's max power
+        # This is the correct calculation: available power relative to what the battery needs
+        if max_battery_power_per_phase_w > 0:
+            available_pct = (available_power_w / max_battery_power_per_phase_w) * 100
+        else:
+            available_pct = 0
+
+        # Limit by target charging power
         charging_power_pct = min(available_pct, self.target_charging_power_pct)
 
         log_message = (
@@ -146,7 +156,7 @@ class HomePowerMonitor:
             "#2: %.0fW (%.1f%%), "
             "#3: %.0fW (%.1f%%)\n"
             "Most loaded phase: %.1f%%\n"
-            "Available capacity: %.1f%%\n"
+            "Available power: %.0fW (%.1f%% of battery max per phase)\n"
             "Target charging: %.1f%%\n"
             "Recommended charging: %.1f%%"
         )
@@ -159,6 +169,7 @@ class HomePowerMonitor:
             l3,
             l3_pct,
             max_load_pct,
+            available_power_w,
             available_pct,
             self.target_charging_power_pct,
             charging_power_pct,

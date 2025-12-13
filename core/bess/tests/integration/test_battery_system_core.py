@@ -3,10 +3,10 @@
 Core system functionality integration tests.
 
 Tests system initialization, settings management, and basic component interactions
-using the HourlyData structures throughout.
+using the PeriodData structures throughout.
 """
 
-from core.bess.models import DecisionData, EconomicData, EnergyData, HourlyData
+from core.bess.models import DecisionData, EconomicData, EnergyData, PeriodData
 
 
 class TestSystemInitialization:
@@ -96,7 +96,7 @@ class TestDataStructureConsistency:
     def test_optimization_returns_new_hourly_data(
         self, battery_system, arbitrage_prices
     ):
-        """Verify optimization algorithm returns HourlyData objects."""
+        """Verify optimization algorithm returns PeriodData objects."""
         from core.bess.dp_battery_algorithm import optimize_battery_schedule
 
         # Run optimization with realistic data - FIX: Ensure all arrays have 24 elements
@@ -113,29 +113,29 @@ class TestDataStructureConsistency:
             )
 
             # Verify return structure
-            assert hasattr(result, "hourly_data"), "Should have hourly_data attribute"
+            assert hasattr(result, "period_data"), "Should have hourly_data attribute"
             assert hasattr(
                 result, "economic_summary"
             ), "Should have economic_summary attribute"
-            assert isinstance(result.hourly_data, list), "hourly_data should be a list"
+            assert isinstance(result.period_data, list), "period_data should be a list"
 
             # Check if we got data
-            if len(result.hourly_data) == 0:
+            if len(result.period_data) == 0:
                 # If optimization returned empty, skip detailed checks but verify structure
                 assert hasattr(
-                    result, "hourly_data"
+                    result, "period_data"
                 ), "Should have hourly_data even if empty"
                 return
 
             assert (
-                len(result.hourly_data) == 24
-            ), f"Should have 24 hours of data, got {len(result.hourly_data)}"
+                len(result.period_data) == 24
+            ), f"Should have 24 hours of data, got {len(result.period_data)}"
 
-            # Verify each hour uses HourlyData
-            for i, hour_data in enumerate(result.hourly_data):
+            # Verify each hour uses PeriodData
+            for i, hour_data in enumerate(result.period_data):
                 assert isinstance(
-                    hour_data, HourlyData
-                ), f"Hour {i} should be HourlyData"
+                    hour_data, PeriodData
+                ), f"Hour {i} should be PeriodData"
                 assert hasattr(hour_data, "energy"), f"Hour {i} should have energy data"
                 assert hasattr(
                     hour_data, "economic"
@@ -179,6 +179,7 @@ class TestDataStructureConsistency:
 
             # Verify economic summary structure (should be EconomicSummary object)
             economic_summary = result.economic_summary
+            assert economic_summary is not None, "Should have economic_summary"
             assert hasattr(
                 economic_summary, "grid_only_cost"
             ), "Should have grid_only_cost"
@@ -230,7 +231,7 @@ class TestDataStructureConsistency:
                 "IDLE",
             }
 
-            for i, hour_data in enumerate(result.hourly_data):
+            for i, hour_data in enumerate(result.period_data):
                 intent = hour_data.decision.strategic_intent
                 assert (
                     intent in valid_intents
@@ -247,21 +248,21 @@ class TestComponentInteraction:
     """Test interactions between different system components."""
 
     def test_historical_store_integration(self, battery_system, sample_new_hourly_data):
-        """Test historical store works with HourlyData."""
-        # Record data using new format
-        success = battery_system.historical_store.record_energy_data(
-            hour=12, energy_data=sample_new_hourly_data.energy, data_source="actual"
+        """Test historical store works with PeriodData."""
+        # Record data using new format - period 48 = 12:00 (48 quarters = 12 hours)
+        period_index = 48
+        battery_system.historical_store.record_period(
+            period_index=period_index, period_data=sample_new_hourly_data
         )
-        assert success, "Should successfully record energy data"
 
         # Retrieve and verify
-        stored_data = battery_system.historical_store.get_hour_record(12)
+        stored_data = battery_system.historical_store.get_period(period_index)
         assert stored_data is not None, "Should retrieve stored data"
-        assert isinstance(stored_data, HourlyData), "Should return HourlyData"
+        assert isinstance(stored_data, PeriodData), "Should return PeriodData"
         assert stored_data.energy.solar_production == 5.0, "Should preserve energy data"
 
     def test_schedule_store_integration(self, battery_system, arbitrage_prices):
-        """Test schedule store works with OptimizationResult containing HourlyData."""
+        """Test schedule store works with OptimizationResult containing PeriodData."""
         from core.bess.dp_battery_algorithm import optimize_battery_schedule
 
         try:
@@ -279,7 +280,7 @@ class TestComponentInteraction:
 
             # Store schedule
             stored_schedule = battery_system.schedule_store.store_schedule(
-                optimization_result=result, optimization_hour=0, scenario="test"
+                optimization_result=result, optimization_period=0
             )
 
             assert stored_schedule is not None, "Should store schedule"
@@ -293,8 +294,8 @@ class TestComponentInteraction:
 
             for hour_data in hourly_data:
                 assert isinstance(
-                    hour_data, HourlyData
-                ), "Should contain HourlyData objects"
+                    hour_data, PeriodData
+                ), "Should contain PeriodData objects"
 
         except Exception as e:
             # FIX: IndexError is also a valid exception type for malformed input data
@@ -330,7 +331,7 @@ class TestErrorHandling:
         # Test with invalid price data
         try:
             result = optimize_battery_schedule(
-                buy_price=None,  # Invalid
+                buy_price=None,  # type: ignore  # Invalid - testing error handling
                 sell_price=[1.0] * 24,
                 home_consumption=[4.0] * 24,
                 solar_production=[0.0] * 24,
@@ -339,7 +340,7 @@ class TestErrorHandling:
             )
             # If it doesn't raise an exception, verify it at least returns something reasonable
             assert hasattr(
-                result, "hourly_data"
+                result, "period_data"
             ), "Should return valid result structure even with invalid inputs"
         except (ValueError, TypeError, AttributeError):
             # Expected - system properly handled invalid parameters

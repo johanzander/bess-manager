@@ -17,10 +17,41 @@ __all__ = [
     "DecisionData",
     "EconomicData",
     "EnergyData",
-    "HourlyData",
-    "PeriodData",  # Alias for HourlyData (supports quarterly periods)
     "OptimizationResult",
+    "PeriodData",
+    "determine_strategic_intent",
 ]
+
+
+def determine_strategic_intent(power: float, energy_data: "EnergyData") -> str:
+    """
+    Determine strategic intent based on battery action and energy flows.
+
+    This moves the strategic intent logic from dp_algorithm to decision framework
+    for better separation of concerns.
+
+    Args:
+        power: Battery power in kW (+ charging, - discharging)
+        energy_data: Complete energy flow data
+
+    Returns:
+        Strategic intent string
+    """
+    if power > 0.1:  # CHARGING
+        if energy_data.grid_to_battery > 0.1:  # ANY grid charging needs capability
+            return "GRID_CHARGING"  # Enable grid charging capability
+        elif energy_data.solar_to_battery > 0.1 or energy_data.solar_production > 0.1:
+            return "SOLAR_STORAGE"  # Solar charging (check both flows and production)
+        else:
+            # Small amounts of charging from unclear source - default to grid
+            return "GRID_CHARGING"
+    elif power < -0.1:  # DISCHARGING
+        if energy_data.battery_to_grid > 0.1:  # ANY export needs capability
+            return "EXPORT_ARBITRAGE"  # Enable export capability
+        else:
+            return "LOAD_SUPPORT"  # Pure home support
+    else:
+        return "IDLE"
 
 
 @dataclass
@@ -155,6 +186,65 @@ class EconomicData:
         """Calculate net economic value (savings minus costs)."""
         return self.hourly_savings - self.battery_cycle_cost
 
+    @classmethod
+    def from_energy_data(
+        cls,
+        energy_data: EnergyData,
+        buy_price: float,
+        sell_price: float,
+        battery_cycle_cost: float = 0.0,
+    ) -> "EconomicData":
+        """
+        Create EconomicData from EnergyData and prices using standard calculations.
+
+        This method encapsulates the economic calculation logic used throughout the system,
+        ensuring consistency between optimization and historical data analysis.
+
+        Args:
+            energy_data: Energy flows for the period
+            buy_price: Price to buy from grid (SEK/kWh)
+            sell_price: Price to sell to grid (SEK/kWh)
+            battery_cycle_cost: Battery degradation cost (SEK) - should include actual wear cost
+
+        Returns:
+            EconomicData with all calculated fields
+        """
+        # Grid cost: what we paid/earned from grid
+        grid_cost = (
+            energy_data.grid_imported * buy_price
+            - energy_data.grid_exported * sell_price
+        )
+
+        # Total cost: grid interactions + battery wear
+        hourly_cost = grid_cost + battery_cycle_cost
+
+        # Grid-only baseline: cost if we only used grid (no solar, no battery)
+        grid_only_cost = energy_data.home_consumption * buy_price
+
+        # Solar-only baseline: cost if we had solar but no battery
+        # If solar > consumption, we export excess at sell_price
+        # If solar < consumption, we import deficit at buy_price
+        solar_only_cost = (
+            max(0, energy_data.home_consumption - energy_data.solar_production)
+            * buy_price
+            - max(0, energy_data.solar_production - energy_data.home_consumption)
+            * sell_price
+        )
+
+        # Savings: solar-only baseline minus actual cost
+        hourly_savings = solar_only_cost - hourly_cost
+
+        return cls(
+            buy_price=buy_price,
+            sell_price=sell_price,
+            grid_cost=grid_cost,
+            battery_cycle_cost=battery_cycle_cost,
+            hourly_cost=hourly_cost,
+            grid_only_cost=grid_only_cost,
+            solar_only_cost=solar_only_cost,
+            hourly_savings=hourly_savings,
+        )
+
 
 @dataclass
 class EconomicSummary:
@@ -181,7 +271,7 @@ class DecisionData:
         "IDLE"  # Strategic intent (GRID_CHARGING, SOLAR_STORAGE, etc.)
     )
     battery_action: float | None = (
-        None  # kW - planned battery action (+ charge, - discharge)
+        None  # kWh per period - planned battery energy action (+ charge, - discharge)
     )
     cost_basis: float = 0.0  # SEK/kWh - cost basis of stored energy
 
@@ -204,17 +294,37 @@ class DecisionData:
         default_factory=list
     )  # When future opportunity occurs
 
+    @classmethod
+    def from_actual_energy(cls, energy_data: EnergyData) -> "DecisionData":
+        """Create DecisionData from actual energy flows by inferring intent.
+
+        Args:
+            energy_data: Actual energy data from sensors
+
+        Returns:
+            DecisionData with inferred strategic intent
+        """
+        # Use battery net change as power approximation (kWh ≈ kW for quarter-hourly data)
+        battery_power = energy_data.battery_net_change
+        strategic_intent = determine_strategic_intent(battery_power, energy_data)
+
+        return cls(strategic_intent=strategic_intent)
+
 
 @dataclass
-class HourlyData:
+class PeriodData:
     """
-    Complete hourly data with context - when/where this data applies.
-    Composes pure energy data with economic analysis and strategic decisions.
+    Period data with energy, economic, and decision information.
 
+    Represents a single period which can be:
+    - Hourly resolution: 1-hour period (60 minutes), period index 0-23
+    - Quarterly resolution: 15-minute period, period index 0-95
+
+    Composes pure energy data with economic analysis and strategic decisions.
     """
 
     # Required fields first (no defaults)
-    hour: int  # TODO: Check if someone is actually using this
+    period: int  # Period index (0-23 for hourly, 0-95 for quarterly)
     energy: EnergyData
 
     # Optional fields with defaults
@@ -227,14 +337,14 @@ class HourlyData:
     @classmethod
     def from_energy_data(
         cls,
-        hour: int,
+        period: int,
         energy_data: EnergyData,
         data_source: str = "actual",
         timestamp: datetime | None = None,
-    ) -> "HourlyData":
-        """Create HourlyData from pure energy data (sensor input)."""
+    ) -> "PeriodData":
+        """Create PeriodData from pure energy data (sensor input)."""
         return cls(
-            hour=hour,
+            period=period,
             energy=energy_data,
             timestamp=timestamp or datetime.now(),
             data_source=data_source,
@@ -243,15 +353,15 @@ class HourlyData:
     @classmethod
     def from_optimization(
         cls,
-        hour: int,
+        period: int,
         energy_data: EnergyData,
         economic_data: EconomicData,
         decision_data: DecisionData,
         timestamp: datetime | None = None,
-    ) -> "HourlyData":
-        """Create complete HourlyData from optimization algorithm."""
+    ) -> "PeriodData":
+        """Create complete PeriodData from optimization algorithm."""
         return cls(
-            hour=hour,
+            period=period,
             energy=energy_data,
             timestamp=timestamp or datetime.now(),
             data_source="predicted",
@@ -263,9 +373,9 @@ class HourlyData:
         """Validate all data components and return any errors."""
         errors = []
 
-        # Validate hour
-        if not 0 <= self.hour <= 23:
-            errors.append(f"Invalid hour: {self.hour}, must be 0-23")
+        # Validate period index (must be non-negative, no upper bound due to DST)
+        if self.period < 0:
+            errors.append(f"Invalid period: {self.period}, must be non-negative")
 
         # Validate energy balance
         is_valid, message = self.energy.validate_energy_balance()
@@ -281,16 +391,10 @@ class HourlyData:
         return errors
 
 
-# Type alias for quarterly period support
-# HourlyData works for both hourly and quarterly periods
-# (the 'hour' field is kept for backward compatibility: hour = period_index // 4)
-PeriodData = HourlyData
-
-
 @dataclass
 class OptimizationResult:
     """Result structure returned by optimize_battery_schedule."""
 
     input_data: dict
-    hourly_data: list[HourlyData]
-    economic_summary: EconomicSummary
+    period_data: list[PeriodData]
+    economic_summary: EconomicSummary | None = None

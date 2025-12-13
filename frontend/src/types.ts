@@ -16,7 +16,7 @@ export interface FormattedValue {
 }
 export interface HourlyData {
   // Core display fields (use these for UI)
-  hour: string | number;
+  period: number;  // Period index (0-23 for hourly, 0-95 for quarterly)
 
   // Economic fields (use these for cost calculations)
   batteryCycleCost?: number;   // SEK battery wear

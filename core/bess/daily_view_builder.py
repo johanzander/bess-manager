@@ -11,7 +11,7 @@ from .historical_data_store import HistoricalDataStore
 from .models import PeriodData
 from .schedule_store import ScheduleStore
 from .settings import BatterySettings
-from .time_utils import TIMEZONE, get_period_count
+from .time_utils import TIMEZONE, format_period, get_period_count
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +54,9 @@ class DailyViewBuilder:
             DailyView with quarterly periods (92-100 depending on DST)
         """
         today = datetime.now(tz=TIMEZONE).date()
-        logger.info(f"Building view for {today} at period {current_period}")
+        logger.info(
+            f"Building view for {today} at period {current_period} ({format_period(current_period)})"
+        )
 
         # 2. Get data sources
         historical_periods = self.historical_store.get_today_periods()
@@ -63,7 +65,8 @@ class DailyViewBuilder:
         if not predicted_schedule:
             raise ValueError("No optimization schedule available")
 
-        predicted_periods = predicted_schedule.optimization_result.hourly_data
+        predicted_periods = predicted_schedule.optimization_result.period_data
+        optimization_period = predicted_schedule.optimization_period
 
         # 3. Merge: past = actual, future = predicted
         periods = []
@@ -75,10 +78,14 @@ class DailyViewBuilder:
                 periods.append(historical_periods[i])
             else:
                 # Future: use predicted optimization data
-                if i < len(predicted_periods):
-                    periods.append(predicted_periods[i])
+                # Period indices and timestamps are already correct from BatterySystemManager
+                predicted_index = i - optimization_period
+                if 0 <= predicted_index < len(predicted_periods):
+                    periods.append(predicted_periods[predicted_index])
                 else:
-                    logger.warning(f"No predicted data for period {i}")
+                    logger.warning(
+                        f"No predicted data for period {i} ({format_period(i)})"
+                    )
                     continue
 
         # 4. Calculate summary

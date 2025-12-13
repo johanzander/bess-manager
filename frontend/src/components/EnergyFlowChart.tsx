@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { ComposedChart, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 import { HourlyData } from '../types';
+import { periodToTimeRange } from '../utils/timeUtils';
+import { DataResolution } from '../hooks/useUserPreferences';
 
 interface ChartDataPoint {
   hour: number;
+  periodNum: number;
   solar: number;
   batteryOut: number;
   gridIn: number;
@@ -16,7 +19,7 @@ interface ChartDataPoint {
   isActual: boolean;
 }
 
-const CustomTooltip = ({ active, payload, label }: any) => {
+const CustomTooltip = ({ active, payload, label, resolution }: any) => {
   if (active && payload && payload.length) {
     const data = payload[0].payload;
     if (label === 0) {
@@ -24,9 +27,9 @@ const CustomTooltip = ({ active, payload, label }: any) => {
       return null;
     }
 
-    const startHour = (label - 1) % 24; // Convert timeline position back to actual hour
-    const endHour = label % 24;
-    const timeRange = `${startHour.toString().padStart(2, '0')}:00-${endHour.toString().padStart(2, '0')}:00`;
+    // Get time range from period number stored in data
+    const periodNum = data.periodNum;
+    const timeRange = periodToTimeRange(periodNum, resolution);
 
     // Map chart dataKeys to their corresponding FormattedValue fields
     const getFormattedText = (dataKey: string): string => {
@@ -36,8 +39,9 @@ const CustomTooltip = ({ active, payload, label }: any) => {
         case 'home':
           return data.homeConsumptionFormatted?.text || 'N/A';
         case 'batteryOut':
+          return data.batteryDischargedFormatted?.text || 'N/A';
         case 'batteryIn':
-          return data.batteryActionFormatted?.text || 'N/A';
+          return data.batteryChargedFormatted?.text || 'N/A';
         case 'gridIn':
           return data.gridImportedFormatted?.text || 'N/A';
         case 'gridOut':
@@ -98,7 +102,8 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 };export const EnergyFlowChart: React.FC<{
   dailyViewData: HourlyData[];
   currentHour: number;
-}> = ({ dailyViewData }) => {
+  resolution: DataResolution;
+}> = ({ dailyViewData, resolution }) => {
   
   // Helper function to get currency unit from price data
   const getCurrencyUnit = () => {
@@ -146,11 +151,14 @@ const CustomTooltip = ({ active, payload, label }: any) => {
   };
 
   // Shift timeline - data for hour 0 (00:00-01:00) should appear at position 1
-  const chartData: ChartDataPoint[] = Array.from({ length: 25 }, (_, index) => {
+  // Support both hourly (24 periods) and quarterly (96 periods) data
+  const numDataPoints = dailyViewData?.length || 24;
+  const chartData: ChartDataPoint[] = Array.from({ length: numDataPoints + 1 }, (_, index) => {
     if (index === 0) {
       // Add empty data point at the start (before 00:00)
       return {
         hour: 0,
+        periodNum: 0,
         solar: 0,
         batteryOut: 0,
         gridIn: 0,
@@ -161,12 +169,10 @@ const CustomTooltip = ({ active, payload, label }: any) => {
         price: 0,
       };
     }
-    const dataHour = index - 1;
-    const dailyViewHour = dailyViewData?.find(h => {
-      const hourValue = typeof h.hour === 'string' ? parseInt(h.hour, 10) : h.hour;
-      return hourValue === dataHour;
-    });
+    const dataIndex = index - 1;
+    const dailyViewHour = dailyViewData?.[dataIndex];
     const isActual = dailyViewHour?.dataSource === 'actual';
+    const periodNum = dataIndex;
     // Extract values from FormattedValue objects or fallback to raw numbers
     const getValue = (field: any) => {
       if (typeof field === 'object' && field?.value !== undefined) {
@@ -178,24 +184,30 @@ const CustomTooltip = ({ active, payload, label }: any) => {
     // Map unified API data format to chart format
     const solarProduction = getValue(dailyViewHour?.solarProduction);
     const homeConsumption = getValue(dailyViewHour?.homeConsumption);
-    const batteryAction = getValue(dailyViewHour?.batteryAction) || 0; // positive = charge, negative = discharge
+    const batteryCharged = getValue(dailyViewHour?.batteryCharged) || 0; // actual energy charged
+    const batteryDischarged = getValue(dailyViewHour?.batteryDischarged) || 0; // actual energy discharged
     const gridImported = getValue(dailyViewHour?.gridImported) || 0; // actual grid import
     const gridExported = getValue(dailyViewHour?.gridExported) || 0; // actual grid export
 
+    // Calculate x-axis position
+    const hourPosition = resolution === 'quarter-hourly' ? (periodNum / 4) + 1 : index;
+
     return {
-      hour: index,
+      hour: hourPosition,
+      periodNum,
       solar: solarProduction,
-      batteryOut: batteryAction < 0 ? -batteryAction : 0, // discharge (negative battery action)
+      batteryOut: batteryDischarged, // discharge (actual energy flow)
       gridIn: gridImported,
       home: -homeConsumption, // negative for consumption display
-      batteryIn: batteryAction > 0 ? -batteryAction : 0, // charge (positive battery action, negative for display)
+      batteryIn: batteryCharged > 0 ? -batteryCharged : 0, // charge (actual energy flow, negative for display)
       gridOut: gridExported > 0 ? -gridExported : 0, // grid export (negative for display)
       isActual,
       price: getValue(dailyViewHour?.buyPrice),
       // Include FormattedValue objects for tooltip
       solarProductionFormatted: dailyViewHour?.solarProduction,
       homeConsumptionFormatted: dailyViewHour?.homeConsumption,
-      batteryActionFormatted: dailyViewHour?.batteryAction,
+      batteryChargedFormatted: dailyViewHour?.batteryCharged,
+      batteryDischargedFormatted: dailyViewHour?.batteryDischarged,
       gridImportedFormatted: dailyViewHour?.gridImported,
       gridExportedFormatted: dailyViewHour?.gridExported,
       buyPriceFormatted: dailyViewHour?.buyPrice,
@@ -295,7 +307,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
                 style: { textAnchor: 'middle', dominantBaseline: 'central' }
               }}
             />
-            <Tooltip content={<CustomTooltip />} />
+            <Tooltip content={<CustomTooltip resolution={resolution} />} />
             
             {/* Reference line at zero to separate sources from consumption */}
             <ReferenceLine y={0} stroke={colors.text} strokeWidth={2} />

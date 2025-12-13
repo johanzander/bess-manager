@@ -97,7 +97,6 @@ class OfficialNordpoolSource(PriceSource):
                     break
 
             if not price_entries:
-                logger.error(f"Service response keys: {list(service_response.keys())}")
                 raise ValueError(
                     f"No price entries returned for {target_date}. Available keys: {list(service_response.keys())}"
                 )
@@ -110,28 +109,6 @@ class OfficialNordpoolSource(PriceSource):
                 # Convert to SEK/kWh
                 price_kwh = price_mwh / 1000.0
                 prices.append(price_kwh)
-
-            # Nordpool changed from hourly to quarter-hourly reporting (4 values per hour)
-            # Convert 96 quarter-hourly prices to 24 hourly prices for backward compatibility
-            if len(prices) == 96:
-                logger.info(
-                    "Converting 96 quarter-hourly prices to 24 hourly prices by averaging"
-                )
-                hourly_prices = []
-                for hour in range(24):
-                    # Average the 4 quarter-hour values for this hour
-                    quarter_start = hour * 4
-                    quarter_end = quarter_start + 4
-                    hour_quarters = prices[quarter_start:quarter_end]
-                    hourly_avg = sum(hour_quarters) / len(hour_quarters)
-                    hourly_prices.append(hourly_avg)
-                prices = hourly_prices
-                logger.info(f"Successfully converted to {len(prices)} hourly prices")
-
-            if len(prices) != 24:
-                logger.warning(
-                    f"Expected 24 hourly prices, got {len(prices)} for {target_date}"
-                )
 
             logger.info(
                 f"Successfully fetched {len(prices)} prices from official Nordpool integration"

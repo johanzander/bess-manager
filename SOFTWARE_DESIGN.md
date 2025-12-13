@@ -2,7 +2,7 @@
 
 ## System Overview
 
-The Battery Energy Storage System (BESS) Manager is a Home Assistant add-on that optimizes battery storage systems for cost savings through price-based arbitrage and solar integration. The system uses dynamic programming optimization to generate optimal 24-hour battery schedules while adapting to real-time conditions.
+The Battery Energy Storage System (BESS) Manager is a Home Assistant add-on that optimizes battery storage systems for cost savings through price-based arbitrage and solar integration. The system uses dynamic programming optimization to generate optimal daily battery schedules at 15-minute (quarterly) resolution while adapting to real-time conditions.
 
 ## Architecture Principles
 
@@ -28,12 +28,12 @@ The Battery Energy Storage System (BESS) Manager is a Home Assistant add-on that
 **Key Methods**:
 
 ```python
-def update_battery_schedule(current_hour: int, prepare_next_day: bool = False) -> None
+def update_battery_schedule(current_period: int, prepare_next_day: bool = False) -> None
 def adjust_charging_power() -> None
 def update_settings(settings: dict) -> None
-def get_current_daily_view() -> DailyView
+def get_current_daily_view(current_period: int | None = None) -> DailyView
 def start() -> None
-```text
+```
 
 ### SensorCollector
 
@@ -41,7 +41,7 @@ def start() -> None
 
 **Key Responsibilities**:
 
-- Collect hourly energy measurements from InfluxDB and real-time sensors
+- Collect quarterly (15-minute) energy measurements from InfluxDB and real-time sensors
 - Calculate detailed energy flows (solar-to-home, grid-to-battery, etc.)
 - Validate energy balance and detect sensor anomalies
 - Reconstruct historical data during system startup
@@ -85,28 +85,28 @@ def start() -> None
 
 **Inputs**:
 
-- 24-hour electricity price forecast
+- 96 quarterly (15-minute) electricity price forecast
 - Battery parameters (capacity, limits, cycle cost)
-- Consumption predictions
-- Solar production forecast
+- Consumption predictions (96 quarterly periods)
+- Solar production forecast (96 quarterly periods)
 - Current battery state and cost basis
 
 **Outputs**:
 
-- Hourly battery actions (charge/discharge/idle)
-- Expected battery SOC progression
+- Quarterly battery actions (charge/discharge/idle) for 96 periods
+- Expected battery SOC progression at 15-minute resolution
 - Economic analysis (costs, savings, decision reasoning)
 
 ### DailyViewBuilder
 
-**Purpose**: Creates complete 24-hour views combining actual and predicted data.
+**Purpose**: Creates complete daily views combining actual and predicted data at quarterly resolution.
 
 **Key Responsibilities**:
 
 - Merge historical actuals with current predictions
-- Provide always-complete 00-23 hourly data for UI/API
+- Provide always-complete 96-period quarterly data for UI/API
 - Recalculate total daily savings from combined data
-- Mark data sources (actual vs predicted) for each hour
+- Mark data sources (actual vs predicted) for each period
 
 **Data Integration**:
 
@@ -121,12 +121,14 @@ def start() -> None
 **Data Model**:
 
 ```python
-class HourlyData:
-    hour: int
+class PeriodData:
+    period: int  # Period index (0-95 for normal day)
     energy: EnergyData  # Actual measured flows
     timestamp: datetime
     data_source: str = "actual"
-```text
+    economic: EconomicData
+    decision: DecisionData
+```
 
 **Key Features**:
 
@@ -144,10 +146,9 @@ class HourlyData:
 ```python
 class StoredSchedule:
     timestamp: datetime
-    optimization_hour: int
+    optimization_period: int
     optimization_result: OptimizationResult
-    created_for_scenario: str  # "tomorrow", "hourly", "restart"
-```text
+```
 
 **Key Features**:
 
@@ -162,10 +163,11 @@ class StoredSchedule:
 
 **Key Responsibilities**:
 
-- Convert hourly schedule to Time-of-Use (TOU) intervals
+- Convert quarterly schedule to hourly Time-of-Use (TOU) intervals (hardware constraint)
 - Manage battery modes (load-first, battery-first)
 - Configure grid charging and discharge rate settings
 - Apply strategic intents to hardware parameters
+- Aggregate quarterly periods to hourly for Growatt inverter
 
 **Hardware Integration**:
 
@@ -352,14 +354,15 @@ The system includes comprehensive health checking:
 
 ### Dashboard API (`/api/dashboard`)
 
-- Complete 24-hour energy flow data
+- Complete daily energy flow data (96 quarterly periods or 24 hourly aggregated)
+- Resolution parameter: `quarter-hourly` or `hourly`
 - Real-time power monitoring
 - Economic analysis and savings breakdown
 - Battery status and schedule information
 
 ### Decision Intelligence API (`/api/decision-intelligence`)
 
-- Hourly decision analysis with economic reasoning
+- Quarterly and hourly decision analysis with economic reasoning
 - Strategic intent explanation and flow patterns
 - Alternative scenario analysis
 - Confidence metrics and prediction accuracy
@@ -377,6 +380,109 @@ The system includes comprehensive health checking:
 - TOU interval configuration
 - Strategic intent monitoring
 
+## Quarterly Resolution Architecture
+
+### System Architecture Diagram
+
+The system operates on **quarterly resolution (15-minute periods)** throughout the entire stack:
+
+```text
+┌─────────────────────────────────────────────────────────────────┐
+│                      Nordpool API                               │
+│           Provides: 96 quarterly prices (15-min)                │
+│           Format: Arrays indexed 0-95 for today                 │
+└────────────────────────────┬────────────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      PriceManager                               │
+│  - get_available_prices() → (buy[96], sell[96])                 │
+│  - Uses Nordpool quarterly data directly (no expansion)         │
+│  - DST-aware: validates 92-100 periods                          │
+│  - Simple array indexing: index 0 = today 00:00-00:15           │
+└────────────────────────────┬────────────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                 BatterySystemManager                            │
+│  - Optimization: 96 quarterly periods                           │
+│  - Storage: record_period(period_index, period_data)            │
+│  - Collection: Uses period indices (0-95 normal, 0-91/99 DST)   │
+│  - InfluxDB: Queries at 15-minute boundaries                    │
+└────────────────────────────┬────────────────────────────────────┘
+                             │
+                ┌────────────┴────────────┐
+                ▼                         ▼
+┌──────────────────────────┐  ┌──────────────────────────┐
+│  HistoricalDataStore     │  │    ScheduleStore         │
+│  dict[int, PeriodData]   │  │  Optimization results    │
+│  - Stores actual data    │  │  - Predicted data        │
+│  - Period index keys     │  │  - Strategic intents     │
+│  - 92-100 periods/day    │  │  - Battery actions       │
+└──────────────────────────┘  └──────────────────────────┘
+                │                         │
+                └────────────┬────────────┘
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                   DailyViewBuilder                              │
+│  - Merges actual (past) + predicted (future)                    │
+│  - Returns 96 quarterly PeriodData items                        │
+│  - Simple logic: if i < current_period: actual, else: predicted │
+│  - Calculates summary statistics                                │
+└────────────────────────────┬────────────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                     API Layer (FastAPI)                         │
+│  - GET /api/dashboard?resolution=quarter-hourly → 96 periods    │
+│  - GET /api/dashboard?resolution=hourly → 24 aggregated         │
+│  - Internal data: Always quarterly (96 periods)                 │
+│  - Aggregation: Display-only feature for UI                     │
+└────────────────────────────┬────────────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    Frontend (React)                             │
+│  - EnergyFlowChart: Displays quarterly (96) or hourly (24)      │
+│  - EnergyFlowCards: Shows totals with flow breakdowns           │
+│  - Resolution toggle: User display preference                   │
+│  - All calculations use actual quarterly data                   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Key Design Principles
+
+**Quarterly-First Architecture**:
+
+- All internal data structures use 96 quarterly periods
+- No hourly resolution at core level - only for display
+- Simple integer indices (0-95 for normal day)
+- Array-based operations (slicing, summing, mapping)
+
+**DST Handling**:
+
+- Period count varies: 92 (spring), 96 (normal), 100 (fall)
+- All components handle variable period counts
+- No hardcoded 24-hour assumptions
+- Validation uses ranges (92-100) not fixed values
+
+**Data Flow**:
+
+- **Nordpool**: Provides 96 quarterly prices directly
+- **Optimization**: Operates on 96-period arrays
+- **Storage**: Indexes by period_index (0-95)
+- **InfluxDB**: Queries at 15-minute boundaries
+- **API**: Returns quarterly, aggregates only for display
+- **Frontend**: Displays both resolutions as user preference
+
+**Simplifications from Quarterly Design**:
+
+- No complex interval metadata
+- No triple data models (hourly/quarterly/metadata)
+- No hour-to-period conversions in core logic
+- Reduced code size by ~70% compared to previous design
+- Simple continuous indexing eliminates edge cases
+
 ## Development and Testing
 
 ### Component Testing
@@ -385,12 +491,13 @@ The system includes comprehensive health checking:
 - **Integration Tests**: End-to-end workflow testing with real scenarios
 - **Optimization Tests**: Algorithm correctness with various market conditions
 - **Hardware Tests**: Inverter integration and sensor validation
+- **Quarterly Tests**: DST transitions and period boundary handling
 
 ### Test Data
 
 - **Historical Scenarios**: Real price data from high-volatility days
 - **Synthetic Patterns**: EV charging, seasonal variations, extreme conditions
-- **Edge Cases**: Sensor failures, price anomalies, hardware issues
+- **Edge Cases**: Sensor failures, price anomalies, hardware issues, DST transitions
 
 ### Quality Assurance
 
@@ -398,5 +505,6 @@ The system includes comprehensive health checking:
 - **Type Safety**: Strict typing with union operators (`|`)
 - **Documentation**: Comprehensive docstrings and design documentation
 - **Performance**: Optimization runtime and memory usage monitoring
+- **Period Validation**: No hardcoded 24/96 checks, DST-aware throughout
 
-This design reflects the current implementation as of the latest codebase analysis, focusing on the working architecture rather than planned or deprecated components.
+This design reflects the current quarterly-native implementation as of the latest refactoring, focusing on simplicity and correctness across all time-based operations.

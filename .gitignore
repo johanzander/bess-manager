@@ -27,6 +27,9 @@ yarn-error.log*
 .env.local
 .env.*.local
 
+# Development options (contains sensitive settings)
+backend/dev-options.json
+
 # Build output
 dist/
 build/

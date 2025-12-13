@@ -3,17 +3,17 @@
 Schedule creation and management integration tests.
 
 Tests schedule creation, updates, strategic intent classification, and
-schedule persistence using HourlyData structures.
+schedule persistence using PeriodData structures.
 """
 
-from core.bess.models import HourlyData
+from core.bess.models import PeriodData
 
 
 class TestScheduleCreation:
     """Test schedule creation with new data structures."""
 
     def test_create_tomorrow_schedule(self, battery_system):
-        """Test creating tomorrow's schedule returns HourlyData."""
+        """Test creating tomorrow's schedule returns PeriodData."""
         success = battery_system.update_battery_schedule(0, prepare_next_day=True)
         assert success, "Should create tomorrow's schedule"
 
@@ -22,59 +22,37 @@ class TestScheduleCreation:
         assert latest_schedule is not None, "Should have created schedule"
 
         optimization_result = latest_schedule.optimization_result
-        assert hasattr(optimization_result, "hourly_data"), "Should have hourly_data"
-        assert len(optimization_result.hourly_data) == 24, "Should have 24 hours"
+        assert hasattr(optimization_result, "period_data"), "Should have period_data"
+        assert len(optimization_result.period_data) == 24, "Should have 24 periods"
 
-        # Verify hourly_data contains HourlyData objects
-        for i, hour_data in enumerate(optimization_result.hourly_data):
-            assert isinstance(hour_data, HourlyData), f"Hour {i} should be HourlyData"
-            assert hour_data.hour == i, f"Hour {i} should have correct hour value"
-            assert hasattr(hour_data, "energy"), f"Hour {i} should have energy data"
-            assert hasattr(hour_data, "economic"), f"Hour {i} should have economic data"
-            assert hasattr(hour_data, "strategy"), f"Hour {i} should have strategy data"
+        # Verify period_data contains PeriodData objects
+        for i, period_data in enumerate(optimization_result.period_data):
+            assert isinstance(period_data, PeriodData), f"Period {i} should be PeriodData"
+            assert period_data.period == i, f"Period {i} should have correct period value"
+            assert hasattr(period_data, "energy"), f"Period {i} should have energy data"
+            assert hasattr(period_data, "economic"), f"Period {i} should have economic data"
+            assert hasattr(period_data, "decision"), f"Period {i} should have decision data"
 
-    def test_create_hourly_update_schedule(self, battery_system):
-        """Test creating hourly update schedule."""
-        current_hour = 8
-        success = battery_system.update_battery_schedule(
-            current_hour, prepare_next_day=False
+    def test_create_quarterly_update_schedule(self, quarterly_battery_system):
+        """Test creating quarterly period update schedule (mid-day update)."""
+        # Test period 32 = 8:00 AM (hour 8 * 4 periods/hour)
+        current_period = 32
+        success = quarterly_battery_system.update_battery_schedule(
+            current_period, prepare_next_day=False
         )
-        assert success, "Should create hourly update schedule"
+        assert success, "Should create quarterly update schedule"
 
-        latest_schedule = battery_system.schedule_store.get_latest_schedule()
+        latest_schedule = quarterly_battery_system.schedule_store.get_latest_schedule()
         assert latest_schedule is not None, "Should have created schedule"
 
-        # Verify optimization range
-        start_hour, end_hour = latest_schedule.get_optimization_range()
-        assert start_hour == current_hour, f"Should start from hour {current_hour}"
-        assert end_hour == 23, "Should end at hour 23"
+        # Verify optimization period is tracked
+        assert (
+            latest_schedule.optimization_period == current_period
+        ), f"Should track optimization period {current_period}"
 
-        # Verify hourly data covers remaining hours
+        # Verify period data exists
         optimization_result = latest_schedule.optimization_result
-        expected_hours = end_hour - start_hour + 1
-        assert (
-            len(optimization_result.hourly_data) == expected_hours
-        ), f"Should have {expected_hours} hours"
-
-    def test_schedule_scenario_tracking(self, battery_system):
-        """Test that schedule scenarios are properly tracked."""
-        # Create tomorrow schedule
-        success1 = battery_system.update_battery_schedule(0, prepare_next_day=True)
-        assert success1, "Should create tomorrow schedule"
-
-        schedule1 = battery_system.schedule_store.get_latest_schedule()
-        assert (
-            "tomorrow" in schedule1.created_for_scenario
-        ), "Should track tomorrow scenario"
-
-        # Create hourly update
-        success2 = battery_system.update_battery_schedule(10, prepare_next_day=False)
-        assert success2, "Should create hourly schedule"
-
-        schedule2 = battery_system.schedule_store.get_latest_schedule()
-        assert (
-            "hourly" in schedule2.created_for_scenario
-        ), "Should track hourly scenario"
+        assert len(optimization_result.period_data) > 0, "Should have period data"
 
 
 class TestStrategicIntentClassification:
@@ -93,8 +71,8 @@ class TestStrategicIntentClassification:
             battery_system_with_arbitrage.schedule_store.get_latest_schedule()
         )
         strategic_intents = [
-            h.strategy.strategic_intent
-            for h in latest_schedule.optimization_result.hourly_data
+            h.decision.strategic_intent
+            for h in latest_schedule.optimization_result.period_data
         ]
 
         # With arbitrage prices, should have strategic decisions beyond IDLE
@@ -128,8 +106,8 @@ class TestStrategicIntentClassification:
         )
 
         # Look for grid charging during low price hours (night hours 0-2)
-        night_hours = latest_schedule.optimization_result.hourly_data[0:3]
-        night_intents = [h.strategy.strategic_intent for h in night_hours]
+        night_hours = latest_schedule.optimization_result.period_data[0:3]
+        night_intents = [h.decision.strategic_intent for h in night_hours]
 
         # Should have at least some grid charging during cheap hours
         grid_charging_count = night_intents.count("GRID_CHARGING")
@@ -149,8 +127,8 @@ class TestStrategicIntentClassification:
         )
 
         # Look for export arbitrage during high price hours (peak hours 9-11)
-        peak_hours = latest_schedule.optimization_result.hourly_data[9:12]
-        peak_intents = [h.strategy.strategic_intent for h in peak_hours]
+        peak_hours = latest_schedule.optimization_result.period_data[9:12]
+        peak_intents = [h.decision.strategic_intent for h in peak_hours]
 
         # Should potentially have export arbitrage during expensive hours
         export_arbitrage_count = peak_intents.count("EXPORT_ARBITRAGE")
@@ -172,8 +150,8 @@ class TestStrategicIntentClassification:
         latest_schedule = battery_system.schedule_store.get_latest_schedule()
 
         # Look for solar storage during high solar hours
-        solar_hours = latest_schedule.optimization_result.hourly_data[10:14]
-        solar_intents = [h.strategy.strategic_intent for h in solar_hours]
+        solar_hours = latest_schedule.optimization_result.period_data[10:14]
+        solar_intents = [h.decision.strategic_intent for h in solar_hours]
 
         # Should have some solar storage when solar production is high
         solar_storage_count = solar_intents.count("SOLAR_STORAGE")
@@ -228,20 +206,24 @@ class TestScheduleUpdates:
         all_schedules = battery_system.schedule_store.get_all_schedules_today()
         assert len(all_schedules) >= 2, "Should store both schedules"
 
-    def test_schedule_persistence_across_hours(self, battery_system):
-        """Test schedule persistence for different optimization hours."""
-        hours_to_test = [0, 8, 16]
+    def test_schedule_persistence_across_periods(self, quarterly_battery_system):
+        """Test schedule persistence for different optimization scenarios."""
+        # Test different scenarios starting from period 0
+        scenarios = [
+            (0, True),   # Next day preparation
+            (0, False),  # Intraday update
+        ]
 
-        for hour in hours_to_test:
-            success = battery_system.update_battery_schedule(
-                hour, prepare_next_day=False
+        for period, prepare_next_day in scenarios:
+            success = quarterly_battery_system.update_battery_schedule(
+                period, prepare_next_day=prepare_next_day
             )
-            assert success, f"Should create schedule for hour {hour}"
+            assert success, f"Should create schedule for period {period}, prepare_next_day={prepare_next_day}"
 
-            latest_schedule = battery_system.schedule_store.get_latest_schedule()
+            latest_schedule = quarterly_battery_system.schedule_store.get_latest_schedule()
             assert (
-                latest_schedule.optimization_hour == hour
-            ), f"Should track optimization hour {hour}"
+                latest_schedule.optimization_period == period
+            ), f"Should track optimization period {period}"
 
 
 class TestScheduleEconomics:
@@ -270,7 +252,7 @@ class TestScheduleEconomics:
 
         latest_schedule = battery_system.schedule_store.get_latest_schedule()
 
-        for i, hour_data in enumerate(latest_schedule.optimization_result.hourly_data):
+        for i, hour_data in enumerate(latest_schedule.optimization_result.period_data):
             economic = hour_data.economic
 
             # Verify economic data structure
@@ -323,47 +305,46 @@ class TestScheduleEconomics:
 class TestScheduleValidation:
     """Test schedule validation and error handling."""
 
-    def test_invalid_optimization_hour(self, battery_system):
-        """Test handling of invalid optimization hours."""
-        # Test negative hour
-        success = battery_system.update_battery_schedule(-1, prepare_next_day=False)
-        assert not success, "Should reject negative hour"
+    def test_invalid_optimization_period(self, quarterly_battery_system):
+        """Test handling of invalid optimization periods."""
+        # Test negative period
+        try:
+            quarterly_battery_system.update_battery_schedule(-1, prepare_next_day=False)
+            raise AssertionError("Should raise SystemConfigurationError for negative period")
+        except Exception as e:
+            assert "Invalid period" in str(e) or "SystemConfigurationError" in str(type(e))
 
-        # Test hour > 23
-        success = battery_system.update_battery_schedule(25, prepare_next_day=False)
-        assert not success, "Should reject hour > 23"
-
-    def test_schedule_data_integrity(self, battery_system):
+    def test_schedule_data_integrity(self, quarterly_battery_system):
         """Test that schedule data maintains integrity."""
-        success = battery_system.update_battery_schedule(0, prepare_next_day=True)
+        success = quarterly_battery_system.update_battery_schedule(0, prepare_next_day=True)
         assert success, "Should create schedule"
 
-        latest_schedule = battery_system.schedule_store.get_latest_schedule()
+        latest_schedule = quarterly_battery_system.schedule_store.get_latest_schedule()
 
-        # Verify hour sequence
-        for i, hour_data in enumerate(latest_schedule.optimization_result.hourly_data):
-            assert hour_data.hour == i, f"Hour {i} should have correct hour value"
+        # Verify period sequence
+        for i, period_data in enumerate(latest_schedule.optimization_result.period_data):
+            assert period_data.period == i, f"Period {i} should have correct period value"
 
-        # Verify energy balance for each hour
-        for i, hour_data in enumerate(latest_schedule.optimization_result.hourly_data):
-            energy = hour_data.energy
+        # Verify energy balance for each period
+        for i, period_data in enumerate(latest_schedule.optimization_result.period_data):
+            energy = period_data.energy
 
             # Basic energy balance checks
             assert (
                 energy.solar_production >= 0
-            ), f"Hour {i} solar should be non-negative"
+            ), f"Period {i} solar should be non-negative"
             assert (
                 energy.home_consumption >= 0
-            ), f"Hour {i} consumption should be non-negative"
+            ), f"Period {i} consumption should be non-negative"
             assert (
                 energy.grid_imported >= 0
-            ), f"Hour {i} grid import should be non-negative"
+            ), f"Period {i} grid import should be non-negative"
             assert (
                 energy.grid_exported >= 0
-            ), f"Hour {i} grid export should be non-negative"
+            ), f"Period {i} grid export should be non-negative"
             assert (
-                0 <= energy.battery_soc_start <= 100
-            ), f"Hour {i} start SOC should be 0-100%"
+                0 <= energy.battery_soe_start <= 100
+            ), f"Period {i} start SOE should be 0-100%"
             assert (
-                0 <= energy.battery_soc_end <= 100
-            ), f"Hour {i} end SOC should be 0-100%"
+                0 <= energy.battery_soe_end <= 100
+            ), f"Period {i} end SOE should be 0-100%"

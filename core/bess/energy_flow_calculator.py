@@ -52,18 +52,18 @@ class EnergyFlowCalculator:
                 logger.debug(f"Sensor key '{sensor_key}' not configured, skipping")
         return resolved_mapping
 
-    def calculate_hourly_flows(
+    def calculate_period_flows(
         self,
         current_readings: dict[str, float],
         previous_readings: dict[str, float],
-        hour_of_day: int | None = None,
     ) -> dict[str, float] | None:
-        """Calculate energy flows between two sensor readings.
+        """Calculate energy flows between two sensor readings for a period.
+
+        This calculates flows for a single 15-minute period (quarterly resolution).
 
         Args:
-            current_readings: Current hour sensor readings
-            previous_readings: Previous hour sensor readings
-            hour_of_day: Hour for time-based validation (0-23)
+            current_readings: Current period sensor readings
+            previous_readings: Previous period sensor readings
 
         Returns:
             Dict of calculated energy flows or None if calculation fails
@@ -96,9 +96,7 @@ class EnergyFlowCalculator:
             previous_value = previous_readings.get(sensor_name)
 
             if current_value is None or previous_value is None:
-                logger.debug(
-                    "Missing value for %s in hour %s", sensor_name, hour_of_day
-                )
+                logger.debug("Missing value for %s", sensor_name)
                 continue
 
             try:
@@ -121,11 +119,9 @@ class EnergyFlowCalculator:
                 logger.warning("Error calculating flow for %s: %s", sensor_name, e)
 
         # Calculate derived flows
-        return self._calculate_derived_flows(flows, hour_of_day)
+        return self._calculate_derived_flows(flows)
 
-    def _calculate_derived_flows(
-        self, flows: dict[str, float], hour_of_day: int | None = None
-    ) -> dict[str, float]:
+    def _calculate_derived_flows(self, flows: dict[str, float]) -> dict[str, float]:
         """Calculate derived flows"""
 
         solar_production = flows.get("solar_production", 0)
@@ -144,13 +140,11 @@ class EnergyFlowCalculator:
         flows["grid_to_battery"] = max(0, battery_charged - solar_to_battery)
 
         logger.debug(
-            "Hour %s: Solar to battery = %.2f kWh (from new sensors)",
-            hour_of_day,
+            "Solar to battery = %.2f kWh (from new sensors)",
             flows["solar_to_battery"],
         )
         logger.debug(
-            "Hour %s: Grid to battery = %.2f kWh (from new sensors)",
-            hour_of_day,
+            "Grid to battery = %.2f kWh (from new sensors)",
             flows["grid_to_battery"],
         )
 

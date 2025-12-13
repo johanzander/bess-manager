@@ -7,6 +7,7 @@ import EnergyFlowCards from '../components/EnergyFlowCards';
 import SystemStatusCard from '../components/SystemStatusCard';
 import AlertBanner from '../components/AlertBanner';
 import api from '../lib/api';
+import { useUserPreferences } from '../hooks/useUserPreferences';
 
 interface DashboardProps {
   onLoadingChange: (loading: boolean) => void;
@@ -69,7 +70,10 @@ export default function DashboardPage({
   const [error, setError] = useState<string | null>(null);
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
   const [isInitialLoad, setIsInitialLoad] = useState(true);
-  
+
+  // User preferences (resolution, etc.)
+  const { dataResolution, setDataResolution } = useUserPreferences();
+
   // Health summary state for alert banner
   interface HealthSummary {
     hasCriticalErrors: boolean;
@@ -121,7 +125,7 @@ export default function DashboardPage({
     try {
       // Fetch dashboard data, health summary, and historical data status concurrently
       const [dashboardResponse, healthResponse, historicalResponse] = await Promise.all([
-        api.get('/api/dashboard'),
+        api.get('/api/dashboard', { params: { resolution: dataResolution } }),
         api.get('/api/dashboard-health-summary'),
         api.get('/api/historical-data-status')
       ]);
@@ -172,7 +176,7 @@ export default function DashboardPage({
       onLoadingChange(false);
       setIsInitialLoad(false);
     }
-  }, [isInitialLoad, onLoadingChange]); // Add dependencies
+  }, [isInitialLoad, onLoadingChange, dataResolution]); // Add dependencies
 
   useEffect(() => {
     fetchData();
@@ -254,12 +258,36 @@ export default function DashboardPage({
       {/* System Status Header */}
       <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
         <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-4">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
-          </div>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
           <div className="flex items-center text-sm text-gray-500 dark:text-gray-400">
             <Clock className="h-4 w-4 mr-1" />
             Last updated: {lastUpdate.toLocaleTimeString()}
+          </div>
+        </div>
+
+        {/* Resolution Selector */}
+        <div className="mt-4 flex items-center justify-end">
+          <div className="flex bg-gray-100 dark:bg-gray-700 rounded-lg p-1">
+            <button
+              onClick={() => setDataResolution('hourly')}
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                dataResolution === 'hourly'
+                  ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm'
+                  : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
+              }`}
+            >
+              60 min
+            </button>
+            <button
+              onClick={() => setDataResolution('quarter-hourly')}
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                dataResolution === 'quarter-hourly'
+                  ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm'
+                  : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
+              }`}
+            >
+              15 min
+            </button>
           </div>
         </div>
       </div>
@@ -304,6 +332,7 @@ export default function DashboardPage({
                 <EnergyFlowChart
                   dailyViewData={dashboardData.hourlyData as any}
                   currentHour={currentHour}
+                  resolution={dataResolution}
                 />
               </div>
             </div>
@@ -316,6 +345,7 @@ export default function DashboardPage({
               <BatteryLevelChart
                 hourlyData={dashboardData.hourlyData as any}
                 settings={settings}
+                resolution={dataResolution}
               />
             </div>
           </div>

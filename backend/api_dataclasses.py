@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
+from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -171,7 +175,7 @@ class APIDashboardHourlyData:
     """Dashboard hourly data with canonical FormattedValue interface."""
 
     # Metadata
-    hour: int
+    period: int
     dataSource: str
     timestamp: str | None
 
@@ -225,144 +229,116 @@ class APIDashboardHourlyData:
             return create_formatted_value(value or 0, unit_type, currency)
 
         # Calculate derived values
-        solar_production = hourly.energy.solar_production if hourly.energy else 0
-        home_consumption = hourly.energy.home_consumption if hourly.energy else 0
+        solar_production = hourly.energy.solar_production
+        home_consumption = hourly.energy.home_consumption
         direct_solar = min(solar_production, home_consumption)
 
+        # Period index (0-23 for hourly, 0-95 for quarterly)
+        # Frontend correctly handles different resolutions via resolution parameter
         return cls(
             # Metadata
-            hour=hourly.hour,
+            period=hourly.period,
             dataSource="actual" if hourly.data_source == "actual" else "predicted",
             timestamp=hourly.timestamp.isoformat() if hourly.timestamp else None,
             # Energy flows
             solarProduction=safe_format(solar_production, "energy_kwh_only"),
             homeConsumption=safe_format(home_consumption, "energy_kwh_only"),
-            # Battery state
+            # Battery state - EnergyData uses battery_soe (State of Energy in kWh)
             batterySocStart=safe_format(
-                (
-                    (hourly.energy.battery_soe_start / battery_capacity) * 100.0
-                    if hasattr(hourly.energy, "battery_soe_start") and hourly.energy
-                    else (
-                        getattr(hourly.energy, "battery_soc_start", 0)
-                        if hourly.energy
-                        else 0
-                    )
-                ),
+                (hourly.energy.battery_soe_start / battery_capacity) * 100.0,
                 "percentage",
             ),
             batterySocEnd=safe_format(
-                (
-                    (hourly.energy.battery_soe_end / battery_capacity) * 100.0
-                    if hasattr(hourly.energy, "battery_soe_end") and hourly.energy
-                    else (
-                        getattr(hourly.energy, "battery_soc_end", 0)
-                        if hourly.energy
-                        else 0
-                    )
-                ),
+                (hourly.energy.battery_soe_end / battery_capacity) * 100.0,
                 "percentage",
             ),
             batterySoeStart=safe_format(
-                getattr(hourly.energy, "battery_soe_start", 0) if hourly.energy else 0,
+                hourly.energy.battery_soe_start,
                 "energy_kwh_only",
             ),
             batterySoeEnd=safe_format(
-                getattr(hourly.energy, "battery_soe_end", 0) if hourly.energy else 0,
+                hourly.energy.battery_soe_end,
                 "energy_kwh_only",
             ),
             # Economic data
-            buyPrice=safe_format(
-                hourly.economic.buy_price if hourly.economic else 0, "price"
-            ),
-            sellPrice=safe_format(
-                hourly.economic.sell_price if hourly.economic else 0, "price"
-            ),
-            hourlyCost=safe_format(
-                hourly.economic.hourly_cost if hourly.economic else 0, "currency"
-            ),
-            hourlySavings=safe_format(
-                hourly.economic.hourly_savings if hourly.economic else 0, "currency"
-            ),
-            gridOnlyCost=safe_format(
-                hourly.economic.grid_only_cost if hourly.economic else 0, "currency"
-            ),
-            solarOnlyCost=safe_format(
-                hourly.economic.solar_only_cost if hourly.economic else 0, "currency"
-            ),
-            # Battery control
+            buyPrice=safe_format(hourly.economic.buy_price, "price"),
+            sellPrice=safe_format(hourly.economic.sell_price, "price"),
+            hourlyCost=safe_format(hourly.economic.hourly_cost, "currency"),
+            hourlySavings=safe_format(hourly.economic.hourly_savings, "currency"),
+            gridOnlyCost=safe_format(hourly.economic.grid_only_cost, "currency"),
+            solarOnlyCost=safe_format(hourly.economic.solar_only_cost, "currency"),
+            # Battery control - use actual charge/discharge for historical data
             batteryAction=safe_format(
-                getattr(hourly.decision, "battery_action", 0) if hourly.decision else 0,
+                (
+                    # For historical data, calculate from actual charge/discharge
+                    (hourly.energy.battery_charged - hourly.energy.battery_discharged)
+                    if hourly.data_source == "actual"
+                    # For predicted data, use the optimization decision
+                    else (hourly.decision.battery_action or 0)
+                ),
                 "energy_kwh_only",
             ),
             batteryCharged=safe_format(
-                getattr(hourly.energy, "battery_charged", 0) if hourly.energy else 0,
+                hourly.energy.battery_charged,
                 "energy_kwh_only",
             ),
             batteryDischarged=safe_format(
-                getattr(hourly.energy, "battery_discharged", 0) if hourly.energy else 0,
+                hourly.energy.battery_discharged,
                 "energy_kwh_only",
             ),
             # Grid interactions
             gridImported=safe_format(
-                getattr(hourly.energy, "grid_imported", 0) if hourly.energy else 0,
+                hourly.energy.grid_imported,
                 "energy_kwh_only",
             ),
             gridExported=safe_format(
-                getattr(hourly.energy, "grid_exported", 0) if hourly.energy else 0,
+                hourly.energy.grid_exported,
                 "energy_kwh_only",
             ),
             # Detailed energy flows - using existing calculated fields from backend models
             solarToHome=safe_format(
-                getattr(hourly.energy, "solar_to_home", 0) if hourly.energy else 0,
+                hourly.energy.solar_to_home,
                 "energy_kwh_only",
             ),
             solarToBattery=safe_format(
-                getattr(hourly.energy, "solar_to_battery", 0) if hourly.energy else 0,
+                hourly.energy.solar_to_battery,
                 "energy_kwh_only",
             ),
             solarToGrid=safe_format(
-                getattr(hourly.energy, "solar_to_grid", 0) if hourly.energy else 0,
+                hourly.energy.solar_to_grid,
                 "energy_kwh_only",
             ),
             gridToHome=safe_format(
-                getattr(hourly.energy, "grid_to_home", 0) if hourly.energy else 0,
+                hourly.energy.grid_to_home,
                 "energy_kwh_only",
             ),
             gridToBattery=safe_format(
-                getattr(hourly.energy, "grid_to_battery", 0) if hourly.energy else 0,
+                hourly.energy.grid_to_battery,
                 "energy_kwh_only",
             ),
             batteryToHome=safe_format(
-                getattr(hourly.energy, "battery_to_home", 0) if hourly.energy else 0,
+                hourly.energy.battery_to_home,
                 "energy_kwh_only",
             ),
             batteryToGrid=safe_format(
-                getattr(hourly.energy, "battery_to_grid", 0) if hourly.energy else 0,
+                hourly.energy.battery_to_grid,
                 "energy_kwh_only",
             ),
             # Solar-only scenario calculations
             gridImportNeeded=safe_format(
-                max(
-                    0, home_consumption - solar_production
-                ),  # Grid import needed if solar < consumption
+                max(0, home_consumption - solar_production),
                 "energy_kwh_only",
             ),
             solarExcess=safe_format(
-                max(
-                    0, solar_production - home_consumption
-                ),  # Solar excess if solar > consumption
+                max(0, solar_production - home_consumption),
                 "energy_kwh_only",
             ),
             solarSavings=safe_format(
-                getattr(hourly.economic, "solar_savings", 0) if hourly.economic else 0,
+                hourly.economic.solar_savings,
                 "currency",
             ),
             # Raw values for logic
-            strategicIntent=(
-                getattr(hourly.decision, "strategic_intent", "")
-                if hourly.decision
-                else ""
-            ),
+            strategicIntent=hourly.decision.strategic_intent,
             directSolar=direct_solar,
         )
 
@@ -610,7 +586,7 @@ class APIDashboardResponse:
 
     # Core metadata
     date: str
-    currentHour: int
+    currentPeriod: int
 
     # Financial summary
     totalDailySavings: float
@@ -646,6 +622,7 @@ class APIDashboardResponse:
         battery_capacity: float,
         currency: str,
         hourly_data_instances: list | None = None,
+        resolution: str = "quarter-hourly",
     ) -> APIDashboardResponse:
         """Create complete dashboard response from internal data."""
 
@@ -671,6 +648,18 @@ class APIDashboardResponse:
             "totalBatteryToGrid": sum(h.batteryToGrid.value for h in hourly_data),
         }
 
+        # Override battery charged/discharged totals to match detailed flows perspective
+        # Detailed flows represent GROSS energy (before efficiency losses)
+        # This ensures percentages are correct: solar_to_battery + grid_to_battery = total_charged
+        totals["totalBatteryCharged"] = (
+            detailed_flow_totals["totalSolarToBattery"]
+            + detailed_flow_totals["totalGridToBattery"]
+        )
+        totals["totalBatteryDischarged"] = (
+            detailed_flow_totals["totalBatteryToHome"]
+            + detailed_flow_totals["totalBatteryToGrid"]
+        )
+
         # Combine basic totals with detailed flow totals
         complete_totals = {**totals, **detailed_flow_totals}
 
@@ -682,8 +671,17 @@ class APIDashboardResponse:
         # Create real-time power data
         real_time_power = APIRealTimePower.from_controller(controller)
 
-        # Calculate derived financial values
-        current_hour = daily_view.current_hour
+        # Calculate current index based on resolution
+        now = datetime.now()
+        if resolution == "hourly":
+            # For hourly resolution, use hour number (0-23)
+            current_index = now.hour
+            logger.debug(f"Hourly mode: currentPeriod={current_index} (hour={now.hour})")
+        else:
+            # For quarterly resolution, use period index (0-95)
+            current_index = now.hour * 4 + now.minute // 15
+            logger.debug(f"Quarterly mode: currentPeriod={current_index} (hour={now.hour}, minute={now.minute})")
+
         actual_data = [h for h in hourly_data if h.dataSource == "actual"]
         predicted_data = [h for h in hourly_data if h.dataSource == "predicted"]
 
@@ -705,7 +703,7 @@ class APIDashboardResponse:
         return cls(
             # Core metadata
             date=daily_view.date.isoformat(),
-            currentHour=current_hour,
+            currentPeriod=current_index,
             # Financial summary
             totalDailySavings=total_daily_savings,
             actualSavingsSoFar=actual_savings,

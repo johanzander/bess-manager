@@ -17,7 +17,7 @@ from core.bess.dp_battery_algorithm import (
     optimize_battery_schedule,
     print_optimization_results,
 )
-from core.bess.models import EconomicSummary, HourlyData
+from core.bess.models import EconomicSummary, PeriodData
 from core.bess.price_manager import MockSource, PriceManager
 from core.bess.settings import (
     ADDITIONAL_COSTS,
@@ -110,6 +110,10 @@ def test_all_scenarios(scenario_name):
     buy_prices = price_manager.get_buy_prices(raw_prices=base_prices)
     sell_prices = price_manager.get_sell_prices(raw_prices=base_prices)
 
+    # These scenario files are hourly test data
+    # System runs quarterly internally, but these unit tests use hourly resolution
+    period_duration_hours = 1.0
+
     # Run optimization
     result = optimize_battery_schedule(
         buy_price=buy_prices,
@@ -118,22 +122,23 @@ def test_all_scenarios(scenario_name):
         solar_production=solar_production,
         initial_soe=battery["initial_soe"],
         battery_settings=battery_settings,
+        period_duration_hours=period_duration_hours,
     )
 
     # Validate results using new data structures
-    assert isinstance(result.hourly_data, list)
+    assert isinstance(result.period_data, list)
     assert (
-        len(result.hourly_data) == horizon
+        len(result.period_data) == horizon
     )  # Use actual horizon instead of hardcoded 24
     assert isinstance(result.economic_summary, EconomicSummary)
 
     # Validate hourly data structure
-    for i, hour_data in enumerate(result.hourly_data):
-        assert isinstance(hour_data, HourlyData)
+    for i, hour_data in enumerate(result.period_data):
+        assert isinstance(hour_data, PeriodData)
         assert hour_data.energy is not None
         assert hour_data.economic is not None
         assert hour_data.decision is not None
-        assert hour_data.hour == i  # Should match the index
+        assert hour_data.period == i  # Should match the index
         assert hour_data.data_source == "predicted"
 
     # Validate economic summary - use proper attribute access
@@ -189,7 +194,7 @@ def test_all_scenarios(scenario_name):
         )
 
     # Battery usage should be within physical constraints
-    for hour_data in result.hourly_data:
+    for hour_data in result.period_data:
         # Access SOE directly - these are already in kWh
         soe_start_kwh = hour_data.energy.battery_soe_start  # Already in kWh
         soe_end_kwh = hour_data.energy.battery_soe_end  # Already in kWh

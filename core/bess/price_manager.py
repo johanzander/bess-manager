@@ -242,26 +242,25 @@ class HomeAssistantSource(PriceSource):
             return None
 
     def _handle_dst_transitions(self, prices):
-        """Handle DST transitions to ensure we always have 24 hours."""
+        """Handle DST transitions for quarterly resolution (92-100 periods).
+
+        Nordpool provides quarterly prices (15-minute intervals):
+        - Normal day: 96 periods (24 hours × 4)
+        - DST spring (23h): 92 periods
+        - DST fall (25h): 100 periods
+
+        Returns prices as-is since Nordpool already provides quarterly resolution.
+        """
         if not prices:
             return []
 
-        if len(prices) == 24:
-            return prices
-        elif len(prices) == 23:
-            # Spring forward - duplicate middle hour
-            middle_idx = len(prices) // 2
-            prices.insert(middle_idx, prices[middle_idx])
-            return prices
-        elif len(prices) == 25:
-            # Fall back - remove middle hour
-            middle_idx = len(prices) // 2
-            prices.pop(middle_idx)
+        # Validate quarterly period count (92-100 for DST variations)
+        if 92 <= len(prices) <= 100:
             return prices
         else:
             # Unexpected count - fail fast instead of guessing
             raise PriceDataUnavailableError(
-                message=f"Unexpected price count: {len(prices)} hours. Expected 23, 24, or 25 for DST transitions."
+                message=f"Unexpected price count: {len(prices)} periods. Expected 92-100 for quarterly resolution with DST."
             )
 
     def _get_sensor_diagnostic_info(self, sensor_data, sensor_name):
@@ -288,9 +287,9 @@ class HomeAssistantSource(PriceSource):
             dict: Health check result with status and checks
         """
         try:
-            # Test fetching today's prices
+            # Test fetching today's prices (accepts any count - DST may give 23/24/25)
             today_prices = self.get_prices_for_date(date.today())
-            if len(today_prices) == 24:
+            if today_prices:
                 return {
                     "status": "OK",
                     "checks": [
@@ -303,12 +302,12 @@ class HomeAssistantSource(PriceSource):
                 }
             else:
                 return {
-                    "status": "WARNING",
+                    "status": "ERROR",
                     "checks": [
                         {
                             "component": "HomeAssistantSource",
-                            "status": "WARNING",
-                            "message": f"Expected 24 prices, got {len(today_prices)}",
+                            "status": "ERROR",
+                            "message": "No price data available for today",
                         }
                     ],
                 }
@@ -363,6 +362,10 @@ class PriceManager:
         self._today_prices = None
         self._today_date = None
 
+        # Cache for tomorrow's prices
+        self._tomorrow_prices = None
+        self._tomorrow_date = None
+
     def _calculate_buy_price(self, base_price: float) -> float:
         """Calculate retail buy price from Nordpool base price.
 
@@ -405,6 +408,10 @@ class PriceManager:
         if self._today_date == target_date and self._today_prices is not None:
             return self._today_prices
 
+        # Use cached values for tomorrow if available
+        if self._tomorrow_date == target_date and self._tomorrow_prices is not None:
+            return self._tomorrow_prices
+
         try:
             # Get raw prices from the source
             raw_prices = self.price_source.get_prices_for_date(target_date)
@@ -424,9 +431,15 @@ class PriceManager:
                 price_data.append(price_entry)
 
             # Cache today's prices
-            if target_date == datetime.now().date():
+            today = datetime.now().date()
+            tomorrow = today + timedelta(days=1)
+
+            if target_date == today:
                 self._today_prices = price_data
                 self._today_date = target_date
+            elif target_date == tomorrow:
+                self._tomorrow_prices = price_data
+                self._tomorrow_date = target_date
 
             return price_data
 
@@ -514,30 +527,11 @@ class PriceManager:
             price_data = self.get_price_data(target_date)
             return [entry["sellPrice"] for entry in price_data]
 
-    def _expand_hourly_to_quarterly(self, hourly_prices: list[float]) -> list[float]:
-        """Expand hourly prices to quarterly resolution.
-
-        Electricity prices are constant within each hour, so we repeat each
-        hourly price 4 times to get 15-minute intervals.
-
-        Args:
-            hourly_prices: List of 24 hourly prices
-
-        Returns:
-            List of 96 quarterly prices (each hourly price repeated 4 times)
-        """
-        quarterly_prices = []
-        for hourly_price in hourly_prices:
-            # Repeat each hourly price 4 times for the 4 quarters in that hour
-            quarterly_prices.extend([hourly_price] * 4)
-        return quarterly_prices
 
     def get_available_prices(self) -> tuple[list[float], list[float]]:
         """Get all available prices at quarterly resolution starting at today 00:00.
 
-        Uses existing get_buy_prices() and get_sell_prices() methods (hourly),
-        then expands to quarterly resolution by repeating each hourly price 4 times.
-        Returns full arrays from 00:00 - caller slices as needed.
+        Nordpool provides quarterly prices (96 periods/day) directly.
         Automatically tries tomorrow, falls back to today only.
 
         Returns:
@@ -548,31 +542,23 @@ class PriceManager:
 
         Example at 14:00:
             buy, sell = get_available_prices()
-            # Returns 192 prices (96 today + 96 tomorrow)
             # buy[0] = today 00:00
             # buy[56] = today 14:00 (current period)
-            # buy[96] = tomorrow 00:00
             # Caller slices: buy[56:] for optimization from now
         """
         today = datetime.now().date()
         tomorrow = today + timedelta(days=1)
 
-        # Get today hourly prices - uses existing methods
-        hourly_buy = self.get_buy_prices(target_date=today)
-        hourly_sell = self.get_sell_prices(target_date=today)
-
-        # Expand to quarterly resolution
-        buy_prices = self._expand_hourly_to_quarterly(hourly_buy)
-        sell_prices = self._expand_hourly_to_quarterly(hourly_sell)
+        # Get today's quarterly prices (already quarterly resolution from Nordpool)
+        buy_prices = self.get_buy_prices(target_date=today)
+        sell_prices = self.get_sell_prices(target_date=today)
 
         # Try tomorrow (full day from 00:00)
+        # Fetch price data once and extract both buy and sell to avoid duplicate API calls
         try:
-            tomorrow_hourly_buy = self.get_buy_prices(target_date=tomorrow)
-            tomorrow_hourly_sell = self.get_sell_prices(target_date=tomorrow)
-
-            # Expand tomorrow to quarterly
-            tomorrow_buy = self._expand_hourly_to_quarterly(tomorrow_hourly_buy)
-            tomorrow_sell = self._expand_hourly_to_quarterly(tomorrow_hourly_sell)
+            tomorrow_price_data = self.get_price_data(target_date=tomorrow)
+            tomorrow_buy = [entry["buyPrice"] for entry in tomorrow_price_data]
+            tomorrow_sell = [entry["sellPrice"] for entry in tomorrow_price_data]
 
             # Concatenate if tomorrow available
             buy_prices = buy_prices + tomorrow_buy

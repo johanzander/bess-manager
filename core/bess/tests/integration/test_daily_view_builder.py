@@ -3,9 +3,10 @@
 Tests behavior: merging actual + predicted data at different times of day.
 """
 
-import pytest
 from datetime import datetime
 from zoneinfo import ZoneInfo
+
+import pytest
 
 from core.bess.daily_view_builder import DailyView, DailyViewBuilder
 from core.bess.historical_data_store import HistoricalDataStore
@@ -58,7 +59,7 @@ def create_period_data(
 ) -> PeriodData:
     """Helper to create PeriodData for testing."""
     return PeriodData(
-        hour=period_index // 4,  # Backward compat
+        period=period_index,
         energy=EnergyData(
             solar_production=1.0,
             home_consumption=0.5,
@@ -86,12 +87,12 @@ def test_early_morning_all_predicted(view_builder, schedule_store):
     periods = [create_period_data(i, "predicted", savings=10.0) for i in range(96)]
     opt_result = OptimizationResult(
         input_data={},
-        hourly_data=periods,
+        period_data=periods,
         economic_summary=None,
     )
 
     # Store schedule
-    schedule_store.store_schedule(opt_result, optimization_hour=0, scenario="test")
+    schedule_store.store_schedule(opt_result, optimization_period=0)
 
     # Build view at period 0 (midnight)
     view = view_builder.build_daily_view(current_period=0)
@@ -102,7 +103,7 @@ def test_early_morning_all_predicted(view_builder, schedule_store):
     assert view.actual_count == 0
     assert view.predicted_count == 96
     assert all(p.data_source == "predicted" for p in view.periods)
-    assert view.total_savings == 96 * 10.0  # 96 periods × 10 SEK
+    assert view.total_savings == 96 * 10.0  # 96 periods X 10 SEK
 
 
 def test_midday_mix_actual_and_predicted(
@@ -119,10 +120,10 @@ def test_midday_mix_actual_and_predicted(
     periods = [create_period_data(i, "predicted", savings=10.0) for i in range(96)]
     opt_result = OptimizationResult(
         input_data={},
-        hourly_data=periods,
+        period_data=periods,
         economic_summary=None,
     )
-    schedule_store.store_schedule(opt_result, optimization_hour=14, scenario="test")
+    schedule_store.store_schedule(opt_result, optimization_period=14)
 
     # Build view at period 56 (14:00)
     view = view_builder.build_daily_view(current_period=56)
@@ -156,10 +157,10 @@ def test_end_of_day_mostly_actual(view_builder, historical_store, schedule_store
     periods = [create_period_data(i, "predicted", savings=10.0) for i in range(96)]
     opt_result = OptimizationResult(
         input_data={},
-        hourly_data=periods,
+        period_data=periods,
         economic_summary=None,
     )
-    schedule_store.store_schedule(opt_result, optimization_hour=23, scenario="test")
+    schedule_store.store_schedule(opt_result, optimization_period=23)
 
     # Build view at period 92 (23:00)
     view = view_builder.build_daily_view(current_period=92)
@@ -186,10 +187,10 @@ def test_missing_historical_data_uses_predicted(
     periods = [create_period_data(i, "predicted", savings=10.0) for i in range(96)]
     opt_result = OptimizationResult(
         input_data={},
-        hourly_data=periods,
+        period_data=periods,
         economic_summary=None,
     )
-    schedule_store.store_schedule(opt_result, optimization_hour=0, scenario="test")
+    schedule_store.store_schedule(opt_result, optimization_period=0)
 
     # Build view at period 30
     view = view_builder.build_daily_view(current_period=30)
@@ -236,10 +237,10 @@ def test_different_periods_throughout_day(
     periods = [create_period_data(i, "predicted", savings=10.0) for i in range(96)]
     opt_result = OptimizationResult(
         input_data={},
-        hourly_data=periods,
+        period_data=periods,
         economic_summary=None,
     )
-    schedule_store.store_schedule(opt_result, optimization_hour=0, scenario="test")
+    schedule_store.store_schedule(opt_result, optimization_period=0)
 
     # Test at different periods
     test_periods = [0, 20, 40, 60, 80, 95]
@@ -269,10 +270,10 @@ def test_economic_data_preserved(view_builder, historical_store, schedule_store)
     periods = [predicted_data] * 96
     opt_result = OptimizationResult(
         input_data={},
-        hourly_data=periods,
+        period_data=periods,
         economic_summary=None,
     )
-    schedule_store.store_schedule(opt_result, optimization_hour=0, scenario="test")
+    schedule_store.store_schedule(opt_result, optimization_period=0)
 
     # Build view at period 1
     view = view_builder.build_daily_view(current_period=1)

@@ -5,9 +5,9 @@ services:
       dockerfile: backend/Dockerfile.dev
     container_name: bess-dev
     volumes:
-      - ./backend:/app
-      - ./core:/app/core
-      - ./config.yaml:/app/config.yaml:ro
+      - ./backend:/app:delegated
+      - ./core:/app/core:delegated
+      - ./backend/dev-options.json:/data/options.json:ro
     environment:
       - TZ=Europe/Stockholm
       - FLASK_DEBUG=true

@@ -1,16 +1,16 @@
 """Tests for time_utils."""
 
-import pytest
-from datetime import date, datetime, time
-from zoneinfo import ZoneInfo
+from datetime import date, datetime
 from unittest.mock import patch
+
+import pytest
 
 from core.bess.time_utils import (
     TIMEZONE,
-    get_period_count,
-    timestamp_to_period_index,
-    period_index_to_timestamp,
     get_current_period_index,
+    get_period_count,
+    period_index_to_timestamp,
+    timestamp_to_period_index,
 )
 
 

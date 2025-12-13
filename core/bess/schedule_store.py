@@ -7,7 +7,7 @@ import logging
 from dataclasses import dataclass
 from datetime import date, datetime
 
-from core.bess.models import HourlyData, OptimizationResult
+from core.bess.models import OptimizationResult
 
 logger = logging.getLogger(__name__)
 
@@ -17,26 +17,14 @@ class StoredSchedule:
     """Container for a stored optimization result with metadata."""
 
     timestamp: datetime
-    optimization_hour: int  # Hour optimization started from (0-23)
+    optimization_period: int  # Period optimization started from
     optimization_result: OptimizationResult  # Direct storage of OptimizationResult
-    created_for_scenario: str  # "tomorrow", "hourly", "restart"
 
-    def get_optimization_range(self) -> tuple[int, int]:
-        """Get the hour range that was optimized."""
-        if (
-            "next_day" in self.created_for_scenario
-            or "tomorrow" in self.created_for_scenario
-        ):
-            return (0, 23)  # Full day optimization
-        else:
-            return (self.optimization_hour, 23)  # Partial day optimization
-
-    def get_hourly_data(self) -> list[HourlyData]:
-        """Get unified hourly data directly."""
-        return self.optimization_result.hourly_data
 
     def get_total_savings(self) -> float:
         """Get total savings from optimization results."""
+        if self.optimization_result.economic_summary is None:
+            raise ValueError("OptimizationResult missing economic_summary")
         return self.optimization_result.economic_summary.grid_to_battery_solar_savings
 
 
@@ -48,20 +36,18 @@ class ScheduleStore:
         self._schedules: list[StoredSchedule] = []
         self._current_date: date | None = None
 
-        logger.info("Initialized ScheduleStore with unified data structures")
+        logger.debug("Initialized ScheduleStore")
 
     def store_schedule(
         self,
         optimization_result: OptimizationResult,
-        optimization_hour: int,
-        scenario: str,
+        optimization_period: int
     ) -> StoredSchedule:
         """Store a new optimization result.
 
         Args:
             optimization_result: OptimizationResult from optimize_battery_schedule()
-            optimization_hour: Hour optimization started from (0-23)
-            scenario: Why this optimization was performed (any string)
+            optimization_period: Period optimization started from (0-95)
 
         Returns:
             StoredSchedule: The stored schedule object
@@ -73,15 +59,14 @@ class ScheduleStore:
         if not isinstance(optimization_result, OptimizationResult):
             raise ValueError("optimization_result must be an OptimizationResult object")
 
-        if not 0 <= optimization_hour <= 23:
-            raise ValueError(f"optimization_hour must be 0-23, got {optimization_hour}")
+        if optimization_period < 0:
+            raise ValueError(f"optimization_period must be non-negative, got {optimization_period}")
 
-        # Create the stored schedule - no scenario validation or mapping
+        # Create the stored schedule
         stored_schedule = StoredSchedule(
             timestamp=datetime.now(),
-            optimization_hour=optimization_hour,
-            optimization_result=optimization_result,
-            created_for_scenario=scenario,
+            optimization_period=optimization_period,
+            optimization_result=optimization_result
         )
 
         # Add to our list

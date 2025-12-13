@@ -39,6 +39,33 @@ if [ ! -f backend/requirements.txt ]; then
   exit 1
 fi
 
+# Extract options from config.yaml to backend/dev-options.json for development
+# Note: InfluxDB credentials are passed as environment variables, not in options.json
+echo "Extracting development options from config.yaml..."
+if [ -f config.yaml ]; then
+  ./.venv/bin/python << 'EOF'
+import yaml
+import json
+
+with open('config.yaml', 'r') as f:
+    config = yaml.safe_load(f)
+
+options = config.get('options', {})
+
+# Remove InfluxDB from options - credentials come from environment variables
+if 'influxdb' in options:
+    del options['influxdb']
+    print("  → InfluxDB credentials will be loaded from environment variables")
+
+with open('backend/dev-options.json', 'w') as f:
+    json.dump(options, f, indent=2)
+
+print("✓ Created backend/dev-options.json (simulates /data/options.json in HA)")
+EOF
+else
+  echo "Warning: config.yaml not found in root directory"
+fi
+
 echo "Stopping any existing containers..."
 docker-compose down --remove-orphans
 

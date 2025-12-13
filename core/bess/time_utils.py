@@ -161,3 +161,28 @@ def get_current_period_index() -> int:
     """
     now = datetime.now(tz=TIMEZONE)
     return timestamp_to_period_index(now)
+
+
+def format_period(period_index: int) -> str:
+    """Format period index as HH:MM time string for logging.
+
+    Args:
+        period_index: Period index (0-95 for today, 96-191 for tomorrow)
+
+    Returns:
+        Formatted time string like "14:30" or "00:00"
+
+    Example:
+        >>> format_period(0)
+        "00:00"
+        >>> format_period(58)
+        "14:30"
+        >>> format_period(95)
+        "23:45"
+    """
+    try:
+        timestamp = period_index_to_timestamp(period_index)
+        return timestamp.strftime("%H:%M")
+    except ValueError:
+        # Fallback for invalid period indices
+        return f"period_{period_index}"

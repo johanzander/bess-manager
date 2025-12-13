@@ -4,7 +4,7 @@ Complete replacement for battery_system.py that preserves ALL functionality.
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from .daily_view_builder import DailyView, DailyViewBuilder
@@ -15,20 +15,19 @@ from .dp_battery_algorithm import (
 )
 from .dp_schedule import DPSchedule
 from .exceptions import (
-    PriceDataUnavailableError,
     SystemConfigurationError,
 )
 from .growatt_schedule import GrowattScheduleManager
 from .ha_api_controller import HomeAssistantAPIController
 from .health_check import run_system_health_checks
 from .historical_data_store import HistoricalDataStore
-
-# EnergyData import removed as we're using fully calculated energy data from sensor_collector
+from .models import DecisionData, EconomicData, PeriodData
 from .power_monitor import HomePowerMonitor
 from .price_manager import HomeAssistantSource, PriceManager, PriceSource
 from .schedule_store import ScheduleStore
 from .sensor_collector import SensorCollector
 from .settings import BatterySettings, HomeSettings, PriceSettings
+from .time_utils import TIMEZONE, format_period
 
 logger = logging.getLogger(__name__)
 
@@ -130,7 +129,7 @@ class BatterySystemManager:
         # Critical sensor failure tracking for graceful degradation
         self._critical_sensor_failures = []
 
-        logger.info("BatterySystemManager initialized with strategic intent support")
+        logger.debug("BatterySystemManager initialized")
 
     @property
     def controller(self) -> HomeAssistantAPIController:
@@ -170,27 +169,35 @@ class BatterySystemManager:
             raise
 
     def update_battery_schedule(
-        self, current_hour: int, prepare_next_day: bool = False
+        self, current_period: int, prepare_next_day: bool = False
     ) -> bool:
-        """Main schedule update method"""
+        """Main schedule update method for quarterly resolution"""
 
-        # Input validation
-        if not 0 <= current_hour <= 23:
-            logger.error("Invalid hour: %d (must be 0-23)", current_hour)
+        # Input validation (no upper bound due to DST transitions)
+        if current_period < 0:
+            logger.error("Invalid period: %d (must be non-negative)", current_period)
             raise SystemConfigurationError(
-                message=f"Invalid hour: {current_hour} (must be 0-23)"
+                message=f"Invalid period: {current_period} (must be non-negative)"
             )
 
         if prepare_next_day:
-            logger.info("Preparing schedule for next day at hour %02d:00", current_hour)
+            logger.info(
+                "Preparing schedule for next day at period %d (%s)",
+                current_period,
+                format_period(current_period),
+            )
         else:
-            logger.info("Updating battery schedule for hour %02d:00", current_hour)
+            logger.info(
+                "Updating battery schedule for period %d (%s)",
+                current_period,
+                format_period(current_period),
+            )
 
         is_first_run = self._current_schedule is None
 
         try:
             # Handle special cases (midnight, next day prep)
-            self._handle_special_cases(current_hour, prepare_next_day)
+            self._handle_special_cases(current_period, prepare_next_day)
 
             # Get price data
             prices, price_entries = self._get_price_data(prepare_next_day)
@@ -198,8 +205,8 @@ class BatterySystemManager:
                 logger.warning("Schedule update aborted: No price data available")
                 return False
 
-            # Update energy data for completed hour
-            self._update_energy_data(current_hour, is_first_run, prepare_next_day)
+            # Update energy data for completed period
+            self._update_energy_data(current_period, is_first_run, prepare_next_day)
 
             # Get current battery state
             current_soc = self._get_current_battery_soc()
@@ -209,19 +216,18 @@ class BatterySystemManager:
 
             # Gather optimization data
             optimization_data_result = self._gather_optimization_data(
-                current_hour, current_soc, prepare_next_day
+                current_period, current_soc, prepare_next_day, len(prices)
             )
 
             if optimization_data_result is None:
                 logger.error("Failed to gather optimization data")
                 return False
 
-            optimization_hour, optimization_data = optimization_data_result
+            optimization_period, optimization_data = optimization_data_result
 
-            # Run optimization using DP algorithm with strategic intent capture
+            # Run optimization using DP algorithm with quarterly resolution
             optimization_result = self._run_optimization(
-                optimization_hour,
-                current_soc,
+                optimization_period,
                 optimization_data,
                 prices,
                 prepare_next_day,
@@ -233,7 +239,7 @@ class BatterySystemManager:
 
             # Create new schedule
             schedule_result = self._create_updated_schedule(
-                optimization_hour,
+                optimization_period,
                 optimization_result,
                 prices,
                 optimization_data,
@@ -246,60 +252,59 @@ class BatterySystemManager:
                 return False
 
             temp_schedule, temp_growatt = schedule_result
-            temp_growatt.current_hour = current_hour
 
             # Determine if we should apply the new schedule
             should_apply, reason = self._should_apply_schedule(
                 is_first_run,
-                current_hour,
+                current_period,
                 prepare_next_day,
                 temp_growatt,
-                optimization_hour,
+                optimization_period,
                 temp_schedule,
             )
 
             # Apply schedule if needed
             if should_apply:
                 self._apply_schedule(
-                    current_hour, temp_schedule, temp_growatt, reason, prepare_next_day
+                    current_period,
+                    temp_schedule,
+                    temp_growatt,
+                    reason,
+                    prepare_next_day,
                 )
             else:
                 # Update current schedule even when TOU doesn't change
                 self._current_schedule = temp_schedule
+                self._schedule_manager = (
+                    temp_growatt  # Update manager with new schedule
+                )
 
-                # Ensure hourly settings exist even when TOU doesn't change
-                if not self._schedule_manager.hourly_settings:
-                    self._schedule_manager.hourly_settings = (
-                        temp_growatt.hourly_settings
-                    )
-                    self._schedule_manager.strategic_intents = (
-                        temp_growatt.strategic_intents
-                    )
-
-            # Apply current hour settings
+            # Apply current period settings
             if not prepare_next_day:
-                self._apply_hourly_schedule(current_hour)
-                logger.info("Applied hourly settings for hour %02d:00", current_hour)
+                self._apply_period_schedule(current_period)
+                logger.info(
+                    "Applied period settings for period %d (%s)",
+                    current_period,
+                    format_period(current_period),
+                )
 
-            self.log_battery_schedule(current_hour)
+            self.log_battery_schedule(current_period)
             return True
 
         except Exception as e:
             logger.error(f"Failed to update battery schedule: {e}")
             return False
 
-    def log_battery_schedule(self, current_hour: int) -> None:
+    def log_battery_schedule(self, current_period: int) -> None:
         """Log the current battery schedule."""
         if not self._current_schedule:
             logger.warning("No current schedule available for reporting")
             return
 
-        logger.info(f"Logging battery schedule for hour {current_hour}")
-
         # Log Growatt TOU schedule and detailed schedule
         self._schedule_manager.log_current_TOU_schedule("=== GROWATT TOU SCHEDULE ===")
         self._schedule_manager.log_detailed_schedule(
-            "=== GROWATT DETAILED SCHEDULE WITH STRATEGIC INTENTS ==="
+            "=== GROWATT DETAILED SCHEDULE ==="
         )
 
     def _initialize_tou_schedule_from_inverter(self) -> None:
@@ -324,53 +329,97 @@ class BatterySystemManager:
             logger.error(f"Failed to read current inverter schedule: {e}")
 
     def _fetch_and_initialize_historical_data(self) -> None:
-        """Fetch and initialize historical data using new data flow."""
+        """Fetch and initialize historical data using quarterly resolution."""
         try:
-            current_hour, current_minute, today = self._get_current_time_info()
-            end_hour = self._determine_historical_end_hour(current_hour, current_minute)
+            now = datetime.now(tz=TIMEZONE)
+            current_period = now.hour * 4 + now.minute // 15
 
             logger.info(
-                f"Fetching historical data - current_hour={current_hour}, current_minute={current_minute}, end_hour={end_hour}"
+                f"Fetching historical data - current period: {current_period} ({format_period(current_period)})"
             )
 
-            if end_hour >= 0:
-                # Use new data collection method
-                for hour in range(0, end_hour + 1):
-                    try:
-                        # Use new sensor collector method to get complete energy data with detailed flows
-                        energy_data = self.sensor_collector.collect_energy_data(hour)
+            if current_period > 0:
+                # Get prices once for all periods (fetch outside loop to avoid repeated API calls)
+                try:
+                    buy_prices, sell_prices = self.price_manager.get_available_prices()
+                except Exception as e:
+                    logger.warning(f"Could not get prices for historical data: {e}")
+                    buy_prices, sell_prices = [], []
 
-                        # Store using new historical store method
-                        success = self.historical_store.record_energy_data(
-                            hour, energy_data, data_source="actual"
+                # Collect quarterly data for all completed periods
+                for period in range(0, current_period):
+                    try:
+                        # Collect cumulative sensor readings at period boundary (calculate deltas for energy flows)
+                        period_energy_data = self.sensor_collector.collect_energy_data(
+                            period
                         )
 
-                        if success:
-                            logger.info(
-                                f"Stored hour {hour}: Solar={energy_data.solar_production:.2f} kWh, "
-                                f"SOC={energy_data.battery_soe_start:.1f}%→{energy_data.battery_soe_end:.1f}%"
+                        # Calculate economic data using pre-fetched prices
+                        if period < len(buy_prices):
+                            buy_price = buy_prices[period]
+                            sell_price = sell_prices[period]
+
+                            # Calculate battery cycle cost based on actual charging
+                            battery_cycle_cost_sek = (
+                                period_energy_data.battery_charged
+                                * self.battery_settings.cycle_cost_per_kwh
+                            )
+
+                            # Use standard economic calculation from EconomicData
+                            economic_data = EconomicData.from_energy_data(
+                                energy_data=period_energy_data,
+                                buy_price=buy_price,
+                                sell_price=sell_price,
+                                battery_cycle_cost=battery_cycle_cost_sek,
                             )
                         else:
-                            logger.warning(
-                                f"Failed to store energy data for hour {hour}"
+                            # Period beyond available prices
+                            economic_data = EconomicData(
+                                buy_price=0.0, sell_price=0.0, hourly_savings=0.0
                             )
+
+                        # Store period data
+                        period_data = PeriodData(
+                            period=period,  # For backward compatibility, still called 'hour'
+                            energy=period_energy_data,
+                            timestamp=datetime.now(tz=TIMEZONE),
+                            data_source="actual",
+                            economic=economic_data,
+                            decision=DecisionData.from_actual_energy(period_energy_data),
+                        )
+                        self.historical_store.record_period(period, period_data)
+
+                        logger.debug(
+                            f"Stored period {period} ({format_period(period)}): Solar={period_energy_data.solar_production:.3f} kWh, "
+                            f"SOC={period_energy_data.battery_soe_start:.1f}%→{period_energy_data.battery_soe_end:.1f}%"
+                        )
 
                     except Exception as e:
                         logger.warning(
-                            f"Failed to collect/store data for hour {hour}: {e}"
+                            f"Failed to collect/store data for period {period} ({format_period(period)}): {e}"
                         )
 
-                # Verify storage using new method
-                completed_hours = []
-                for hour in range(0, end_hour + 1):
-                    if self.historical_store.has_data_for_hour(hour):
-                        completed_hours.append(hour)
+                # Verify storage using period-based API
+                completed_periods = [
+                    p
+                    for p in range(current_period)
+                    if self.historical_store.get_period(p) is not None
+                ]
 
-                logger.info(
-                    f"Historical store now contains {len(completed_hours)} hours: {completed_hours}"
-                )
+                if completed_periods:
+                    # Show the time range covered (start of first period to end of last period)
+                    first_period = completed_periods[0]
+                    last_period = completed_periods[-1]
+                    # Last period END time is 15 minutes after its start
+                    last_period_end = last_period + 1
+                    logger.info(
+                        f"Historical store now contains {len(completed_periods)} periods: "
+                        f"{format_period(first_period)} to {format_period(last_period_end)}"
+                    )
+                else:
+                    logger.info("No periods stored in historical store")
             else:
-                logger.info("end_hour < 0, no historical data to fetch")
+                logger.info("No completed periods, no historical data to fetch")
 
         except Exception as e:
             logger.error(f"Failed to initialize historical data: {e}")
@@ -409,41 +458,9 @@ class BatterySystemManager:
         except Exception as e:
             logger.warning(f"Failed to fetch predictions: {e}")
 
-    def _get_consumption_predictions(self) -> list[float]:
-        """Get consumption predictions directly from controller."""
-        try:
-            if self._controller is not None:
-                predictions = self._controller.get_estimated_consumption()
-                if predictions and len(predictions) == 24:
-                    return predictions
-            else:
-                logger.warning(
-                    "Cannot get consumption predictions: controller is not available"
-                )
-        except Exception as e:
-            logger.warning(f"Failed to get consumption predictions: {e}")
-
-        return [4.0] * 24  # Default fallback
-
-    def _get_solar_predictions(self) -> list[float]:
-        """Get solar predictions directly from controller."""
-        try:
-            if self._controller is not None:
-                predictions = self._controller.get_solar_forecast()
-                if predictions and len(predictions) == 24:
-                    return predictions
-            else:
-                logger.warning(
-                    "Cannot get solar predictions: controller is not available"
-                )
-        except Exception as e:
-            logger.warning(f"Failed to get solar predictions: {e}")
-
-        return [0.0] * 24  # Default fallback
-
-    def _handle_special_cases(self, hour: int, prepare_next_day: bool) -> None:
+    def _handle_special_cases(self, period: int, prepare_next_day: bool) -> None:
         """Handle special cases like midnight transition."""
-        if hour == 0 and not prepare_next_day:
+        if period == 0 and not prepare_next_day:
             try:
                 if self._controller is not None:
                     current_soc = self._controller.get_battery_soc()
@@ -477,13 +494,16 @@ class BatterySystemManager:
 
             prices = [entry["price"] for entry in price_entries]
 
-            # Handle DST transitions
-            if len(prices) == 23:
-                logger.info("Detected DST spring forward transition")
-            elif len(prices) == 25:
-                logger.info("Detected DST fall back transition")
-            elif len(prices) != 24:
-                logger.warning(f"Expected 24 prices but got {len(prices)}")
+            # Prices are quarterly (96 periods) - DP algorithm supports variable horizon
+            # Handle DST transitions (quarterly)
+            if len(prices) == 92:
+                logger.info(
+                    "Detected DST spring forward transition (92 quarterly periods)"
+                )
+            elif len(prices) == 100:
+                logger.info("Detected DST fall back transition (100 quarterly periods)")
+            elif len(prices) != 96:
+                logger.warning(f"Expected 96 quarterly prices but got {len(prices)}")
 
             return prices, price_entries
 
@@ -492,58 +512,103 @@ class BatterySystemManager:
             return None, None
 
     def _update_energy_data(
-        self, hour: int, is_first_run: bool, prepare_next_day: bool
+        self, period: int, is_first_run: bool, prepare_next_day: bool
     ) -> None:
         """Track energy data collection with strategic intent."""
-        logger.info("=== ENERGY DATA UPDATE DEBUG START ===")
         logger.info(
-            f"Hour: {hour}, is_first_run: {is_first_run}, prepare_next_day: {prepare_next_day}"
+            f"Period: {period} ({format_period(period)}), is_first_run: {is_first_run}, prepare_next_day: {prepare_next_day}"
         )
 
-        if not is_first_run and hour > 0 and not prepare_next_day:
-            prev_hour = hour - 1
-            logger.info(f"Collecting data for previous hour: {prev_hour}")
+        if not is_first_run and period > 0 and not prepare_next_day:
+            prev_period = period - 1
+            logger.info(
+                f"Collecting data for previous period: {prev_period} ({format_period(prev_period)})"
+            )
 
             # Use sensor collector to get complete energy data with detailed flows
-            energy_data = self.sensor_collector.collect_energy_data(prev_hour)
+            # Uses live sensors for current data (fast)
+            # Falls back to InfluxDB for historical data at startup/restart
+            energy_data = self.sensor_collector.collect_energy_data(prev_period)
 
             logger.info(
-                f"Collected energy data for hour {prev_hour} - Solar: {energy_data.solar_production:.2f} kWh, "
-                f"Load: {energy_data.home_consumption:.2f} kWh, SOC: {energy_data.battery_soe_start:.1f}% → {energy_data.battery_soe_end:.1f}%"
+                f"Collected energy data for period {prev_period} ({format_period(prev_period)}) - "
+                f"Solar: {energy_data.solar_production:.3f} kWh, "
+                f"Load: {energy_data.home_consumption:.3f} kWh, "
+                f"SOC: {energy_data.battery_soe_start:.1f}% → {energy_data.battery_soe_end:.1f}%"
             )
 
-            # Store using new method
-            self.historical_store.record_energy_data(
-                prev_hour, energy_data, data_source="actual"
-            )
-            logger.info(f"Recorded energy data for hour {prev_hour}")
+            # Get prices for this period
+            buy_prices, sell_prices = self.price_manager.get_available_prices()
+            if 0 <= prev_period < len(buy_prices):
+                buy_price = buy_prices[prev_period]
+                sell_price = sell_prices[prev_period]
 
-            # Verify storage
-            stored_data = self.historical_store.get_hour_record(prev_hour)
-            if stored_data:
-                logger.info(
-                    f"Verified: Hour {prev_hour} stored with intent {stored_data.decision.strategic_intent}"
+                # Calculate battery cycle cost based on actual charging
+                battery_cycle_cost_sek = (
+                    energy_data.battery_charged * self.battery_settings.cycle_cost_per_kwh
+                )
+
+                # Calculate economic data from actual energy flows
+                economic_data = EconomicData.from_energy_data(
+                    energy_data=energy_data,
+                    buy_price=buy_price,
+                    sell_price=sell_price,
+                    battery_cycle_cost=battery_cycle_cost_sek,
                 )
             else:
-                raise RuntimeError(f"Failed to store energy data for hour {prev_hour}")
+                # Period beyond available prices
+                economic_data = EconomicData(
+                    buy_price=0.0, sell_price=0.0, hourly_savings=0.0
+                )
+
+            # Store using period-based API
+            period_data = PeriodData(
+                period=prev_period,
+                energy=energy_data,
+                timestamp=datetime.now(tz=TIMEZONE),
+                data_source="actual",
+                economic=economic_data,
+                decision=DecisionData.from_actual_energy(energy_data),
+            )
+            self.historical_store.record_period(prev_period, period_data)
+            logger.info(
+                f"Recorded energy data for period {prev_period} ({format_period(prev_period)})"
+            )
+
+            # Verify storage
+            stored_data = self.historical_store.get_period(prev_period)
+            if stored_data:
+                logger.info(
+                    f"Verified: Period {prev_period} stored with intent {stored_data.decision.strategic_intent}"
+                )
+            else:
+                raise RuntimeError(
+                    f"Failed to store energy data for period {prev_period}"
+                )
 
         else:
             logger.info(
-                f"Skipping data collection: is_first_run={is_first_run}, hour={hour}, prepare_next_day={prepare_next_day}"
+                f"Skipping data collection: is_first_run={is_first_run}, period={period}, prepare_next_day={prepare_next_day}"
             )
 
         # Log energy balance
         if not prepare_next_day:
-            try:
-                logger.info("Calling _log_energy_balance()")
-                self._log_energy_balance()
-            except Exception as e:
-                logger.error(f"EXCEPTION in _log_energy_balance(): {e}")
+            self._log_energy_balance()
 
-        # Final check: what hours do we have stored?
-        completed_hours = self.historical_store.get_completed_hours()
-        logger.info(f"Historical store after update: {completed_hours}")
-        logger.info("=== ENERGY DATA UPDATE DEBUG END ===")
+        # Final check: what periods do we have stored?
+        today_periods = self.historical_store.get_today_periods()
+        completed_periods = [i for i, p in enumerate(today_periods) if p is not None]
+        if completed_periods:
+            first_period = completed_periods[0]
+            last_period = completed_periods[-1]
+            # Last period END time is 15 minutes after its start
+            last_period_end = last_period + 1
+            logger.info(
+                f"Historical store: {len(completed_periods)} periods "
+                f"({format_period(first_period)} to {format_period(last_period_end)})"
+            )
+        else:
+            logger.info("Historical store: no periods stored yet")
 
     def _get_current_battery_soc(self) -> float | None:
         """Get current battery SOC with validation."""
@@ -568,101 +633,110 @@ class BatterySystemManager:
             return None
 
     def _gather_optimization_data(
-        self, hour: int, current_soc: float, prepare_next_day: bool
+        self, period: int, current_soc: float, prepare_next_day: bool, period_count: int
     ) -> tuple[int, dict[str, list[float]]] | None:
-        """Always return full 24-hour data combining actuals + predictions with correct SOC progression."""
+        """Always return full period data combining actuals + predictions with correct SOC progression.
 
-        if not 0 <= hour <= 23:
-            logger.error(f"Invalid hour: {hour}")
+        Args:
+            period: Current period index
+            current_soc: Current state of charge (%)
+            prepare_next_day: Whether preparing for next day
+            period_count: Number of periods in the day (handles DST: 92, 96, or 100)
+        """
+
+        if period < 0:
+            logger.error(f"Invalid period: {period} (must be non-negative)")
             return None
 
         current_soe = current_soc / 100.0 * self.battery_settings.total_capacity
 
-        # Always build full 24-hour arrays
-        consumption_data = [0.0] * 24
-        solar_data = [0.0] * 24
-        combined_soe = [0.0] * 24  # FIXED: Initialize to zeros instead of current_soe
-        combined_actions = [0.0] * 24
-        solar_charged = [0.0] * 24
+        # Build arrays dynamically based on period_count (handles DST)
+        consumption_data = [0.0] * period_count
+        solar_data = [0.0] * period_count
+        combined_soe = [0.0] * period_count
+        combined_actions = [0.0] * period_count
+        solar_charged = [0.0] * period_count
 
         if prepare_next_day:
             # For next day, use predictions only
-            consumption_predictions = self._get_consumption_predictions()
-            solar_predictions = self._get_solar_predictions()
+            consumption_predictions = self.controller.get_estimated_consumption()
+            solar_predictions = self.controller.get_solar_forecast()
 
             consumption_data = consumption_predictions
             solar_data = solar_predictions
 
-            # Initialize all hours with minimal SOC for next day
+            # Initialize all periods with minimal SOC for next day
             initial_soe = self.battery_settings.min_soe_kwh
-            combined_soe = [initial_soe] * 24
+            combined_soe = [initial_soe] * period_count
 
-            optimization_hour = 0
+            optimization_period = 0
 
         else:
-            # FIXED: For today, properly calculate SOC progression
-            completed_hours = self.historical_store.get_completed_hours()
-            predictions_consumption = self._get_consumption_predictions()
-            predictions_solar = self._get_solar_predictions()
-            logger.info(f"Stored hours: {completed_hours}")
+            # For today, properly calculate SOC progression
+            today_periods = self.historical_store.get_today_periods()
+            completed_periods = [
+                i for i, p in enumerate(today_periods) if p is not None
+            ]
+            predictions_consumption = self.controller.get_estimated_consumption()
+            predictions_solar = self.controller.get_solar_forecast()
 
             # Track running SOC for proper progression
             running_soe = current_soe
 
-            for h in range(24):
-                if h in completed_hours and h < hour:
-                    # Use actual data for past hours
-                    event = self.historical_store.get_hour_record(h)
+            for p in range(period_count):
+                if p in completed_periods and p < period:
+                    # Use actual data for past periods
+                    event = self.historical_store.get_period(p)
                     if event:
-                        consumption_data[h] = event.energy.home_consumption
-                        solar_data[h] = event.energy.solar_production
-                        combined_soe[h] = event.energy.battery_soe_end
-                        combined_actions[h] = (
+                        consumption_data[p] = event.energy.home_consumption
+                        solar_data[p] = event.energy.solar_production
+                        combined_soe[p] = event.energy.battery_soe_end
+                        combined_actions[p] = (
                             event.energy.battery_charged
                             - event.energy.battery_discharged
                         )
-                        solar_charged[h] = min(
+                        solar_charged[p] = min(
                             event.energy.battery_charged, event.energy.solar_production
                         )
-                        # Update running SOE to the end state of this hour
-                        running_soe = combined_soe[h]
+                        # Update running SOE to the end state of this period
+                        running_soe = combined_soe[p]
                     else:
                         # Fallback to predictions if event missing
-                        consumption_data[h] = (
-                            predictions_consumption[h]
-                            if h < len(predictions_consumption)
-                            else 4.0
+                        consumption_data[p] = (
+                            predictions_consumption[p]
+                            if p < len(predictions_consumption)
+                            else 1.0
                         )
-                        solar_data[h] = (
-                            predictions_solar[h] if h < len(predictions_solar) else 0.0
+                        solar_data[p] = (
+                            predictions_solar[p] if p < len(predictions_solar) else 0.0
                         )
                         # Use the last known SOE for missing data
-                        combined_soe[h] = running_soe
+                        combined_soe[p] = running_soe
                 else:
-                    # Use predictions for current and future hours
-                    consumption_data[h] = (
-                        predictions_consumption[h]
-                        if h < len(predictions_consumption)
-                        else 4.0
+                    # Use predictions for current and future periods
+                    consumption_data[p] = (
+                        predictions_consumption[p]
+                        if p < len(predictions_consumption)
+                        else 1.0
                     )
-                    solar_data[h] = (
-                        predictions_solar[h] if h < len(predictions_solar) else 0.0
+                    solar_data[p] = (
+                        predictions_solar[p] if p < len(predictions_solar) else 0.0
                     )
 
-                    # CRITICAL FIX: Set correct SOE for optimization starting point
-                    if h == hour:
-                        # This is the optimization starting hour - use current SOE
-                        combined_soe[h] = current_soe
+                    # Set correct SOE for optimization starting point
+                    if p == period:
+                        # This is the optimization starting period - use current SOE
+                        combined_soe[p] = current_soe
                         running_soe = current_soe
                     else:
-                        # For other future hours, use running SOE (will be updated by optimization)
-                        combined_soe[h] = running_soe
+                        # For other future periods, use running SOE (will be updated by optimization)
+                        combined_soe[p] = running_soe
 
-            optimization_hour = hour
+            optimization_period = period
 
-        # Ensure current hour has correct SOE (redundant but safe)
+        # Ensure current period has correct SOE
         if not prepare_next_day:
-            combined_soe[optimization_hour] = current_soe
+            combined_soe[optimization_period] = current_soe
 
         optimization_data = {
             "full_consumption": consumption_data,
@@ -672,17 +746,16 @@ class BatterySystemManager:
             "solar_charged": solar_charged,
         }
 
-        logger.debug(f"Optimization data prepared for hour {optimization_hour}")
+        logger.debug(f"Optimization data prepared for period {optimization_period}")
         logger.debug(
-            f"SOE progression check - Hour {hour-1}: {combined_soe[hour-1]:.1f}, Hour {hour}: {combined_soe[hour]:.1f}"
+            f"SOE progression check - Period {period-1}: {combined_soe[period-1]:.1f}, Period {period}: {combined_soe[period]:.1f}"
         )
 
-        return optimization_hour, optimization_data
+        return optimization_period, optimization_data
 
     def _run_optimization(
         self,
-        optimization_hour: int,
-        current_soc: float,
+        optimization_period: int,
         optimization_data: dict[str, list[float]],
         prices: list[float],
         prepare_next_day: bool,
@@ -690,41 +763,41 @@ class BatterySystemManager:
         """Run optimization - now returns OptimizationResult directly."""
 
         try:
-            current_soe = optimization_data["combined_soe"][optimization_hour]
+            current_soe = optimization_data["combined_soe"][optimization_period]
 
             # Calculate initial cost basis
             if prepare_next_day:
                 initial_cost_basis = self.battery_settings.cycle_cost_per_kwh
             else:
                 initial_cost_basis = self._calculate_initial_cost_basis(
-                    optimization_hour
+                    optimization_period
                 )
 
-            # Get optimization portions
-            remaining_prices = prices[optimization_hour:]
+            # Get optimization portions (slice from current period)
+            remaining_prices = prices[optimization_period:]
             remaining_consumption = optimization_data["full_consumption"][
-                optimization_hour:
+                optimization_period:
             ]
-            remaining_solar = optimization_data["full_solar"][optimization_hour:]
+            remaining_solar = optimization_data["full_solar"][optimization_period:]
 
             # Ensure array lengths match
-            n_hours = len(remaining_prices)
-            if len(remaining_consumption) != n_hours:
-                if len(remaining_consumption) < n_hours:
+            n_periods = len(remaining_prices)
+            if len(remaining_consumption) != n_periods:
+                if len(remaining_consumption) < n_periods:
                     remaining_consumption.extend(
-                        [4.0] * (n_hours - len(remaining_consumption))
+                        [1.0] * (n_periods - len(remaining_consumption))
                     )
                 else:
-                    remaining_consumption = remaining_consumption[:n_hours]
+                    remaining_consumption = remaining_consumption[:n_periods]
 
-            if len(remaining_solar) != n_hours:
-                if len(remaining_solar) < n_hours:
-                    remaining_solar.extend([0.0] * (n_hours - len(remaining_solar)))
+            if len(remaining_solar) != n_periods:
+                if len(remaining_solar) < n_periods:
+                    remaining_solar.extend([0.0] * (n_periods - len(remaining_solar)))
                 else:
-                    remaining_solar = remaining_solar[:n_hours]
+                    remaining_solar = remaining_solar[:n_periods]
 
             logger.info(
-                f"Running optimization for {n_hours} hours from hour {optimization_hour} with strategic intent capture"
+                f"Running optimization for {n_periods} periods from {format_period(optimization_period)}"
             )
 
             # Calculate buy and sell prices
@@ -744,6 +817,9 @@ class BatterySystemManager:
                 initial_cost_basis=initial_cost_basis,
             )
 
+            # Add timestamps to period data (algorithm is time-agnostic, operates on relative indices)
+            self._add_timestamps_to_period_data(result, optimization_period)
+
             # Print results table with strategic intents
             print_optimization_results(result, buy_prices, sell_prices)
 
@@ -759,9 +835,44 @@ class BatterySystemManager:
             logger.error(f"Optimization failed: {e}")
             return None
 
+    def _add_timestamps_to_period_data(
+        self, result: OptimizationResult, optimization_period: int
+    ) -> None:
+        """
+        Add timestamps and correct period indices in period data after optimization.
+
+        The DP algorithm is time-agnostic and operates on relative period indices (0 to horizon-1).
+        This method maps those relative indices to actual timestamps and period indices based on optimization_period.
+
+        Args:
+            result: OptimizationResult containing period_data with relative periods (0, 1, 2, ...) and None timestamps
+            optimization_period: The actual period index where optimization started (0-95 for today, 96-191 for tomorrow, etc.)
+        """
+        for i, period_data in enumerate(result.period_data):
+            # Calculate actual period index
+            actual_period = optimization_period + i
+
+            # Convert period index to datetime
+            # Period 0-95: today, 96-191: tomorrow, etc.
+            day_offset = actual_period // 96  # Which day (0=today, 1=tomorrow, etc.)
+            period_in_day = actual_period % 96  # Period within the day (0-95)
+            period_hour = period_in_day // 4  # Hour within day (0-23)
+            period_minute = (period_in_day % 4) * 15  # Minute (0, 15, 30, 45)
+
+            # Create timestamp starting from today
+            now = datetime.now()
+            base_date = now.replace(
+                hour=period_hour, minute=period_minute, second=0, microsecond=0
+            )
+            timestamp = base_date + timedelta(days=day_offset)
+
+            # Update the period_data with correct period index and timestamp (dataclass is mutable)
+            period_data.period = actual_period
+            period_data.timestamp = timestamp
+
     def _create_updated_schedule(
         self,
-        optimization_hour: int,
+        optimization_period: int,
         result: OptimizationResult,
         prices: list[float],
         optimization_data: dict[str, list[float]],
@@ -773,75 +884,75 @@ class BatterySystemManager:
         try:
             logger.info("=== SCHEDULE CREATION DEBUG START ===")
             logger.info(
-                f"optimization_hour: {optimization_hour}, prepare_next_day: {prepare_next_day}"
+                f"optimization_period: {optimization_period} ({format_period(optimization_period)}), prepare_next_day: {prepare_next_day}"
             )
 
-            # Extract HourlyData directly from OptimizationResult
-            hourly_data_list = result.hourly_data
+            # Extract PeriodData (actually period data) directly from OptimizationResult
+            period_data_list = result.period_data
 
-            # FIXED: Start with the optimization_data SOE values (which have correct progression)
+            # Start with the optimization_data SOE values (which have correct progression)
             combined_soe = optimization_data["combined_soe"].copy()
             combined_actions = optimization_data["combined_actions"].copy()
             solar_charged = optimization_data["solar_charged"].copy()
 
             logger.info(
-                f"Initial SOE from optimization_data: {combined_soe[optimization_hour:optimization_hour+3]}"
+                f"Initial SOE from optimization_data: {combined_soe[optimization_period:optimization_period+3]}"
             )
 
-            # FIXED: Only update the hours that were actually optimized
+            # Only update the periods that were actually optimized
             logger.info(
-                f"Got {len(hourly_data_list)} HourlyData objects from optimization"
+                f"Got {len(period_data_list)} period data objects from optimization"
             )
 
-            for i, hour_data in enumerate(hourly_data_list):
-                target_hour = optimization_hour + i
-                if target_hour < 24:
+            for i, period_data in enumerate(period_data_list):
+                target_period = optimization_period + i
+                if target_period < 96:
                     logger.debug(
-                        f"  Mapping HourlyData index {i} (action={hour_data.decision.battery_action:.1f}) to hour {target_hour}"
+                        f"  Mapping period data index {i} (action={period_data.decision.battery_action:.1f}) to period {target_period}"
                     )
-                    combined_actions[target_hour] = (
-                        hour_data.decision.battery_action or 0.0
+                    combined_actions[target_period] = (
+                        period_data.decision.battery_action or 0.0
                     )
-                    # Store the SOE directly (it's already in the correct format from HourlyData)
-                    combined_soe[target_hour] = hour_data.energy.battery_soe_end
+                    # Store the SOE directly (it's already in the correct format from period data)
+                    combined_soe[target_period] = period_data.energy.battery_soe_end
 
             # Log the corrected SOE progression
             logger.info("CORRECTED SOE progression:")
-            for h in range(
-                max(0, optimization_hour - 1), min(24, optimization_hour + 4)
+            for p in range(
+                max(0, optimization_period - 1), min(96, optimization_period + 4)
             ):
                 soc_percent = (
-                    combined_soe[h] / self.battery_settings.total_capacity
+                    combined_soe[p] / self.battery_settings.total_capacity
                 ) * 100
-                action = combined_actions[h]
+                action = combined_actions[p]
                 logger.info(
-                    f"  Hour {h}: SOE={combined_soe[h]:.1f}kWh ({soc_percent:.1f}%), Action={action:.1f}kW"
+                    f"  Period {p}: SOE={combined_soe[p]:.1f}kWh ({soc_percent:.1f}%), Action={action:.1f}kW"
                 )
 
             # Create strategic intents array from OptimizationResult
-            full_day_strategic_intents = ["IDLE"] * 24
-            for i, hour_data in enumerate(hourly_data_list):
-                target_hour = optimization_hour + i
-                if target_hour < 24:
-                    full_day_strategic_intents[target_hour] = (
-                        hour_data.decision.strategic_intent
+            full_day_strategic_intents = ["IDLE"] * 96
+            for i, period_data in enumerate(period_data_list):
+                target_period = optimization_period + i
+                if target_period < 96:
+                    full_day_strategic_intents[target_period] = (
+                        period_data.decision.strategic_intent
                     )
 
-            # ADD: Correct historical hours with actual strategic intents BEFORE creating schedules
+            # Correct historical periods with actual strategic intents BEFORE creating schedules
             if not prepare_next_day:
-                current_hour = datetime.now().hour
-                for hour in range(min(current_hour, 24)):
-                    if hour < len(full_day_strategic_intents):
-                        event = self.historical_store.get_hour_record(hour)
+                current_period = datetime.now().hour * 4 + datetime.now().minute // 15
+                for period in range(min(current_period, 96)):
+                    if period < len(full_day_strategic_intents):
+                        event = self.historical_store.get_period(period)
                         if event and hasattr(event, "strategic_intent"):
-                            full_day_strategic_intents[hour] = (
+                            full_day_strategic_intents[period] = (
                                 event.decision.strategic_intent
                             )
                             logger.debug(
-                                f"Hour {hour}: Corrected intent from IDLE to '{event.decision.strategic_intent}'"
+                                f"Period {period}: Corrected intent from IDLE to '{event.decision.strategic_intent}'"
                             )
 
-            # FIXED: Store initial SOC in OptimizationResult for DailyViewBuilder
+            # Store initial SOC in OptimizationResult for DailyViewBuilder
             if self._initial_soe is not None:
                 result.input_data["initial_soe"] = self._initial_soe
             elif not prepare_next_day:
@@ -852,12 +963,16 @@ class BatterySystemManager:
             # Store in schedule store - now using OptimizationResult directly
             self.schedule_store.store_schedule(
                 optimization_result=result,
-                optimization_hour=optimization_hour,
-                scenario="tomorrow" if prepare_next_day else "hourly",
+                optimization_period=optimization_period,
             )
 
             # Create DPSchedule with corrected SOE and strategic intents
             # Convert EconomicSummary to dict for DPSchedule
+            if result.economic_summary is None:
+                raise ValueError(
+                    "OptimizationResult missing economic_summary - algorithm should always provide this"
+                )
+
             summary_dict = {
                 "grid_only_cost": result.economic_summary.grid_only_cost,
                 "solar_only_cost": result.economic_summary.solar_only_cost,
@@ -895,30 +1010,22 @@ class BatterySystemManager:
             )
             temp_growatt.strategic_intents = full_day_strategic_intents
 
-            # Copy existing TOU intervals for past hours if not preparing next day
+            # Copy existing TOU intervals for past periods if not preparing next day
             if not prepare_next_day and hasattr(
                 self._schedule_manager, "tou_intervals"
             ):
                 for segment in self._schedule_manager.tou_intervals:
-                    start_hour = int(segment["start_time"].split(":")[0])
-                    if start_hour < optimization_hour:
+                    start_time_parts = segment["start_time"].split(":")
+                    start_period = (
+                        int(start_time_parts[0]) * 4 + int(start_time_parts[1]) // 15
+                    )
+                    if start_period < optimization_period:
                         temp_growatt.tou_intervals.append(segment.copy())
 
-            effective_hour = 0 if prepare_next_day else optimization_hour
-            temp_growatt.current_hour = effective_hour
-
             # Create schedule with strategic intents
-            logger.info(
-                f"Creating Growatt schedule with current_hour={temp_growatt.current_hour}"
-            )
+            effective_period = 0 if prepare_next_day else optimization_period
+            logger.info(f"Creating Growatt schedule for period={effective_period}")
             temp_growatt.create_schedule(temp_schedule)
-
-            if prepare_next_day:
-                logger.info("Prepared next day's schedule with strategic intents")
-            else:
-                logger.info(
-                    f"Updated schedule from hour {optimization_hour:02d}:00 with strategic intents"
-                )
 
             return temp_schedule, temp_growatt
 
@@ -932,22 +1039,19 @@ class BatterySystemManager:
     def _should_apply_schedule(
         self,
         is_first_run: bool,
-        hour: int,
+        period: int,
         prepare_next_day: bool,
         temp_growatt: GrowattScheduleManager,
-        optimization_hour: int,
+        optimization_period: int,
         temp_schedule: DPSchedule,
     ) -> tuple[bool, str]:
-        """Determine if schedule should be applied based on TOU differences from current hour onwards."""
+        """Determine if schedule should be applied based on TOU differences from current period onwards."""
 
-        logger.info("Evaluating whether to apply new schedule at hour %d", hour)
+        logger.info("Evaluating whether to apply new schedule at period %d", period)
 
         # Special case: preparing next day (runs at 23:55 for 00:00 start)
         if prepare_next_day:
-            # Compare full day TOU settings for tomorrow
-            self._schedule_manager.current_hour = 0  # Compare from start of day
-            temp_growatt.current_hour = 0
-
+            # Compare full day TOU settings for tomorrow (from start of day)
             schedules_differ, reason = self._schedule_manager.compare_schedules(
                 other_schedule=temp_growatt, from_hour=0
             )
@@ -959,13 +1063,12 @@ class BatterySystemManager:
             )
             return schedules_differ, f"Next day: {reason}"
 
-        # Normal case: compare TOU settings from current hour onwards
+        # Normal case: compare TOU settings from current period onwards
         try:
-            self._schedule_manager.current_hour = hour
-            temp_growatt.current_hour = hour
-
+            # Convert period to hour for Growatt TOU comparison (hardware operates hourly)
+            from_hour = period // 4
             schedules_differ, reason = self._schedule_manager.compare_schedules(
-                other_schedule=temp_growatt, from_hour=hour
+                other_schedule=temp_growatt, from_hour=from_hour
             )
 
             if schedules_differ:
@@ -981,7 +1084,7 @@ class BatterySystemManager:
 
     def _apply_schedule(
         self,
-        hour: int,
+        period: int,
         temp_schedule: DPSchedule,
         temp_growatt: GrowattScheduleManager,
         reason: str,
@@ -992,7 +1095,11 @@ class BatterySystemManager:
         logger.info("=" * 80)
         logger.info("=== SCHEDULE APPLICATION START ===")
         logger.info(
-            "Hour: %02d, Reason: %s, Next day: %s", hour, reason, prepare_next_day
+            "Period: %d (%s), Reason: %s, Next day: %s",
+            period,
+            format_period(period),
+            reason,
+            prepare_next_day,
         )
         logger.info("=" * 80)
 
@@ -1016,19 +1123,23 @@ class BatterySystemManager:
                 new_tou, "before_sending_to_inverter"
             )
 
-            effective_hour = 0 if prepare_next_day else hour
+            effective_period = 0 if prepare_next_day else period
+            effective_hour = effective_period // 4
 
             # Find segments to disable and update
             to_disable = []
             to_update = []
 
             logger.info(
-                "Analyzing TOU changes from hour %02d onwards...", effective_hour
+                "Analyzing TOU changes from period %d (hour %02d) onwards...",
+                effective_period,
+                effective_hour,
             )
 
             # Identify segments to disable
             for current in current_tou:
-                start_hour = int(current["start_time"].split(":")[0])
+                start_time_parts = current["start_time"].split(":")
+                start_hour = int(start_time_parts[0])
                 if (
                     start_hour >= effective_hour
                     or int(current["end_time"].split(":")[0]) >= effective_hour
@@ -1167,12 +1278,11 @@ class BatterySystemManager:
                 logger.info("No TOU segment changes needed")
 
             # Update schedule manager
-            temp_growatt.current_hour = hour
             self._schedule_manager = temp_growatt
 
-            # Apply current hour settings
+            # Apply current period settings
             if not prepare_next_day:
-                self._apply_hourly_schedule(hour)
+                self._apply_period_schedule(period)
 
             logger.info("Schedule applied successfully")
 
@@ -1180,61 +1290,154 @@ class BatterySystemManager:
             logger.error("Failed to apply schedule: %s", e)
             raise
 
-    def _apply_hourly_schedule(self, hour: int) -> None:
-        """Apply hourly settings with proper charge/discharge power rates."""
-        logger.info("=== APPLY HOURLY SCHEDULE ===")
+    def _apply_period_schedule(self, period: int) -> None:
+        """Apply period settings with proper charge/discharge power rates.
 
-        # Get schedule settings for current hour
-        settings = self._schedule_manager.get_hourly_settings(hour)
+        Uses per-period strategic intent for full quarterly resolution control.
+        """
 
-        # Log strategic context with power information
-        strategic_intent = settings["strategic_intent"]
-        battery_action_kw = settings["battery_action_kw"]
-        charge_rate = settings.get("charge_rate", 0)
-        discharge_rate = settings["discharge_rate"]
+        # Get current period's strategic intent (quarterly resolution)
+        if period >= len(self._schedule_manager.strategic_intents):
+            logger.warning(
+                "Period %d exceeds strategic intents length %d",
+                period,
+                len(self._schedule_manager.strategic_intents)
+            )
+            return
 
+        strategic_intent = self._schedule_manager.strategic_intents[period]
+
+        # Get battery action for this specific period
+        # Note: actions now store energy (kWh) per period, convert to power (kW)
+        battery_action_kwh = 0.0
+        battery_action_kw = 0.0
+        if self._schedule_manager.current_schedule and self._schedule_manager.current_schedule.actions:
+            if period < len(self._schedule_manager.current_schedule.actions):
+                battery_action_kwh = self._schedule_manager.current_schedule.actions[period]
+                # Convert kWh to kW: power = energy / time
+                # Calculate period duration from number of periods per day
+                num_periods = len(self._schedule_manager.current_schedule.actions)
+                period_duration_hours = 24.0 / num_periods
+                battery_action_kw = battery_action_kwh / period_duration_hours
+
+        # Determine charge/discharge rates based on period's strategic intent
+        if strategic_intent == "GRID_CHARGING":
+            grid_charge = True
+            discharge_rate = 0
+            charge_rate = 100  # Full power for grid charging
+
+        elif strategic_intent == "SOLAR_STORAGE":
+            grid_charge = False
+            discharge_rate = 0
+            charge_rate = 100  # Full power for solar storage
+
+        elif strategic_intent == "LOAD_SUPPORT":
+            grid_charge = False
+            discharge_rate = 100  # Full discharge for load support
+            charge_rate = 0
+
+        elif strategic_intent == "EXPORT_ARBITRAGE":
+            grid_charge = False
+            # Calculate discharge rate from battery action
+            if battery_action_kw < -0.01:  # Discharging
+                discharge_power_pct = abs(battery_action_kw) / self.battery_settings.max_discharge_power_kw * 100
+                discharge_rate = min(100, max(0, int(discharge_power_pct)))
+            else:
+                discharge_rate = 0
+            charge_rate = 0
+
+        elif strategic_intent == "IDLE":
+            grid_charge = False
+            discharge_rate = 0
+            charge_rate = 100  # Allow solar charging
+
+        else:
+            logger.warning("Unknown strategic intent: %s, using IDLE defaults", strategic_intent)
+            grid_charge = False
+            discharge_rate = 0
+            charge_rate = 100
+
+        hour = period // 4
         logger.info(
-            "Strategic context: Intent=%s, Action=%.2f kW, ChargeRate=%d%%, DischargeRate=%d%%",
+            "Period %d (%02d:%02d): Intent=%s, Action=%.2f kWh (%.2f kW), ChargeRate=%d%%, DischargeRate=%d%%",
+            period,
+            hour,
+            (period % 4) * 15,
             strategic_intent,
+            battery_action_kwh,
             battery_action_kw,
             charge_rate,
             discharge_rate,
         )
 
         # Apply grid charge setting
-        grid_charge_value = settings["grid_charge"]
-        logger.info(
-            "HARDWARE: Setting grid charge to %s for hour %02d:00",
-            grid_charge_value,
-            hour,
+        logger.debug(
+            "HARDWARE: Setting grid charge to %s for period %d",
+            grid_charge,
+            period,
         )
-        self.controller.set_grid_charge(grid_charge_value)
+        self.controller.set_grid_charge(grid_charge)
 
         # Apply charging power rate (when grid charging is enabled)
         self.adjust_charging_power()
 
         # Apply discharge power rate
         logger.info(
-            "HARDWARE: Setting discharge power rate to %d%% for hour %02d:00",
+            "HARDWARE: Setting discharge power rate to %d%% for period %d",
             discharge_rate,
-            hour,
+            period,
         )
         self.controller.set_discharging_power_rate(discharge_rate)
 
-    def _calculate_initial_cost_basis(self, current_hour: int) -> float:
-        """Calculate cost basis using stored facts and shared calculation logic."""
-        completed_hours = self.historical_store.get_completed_hours()
-        if not completed_hours:
+    def _calculate_initial_cost_basis(self, current_period: int) -> float:
+        """Calculate marginal cost of battery energy using historical data.
+
+        This calculates the "value" of energy currently stored in the battery by
+        tracking the actual costs paid to acquire that energy throughout the day.
+
+        Algorithm:
+        1. Iterate through all completed periods before current_period
+        2. For charging periods: Add grid costs and cycle costs to running total
+           - Solar charging: Only cycle cost (solar is free)
+           - Grid charging: Buy price + cycle cost
+        3. For discharging periods: Remove proportional cost from running total
+           - Use weighted average cost per kWh in battery
+           - Maintains FIFO-like cost accounting
+        4. Final result: running_total_cost / running_energy = marginal cost per kWh
+
+        Example:
+            Period 10: Charged 5 kWh from grid at 1.5 SEK/kWh + 0.05 cycle cost
+                       → running_cost = 7.75 SEK, running_energy = 5 kWh
+            Period 15: Discharged 2 kWh
+                       → avg_cost = 7.75/5 = 1.55 SEK/kWh
+                       → running_cost = 4.65 SEK, running_energy = 3 kWh
+            Period 20: Marginal cost = 4.65/3 = 1.55 SEK/kWh
+                       → Only discharge if sell price > 1.55 SEK/kWh
+
+        This ensures discharge decisions account for the actual acquisition cost
+        of the energy, not just cycle wear.
+
+        Args:
+            current_period: Current period index (0-95)
+
+        Returns:
+            float: Marginal cost of battery energy in SEK/kWh
+                  Falls back to cycle_cost_per_kwh if no historical data
+        """
+        # Get completed periods
+        today_periods = self.historical_store.get_today_periods()
+        completed_periods = [i for i, p in enumerate(today_periods) if p is not None]
+        if not completed_periods:
             return self.battery_settings.cycle_cost_per_kwh
 
         running_energy = 0.0
         running_total_cost = 0.0
 
-        for hour in sorted(completed_hours):
-            if hour >= current_hour:
+        for period in sorted(completed_periods):
+            if period >= current_period:
                 continue
 
-            event = self.historical_store.get_hour_record(hour)
+            event = self.historical_store.get_period(period)
             if not event:
                 continue
 
@@ -1302,6 +1505,9 @@ class BatterySystemManager:
         try:
             logger.info("Running system health check...")
             health_results = run_system_health_checks(self)
+
+            # Cache results for dashboard (avoid re-running on every page load)
+            self._cached_health_results = health_results
 
             logger.info("System Health Check Results:")
             logger.info("=" * 40)
@@ -1375,6 +1581,10 @@ class BatterySystemManager:
         """Get list of critical components with sensor failures."""
         return self._critical_sensor_failures.copy()
 
+    def get_cached_health_results(self) -> dict[str, Any] | None:
+        """Get cached health check results from startup (avoids re-running expensive checks)."""
+        return getattr(self, "_cached_health_results", None)
+
     def _get_today_price_data(self) -> list[float]:
         """Get today's price data for reports and views."""
         try:
@@ -1389,32 +1599,33 @@ class BatterySystemManager:
         """Getter for price_manager to ensure API compatibility."""
         return self._price_manager
 
-    def get_current_daily_view(self, current_hour: int | None = None) -> DailyView:
-        """Get daily view for specified or current hour.
+    def get_current_daily_view(self, current_period: int | None = None) -> DailyView:
+        """Get daily view for specified or current period.
+
+        The period index determines the split between actual (before) and predicted (after) data.
 
         Args:
-            current_hour: Hour to get daily view for (0-23). If None, uses current system time.
-                         Converted to period index (hour * 4) internally.
+            current_period: Period index (0-95) to get daily view for. If None, uses current system time.
+                           Determines which periods are marked as actual vs predicted.
 
         Returns:
             DailyView: Complete daily view with quarterly periods combining actual and predicted data
 
         Raises:
-            ValueError: If current_hour is not in valid range 0-23
+            SystemConfigurationError: If current_period is not in valid range 0-95
         """
-        if current_hour is None:
-            current_hour = datetime.now().hour
+        # Calculate current period from current time if not provided
+        now = datetime.now(tz=TIMEZONE)
+        if current_period is None:
+            current_period = now.hour * 4 + now.minute // 15
+        else:
+            # Validate period range
+            if not 0 <= current_period <= 95:
+                raise SystemConfigurationError(
+                    message=f"current_period must be 0-95, got {current_period}"
+                )
 
-        if not 0 <= current_hour <= 23:
-            raise SystemConfigurationError(
-                message=f"current_hour must be 0-23, got {current_hour}"
-            )
-
-        # Convert hour to period index (quarterly periods: 0-95)
-        # Hour 0 = periods 0-3, Hour 1 = periods 4-7, etc.
-        current_period = current_hour * 4
-
-        # Build daily view with current period (simplified - no prices needed)
+        # Build daily view with current period
         return self.daily_view_builder.build_daily_view(current_period)
 
     def adjust_charging_power(self) -> None:
@@ -1462,11 +1673,11 @@ class BatterySystemManager:
         """Log the current battery configuration - reproduces original functionality."""
         try:
             # Get energy data for consumption info (like original)
-            predictions_consumption = self._get_consumption_predictions()
+            predictions_consumption = self.controller.get_estimated_consumption()
 
             # Get current SOC
             if self._controller:
-                current_soc = self._controller.get_battery_soc()
+                current_soc = self.controller.get_battery_soc()
             else:
                 current_soc = self.battery_settings.min_soc
 
@@ -1499,14 +1710,23 @@ class BatterySystemManager:
             logger.error(f"Failed to log battery system config: {e}")
 
     def _log_energy_balance(self) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-        """Generate energy balance from historical store with proper formatting."""
-        completed_hours = self.historical_store.get_completed_hours()
+        """Generate energy balance from historical store with quarterly detail.
 
-        if not completed_hours:
-            logger.info("No completed hours for energy balance")
+        Logs all completed quarter-hour periods with HH:MM formatting.
+        No aggregation - shows full 15-minute resolution data.
+
+        Returns:
+            tuple: (period_data, totals) where period_data contains all completed periods
+        """
+        # Get all completed periods
+        today_periods = self.historical_store.get_today_periods()
+        completed_periods = [i for i, p in enumerate(today_periods) if p is not None]
+
+        if not completed_periods:
+            logger.info("No completed periods for energy balance")
             return [], {}
 
-        hourly_data = []
+        period_data = []
         totals = {
             "total_solar": 0.0,
             "total_consumption": 0.0,
@@ -1515,105 +1735,86 @@ class BatterySystemManager:
             "total_battery_charged": 0.0,
             "total_battery_discharged": 0.0,
             "battery_net_change": 0.0,
-            "hours_recorded": len(completed_hours),
+            "periods_recorded": len(completed_periods),
         }
 
-        for hour in sorted(completed_hours):
-            hour_data = self.historical_store.get_hour_record(hour)
-            if hour_data:
-                hourly_item = {
-                    "hour": hour,
-                    "solar_production": hour_data.energy.solar_production,
-                    "home_consumption": hour_data.energy.home_consumption,
-                    "grid_import": hour_data.energy.grid_imported,
-                    "grid_export": hour_data.energy.grid_exported,
-                    "battery_charged": hour_data.energy.battery_charged,
-                    "battery_discharged": hour_data.energy.battery_discharged,
-                    "battery_soe_end": hour_data.energy.battery_soe_end,
-                    "battery_net_change": hour_data.energy.battery_charged
-                    - hour_data.energy.battery_discharged,
+        # Log each quarter-hour period with HH:MM formatting
+        for period in sorted(completed_periods):
+            period_info = self.historical_store.get_period(period)
+            if period_info:
+                period_item = {
+                    "period": period,
+                    "time": format_period(period),  # Shows as "14:45"
+                    "solar_production": period_info.energy.solar_production,
+                    "home_consumption": period_info.energy.home_consumption,
+                    "grid_import": period_info.energy.grid_imported,
+                    "grid_export": period_info.energy.grid_exported,
+                    "battery_charged": period_info.energy.battery_charged,
+                    "battery_discharged": period_info.energy.battery_discharged,
+                    "battery_soe_end": period_info.energy.battery_soe_end,
+                    "battery_net_change": (
+                        period_info.energy.battery_charged
+                        - period_info.energy.battery_discharged
+                    ),
                 }
 
-                totals["total_solar"] += hour_data.energy.solar_production
-                totals["total_consumption"] += hour_data.energy.home_consumption
-                totals["total_grid_import"] += hour_data.energy.grid_imported
-                totals["total_grid_export"] += hour_data.energy.grid_exported
-                totals["total_battery_charged"] += hour_data.energy.battery_charged
+                totals["total_solar"] += period_info.energy.solar_production
+                totals["total_consumption"] += period_info.energy.home_consumption
+                totals["total_grid_import"] += period_info.energy.grid_imported
+                totals["total_grid_export"] += period_info.energy.grid_exported
+                totals["total_battery_charged"] += period_info.energy.battery_charged
                 totals[
                     "total_battery_discharged"
-                ] += hour_data.energy.battery_discharged
+                ] += period_info.energy.battery_discharged
 
-                hourly_data.append(hourly_item)
+                period_data.append(period_item)
 
         totals["battery_net_change"] = (
             totals["total_battery_charged"] - totals["total_battery_discharged"]
         )
 
         # Format and log energy balance table
-        self._format_and_log_energy_balance(hourly_data, totals)
+        self._format_and_log_energy_balance(period_data, totals)
 
-        return hourly_data, totals
-
-    def get_24h_decision_intelligence(self, current_hour: int) -> list:
-        """Get complete 24-hour decision intelligence with historical reconstruction."""
-        decisions = []
-
-        for hour in range(24):
-            if hour < current_hour:
-                # Historical: Get stored HourlyData
-                hour_data = self.historical_store.get_hour_record(hour)
-                if hour_data:
-                    decisions.append(hour_data)
-                else:
-                    decisions.append(None)
-            else:
-                # Current/Future: Get from latest optimization
-                latest = self.schedule_store.get_latest_schedule()
-                if latest and latest.optimization_result:
-                    # Get HourlyData from OptimizationResult
-                    hourly_data_list = latest.optimization_result.hourly_data
-                    relative_hour = hour - latest.optimization_hour
-                    if 0 <= relative_hour < len(hourly_data_list):
-                        decisions.append(hourly_data_list[relative_hour])
-                    else:
-                        decisions.append(None)
-                else:
-                    decisions.append(None)
-
-        return decisions
+        return period_data, totals
 
     def _format_and_log_energy_balance(
-        self, hourly_data: list[dict[str, Any]], totals: dict[str, Any]
+        self, period_data: list[dict[str, Any]], totals: dict[str, Any]
     ) -> None:
-        """Format and log energy balance table with predictions indicator."""
-        if not hourly_data:
+        """Format and log energy balance table with quarterly period detail.
+
+        Args:
+            period_data: List of period dictionaries with 'period', 'time', and energy fields
+            totals: Dictionary of total energy values
+        """
+        if not period_data:
             logger.info("No energy data to display")
             return
 
-        current_hour = datetime.now().hour
+        now = datetime.now(tz=TIMEZONE)
+        current_period = now.hour * 4 + now.minute // 15
 
         # Create table header
         lines = [
             "\n╔════════════════════════════════════════════════════════════════════════════════════════════════════════╗",
-            "║                                          Energy Balance Report                                         ║",
+            "║                                    Energy Balance Report (15-min periods)                              ║",
             "╠════════╦══════════════════════════╦══════════════════════════╦══════════════════════════════════╦══════╣",
             "║        ║       Energy Input       ║       Energy Output      ║           Battery Flows          ║      ║",
-            "║  Hour  ╠════════╦════════╦════════╬════════╦════════╦════════╬════════╦════════╦════════╦═══════╣ SOC  ║",
+            "║  Time  ╠════════╦════════╦════════╬════════╦════════╦════════╬════════╦════════╦════════╦═══════╣ SOC  ║",
             "║        ║ Solar  ║ Grid   ║ Total  ║ Home   ║ Export ║ Aux.   ║ Charge ║Dischrge║Solar->B║ Grid  ║ (%)  ║",
             "╠════════╬════════╬════════╬════════╬════════╬════════╬════════╬════════╬════════╬════════╬═══════╬══════╣",
         ]
 
-        # Add hourly data rows
-        for data in hourly_data:
+        # Add period data rows
+        for data in period_data:
             energy_in = data["grid_import"] + data["solar_production"]
-            #            energy_out_value = data['home_consumption'] + data['grid_export']
 
             # Estimate solar to battery (simplified)
             solar_to_battery = min(data["battery_charged"], data["solar_production"])
             grid_to_battery = max(0, data["battery_charged"] - solar_to_battery)
 
-            # Mark predictions with ★
-            indicator = "★" if data["hour"] >= current_hour else " "
+            # Mark predictions with ★ (periods >= current_period)
+            indicator = "★" if data["period"] >= current_period else " "
 
             # Convert SOE (kWh) to SOC (%) for display
             battery_soc_end = (
@@ -1621,17 +1822,17 @@ class BatterySystemManager:
             ) * 100.0
 
             row = (
-                f"║ {data['hour']:02d}:00{indicator} "
-                f"║ {data['solar_production']:>5.1f}  "
-                f"║ {data['grid_import']:>5.1f}  "
-                f"║ {energy_in:>6.1f} "
-                f"║ {data['home_consumption']:>5.1f}  "
-                f"║ {data['grid_export']:>5.1f}  "
-                f"║ {0.0:>5.1f}  "  # Aux load
-                f"║ {data['battery_charged']:>5.1f}  "
-                f"║ {data['battery_discharged']:>5.1f}  "
-                f"║ {solar_to_battery:>5.1f}  "
-                f"║ {grid_to_battery:>5.1f} "
+                f"║ {data['time']}{indicator} "
+                f"║ {data['solar_production']:>5.2f}  "
+                f"║ {data['grid_import']:>5.2f}  "
+                f"║ {energy_in:>6.2f} "
+                f"║ {data['home_consumption']:>5.2f}  "
+                f"║ {data['grid_export']:>5.2f}  "
+                f"║ {0.0:>5.2f}  "  # Aux load
+                f"║ {data['battery_charged']:>5.2f}  "
+                f"║ {data['battery_discharged']:>5.2f}  "
+                f"║ {solar_to_battery:>5.2f}  "
+                f"║ {grid_to_battery:>5.2f} "
                 f"║ {battery_soc_end:>4.0f} ║"
             )
             lines.append(row)
@@ -1655,19 +1856,13 @@ class BatterySystemManager:
         logger.info("\n".join(lines))
 
     def log_system_startup(self) -> None:
-        """FIXED: Log system startup information - reproduces original functionality."""
+        """ Log system startup information"""
         try:
             # Log battery configuration
             self._log_battery_system_config()
 
             # Log energy balance using the new components
             self._log_energy_balance()
-
-            # Log current schedule if available
-        #            if self._current_schedule:
-        #                self._current_schedule.log_schedule()
-        #            else:
-        #                logger.info("No current schedule available to log.")
 
         except Exception as e:
             logger.error(f"Failed to log system startup: {e}")

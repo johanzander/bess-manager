@@ -18,7 +18,7 @@ from core.bess.models import (  # noqa: E402
     DecisionData,
     EconomicData,
     EnergyData,
-    HourlyData,
+    PeriodData,
 )
 
 # Configure logging
@@ -62,9 +62,10 @@ class MockHomeAssistantController(HomeAssistantAPIController):
             "ev_energy_today": 0.0,
         }
 
-        # Configurable forecasts for testing
-        self.consumption_forecast = [4.5] * 24
-        self.solar_forecast = [0.0] * 24
+        # Configurable forecasts for testing (quarterly resolution: 96 periods)
+        # Default: 4.5 kWh/hour = 1.125 kWh per quarter-hour
+        self.consumption_forecast = [1.125] * 96
+        self.solar_forecast = [0.0] * 96
 
         # Call tracking for integration tests
         self.calls = {
@@ -84,11 +85,11 @@ class MockHomeAssistantController(HomeAssistantAPIController):
         return self.settings["consumption"]
 
     def get_estimated_consumption(self):
-        """Get estimated hourly consumption for 24 hours."""
+        """Get estimated consumption in quarterly resolution (96 periods)."""
         return self.consumption_forecast
 
     def get_solar_forecast(self, day_offset=0):  # type: ignore[unused-argument]
-        """Get solar forecast data from Solcast integration."""
+        """Get solar forecast data in quarterly resolution (96 periods)."""
         return self.solar_forecast
 
     def grid_charge_enabled(self):
@@ -575,7 +576,7 @@ def battery_system_with_arbitrage(mock_controller, arbitrage_prices, monkeypatch
 
 @pytest.fixture
 def sample_new_hourly_data():
-    """Provide sample HourlyData object for testing."""
+    """Provide sample PeriodData object for testing."""
     energy_data = EnergyData(
         solar_production=5.0,
         home_consumption=3.0,
@@ -599,13 +600,13 @@ def sample_new_hourly_data():
 
     decision_data = DecisionData(strategic_intent="IDLE", battery_action=0.0)
 
-    return HourlyData(
-        hour=12,
+    return PeriodData(
+        period=12,
         energy=energy_data,
         economic=economic_data,
         decision=decision_data,
         timestamp=datetime(2025, 7, 2, 12, 0, 0),
-        data_source="predicted",
+        data_source="actual",  # Changed to "actual" for integration tests
     )
 
 
@@ -614,3 +615,258 @@ def sample_new_hourly_data():
 def battery_system(battery_system_integration):
     """Alias for integration test compatibility."""
     return battery_system_integration
+
+
+@pytest.fixture
+def quarterly_battery_system(mock_controller, quarterly_arbitrage_prices, monkeypatch):
+    """Create BatterySystemManager for quarterly resolution testing (96 periods)."""
+    from core.bess.price_manager import MockSource
+
+    # Mock external dependencies
+    monkeypatch.setattr(
+        "core.bess.sensor_collector.SensorCollector", MockSensorCollector
+    )
+
+    # Use quarterly prices (96 periods)
+    price_source = MockSource(quarterly_arbitrage_prices)
+
+    system = BatterySystemManager(controller=mock_controller, price_source=price_source)
+
+    return system
+
+
+# QUARTERLY RESOLUTION TEST UTILITIES
+
+
+def expand_hourly_to_quarterly(hourly_data: list) -> list:
+    """Expand 24 hourly values to 96 quarterly (15-minute) values.
+
+    Each hourly value is repeated 4 times to create quarterly periods.
+    This is the simplest expansion strategy - more sophisticated
+    interpolation could be added if needed.
+
+    Args:
+        hourly_data: List of 24 hourly values
+
+    Returns:
+        List of 96 quarterly values
+    """
+    if len(hourly_data) != 24:
+        raise ValueError(f"Expected 24 hourly values, got {len(hourly_data)}")
+    return [val for val in hourly_data for _ in range(4)]
+
+
+@pytest.fixture
+def quarterly_arbitrage_prices():
+    """Quarterly version of arbitrage_prices fixture (96 periods).
+
+    Expands the hourly arbitrage prices to quarterly resolution.
+    Use this for testing quarterly system behavior.
+    """
+    hourly_prices = [
+        0.10,
+        0.10,
+        0.10,
+        0.10,
+        0.15,
+        0.20,
+        0.30,
+        0.50,
+        0.80,
+        1.20,
+        1.50,
+        1.80,
+        2.00,
+        1.80,
+        1.60,
+        1.40,
+        1.20,
+        1.00,
+        0.80,
+        0.60,
+        0.40,
+        0.30,
+        0.20,
+        0.15,
+    ]
+    return expand_hourly_to_quarterly(hourly_prices)
+
+
+@pytest.fixture
+def quarterly_consumption():
+    """Quarterly consumption forecast (96 periods).
+
+    Typical daily consumption pattern expanded to quarterly resolution.
+    """
+    hourly_consumption = [
+        0.5,
+        0.4,
+        0.4,
+        0.3,
+        0.3,
+        0.4,
+        0.6,
+        1.0,
+        1.5,
+        2.0,
+        2.5,
+        2.5,
+        2.0,
+        1.8,
+        1.6,
+        1.8,
+        2.0,
+        2.5,
+        3.0,
+        2.5,
+        2.0,
+        1.5,
+        1.0,
+        0.7,
+    ]
+    return expand_hourly_to_quarterly(hourly_consumption)
+
+
+@pytest.fixture
+def quarterly_solar():
+    """Quarterly solar production forecast (96 periods).
+
+    Typical solar production curve expanded to quarterly resolution.
+    """
+    hourly_solar = [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.1,
+        0.3,
+        0.8,
+        1.5,
+        2.5,
+        3.5,
+        4.0,
+        4.5,
+        4.0,
+        3.5,
+        2.5,
+        1.5,
+        0.8,
+        0.3,
+        0.1,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+    ]
+    return expand_hourly_to_quarterly(hourly_solar)
+
+
+@pytest.fixture
+def quarterly_test_scenario():
+    """Complete quarterly test scenario with all required data.
+
+    This provides 96-period test data for testing the quarterly system.
+    Use this for new tests that need to validate quarterly behavior.
+
+    Returns:
+        dict with keys:
+            - buy_prices: 96 quarterly buy prices
+            - sell_prices: 96 quarterly sell prices
+            - consumption: 96 quarterly consumption forecast
+            - solar: 96 quarterly solar forecast
+            - initial_soe: Initial state of energy (kWh)
+            - initial_cost_basis: Initial cost basis (SEK/kWh)
+            - expected_periods: Expected number of periods (96)
+            - resolution: "quarterly"
+    """
+    hourly_buy = [
+        0.30,
+        0.20,
+        0.10,
+        0.10,
+        0.20,
+        1.50,
+        2.80,
+        3.50,
+        0.80,
+        0.40,
+        0.30,
+        0.20,
+        0.10,
+        0.40,
+        2.00,
+        3.00,
+        3.80,
+        4.00,
+        3.50,
+        2.80,
+        1.50,
+        0.70,
+        0.40,
+        0.30,
+    ]
+    hourly_sell = hourly_buy  # Same for simplicity
+    hourly_consumption = [
+        0.8,
+        0.7,
+        0.6,
+        0.5,
+        0.5,
+        0.7,
+        1.5,
+        2.5,
+        3.0,
+        2.0,
+        1.5,
+        2.0,
+        2.5,
+        1.8,
+        2.0,
+        2.5,
+        3.5,
+        4.5,
+        5.0,
+        4.5,
+        3.5,
+        2.5,
+        1.5,
+        1.0,
+    ]
+    hourly_solar = [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.1,
+        0.3,
+        0.7,
+        1.2,
+        0.5,
+        2.5,
+        0.8,
+        3.0,
+        1.5,
+        2.8,
+        0.6,
+        1.2,
+        0.7,
+        0.3,
+        0.1,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+    ]
+
+    return {
+        "buy_prices": expand_hourly_to_quarterly(hourly_buy),
+        "sell_prices": expand_hourly_to_quarterly(hourly_sell),
+        "consumption": expand_hourly_to_quarterly(hourly_consumption),
+        "solar": expand_hourly_to_quarterly(hourly_solar),
+        "initial_soe": 3.0,
+        "initial_cost_basis": 0.4,
+        "expected_periods": 96,
+        "resolution": "quarterly",
+    }

@@ -65,6 +65,7 @@ ROBUST RECOVERY: When TOU corruption detected (overlaps, wrong order, duplicates
 """
 
 import logging
+from typing import ClassVar
 
 from .dp_schedule import DPSchedule
 from .health_check import perform_health_check
@@ -87,6 +88,15 @@ class GrowattScheduleManager:
     - EXPORT_ARBITRAGE → grid-first (export priority)
     - IDLE → load-first (normal operation)
     """
+    # Priority order for tie-breaking when aggregating quarterly to hourly
+    # Higher values win ties - prioritizes action over inaction
+    INTENT_PRIORITY: ClassVar[dict[str, int]] = {
+        "GRID_CHARGING": 5,  # Highest - aggressive arbitrage
+        "EXPORT_ARBITRAGE": 4,  # High - selling opportunity
+        "LOAD_SUPPORT": 3,  # Medium - using stored energy
+        "SOLAR_STORAGE": 2,  # Low - storing excess solar
+        "IDLE": 1,  # Lowest - no action needed
+    }
 
     def __init__(self, battery_settings: BatterySettings) -> None:
         """Initialize the schedule manager with required battery settings for power calculations."""
@@ -97,7 +107,7 @@ class GrowattScheduleManager:
         self.current_schedule = None
         self.detailed_intervals = []  # For overview display
         self.tou_intervals = []  # For actual TOU settings
-        self.current_hour = 0  # Track current hour
+        self.current_hour = 0  # Track current hour (0-23) for TOU schedule boundaries
         self.hourly_settings = {}  # Pre-calculated settings for each hour (0-23)
         self.strategic_intents = []  # Store strategic intents from DP algorithm
 
@@ -146,28 +156,85 @@ class GrowattScheduleManager:
 
         return charge_rate, discharge_rate
 
+    def _get_hourly_intent(self, hour: int) -> str:
+        """Get dominant strategic intent for an hour by aggregating 4 quarterly periods.
+
+        This method converts quarterly strategic intents (96 periods, 15-min intervals)
+        into hourly strategic intents (24 hours) using majority rule with priority-based
+        tie-breaking.
+
+        Args:
+            hour: Hour (0-23) to get intent for
+
+        Returns:
+            Dominant strategic intent for this hour
+
+        Logic:
+        - Each hour has 4 quarterly periods (15-minute intervals)
+        - Use most common intent in the 4 periods (majority rule)
+        - If tie, use INTENT_PRIORITY for tie-breaking (action > inaction)
+
+        Example:
+            Hour 5 has periods 20-23 with intents [IDLE, GRID_CHARGING, GRID_CHARGING, IDLE]
+            Count: GRID_CHARGING=2, IDLE=2 (tie)
+            Result: GRID_CHARGING (priority 5 > 1)
+        """
+        if not self.strategic_intents:
+            raise ValueError("No strategic intents available")
+
+        num_periods = len(self.strategic_intents)
+        start_period = hour * 4
+        end_period = min(start_period + 4, num_periods)
+
+        # Get all quarterly intents for this hour
+        period_intents = [
+            self.strategic_intents[p] for p in range(start_period, end_period)
+        ]
+
+        # Count occurrences of each intent
+        intent_counts = {}
+        for intent in period_intents:
+            intent_counts[intent] = intent_counts.get(intent, 0) + 1
+
+        # Find dominant intent (most common, tie-break by priority)
+        max_count = max(intent_counts.values())
+        candidates = [i for i, c in intent_counts.items() if c == max_count]
+        return max(candidates, key=lambda x: self.INTENT_PRIORITY.get(x, 0))
+
     def _calculate_hourly_settings_with_strategic_intents(self):
-        """Pre-calculate hourly settings using strategic intents and proper power rates."""
+        """Pre-calculate hourly settings using strategic intents and proper power rates.
+
+        Aggregates quarterly strategic intents (96 periods) into hourly settings (24 hours)
+        for Growatt inverter control.
+        """
         self.hourly_settings = {}
 
         # REQUIRE strategic intents - no fallbacks
-        if not self.strategic_intents or len(self.strategic_intents) < 24:
-            raise ValueError(
-                f"Missing strategic intents for hourly settings calculation. "
-                f"Expected 24, got {len(self.strategic_intents) if self.strategic_intents else 0}"
-            )
+        if not self.strategic_intents:
+            raise ValueError("Missing strategic intents for hourly settings calculation")
 
-        for hour in range(24):
-            intent = self.strategic_intents[hour]
+        # Get number of periods to handle DST (92/96/100)
+        num_periods = len(self.strategic_intents)
+        num_hours = (num_periods + 3) // 4  # Round up to handle partial hours
+
+        for hour in range(num_hours):
+            # Get dominant strategic intent for this hour (aggregates 4 quarterly periods)
+            intent = self._get_hourly_intent(hour)
+
+            # Get quarterly periods for battery action calculation
+            start_period = hour * 4
+            end_period = min(start_period + 4, num_periods)
+            hourly_periods = range(start_period, end_period)
 
             # Get battery action for this hour if available
+            # Actions are in kWh (energy per period) - sum them for the hour
+            # Since each hour always has 4 quarterly periods, summing 4 periods gives the hourly total
+            # which equals average power in kW (4 periods * 0.25h * kW = kWh, so kWh/1h = kW)
             battery_action = 0.0
-            if (
-                self.current_schedule
-                and self.current_schedule.actions
-                and hour < len(self.current_schedule.actions)
-            ):
-                battery_action = self.current_schedule.actions[hour]
+            if self.current_schedule and self.current_schedule.actions:
+                for period in hourly_periods:
+                    if period < len(self.current_schedule.actions):
+                        battery_action += self.current_schedule.actions[period]
 
             # Calculate power rates from battery action
             charge_power_rate, discharge_power_rate = (
@@ -242,23 +309,18 @@ class GrowattScheduleManager:
         # Always use strategic intents from DP algorithm - no fallbacks
         self.strategic_intents = schedule.original_dp_results["strategic_intent"]
 
-        if len(self.strategic_intents) != 24:
-            raise ValueError(
-                f"Expected 24 strategic intents, got {len(self.strategic_intents)}"
-            )
-
         logger.info(
-            f"Using {len(self.strategic_intents)} strategic intents from DP algorithm"
+            f"Using {len(self.strategic_intents)} strategic intents from DP algorithm (quarterly resolution)"
         )
 
         # Log intent transitions
-        for hour in range(1, len(self.strategic_intents)):
-            if self.strategic_intents[hour] != self.strategic_intents[hour - 1]:
+        for period in range(1, len(self.strategic_intents)):
+            if self.strategic_intents[period] != self.strategic_intents[period - 1]:
                 logger.info(
-                    "Intent transition at hour %02d: %s → %s",
-                    hour,
-                    self.strategic_intents[hour - 1],
-                    self.strategic_intents[hour],
+                    "Intent transition at period %d: %s → %s",
+                    period,
+                    self.strategic_intents[period - 1],
+                    self.strategic_intents[period],
                 )
 
         self.current_schedule = schedule
@@ -342,29 +404,44 @@ class GrowattScheduleManager:
         current_period_start = None
 
         for hour in range(self.current_hour, 24):
-            if hour < len(self.strategic_intents):
-                intent = self.strategic_intents[hour]
-                hour_mode = intent_to_mode.get(intent, "load-first")
+            # Get dominant strategic intent for this hour (aggregates 4 quarterly periods)
+            intent = self._get_hourly_intent(hour)
+            hour_mode = intent_to_mode.get(intent, "load-first")
 
-                logger.debug("Hour %02d: intent=%s → mode=%s", hour, intent, hour_mode)
+            # Log quarterly details for debugging
+            start_period = hour * 4
+            end_period = min(start_period + 4, len(self.strategic_intents))
+            period_intents = [
+                self.strategic_intents[p] for p in range(start_period, end_period)
+            ]
 
-                if hour_mode != current_mode:
-                    # Save previous period if exists
-                    if current_mode is not None and current_period_start is not None:
-                        mode_periods.append(
-                            {
-                                "mode": current_mode,
-                                "start_hour": current_period_start,
-                                "end_hour": hour - 1,
-                                "intent_summary": self._get_period_intent_summary(
-                                    current_period_start, hour - 1
-                                ),
-                            }
-                        )
+            logger.debug(
+                "Hour %02d (periods %d-%d): intents=%s → dominant=%s → mode=%s",
+                hour,
+                start_period,
+                end_period - 1,
+                period_intents,
+                intent,
+                hour_mode,
+            )
 
-                    # Start new period
-                    current_mode = hour_mode
-                    current_period_start = hour
+            if hour_mode != current_mode:
+                # Save previous period if exists
+                if current_mode is not None and current_period_start is not None:
+                    mode_periods.append(
+                        {
+                            "mode": current_mode,
+                            "start_hour": current_period_start,
+                            "end_hour": hour - 1,
+                            "intent_summary": self._get_period_intent_summary(
+                                current_period_start, hour - 1
+                            ),
+                        }
+                    )
+
+                # Start new period
+                current_mode = hour_mode
+                current_period_start = hour
 
         # Add final period
         if current_mode is not None and current_period_start is not None:
@@ -436,14 +513,23 @@ class GrowattScheduleManager:
         )
 
     def _get_period_intent_summary(self, start_hour: int, end_hour: int) -> str:
-        """Get a summary of intents for a period."""
+        """Get a summary of intents for a period (aggregated from quarterly periods)."""
         if not self.strategic_intents:
             return "unknown"
 
+        # Aggregate quarterly strategic intents for the hour range
+        num_periods = len(self.strategic_intents)
         period_intents = []
-        for hour in range(start_hour, min(end_hour + 1, len(self.strategic_intents))):
-            if hour < len(self.strategic_intents):
-                period_intents.append(self.strategic_intents[hour])
+
+        for hour in range(start_hour, end_hour + 1):
+            # Get quarterly periods for this hour (4 periods per hour normally)
+            start_period = hour * 4
+            end_period = min(start_period + 4, num_periods)
+
+            # Add all quarterly intents for this hour
+            for period in range(start_period, end_period):
+                if period < num_periods:
+                    period_intents.append(self.strategic_intents[period])
 
         if not period_intents:
             return "unknown"
@@ -534,12 +620,19 @@ class GrowattScheduleManager:
         return self.hourly_settings[hour]
 
     def get_strategic_intent_summary(self) -> dict:
-        """Get a summary of strategic intents for the day."""
+        """Get a summary of strategic intents for the day (aggregated from quarterly periods)."""
         if not self.strategic_intents:
             return {}
 
+        # Aggregate quarterly strategic intents into hourly intents
+        num_periods = len(self.strategic_intents)
+        num_hours = (num_periods + 3) // 4  # Round up to handle partial hours
+
         intent_hours = {}
-        for hour, intent in enumerate(self.strategic_intents):
+        for hour in range(num_hours):
+            # Get dominant strategic intent for this hour (aggregates 4 quarterly periods)
+            intent = self._get_hourly_intent(hour)
+
             if intent not in intent_hours:
                 intent_hours[intent] = []
             intent_hours[intent].append(hour)
@@ -969,7 +1062,8 @@ class GrowattScheduleManager:
             "╠════╬══════════════════╬═══════════════╬═════════════╬═══════════════╬═══════════════╬═══════════════════════════════╣",
         ]
 
-        for hour in range(24):
+        # Iterate over actual hourly settings (handles DST with 23/24/25 hours)
+        for hour in sorted(self.hourly_settings.keys()):
             settings = self.get_hourly_settings(hour)
             intent = settings.get("strategic_intent", "IDLE")
             batt_mode = settings.get("batt_mode", "load-first")

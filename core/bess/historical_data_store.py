@@ -32,7 +32,7 @@ class HistoricalDataStore:
         # Store battery capacity for SOC calculations
         self.total_capacity = battery_capacity_kwh
 
-        logger.info("Initialized HistoricalDataStore (quarterly resolution)")
+        logger.debug("Initialized HistoricalDataStore")
 
     def record_period(self, period_index: int, period_data: PeriodData) -> None:
         """Record actual sensor data for a period.

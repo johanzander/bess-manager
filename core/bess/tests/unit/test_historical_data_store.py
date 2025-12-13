@@ -1,11 +1,12 @@
 """Tests for HistoricalDataStore."""
 
-import pytest
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+import pytest
+
 from core.bess.historical_data_store import HistoricalDataStore
-from core.bess.models import PeriodData, EnergyData, DecisionData
+from core.bess.models import DecisionData, EnergyData, PeriodData
 
 TIMEZONE = ZoneInfo("Europe/Stockholm")
 
@@ -20,7 +21,7 @@ def store():
 def sample_period_data():
     """Create sample PeriodData for testing."""
     return PeriodData(
-        hour=0,  # Backward compat field
+        period=0,  # Backward compat field
         energy=EnergyData(
             solar_production=1.0,
             home_consumption=0.5,

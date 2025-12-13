@@ -2,10 +2,12 @@ import React, { useState } from 'react';
 import { DetailedSavingsAnalysis } from '../components/DetailedSavingsAnalysis';
 import { SavingsOverview } from '../components/SavingsOverview';
 import { useSettings } from '../hooks/useSettings';
+import { useUserPreferences } from '../hooks/useUserPreferences';
 import { Eye, Table2 } from 'lucide-react';
 
 const SavingsPage: React.FC = () => {
   const { batterySettings } = useSettings();
+  const { dataResolution, setDataResolution } = useUserPreferences();
   const [viewMode, setViewMode] = useState<'simple' | 'detailed'>('simple');
 
   // Create merged settings with defaults for the table
@@ -66,20 +68,39 @@ const SavingsPage: React.FC = () => {
             </button>
           </div>
         </div>
-        
-        {/* Current view indicator */}
-        <div className="mt-4 text-right">
-          <span className="text-sm text-gray-500 dark:text-gray-400">
-            Currently viewing: <strong>{viewMode === 'simple' ? 'Standard' : 'Detailed'}</strong>
-          </span>
+
+        {/* Resolution Selector */}
+        <div className="mt-4 flex items-center justify-end">
+          <div className="flex bg-gray-100 dark:bg-gray-700 rounded-lg p-1">
+            <button
+              onClick={() => setDataResolution('hourly')}
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                dataResolution === 'hourly'
+                  ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm'
+                  : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
+              }`}
+            >
+              60 min
+            </button>
+            <button
+              onClick={() => setDataResolution('quarter-hourly')}
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                dataResolution === 'quarter-hourly'
+                  ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm'
+                  : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
+              }`}
+            >
+              15 min
+            </button>
+          </div>
         </div>
       </div>
 
       {/* Render the appropriate table based on view mode */}
       {viewMode === 'simple' ? (
-        <SavingsOverview />
+        <SavingsOverview resolution={dataResolution} />
       ) : (
-        <DetailedSavingsAnalysis settings={mergedSettings} />
+        <DetailedSavingsAnalysis settings={mergedSettings} resolution={dataResolution} />
       )}
     </div>
   );

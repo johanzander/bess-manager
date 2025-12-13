@@ -1,12 +1,12 @@
 """
 Unit tests for new hierarchical data models.
 
-Tests the EnergyData, EconomicData, DecisionData, and HourlyData structures
+Tests the EnergyData, EconomicData, DecisionData, and PeriodData structures
 """
 
 from datetime import datetime
 
-from core.bess.models import DecisionData, EconomicData, EnergyData, HourlyData
+from core.bess.models import DecisionData, EconomicData, EnergyData, PeriodData
 
 
 class TestEnergyData:
@@ -229,11 +229,11 @@ class TestDecisionData:
         assert decision.net_strategy_value == 0.0
 
 
-class TestHourlyData:
-    """Test HourlyData composition structure."""
+class TestPeriodData:
+    """Test PeriodData composition structure."""
 
     def test_creation_from_optimization(self):
-        """Test creating HourlyData from optimization results."""
+        """Test creating PeriodData from optimization results."""
         energy = EnergyData(
             solar_production=5.0,
             home_consumption=3.0,
@@ -256,8 +256,8 @@ class TestHourlyData:
         )
 
         timestamp = datetime(2025, 6, 28, 14, 0, 0)
-        hourly = HourlyData.from_optimization(
-            hour=14,
+        hourly = PeriodData.from_optimization(
+            period=14,
             energy_data=energy,
             economic_data=economic,
             decision_data=strategy,
@@ -265,7 +265,7 @@ class TestHourlyData:
         )
 
         # Test context fields
-        assert hourly.hour == 14
+        assert hourly.period == 14
         assert hourly.timestamp == timestamp
         assert hourly.data_source == "predicted"
 
@@ -275,7 +275,7 @@ class TestHourlyData:
         assert hourly.decision is strategy
 
     def test_creation_from_energy_data(self):
-        """Test creating HourlyData from sensor energy data."""
+        """Test creating PeriodData from sensor energy data."""
         energy = EnergyData(
             solar_production=4.0,
             home_consumption=3.5,
@@ -288,11 +288,11 @@ class TestHourlyData:
         )
 
         timestamp = datetime(2025, 6, 28, 10, 0, 0)
-        hourly = HourlyData.from_energy_data(
-            hour=10, energy_data=energy, data_source="actual", timestamp=timestamp
+        hourly = PeriodData.from_energy_data(
+            period=10, energy_data=energy, data_source="actual", timestamp=timestamp
         )
 
-        assert hourly.hour == 10
+        assert hourly.period == 10
         assert hourly.timestamp == timestamp
         assert hourly.data_source == "actual"
         assert hourly.energy is energy
@@ -316,13 +316,13 @@ class TestHourlyData:
             battery_soe_end=43.0,
         )
 
-        hourly = HourlyData.from_energy_data(hour=14, energy_data=energy)
+        hourly = PeriodData.from_energy_data(period=14, energy_data=energy)
         errors = hourly.validate_data()
 
         assert len(errors) == 0, f"Should have no validation errors: {errors}"
 
     def test_data_validation_invalid_hour(self):
-        """Test data validation catches invalid hour."""
+        """Test data validation catches invalid period (negative values)."""
         energy = EnergyData(
             solar_production=5.0,
             home_consumption=3.0,
@@ -334,11 +334,12 @@ class TestHourlyData:
             battery_soe_end=25.0,
         )
 
-        hourly = HourlyData.from_energy_data(hour=25, energy_data=energy)
+        # Negative period is invalid (no upper bound due to DST transitions)
+        hourly = PeriodData.from_energy_data(period=-1, energy_data=energy)
         errors = hourly.validate_data()
 
         assert len(errors) > 0
-        assert any("Invalid hour" in error for error in errors)
+        assert any("Invalid period" in error for error in errors)
 
     def test_timestamp_defaults(self):
         """Test timestamp defaults to provided value."""
@@ -354,7 +355,7 @@ class TestHourlyData:
         )
 
         before = datetime.now()
-        hourly = HourlyData.from_energy_data(hour=12, energy_data=energy)
+        hourly = PeriodData.from_energy_data(period=12, energy_data=energy)
         after = datetime.now()
 
         assert hourly.timestamp is not None

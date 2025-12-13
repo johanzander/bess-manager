@@ -8,6 +8,7 @@ import pytest  # type: ignore
 
 from core.bess.battery_system_manager import BatterySystemManager
 from core.bess.dp_battery_algorithm import optimize_battery_schedule
+from core.bess.models import DecisionData, EconomicData, PeriodData
 from core.bess.settings import BatterySettings
 
 
@@ -163,21 +164,18 @@ class TestCostSavingsFlow:
         # Store optimization result
         manager.schedule_store.store_schedule(
             optimization_result=optimization_result,
-            optimization_hour=0,
-            scenario="test",
+            optimization_period=0,
         )
 
         # Create daily view
         daily_view = manager.daily_view_builder.build_daily_view(
-            current_hour=0,
-            buy_price=test_scenario_data["buy_prices"],
-            sell_price=test_scenario_data["sell_prices"],
+            current_period=0,
         )
 
         # Check that daily view shows positive savings (this was the main issue)
         assert (
-            daily_view.total_daily_savings > 0
-        ), f"Daily view should show positive savings, got {daily_view.total_daily_savings}"
+            daily_view.total_savings > 0
+        ), f"Daily view should show positive savings, got {daily_view.total_savings}"
 
     def test_dashboard_api_provides_required_fields(
         self, optimization_result, test_scenario_data
@@ -190,23 +188,20 @@ class TestCostSavingsFlow:
         # Store optimization result
         manager.schedule_store.store_schedule(
             optimization_result=optimization_result,
-            optimization_hour=0,
-            scenario="test",
+            optimization_period=0,
         )
 
         # Create daily view
         daily_view = manager.daily_view_builder.build_daily_view(
-            current_hour=0,
-            buy_price=test_scenario_data["buy_prices"],
-            sell_price=test_scenario_data["sell_prices"],
+            current_period=0,
         )
 
         # Test core data structures directly (no API conversion needed)
-        hourly_data = daily_view.hourly_data
+        hourly_data = daily_view.periods
 
         # Check that all required core fields are present
         for hour_idx, hour_data in enumerate(hourly_data[:3]):  # Check first 3 hours
-            assert hasattr(hour_data, "hour"), f"Hour {hour_idx}: Missing hour field"
+            assert hasattr(hour_data, "period"), f"Hour {hour_idx}: Missing hour field"
             assert hasattr(
                 hour_data, "economic"
             ), f"Hour {hour_idx}: Missing economic field"
@@ -250,21 +245,18 @@ class TestCostSavingsFlow:
         # Store optimization result
         manager.schedule_store.store_schedule(
             optimization_result=optimization_result,
-            optimization_hour=0,
-            scenario="test",
+            optimization_period=0,
         )
 
         # Create daily view
         daily_view = manager.daily_view_builder.build_daily_view(
-            current_hour=0,
-            buy_price=test_scenario_data["buy_prices"],
-            sell_price=test_scenario_data["sell_prices"],
+            current_period=0,
         )
 
         # Check battery SOE data is within limits
         battery_capacity = 30.0  # kWh from BatterySettings
 
-        for hourly in daily_view.hourly_data:
+        for hourly in daily_view.periods:
             soe_start = hourly.energy.battery_soe_start
             soe_end = hourly.energy.battery_soe_end
 
@@ -290,68 +282,88 @@ class TestCostSavingsFlow:
         # Store optimization result
         manager.schedule_store.store_schedule(
             optimization_result=optimization_result,
-            optimization_hour=0,
-            scenario="test",
+            optimization_period=0,
         )
 
-        # Simulate historical data for the first 8 hours (like user's scenario)
+        # Simulate historical data for the first 8 hours (32 quarterly periods)
         base_time = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
 
-        # Add historical data for hours 0-7 (simulate real sensor data)
-        for hour in range(8):
-            # Create realistic historical energy data
+        # Add historical data for periods 0-31 (simulate real sensor data at 15-min intervals)
+        for period_index in range(32):
+            hour = period_index // 4  # Which hour this period belongs to
+
+            # Create realistic historical energy data (scaled to 15-min period)
+            # Divide hourly values by 4 to get quarterly energy
             historical_energy = EnergyData(
-                solar_production=test_scenario_data["solar"][hour],
-                home_consumption=test_scenario_data["consumption"][hour],
-                battery_charged=(
-                    0.5 if hour < 4 else 0.0
-                ),  # Some charging in early hours
-                battery_discharged=0.0 if hour < 4 else 0.2,  # Some discharging later
-                grid_imported=test_scenario_data["consumption"][hour]
-                + (0.5 if hour < 4 else -0.2),
+                solar_production=test_scenario_data["solar"][hour] / 4,
+                home_consumption=test_scenario_data["consumption"][hour] / 4,
+                battery_charged=(0.5 / 4 if hour < 4 else 0.0),
+                battery_discharged=(0.0 if hour < 4 else 0.2 / 4),
+                grid_imported=(test_scenario_data["consumption"][hour] + (0.5 if hour < 4 else -0.2)) / 4,
                 grid_exported=0.0,
-                battery_soe_start=3.0 + hour * 0.3,  # Gradually increasing SOE
-                battery_soe_end=3.0 + hour * 0.3 + (0.5 if hour < 4 else -0.2),
+                battery_soe_start=3.0 + period_index * 0.075,  # Gradual SOE change
+                battery_soe_end=3.0 + (period_index + 1) * 0.075,
             )
 
-            # Store in historical data store
-            manager.historical_store.record_energy_data(
-                hour=hour,
+            # Create economic data from energy flows using standard calculation
+            economic_data = EconomicData.from_energy_data(
                 energy_data=historical_energy,
-                data_source="actual",
-                timestamp=base_time + timedelta(hours=hour),
+                buy_price=test_scenario_data["buy_prices"][hour],
+                sell_price=test_scenario_data["sell_prices"][hour],
+                battery_cycle_cost=0.0,  # No cycle cost for actual historical data
             )
 
-        # Create daily view with current hour = 8 (like user's scenario)
+            # Create full PeriodData for this quarterly period
+            period_data = PeriodData(
+                period=period_index,  # Consecutive periods: 0, 1, 2, 3...31
+                energy=historical_energy,
+                timestamp=base_time + timedelta(minutes=period_index * 15),
+                data_source="actual",
+                economic=economic_data,
+                decision=DecisionData(),
+            )
+
+            # Store consecutive periods
+            manager.historical_store.record_period(
+                period_index=period_index,
+                period_data=period_data,
+            )
+
+        # Create daily view at current period = 32 (8:00 AM = 8 hours * 4 periods/hour)
         daily_view = manager.daily_view_builder.build_daily_view(
-            current_hour=8,
-            buy_price=test_scenario_data["buy_prices"],
-            sell_price=test_scenario_data["sell_prices"],
+            current_period=32,  # Period 32 = 8:00 AM
         )
 
-        # Check that the first 8 hours show proper costs (not 0.00)
-        for hour in range(8):
-            hour_data = daily_view.hourly_data[hour]
+        # Check that the first 32 periods (8 hours) show proper costs (not 0.00)
+        # We stored consecutive quarterly periods 0-31
+        for period_index in range(32):
+            # Find the period data in daily_view.periods by matching period index
+            period_data = next(
+                (p for p in daily_view.periods if p.period == period_index),
+                None
+            )
 
-            # Verify this hour uses actual data
+            assert period_data is not None, f"Period {period_index} not found in daily view"
+
+            # Verify this period uses actual data
             assert (
-                hour_data.data_source == "actual"
-            ), f"Hour {hour} should be actual data"
+                period_data.data_source == "actual"
+            ), f"Period {period_index} should be actual data"
 
             # Verify costs are not zero (this is the user's issue)
             assert (
-                hour_data.economic.hourly_cost != 0.0
-            ), f"Hour {hour} shows 0.00 cost but should have proper cost calculation"
+                period_data.economic.hourly_cost != 0.0
+            ), f"Period {period_index} shows 0.00 cost but should have proper cost calculation"
             assert (
-                hour_data.economic.grid_only_cost != 0.0
-            ), f"Hour {hour} shows 0.00 grid-only cost but should have proper baseline cost"
+                period_data.economic.grid_only_cost != 0.0
+            ), f"Period {period_index} shows 0.00 grid-only cost but should have proper baseline cost"
             assert (
-                hour_data.economic.solar_only_cost != 0.0
-            ), f"Hour {hour} shows 0.00 solar-only cost but should have proper baseline cost"
+                period_data.economic.solar_only_cost != 0.0
+            ), f"Period {period_index} shows 0.00 solar-only cost but should have proper baseline cost"
 
             # The savings can be negative (battery charging) or positive, but grid-only baseline costs should be positive
             assert (
-                hour_data.economic.grid_only_cost > 0
-            ), f"Hour {hour} grid-only cost should be positive, got {hour_data.economic.grid_only_cost}"
+                period_data.economic.grid_only_cost > 0
+            ), f"Period {period_index} grid-only cost should be positive, got {period_data.economic.grid_only_cost}"
             # Solar-only cost can be negative when exporting solar (earning money from export)
             # No assertion needed for solar_only_cost as it can be positive, negative, or zero

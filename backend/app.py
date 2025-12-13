@@ -117,7 +117,11 @@ class BESSController:
         self.ha_controller = self._init_ha_controller(sensor_config)
 
         # Enable test mode based on environment variable (defaults to False for production)
-        test_mode = os.environ.get("HA_TEST_MODE", "false").lower() in ("true", "1", "yes")
+        test_mode = os.environ.get("HA_TEST_MODE", "false").lower() in (
+            "true",
+            "1",
+            "yes",
+        )
         if test_mode:
             logger.info("Enabling test mode - hardware writes will be simulated")
         self.ha_controller.set_test_mode(test_mode)
@@ -207,8 +211,7 @@ class BESSController:
             except Exception as e:
                 logger.error(f"Error loading options from {options_json}: {e!s}")
                 raise RuntimeError(
-                    f"Failed to load configuration from {options_json}. "
-                    f"Error: {e}"
+                    f"Failed to load configuration from {options_json}. " f"Error: {e}"
                 ) from e
         else:
             raise RuntimeError(
@@ -288,6 +291,8 @@ class BESSController:
             # Required battery settings
             required_battery_keys = [
                 "total_capacity",
+                "min_soc",
+                "max_soc",
                 "cycle_cost",
                 "max_charge_discharge_power",
                 "min_action_profit_threshold",
@@ -323,6 +328,8 @@ class BESSController:
             settings = {
                 "battery": {
                     "totalCapacity": battery_config["total_capacity"],
+                    "minSoc": battery_config["min_soc"],
+                    "maxSoc": battery_config["max_soc"],
                     "cycleCostPerKwh": battery_config["cycle_cost"],
                     "maxChargePowerKw": battery_config["max_charge_discharge_power"],
                     "maxDischargePowerKw": battery_config["max_charge_discharge_power"],
@@ -350,7 +357,7 @@ class BESSController:
         except Exception as e:
             logger.error(
                 f"CRITICAL: Failed to apply settings from config.yaml: {e}",
-                exc_info=True
+                exc_info=True,
             )
             raise RuntimeError(
                 f"Settings application failed - system cannot start safely. "

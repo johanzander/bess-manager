@@ -138,6 +138,45 @@ class BatterySystemManager:
             raise RuntimeError("Controller not initialized - system not started")
         return self._controller
 
+    def _sync_soc_limits(self) -> None:
+        """
+        Sync SOC limits from config to inverter hardware.
+
+        Config values are the single source of truth. This method ensures
+        the inverter hardware matches the configured min/max SOC limits.
+        Called during system startup.
+        """
+        logger.info("Syncing SOC limits from config to inverter...")
+
+        # Sync minimum SOC (discharge stop)
+        configured_min_soc = self.battery_settings.min_soc
+        self.controller.set_discharge_stop_soc(configured_min_soc)
+        logger.info(f"Set discharge_stop_soc to {configured_min_soc}%")
+
+        # Sync maximum SOC (charge stop)
+        configured_max_soc = self.battery_settings.max_soc
+        self.controller.set_charge_stop_soc(configured_max_soc)
+        logger.info(f"Set charge_stop_soc to {configured_max_soc}%")
+
+        # Verify sync by reading back values
+        actual_min_soc = self.controller.get_discharge_stop_soc()
+        actual_max_soc = self.controller.get_charge_stop_soc()
+
+        # Log verification results
+        if (
+            actual_min_soc == configured_min_soc
+            and actual_max_soc == configured_max_soc
+        ):
+            logger.info(
+                f"SOC limits verified: min={actual_min_soc}%, max={actual_max_soc}%"
+            )
+        else:
+            logger.warning(
+                f"SOC limit mismatch detected! "
+                f"Configured: min={configured_min_soc}%, max={configured_max_soc}% | "
+                f"Actual: min={actual_min_soc}%, max={actual_max_soc}%"
+            )
+
     def start(self) -> None:
         """Start the system - preserves original functionality."""
         try:
@@ -151,6 +190,9 @@ class BatterySystemManager:
 
                 # Run health check before we start using sensors
                 self._run_health_check()
+
+                # Sync SOC limits from config to inverter (config as master)
+                self._sync_soc_limits()
 
                 # Initialize schedule from inverter - preserves original logic
                 self._initialize_tou_schedule_from_inverter()
@@ -385,7 +427,9 @@ class BatterySystemManager:
                             timestamp=datetime.now(tz=TIMEZONE),
                             data_source="actual",
                             economic=economic_data,
-                            decision=DecisionData.from_actual_energy(period_energy_data),
+                            decision=DecisionData.from_actual_energy(
+                                period_energy_data
+                            ),
                         )
                         self.historical_store.record_period(period, period_data)
 
@@ -545,7 +589,8 @@ class BatterySystemManager:
 
                 # Calculate battery cycle cost based on actual charging
                 battery_cycle_cost_sek = (
-                    energy_data.battery_charged * self.battery_settings.cycle_cost_per_kwh
+                    energy_data.battery_charged
+                    * self.battery_settings.cycle_cost_per_kwh
                 )
 
                 # Calculate economic data from actual energy flows
@@ -1301,7 +1346,7 @@ class BatterySystemManager:
             logger.warning(
                 "Period %d exceeds strategic intents length %d",
                 period,
-                len(self._schedule_manager.strategic_intents)
+                len(self._schedule_manager.strategic_intents),
             )
             return
 
@@ -1311,9 +1356,14 @@ class BatterySystemManager:
         # Note: actions now store energy (kWh) per period, convert to power (kW)
         battery_action_kwh = 0.0
         battery_action_kw = 0.0
-        if self._schedule_manager.current_schedule and self._schedule_manager.current_schedule.actions:
+        if (
+            self._schedule_manager.current_schedule
+            and self._schedule_manager.current_schedule.actions
+        ):
             if period < len(self._schedule_manager.current_schedule.actions):
-                battery_action_kwh = self._schedule_manager.current_schedule.actions[period]
+                battery_action_kwh = self._schedule_manager.current_schedule.actions[
+                    period
+                ]
                 # Convert kWh to kW: power = energy / time
                 # Calculate period duration from number of periods per day
                 num_periods = len(self._schedule_manager.current_schedule.actions)
@@ -1340,7 +1390,11 @@ class BatterySystemManager:
             grid_charge = False
             # Calculate discharge rate from battery action
             if battery_action_kw < -0.01:  # Discharging
-                discharge_power_pct = abs(battery_action_kw) / self.battery_settings.max_discharge_power_kw * 100
+                discharge_power_pct = (
+                    abs(battery_action_kw)
+                    / self.battery_settings.max_discharge_power_kw
+                    * 100
+                )
                 discharge_rate = min(100, max(0, int(discharge_power_pct)))
             else:
                 discharge_rate = 0
@@ -1352,7 +1406,9 @@ class BatterySystemManager:
             charge_rate = 100  # Allow solar charging
 
         else:
-            logger.warning("Unknown strategic intent: %s, using IDLE defaults", strategic_intent)
+            logger.warning(
+                "Unknown strategic intent: %s, using IDLE defaults", strategic_intent
+            )
             grid_charge = False
             discharge_rate = 0
             charge_rate = 100
@@ -1856,7 +1912,7 @@ class BatterySystemManager:
         logger.info("\n".join(lines))
 
     def log_system_startup(self) -> None:
-        """ Log system startup information"""
+        """Log system startup information"""
         try:
             # Log battery configuration
             self._log_battery_system_config()

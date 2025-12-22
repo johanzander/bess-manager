@@ -518,7 +518,11 @@ class BatterySystemManager:
                 logger.warning(f"Failed to get initial SOC: {e}")
 
         if prepare_next_day:
-            logger.info("Preparing for next day - refreshing predictions")
+            logger.info(
+                "Preparing for next day - clearing historical store and refreshing predictions"
+            )
+            # Clear historical store to prevent yesterday's data from appearing as today's future data
+            self.historical_store.clear()
             self._fetch_predictions()
 
     def _get_price_data(

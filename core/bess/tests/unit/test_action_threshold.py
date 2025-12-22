@@ -54,7 +54,7 @@ class TestActionThreshold:
     def test_no_threshold_baseline(
         self, marginal_profit_scenario, base_battery_settings
     ):
-        """Test that without threshold, marginal profit actions are taken."""
+        """Test that profitability gate blocks money-losing operations even with threshold=0."""
         base_battery_settings.min_action_profit_threshold = 0.0
 
         result = optimize_battery_schedule(
@@ -64,24 +64,36 @@ class TestActionThreshold:
             solar_production=marginal_profit_scenario["solar"],
             initial_soe=marginal_profit_scenario["initial_soe"],
             battery_settings=base_battery_settings,
+            period_duration_hours=1.0,  # Hourly resolution for 24-hour test
         )
 
-        # Count significant battery actions
+        # With threshold=0, profitability gate should still reject money-losing operations
+        # The marginal_profit_scenario results in -0.18 SEK savings (loses money)
+        # So profitability gate should reject it and use all-IDLE schedule
+        assert result.economic_summary is not None, "Economic summary should not be None"
+        total_savings = result.economic_summary.grid_to_battery_solar_savings
+
+        # Verify profitability gate worked: should have 0 or positive savings (IDLE fallback)
+        assert (
+            total_savings >= 0
+        ), f"Profitability gate should prevent losses, got {total_savings:.2f} SEK"
+
+        # Should have no battery actions (all-IDLE schedule)
         significant_actions = sum(
             1
-            for hour in result.hourly_data
+            for hour in result.period_data
             if hour.decision.battery_action is not None
             and abs(hour.decision.battery_action) > 0.1
         )
 
         assert (
-            significant_actions > 0
-        ), "Without threshold, algorithm should take marginal actions"
+            significant_actions == 0
+        ), "Money-losing operations should be rejected even with threshold=0"
 
-    def test_threshold_blocks_marginal_actions(
+    def test_profitability_gate_blocks_below_threshold(
         self, marginal_profit_scenario, base_battery_settings
     ):
-        """Test that threshold blocks marginal profit actions."""
+        """Test that profitability gate blocks optimization when savings < threshold."""
         base_battery_settings.min_action_profit_threshold = 1.5
 
         result = optimize_battery_schedule(
@@ -91,28 +103,31 @@ class TestActionThreshold:
             solar_production=marginal_profit_scenario["solar"],
             initial_soe=marginal_profit_scenario["initial_soe"],
             battery_settings=base_battery_settings,
+            period_duration_hours=1.0,  # Hourly resolution for 24-hour test
         )
 
-        # Should have minimal battery actions
+        # Profitability gate should reject optimization with savings below threshold
+        # marginal_profit_scenario produces negative or very low savings
+        # With threshold=1.5, it should be rejected and IDLE schedule used
+        assert result.economic_summary is not None, "Economic summary should not be None"
+        savings = result.economic_summary.grid_to_battery_solar_savings
+
+        # Verify profitability gate blocked the optimization
+        assert (
+            savings < 1.5
+        ), f"Optimization should have been blocked (savings={savings:.2f} < threshold=1.5)"
+
+        # Should result in all-IDLE schedule (no battery actions)
         significant_actions = sum(
             1
-            for hour in result.hourly_data
+            for hour in result.period_data
             if hour.decision.battery_action is not None
             and abs(hour.decision.battery_action) > 0.1
         )
 
-        total_cycling = sum(
-            abs(hour.decision.battery_action)
-            for hour in result.hourly_data
-            if hour.decision.battery_action is not None
-        )
-
         assert (
-            significant_actions <= 2
-        ), f"With 1.5 SEK threshold, marginal actions should be blocked, got {significant_actions}"
-        assert (
-            total_cycling < 5.0
-        ), f"With threshold, minimal cycling expected, got {total_cycling:.1f}kW"
+            significant_actions == 0
+        ), f"Below-threshold optimization should result in IDLE schedule, got {significant_actions} actions"
 
     def test_threshold_preserves_profitable_actions(
         self, profitable_scenario, base_battery_settings
@@ -127,9 +142,11 @@ class TestActionThreshold:
             solar_production=profitable_scenario["solar"],
             initial_soe=profitable_scenario["initial_soe"],
             battery_settings=base_battery_settings,
+            period_duration_hours=1.0,  # Hourly resolution for 24-hour test
         )
 
         # Should still have significant savings despite threshold
+        assert result.economic_summary is not None, "Economic summary should not be None"
         savings = result.economic_summary.grid_to_battery_solar_savings
         assert (
             savings > 15.0
@@ -138,7 +155,7 @@ class TestActionThreshold:
         # Should still have significant battery actions
         total_cycling = sum(
             abs(hour.decision.battery_action)
-            for hour in result.hourly_data
+            for hour in result.period_data
             if hour.decision.battery_action is not None
         )
         assert (
@@ -166,18 +183,19 @@ class TestActionThreshold:
             solar_production=discharge_scenario["solar"],
             initial_soe=discharge_scenario["initial_soe"],
             battery_settings=base_battery_settings,
+            period_duration_hours=1.0,  # Hourly resolution for 24-hour test
         )
 
         # Count charging vs discharging actions
         charging_actions = sum(
             1
-            for hour in result.hourly_data
+            for hour in result.period_data
             if hour.decision.battery_action is not None
             and hour.decision.battery_action > 0.1
         )
         discharging_actions = sum(
             1
-            for hour in result.hourly_data
+            for hour in result.period_data
             if hour.decision.battery_action is not None
             and hour.decision.battery_action < -0.1
         )

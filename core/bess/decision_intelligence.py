@@ -8,35 +8,7 @@ This module enhances the existing DecisionData fields without creating new class
 maintaining compatibility with the existing software architecture.
 """
 
-from core.bess.models import DecisionData, EnergyData
-
-
-def determine_strategic_intent(power: float, energy_data: EnergyData) -> str:
-    """
-    Determine strategic intent based on battery action and energy flows.
-
-    This moves the strategic intent logic from dp_algorithm to decision framework
-    for better separation of concerns.
-
-    Args:
-        power: Battery power in kW (+ charging, - discharging)
-        energy_data: Complete energy flow data
-
-    Returns:
-        Strategic intent string
-    """
-    if power > 0.1:  # CHARGING
-        if energy_data.grid_to_battery > 0.1:  # ANY grid charging needs capability
-            return "GRID_CHARGING"  # Enable grid charging capability
-        else:
-            return "SOLAR_STORAGE"  # Pure solar charging
-    elif power < -0.1:  # DISCHARGING
-        if energy_data.battery_to_grid > 0.1:  # ANY export needs capability
-            return "EXPORT_ARBITRAGE"  # Enable export capability
-        else:
-            return "LOAD_SUPPORT"  # Pure home support
-    else:
-        return "IDLE"
+from core.bess.models import DecisionData, EnergyData, determine_strategic_intent
 
 
 def generate_advanced_flow_pattern_name(energy_data: EnergyData) -> str:
@@ -441,6 +413,7 @@ def create_decision_data(
     battery_wear_cost: float,
     buy_price: float,
     sell_price: float,
+    dt: float,
 ) -> DecisionData:
     """
     Create enhanced DecisionData with rich pattern analysis and economic reasoning.
@@ -450,7 +423,7 @@ def create_decision_data(
     Implements advanced flow pattern analysis from decisionframework.md.
 
     Args:
-        power: Battery power action (+ charge, - discharge)
+        power: Battery power action (+ charge, - discharge) in kW
         energy_data: Complete energy flow data
         hour: Current hour (0-23)
         cost_basis: Cost basis of stored energy (SEK/kWh)
@@ -460,6 +433,7 @@ def create_decision_data(
         battery_wear_cost: Battery degradation cost
         buy_price: Current electricity purchase price (SEK/kWh)
         sell_price: Current electricity sale price (SEK/kWh)
+        dt: Period duration in hours (e.g., 0.25 for quarterly, 1.0 for hourly)
 
     Returns:
         Enhanced DecisionData with all fields populated including advanced flow patterns
@@ -511,19 +485,19 @@ def create_decision_data(
         # For export strategies, this is the realization hour
         future_target_hours = [hour]
 
-    # Create simplified DecisionData with only fields we can implement well
+    # Create DecisionData with only fields we can implement
+    # Convert power (kW) to energy (kWh) for consistency with other period data
+    battery_action_kwh = power * dt
     return DecisionData(
         strategic_intent=strategic_intent,
-        battery_action=power,
+        battery_action=battery_action_kwh,
         cost_basis=cost_basis,
-        # Enhanced fields (existing but previously unused)
         pattern_name=pattern_name,
         description=description,
         economic_chain=economic_chain,
         immediate_value=immediate_value,
         future_value=future_value,
         net_strategy_value=net_strategy_value,
-        # NEW: Simple enhanced fields that actually work
         advanced_flow_pattern=advanced_flow_pattern,
         detailed_flow_values=detailed_flow_values,
         future_target_hours=future_target_hours,

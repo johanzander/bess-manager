@@ -1,13 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Bar, ComposedChart, Area, Line } from 'recharts';
 import { HourlyData } from '../types';
+import { periodToTimeString, periodToTimeRange } from '../utils/timeUtils';
+import { DataResolution } from '../hooks/useUserPreferences';
 
 interface BatteryLevelChartProps {
   hourlyData: HourlyData[];
   settings: any; // Adjust type as needed
+  resolution: DataResolution;
 }
 
-export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData }) => {
+export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData, resolution }) => {
   // Reactive dark mode detection
   const [isDarkMode, setIsDarkMode] = useState(
     document.documentElement.classList.contains('dark')
@@ -81,16 +84,26 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
     const batteryAction = getValue(hour.batteryAction);
     const batterySocPercent = getValue(hour.batterySocEnd); // Extract from FormattedValue
     const price = getValue(hour.buyPrice); // Extract from FormattedValue
-    const hourNum = typeof hour.hour === 'string' ? parseInt(hour.hour, 10) : (hour.hour || index);
+    const periodNum = hour.period ?? index;
     if (hour.dataSource === undefined) {
       throw new Error(`MISSING DATA: dataSource is required but missing at index ${index}`);
     }
     const dataSource = hour.dataSource;
-    
+
+    // Calculate x-axis position (center of period)
+    let xPosition: number;
+    if (resolution === 'quarter-hourly') {
+      // For quarterly: convert period to hour position (period 4 = hour 1.0)
+      xPosition = periodNum / 4 + 0.125; // Center in 15-min period (0.125 = 1/8 hour)
+    } else {
+      // For hourly: center in hour
+      xPosition = periodNum + 0.5;
+    }
+
     return {
-      hour: hourNum + 0.5,  // Center the bar in the middle of the hour period
-      hourNum,
-      hourLabel: `${hourNum.toString().padStart(2, '0')}:00`,  // Keep original for tooltip
+      hour: xPosition,
+      periodNum,
+      hourLabel: periodToTimeString(periodNum, resolution),
       batterySocPercent: batterySocPercent,
       action: batteryAction,
       price: price,
@@ -113,12 +126,13 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
         <ResponsiveContainer width="100%" height="100%">
           <ComposedChart data={chartData}>
             <CartesianGrid strokeDasharray="5 5" stroke={colors.grid} strokeOpacity={0.3} strokeWidth={0.5} />
-            <XAxis 
-              dataKey="hour" 
-              interval={0}
+            <XAxis
+              dataKey="hour"
+              interval="preserveStartEnd"
               tick={{ fill: colors.text, fontSize: 12 }}
               axisLine={{ stroke: colors.text }}
               tickLine={{ stroke: colors.text }}
+              ticks={Array.from({ length: 25 }, (_, i) => i)}
               tickFormatter={(value) => `${Math.floor(value).toString().padStart(2, '0')}:00`}
             />
             
@@ -192,27 +206,30 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
                 }
                 return ['N/A', name];
               }}
-              labelFormatter={(label) => {
-                // label should be the hour value from the data
-                const hourNum = Math.floor(Number(label));
-                const endHour = (hourNum + 1) % 24;
-                return `${hourNum.toString().padStart(2, '0')}:00 - ${endHour.toString().padStart(2, '0')}:00`;
+              labelFormatter={(label, payload) => {
+                // Get period index from the first data point in tooltip
+                if (payload && payload.length > 0) {
+                  const periodNum = payload[0].payload.periodNum;
+                  return periodToTimeRange(periodNum, resolution);
+                }
+                return '';
               }}
               labelStyle={{ color: colors.text }}
             />
             
             <ReferenceLine yAxisId="action" y={0} stroke={colors.grid} strokeDasharray="2 2" />
-            
-            {/* Hourly vertical grid lines */}
+
+            {/* Hourly vertical grid lines - calculate from data length */}
+            {/* For quarterly data (96 periods), still show 24 hour lines */}
             {Array.from({ length: 25 }, (_, i) => (
-              <ReferenceLine 
+              <ReferenceLine
                 key={`hour-${i}`}
-                x={i} 
+                x={i}
                 yAxisId="left"
-                stroke={colors.grid} 
-                strokeOpacity={0.3} 
+                stroke={colors.grid}
+                strokeOpacity={0.3}
                 strokeWidth={0.5}
-                strokeDasharray="5 5" 
+                strokeDasharray="5 5"
               />
             ))}
             

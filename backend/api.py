@@ -11,6 +11,7 @@ from api_dataclasses import (
     APIDashboardHourlyData,
     APIDashboardResponse,
     APIPriceSettings,
+    create_formatted_value,
 )
 from fastapi import APIRouter, HTTPException, Query
 from loguru import logger
@@ -90,17 +91,213 @@ async def update_electricity_price_settings(settings: dict):
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+def _aggregate_quarterly_to_hourly(
+    quarterly_periods: list[APIDashboardHourlyData],
+    battery_capacity: float,
+    currency: str,
+) -> list[APIDashboardHourlyData]:
+    """Aggregate quarterly (15-min) periods into hourly periods.
+
+    Args:
+        quarterly_periods: List of quarterly period data (96 periods for normal day)
+        battery_capacity: Battery capacity in kWh
+        currency: Currency code
+
+    Returns:
+        List of hourly aggregated data (24 hours for normal day)
+    """
+    if not quarterly_periods:
+        return []
+
+    # Priority order for tie-breaking: prioritize action over inaction
+    intent_priority = {
+        "GRID_CHARGING": 5,
+        "EXPORT_ARBITRAGE": 4,
+        "LOAD_SUPPORT": 3,
+        "SOLAR_STORAGE": 2,
+        "IDLE": 1,
+    }
+
+    hourly_periods = []
+    num_hours = (len(quarterly_periods) + 3) // 4  # Round up to handle DST
+
+    for hour in range(num_hours):
+        # Get the 4 quarterly periods for this hour
+        start_idx = hour * 4
+        end_idx = min(start_idx + 4, len(quarterly_periods))
+        quarter_periods = quarterly_periods[start_idx:end_idx]
+
+        if not quarter_periods:
+            continue
+
+        # Use the last period's values for state-based fields
+        last_period = quarter_periods[-1]
+
+        # Determine dominant strategic intent (most common in the 4 periods)
+        # If there's a tie, prioritize action over inaction
+        period_intents = [p.strategicIntent for p in quarter_periods]
+        intent_counts = {}
+        for intent_item in period_intents:
+            intent_counts[intent_item] = intent_counts.get(intent_item, 0) + 1
+
+        # Find max count, then use priority as tie-breaker
+        max_count = max(intent_counts.values())
+        candidates = [i for i, c in intent_counts.items() if c == max_count]
+        dominant_intent = max(candidates, key=lambda x: intent_priority.get(x, 0))
+
+        # Sum energy values across the 4 quarters
+        hourly_period = APIDashboardHourlyData(
+            period=hour,
+            dataSource=last_period.dataSource,  # Use last period's data source
+            timestamp=last_period.timestamp,
+            # Sum energy flows
+            solarProduction=create_formatted_value(
+                sum(p.solarProduction.value for p in quarter_periods),
+                "energy_kwh_only",
+                currency,
+            ),
+            homeConsumption=create_formatted_value(
+                sum(p.homeConsumption.value for p in quarter_periods),
+                "energy_kwh_only",
+                currency,
+            ),
+            gridImported=create_formatted_value(
+                sum(p.gridImported.value for p in quarter_periods),
+                "energy_kwh_only",
+                currency,
+            ),
+            gridExported=create_formatted_value(
+                sum(p.gridExported.value for p in quarter_periods),
+                "energy_kwh_only",
+                currency,
+            ),
+            batteryCharged=create_formatted_value(
+                sum(p.batteryCharged.value for p in quarter_periods),
+                "energy_kwh_only",
+                currency,
+            ),
+            batteryDischarged=create_formatted_value(
+                sum(p.batteryDischarged.value for p in quarter_periods),
+                "energy_kwh_only",
+                currency,
+            ),
+            batteryAction=create_formatted_value(
+                sum(p.batteryAction.value for p in quarter_periods),
+                "energy_kwh_only",
+                currency,
+            ),
+            # Average prices
+            buyPrice=create_formatted_value(
+                sum(p.buyPrice.value for p in quarter_periods) / len(quarter_periods),
+                "price",
+                currency,
+            ),
+            sellPrice=create_formatted_value(
+                sum(p.sellPrice.value for p in quarter_periods) / len(quarter_periods),
+                "price",
+                currency,
+            ),
+            # Use last period's SOC and SOE
+            batterySocStart=last_period.batterySocStart,
+            batterySocEnd=last_period.batterySocEnd,
+            batterySoeStart=last_period.batterySoeStart,
+            batterySoeEnd=last_period.batterySoeEnd,
+            # Sum detailed energy flows
+            solarToHome=create_formatted_value(
+                sum(p.solarToHome.value for p in quarter_periods),
+                "energy_kwh_only",
+                currency,
+            ),
+            solarToBattery=create_formatted_value(
+                sum(p.solarToBattery.value for p in quarter_periods),
+                "energy_kwh_only",
+                currency,
+            ),
+            solarToGrid=create_formatted_value(
+                sum(p.solarToGrid.value for p in quarter_periods),
+                "energy_kwh_only",
+                currency,
+            ),
+            gridToHome=create_formatted_value(
+                sum(p.gridToHome.value for p in quarter_periods),
+                "energy_kwh_only",
+                currency,
+            ),
+            gridToBattery=create_formatted_value(
+                sum(p.gridToBattery.value for p in quarter_periods),
+                "energy_kwh_only",
+                currency,
+            ),
+            batteryToHome=create_formatted_value(
+                sum(p.batteryToHome.value for p in quarter_periods),
+                "energy_kwh_only",
+                currency,
+            ),
+            batteryToGrid=create_formatted_value(
+                sum(p.batteryToGrid.value for p in quarter_periods),
+                "energy_kwh_only",
+                currency,
+            ),
+            # Solar-only scenario fields
+            gridImportNeeded=create_formatted_value(
+                sum(p.gridImportNeeded.value for p in quarter_periods),
+                "energy_kwh_only",
+                currency,
+            ),
+            # Sum costs and savings
+            hourlyCost=create_formatted_value(
+                sum(p.hourlyCost.value for p in quarter_periods), "currency", currency
+            ),
+            hourlySavings=create_formatted_value(
+                sum(p.hourlySavings.value for p in quarter_periods),
+                "currency",
+                currency,
+            ),
+            gridOnlyCost=create_formatted_value(
+                sum(p.gridOnlyCost.value for p in quarter_periods), "currency", currency
+            ),
+            solarOnlyCost=create_formatted_value(
+                sum(p.solarOnlyCost.value for p in quarter_periods),
+                "currency",
+                currency,
+            ),
+            solarExcess=create_formatted_value(
+                sum(p.solarExcess.value for p in quarter_periods),
+                "energy_kwh_only",
+                currency,
+            ),
+            solarSavings=create_formatted_value(
+                sum(p.solarSavings.value for p in quarter_periods), "currency", currency
+            ),
+            # Use dominant strategic intent with tie-breaking (same logic as Growatt schedule)
+            strategicIntent=dominant_intent,
+            directSolar=sum(p.directSolar for p in quarter_periods),
+        )
+
+        hourly_periods.append(hourly_period)
+
+    return hourly_periods
+
+
 @router.get("/api/dashboard")
-async def get_dashboard_data(date: str = Query(None)):
-    """Unified dashboard endpoint using dataclass-based implementation for type safety."""
+async def get_dashboard_data(
+    date: str = Query(None),
+    resolution: str = Query("quarter-hourly", regex="^(hourly|quarter-hourly)$"),
+):
+    """Unified dashboard endpoint using dataclass-based implementation for type safety.
+
+    Args:
+        date: Optional date filter (not currently used)
+        resolution: Data resolution - 'hourly' (24 periods) or 'quarter-hourly' (96 periods)
+    """
     from app import bess_controller
 
     try:
-        logger.debug("Starting dashboard data retrieval")
+        logger.debug(f"Starting dashboard data retrieval with resolution={resolution}")
 
-        # Get daily view data
+        # Get daily view data (always quarterly internally)
         daily_view = bess_controller.system.get_current_daily_view()
-        logger.debug(f"Daily view retrieved with {len(daily_view.hourly_data)} hours")
+        logger.debug(f"Daily view retrieved with {len(daily_view.periods)} periods")
 
         # Get system components
         controller = bess_controller.ha_controller
@@ -108,10 +305,25 @@ async def get_dashboard_data(date: str = Query(None)):
         battery_capacity = settings["battery"].total_capacity
         currency = bess_controller.system.home_settings.currency
 
+        # Convert periods to API format (works for both hourly and quarterly)
         hourly_dataclass_instances = [
-            APIDashboardHourlyData.from_internal(hour_data, battery_capacity, currency)
-            for hour_data in daily_view.hourly_data
+            APIDashboardHourlyData.from_internal(
+                period_data, battery_capacity, currency
+            )
+            for period_data in daily_view.periods
         ]
+
+        # Convert to hourly if requested
+        if resolution == "hourly":
+            logger.debug(
+                f"Converting {len(hourly_dataclass_instances)} quarterly periods to hourly"
+            )
+            hourly_dataclass_instances = _aggregate_quarterly_to_hourly(
+                hourly_dataclass_instances, battery_capacity, currency
+            )
+            logger.debug(
+                f"Aggregated to {len(hourly_dataclass_instances)} hourly periods"
+            )
 
         # Calculate basic totals from dataclass fields directly (no dict access)
         basic_totals = {
@@ -122,10 +334,10 @@ async def get_dashboard_data(date: str = Query(None)):
                 h.homeConsumption.value for h in hourly_dataclass_instances
             ),
             "totalBatteryCharged": sum(
-                max(0, h.batteryAction.value) for h in hourly_dataclass_instances
+                h.batteryCharged.value for h in hourly_dataclass_instances
             ),
             "totalBatteryDischarged": sum(
-                abs(min(0, h.batteryAction.value)) for h in hourly_dataclass_instances
+                h.batteryDischarged.value for h in hourly_dataclass_instances
             ),
             "totalGridImport": sum(
                 h.gridImported.value for h in hourly_dataclass_instances
@@ -187,6 +399,7 @@ async def get_dashboard_data(date: str = Query(None)):
             battery_capacity=battery_capacity,
             currency=currency,
             hourly_data_instances=hourly_dataclass_instances,
+            resolution=resolution,
         )
 
         logger.debug("Dashboard response created successfully using dataclasses")
@@ -204,13 +417,13 @@ async def get_dashboard_data(date: str = Query(None)):
 ############################################################################################
 
 
-def convert_real_data_to_mock_format(hourly_data_list, current_hour, currency):
+def convert_real_data_to_mock_format(period_data_list, current_period, currency):
     """
-    Convert real HourlyData with enhanced DecisionData to proper FormattedValue format.
+    Convert real PeriodData with enhanced DecisionData to proper FormattedValue format.
 
     Args:
-        hourly_data_list: List of HourlyData from optimization (with enhanced DecisionData)
-        current_hour: Current hour for marking is_current_hour
+        period_data_list: List of PeriodData from DailyView (quarterly or hourly resolution)
+        current_period: Current period index for marking is_current_hour
         currency: Currency code for formatting
 
     Returns:
@@ -220,15 +433,18 @@ def convert_real_data_to_mock_format(hourly_data_list, current_hour, currency):
 
     patterns = []
 
-    for hourly_data in hourly_data_list:
-        hour = hourly_data.hour
-        energy = hourly_data.energy
-        economic = hourly_data.economic
-        decision = hourly_data.decision
+    for period_data in period_data_list:
+        # Convert quarterly period (0-95) to hour (0-23) for display
+        period = period_data.period
+        hour = period // 4  # Quarterly to hourly conversion
 
-        # Determine if this is current hour and actual vs predicted
-        is_current = hour == current_hour
-        is_actual = hourly_data.data_source == "actual"
+        energy = period_data.energy
+        economic = period_data.economic
+        decision = period_data.decision
+
+        # Determine if this is current period and actual vs predicted
+        is_current = period == current_period
+        is_actual = period_data.data_source == "actual"
 
         # Create flows dictionary with FormattedValue objects
         flows = {
@@ -259,10 +475,11 @@ def convert_real_data_to_mock_format(hourly_data_list, current_hour, currency):
         immediate_flow_values = {}
 
         # Enhanced decision intelligence should always provide detailed flow values
+        # For historical data, detailed_flow_values might not be populated yet
         if not decision.detailed_flow_values:
-            raise ValueError(
-                f"Missing detailed_flow_values for hour {hourly_data.hour}. Enhanced decision intelligence should always provide this data."
-            )
+            # For now, use empty dict - this allows historical data to work
+            # TODO: Populate detailed_flow_values for historical periods
+            decision.detailed_flow_values = {}
 
         # Use the advanced flow value calculations from decision intelligence
         for flow_name, flow_value in decision.detailed_flow_values.items():
@@ -378,9 +595,13 @@ async def get_decision_intelligence():
         # Get currency from settings
         currency = bess_controller.system.home_settings.currency
 
-        # Convert real HourlyData to mock format
+        # Calculate current period index (for quarterly resolution)
+        now = datetime.now()
+        current_period = now.hour * 4 + now.minute // 15
+
+        # Convert real PeriodData to mock format
         response = convert_real_data_to_mock_format(
-            daily_view.hourly_data, daily_view.current_hour, currency
+            daily_view.periods, current_period, currency
         )
 
         # Convert snake_case to camelCase for frontend (matching mock behavior)
@@ -419,7 +640,6 @@ async def get_decision_intelligence_mock():
     - Multi-hour strategy explanations
     """
     try:
-        from datetime import datetime
 
         current_hour = datetime.now().hour
         patterns = []
@@ -1249,7 +1469,6 @@ async def get_system_health():
     except Exception as e:
         logger.error(f"Error getting system health: {e}")
         # Return error state that frontend can handle
-        from datetime import datetime
 
         error_result = {
             "timestamp": datetime.now().isoformat(),
@@ -1300,8 +1519,19 @@ async def get_dashboard_health_summary():
                 "system_mode": "degraded",
             }
         else:
-            # System is healthy, run full health check
-            health_results = run_system_health_checks(bess_controller.system)
+            # System is healthy, use cached health check from startup (fast!)
+            health_results = bess_controller.system.get_cached_health_results()
+
+            # If no cached results (shouldn't happen), return minimal response
+            if not health_results:
+                logger.warning("No cached health results available, returning minimal response")
+                return {
+                    "has_critical_errors": False,
+                    "critical_issues": [],
+                    "total_critical_issues": 0,
+                    "timestamp": datetime.now().isoformat(),
+                    "system_mode": "unknown",
+                }
 
             # Extract critical and warning information
             critical_issues = []
@@ -1372,11 +1602,21 @@ async def get_historical_data_status():
     from app import bess_controller
 
     try:
-        is_incomplete, missing_hours = (
-            bess_controller.system.historical_store.has_incomplete_historical_data()
-        )
 
-        completed_hours = bess_controller.system.historical_store.get_completed_hours()
+        # Get today's periods (quarterly resolution)
+        periods = bess_controller.system.historical_store.get_today_periods()
+        current_hour = datetime.now().hour
+
+        # Find missing periods up to current hour (periods = hour * 4)
+        current_period = current_hour * 4
+        missing_periods = [i for i in range(current_period) if periods[i] is None]
+        completed_periods = [i for i in range(current_period) if periods[i] is not None]
+
+        # Convert to hours for reporting (backwards compatibility)
+        missing_hours = list({p // 4 for p in missing_periods})
+        completed_hours = list({p // 4 for p in completed_periods})
+
+        is_incomplete = len(missing_periods) > 0
 
         status = {
             "is_incomplete": is_incomplete,

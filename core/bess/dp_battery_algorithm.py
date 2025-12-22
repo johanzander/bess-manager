@@ -23,15 +23,15 @@ KEY FEATURES:
 - Strategic intent capture at decision time for transparency and hardware control
 
 MINIMUM PROFIT THRESHOLD SYSTEM:
-The minimum profit threshold prevents unprofitable battery cycling by raising the cost threshold for charging decisions:
-The threshold doesn't require immediate profit, but ensures the complete charge/discharge strategy provides meaningful profit above the penalty level. This prevents excessive cycling for marginal gains while preserving clearly profitable arbitrage opportunities.
+The minimum profit threshold prevents unprofitable battery operations through a post-optimization profitability gate.
+After optimization completes, the total savings are compared against the threshold:
+- If total_savings >= min_action_profit_threshold: Execute the optimized schedule
+- If total_savings < min_action_profit_threshold: Reject optimization and use all-IDLE schedule (do nothing)
 
-Adds fixed penalty (min_action_profit_threshold) to charging actions only during optimization
-No penalty on discharging actions - stored energy is always usable without additional threshold costs
-Creates minimum profit barrier: charging only occurs when total future benefits exceed all costs (grid + cycle + threshold)
-Threshold penalty only affects optimization decisions, not user-facing cost calculations
+This ensures the battery only operates when it provides meaningful economic benefit:
 Default: 1.5 SEK - configurable via battery.min_action_profit_threshold_sek in config.yaml
-Example: 1.5 SEK threshold means charging strategies must provide net benefits >1.5 SEK above normal costs to be selected by the optimizer
+Example: 1.5 SEK threshold means optimization must save at least 1.5 SEK to be executed
+Otherwise the battery stays idle - better to do nothing than operate for marginal gains
 
 STRATEGIC INTENT CAPTURE:
 The algorithm now captures the strategic reasoning behind each decision:
@@ -69,7 +69,6 @@ __all__ = [
 
 
 import logging
-from datetime import datetime
 from enum import Enum
 
 import numpy as np
@@ -80,14 +79,14 @@ from core.bess.models import (
     EconomicData,
     EconomicSummary,
     EnergyData,
-    HourlyData,
     OptimizationResult,
+    PeriodData,
 )
 from core.bess.settings import BatterySettings
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+    level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -132,7 +131,7 @@ def _discretize_state_action_space(
 
 
 def _state_transition(
-    soe: float, power: float, battery_settings: BatterySettings, dt: float = 1.0
+    soe: float, power: float, battery_settings: BatterySettings, dt: float
 ) -> float:
     """
     Calculate the next state of energy based on current SOE and power action.
@@ -169,16 +168,15 @@ def _calculate_reward(
     power: float,
     soe: float,  # State of Energy in kWh
     next_soe: float,  # State of Energy in kWh
-    hour: int,
+    period: int,
     home_consumption: float,
     battery_settings: BatterySettings,
-    solar_production: float = 0.0,
-    dt: float = 1.0,
-    buy_price: list[float] | None = None,
-    sell_price: list[float] | None = None,
-    cost_basis: float = 0.0,
-    future_prices: list[float] | None = None,
-) -> tuple[float, float, HourlyData]:
+    dt: float,
+    buy_price: list[float],
+    sell_price: list[float],
+    solar_production: float,
+    cost_basis: float,
+) -> tuple[float, float, PeriodData]:
     """
     Calculate reward with proper cycle cost accounting and CORRECTED discharge profitability checks.
 
@@ -188,11 +186,11 @@ def _calculate_reward(
     - Grid costs applied to energy throughput (what you draw from grid)
     - Cost basis includes BOTH grid costs AND cycle costs for profitability analysis
 
-    PROFITABILITY CHECK - CORRECTED:
+    PROFITABILITY CHECK:
     - For any discharge, calculate the value of the discharged energy
     - Value = max(avoiding grid purchases, grid export revenue)
     - Discharge only profitable if this value > cost_basis
-    - CRITICAL: Must account for discharge efficiency losses
+    - Must account for discharge efficiency losses
 
     Example for stored energy costing 2.61 SEK/kWh:
     - If buy_price = 2.58, sell_price = 1.81
@@ -202,11 +200,9 @@ def _calculate_reward(
     - 2.45 < 2.61 → UNPROFITABLE (correctly blocked)
     """
 
-    # Get prices for this hour
-    current_buy_price = buy_price[hour] if buy_price and hour < len(buy_price) else 0.0
-    current_sell_price = (
-        sell_price[hour] if sell_price and hour < len(sell_price) else 0.0
-    )
+    # Get prices for this period
+    current_buy_price = buy_price[period]
+    current_sell_price = sell_price[period]
 
     # Calculate battery flows from power
     battery_charged = max(0, power * dt) if power > 0 else 0.0
@@ -250,15 +246,6 @@ def _calculate_reward(
             )
     else:  # Discharging or idle
         battery_wear_cost = 0.0
-
-    # MINIMUM ACTION PROFIT THRESHOLD
-    # ============================================================================
-    # Apply fixed penalty ONLY to charging actions (like cycle cost)
-    # This prevents low-profit charging while never penalizing use of stored energy
-    if power > 0:  # Only charging actions
-        action_threshold_penalty = battery_settings.min_action_profit_threshold
-    else:
-        action_threshold_penalty = 0.0
 
     # ============================================================================
     # COST BASIS CALCULATION
@@ -324,7 +311,7 @@ def _calculate_reward(
         if effective_value_per_kwh_stored <= cost_basis:
             # This discharge is unprofitable - prevent it
             logger.debug(
-                f"Hour {hour}: Unprofitable discharge blocked. "
+                f"Period {period}: Unprofitable discharge blocked. "
                 f"Buy: {current_buy_price:.3f}, Sell: {current_sell_price:.3f}, "
                 f"Avoid value: {avoid_purchase_value:.3f}, Export value: {export_value:.3f}, "
                 f"Best value: {effective_value_per_kwh_stored:.3f} <= "
@@ -342,20 +329,24 @@ def _calculate_reward(
                 * current_buy_price
                 - max(0, solar_production - home_consumption) * current_sell_price,
             )
+            # Store battery_action as energy (kWh) per period for consistency with other energy values
+            battery_action_kwh = power * dt
             decision_data = DecisionData(
-                strategic_intent="IDLE", battery_action=power, cost_basis=cost_basis
+                strategic_intent="IDLE",
+                battery_action=battery_action_kwh,
+                cost_basis=cost_basis,
             )
-            hour_data = HourlyData(
-                hour=hour,
+            # Timestamp is set to None - caller will add timestamps based on optimization_period
+            # The algorithm is time-agnostic and operates on relative period indices (0 to horizon-1)
+            period_data = PeriodData(
+                period=period,
                 energy=energy_data,
-                timestamp=datetime.now().replace(
-                    hour=hour, minute=0, second=0, microsecond=0
-                ),
+                timestamp=None,
                 data_source="predicted",
                 economic=economic_data,
                 decision=decision_data,
             )
-            return float("-inf"), cost_basis, hour_data
+            return float("-inf"), cost_basis, period_data
 
     # ============================================================================
     # REWARD CALCULATION
@@ -365,10 +356,8 @@ def _calculate_reward(
     import_cost = energy_data.grid_imported * current_buy_price
     export_revenue = energy_data.grid_exported * current_sell_price
 
-    # Total cost = grid costs + battery degradation costs + action threshold penalty
-    total_cost = (
-        import_cost - export_revenue + battery_wear_cost + action_threshold_penalty
-    )
+    # Total cost = grid costs + battery degradation costs
+    total_cost = import_cost - export_revenue + battery_wear_cost
     reward = -total_cost  # Negative cost = positive reward
 
     # ============================================================================
@@ -378,7 +367,7 @@ def _calculate_reward(
     decision_data = create_decision_data(
         power=power,
         energy_data=energy_data,
-        hour=hour,
+        hour=period,
         cost_basis=new_cost_basis,
         reward=reward,
         import_cost=import_cost,
@@ -386,57 +375,48 @@ def _calculate_reward(
         battery_wear_cost=battery_wear_cost,
         buy_price=current_buy_price,
         sell_price=current_sell_price,
+        dt=dt,
     )
 
     # ============================================================================
     # ECONOMIC DATA CREATION
     # ============================================================================
 
-    grid_cost = import_cost - export_revenue
-    hourly_cost = grid_cost + battery_wear_cost
-    grid_only_cost = home_consumption * current_buy_price
-    solar_only_cost = (
-        max(0, home_consumption - solar_production) * current_buy_price
-        - max(0, solar_production - home_consumption) * current_sell_price
-    )
-    hourly_savings = solar_only_cost - hourly_cost
-
-    economic_data = EconomicData(
+    # Use standard economic calculation from EconomicData.from_energy_data()
+    economic_data = EconomicData.from_energy_data(
+        energy_data=energy_data,
         buy_price=current_buy_price,
         sell_price=current_sell_price,
-        grid_cost=grid_cost,
-        battery_cycle_cost=battery_wear_cost,  # This matches what we calculated above
-        hourly_cost=hourly_cost,
-        grid_only_cost=grid_only_cost,
-        solar_only_cost=solar_only_cost,
-        hourly_savings=hourly_savings,
+        battery_cycle_cost=battery_wear_cost,
     )
 
     # ============================================================================
-    # CREATE HOURLY DATA OBJECT
+    # CREATE PERIOD DATA OBJECT
     # ============================================================================
 
-    new_hourly_data = HourlyData(
-        hour=hour,
+    # Timestamp is set to None - caller will add timestamps based on optimization_period
+    # The algorithm is time-agnostic and operates on relative period indices (0 to horizon-1)
+    new_period_data = PeriodData(
+        period=period,
         energy=energy_data,
-        timestamp=datetime.now().replace(hour=hour, minute=0, second=0, microsecond=0),
+        timestamp=None,
         data_source="predicted",
         economic=economic_data,
         decision=decision_data,
     )
 
-    return reward, new_cost_basis, new_hourly_data
+    return reward, new_cost_basis, new_period_data
 
 
 def print_optimization_results(results, buy_prices, sell_prices):
     """Log a detailed results table with strategic intents - new format version.
 
     Args:
-        results: OptimizationResult object with hourly_data and economic_summary
+        results: OptimizationResult object with period_data and economic_summary
         buy_prices: List of buy prices
         sell_prices: List of sell prices
     """
-    hourly_data_list = results.hourly_data
+    period_data_list = results.period_data
     economic_results = results.economic_summary
 
     # Initialize totals
@@ -457,65 +437,48 @@ def print_optimization_results(results, buy_prices, sell_prices):
 
     output.append("\nBattery Schedule:")
     output.append(
-        "╔════╦════════════╦═════╦══════╦╦═════╦══════╦══════╦═════╦══════╦════════════════╦══════╦══════╦══════╗"
+        "╔════╦═══════════╦══════╦═══════╦╦═════╦══════╦══════╦═════╦═══════╦═══════════════╦═══════╦══════╦══════╗"
     )
     output.append(
-        "║ Hr ║  Buy/Sell  ║Cons.║Cost  ║║Sol. ║Sol→B ║Gr→B  ║ SoE ║Act.  ║ Strategic      ║ Grid ║ Batt ║ Save ║"
+        "║ Hr ║  Buy/Sell ║Cons. ║ Cost  ║║Sol. ║Sol→B ║Gr→B  ║ SoE ║Action ║    Intent     ║  Grid ║ Batt ║ Save ║"
     )
     output.append(
-        "║    ║   (SEK)    ║(kWh)║(SEK) ║║(kWh)║(kWh) ║(kWh) ║(kWh)║(kW)  ║ Intent         ║(SEK) ║(SEK) ║(SEK) ║"
+        "║    ║   (SEK)   ║(kWh) ║ (SEK) ║║(kWh)║(kWh) ║(kWh) ║(kWh)║(kWh)  ║               ║ (SEK) ║(SEK) ║(SEK) ║"
     )
     output.append(
-        "╠════╬════════════╬═════╬══════╬╬═════╬══════╬══════╬════╬══════╬════════════════╬══════╬══════╬══════╣"
+        "╠════╬═══════════╬══════╬═══════╬╬═════╬══════╬══════╬═════╬═══════╬═══════════════╬═══════╬══════╬══════╣"
     )
 
     # Process each hour - replicating original logic exactly
-    for i, hour_data in enumerate(hourly_data_list):
-        hour = hour_data.hour
-        consumption = hour_data.energy.home_consumption
-        solar = hour_data.energy.solar_production
-        action = hour_data.decision.battery_action or 0.0
-        soe_kwh = hour_data.energy.battery_soe_end
-        intent = hour_data.decision.strategic_intent
+    for i, period_data in enumerate(period_data_list):
+        period = period_data.period
+        consumption = period_data.energy.home_consumption
+        solar = period_data.energy.solar_production
+        action = period_data.decision.battery_action or 0.0
+        soe_kwh = period_data.energy.battery_soe_end
+        intent = period_data.decision.strategic_intent
 
         # Calculate values exactly like original function
         base_cost = (
             consumption * buy_prices[i]
             if i < len(buy_prices)
-            else consumption * hour_data.economic.buy_price
+            else consumption * period_data.economic.buy_price
         )
 
-        # Extract solar flows - try to get from detailed flows if available
-        solar_to_battery = 0.0
-        grid_to_battery = 0.0
-
-        # If we have detailed flow data, use it
-        if hasattr(hour_data, "solar_to_battery"):
-            solar_to_battery = hour_data.solar_to_battery
-            grid_to_battery = hour_data.grid_to_battery
-        else:
-            # Fallback: estimate from battery_charged
-            solar_to_battery = (
-                hour_data.energy.battery_charged
-                if hour_data.energy.battery_charged > 0
-                else 0
-            )
-            grid_to_battery = max(
-                0,
-                hour_data.energy.battery_charged
-                - min(solar, hour_data.energy.battery_charged),
-            )
+        # Extract solar flows from detailed flow data (always available from EnergyData)
+        solar_to_battery = period_data.energy.solar_to_battery
+        grid_to_battery = period_data.energy.grid_to_battery
 
         # Calculate costs using original logic - FIXED: use property accessor for battery_cycle_cost
         grid_cost = (
-            hour_data.energy.grid_imported * hour_data.economic.buy_price
-            - hour_data.energy.grid_exported * hour_data.economic.sell_price
+            period_data.energy.grid_imported * period_data.economic.buy_price
+            - period_data.energy.grid_exported * period_data.economic.sell_price
         )
         battery_cost = (
-            hour_data.economic.battery_cycle_cost
+            period_data.economic.battery_cycle_cost
         )  # FIXED: access via economic component
         combined_cost = grid_cost + battery_cost
-        hourly_savings = base_cost - combined_cost
+        period_savings = base_cost - combined_cost
 
         # Update totals
         total_consumption += consumption
@@ -526,32 +489,32 @@ def print_optimization_results(results, buy_prices, sell_prices):
         total_grid_cost += grid_cost
         total_battery_cost += battery_cost
         total_combined_cost += combined_cost
-        total_savings += hourly_savings
-        total_charging += hour_data.energy.battery_charged
-        total_discharging += hour_data.energy.battery_discharged
+        total_savings += period_savings
+        total_charging += period_data.energy.battery_charged
+        total_discharging += period_data.energy.battery_discharged
 
         # Format intent to fit column width
         intent_display = intent[:15] if len(intent) > 15 else intent
 
-        # Format hour row - preserving original formatting exactly
-        buy_sell_str = f"{buy_prices[i] if i < len(buy_prices) else hour_data.buy_price:.2f}/{sell_prices[i] if i < len(sell_prices) else hour_data.sell_price:.2f}"
+        # Format period row - preserving original formatting exactly
+        buy_sell_str = f"{buy_prices[i] if i < len(buy_prices) else period_data.economic.buy_price:.2f}/{sell_prices[i] if i < len(sell_prices) else period_data.economic.sell_price:.2f}"
 
         output.append(
-            f"║{hour:3d} ║ {buy_sell_str:10s} ║{consumption:4.1f} ║{base_cost:5.2f} ║║{solar:4.1f} ║{solar_to_battery:5.1f} ║{grid_to_battery:5.1f} ║{soe_kwh:3.0f} ║{action:5.1f} ║{intent_display:15s} ║{grid_cost:5.2f} ║{battery_cost:5.2f} ║{hourly_savings:5.2f} ║"
+            f"║{period:3d} ║ {buy_sell_str:9s} ║{consumption:5.1f} ║{base_cost:6.2f} ║║{solar:4.1f} ║{solar_to_battery:5.1f} ║{grid_to_battery:5.1f} ║{soe_kwh:4.0f} ║{action:6.1f} ║ {intent_display:13s} ║{grid_cost:6.2f} ║{battery_cost:5.2f} ║{period_savings:5.2f} ║"
         )
 
     # Add separator and total row
     output.append(
-        "╠════╬════════════╬═════╬══════╬╬═════╬══════╬══════╬════╬══════╬════════════════╬══════╬══════╬══════╣"
+        "╠════╬═══════════╬══════╬═══════╬╬═════╬══════╬══════╬═════╬═══════╬═══════════════╬═══════╬══════╬══════╣"
     )
     output.append(
-        f"║Tot ║            ║{total_consumption:4.1f} ║{total_base_cost:5.2f} ║║{total_solar:4.1f} ║{total_solar_to_bat:5.1f} ║{total_grid_to_bat:5.1f} ║    ║C:{total_charging:3.1f} ║                ║{total_grid_cost:5.2f} ║{total_battery_cost:5.2f} ║{total_savings:5.2f} ║"
+        f"║Tot ║           ║{total_consumption:5.1f} ║{total_base_cost:6.2f} ║║{total_solar:4.1f} ║{total_solar_to_bat:5.1f} ║{total_grid_to_bat:5.1f} ║     ║C:{total_charging:4.1f} ║               ║{total_grid_cost:6.2f} ║{total_battery_cost:5.2f} ║{total_savings:5.2f} ║"
     )
     output.append(
-        f"║    ║            ║     ║      ║║     ║      ║      ║    ║D:{total_discharging:3.1f} ║                ║      ║      ║      ║"
+        f"║    ║           ║      ║       ║║     ║      ║      ║     ║D:{total_discharging:4.1f} ║               ║       ║      ║      ║"
     )
     output.append(
-        "╚════╩════════════╩═════╩══════╩╩═════╩══════╩══════╩════╩══════╩════════════════╩══════╩══════╩══════╝"
+        "╚════╩═══════════╩══════╩═══════╩╩═════╩══════╩══════╩═════╩═══════╩═══════════════╩═══════╩══════╩══════╝"
     )
 
     # Append summary stats to output
@@ -572,22 +535,23 @@ def print_optimization_results(results, buy_prices, sell_prices):
     logger.info("\n".join(output))
 
 
-def _run_dynamic_programming_with_storage(
+def _run_dynamic_programming(
     horizon: int,
-    buy_price: list[float] | None,
-    sell_price: list[float] | None,
+    buy_price: list[float],
+    sell_price: list[float],
     home_consumption: list[float],
     battery_settings: BatterySettings,
+    dt: float,
     solar_production: list[float] | None = None,
     initial_soe: float | None = None,
     initial_cost_basis: float = 0.0,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[list[StrategicIntent]], dict]:
     """
-    Enhanced DP that stores the HourlyData objects calculated during optimization.
+    Enhanced DP that stores the PeriodData objects calculated during optimization.
     This eliminates the need for reward recalculation in simulation.
     """
 
-    logger.debug("Starting DP optimization with HourlyData storage")
+    logger.debug("Starting DP optimization with PeriodData storage")
 
     # Set defaults if not provided
     if solar_production is None:
@@ -606,8 +570,9 @@ def _run_dynamic_programming_with_storage(
         [StrategicIntent.IDLE for _ in range(len(soe_levels))] for _ in range(horizon)
     ]
 
-    # NEW: Store HourlyData objects calculated during DP
-    stored_hourly_data = {}  # Key: (t, i), Value: HourlyData
+    # Store PeriodData objects calculated during DP
+    stored_period_data = {}  # Key: (t, i), Value: PeriodData
+
 
     # Backward induction (same structure as before)
     for t in reversed(range(horizon)):
@@ -616,7 +581,7 @@ def _run_dynamic_programming_with_storage(
             best_action = 0
             best_cost_basis = C[t, i]
             best_intent = StrategicIntent.IDLE
-            best_hourly_data = None  # NEW: Store the HourlyData from best action
+            best_period_data = None  # Store the PeriodData from best action
 
             # Try all possible actions
             for power in power_levels:
@@ -624,35 +589,36 @@ def _run_dynamic_programming_with_storage(
                 if power < 0:
                     available_energy = soe - battery_settings.min_soe_kwh
                     max_discharge_power = (
-                        available_energy / 1.0 * battery_settings.efficiency_discharge
+                        available_energy / dt * battery_settings.efficiency_discharge
                     )
                     if abs(power) > max_discharge_power:
                         continue
                 elif power > 0:
                     available_capacity = battery_settings.max_soe_kwh - soe
                     max_charge_power = (
-                        available_capacity / 1.0 / battery_settings.efficiency_charge
+                        available_capacity / dt / battery_settings.efficiency_charge
                     )
                     if power > max_charge_power:
                         continue
 
                 # Calculate next state
-                next_soe = _state_transition(soe, power, battery_settings)
+                next_soe = _state_transition(soe, power, battery_settings, dt)
                 if (
                     next_soe < battery_settings.min_soe_kwh
                     or next_soe > battery_settings.max_soe_kwh
                 ):
                     continue
 
-                # Calculate reward WITH HourlyData creation
-                reward, new_cost_basis, hourly_data = _calculate_reward(
+                # Calculate reward WITH PeriodData creation
+                reward, new_cost_basis, period_data = _calculate_reward(
                     power=power,
                     soe=soe,
                     next_soe=next_soe,
-                    hour=t,
+                    period=t,
                     home_consumption=home_consumption[t],
-                    solar_production=solar_production[t],
                     battery_settings=battery_settings,
+                    dt=dt,
+                    solar_production=solar_production[t],
                     buy_price=buy_price,
                     sell_price=sell_price,
                     cost_basis=C[t, i],
@@ -674,7 +640,7 @@ def _run_dynamic_programming_with_storage(
                     best_value = value
                     best_action = power
                     best_cost_basis = new_cost_basis
-                    best_hourly_data = hourly_data  # NEW: Store the HourlyData
+                    best_period_data = period_data  # NEW: Store the PeriodData
 
                     # Determine strategic intent
                     if power > 0.1:
@@ -695,13 +661,13 @@ def _run_dynamic_programming_with_storage(
             policy[t, i] = best_action
             intents[t][i] = best_intent
 
-            # NEW: Store the HourlyData for this optimal decision
-            if best_hourly_data is not None:
-                stored_hourly_data[(t, i)] = best_hourly_data
+            # Store the PeriodData for this optimal decision
+            if best_period_data is not None:
+                stored_period_data[(t, i)] = best_period_data
 
             # Update cost basis for next time step
             if best_action != 0 and t + 1 < horizon:
-                next_soe = _state_transition(soe, best_action, battery_settings)
+                next_soe = _state_transition(soe, best_action, battery_settings, dt)
                 next_i = round((next_soe - battery_settings.min_soe_kwh) / SOE_STEP_KWH)
                 next_i = min(max(0, next_i), len(soe_levels) - 1)
                 C[t + 1, next_i] = best_cost_basis
@@ -713,7 +679,92 @@ def _run_dynamic_programming_with_storage(
         battery_settings.max_charge_power_kw,
     )
 
-    return V, policy, C, intents, stored_hourly_data
+    return V, policy, C, intents, stored_period_data
+
+
+def _create_idle_schedule(
+    horizon: int,
+    buy_price: list[float],
+    sell_price: list[float],
+    home_consumption: list[float],
+    solar_production: list[float],
+    initial_soe: float,
+    battery_settings: BatterySettings,
+) -> OptimizationResult:
+    """
+    Create an all-IDLE schedule where battery does nothing.
+
+    Used as fallback when optimization doesn't meet minimum profit threshold.
+    """
+    period_data_list = []
+    current_soe = initial_soe
+
+    for t in range(horizon):
+        # No battery action - pure grid consumption
+        energy_data = EnergyData(
+            solar_production=solar_production[t],
+            home_consumption=home_consumption[t],
+            battery_charged=0.0,
+            battery_discharged=0.0,
+            grid_imported=max(0, home_consumption[t] - solar_production[t]),
+            grid_exported=max(0, solar_production[t] - home_consumption[t]),
+            battery_soe_start=current_soe,
+            battery_soe_end=current_soe,
+        )
+
+        economic_data = EconomicData.from_energy_data(
+            energy_data=energy_data,
+            buy_price=buy_price[t],
+            sell_price=sell_price[t],
+            battery_cycle_cost=0.0,
+        )
+
+        decision_data = DecisionData(
+            strategic_intent="IDLE",
+            battery_action=0.0,
+            cost_basis=battery_settings.cycle_cost_per_kwh,
+        )
+
+        period_data = PeriodData(
+            period=t,
+            energy=energy_data,
+            timestamp=None,
+            data_source="predicted",
+            economic=economic_data,
+            decision=decision_data,
+        )
+
+        period_data_list.append(period_data)
+
+    # Calculate economic summary for idle schedule
+    total_base_cost = sum(home_consumption[i] * buy_price[i] for i in range(horizon))
+    total_optimized_cost = sum(h.economic.hourly_cost for h in period_data_list)
+
+    economic_summary = EconomicSummary(
+        grid_only_cost=total_base_cost,
+        solar_only_cost=total_base_cost,
+        battery_solar_cost=total_optimized_cost,
+        grid_to_solar_savings=0.0,
+        grid_to_battery_solar_savings=0.0,  # No savings - doing nothing
+        solar_to_battery_solar_savings=0.0,
+        grid_to_battery_solar_savings_pct=0.0,
+        total_charged=0.0,
+        total_discharged=0.0,
+    )
+
+    return OptimizationResult(
+        period_data=period_data_list,
+        economic_summary=economic_summary,
+        input_data={
+            "buy_price": buy_price,
+            "sell_price": sell_price,
+            "home_consumption": home_consumption,
+            "solar_production": solar_production,
+            "initial_soe": initial_soe,
+            "initial_cost_basis": battery_settings.cycle_cost_per_kwh,
+            "horizon": horizon,
+        },
+    )
 
 
 def optimize_battery_schedule(
@@ -724,13 +775,30 @@ def optimize_battery_schedule(
     solar_production: list[float] | None = None,
     initial_soe: float | None = None,
     initial_cost_basis: float | None = None,
+    period_duration_hours: float = 0.25,
 ) -> OptimizationResult:
     """
     Battery optimization that eliminates dual cost calculation by using
-    DP-calculated HourlyData directly in simulation.
+    DP-calculated PeriodData directly in simulation.
+
+    Args:
+        buy_price: List of electricity buy prices for each period
+        sell_price: List of electricity buy prices for each period
+        home_consumption: List of home consumption for each period (kWh)
+        battery_settings: Battery configuration and limits
+        solar_production: List of solar production for each period (kWh), defaults to 0
+        initial_soe: Initial battery state of energy (kWh), defaults to min_soe
+        initial_cost_basis: Initial cost basis for battery cycling, defaults to cycle_cost
+        period_duration_hours: Duration of each period in hours (always 0.25 for quarterly resolution)
+
+    Returns:
+        OptimizationResult with optimal battery schedule
     """
 
     horizon = len(buy_price)
+    dt = period_duration_hours
+
+    logger.info(f"Optimization using dt={dt} hours for horizon={horizon} periods")
 
     # Handle defaults
     if solar_production is None:
@@ -758,8 +826,8 @@ def optimize_battery_schedule(
         f"Starting direct optimization: horizon={horizon}, initial_soe={initial_soe:.1f}, initial_cost_basis={initial_cost_basis:.3f}"
     )
 
-    # Step 1: Run DP with HourlyData storage
-    _, _, _, _, stored_hourly_data = _run_dynamic_programming_with_storage(
+    # Step 1: Run DP with PeriodData storage
+    _, _, _, _, stored_period_data = _run_dynamic_programming(
         horizon=horizon,
         buy_price=buy_price,
         sell_price=sell_price,
@@ -768,6 +836,7 @@ def optimize_battery_schedule(
         initial_soe=initial_soe,
         battery_settings=battery_settings,
         initial_cost_basis=initial_cost_basis,
+        dt=dt,
     )
 
     # Step 2: Extract optimal path results directly from stored DP data
@@ -784,18 +853,18 @@ def optimize_battery_schedule(
         i = round((current_soe - battery_settings.min_soe_kwh) / SOE_STEP_KWH)
         i = min(max(0, i), len(soe_levels) - 1)
 
-        # Get the HourlyData from DP results - should always exist with valid inputs
-        if (t, i) not in stored_hourly_data:
+        # Get the PeriodData from DP results - should always exist with valid inputs
+        if (t, i) not in stored_period_data:
             raise RuntimeError(
                 f"Missing DP result for hour {t}, state {i} (SOE={current_soe:.1f}). "
                 f"This indicates a bug in the DP algorithm or invalid inputs."
             )
 
-        hourly_data = stored_hourly_data[(t, i)]
-        hourly_results.append(hourly_data)
-        current_soe = hourly_data.energy.battery_soe_end
+        period_data = stored_period_data[(t, i)]
+        hourly_results.append(period_data)
+        current_soe = period_data.energy.battery_soe_end
 
-    # Step 3: Calculate economic summary directly from HourlyData
+    # Step 3: Calculate economic summary directly from PeriodData
     total_base_cost = sum(
         home_consumption[i] * buy_price[i] for i in range(len(buy_price))
     )
@@ -829,8 +898,27 @@ def optimize_battery_schedule(
         f"Savings: {grid_to_battery_solar_savings:.2f} SEK ({economic_summary.grid_to_battery_solar_savings_pct:.1f}%)"
     )
 
+    # ============================================================================
+    # PROFITABILITY GATE: Reject optimization if savings below threshold
+    # ============================================================================
+    if grid_to_battery_solar_savings < battery_settings.min_action_profit_threshold:
+        logger.warning(
+            f"Optimization savings ({grid_to_battery_solar_savings:.2f} SEK) below "
+            f"minimum threshold ({battery_settings.min_action_profit_threshold:.2f} SEK). "
+            f"Using all-IDLE schedule instead."
+        )
+        return _create_idle_schedule(
+            horizon=horizon,
+            buy_price=buy_price,
+            sell_price=sell_price,
+            home_consumption=home_consumption,
+            solar_production=solar_production,
+            initial_soe=initial_soe,
+            battery_settings=battery_settings,
+        )
+
     return OptimizationResult(
-        hourly_data=hourly_results,
+        period_data=hourly_results,
         economic_summary=economic_summary,
         input_data={
             "buy_price": buy_price,

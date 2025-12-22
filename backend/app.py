@@ -4,13 +4,11 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 
 import log_config  # noqa: F401
-import yaml
 
 # Import endpoints router
 from api import router as endpoints_router
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -40,9 +38,6 @@ async def lifespan(app: FastAPI):
         else:
             routes.append(f"{path} - Mounted route or no methods")
     logger.info(f"Registered routes: {routes}")
-    logger.info(
-        f"Using ingress base path: {os.environ.get('INGRESS_BASE_PATH', '/local_bess_manager/ingress')}"
-    )
 
     yield
 
@@ -108,8 +103,8 @@ app.include_router(endpoints_router)
 class BESSController:
     def __init__(self):
         """Initialize the BESS Controller."""
-        # Load environment variables
-        load_dotenv("/data/options.env")
+        # Environment variables are injected by HA Supervisor (production)
+        # or docker-compose (development).
 
         # Load all settings as early as possible
         options = self._load_options()
@@ -122,7 +117,11 @@ class BESSController:
         self.ha_controller = self._init_ha_controller(sensor_config)
 
         # Enable test mode based on environment variable (defaults to False for production)
-        test_mode = os.environ.get("HA_TEST_MODE", "false").lower() in ("true", "1", "yes")
+        test_mode = os.environ.get("HA_TEST_MODE", "false").lower() in (
+            "true",
+            "1",
+            "yes",
+        )
         if test_mode:
             logger.info("Enabling test mode - hardware writes will be simulated")
         self.ha_controller.set_test_mode(test_mode)
@@ -196,12 +195,13 @@ class BESSController:
             logger.error(f"Error reloading settings: {e}", exc_info=True)
 
     def _load_options(self):
-        """Load options from Home Assistant add-on config or environment vars."""
+        """Load options from Home Assistant add-on standard location.
 
+        In production: /data/options.json provided by Home Assistant add-on system
+        In development: /data/options.json mounted from backend/dev-options.json (extracted by dev-run.sh)
+        """
         options_json = "/data/options.json"
-        config_yaml = "/app/config.yaml"
 
-        # First try the standard options.json (production)
         if os.path.exists(options_json):
             try:
                 with open(options_json) as f:
@@ -210,43 +210,40 @@ class BESSController:
                     return options
             except Exception as e:
                 logger.error(f"Error loading options from {options_json}: {e!s}")
-
-        # If not available, try to load from config.yaml directly (development)
-        if os.path.exists(config_yaml):
-            try:
-                with open(config_yaml) as f:
-                    config = yaml.safe_load(f)
-
-                # Extract options section if it exists
-                if "options" in config:
-                    options = config["options"]
-                    logger.info(f"Loaded options from {config_yaml} (options section)")
-                    return options
-
-                logger.warning(
-                    f"No 'options' section found in {config_yaml}, using entire file"
-                )
-                return config
-            except Exception as e:
-                logger.error(f"Error loading from {config_yaml}: {e!s}")
+                raise RuntimeError(
+                    f"Failed to load configuration from {options_json}. " f"Error: {e}"
+                ) from e
+        else:
+            raise RuntimeError(
+                f"Configuration file not found at {options_json}. "
+                f"In development, ensure dev-run.sh has extracted options from config.yaml."
+            )
 
     def _init_scheduler_jobs(self):
         """Configure scheduler jobs."""
 
-        # Hourly schedule update (every hour at xx:00)
+        # Quarterly schedule update (every 15 minutes: 0, 15, 30, 45)
+        def update_schedule_quarterly():
+            now = datetime.now()
+            current_period = now.hour * 4 + now.minute // 15
+            self.system.update_battery_schedule(current_period=current_period)
+
         self.scheduler.add_job(
-            lambda: self.system.update_battery_schedule(
-                current_hour=datetime.now().hour
-            ),
-            CronTrigger(minute=0),
+            update_schedule_quarterly,
+            CronTrigger(minute="0,15,30,45"),
             misfire_grace_time=30,  # Allow 30 seconds of misfire before warning
         )
 
         # Next day preparation (daily at 23:55)
+        def prepare_next_day():
+            now = datetime.now()
+            current_period = now.hour * 4 + now.minute // 15
+            self.system.update_battery_schedule(
+                current_period=current_period, prepare_next_day=True
+            )
+
         self.scheduler.add_job(
-            lambda: self.system.update_battery_schedule(
-                current_hour=datetime.now().hour, prepare_next_day=True
-            ),
+            prepare_next_day,
             CronTrigger(hour=23, minute=55),
             misfire_grace_time=30,  # Allow 30 seconds of misfire before warning
         )
@@ -294,6 +291,8 @@ class BESSController:
             # Required battery settings
             required_battery_keys = [
                 "total_capacity",
+                "min_soc",
+                "max_soc",
                 "cycle_cost",
                 "max_charge_discharge_power",
                 "min_action_profit_threshold",
@@ -329,6 +328,8 @@ class BESSController:
             settings = {
                 "battery": {
                     "totalCapacity": battery_config["total_capacity"],
+                    "minSoc": battery_config["min_soc"],
+                    "maxSoc": battery_config["max_soc"],
                     "cycleCostPerKwh": battery_config["cycle_cost"],
                     "maxChargePowerKw": battery_config["max_charge_discharge_power"],
                     "maxDischargePowerKw": battery_config["max_charge_discharge_power"],
@@ -356,7 +357,7 @@ class BESSController:
         except Exception as e:
             logger.error(
                 f"CRITICAL: Failed to apply settings from config.yaml: {e}",
-                exc_info=True
+                exc_info=True,
             )
             raise RuntimeError(
                 f"Settings application failed - system cannot start safely. "
@@ -366,7 +367,9 @@ class BESSController:
     def start(self):
         """Start the scheduler."""
         self.system.start()
-        self.system.update_battery_schedule(current_hour=datetime.now().hour)
+        now = datetime.now()
+        current_period = now.hour * 4 + now.minute // 15
+        self.system.update_battery_schedule(current_period=current_period)
         self._init_scheduler_jobs()
         logger.info("Scheduler started successfully")
 

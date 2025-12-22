@@ -1,14 +1,17 @@
 import React from 'react';
 import FormattedValueComponent from './FormattedValue';
 import { useDashboardData } from '../hooks/useDashboardData';
+import { periodToTimeString, periodToEndTime } from '../utils/timeUtils';
+import { DataResolution } from '../hooks/useUserPreferences';
 
 interface DetailedSavingsAnalysisProps {
   settings: any;
+  resolution: DataResolution;
 }
 
 
-export const DetailedSavingsAnalysis: React.FC<DetailedSavingsAnalysisProps> = () => {
-  const { data: dashboardData, loading, error } = useDashboardData();
+export const DetailedSavingsAnalysis: React.FC<DetailedSavingsAnalysisProps> = ({ resolution }) => {
+  const { data: dashboardData, loading, error } = useDashboardData(undefined, resolution);
 
   if (loading) {
     return (
@@ -227,17 +230,34 @@ export const DetailedSavingsAnalysis: React.FC<DetailedSavingsAnalysisProps> = (
             </th>
           </tr>
         </thead>
-        <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+        <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
           {dashboardData.hourlyData.map((hour, index) => {
             const batteryAction = typeof hour.batteryAction === 'number' ? hour.batteryAction : 0;
             const batterySoc = hour.batterySocEnd;
-            
+            const isCurrentPeriod = hour.period === dashboardData.currentPeriod;
+            const isActual = hour.dataSource === 'actual';
+
+            // Row styling based on actual/predicted/current
+            let rowClass = '';
+            let firstCellClass = 'px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white border-t border-r border-b border-gray-300 dark:border-gray-600 text-center ';
+
+            if (isCurrentPeriod) {
+              rowClass = 'bg-purple-50 dark:bg-purple-900/20';
+              firstCellClass += 'border-l-4 border-l-purple-400';
+            } else if (isActual) {
+              rowClass = 'bg-gray-50 dark:bg-gray-700';
+              firstCellClass += 'border-l-4 border-l-green-400';
+            } else {
+              rowClass = 'bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700';
+              firstCellClass += 'border-l border-l-gray-300 dark:border-l-gray-600';
+            }
+
             return (
-              <tr key={index} className="hover:bg-gray-50 dark:hover:bg-gray-700">
-                <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
+              <tr key={index} className={rowClass}>
+                <td className={firstCellClass}>
                   <div className="text-center">
-                    <div>{String(hour.hour || index).padStart(2, '0')}:00</div>
-                    <div className="text-xs text-gray-400 dark:text-gray-500">-{String(hour.hour || index).padStart(2, '0')}:59</div>
+                    <div>{periodToTimeString(hour.period, resolution)}</div>
+                    <div className="text-xs text-gray-400 dark:text-gray-500">{periodToEndTime(hour.period, resolution)}</div>
                   </div>
                   <div className="text-xs text-gray-500 dark:text-gray-400 text-center">
                     {(hour.dataSource || 'predicted').charAt(0).toUpperCase() + (hour.dataSource || 'predicted').slice(1)}

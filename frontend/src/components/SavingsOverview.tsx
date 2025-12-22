@@ -3,11 +3,15 @@ import { Zap } from 'lucide-react';
 import { FormattedValue } from '../types';
 import FormattedValueComponent from './FormattedValue';
 import { useDashboardData } from '../hooks/useDashboardData';
+import { DataResolution } from '../hooks/useUserPreferences';
+import { periodToTimeString, periodToEndTime } from '../utils/timeUtils';
 
-type SavingsOverviewProps = Record<string, never>
+interface SavingsOverviewProps {
+  resolution: DataResolution;
+}
 
-export const SavingsOverview: React.FC<SavingsOverviewProps> = () => {
-  const { data: dashboardData, loading, error } = useDashboardData();
+export const SavingsOverview: React.FC<SavingsOverviewProps> = ({ resolution }) => {
+  const { data: dashboardData, loading, error } = useDashboardData(undefined, resolution);
 
   // Helper function to get numeric value from FormattedValue objects (for calculations)
   const getNumericValue = (field: any) => {
@@ -180,42 +184,45 @@ export const SavingsOverview: React.FC<SavingsOverviewProps> = () => {
             </th>
           </tr>
         </thead>
-        <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+        <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
           {dashboardData.hourlyData.map((hour: any, index: number) => {
-            const isCurrentHour = hour.hour === dashboardData.currentHour;
-            
-            // Row styling based on actual/predicted/current
+            const isCurrentPeriod = hour.period === dashboardData.currentPeriod;
             const isActual = hour.dataSource === 'actual';
-            let rowClass = 'border-l-4 ';
-            if (isCurrentHour) {
-              rowClass += 'bg-purple-50 dark:bg-purple-900/20 border-purple-400';
+
+            // Row styling based on actual/predicted/current
+            let rowClass = '';
+            let firstCellClass = 'px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white border-t border-r border-b border-gray-300 dark:border-gray-600 ';
+
+            if (isCurrentPeriod) {
+              rowClass = 'bg-purple-50 dark:bg-purple-900/20';
+              firstCellClass += 'border-l-4 border-l-purple-400';
             } else if (isActual) {
-              rowClass += 'bg-gray-50 dark:bg-gray-700 border-green-400';
+              rowClass = 'bg-gray-50 dark:bg-gray-700';
+              firstCellClass += 'border-l-4 border-l-green-400';
             } else {
-              rowClass += 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-600';
+              rowClass = 'bg-white dark:bg-gray-800';
+              firstCellClass += 'border-l border-l-gray-300 dark:border-l-gray-600';
             }
-            
+
             return (
               <tr key={index} className={rowClass}>
-                <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600">
+                <td className={firstCellClass}>
                   <div className="flex items-center">
                     <div className="text-right">
-                      <div>{hour.hour.toString().padStart(2, '0')}:00</div>
-                      <div className="text-xs text-gray-400 dark:text-gray-500">-{hour.hour.toString().padStart(2, '0')}:59</div>
+                      <div>{periodToTimeString(hour.period, resolution)}</div>
+                      <div className="text-xs text-gray-400 dark:text-gray-500">{periodToEndTime(hour.period, resolution)}</div>
                     </div>
-                    {isActual && (
+                    {isCurrentPeriod ? (
+                      <span className="ml-2 text-xs bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 px-2 py-1 rounded">
+                        Current
+                      </span>
+                    ) : isActual ? (
                       <span className="ml-2 text-xs bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 px-2 py-1 rounded">
                         Actual
                       </span>
-                    )}
-                    {!isActual && !isCurrentHour && (
+                    ) : (
                       <span className="ml-2 text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 px-2 py-1 rounded">
                         Predicted
-                      </span>
-                    )}
-                    {isCurrentHour && (
-                      <span className="ml-2 text-xs bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 px-2 py-1 rounded">
-                        Current
                       </span>
                     )}
                   </div>

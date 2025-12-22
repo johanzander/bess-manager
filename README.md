@@ -70,7 +70,6 @@ Tested with MIN/TLX inverters
 
 > 📸 **Screenshot placeholders** - Add actual screenshots to `docs/images/` directory
 
-
 ## Documentation
 
 - 🔧 **[Installation Guide](INSTALLATION.md)** - Complete setup instructions

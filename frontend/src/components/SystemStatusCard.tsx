@@ -186,9 +186,18 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "" }) =
       console.warn('Missing key: totalDailySavings in dashboardData');
     }
 
-    // Get current battery power and status
-    const currentHour = new Date().getHours();
-    const currentHourData = dashboardData.hourlyData?.find((h: any) => h.hour === currentHour);
+    // Get current battery power and status from quarterly or hourly data
+    const now = new Date();
+    const currentHour = now.getHours();
+    const currentMinute = now.getMinutes();
+
+    // Calculate current period index (0-95) for quarterly resolution
+    const currentPeriodIndex = currentHour * 4 + Math.floor(currentMinute / 15);
+
+    // Find current period data - supports both hourly (24 periods) and quarterly (96 periods)
+    const currentHourData = dashboardData.hourlyData?.length === 24
+      ? dashboardData.hourlyData.find((h: any) => h.hour === currentHour)  // Hourly mode
+      : dashboardData.hourlyData?.[currentPeriodIndex];  // Quarterly mode (direct array access)
 
     // Validate hourlyData exists
     if (!dashboardData.hourlyData || !Array.isArray(dashboardData.hourlyData)) {

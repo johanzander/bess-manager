@@ -35,8 +35,8 @@ last_change_time = 0
 class ChangeHandler(FileSystemEventHandler):
     """Handle file system change events."""
 
-    def on_any_event(self, event):
-        """React to file changes."""
+    def on_modified(self, event):
+        """React to file modifications (not access, only actual changes)."""
         global last_change_time, server_process
 
         # Get the filename from the path

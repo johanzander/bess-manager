@@ -62,7 +62,7 @@ export const TableBatteryDecisionExplorer: React.FC = () => {
     return dashboardData.hourlyData.map((hour: any) => {
     // Extract raw values from FormattedValue objects for calculations
     if (!hour.batteryAction || hour.batteryAction.value === undefined) {
-      throw new Error(`MISSING DATA: batteryAction.value is required but missing for hour ${hour.hour}`);
+      throw new Error(`MISSING DATA: batteryAction.value is required but missing for hour ${hour.period}`);
     }
     const batteryAction = hour.batteryAction.value;
     let action: 'charge' | 'discharge' | 'hold' = 'hold';
@@ -71,16 +71,16 @@ export const TableBatteryDecisionExplorer: React.FC = () => {
 
     // Extract values from FormattedValue objects
     if (!hour.solarProduction || hour.solarProduction.value === undefined) {
-      throw new Error(`MISSING DATA: solarProduction.value is required but missing for hour ${hour.hour}`);
+      throw new Error(`MISSING DATA: solarProduction.value is required but missing for hour ${hour.period}`);
     }
     if (!hour.homeConsumption || hour.homeConsumption.value === undefined) {
-      throw new Error(`MISSING DATA: homeConsumption.value is required but missing for hour ${hour.hour}`);
+      throw new Error(`MISSING DATA: homeConsumption.value is required but missing for hour ${hour.period}`);
     }
     const solarProduction = hour.solarProduction.value;
     const homeConsumption = hour.homeConsumption.value;
     const solarBalance = solarProduction - homeConsumption;
     if (!hour.buyPrice || hour.buyPrice.value === undefined) {
-      throw new Error(`MISSING DATA: buyPrice.value is required but missing for hour ${hour.hour}`);
+      throw new Error(`MISSING DATA: buyPrice.value is required but missing for hour ${hour.period}`);
     }
     const price = hour.buyPrice.value;
     
@@ -123,20 +123,20 @@ export const TableBatteryDecisionExplorer: React.FC = () => {
     // Note: savings variable removed since we use canonical hourlySavings directly
 
     return {
-      hour: hour.hour,
+      hour: hour.period,
       action,
       buyPriceValue: price,
       solarProductionValue: solarProduction,
       solarBalanceValue: solarBalance,
       batterySocStartValue: (() => {
         if (!hour.batterySocStart || hour.batterySocStart.value === undefined) {
-          throw new Error(`MISSING DATA: batterySocStart.value is required but missing for hour ${hour.hour}`);
+          throw new Error(`MISSING DATA: batterySocStart.value is required but missing for hour ${hour.period}`);
         }
         return hour.batterySocStart.value;
       })(),
       batterySocEndValue: (() => {
         if (!hour.batterySocEnd || hour.batterySocEnd.value === undefined) {
-          throw new Error(`MISSING DATA: batterySocEnd.value is required but missing for hour ${hour.hour}`);
+          throw new Error(`MISSING DATA: batterySocEnd.value is required but missing for hour ${hour.period}`);
         }
         return hour.batterySocEnd.value;
       })(),
@@ -145,12 +145,12 @@ export const TableBatteryDecisionExplorer: React.FC = () => {
       opportunityScoreValue: opportunityScore,
       hourlySavingsValue: (() => {
         if (!hour.hourlySavings || hour.hourlySavings.value === undefined) {
-          throw new Error(`MISSING DATA: hourlySavings.value is required but missing for hour ${hour.hour}`);
+          throw new Error(`MISSING DATA: hourlySavings.value is required but missing for hour ${hour.period}`);
         }
         return hour.hourlySavings.value;
       })(),
       isActual: hour.isActual || hour.dataSource === 'actual' || false,
-      isCurrentHour: hour.hour === dashboardData.currentHour,
+      isCurrentHour: hour.period === dashboardData.currentPeriod,
 
       // Backend MUST provide FormattedValue objects - canonical naming
       buyPrice: hour.buyPrice!,
@@ -246,7 +246,7 @@ export const TableBatteryDecisionExplorer: React.FC = () => {
                 <td className="px-3 py-4 whitespace-nowrap text-sm">
                   <div>
                     <FormattedValueComponent
-                      data={dashboardData.hourlyData.find(h => h.hour === decision.hour)?.buyPrice || decision.buyPrice}
+                      data={dashboardData.hourlyData.find(h => h.period === decision.hour)?.buyPrice || decision.buyPrice}
                       size="sm"
                       align="left"
                       color={

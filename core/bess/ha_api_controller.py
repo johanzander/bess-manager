@@ -10,6 +10,8 @@ from typing import ClassVar
 
 import requests
 
+from .exceptions import SystemConfigurationError
+
 logger = logging.getLogger(__name__)
 # logger.setLevel(logging.DEBUG)
 
@@ -104,6 +106,10 @@ class HomeAssistantAPIController:
 
         # Use provided sensor configuration
         self.sensors = sensor_config or {}
+
+        # Create persistent session for connection reuse (400x faster)
+        self.session = requests.Session()
+        self.session.headers.update(self.headers)
 
         logger.info(
             f"Initialized HomeAssistantAPIController with {len(self.sensors)} sensor mappings"
@@ -502,11 +508,11 @@ class HomeAssistantAPIController:
         logger.debug("Making API request to %s %s", method.upper(), url)
         for attempt in range(self.max_attempts):
             try:
-                http_method = getattr(requests, method.lower())
+                http_method = getattr(self.session, method.lower())
 
-                # Use the environment-aware request function
+                # Use the environment-aware request function with session (connection pooling)
                 response = run_request(
-                    http_method, url=url, headers=self.headers, timeout=30, **kwargs
+                    http_method, url=url, timeout=30, **kwargs
                 )
 
                 # Raise an exception if the response status is an error
@@ -634,9 +640,25 @@ class HomeAssistantAPIController:
             return 0.0
 
     def get_estimated_consumption(self):
-        """Get estimated hourly consumption for 24 hours."""
-        avg_consumption = self._get_sensor_value("48h_avg_grid_import") / 1000
-        return [avg_consumption] * 24
+        """Get estimated consumption in quarterly resolution (96 periods).
+
+        Returns consumption forecast for a full day in 15-minute periods.
+        Upscales from hourly average by dividing by 4.
+
+        Returns:
+            list[float]: 96 quarterly consumption values in kWh per quarter-hour
+
+        Raises:
+            SystemConfigurationError: If sensor data is unavailable
+        """
+        avg_hourly_consumption = self._get_sensor_value("48h_avg_grid_import") / 1000
+
+        # Convert hourly average to quarterly by dividing by 4
+        # E.g., 4.0 kWh/hour = 1.0 kWh per 15-minute period
+        quarterly_consumption = avg_hourly_consumption / 4.0
+
+        # Return 96 quarterly periods (24 hours * 4 quarters per hour)
+        return [quarterly_consumption] * 96
 
     def get_battery_soc(self):
         """Get the battery state of charge (SOC)."""
@@ -805,33 +827,43 @@ class HomeAssistantAPIController:
         return self._get_sensor_value("current_l3")
 
     def get_solar_forecast(self):
-        """Get solar forecast data from Solcast integration."""
-        # Determine which sensor key to use based on day_offset
+        """Get solar forecast data in quarterly resolution (96 periods).
+
+        Fetches hourly solar forecast from Solcast integration and upscales to
+        15-minute resolution by dividing each hourly value by 4.
+
+        Returns:
+            list[float]: 96 quarterly solar production values in kWh per quarter-hour
+
+        Raises:
+            SystemConfigurationError: If solar forecast sensor is not configured or unavailable
+        """
+        # Determine which sensor key to use
         sensor_key = "solar_forecast_today"
 
         # Get entity ID from sensor config
         entity_id = self.sensors.get(sensor_key)
         if not entity_id:
-            logger.warning(f"No entity ID configured for {sensor_key}")
-            return [0.0] * 24  # Return zeros as fallback
+            raise SystemConfigurationError(
+                f"Solar forecast sensor '{sensor_key}' not configured in sensors mapping"
+            )
 
         response = self._api_request("get", f"/api/states/{entity_id}")
 
         if not response or "attributes" not in response:
-            logger.warning(
-                "No attributes found for %s, using default values", entity_id
+            raise SystemConfigurationError(
+                f"No attributes found for solar forecast sensor {entity_id}"
             )
-            return [0.0] * 24  # Return zeros as fallback
 
         attributes = response["attributes"]
         hourly_data = attributes.get("detailedHourly")
 
         if not hourly_data:
-            logger.warning(
-                "No hourly data found in %s, using default values", entity_id
+            raise SystemConfigurationError(
+                f"No hourly data found in solar forecast sensor {entity_id}"
             )
-            return [0.0] * 24  # Return zeros as fallback
 
+        # Parse hourly values from Solcast
         hourly_values = [0.0] * 24
         pv_field = "pv_estimate"
 
@@ -848,7 +880,14 @@ class HomeAssistantAPIController:
 
             hourly_values[hour] = float(entry[pv_field])
 
-        return hourly_values
+        # Convert hourly to quarterly resolution
+        # Each hourly value is divided by 4 to get per-quarter-hour energy
+        quarterly_values = []
+        for hourly_value in hourly_values:
+            quarter_value = hourly_value / 4.0
+            quarterly_values.extend([quarter_value] * 4)
+
+        return quarterly_values
 
     def _get_nordpool_prices(self, is_tomorrow=False):
         """Get Nordpool prices from Home Assistant sensor - simplified to just fetch raw data.

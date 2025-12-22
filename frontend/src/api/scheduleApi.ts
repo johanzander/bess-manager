@@ -10,8 +10,10 @@ import { FormattedValue } from '../types';
  * - /api/schedule/current
  * - /api/v2/daily_view
  */
-export const fetchDashboardData = async (date?: string) => {
-  const params = date ? { date } : {};
+export const fetchDashboardData = async (date?: string, resolution?: string) => {
+  const params: Record<string, string> = {};
+  if (date) params.date = date;
+  if (resolution) params.resolution = resolution;
   const response = await api.get('/api/dashboard', { params });
   return response.data;
 };
@@ -19,6 +21,7 @@ export const fetchDashboardData = async (date?: string) => {
 // Type definitions for the unified dashboard response
 export interface DashboardHourlyData {
   hour: number;
+  period: number;  // Period index (0-23 hourly, 0-95 quarterly)
   dataSource: 'actual' | 'predicted';
 
   // Core energy flows - FormattedValue
@@ -130,7 +133,7 @@ export interface DashboardTotals {
 export interface DashboardResponse {
   // Core metadata
   date: string;
-  currentHour: number;
+  currentPeriod: number;
   
   // Financial summary
   totalDailySavings: number;

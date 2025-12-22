@@ -8,7 +8,7 @@ but don't test specific optimization results.
 """
 
 from core.bess.dp_battery_algorithm import optimize_battery_schedule
-from core.bess.models import EconomicSummary, HourlyData
+from core.bess.models import EconomicSummary, PeriodData
 from core.bess.settings import BatterySettings
 
 # Create a BatterySettings instance for testing
@@ -37,11 +37,11 @@ def test_battery_simulation_results(
     )
 
     # Test new OptimizationResult structure
-    assert hasattr(results, "hourly_data")
+    assert hasattr(results, "period_data")
     assert hasattr(results, "economic_summary")
     assert hasattr(results, "input_data")
 
-    hourly_data_list = results.hourly_data
+    hourly_data_list = results.period_data
     economic_summary = results.economic_summary
 
     # Test that we have the right structure
@@ -51,13 +51,13 @@ def test_battery_simulation_results(
         economic_summary, EconomicSummary
     )  # Should be EconomicSummary dataclass
 
-    # Test that each hourly data object is HourlyData with proper structure
+    # Test that each hourly data object is PeriodData with proper structure
     for hour_data in hourly_data_list:
-        assert isinstance(hour_data, HourlyData)
+        assert isinstance(hour_data, PeriodData)
 
         # Test core properties (these use the property accessors)
-        assert hasattr(hour_data, "hour")
-        assert 0 <= hour_data.hour <= 23
+        assert hasattr(hour_data, "period")
+        assert 0 <= hour_data.period <= 23
 
         # Test energy data access - using single source of truth pattern
         assert hasattr(hour_data.energy, "solar_production")
@@ -141,8 +141,8 @@ def test_battery_constraints_respected():
         battery_settings=battery_settings,
     )
 
-    # Test constraints using new HourlyData structure
-    for hour_data in results.hourly_data:
+    # Test constraints using new PeriodData structure
+    for hour_data in results.period_data:
         # SOE is already in kWh, no conversion needed
         soe_start_kwh = hour_data.energy.battery_soe_start
         soe_end_kwh = hour_data.energy.battery_soe_end
@@ -223,7 +223,7 @@ def SKIP_test_strategic_intent_assignment():  # TODO: Improve test to validate c
     )
 
     # Check that strategic intents are assigned
-    intents = [hour_data.decision.strategic_intent for hour_data in results.hourly_data]
+    intents = [hour_data.decision.strategic_intent for hour_data in results.period_data]
 
     # Should have some strategic decisions (not all IDLE)
     assert len(set(intents)) > 1, "Should have multiple strategic intents"
@@ -242,7 +242,7 @@ def SKIP_test_strategic_intent_assignment():  # TODO: Improve test to validate c
 
 def test_energy_data_structure():
     """
-    Test that energy data structure is properly populated in HourlyData.
+    Test that energy data structure is properly populated in PeriodData.
     """
     buy_price = [0.5] * 24
     sell_price = [0.3] * 24
@@ -259,7 +259,7 @@ def test_energy_data_structure():
         battery_settings=battery_settings,
     )
 
-    for hour_data in results.hourly_data:
+    for hour_data in results.period_data:
         # Test that energy component exists and has data
         assert hour_data.energy is not None
         assert hour_data.energy.solar_production >= 0
@@ -279,7 +279,7 @@ def test_energy_data_structure():
 
 def test_economic_data_structure():
     """
-    Test that economic data structure is properly populated in HourlyData.
+    Test that economic data structure is properly populated in PeriodData.
     """
     buy_price = [0.5] * 24
     sell_price = [0.3] * 24
@@ -296,7 +296,7 @@ def test_economic_data_structure():
         battery_settings=battery_settings,
     )
 
-    for hour_data in results.hourly_data:
+    for hour_data in results.period_data:
         # Test that economic component exists and has data
         assert hour_data.economic is not None
         assert hour_data.economic.buy_price >= 0
@@ -315,7 +315,7 @@ def test_economic_data_structure():
 
 def test_strategy_data_structure():
     """
-    Test that strategy data structure is properly populated in HourlyData.
+    Test that strategy data structure is properly populated in PeriodData.
     """
     buy_price = [0.5] * 24
     sell_price = [0.3] * 24
@@ -332,7 +332,7 @@ def test_strategy_data_structure():
         battery_settings=battery_settings,
     )
 
-    for hour_data in results.hourly_data:
+    for hour_data in results.period_data:
         # Test that strategy component exists and has data
         assert hour_data.decision is not None
         assert hour_data.decision.strategic_intent is not None

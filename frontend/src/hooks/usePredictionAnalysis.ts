@@ -1,8 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import axios from 'axios';
+import api from '../lib/api';
 import { PredictionSnapshot, SnapshotComparison, SnapshotToSnapshotComparison } from '../types';
-
-const BASE_URL = process.env.NODE_ENV === 'production' ? '' : '';
 
 interface UsePredictionSnapshotsResult {
   snapshots: PredictionSnapshot[];
@@ -27,7 +25,7 @@ export const usePredictionSnapshots = (): UsePredictionSnapshotsResult => {
     try {
       setLoading(true);
       setError(null);
-      const response = await axios.get(`${BASE_URL}/api/prediction-analysis/snapshots`);
+      const response = await api.get('/api/prediction-analysis/snapshots');
       setSnapshots(response.data.snapshots || []);
     } catch (err) {
       console.error('Failed to fetch prediction snapshots:', err);
@@ -64,9 +62,9 @@ export const useSnapshotComparison = (snapshotPeriod: number | null): UseSnapsho
     try {
       setLoading(true);
       setError(null);
-      const response = await axios.get(
-        `${BASE_URL}/api/prediction-analysis/comparison?snapshot_period=${snapshotPeriod}`
-      );
+      const response = await api.get('/api/prediction-analysis/comparison', {
+        params: { snapshot_period: snapshotPeriod }
+      });
       setComparison(response.data);
     } catch (err) {
       console.error('Failed to fetch snapshot comparison:', err);
@@ -113,9 +111,9 @@ export const useSnapshotToSnapshotComparison = (
     try {
       setLoading(true);
       setError(null);
-      const response = await axios.get(
-        `${BASE_URL}/api/prediction-analysis/snapshot-comparison?period_a=${periodA}&period_b=${periodB}`
-      );
+      const response = await api.get('/api/prediction-analysis/snapshot-comparison', {
+        params: { period_a: periodA, period_b: periodB }
+      });
       setComparison(response.data);
     } catch (err) {
       console.error('Failed to fetch snapshot-to-snapshot comparison:', err);

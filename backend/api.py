@@ -10,7 +10,9 @@ from api_dataclasses import (
     APIBatterySettings,
     APIDashboardHourlyData,
     APIDashboardResponse,
+    APIPredictionSnapshot,
     APIPriceSettings,
+    APISnapshotComparison,
     create_formatted_value,
 )
 from fastapi import APIRouter, HTTPException, Query
@@ -1524,7 +1526,9 @@ async def get_dashboard_health_summary():
 
             # If no cached results (shouldn't happen), return minimal response
             if not health_results:
-                logger.warning("No cached health results available, returning minimal response")
+                logger.warning(
+                    "No cached health results available, returning minimal response"
+                )
                 return {
                     "has_critical_errors": False,
                     "critical_issues": [],
@@ -1637,4 +1641,346 @@ async def get_historical_data_status():
 
     except Exception as e:
         logger.error(f"Error checking historical data status: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.get("/api/prediction-analysis/snapshots")
+async def get_prediction_snapshots():
+    """Get all prediction snapshots for today."""
+    from app import bess_controller
+
+    try:
+        snapshots = (
+            bess_controller.system.prediction_snapshot_store.get_all_snapshots_today()
+        )
+
+        # Get currency from home settings
+        currency = bess_controller.system.home_settings.currency
+
+        # Convert to API format
+        api_snapshots = [
+            APIPredictionSnapshot.from_internal(snapshot, currency)
+            for snapshot in snapshots
+        ]
+
+        response = {
+            "snapshots": [s.__dict__ for s in api_snapshots],
+            "count": len(api_snapshots),
+        }
+
+        return convert_keys_to_camel_case(response)
+
+    except Exception as e:
+        logger.error(f"Error fetching prediction snapshots: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.get("/api/prediction-analysis/timeline")
+async def get_prediction_timeline():
+    """Get timeline showing how predicted savings evolved throughout the day."""
+    from app import bess_controller
+
+    try:
+        snapshots = (
+            bess_controller.system.prediction_snapshot_store.get_all_snapshots_today()
+        )
+
+        # Build timeline data
+        timeline_data = {
+            "timestamps": [s.snapshot_timestamp.isoformat() for s in snapshots],
+            "optimization_periods": [s.optimization_period for s in snapshots],
+            "predicted_savings": [s.predicted_daily_savings for s in snapshots],
+            "growatt_schedule_counts": [len(s.growatt_schedule) for s in snapshots],
+        }
+
+        return convert_keys_to_camel_case(timeline_data)
+
+    except Exception as e:
+        logger.error(f"Error building prediction timeline: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.get("/api/prediction-analysis/comparison")
+async def get_prediction_comparison(
+    snapshot_period: int = Query(
+        ..., ge=0, le=95, description="Period index for snapshot"
+    )
+):
+    """Compare snapshot predictions vs what actually happened."""
+    from app import bess_controller
+    from core.bess.prediction_analyzer import PredictionAnalyzer
+
+    try:
+        # Get snapshot at specified period
+        snapshot = (
+            bess_controller.system.prediction_snapshot_store.get_snapshot_at_period(
+                snapshot_period
+            )
+        )
+
+        if not snapshot:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No snapshot found for period {snapshot_period}",
+            )
+
+        # Get current state
+        from datetime import datetime
+
+        from core.bess.time_utils import TIMEZONE
+
+        now = datetime.now(tz=TIMEZONE)
+        current_period = now.hour * 4 + now.minute // 15
+
+        # Build current daily view
+        current_daily_view = bess_controller.system.daily_view_builder.build_daily_view(
+            current_period
+        )
+
+        # Get current Growatt schedule
+        current_growatt_schedule = (
+            bess_controller.system._schedule_manager.tou_intervals.copy()
+        )
+
+        # Analyze deviations
+        analyzer = PredictionAnalyzer()
+        comparison = analyzer.compare_snapshot_to_current(
+            snapshot=snapshot,
+            current_daily_view=current_daily_view,
+            current_growatt_schedule=current_growatt_schedule,
+        )
+
+        # Get currency from home settings
+        currency = bess_controller.system.home_settings.currency
+
+        # Convert to API format
+        api_comparison = APISnapshotComparison.from_internal(comparison, currency)
+
+        return convert_keys_to_camel_case(api_comparison.__dict__)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error comparing predictions: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.get("/api/prediction-analysis/snapshot-comparison")
+async def compare_two_snapshots(
+    period_a: int = Query(..., description="First snapshot period to compare"),
+    period_b: int = Query(..., description="Second snapshot period to compare"),
+):
+    """Compare two prediction snapshots to see how predictions evolved."""
+    from app import bess_controller
+
+    try:
+        # Get both snapshots
+        snapshot_a = (
+            bess_controller.system.prediction_snapshot_store.get_snapshot_at_period(
+                period_a
+            )
+        )
+        snapshot_b = (
+            bess_controller.system.prediction_snapshot_store.get_snapshot_at_period(
+                period_b
+            )
+        )
+
+        if not snapshot_a:
+            raise HTTPException(
+                status_code=404, detail=f"No snapshot found for period {period_a}"
+            )
+        if not snapshot_b:
+            raise HTTPException(
+                status_code=404, detail=f"No snapshot found for period {period_b}"
+            )
+
+        # Get currency
+        currency = bess_controller.system.home_settings.currency
+
+        # Build comprehensive comparison for all 96 periods
+        period_comparisons = []
+        for period_idx in range(96):
+            period_a_data = snapshot_a.daily_view.periods[period_idx]
+            period_b_data = snapshot_b.daily_view.periods[period_idx]
+
+            # Calculate battery action (net charging/discharging)
+            battery_action_a = (
+                period_a_data.energy.battery_charged
+                - period_a_data.energy.battery_discharged
+            )
+            battery_action_b = (
+                period_b_data.energy.battery_charged
+                - period_b_data.energy.battery_discharged
+            )
+
+            # Build comparison for this period
+            comparison = {
+                "period": period_idx,
+                # Snapshot A data
+                "snapshotA": {
+                    "solar": create_formatted_value(
+                        period_a_data.energy.solar_production,
+                        "energy_kwh_only",
+                        currency,
+                    ),
+                    "consumption": create_formatted_value(
+                        period_a_data.energy.home_consumption,
+                        "energy_kwh_only",
+                        currency,
+                    ),
+                    "batteryAction": create_formatted_value(
+                        battery_action_a, "energy_kwh_only", currency
+                    ),
+                    "batterySoe": create_formatted_value(
+                        period_a_data.energy.battery_soe_end,
+                        "energy_kwh_only",
+                        currency,
+                    ),
+                    "gridImport": create_formatted_value(
+                        period_a_data.energy.grid_imported, "energy_kwh_only", currency
+                    ),
+                    "gridExport": create_formatted_value(
+                        period_a_data.energy.grid_exported, "energy_kwh_only", currency
+                    ),
+                    "cost": create_formatted_value(
+                        period_a_data.economic.hourly_cost, "currency", currency
+                    ),
+                    "gridOnlyCost": create_formatted_value(
+                        period_a_data.economic.grid_only_cost, "currency", currency
+                    ),
+                    "savings": create_formatted_value(
+                        period_a_data.economic.hourly_savings, "currency", currency
+                    ),
+                    "dataSource": period_a_data.data_source,
+                },
+                # Snapshot B data
+                "snapshotB": {
+                    "solar": create_formatted_value(
+                        period_b_data.energy.solar_production,
+                        "energy_kwh_only",
+                        currency,
+                    ),
+                    "consumption": create_formatted_value(
+                        period_b_data.energy.home_consumption,
+                        "energy_kwh_only",
+                        currency,
+                    ),
+                    "batteryAction": create_formatted_value(
+                        battery_action_b, "energy_kwh_only", currency
+                    ),
+                    "batterySoe": create_formatted_value(
+                        period_b_data.energy.battery_soe_end,
+                        "energy_kwh_only",
+                        currency,
+                    ),
+                    "gridImport": create_formatted_value(
+                        period_b_data.energy.grid_imported, "energy_kwh_only", currency
+                    ),
+                    "gridExport": create_formatted_value(
+                        period_b_data.energy.grid_exported, "energy_kwh_only", currency
+                    ),
+                    "cost": create_formatted_value(
+                        period_b_data.economic.hourly_cost, "currency", currency
+                    ),
+                    "gridOnlyCost": create_formatted_value(
+                        period_b_data.economic.grid_only_cost, "currency", currency
+                    ),
+                    "savings": create_formatted_value(
+                        period_b_data.economic.hourly_savings, "currency", currency
+                    ),
+                    "dataSource": period_b_data.data_source,
+                },
+                # Differences (B - A)
+                "delta": {
+                    "solar": create_formatted_value(
+                        period_b_data.energy.solar_production
+                        - period_a_data.energy.solar_production,
+                        "energy_kwh_only",
+                        currency,
+                    ),
+                    "consumption": create_formatted_value(
+                        period_b_data.energy.home_consumption
+                        - period_a_data.energy.home_consumption,
+                        "energy_kwh_only",
+                        currency,
+                    ),
+                    "batteryAction": create_formatted_value(
+                        battery_action_b - battery_action_a, "energy_kwh_only", currency
+                    ),
+                    "batterySoe": create_formatted_value(
+                        period_b_data.energy.battery_soe_end
+                        - period_a_data.energy.battery_soe_end,
+                        "energy_kwh_only",
+                        currency,
+                    ),
+                    "gridImport": create_formatted_value(
+                        period_b_data.energy.grid_imported
+                        - period_a_data.energy.grid_imported,
+                        "energy_kwh_only",
+                        currency,
+                    ),
+                    "gridExport": create_formatted_value(
+                        period_b_data.energy.grid_exported
+                        - period_a_data.energy.grid_exported,
+                        "energy_kwh_only",
+                        currency,
+                    ),
+                    "cost": create_formatted_value(
+                        period_b_data.economic.hourly_cost
+                        - period_a_data.economic.hourly_cost,
+                        "currency",
+                        currency,
+                    ),
+                    "gridOnlyCost": create_formatted_value(
+                        period_b_data.economic.grid_only_cost
+                        - period_a_data.economic.grid_only_cost,
+                        "currency",
+                        currency,
+                    ),
+                    "savings": create_formatted_value(
+                        period_b_data.economic.hourly_savings
+                        - period_a_data.economic.hourly_savings,
+                        "currency",
+                        currency,
+                    ),
+                },
+            }
+            period_comparisons.append(comparison)
+
+        # Build response
+        response = {
+            "snapshotAPeriod": period_a,
+            "snapshotATimestamp": snapshot_a.snapshot_timestamp.isoformat(),
+            "snapshotBPeriod": period_b,
+            "snapshotBTimestamp": snapshot_b.snapshot_timestamp.isoformat(),
+            "periodComparisons": period_comparisons,
+            "growattScheduleA": [
+                {
+                    "segmentId": i + 1,
+                    "battMode": interval["batt_mode"],
+                    "startTime": interval["start_time"],
+                    "endTime": interval["end_time"],
+                    "enabled": interval.get("enabled", True),
+                }
+                for i, interval in enumerate(snapshot_a.growatt_schedule)
+            ],
+            "growattScheduleB": [
+                {
+                    "segmentId": i + 1,
+                    "battMode": interval["batt_mode"],
+                    "startTime": interval["start_time"],
+                    "endTime": interval["end_time"],
+                    "enabled": interval.get("enabled", True),
+                }
+                for i, interval in enumerate(snapshot_b.growatt_schedule)
+            ],
+        }
+
+        return convert_keys_to_camel_case(response)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error comparing snapshots: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e

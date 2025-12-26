@@ -160,4 +160,73 @@ export interface SystemHealthData {
   checks: ComponentHealthStatus[];
 }
 
+export interface PredictionSnapshot {
+  snapshotTimestamp: string;
+  optimizationPeriod: number;
+  predictedDailySavings: FormattedValue;
+  periodCount: number;
+  actualCount: number;
+  growattScheduleCount: number;
+}
+
+export interface PeriodDeviation {
+  period: number;
+  predictedBatteryAction: FormattedValue;
+  actualBatteryAction: FormattedValue;
+  batteryActionDeviation: FormattedValue;
+  predictedConsumption: FormattedValue;
+  actualConsumption: FormattedValue;
+  consumptionDeviation: FormattedValue;
+  predictedSolar: FormattedValue;
+  actualSolar: FormattedValue;
+  solarDeviation: FormattedValue;
+  predictedSavings: FormattedValue;
+  actualSavings: FormattedValue;
+  savingsDeviation: FormattedValue;
+  deviationType: string;
+}
+
+export interface SnapshotComparison {
+  snapshotTimestamp: string;
+  snapshotPeriod: number;
+  comparisonTime: string;
+  periodDeviations: PeriodDeviation[];
+  totalPredictedSavings: FormattedValue;
+  totalActualSavings: FormattedValue;
+  savingsDeviation: FormattedValue;
+  primaryDeviationCause: string;
+  predictedGrowattSchedule: any[];
+  currentGrowattSchedule: any[];
+}
+
+export interface SnapshotDataPoint {
+  solar: FormattedValue;
+  consumption: FormattedValue;
+  batteryAction: FormattedValue;
+  batterySoe: FormattedValue;
+  gridImport: FormattedValue;
+  gridExport: FormattedValue;
+  cost: FormattedValue;
+  gridOnlyCost: FormattedValue;
+  savings: FormattedValue;
+  dataSource: string;
+}
+
+export interface PeriodComparison {
+  period: number;
+  snapshotA: SnapshotDataPoint;
+  snapshotB: SnapshotDataPoint;
+  delta: Omit<SnapshotDataPoint, 'dataSource'>;
+}
+
+export interface SnapshotToSnapshotComparison {
+  snapshotAPeriod: number;
+  snapshotATimestamp: string;
+  snapshotBPeriod: number;
+  snapshotBTimestamp: string;
+  periodComparisons: PeriodComparison[];
+  growattScheduleA: any[];
+  growattScheduleB: any[];
+}
+
 

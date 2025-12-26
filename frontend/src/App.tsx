@@ -86,25 +86,24 @@ const Navigation = () => {
         <TrendingUp className="h-5 w-5" />
         <span className="hidden sm:inline">Savings</span>
       </Link>
-      <Link 
-        to="/inverter" 
+      <Link
+        to="/inverter"
         className={`p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center space-x-1 ${isActive('/inverter')}`}
         title="Inverter status & battery schedule management"
       >
         <Zap className="h-5 w-5" />
         <span className="hidden sm:inline">Inverter</span>
       </Link>
-      {/* Temporarily disabled - under construction */}
-      {/* <Link
+      <Link
         to="/insights"
         className={`p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center space-x-1 ${isActive('/insights')}`}
-        title="Decision analysis & intelligence"
+        title="Prediction vs actual analysis"
       >
         <Brain className="h-5 w-5" />
         <span className="hidden sm:inline">Insights</span>
-      </Link> */}
-      <Link 
-        to="/system-health" 
+      </Link>
+      <Link
+        to="/system-health"
         className={`p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center space-x-1 ${isActive('/system-health')}`}
         title="System status & component health"
       >

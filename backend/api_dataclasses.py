@@ -157,6 +157,161 @@ class APIPriceSettings:
             useActualPrice=price.use_actual_price,
         )
 
+
+@dataclass
+class APIPredictionSnapshot:
+    """API representation of PredictionSnapshot."""
+
+    snapshotTimestamp: str  # ISO format
+    optimizationPeriod: int
+    predictedDailySavings: FormattedValue
+    periodCount: int  # From daily_view
+    actualCount: int  # From daily_view
+    growattScheduleCount: int  # Number of TOU intervals
+
+    @classmethod
+    def from_internal(cls, snapshot, currency: str) -> APIPredictionSnapshot:
+        """Convert from internal PredictionSnapshot to API format.
+
+        Args:
+            snapshot: PredictionSnapshot object
+            currency: Currency code for formatting
+
+        Returns:
+            APIPredictionSnapshot with camelCase fields
+        """
+        return cls(
+            snapshotTimestamp=snapshot.snapshot_timestamp.isoformat(),
+            optimizationPeriod=snapshot.optimization_period,
+            predictedDailySavings=create_formatted_value(
+                snapshot.predicted_daily_savings, "currency", currency
+            ),
+            periodCount=len(snapshot.daily_view.periods),
+            actualCount=snapshot.daily_view.actual_count,
+            growattScheduleCount=len(snapshot.growatt_schedule),
+        )
+
+
+@dataclass
+class APIPeriodDeviation:
+    """API representation of period-level deviation."""
+
+    period: int
+    predictedBatteryAction: FormattedValue
+    actualBatteryAction: FormattedValue
+    batteryActionDeviation: FormattedValue
+    predictedConsumption: FormattedValue
+    actualConsumption: FormattedValue
+    consumptionDeviation: FormattedValue
+    predictedSolar: FormattedValue
+    actualSolar: FormattedValue
+    solarDeviation: FormattedValue
+    predictedSavings: FormattedValue
+    actualSavings: FormattedValue
+    savingsDeviation: FormattedValue
+    deviationType: str
+
+    @classmethod
+    def from_internal(cls, period_deviation, currency: str) -> APIPeriodDeviation:
+        """Convert from internal PeriodDeviation to API format.
+
+        Args:
+            period_deviation: PeriodDeviation object
+            currency: Currency code for formatting
+
+        Returns:
+            APIPeriodDeviation with camelCase fields
+        """
+        return cls(
+            period=period_deviation.period,
+            predictedBatteryAction=create_formatted_value(
+                period_deviation.predicted_battery_action, "energy_kwh_only", currency
+            ),
+            actualBatteryAction=create_formatted_value(
+                period_deviation.actual_battery_action, "energy_kwh_only", currency
+            ),
+            batteryActionDeviation=create_formatted_value(
+                period_deviation.battery_action_deviation, "energy_kwh_only", currency
+            ),
+            predictedConsumption=create_formatted_value(
+                period_deviation.predicted_consumption, "energy_kwh_only", currency
+            ),
+            actualConsumption=create_formatted_value(
+                period_deviation.actual_consumption, "energy_kwh_only", currency
+            ),
+            consumptionDeviation=create_formatted_value(
+                period_deviation.consumption_deviation, "energy_kwh_only", currency
+            ),
+            predictedSolar=create_formatted_value(
+                period_deviation.predicted_solar, "energy_kwh_only", currency
+            ),
+            actualSolar=create_formatted_value(
+                period_deviation.actual_solar, "energy_kwh_only", currency
+            ),
+            solarDeviation=create_formatted_value(
+                period_deviation.solar_deviation, "energy_kwh_only", currency
+            ),
+            predictedSavings=create_formatted_value(
+                period_deviation.predicted_savings, "currency", currency
+            ),
+            actualSavings=create_formatted_value(
+                period_deviation.actual_savings, "currency", currency
+            ),
+            savingsDeviation=create_formatted_value(
+                period_deviation.savings_deviation, "currency", currency
+            ),
+            deviationType=period_deviation.deviation_type,
+        )
+
+
+@dataclass
+class APISnapshotComparison:
+    """API representation of snapshot comparison."""
+
+    snapshotTimestamp: str
+    snapshotPeriod: int
+    comparisonTime: str
+    periodDeviations: list[dict]  # List of APIPeriodDeviation as dicts
+    totalPredictedSavings: FormattedValue
+    totalActualSavings: FormattedValue
+    savingsDeviation: FormattedValue
+    primaryDeviationCause: str
+    predictedGrowattSchedule: list[dict]  # TOU intervals from snapshot
+    currentGrowattSchedule: list[dict]  # Current TOU intervals
+
+    @classmethod
+    def from_internal(cls, snapshot_comparison, currency: str) -> APISnapshotComparison:
+        """Convert from internal SnapshotComparison to API format.
+
+        Args:
+            snapshot_comparison: SnapshotComparison object
+            currency: Currency code for formatting
+
+        Returns:
+            APISnapshotComparison with camelCase fields
+        """
+        return cls(
+            snapshotTimestamp=snapshot_comparison.reference_snapshot.snapshot_timestamp.isoformat(),
+            snapshotPeriod=snapshot_comparison.reference_snapshot.optimization_period,
+            comparisonTime=datetime.now().isoformat(),
+            periodDeviations=[
+                APIPeriodDeviation.from_internal(dev, currency).__dict__
+                for dev in snapshot_comparison.period_deviations
+            ],
+            totalPredictedSavings=create_formatted_value(
+                snapshot_comparison.total_predicted_savings, "currency", currency
+            ),
+            totalActualSavings=create_formatted_value(
+                snapshot_comparison.total_actual_savings, "currency", currency
+            ),
+            savingsDeviation=create_formatted_value(
+                snapshot_comparison.savings_deviation, "currency", currency
+            ),
+            primaryDeviationCause=snapshot_comparison.primary_deviation_cause,
+            predictedGrowattSchedule=snapshot_comparison.predicted_growatt_schedule,
+            currentGrowattSchedule=snapshot_comparison.current_growatt_schedule,
+        )
+
     def to_internal_update(self) -> dict:
         """Convert API updates back to internal snake_case."""
         return {
@@ -676,11 +831,15 @@ class APIDashboardResponse:
         if resolution == "hourly":
             # For hourly resolution, use hour number (0-23)
             current_index = now.hour
-            logger.debug(f"Hourly mode: currentPeriod={current_index} (hour={now.hour})")
+            logger.debug(
+                f"Hourly mode: currentPeriod={current_index} (hour={now.hour})"
+            )
         else:
             # For quarterly resolution, use period index (0-95)
             current_index = now.hour * 4 + now.minute // 15
-            logger.debug(f"Quarterly mode: currentPeriod={current_index} (hour={now.hour}, minute={now.minute})")
+            logger.debug(
+                f"Quarterly mode: currentPeriod={current_index} (hour={now.hour}, minute={now.minute})"
+            )
 
         actual_data = [h for h in hourly_data if h.dataSource == "actual"]
         predicted_data = [h for h in hourly_data if h.dataSource == "predicted"]

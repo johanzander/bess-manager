@@ -23,6 +23,7 @@ from .health_check import run_system_health_checks
 from .historical_data_store import HistoricalDataStore
 from .models import DecisionData, EconomicData, PeriodData
 from .power_monitor import HomePowerMonitor
+from .prediction_snapshot import PredictionSnapshotStore
 from .price_manager import HomeAssistantSource, PriceManager, PriceSource
 from .schedule_store import ScheduleStore
 from .sensor_collector import SensorCollector
@@ -66,6 +67,7 @@ class BatterySystemManager:
             self.battery_settings.total_capacity
         )
         self.schedule_store = ScheduleStore()
+        self.prediction_snapshot_store = PredictionSnapshotStore()
 
         # Initialize specialized components
         self.sensor_collector = SensorCollector(
@@ -321,6 +323,13 @@ class BatterySystemManager:
                     temp_growatt  # Update manager with new schedule
                 )
 
+            # Capture prediction snapshot after schedule is applied
+            if not prepare_next_day:
+                self._capture_prediction_snapshot(
+                    optimization_period=optimization_period,
+                    optimization_result=optimization_result,
+                )
+
             # Apply current period settings
             if not prepare_next_day:
                 self._apply_period_schedule(current_period)
@@ -348,6 +357,42 @@ class BatterySystemManager:
         self._schedule_manager.log_detailed_schedule(
             "=== GROWATT DETAILED SCHEDULE ==="
         )
+
+    def _capture_prediction_snapshot(
+        self,
+        optimization_period: int,
+        optimization_result: OptimizationResult,
+    ) -> None:
+        """Capture snapshot of predictions and actuals using DailyView.
+
+        Args:
+            optimization_period: Period when optimization ran (0-95)
+            optimization_result: Result from DP optimization
+        """
+        try:
+            # Build daily view (merges actuals + predictions)
+            daily_view = self.daily_view_builder.build_daily_view(optimization_period)
+
+            # Get current Growatt schedule
+            growatt_schedule = self._schedule_manager.tou_intervals.copy()
+
+            # Store snapshot
+            self.prediction_snapshot_store.store_snapshot(
+                snapshot_timestamp=datetime.now(tz=TIMEZONE),
+                optimization_period=optimization_period,
+                daily_view=daily_view,
+                growatt_schedule=growatt_schedule,
+                predicted_daily_savings=optimization_result.economic_summary.grid_to_battery_solar_savings,
+            )
+
+            logger.debug(
+                "Captured prediction snapshot at period %d with %d TOU intervals",
+                optimization_period,
+                len(growatt_schedule),
+            )
+
+        except Exception as e:
+            logger.warning(f"Failed to capture prediction snapshot: {e}")
 
     def _initialize_tou_schedule_from_inverter(self) -> None:
         """Initialize schedule from current inverter settings."""
@@ -523,6 +568,7 @@ class BatterySystemManager:
             )
             # Clear historical store to prevent yesterday's data from appearing as today's future data
             self.historical_store.clear()
+            self.prediction_snapshot_store.clear()
             self._fetch_predictions()
 
     def _get_price_data(

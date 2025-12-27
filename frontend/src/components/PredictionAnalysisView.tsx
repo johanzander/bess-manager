@@ -5,6 +5,16 @@ import { usePredictionSnapshots, useSnapshotToSnapshotComparison } from '../hook
 import { AlertCircle, TrendingUp, ChevronDown } from 'lucide-react';
 import { FormattedValue } from '../types';
 
+// Type for Growatt TOU schedule intervals
+interface GrowattInterval {
+  startTime: string;
+  endTime: string;
+  enabled: boolean;
+  battMode: string;
+  power: number;
+  acChargeEnabled?: boolean;
+}
+
 const PredictionAnalysisView: React.FC = () => {
   const { snapshots, loading, error } = usePredictionSnapshots();
   const [selectedPeriodA, setSelectedPeriodA] = useState<number | null>(null);
@@ -61,7 +71,7 @@ const PredictionAnalysisView: React.FC = () => {
   };
 
   // Helper function to render a formatted value with color coding for deltas
-  const renderValue = (value: FormattedValue, isDelta: boolean = false): JSX.Element => {
+  const renderValue = (value: FormattedValue, isDelta: boolean = false): React.JSX.Element => {
     if (!isDelta) {
       return <span>{value.display}</span>;
     }
@@ -257,7 +267,7 @@ const PredictionAnalysisView: React.FC = () => {
                     <div className="flex justify-between border-t border-blue-200 dark:border-blue-700 pt-2">
                       <span className="text-blue-700 dark:text-blue-300 font-medium">Savings:</span>
                       <span className="font-bold text-blue-700 dark:text-blue-300">
-                        {totals.snapshotA.savings.toFixed(2)} {currency}
+                        {(totals.snapshotA.gridOnlyCost - totals.snapshotA.cost).toFixed(2)} {currency}
                       </span>
                     </div>
                   </div>
@@ -284,7 +294,7 @@ const PredictionAnalysisView: React.FC = () => {
                     <div className="flex justify-between border-t border-green-200 dark:border-green-700 pt-2">
                       <span className="text-green-700 dark:text-green-300 font-medium">Savings:</span>
                       <span className="font-bold text-green-700 dark:text-green-300">
-                        {totals.snapshotB.savings.toFixed(2)} {currency}
+                        {(totals.snapshotB.gridOnlyCost - totals.snapshotB.cost).toFixed(2)} {currency}
                       </span>
                     </div>
                   </div>
@@ -292,12 +302,12 @@ const PredictionAnalysisView: React.FC = () => {
 
                 {/* Delta Metrics */}
                 <div className={`p-4 rounded-lg ${
-                  totals.delta.savings >= 0
+                  (totals.snapshotB.gridOnlyCost - totals.snapshotB.cost) - (totals.snapshotA.gridOnlyCost - totals.snapshotA.cost) >= 0
                     ? 'bg-purple-50 dark:bg-purple-900/20'
                     : 'bg-red-50 dark:bg-red-900/20'
                 }`}>
                   <div className={`text-xs font-medium mb-3 ${
-                    totals.delta.savings >= 0
+                    (totals.snapshotB.gridOnlyCost - totals.snapshotB.cost) - (totals.snapshotA.gridOnlyCost - totals.snapshotA.cost) >= 0
                       ? 'text-purple-700 dark:text-purple-300'
                       : 'text-red-700 dark:text-red-300'
                   }`}>
@@ -325,23 +335,24 @@ const PredictionAnalysisView: React.FC = () => {
                       </span>
                     </div>
                     <div className={`flex justify-between border-t pt-2 ${
-                      totals.delta.savings >= 0
+                      (totals.snapshotB.gridOnlyCost - totals.snapshotB.cost) - (totals.snapshotA.gridOnlyCost - totals.snapshotA.cost) >= 0
                         ? 'border-purple-200 dark:border-purple-700'
                         : 'border-red-200 dark:border-red-700'
                     }`}>
                       <span className={`font-medium ${
-                        totals.delta.savings >= 0
+                        (totals.snapshotB.gridOnlyCost - totals.snapshotB.cost) - (totals.snapshotA.gridOnlyCost - totals.snapshotA.cost) >= 0
                           ? 'text-purple-700 dark:text-purple-300'
                           : 'text-red-700 dark:text-red-300'
                       }`}>
                         Savings:
                       </span>
                       <span className={`font-bold ${
-                        totals.delta.savings >= 0
+                        (totals.snapshotB.gridOnlyCost - totals.snapshotB.cost) - (totals.snapshotA.gridOnlyCost - totals.snapshotA.cost) >= 0
                           ? 'text-purple-700 dark:text-purple-300'
                           : 'text-red-700 dark:text-red-300'
                       }`}>
-                        {totals.delta.savings >= 0 ? '+' : ''}{totals.delta.savings.toFixed(2)} {currency}
+                        {((totals.snapshotB.gridOnlyCost - totals.snapshotB.cost) - (totals.snapshotA.gridOnlyCost - totals.snapshotA.cost)) >= 0 ? '+' : ''}
+                        {((totals.snapshotB.gridOnlyCost - totals.snapshotB.cost) - (totals.snapshotA.gridOnlyCost - totals.snapshotA.cost)).toFixed(2)} {currency}
                       </span>
                     </div>
                   </div>
@@ -632,7 +643,7 @@ const PredictionAnalysisView: React.FC = () => {
                 </h4>
                 <div className="space-y-2">
                   {comparison.growattScheduleA && comparison.growattScheduleA.length > 0 ? (
-                    comparison.growattScheduleA.map((interval: any, idx: number) => (
+                    comparison.growattScheduleA.map((interval: GrowattInterval, idx: number) => (
                       <div
                         key={idx}
                         className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-lg p-3"
@@ -691,10 +702,10 @@ const PredictionAnalysisView: React.FC = () => {
                 </h4>
                 <div className="space-y-2">
                   {comparison.growattScheduleB && comparison.growattScheduleB.length > 0 ? (
-                    comparison.growattScheduleB.map((interval: any, idx: number) => {
+                    comparison.growattScheduleB.map((interval: GrowattInterval, idx: number) => {
                       // Find matching interval in schedule A for comparison
                       const matchingA = comparison.growattScheduleA?.find(
-                        (a: any) => a.startTime === interval.startTime && a.endTime === interval.endTime
+                        (a: GrowattInterval) => a.startTime === interval.startTime && a.endTime === interval.endTime
                       );
                       const hasChanges = matchingA && (
                         matchingA.battMode !== interval.battMode ||

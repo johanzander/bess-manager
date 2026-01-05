@@ -114,7 +114,9 @@ class BESSController:
 
         # Initialize Home Assistant API Controller with sensor config from options
         sensor_config = options.get("sensors", {})
-        self.ha_controller = self._init_ha_controller(sensor_config)
+        growatt_config = options.get("growatt", {})
+        growatt_device_id = growatt_config.get("device_id")
+        self.ha_controller = self._init_ha_controller(sensor_config, growatt_device_id)
 
         # Enable test mode based on environment variable (defaults to False for production)
         test_mode = os.environ.get("HA_TEST_MODE", "false").lower() in (
@@ -155,11 +157,12 @@ class BESSController:
 
         logger.info("BESS Controller initialized with early settings loading")
 
-    def _init_ha_controller(self, sensor_config):
+    def _init_ha_controller(self, sensor_config, growatt_device_id=None):
         """Initialize Home Assistant API controller based on environment.
 
         Args:
             sensor_config: Sensor configuration dictionary to use for the controller.
+            growatt_device_id: Growatt device ID for TOU segment operations.
         """
         ha_token = os.getenv("HASSIO_TOKEN")
         if ha_token:
@@ -173,7 +176,10 @@ class BESSController:
         )
 
         return HomeAssistantAPIController(
-            ha_url=ha_url, token=ha_token, sensor_config=sensor_config
+            ha_url=ha_url,
+            token=ha_token,
+            sensor_config=sensor_config,
+            growatt_device_id=growatt_device_id,
         )
 
     def _load_and_apply_settings(self):

@@ -85,13 +85,20 @@ class HomeAssistantAPIController:
             return str(sensor_key) if sensor_key else None
         return None
 
-    def __init__(self, ha_url: str, token: str, sensor_config: dict | None = None):
+    def __init__(
+        self,
+        ha_url: str,
+        token: str,
+        sensor_config: dict | None = None,
+        growatt_device_id: str | None = None,
+    ):
         """Initialize the Controller with Home Assistant API access.
 
         Args:
             ha_url: Base URL of Home Assistant (default: "http://supervisor/core")
             token: Long-lived access token for Home Assistant
             sensor_config: Sensor configuration mapping from options.json
+            growatt_device_id: Growatt device ID for TOU segment operations
 
         """
         self.base_url = ha_url
@@ -106,6 +113,9 @@ class HomeAssistantAPIController:
 
         # Use provided sensor configuration
         self.sensors = sensor_config or {}
+
+        # Store Growatt device ID for TOU operations
+        self.growatt_device_id = growatt_device_id
 
         # Create persistent session for connection reuse (400x faster)
         self.session = requests.Session()
@@ -511,9 +521,7 @@ class HomeAssistantAPIController:
                 http_method = getattr(self.session, method.lower())
 
                 # Use the environment-aware request function with session (connection pooling)
-                response = run_request(
-                    http_method, url=url, timeout=30, **kwargs
-                )
+                response = run_request(http_method, url=url, timeout=30, **kwargs)
 
                 # Raise an exception if the response status is an error
                 response.raise_for_status()
@@ -773,24 +781,46 @@ class HomeAssistantAPIController:
             end_time: End time in "HH:MM" format
             enabled: Whether the segment is enabled
         """
+        # Prepare service call parameters
+        service_params = {
+            "segment_id": segment_id,
+            "batt_mode": batt_mode,
+            "start_time": start_time,
+            "end_time": end_time,
+            "enabled": enabled,
+        }
+
+        # Add device_id if configured
+        if self.growatt_device_id:
+            service_params["device_id"] = self.growatt_device_id
+        else:
+            logger.warning(
+                "No Growatt device_id configured. TOU segment write may fail. "
+                "Please add growatt.device_id to config.yaml"
+            )
+
         self._service_call_with_retry(
-            "growatt_server",
-            "update_time_segment",
-            segment_id=segment_id,
-            batt_mode=batt_mode,
-            start_time=start_time,
-            end_time=end_time,
-            enabled=enabled,
+            "growatt_server", "update_time_segment", **service_params
         )
 
     def read_inverter_time_segments(self):
         """Read all time segments from the inverter with retry logic."""
         try:
+            # Prepare service call parameters
+            service_params: dict[str, object] = {"return_response": True}
+
+            # Add device_id if configured
+            if self.growatt_device_id:
+                service_params["device_id"] = self.growatt_device_id
+            else:
+                logger.warning(
+                    "No Growatt device_id configured. TOU segment read may fail. "
+                    "Please add growatt.device_id to config.yaml"
+                )
+
             # Call the service and get the response
             result = self._service_call_with_retry(
-                "growatt_server",
-                "read_time_segments",
-                return_response=True,  # Explicitly set return_response
+                "growatt_server", "read_time_segments", **service_params
             )
 
             # Check if the result contains 'service_response' with 'time_segments'
@@ -800,9 +830,7 @@ class HomeAssistantAPIController:
                     return service_response["time_segments"]
 
             # If the result doesn't match expected format, log and return empty list
-            logger.warning(
-                "Unexpected response format from read_tlx_inverter_time_segments"
-            )
+            logger.warning("Unexpected response format from read_time_segments")
             return []
 
         except Exception as e:

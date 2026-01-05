@@ -1,6 +1,6 @@
 name: "BESS Manager"
 description: "Battery Energy Storage System optimization and management"
-version: "4.0.2"
+version: "5.0.0"
 slug: "bess_manager"
 init: false
 arch:
@@ -48,13 +48,15 @@ options:
   nordpool:
     use_official_integration: true  # Set to true to use official HA Nord Pool integration
     config_entry_id: "01K3Y99FD3MDZYVFX2XSWR4888"  # Required when use_official_integration is true
+  growatt:
+    device_id: "fbafceb07a1cc74c351ef4310fa430a0"  # Growatt device ID for TOU segment operations
   sensors:
     # === Battery Control & Status ===
     battery_soc: "sensor.rkm0d7n04x_statement_of_charge_soc"
-    battery_charge_stop_soc: "number.rkm0d7n04x_charge_stop_soc_2"
-    battery_discharge_stop_soc: "number.rkm0d7n04x_discharge_stop_soc_2"
-    battery_charging_power_rate: "number.rkm0d7n04x_charge_power"
-    battery_discharging_power_rate: "number.rkm0d7n04x_discharge_power"
+    battery_charge_stop_soc: "number.rkm0d7n04x_battery_charge_soc_limit"
+    battery_discharge_stop_soc: "number.rkm0d7n04x_battery_discharge_soc_limit"
+    battery_charging_power_rate: "number.rkm0d7n04x_battery_charge_power_limit"
+    battery_discharging_power_rate: "number.rkm0d7n04x_battery_discharge_power_limit"
     grid_charge: "switch.rkm0d7n04x_ac_charge"  
     # === Real-time Power Sensors (Primary - Live Power Flow) ===
     pv_power: "sensor.rkm0d7n04x_internal_wattage"                    # Total solar DC production
@@ -114,6 +116,8 @@ schema:
   nordpool:
     use_official_integration: bool
     config_entry_id: str
+  growatt:
+    device_id: str
   sensors:
     battery_soc: str
     battery_charge_power: str

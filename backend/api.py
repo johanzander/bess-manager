@@ -1079,12 +1079,12 @@ async def get_inverter_status():
         battery_settings = bess_controller.system.battery_settings
 
         # Get current battery mode from schedule for current hour
-        current_battery_mode = "load-first"  # Default
+        current_battery_mode = "load_first"  # Default
         try:
             current_hour = datetime.now().hour
             schedule_manager = bess_controller.system._schedule_manager
             hourly_settings = schedule_manager.get_hourly_settings(current_hour)
-            current_battery_mode = hourly_settings.get("batt_mode", "load-first")
+            current_battery_mode = hourly_settings.get("batt_mode", "load_first")
         except Exception as e:
             logger.warning(f"Failed to get current battery mode: {e}")
 
@@ -1164,7 +1164,7 @@ async def get_growatt_detailed_schedule():
         for hour in range(24):
             try:
                 hourly_settings = schedule_manager.get_hourly_settings(hour)
-                battery_mode = hourly_settings.get("batt_mode", "load-first")
+                battery_mode = hourly_settings.get("batt_mode", "load_first")
                 mode_distribution[battery_mode] = (
                     mode_distribution.get(battery_mode, 0) + 1
                 )
@@ -1277,8 +1277,8 @@ async def get_growatt_detailed_schedule():
                     {
                         "hour": hour,
                         "mode": "idle",
-                        "batt_mode": "load-first",
-                        "batteryMode": "load-first",  # Add alias for frontend compatibility
+                        "batt_mode": "load_first",
+                        "batteryMode": "load_first",  # Add alias for frontend compatibility
                         "grid_charge": False,
                         "discharge_rate": 100,
                         "dischargePowerRate": 100,  # Add alias

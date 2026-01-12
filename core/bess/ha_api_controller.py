@@ -776,7 +776,7 @@ class HomeAssistantAPIController:
 
         Args:
             segment_id: Segment number (1-10)
-            batt_mode: Battery mode ("load-first", "battery-first", or "grid-first")
+            batt_mode: Battery mode ("load_first", "battery_first", or "grid_first")
             start_time: Start time in "HH:MM" format
             end_time: End time in "HH:MM" format
             enabled: Whether the segment is enabled

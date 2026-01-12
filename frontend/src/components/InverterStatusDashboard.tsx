@@ -195,11 +195,11 @@ const StatusCard: React.FC<StatusCardProps> = ({
 // Helper function for battery mode formatting
 const formatBatteryMode = (mode: string): string => {
   switch (mode.toLowerCase()) {
-    case 'load-first':
+    case 'load_first':
       return 'Load First';
-    case 'battery-first':
+    case 'battery_first':
       return 'Battery First';
-    case 'grid-first':
+    case 'grid_first':
       return 'Grid First';
     default:
       return mode.charAt(0).toUpperCase() + mode.slice(1);
@@ -354,7 +354,7 @@ const InverterStatusDashboard: React.FC = () => {
           segmentId: segmentId,
           startTime: '00:00',
           endTime: '00:00',
-          battMode: 'load-first',
+          battMode: 'load_first',
           enabled: false,
           isEmpty: true
         });
@@ -378,11 +378,11 @@ const InverterStatusDashboard: React.FC = () => {
 
   // ✅ FIX 2: Get current battery mode from schedule data instead of inverter status
   const getCurrentBatteryMode = (): string => {
-    if (!growattSchedule?.scheduleData) return 'load-first';
+    if (!growattSchedule?.scheduleData) return 'load_first';
     
     const currentHour = new Date().getHours();
     const currentHourData = growattSchedule.scheduleData.find(h => h.hour === currentHour);
-    return currentHourData?.batteryMode || 'load-first';
+    return currentHourData?.batteryMode || 'load_first';
   };
 
   // ✅ Calculate actual values from the API response
@@ -423,7 +423,7 @@ const InverterStatusDashboard: React.FC = () => {
       dischargePowerRate: scheduleHour?.dischargePowerRate || 0,
       chargePowerRate: scheduleHour?.chargePowerRate || 100,
       gridCharge: scheduleHour?.gridCharge || false,
-      batteryMode: scheduleHour?.batteryMode || 'load-first',
+      batteryMode: scheduleHour?.batteryMode || 'load_first',
       // Add formatted fields from dashboard data (they ARE the FormattedValue objects)
       batteryActionFormatted: dashboardHour?.batteryAction,
       batteryChargedFormatted: dashboardHour?.batteryCharged,
@@ -435,9 +435,9 @@ const InverterStatusDashboard: React.FC = () => {
   // Rest of existing functions...
   const getBatteryModeDisplay = (mode: string) => {
     const modes: Record<string, { label: string; color: string }> = {
-      'load-first': { label: 'Load First', color: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300' },
-      'battery-first': { label: 'Battery First', color: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300' },
-      'grid-first': { label: 'Grid First', color: 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300' }
+      'load_first': { label: 'Load First', color: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300' },
+      'battery_first': { label: 'Battery First', color: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300' },
+      'grid_first': { label: 'Grid First', color: 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300' }
     };
     
     if (!modes[mode]) {
@@ -736,9 +736,9 @@ const InverterStatusDashboard: React.FC = () => {
                         <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
                           <span className="font-medium">
                             {hour.isActual ? 'N/A' : (
-                              hour.batteryMode === 'load-first' ? 'Load First' :
-                              hour.batteryMode === 'battery-first' ? 'Battery First' :
-                              hour.batteryMode === 'grid-first' ? 'Grid First' : hour.batteryMode
+                              hour.batteryMode === 'load_first' ? 'Load First' :
+                              hour.batteryMode === 'battery_first' ? 'Battery First' :
+                              hour.batteryMode === 'grid_first' ? 'Grid First' : hour.batteryMode
                             )}
                           </span>
                         </td>

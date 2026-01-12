@@ -79,7 +79,7 @@ class DPSchedule:
             state = "discharging"
             grid_charge = False
         elif intent == "EXPORT_ARBITRAGE":
-            state = "grid-first"  # Priority to grid export
+            state = "grid_first"  # Priority to grid export
             grid_charge = False
         else:  # IDLE
             state = "idle"

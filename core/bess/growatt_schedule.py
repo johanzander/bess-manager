@@ -13,9 +13,9 @@ Growatt inverters have strict hardware requirements that create operational chal
 5. Past time intervals should not be modified (unnecessary writes)
 6. All segments must have unique, sequential segment IDs (1, 2, 3...)
 7. Segment durations must align with full hour boundaries (e.g., 20:00-20:59)
-8. Inverter default behavior is load-first - only create TOU segments to override this default
-9. Only strategic periods (battery-first, grid-first) need explicit TOU segments
-10. IDLE periods automatically use load-first behavior (no TOU segment required)
+8. Inverter default behavior is load_first - only create TOU segments to override this default
+9. Only strategic periods (battery_first, grid_first) need explicit TOU segments
+10. IDLE periods automatically use load_first behavior (no TOU segment required)
 
 OBJECTIVES:
 
@@ -28,16 +28,16 @@ OBJECTIVES:
 APPROACH:
 
 Strategic intents (from DP algorithm) are converted to battery modes:
-- GRID_CHARGING → battery-first (AC charging enabled)
-- SOLAR_STORAGE → battery-first (charging priority)
-- LOAD_SUPPORT → load-first (discharging priority)
-- EXPORT_ARBITRAGE → grid-first (export priority)
-- IDLE → load-first (normal operation)
+- GRID_CHARGING → battery_first (AC charging enabled)
+- SOLAR_STORAGE → battery_first (charging priority)
+- LOAD_SUPPORT → load_first (discharging priority)
+- EXPORT_ARBITRAGE → grid_first (export priority)
+- IDLE → load_first (normal operation)
 
 ALGORITHM:
 
 1. Group consecutive hours by battery mode
-2. Create TOU intervals only for non-"load-first" modes (battery-first, grid-first)
+2. Create TOU intervals only for non-"load_first" modes (battery_first, grid_first)
 3. Use full hour boundaries (e.g., 20:00-20:59) to align with DP algorithm output
 4. Preserve past intervals to minimize inverter writes
 5. Assign sequential segment IDs to avoid conflicts
@@ -50,11 +50,11 @@ Requirements compliance check:
 ✓ Minimal writes: Preserves past intervals unchanged
 ✓ Hardware compatibility: Limits to max 9 segments, ensures unique sequential IDs
 ✓ DP alignment: Uses exact hour boundaries from DP algorithm
-✓ Disabled segments are load-first: Time periods without TOU segments default to load-first
+✓ Disabled segments are load_first: Time periods without TOU segments default to load_first
 ✓ Corruption recovery: Nuclear reset approach when chaos detected
 
-CORRECT APPROACH: Only create TOU segments for strategic periods (battery-first, grid-first).
-All other time periods automatically use load-first as inverter default behavior.
+CORRECT APPROACH: Only create TOU segments for strategic periods (battery_first, grid_first).
+All other time periods automatically use load_first as inverter default behavior.
 
 ROBUST RECOVERY: When TOU corruption detected (overlaps, wrong order, duplicates):
 1. Log corrupted state for debugging
@@ -82,11 +82,11 @@ class GrowattScheduleManager:
     time in the DP algorithm rather than analyzing energy flows afterward.
 
     Strategic Intent → Growatt Mode Mapping:
-    - GRID_CHARGING → battery-first (enables AC charging)
-    - SOLAR_STORAGE → battery-first (charging priority)
-    - LOAD_SUPPORT → load-first (discharging priority)
-    - EXPORT_ARBITRAGE → grid-first (export priority)
-    - IDLE → load-first (normal operation)
+    - GRID_CHARGING → battery_first (enables AC charging)
+    - SOLAR_STORAGE → battery_first (charging priority)
+    - LOAD_SUPPORT → load_first (discharging priority)
+    - EXPORT_ARBITRAGE → grid_first (export priority)
+    - IDLE → load_first (normal operation)
     """
     # Priority order for tie-breaking when aggregating quarterly to hourly
     # Higher values win ties - prioritizes action over inaction
@@ -247,35 +247,35 @@ class GrowattScheduleManager:
                 discharge_rate = 0
                 charge_rate = charge_power_rate
                 state = "charging"
-                batt_mode = "battery-first"
+                batt_mode = "battery_first"
 
             elif intent == "SOLAR_STORAGE":
                 grid_charge = False
                 discharge_rate = 0
                 charge_rate = 100
                 state = "charging" if battery_action > 0.01 else "idle"
-                batt_mode = "battery-first"
+                batt_mode = "battery_first"
 
             elif intent == "LOAD_SUPPORT":
                 grid_charge = False
                 discharge_rate = 100
                 charge_rate = 0
                 state = "discharging"
-                batt_mode = "load-first"
+                batt_mode = "load_first"
 
             elif intent == "EXPORT_ARBITRAGE":
                 grid_charge = False
                 discharge_rate = discharge_power_rate
                 charge_rate = 0
-                state = "grid-first"
-                batt_mode = "grid-first"
+                state = "grid_first"
+                batt_mode = "grid_first"
 
             elif intent == "IDLE":
                 grid_charge = False
                 discharge_rate = 0
                 charge_rate = 100
                 state = "idle"
-                batt_mode = "load-first"
+                batt_mode = "load_first"
             else:
                 raise ValueError(f"Unknown strategic intent at hour {hour}: {intent}")
 
@@ -350,11 +350,11 @@ class GrowattScheduleManager:
 
         # Map strategic intents to battery modes
         intent_to_mode = {
-            "GRID_CHARGING": "battery-first",  # Enable AC charging for arbitrage
-            "SOLAR_STORAGE": "battery-first",  # Priority to battery charging from solar
-            "LOAD_SUPPORT": "load-first",  # Priority to battery discharge for load
-            "EXPORT_ARBITRAGE": "grid-first",  # Priority to grid export for profit
-            "IDLE": "load-first",  # Normal load-first operation
+            "GRID_CHARGING": "battery_first",  # Enable AC charging for arbitrage
+            "SOLAR_STORAGE": "battery_first",  # Priority to battery charging from solar
+            "LOAD_SUPPORT": "load_first",  # Priority to battery discharge for load
+            "EXPORT_ARBITRAGE": "grid_first",  # Priority to grid export for profit
+            "IDLE": "load_first",  # Normal load_first operation
         }
 
         # Initialize new TOU intervals - preserve past intervals unless corrupted
@@ -406,7 +406,7 @@ class GrowattScheduleManager:
         for hour in range(self.current_hour, 24):
             # Get dominant strategic intent for this hour (aggregates 4 quarterly periods)
             intent = self._get_hourly_intent(hour)
-            hour_mode = intent_to_mode.get(intent, "load-first")
+            hour_mode = intent_to_mode.get(intent, "load_first")
 
             # Log quarterly details for debugging
             start_period = hour * 4
@@ -458,9 +458,9 @@ class GrowattScheduleManager:
 
         logger.info("Strategic intent-based mode periods: %s", mode_periods)
 
-        # Create TOU intervals for non-load-first modes only (without segment IDs yet)
+        # Create TOU intervals for non-load_first modes only (without segment IDs yet)
         for period in mode_periods:
-            if period["mode"] in ["battery-first", "grid-first"]:
+            if period["mode"] in ["battery_first", "grid_first"]:
                 start_time = f"{period['start_hour']:02d}:00"
                 end_time = f"{period['end_hour']:02d}:59"
 
@@ -548,12 +548,12 @@ class GrowattScheduleManager:
     def _strategic_intent_to_battery_mode(self, strategic_intent):
         """Convert strategic intent to Growatt battery mode."""
         intent_to_mode = {
-            "IDLE": "load-first",
-            "GRID_CHARGING": "battery-first",
-            "SOLAR_STORAGE": "battery-first",
-            "EXPORT_ARBITRAGE": "grid-first",
+            "IDLE": "load_first",
+            "GRID_CHARGING": "battery_first",
+            "SOLAR_STORAGE": "battery_first",
+            "EXPORT_ARBITRAGE": "grid_first",
         }
-        return intent_to_mode.get(strategic_intent, "load-first")
+        return intent_to_mode.get(strategic_intent, "load_first")
 
     def _consolidate_and_convert_fallback(self):
         """Fallback conversion when no strategic intents are available."""
@@ -578,7 +578,7 @@ class GrowattScheduleManager:
                         battery_first_hours.append(hour)
                     break
 
-        # Create simple TOU intervals for battery-first hours
+        # Create simple TOU intervals for battery_first hours
         if battery_first_hours:
             # Group consecutive hours
             consecutive_periods = []
@@ -601,7 +601,7 @@ class GrowattScheduleManager:
                 self.tou_intervals.append(
                     {
                         "segment_id": segment_id,
-                        "batt_mode": "battery-first",
+                        "batt_mode": "battery_first",
                         "start_time": start_time,
                         "end_time": end_time,
                         "enabled": True,
@@ -754,10 +754,10 @@ class GrowattScheduleManager:
 
             # Convert integer to string representation if needed
             if isinstance(raw_batt_mode, int):
-                batt_mode_map = {0: "load-first", 1: "battery-first", 2: "grid-first"}
-                batt_mode = batt_mode_map.get(raw_batt_mode, "battery-first")
+                batt_mode_map = {0: "load_first", 1: "battery_first", 2: "grid_first"}
+                batt_mode = batt_mode_map.get(raw_batt_mode, "battery_first")
             else:
-                batt_mode = raw_batt_mode
+                batt_mode = raw_batt_mode if raw_batt_mode else "load_first"
 
             self.tou_intervals.append(
                 {
@@ -815,13 +815,13 @@ class GrowattScheduleManager:
     def get_all_tou_segments(self):
         """Get all TOU segments with default intervals filling gaps for complete 24-hour coverage."""
         if not self.tou_intervals:
-            # Return default load-first for entire day if no intervals configured
+            # Return default load_first for entire day if no intervals configured
             return [
                 {
                     "segment_id": 0,
                     "start_time": "00:00",
                     "end_time": "23:59",
-                    "batt_mode": "load-first",
+                    "batt_mode": "load_first",
                     "enabled": False,
                     "is_default": True,
                 }
@@ -854,7 +854,7 @@ class GrowattScheduleManager:
                         "segment_id": 0,
                         "start_time": self._minutes_to_time(current_time_minutes),
                         "end_time": self._minutes_to_time(interval_start_minutes - 1),
-                        "batt_mode": "load-first",
+                        "batt_mode": "load_first",
                         "enabled": False,
                         "is_default": True,
                     }
@@ -875,7 +875,7 @@ class GrowattScheduleManager:
                     "segment_id": 0,
                     "start_time": self._minutes_to_time(current_time_minutes),
                     "end_time": "23:59",
-                    "batt_mode": "load-first",
+                    "batt_mode": "load_first",
                     "enabled": False,
                     "is_default": True,
                 }
@@ -1066,7 +1066,7 @@ class GrowattScheduleManager:
         for hour in sorted(self.hourly_settings.keys()):
             settings = self.get_hourly_settings(hour)
             intent = settings.get("strategic_intent", "IDLE")
-            batt_mode = settings.get("batt_mode", "load-first")
+            batt_mode = settings.get("batt_mode", "load_first")
             grid_charge = settings.get("grid_charge", False)
             charge_rate = settings.get("charge_rate", 0)
             discharge_rate = settings.get("discharge_rate", 0)
@@ -1167,8 +1167,8 @@ class GrowattScheduleManager:
 
             # Check if hour overlaps with this interval
             if hour_start <= interval_end and hour_end >= interval_start:
-                # Check if this interval uses grid-first mode (export)
-                return interval.get("batt_mode") == "grid-first"
+                # Check if this interval uses grid_first mode (export)
+                return interval.get("batt_mode") == "grid_first"
 
         return False
 
@@ -1204,8 +1204,8 @@ class GrowattScheduleManager:
 
             # Check if hour overlaps with this interval
             if hour_start <= interval_end and hour_end >= interval_start:
-                # Check if this interval uses battery-first mode (charging priority)
-                return interval.get("batt_mode") == "battery-first"
+                # Check if this interval uses battery_first mode (charging priority)
+                return interval.get("batt_mode") == "battery_first"
 
         return False
 
@@ -1216,10 +1216,10 @@ class GrowattScheduleManager:
             hour: Hour to check (0-23)
 
         Returns:
-            str: Battery mode ('battery-first', 'grid-first', 'load-first')
+            str: Battery mode ('battery_first', 'grid_first', 'load_first')
         """
         if not self.tou_intervals:
-            return "load-first"  # Default mode
+            return "load_first"  # Default mode
 
         for interval in self.tou_intervals:
             # Parse interval time range
@@ -1238,9 +1238,9 @@ class GrowattScheduleManager:
 
             # Check if hour overlaps with this interval
             if hour_start <= interval_end and hour_end >= interval_start:
-                return interval.get("batt_mode", "load-first")
+                return interval.get("batt_mode", "load_first")
 
-        return "load-first"  # Default mode
+        return "load_first"  # Default mode
 
     def has_no_overlapping_intervals(self) -> bool:
         """Test that no intervals overlap in time (hardware requirement).

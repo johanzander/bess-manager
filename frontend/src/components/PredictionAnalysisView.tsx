@@ -666,7 +666,7 @@ const PredictionAnalysisView: React.FC = () => {
                           <div className="flex justify-between">
                             <span className="text-gray-600 dark:text-gray-400">Mode:</span>
                             <span className="font-medium text-gray-900 dark:text-white">
-                              {interval.battMode === 'battery-first' ? '⚡ Battery First' : '🏠 Load First'}
+                              {interval.battMode === 'battery_first' ? '⚡ Battery First' : '🏠 Load First'}
                             </span>
                           </div>
                           <div className="flex justify-between">
@@ -750,7 +750,7 @@ const PredictionAnalysisView: React.FC = () => {
                                   ? 'text-yellow-700 dark:text-yellow-300'
                                   : 'text-gray-900 dark:text-white'
                               }`}>
-                                {interval.battMode === 'battery-first' ? '⚡ Battery First' : '🏠 Load First'}
+                                {interval.battMode === 'battery_first' ? '⚡ Battery First' : '🏠 Load First'}
                               </span>
                             </div>
                             <div className="flex justify-between">

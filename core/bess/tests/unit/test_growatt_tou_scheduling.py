@@ -166,11 +166,11 @@ class TestStrategicIntentExecution:
 
         # BEHAVIOR: IDLE hours should use default mode
         assert (
-            scheduler.get_hour_battery_mode(0) == "load-first"
-        ), "IDLE hours should be load-first"
+            scheduler.get_hour_battery_mode(0) == "load_first"
+        ), "IDLE hours should be load_first"
         assert (
-            scheduler.get_hour_battery_mode(23) == "load-first"
-        ), "IDLE hours should be load-first"
+            scheduler.get_hour_battery_mode(23) == "load_first"
+        ), "IDLE hours should be load_first"
 
     def test_idle_periods_use_default_mode(self, scheduler):
         """Test that IDLE strategic intents use default battery behavior."""
@@ -183,16 +183,16 @@ class TestStrategicIntentExecution:
         # BEHAVIOR: Strategic hour must be covered with non-default mode
         strategic_mode = scheduler.get_hour_battery_mode(10)
         assert (
-            strategic_mode != "load-first"
-        ), f"Strategic hour 10 should not be load-first, got {strategic_mode}"
+            strategic_mode != "load_first"
+        ), f"Strategic hour 10 should not be load_first, got {strategic_mode}"
 
         # BEHAVIOR: Hours clearly outside strategic influence should use default mode
         clearly_idle_hours = [0, 1, 2, 15, 20, 23]  # Well outside slot boundaries
         for hour in clearly_idle_hours:
             mode = scheduler.get_hour_battery_mode(hour)
             assert (
-                mode == "load-first"
-            ), f"Clearly idle hour {hour} should be load-first, got {mode}"
+                mode == "load_first"
+            ), f"Clearly idle hour {hour} should be load_first, got {mode}"
 
     def test_load_support_uses_default_mode(self, scheduler):
         """Test that LOAD_SUPPORT strategic intent uses default behavior."""
@@ -215,8 +215,8 @@ class TestStrategicIntentExecution:
         for hour in clearly_non_strategic_hours:
             mode = scheduler.get_hour_battery_mode(hour)
             assert (
-                mode == "load-first"
-            ), f"Non-strategic hour {hour} should be load-first, got {mode}"
+                mode == "load_first"
+            ), f"Non-strategic hour {hour} should be load_first, got {mode}"
 
 
 class TestHardwareConstraints:
@@ -392,8 +392,8 @@ class TestEdgeCases:
         for hour in range(24):
             mode = scheduler.get_hour_battery_mode(hour)
             assert (
-                mode == "load-first"
-            ), f"Hour {hour} should be load-first with all IDLE"
+                mode == "load_first"
+            ), f"Hour {hour} should be load_first with all IDLE"
 
         # HARDWARE CONSTRAINTS: Must still be satisfied
         assert (
@@ -475,8 +475,8 @@ class TestEdgeCases:
         for hour in clearly_non_strategic_hours:
             mode = scheduler.get_hour_battery_mode(hour)
             assert (
-                mode == "load-first"
-            ), f"Clearly non-strategic hour {hour} should be load-first"
+                mode == "load_first"
+            ), f"Clearly non-strategic hour {hour} should be load_first"
 
         # HARDWARE CONSTRAINTS: Alternating pattern must not create issues
         assert (

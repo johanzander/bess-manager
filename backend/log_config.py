@@ -24,6 +24,21 @@ logger.add(
     filter=add_module_name,
 )
 
+# File logging configuration
+LOG_DIR = Path("/data/logs")
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+logger.add(
+    LOG_DIR / "bess-{time:YYYY-MM-DD}.log",
+    format="{time:YYYY-MM-DD HH:mm:ss} | {level: <5} | {extra[module_name]} - {message}",
+    level="INFO",
+    rotation="00:00",  # Daily at midnight
+    retention="7 days",
+    compression="zip",
+    filter=add_module_name,
+    colorize=False,  # No ANSI codes in files
+)
+
 
 # Intercept standard logging
 class InterceptHandler(logging.Handler):

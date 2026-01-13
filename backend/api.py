@@ -1984,3 +1984,68 @@ async def compare_two_snapshots(
     except Exception as e:
         logger.error(f"Error comparing snapshots: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.get("/api/export-debug-data")
+async def export_debug_data():
+    """Export comprehensive debug data as markdown report.
+
+    Returns a markdown file containing all system state, logs, historical data,
+    predictions, schedules, and settings for debugging purposes.
+
+    Returns:
+        PlainTextResponse: Markdown file with complete debug data
+    """
+    from datetime import datetime
+
+    from fastapi.responses import PlainTextResponse
+
+    from core.bess.debug_data_exporter import DebugDataAggregator
+    from core.bess.debug_report_formatter import DebugReportFormatter
+
+    from app import bess_controller
+
+    try:
+        # Aggregate all system data
+        aggregator = DebugDataAggregator(bess_controller.system)
+        export_data = aggregator.aggregate_all_data()
+
+        # Format as markdown report
+        formatter = DebugReportFormatter()
+        markdown_content = formatter.format_report(export_data)
+
+        # Generate filename with timestamp
+        timestamp = datetime.now().strftime("%Y-%m-%d-%H%M%S")
+        filename = f"bess-debug-{timestamp}.md"
+
+        return PlainTextResponse(
+            content=markdown_content,
+            media_type="text/markdown",
+            headers={"Content-Disposition": f"attachment; filename={filename}"},
+        )
+    except Exception as e:
+        logger.error(f"Error exporting debug data: {e}", exc_info=True)
+
+        # Return minimal error report as markdown
+        timestamp = datetime.now().isoformat()
+        error_report = f"""# BESS Manager Debug Export (ERROR)
+
+**Export Date**: {timestamp}
+
+## Error During Export
+
+Failed to generate debug export:
+
+```
+{str(e)}
+```
+
+Please check the BESS Manager logs for details.
+"""
+
+        filename = f"bess-debug-error-{datetime.now().strftime('%Y-%m-%d-%H%M%S')}.md"
+        return PlainTextResponse(
+            content=error_report,
+            media_type="text/markdown",
+            headers={"Content-Disposition": f"attachment; filename={filename}"},
+        )

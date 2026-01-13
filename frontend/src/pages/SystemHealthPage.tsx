@@ -1,15 +1,76 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { Download } from 'lucide-react';
 import SystemHealthComponent from '../components/SystemHealth';
+import api from '../lib/api';
 
 const SystemHealthPage: React.FC = () => {
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+
+  const handleExportDebugData = async () => {
+    setIsExporting(true);
+    setExportError(null);
+
+    try {
+      const response = await api.get('/api/export-debug-data', {
+        responseType: 'blob',
+      });
+
+      // Extract filename from Content-Disposition header
+      const contentDisposition = response.headers['content-disposition'];
+      let filename = 'bess-debug.md';
+
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename=(.+)/);
+        if (filenameMatch) {
+          filename = filenameMatch[1].replace(/"/g, '');
+        }
+      }
+
+      // Download file
+      const blob = new Blob([response.data], { type: 'text/markdown' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Failed to export debug data:', error);
+      setExportError('Failed to export debug data. Please check the logs.');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   return (
     <div className="p-6 space-y-6 bg-gray-50 dark:bg-gray-900 min-h-screen">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">System Health</h1>
-        <p className="text-gray-600 dark:text-gray-300">
-          Monitor all system components to ensure they have proper access to required sensors and can operate correctly.
-        </p>
+      <div className="mb-6 flex justify-between items-start">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">System Health</h1>
+          <p className="text-gray-600 dark:text-gray-300">
+            Monitor all system components to ensure they have proper access to required sensors and can operate correctly.
+          </p>
+        </div>
+
+        <button
+          onClick={handleExportDebugData}
+          disabled={isExporting}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-medium transition-colors"
+          title="Export all system data, logs, and settings for debugging"
+        >
+          <Download className="w-4 h-4" />
+          {isExporting ? 'Exporting...' : 'Export Debug Data'}
+        </button>
       </div>
+
+      {exportError && (
+        <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+          <p className="text-red-800 dark:text-red-200">{exportError}</p>
+        </div>
+      )}
       
       <div className="mb-6">
         <SystemHealthComponent />

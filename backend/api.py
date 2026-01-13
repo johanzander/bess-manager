@@ -1984,3 +1984,86 @@ async def compare_two_snapshots(
     except Exception as e:
         logger.error(f"Error comparing snapshots: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.get("/api/runtime-failures")
+async def get_runtime_failures():
+    """Get all active (non-dismissed) runtime API failures.
+
+    Returns runtime failures that occurred after retry exhaustion, allowing
+    users to see when critical operations like TOU segment updates, power
+    rate settings, or sensor reads failed during system operation.
+
+    Returns:
+        Object with failures array, totalCount, and timestamp
+    """
+    from app import bess_controller
+
+    try:
+        failures = bess_controller.system.get_runtime_failures()
+
+        # Convert to API format with camelCase
+        api_failures = [
+            {
+                "id": f.id,
+                "timestamp": f.timestamp.isoformat(),
+                "category": f.category,
+                "operation": f.operation,
+                "errorMessage": f.error_message,
+                "context": f.context,
+            }
+            for f in failures
+        ]
+
+        response = {
+            "failures": api_failures,
+            "total_count": len(api_failures),
+            "timestamp": datetime.now().isoformat(),
+        }
+
+        return convert_keys_to_camel_case(response)
+
+    except Exception as e:
+        logger.error(f"Error fetching runtime failures: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.post("/api/runtime-failures/{failure_id}/dismiss")
+async def dismiss_runtime_failure(failure_id: str):
+    """Dismiss a specific runtime failure notification.
+
+    Args:
+        failure_id: UUID of the failure to dismiss
+
+    Returns:
+        Success message
+    """
+    from app import bess_controller
+
+    try:
+        bess_controller.system.dismiss_runtime_failure(failure_id)
+        return {"message": "Failure dismissed successfully"}
+
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=f"Failure not found: {failure_id}") from e
+    except Exception as e:
+        logger.error(f"Error dismissing failure: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.post("/api/runtime-failures/dismiss-all")
+async def dismiss_all_runtime_failures():
+    """Dismiss all active runtime failures.
+
+    Returns:
+        Object with count of dismissed failures
+    """
+    from app import bess_controller
+
+    try:
+        count = bess_controller.system.dismiss_all_runtime_failures()
+        return {"message": f"Dismissed {count} failures", "count": count}
+
+    except Exception as e:
+        logger.error(f"Error dismissing all failures: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e

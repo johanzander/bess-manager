@@ -229,4 +229,22 @@ export interface SnapshotToSnapshotComparison {
   growattScheduleB: any[];
 }
 
+/**
+ * Runtime API failure tracking types
+ */
+export interface RuntimeFailure {
+  id: string;
+  timestamp: string;
+  category: string;  // "TOU_SEGMENT" | "POWER_RATE" | "GRID_CHARGE" | "SOC_LIMIT" | "SENSOR_READ" | "API_OPERATION"
+  operation: string;
+  errorMessage: string;
+  context: Record<string, any>;
+}
+
+export interface RuntimeFailuresResponse {
+  failures: RuntimeFailure[];
+  totalCount: number;
+  timestamp: string;
+}
+
 

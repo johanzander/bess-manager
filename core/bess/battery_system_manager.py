@@ -131,6 +131,15 @@ class BatterySystemManager:
         # Critical sensor failure tracking for graceful degradation
         self._critical_sensor_failures = []
 
+        # Runtime API failure tracking
+        from .runtime_failure_tracker import RuntimeFailureTracker
+
+        self._runtime_failure_tracker = RuntimeFailureTracker()
+
+        # Inject failure tracker into controller if available
+        if self._controller:
+            self._controller.failure_tracker = self._runtime_failure_tracker
+
         logger.debug("BatterySystemManager initialized")
 
     @property
@@ -1690,6 +1699,33 @@ class BatterySystemManager:
     def get_cached_health_results(self) -> dict[str, Any] | None:
         """Get cached health check results from startup (avoids re-running expensive checks)."""
         return getattr(self, "_cached_health_results", None)
+
+    def get_runtime_failures(self) -> list:
+        """Get all active (non-dismissed) runtime API failures.
+
+        Returns:
+            List of RuntimeFailure objects sorted by timestamp (newest first)
+        """
+        return self._runtime_failure_tracker.get_active_failures()
+
+    def dismiss_runtime_failure(self, failure_id: str) -> None:
+        """Dismiss a specific runtime failure notification.
+
+        Args:
+            failure_id: UUID of the failure to dismiss
+
+        Raises:
+            ValueError: If failure ID not found
+        """
+        self._runtime_failure_tracker.dismiss_failure(failure_id)
+
+    def dismiss_all_runtime_failures(self) -> int:
+        """Dismiss all active runtime failures.
+
+        Returns:
+            Number of failures dismissed
+        """
+        return self._runtime_failure_tracker.dismiss_all()
 
     def _get_today_price_data(self) -> list[float]:
         """Get today's price data for reports and views."""

@@ -117,6 +117,9 @@ class HomeAssistantAPIController:
         # Store Growatt device ID for TOU operations
         self.growatt_device_id = growatt_device_id
 
+        # Runtime failure tracker (injected by BatterySystemManager)
+        self.failure_tracker = None
+
         # Create persistent session for connection reuse (400x faster)
         self.session = requests.Session()
         self.session.headers.update(self.headers)
@@ -616,8 +619,99 @@ class HomeAssistantAPIController:
 
             path += "?" + urllib.parse.urlencode(query_params)
 
-        # Make API call
-        return self._api_request("post", path, json=json_data)
+        # Make API call with failure tracking
+        try:
+            return self._api_request("post", path, json=json_data)
+        except Exception as e:
+            # Record failure if tracker available (skip test mode and safe reads)
+            if self.failure_tracker and not self.test_mode and not is_safe_read:
+                category = self._categorize_service_call(service_domain, service_name, kwargs)
+                operation = self._describe_operation(service_domain, service_name, kwargs)
+                context = {
+                    "service_domain": service_domain,
+                    "service_name": service_name,
+                    "params": {k: v for k, v in kwargs.items() if k != "entity_id"},
+                }
+                self.failure_tracker.record_failure(category, operation, e, context)
+            raise  # Re-raise to preserve existing error handling
+
+    def _categorize_service_call(
+        self, service_domain: str, service_name: str, kwargs: dict
+    ) -> str:
+        """Categorize service call for failure tracking.
+
+        Args:
+            service_domain: Service domain (e.g., 'growatt_server', 'switch')
+            service_name: Service name (e.g., 'update_time_segment', 'turn_on')
+            kwargs: Service parameters
+
+        Returns:
+            Category string (TOU_SEGMENT, POWER_RATE, GRID_CHARGE, SOC_LIMIT, SENSOR_READ, API_OPERATION)
+        """
+        if service_domain == "growatt_server":
+            if service_name == "update_time_segment":
+                return "TOU_SEGMENT"
+            elif service_name == "read_time_segments":
+                return "SENSOR_READ"
+
+        elif service_domain == "number" and service_name == "set_value":
+            entity_id = str(kwargs.get("entity_id", ""))
+            if "discharge_power" in entity_id or "charge_power" in entity_id:
+                return "POWER_RATE"
+            elif "soc" in entity_id or "charge_stop" in entity_id or "discharge_stop" in entity_id:
+                return "SOC_LIMIT"
+
+        elif service_domain == "switch":
+            entity_id = str(kwargs.get("entity_id", ""))
+            if "grid_charge" in entity_id or "ac_charge" in entity_id:
+                return "GRID_CHARGE"
+
+        # Fallback category
+        return "API_OPERATION"
+
+    def _describe_operation(
+        self, service_domain: str, service_name: str, kwargs: dict
+    ) -> str:
+        """Generate human-readable operation description for failure tracking.
+
+        Args:
+            service_domain: Service domain
+            service_name: Service name
+            kwargs: Service parameters
+
+        Returns:
+            Human-readable operation description
+        """
+        if service_domain == "growatt_server" and service_name == "update_time_segment":
+            seg_id = kwargs.get("segment_id", "?")
+            start = kwargs.get("start_time", "?")
+            end = kwargs.get("end_time", "?")
+            mode = kwargs.get("batt_mode", "?")
+            enabled = "enable" if kwargs.get("enabled") else "disable"
+            return f"TOU segment {seg_id}: {enabled} {mode} mode ({start}-{end})"
+
+        elif service_domain == "number" and service_name == "set_value":
+            entity_id = str(kwargs.get("entity_id", ""))
+            value = kwargs.get("value", "?")
+            if "discharge_power" in entity_id:
+                return f"Set discharge power rate to {value}%"
+            elif "charge_power" in entity_id:
+                return f"Set charge power rate to {value}%"
+            elif "charge_stop_soc" in entity_id:
+                return f"Set charge stop SOC to {value}%"
+            elif "discharge_stop_soc" in entity_id:
+                return f"Set discharge stop SOC to {value}%"
+            return f"Set {entity_id.split('.')[-1]} to {value}"
+
+        elif service_domain == "switch":
+            entity_id = str(kwargs.get("entity_id", ""))
+            action = "Enable" if service_name == "turn_on" else "Disable"
+            if "grid_charge" in entity_id or "ac_charge" in entity_id:
+                return f"{action} grid charging"
+            return f"{action} {entity_id.split('.')[-1]}"
+
+        # Fallback: generic description
+        return f"{service_domain}.{service_name}"
 
     def _get_sensor_value(self, sensor_name):
         """Get value from any sensor by name using unified entity resolution."""

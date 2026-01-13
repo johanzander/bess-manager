@@ -6,8 +6,10 @@ import { Clock, AlertCircle } from 'lucide-react';
 import EnergyFlowCards from '../components/EnergyFlowCards';
 import SystemStatusCard from '../components/SystemStatusCard';
 import AlertBanner from '../components/AlertBanner';
+import RuntimeFailureAlerts from '../components/RuntimeFailureAlerts';
 import api from '../lib/api';
 import { useUserPreferences } from '../hooks/useUserPreferences';
+import { useRuntimeFailures } from '../hooks/useRuntimeFailures';
 
 interface DashboardProps {
   onLoadingChange: (loading: boolean) => void;
@@ -73,6 +75,13 @@ export default function DashboardPage({
 
   // User preferences (resolution, etc.)
   const { dataResolution, setDataResolution } = useUserPreferences();
+
+  // Runtime failures tracking
+  const {
+    failures: runtimeFailures,
+    dismissFailure,
+    dismissAll
+  } = useRuntimeFailures();
 
   // Health summary state for alert banner
   interface HealthSummary {
@@ -214,6 +223,15 @@ export default function DashboardPage({
           criticalIssues={healthSummary.criticalIssues}
           totalCriticalIssues={healthSummary.totalCriticalIssues}
           onDismiss={handleDismissBanner}
+        />
+      )}
+
+      {/* Runtime API Failure Notifications */}
+      {runtimeFailures.length > 0 && (
+        <RuntimeFailureAlerts
+          failures={runtimeFailures}
+          onDismiss={dismissFailure}
+          onDismissAll={dismissAll}
         />
       )}
 

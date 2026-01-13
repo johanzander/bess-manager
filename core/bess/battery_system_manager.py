@@ -1231,32 +1231,68 @@ class BatterySystemManager:
                 effective_hour,
             )
 
-            # Identify segments to disable
-            for current in current_tou:
-                start_time_parts = current["start_time"].split(":")
-                start_hour = int(start_time_parts[0])
-                if (
-                    start_hour >= effective_hour
-                    or int(current["end_time"].split(":")[0]) >= effective_hour
-                ):
-                    has_match = any(
-                        segment["start_time"] == current["start_time"]
-                        and segment["end_time"] == current["end_time"]
-                        and segment["batt_mode"] == current["batt_mode"]
-                        and segment["enabled"] == current["enabled"]
-                        for segment in new_tou
-                    )
+            # CRITICAL FIX: When new schedule is empty, disable ALL current TOU segments
+            # This prevents stale schedules from persisting across restarts
+            if len(new_tou) == 0 and len(current_tou) > 0:
+                logger.warning(
+                    "=" * 80
+                )
+                logger.warning(
+                    "Empty TOU schedule detected - CLEARING ALL %d existing TOU segments from inverter",
+                    len(current_tou),
+                )
+                logger.warning(
+                    "This happens when optimization determines NO profitable charging/discharging"
+                )
+                logger.warning(
+                    "=" * 80
+                )
 
-                    if not has_match:
+                # Disable ALL current segments (past and future) to prevent stale schedules
+                for current in current_tou:
+                    if current.get("enabled", True):  # Only disable if currently enabled
                         disabled_segment = current.copy()
                         disabled_segment["enabled"] = False
                         to_disable.append(disabled_segment)
-                        logger.debug(
-                            "Mark for disable: %s-%s %s",
+                        logger.info(
+                            "Marking ALL segments for clearing: %s-%s %s (segment_id=%s)",
                             current["start_time"],
                             current["end_time"],
                             current["batt_mode"],
+                            current.get("segment_id"),
                         )
+
+                logger.info(
+                    "Total segments marked for clearing: %d", len(to_disable)
+                )
+            else:
+                # Normal case: differential update (only update future segments)
+                # Identify segments to disable
+                for current in current_tou:
+                    start_time_parts = current["start_time"].split(":")
+                    start_hour = int(start_time_parts[0])
+                    if (
+                        start_hour >= effective_hour
+                        or int(current["end_time"].split(":")[0]) >= effective_hour
+                    ):
+                        has_match = any(
+                            segment["start_time"] == current["start_time"]
+                            and segment["end_time"] == current["end_time"]
+                            and segment["batt_mode"] == current["batt_mode"]
+                            and segment["enabled"] == current["enabled"]
+                            for segment in new_tou
+                        )
+
+                        if not has_match:
+                            disabled_segment = current.copy()
+                            disabled_segment["enabled"] = False
+                            to_disable.append(disabled_segment)
+                            logger.debug(
+                                "Mark for disable: %s-%s %s",
+                                current["start_time"],
+                                current["end_time"],
+                                current["batt_mode"],
+                            )
 
             # Identify segments to add/update
             for segment in new_tou:

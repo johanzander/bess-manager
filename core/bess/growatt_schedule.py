@@ -110,6 +110,7 @@ class GrowattScheduleManager:
         self.current_hour = 0  # Track current hour (0-23) for TOU schedule boundaries
         self.hourly_settings = {}  # Pre-calculated settings for each hour (0-23)
         self.strategic_intents = []  # Store strategic intents from DP algorithm
+        self.corruption_detected = False  # Flag to force hardware write when corruption found
 
         # Required battery settings for power calculations
         self.battery_settings = battery_settings
@@ -377,6 +378,12 @@ class GrowattScheduleManager:
                     )
                 # Clear corrupted intervals - we have strategic intents to rebuild properly
                 old_intervals = []
+                # CRITICAL: Set flag to force hardware write since corruption was detected
+                # Even if comparison shows no difference, we need to clear hardware
+                self.corruption_detected = True
+                logger.warning(
+                    "⚠️  CORRUPTION FLAG SET - Hardware write will be FORCED to clear corrupted intervals"
+                )
                 logger.info(
                     "✅ Corrupted intervals cleared, rebuilding from strategic intents"
                 )
@@ -661,6 +668,16 @@ class GrowattScheduleManager:
     def compare_schedules(self, other_schedule, from_hour=0):
         """Enhanced schedule comparison - TOU intervals only (what's actually in the inverter)."""
         logger.info(f"Comparing TOU intervals from hour {from_hour:02d}:00 onwards")
+
+        # CRITICAL: If corruption was detected, force hardware write regardless of comparison
+        if self.corruption_detected:
+            logger.warning(
+                "⚠️  CORRUPTION DETECTED FLAG IS SET - FORCING HARDWARE WRITE"
+            )
+            logger.warning(
+                "This overrides normal schedule comparison to ensure corrupted intervals are cleared"
+            )
+            return True, "Corruption detected - forcing hardware write to clear"
 
         # Get TOU intervals
         current_tou = self.get_daily_TOU_settings()

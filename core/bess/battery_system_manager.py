@@ -1411,6 +1411,13 @@ class BatterySystemManager:
             # Update schedule manager
             self._schedule_manager = temp_growatt
 
+            # CRITICAL: Clear corruption flag after successful hardware write
+            if temp_growatt.corruption_detected:
+                logger.info(
+                    "✅ Corruption recovery complete - clearing corruption flag after successful hardware write"
+                )
+                temp_growatt.corruption_detected = False
+
             # Apply current period settings
             if not prepare_next_day:
                 self._apply_period_schedule(period)

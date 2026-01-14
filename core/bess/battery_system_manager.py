@@ -1039,7 +1039,7 @@ class BatterySystemManager:
                 for period in range(min(current_period, 96)):
                     if period < len(full_day_strategic_intents):
                         event = self.historical_store.get_period(period)
-                        if event and hasattr(event, "strategic_intent"):
+                        if event and event.decision:
                             full_day_strategic_intents[period] = (
                                 event.decision.strategic_intent
                             )
@@ -1234,9 +1234,7 @@ class BatterySystemManager:
             # CRITICAL FIX: When new schedule is empty, disable ALL current TOU segments
             # This prevents stale schedules from persisting across restarts
             if len(new_tou) == 0 and len(current_tou) > 0:
-                logger.warning(
-                    "=" * 80
-                )
+                logger.warning("=" * 80)
                 logger.warning(
                     "Empty TOU schedule detected - CLEARING ALL %d existing TOU segments from inverter",
                     len(current_tou),
@@ -1244,13 +1242,13 @@ class BatterySystemManager:
                 logger.warning(
                     "This happens when optimization determines NO profitable charging/discharging"
                 )
-                logger.warning(
-                    "=" * 80
-                )
+                logger.warning("=" * 80)
 
                 # Disable ALL current segments (past and future) to prevent stale schedules
                 for current in current_tou:
-                    if current.get("enabled", True):  # Only disable if currently enabled
+                    if current.get(
+                        "enabled", True
+                    ):  # Only disable if currently enabled
                         disabled_segment = current.copy()
                         disabled_segment["enabled"] = False
                         to_disable.append(disabled_segment)
@@ -1262,9 +1260,7 @@ class BatterySystemManager:
                             current.get("segment_id"),
                         )
 
-                logger.info(
-                    "Total segments marked for clearing: %d", len(to_disable)
-                )
+                logger.info("Total segments marked for clearing: %d", len(to_disable))
             else:
                 # Normal case: differential update (only update future segments)
                 # Identify segments to disable

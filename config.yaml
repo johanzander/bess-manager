@@ -1,6 +1,6 @@
 name: "BESS Manager"
 description: "Battery Energy Storage System optimization and management"
-version: "5.1.3"
+version: "5.1.4"
 slug: "bess_manager"
 init: false
 arch:
@@ -75,7 +75,7 @@ options:
     current_l3: "sensor.current_l3_gustavsgatan_32a"                 # Phase 3 current
     # === Lifetime Energy Totals ===
     lifetime_solar_energy: "sensor.rkm0d7n04x_lifetime_total_solar_energy"
-    lifetime_load_consumption: "sensor.rkm0d7n04x_lifetime_total_load_consumption"
+    lifetime_load_consumption: "sensor.rkm0d7n04x_load_consumption_today"
     lifetime_self_consumption: "sensor.rkm0d7n04x_lifetime_self_consumption"
     lifetime_import_from_grid: "sensor.rkm0d7n04x_lifetime_import_from_grid"
     lifetime_export_to_grid: "sensor.rkm0d7n04x_lifetime_total_export_to_grid"

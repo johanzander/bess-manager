@@ -31,6 +31,7 @@ class SensorCollector:
 
         # Batch mode: fetch all periods in 1-2 queries instead of 176 (98% faster)
         self._batch_cache = {}  # {date: {period: {sensor: value}}}
+        self._batch_cache_loaded_on = {}  # {date: date_loaded} - tracks when each batch was loaded
 
         # Simple cache: last known cumulative sensor readings (for current - previous = delta)
         self._last_readings: dict[str, float] | None = None
@@ -285,15 +286,39 @@ class SensorCollector:
     def _ensure_batch_data_loaded(self, target_date) -> bool:
         """Ensure batch data is loaded for the target date.
 
+        For PAST dates (yesterday or earlier), the batch is re-fetched if it was loaded
+        on a different day than today. This prevents stale cache issues when the system
+        runs continuously across midnight - the batch loaded on Jan 15 at 23:45 would
+        miss data from 23:45-23:59, but on Jan 16 we need complete Jan 15 data.
+
         Args:
             target_date: Date to load data for
 
         Returns:
             True if data was loaded successfully, False otherwise
         """
+        today = datetime.now().date()
+
         # Check if already cached
         if target_date in self._batch_cache:
-            return True
+            # For past dates, verify the cache was loaded TODAY (after the day ended)
+            # This ensures we have complete data for that day
+            if target_date < today:
+                loaded_on = self._batch_cache_loaded_on.get(target_date)
+                if loaded_on != today:
+                    logger.info(
+                        "Invalidating stale batch cache for %s (loaded on %s, today is %s)",
+                        target_date.strftime("%Y-%m-%d"),
+                        loaded_on.strftime("%Y-%m-%d") if loaded_on else "unknown",
+                        today.strftime("%Y-%m-%d"),
+                    )
+                    del self._batch_cache[target_date]
+                    if target_date in self._batch_cache_loaded_on:
+                        del self._batch_cache_loaded_on[target_date]
+                else:
+                    return True
+            else:
+                return True
 
         # Fetch batch data
         logger.info(
@@ -306,10 +331,12 @@ class SensorCollector:
 
         if result.get("status") == "success":
             self._batch_cache[target_date] = result.get("data", {})
+            self._batch_cache_loaded_on[target_date] = today
             logger.info(
-                "Batch data loaded: %d periods for %s",
+                "Batch data loaded: %d periods for %s (loaded on %s)",
                 len(self._batch_cache[target_date]),
                 target_date.strftime("%Y-%m-%d"),
+                today.strftime("%Y-%m-%d"),
             )
             return True
         else:

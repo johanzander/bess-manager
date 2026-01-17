@@ -194,17 +194,19 @@ def test_all_scenarios(scenario_name):
         )
 
     # Battery usage should be within physical constraints
+    # Small tolerance for floating-point precision errors (e.g., np.arange producing 30.000000000000025)
+    soe_tolerance = 1e-6
     for hour_data in result.period_data:
         # Access SOE directly - these are already in kWh
         soe_start_kwh = hour_data.energy.battery_soe_start  # Already in kWh
         soe_end_kwh = hour_data.energy.battery_soe_end  # Already in kWh
 
-        # Validate SOE bounds in kWh
+        # Validate SOE bounds in kWh (with tolerance for floating-point precision)
         assert (
-            battery["min_soe_kwh"] <= soe_start_kwh <= battery["max_soe_kwh"]
+            battery["min_soe_kwh"] - soe_tolerance <= soe_start_kwh <= battery["max_soe_kwh"] + soe_tolerance
         ), f"SOE start {soe_start_kwh:.2f} kWh outside bounds [{battery['min_soe_kwh']}, {battery['max_soe_kwh']}]"
         assert (
-            battery["min_soe_kwh"] <= soe_end_kwh <= battery["max_soe_kwh"]
+            battery["min_soe_kwh"] - soe_tolerance <= soe_end_kwh <= battery["max_soe_kwh"] + soe_tolerance
         ), f"SOE end {soe_end_kwh:.2f} kWh outside bounds [{battery['min_soe_kwh']}, {battery['max_soe_kwh']}]"
 
         # Battery action should respect power limits - access through strategy field

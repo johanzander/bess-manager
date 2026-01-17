@@ -586,20 +586,24 @@ def _run_dynamic_programming(
             # Try all possible actions
             for power in power_levels:
                 # Skip physically impossible actions (same as before)
-                if power < 0:
+                # Use tolerance for near-zero power due to floating-point precision in np.arange
+                # (e.g., "0.0" might be 2.2e-16 which would incorrectly match "power > 0")
+                power_tolerance = 0.001  # kW
+                if power < -power_tolerance:  # Discharging
                     available_energy = soe - battery_settings.min_soe_kwh
                     max_discharge_power = (
                         available_energy / dt * battery_settings.efficiency_discharge
                     )
                     if abs(power) > max_discharge_power:
                         continue
-                elif power > 0:
+                elif power > power_tolerance:  # Charging
                     available_capacity = battery_settings.max_soe_kwh - soe
                     max_charge_power = (
                         available_capacity / dt / battery_settings.efficiency_charge
                     )
                     if power > max_charge_power:
                         continue
+                # else: IDLE (near-zero power) - no physical constraints to check
 
                 # Calculate next state
                 next_soe = _state_transition(soe, power, battery_settings, dt)
@@ -664,6 +668,48 @@ def _run_dynamic_programming(
             # Store the PeriodData for this optimal decision
             if best_period_data is not None:
                 stored_period_data[(t, i)] = best_period_data
+            else:
+                # No valid action found - create a default IDLE PeriodData
+                # This can happen at boundary states (e.g., max SOE with unprofitable discharge)
+                logger.warning(
+                    f"No valid action found for period {t}, state {i} (SOE={soe:.1f}). "
+                    f"Creating default IDLE state."
+                )
+                # Calculate IDLE scenario: no battery action, just grid covering consumption
+                idle_grid_imported = max(0, home_consumption[t] - solar_production[t])
+                idle_grid_exported = max(0, solar_production[t] - home_consumption[t])
+                idle_energy = EnergyData(
+                    solar_production=solar_production[t],
+                    home_consumption=home_consumption[t],
+                    battery_charged=0.0,
+                    battery_discharged=0.0,
+                    grid_imported=idle_grid_imported,
+                    grid_exported=idle_grid_exported,
+                    battery_soe_start=soe,
+                    battery_soe_end=soe,
+                )
+                idle_economic = EconomicData.from_energy_data(
+                    energy_data=idle_energy,
+                    buy_price=buy_price[t],
+                    sell_price=sell_price[t],
+                    battery_cycle_cost=0.0,
+                )
+                idle_decision = DecisionData(
+                    strategic_intent="IDLE",
+                    battery_action=0.0,
+                    cost_basis=C[t, i],
+                )
+                idle_period_data = PeriodData(
+                    period=t,
+                    energy=idle_energy,
+                    timestamp=None,
+                    data_source="predicted",
+                    economic=idle_economic,
+                    decision=idle_decision,
+                )
+                stored_period_data[(t, i)] = idle_period_data
+                # Also update V[t, i] to the actual IDLE cost (not -inf)
+                V[t, i] = -(idle_grid_imported * buy_price[t] - idle_grid_exported * sell_price[t])
 
             # Update cost basis for next time step
             if best_action != 0 and t + 1 < horizon:

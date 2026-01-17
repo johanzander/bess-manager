@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Glob",
+      "Grep",
+      "Bash(pytest:*)",
+      "Bash(python3 -m pytest:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(./.venv/bin/pytest:*)",
+      "Bash(./.venv/bin/python -m pytest:*)"
+    ],
+    "ask": [
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(git reset:*)",
+      "Bash(git rebase:*)",
+      "Bash(git merge:*)",
+      "Bash(rm:*)"
+    ],
+    "deny": []
+  }
+}

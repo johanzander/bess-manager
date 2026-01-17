@@ -113,7 +113,9 @@ class EnergyData:
         # Step 3: Grid flow allocation (uses actual measured totals)
         # Grid import covers remaining home consumption first, then battery charging
         grid_to_home = min(self.grid_imported, remaining_consumption)
-        grid_to_battery = self.grid_imported - grid_to_home
+        # Grid to battery is whatever battery charging wasn't covered by solar
+        # Must be constrained by actual battery_charged to avoid impossible flows
+        grid_to_battery = max(0, self.battery_charged - solar_to_battery)
 
         # Step 4: Export flow reconciliation (ensure exports match measured total)
         calculated_export = solar_to_grid + battery_to_grid

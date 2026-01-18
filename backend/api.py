@@ -1798,11 +1798,24 @@ async def compare_two_snapshots(
         # Get currency
         currency = bess_controller.system.home_settings.currency
 
+        # Build period maps for defensive lookup (handles edge cases where
+        # DailyView might have fewer periods due to HA restart gaps)
+        period_map_a = {p.period: p for p in snapshot_a.daily_view.periods}
+        period_map_b = {p.period: p for p in snapshot_b.daily_view.periods}
+
         # Build comprehensive comparison for all 96 periods
         period_comparisons = []
         for period_idx in range(96):
-            period_a_data = snapshot_a.daily_view.periods[period_idx]
-            period_b_data = snapshot_b.daily_view.periods[period_idx]
+            period_a_data = period_map_a.get(period_idx)
+            period_b_data = period_map_b.get(period_idx)
+
+            # Skip periods missing from either snapshot
+            if period_a_data is None or period_b_data is None:
+                logger.warning(
+                    f"Skipping period {period_idx} in snapshot comparison - "
+                    f"missing from {'A' if period_a_data is None else 'B'}"
+                )
+                continue
 
             # Calculate battery action (net charging/discharging)
             battery_action_a = (

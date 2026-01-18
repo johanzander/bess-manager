@@ -19,23 +19,28 @@ __all__ = [
     "EnergyData",
     "OptimizationResult",
     "PeriodData",
-    "determine_strategic_intent",
+    "infer_intent_from_flows",
 ]
 
 
-def determine_strategic_intent(power: float, energy_data: "EnergyData") -> str:
+def infer_intent_from_flows(power: float, energy_data: "EnergyData") -> str:
     """
-    Determine strategic intent based on battery action and energy flows.
+    Infer strategic intent from observed energy flows.
 
-    This moves the strategic intent logic from dp_algorithm to decision framework
-    for better separation of concerns.
+    NOTE: For OBSERVATIONAL purposes only (dashboard display of what happened).
+    The authoritative intent comes from DP algorithm economics-based decision
+    in decision_intelligence.create_decision_data().
+
+    This function looks at actual energy flows to determine what the battery
+    appeared to be doing. It cannot determine economic intent (e.g., whether
+    discharge was profitable export vs load support) - that requires price data.
 
     Args:
         power: Battery power in kW (+ charging, - discharging)
         energy_data: Complete energy flow data
 
     Returns:
-        Strategic intent string
+        Inferred strategic intent string based on observed flows
     """
     if power > 0.1:  # CHARGING
         if energy_data.grid_to_battery > 0.1:  # ANY grid charging needs capability
@@ -270,7 +275,10 @@ class DecisionData:
     """Strategic analysis and decision data."""
 
     strategic_intent: str = (
-        "IDLE"  # Strategic intent (GRID_CHARGING, SOLAR_STORAGE, etc.)
+        "IDLE"  # DP-planned intent (authoritative) - set at optimization time
+    )
+    observed_intent: str | None = (
+        None  # What actually happened (for dashboard) - inferred from flows
     )
     battery_action: float | None = (
         None  # kWh per period - planned battery energy action (+ charge, - discharge)
@@ -297,20 +305,24 @@ class DecisionData:
     )  # When future opportunity occurs
 
     @classmethod
-    def from_actual_energy(cls, energy_data: EnergyData) -> "DecisionData":
-        """Create DecisionData from actual energy flows by inferring intent.
+    def from_observed_flows(cls, energy_data: EnergyData) -> "DecisionData":
+        """Create DecisionData from actual sensor data with observed intent.
+
+        This sets observed_intent (what actually happened) based on energy flows.
+        Use this for historical periods where we have sensor data but may not
+        have the original DP-planned intent.
 
         Args:
             energy_data: Actual energy data from sensors
 
         Returns:
-            DecisionData with inferred strategic intent
+            DecisionData with observed_intent set (strategic_intent remains IDLE)
         """
         # Use battery net change as power approximation (kWh ≈ kW for quarter-hourly data)
         battery_power = energy_data.battery_net_change
-        strategic_intent = determine_strategic_intent(battery_power, energy_data)
+        observed = infer_intent_from_flows(battery_power, energy_data)
 
-        return cls(strategic_intent=strategic_intent)
+        return cls(observed_intent=observed)
 
 
 @dataclass

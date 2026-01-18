@@ -88,14 +88,17 @@ class GrowattScheduleManager:
     - EXPORT_ARBITRAGE → grid_first (export priority)
     - IDLE → load_first (normal operation)
     """
-    # Priority order for tie-breaking when aggregating quarterly to hourly
-    # Higher values win ties - prioritizes action over inaction
+
+    # Priority for tie-breaking only (when 2 intents each have 2 periods in an hour)
+    # With proper DP economics-based decisions, ties should be rare (all 4 periods
+    # in an hour typically have the same intent). When ties occur, prefer action over
+    # inaction. The specific ordering within "action" intents doesn't matter much.
     INTENT_PRIORITY: ClassVar[dict[str, int]] = {
-        "GRID_CHARGING": 5,  # Highest - aggressive arbitrage
-        "EXPORT_ARBITRAGE": 4,  # High - selling opportunity
-        "LOAD_SUPPORT": 3,  # Medium - using stored energy
-        "SOLAR_STORAGE": 2,  # Low - storing excess solar
-        "IDLE": 1,  # Lowest - no action needed
+        "GRID_CHARGING": 4,
+        "EXPORT_ARBITRAGE": 3,
+        "LOAD_SUPPORT": 2,
+        "SOLAR_STORAGE": 1,
+        "IDLE": 0,  # Lowest - prefer any action over inaction
     }
 
     def __init__(self, battery_settings: BatterySettings) -> None:
@@ -110,7 +113,9 @@ class GrowattScheduleManager:
         self.current_hour = 0  # Track current hour (0-23) for TOU schedule boundaries
         self.hourly_settings = {}  # Pre-calculated settings for each hour (0-23)
         self.strategic_intents = []  # Store strategic intents from DP algorithm
-        self.corruption_detected = False  # Flag to force hardware write when corruption found
+        self.corruption_detected = (
+            False  # Flag to force hardware write when corruption found
+        )
 
         # Required battery settings for power calculations
         self.battery_settings = battery_settings
@@ -212,7 +217,9 @@ class GrowattScheduleManager:
 
         # REQUIRE strategic intents - no fallbacks
         if not self.strategic_intents:
-            raise ValueError("Missing strategic intents for hourly settings calculation")
+            raise ValueError(
+                "Missing strategic intents for hourly settings calculation"
+            )
 
         # Get number of periods to handle DST (92/96/100)
         num_periods = len(self.strategic_intents)

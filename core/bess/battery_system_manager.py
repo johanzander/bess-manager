@@ -21,7 +21,7 @@ from .growatt_schedule import GrowattScheduleManager
 from .ha_api_controller import HomeAssistantAPIController
 from .health_check import run_system_health_checks
 from .historical_data_store import HistoricalDataStore
-from .models import DecisionData, EconomicData, PeriodData
+from .models import DecisionData, EconomicData, PeriodData, infer_intent_from_flows
 from .power_monitor import HomePowerMonitor
 from .prediction_snapshot import PredictionSnapshotStore
 from .price_manager import HomeAssistantSource, PriceManager, PriceSource
@@ -465,15 +465,24 @@ class BatterySystemManager:
                                 buy_price=0.0, sell_price=0.0, hourly_savings=0.0
                             )
 
-                        # Store period data
+                        # Store period data with both planned and observed intents
+                        # Get DP-planned intent (authoritative) if available
+                        planned_intent = self._get_planned_intent_for_period(period)
+                        # Infer observed intent from actual flows
+                        battery_power = period_energy_data.battery_net_change
+                        observed = infer_intent_from_flows(
+                            battery_power, period_energy_data
+                        )
+
                         period_data = PeriodData(
                             period=period,  # For backward compatibility, still called 'hour'
                             energy=period_energy_data,
                             timestamp=datetime.now(tz=TIMEZONE),
                             data_source="actual",
                             economic=economic_data,
-                            decision=DecisionData.from_actual_energy(
-                                period_energy_data
+                            decision=DecisionData(
+                                strategic_intent=planned_intent or "IDLE",
+                                observed_intent=observed,
                             ),
                         )
                         self.historical_store.record_period(period, period_data)
@@ -656,14 +665,23 @@ class BatterySystemManager:
                     buy_price=0.0, sell_price=0.0, hourly_savings=0.0
                 )
 
-            # Store using period-based API
+            # Store using period-based API with both planned and observed intents
+            # Get DP-planned intent (authoritative) if available
+            planned_intent = self._get_planned_intent_for_period(prev_period)
+            # Infer observed intent from actual flows
+            battery_power = energy_data.battery_net_change
+            observed = infer_intent_from_flows(battery_power, energy_data)
+
             period_data = PeriodData(
                 period=prev_period,
                 energy=energy_data,
                 timestamp=datetime.now(tz=TIMEZONE),
                 data_source="actual",
                 economic=economic_data,
-                decision=DecisionData.from_actual_energy(energy_data),
+                decision=DecisionData(
+                    strategic_intent=planned_intent or "IDLE",
+                    observed_intent=observed,
+                ),
             )
             self.historical_store.record_period(prev_period, period_data)
             logger.info(
@@ -704,6 +722,34 @@ class BatterySystemManager:
             )
         else:
             logger.info("Historical store: no periods stored yet")
+
+    def _get_planned_intent_for_period(self, period: int) -> str | None:
+        """Get the DP-planned strategic intent for a period.
+
+        First checks in-memory schedule store, then falls back to persisted intents
+        (for restart recovery when schedule store is empty but disk has data).
+
+        Args:
+            period: Period index (0-95)
+
+        Returns:
+            Strategic intent string if available, None otherwise
+        """
+        # First try the in-memory schedule store
+        latest_schedule = self.schedule_store.get_latest_schedule()
+        if latest_schedule is not None:
+            result = latest_schedule.optimization_result
+            if result.period_data:
+                opt_period = latest_schedule.optimization_period
+
+                # Check if this period is within the optimization range
+                if opt_period <= period < opt_period + len(result.period_data):
+                    index = period - opt_period
+                    period_data = result.period_data[index]
+                    return period_data.decision.strategic_intent
+
+        # Fall back to persisted intents (loaded from disk on startup)
+        return self.schedule_store.get_persisted_intent(period)
 
     def _get_current_battery_soc(self) -> float | None:
         """Get current battery SOC with validation."""
@@ -1025,6 +1071,8 @@ class BatterySystemManager:
                 )
 
             # Create strategic intents array from OptimizationResult
+            # DP intents are authoritative - do NOT override with inferred intents from historical data
+            # (that causes feedback loop: export → inferred EXPORT_ARBITRAGE → grid_first mode → more export)
             full_day_strategic_intents = ["IDLE"] * 96
             for i, period_data in enumerate(period_data_list):
                 target_period = optimization_period + i
@@ -1032,20 +1080,6 @@ class BatterySystemManager:
                     full_day_strategic_intents[target_period] = (
                         period_data.decision.strategic_intent
                     )
-
-            # Correct historical periods with actual strategic intents BEFORE creating schedules
-            if not prepare_next_day:
-                current_period = datetime.now().hour * 4 + datetime.now().minute // 15
-                for period in range(min(current_period, 96)):
-                    if period < len(full_day_strategic_intents):
-                        event = self.historical_store.get_period(period)
-                        if event and event.decision:
-                            full_day_strategic_intents[period] = (
-                                event.decision.strategic_intent
-                            )
-                            logger.debug(
-                                f"Period {period}: Corrected intent from IDLE to '{event.decision.strategic_intent}'"
-                            )
 
             # Store initial SOC in OptimizationResult for DailyViewBuilder
             if self._initial_soe is not None:

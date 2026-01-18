@@ -545,7 +545,7 @@ def _run_dynamic_programming(
     solar_production: list[float] | None = None,
     initial_soe: float | None = None,
     initial_cost_basis: float = 0.0,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[list[StrategicIntent]], dict]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict]:
     """
     Enhanced DP that stores the PeriodData objects calculated during optimization.
     This eliminates the need for reward recalculation in simulation.
@@ -566,13 +566,9 @@ def _run_dynamic_programming(
     V = np.zeros((horizon + 1, len(soe_levels)))
     policy = np.zeros((horizon, len(soe_levels)))
     C = np.full((horizon + 1, len(soe_levels)), initial_cost_basis)
-    intents = [
-        [StrategicIntent.IDLE for _ in range(len(soe_levels))] for _ in range(horizon)
-    ]
 
     # Store PeriodData objects calculated during DP
     stored_period_data = {}  # Key: (t, i), Value: PeriodData
-
 
     # Backward induction (same structure as before)
     for t in reversed(range(horizon)):
@@ -580,7 +576,6 @@ def _run_dynamic_programming(
             best_value = float("-inf")
             best_action = 0
             best_cost_basis = C[t, i]
-            best_intent = StrategicIntent.IDLE
             best_period_data = None  # Store the PeriodData from best action
 
             # Try all possible actions
@@ -644,26 +639,11 @@ def _run_dynamic_programming(
                     best_value = value
                     best_action = power
                     best_cost_basis = new_cost_basis
-                    best_period_data = period_data  # NEW: Store the PeriodData
-
-                    # Determine strategic intent
-                    if power > 0.1:
-                        solar_available = max(
-                            0, solar_production[t] - home_consumption[t]
-                        )
-                        if power > solar_available:
-                            best_intent = StrategicIntent.GRID_CHARGING
-                        else:
-                            best_intent = StrategicIntent.SOLAR_STORAGE
-                    elif power < -0.1:
-                        best_intent = StrategicIntent.LOAD_SUPPORT  # Simplified for now
-                    else:
-                        best_intent = StrategicIntent.IDLE
+                    best_period_data = period_data
 
             # Store results
             V[t, i] = best_value
             policy[t, i] = best_action
-            intents[t][i] = best_intent
 
             # Store the PeriodData for this optimal decision
             if best_period_data is not None:
@@ -709,7 +689,10 @@ def _run_dynamic_programming(
                 )
                 stored_period_data[(t, i)] = idle_period_data
                 # Also update V[t, i] to the actual IDLE cost (not -inf)
-                V[t, i] = -(idle_grid_imported * buy_price[t] - idle_grid_exported * sell_price[t])
+                V[t, i] = -(
+                    idle_grid_imported * buy_price[t]
+                    - idle_grid_exported * sell_price[t]
+                )
 
             # Update cost basis for next time step
             if best_action != 0 and t + 1 < horizon:
@@ -725,7 +708,7 @@ def _run_dynamic_programming(
         battery_settings.max_charge_power_kw,
     )
 
-    return V, policy, C, intents, stored_period_data
+    return V, policy, C, stored_period_data
 
 
 def _create_idle_schedule(
@@ -873,7 +856,7 @@ def optimize_battery_schedule(
     )
 
     # Step 1: Run DP with PeriodData storage
-    _, _, _, _, stored_period_data = _run_dynamic_programming(
+    _, _, _, stored_period_data = _run_dynamic_programming(
         horizon=horizon,
         buy_price=buy_price,
         sell_price=sell_price,

@@ -8,7 +8,7 @@ This module enhances the existing DecisionData fields without creating new class
 maintaining compatibility with the existing software architecture.
 """
 
-from core.bess.models import DecisionData, EnergyData, determine_strategic_intent
+from core.bess.models import DecisionData, EnergyData
 
 
 def generate_advanced_flow_pattern_name(energy_data: EnergyData) -> str:
@@ -438,8 +438,21 @@ def create_decision_data(
     Returns:
         Enhanced DecisionData with all fields populated including advanced flow patterns
     """
-    # Determine strategic intent in decision framework (moved from dp_algorithm)
-    strategic_intent = determine_strategic_intent(power, energy_data)
+    # Determine strategic intent using economics-based decision (not flow-based inference)
+    # This is the authoritative source of intent - decided at optimization time
+    if power < -0.1:  # Discharging
+        # Economics-based: export is profitable when sell_price > cost_basis
+        if sell_price > cost_basis:
+            strategic_intent = "EXPORT_ARBITRAGE"
+        else:
+            strategic_intent = "LOAD_SUPPORT"
+    elif power > 0.1:  # Charging
+        if energy_data.grid_to_battery > 0.1:
+            strategic_intent = "GRID_CHARGING"
+        else:
+            strategic_intent = "SOLAR_STORAGE"
+    else:
+        strategic_intent = "IDLE"
 
     # Generate high-level strategic pattern name
     pattern_name = generate_strategic_pattern_name(strategic_intent, energy_data)

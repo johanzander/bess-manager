@@ -11,11 +11,10 @@ It does this by:
 2. Battery Charge Management:
    - Adjusts battery charging power based on available power
    - Ensures total power draw (including battery) stays within fuse limits
-   - Makes gradual adjustments (e.g., 5% steps) to prevent sudden load changes
    - Respects maximum charging rate configuration
    - Only activates when grid charging is enabled
 
-This module is designed to work with the Home Assistant controller and to be run periodically (e.g from pyscript)
+This module is designed to work with the Home Assistant controller and to be run periodically
 
 """
 
@@ -37,7 +36,6 @@ class HomePowerMonitor:
         ha_controller: HomeAssistantAPIController,
         home_settings: HomeSettings | None = None,
         battery_settings: BatterySettings | None = None,
-        step_size: int = 5,
     ) -> None:
         """Initialize power monitor.
 
@@ -51,7 +49,6 @@ class HomePowerMonitor:
         self.controller = ha_controller
         self.home_settings = home_settings or HomeSettings()
         self.battery_settings = battery_settings or BatterySettings()
-        self.step_size = step_size
 
         # Calculate max power per phase with safety margin
         self.max_power_per_phase = (
@@ -72,15 +69,13 @@ class HomePowerMonitor:
             "Initialized HomePowerMonitor with:\n"
             "  Max power per phase: {}W\n"
             "  Max charging power: {}W\n"
-            "  Target charging rate: {}%\n"
-            "  Step size: {}%"
+            "  Target charging rate: {}%"
         )
         logger.info(
             log_message.format(
                 self.max_power_per_phase,
                 self.max_charge_power_w,
                 self.target_charging_power_pct,
-                self.step_size,
             )
         )
 
@@ -178,23 +173,20 @@ class HomePowerMonitor:
         return max(0, charging_power_pct)
 
     def adjust_battery_charging(self) -> None:
-        """Adjust battery charging power based on available capacity."""
         if not self.controller.grid_charge_enabled():
             return
 
         target_power = self.calculate_available_charging_power()
         current_power = self.controller.get_charging_power_rate()
 
-        if target_power > current_power:
-            new_power = min(current_power + self.step_size, target_power)
-        else:
-            new_power = max(current_power - self.step_size, target_power)
+        # Skip if no change needed (within 1% tolerance)
+        if abs(target_power - current_power) < 1:
+            return
 
-        if abs(new_power - current_power) >= self.step_size:
-            logger.info(
-                f"Adjusting charging power from {current_power:.0f}% to {new_power:.0f}% (target: {target_power:.0f}%)"
-            )
-            self.controller.set_charging_power_rate(int(new_power))
+        logger.info(
+            f"Adjusting charging power from {current_power:.0f}% to {target_power:.0f}%"
+        )
+        self.controller.set_charging_power_rate(int(target_power))
 
     def update_target_charging_power(self, percentage: float) -> None:
         """Update the target charging power percentage.

@@ -36,7 +36,7 @@ VAT_MULTIPLIER = 1.25  # 25% VAT
 ADDITIONAL_COSTS = (
     1.03  # överföringsavgift: 28.90 öre, energiskatt: 53.50 öre + 25% moms
 )
-TAX_REDUCTION = 0.6518  # 60 öre skattereduktion + 5.18 öre förlustersättning
+TAX_REDUCTION = 0.0518  # 5.18 öre förlustersättning
 MIN_PROFIT = 0.2  # Minimim profit (SEK/kWh) to consider a charge/discharge cycle
 USE_ACTUAL_PRICE = False  # Use raw Nordpool spot prices or includue markup, VAT, etc.
 
@@ -60,7 +60,11 @@ MIN_CONSUMPTION = 0.1
 # Home electrical defaults
 HOUSE_MAX_FUSE_CURRENT_A = 25  # Maximum fuse current in amperes
 HOUSE_VOLTAGE_V = 230  # Line voltage
-SAFETY_MARGIN_FACTOR = 0.95  # Safety margin for power calculations (95%)
+SAFETY_MARGIN_FACTOR = 1.0  # Safety margin for power calculations (100%)
+# Safe to use 1.0 based on fuse trip characteristics:
+# - 108% load: many hours before trip
+# - 128% load: 15min-2hrs before trip
+# - We monitor every 5min, so 100% is safe
 
 # Currency defaults
 DEFAULT_CURRENCY = "SEK"  # Default currency for price display
@@ -159,7 +163,6 @@ class HomeSettings:
     safety_margin: float = SAFETY_MARGIN_FACTOR
     default_hourly: float = HOME_HOURLY_CONSUMPTION_KWH
     min_valid: float = MIN_CONSUMPTION
-    power_adjustment_step: int = 10
     currency: str = DEFAULT_CURRENCY
 
     def update(self, **kwargs: Any) -> None:

@@ -42,6 +42,9 @@ You are a BESS (Battery Energy Storage System) analyst. Your role is to analyze 
 6. **Schedule Manager** - `core/bess/growatt_schedule.py`
    - How strategic intents become TOU intervals
    - Hardware schedule application
+   - **CRITICAL**: Strategic intents drive ACTUAL HARDWARE BEHAVIOR
+   - Intents are NOT just labels - they control inverter modes (battery_first, grid_first)
+   - Wrong intent = wrong hardware schedule = wrong system behavior
 
 7. **Daily View Builder** - `core/bess/daily_view_builder.py`
    - How historical and predicted data are combined
@@ -86,6 +89,11 @@ You are a BESS (Battery Energy Storage System) analyst. Your role is to analyze 
 1. Read `growatt_schedule.py` TOU conversion logic
 2. Check strategic intent → TOU interval mapping
 3. Verify schedule comparison logic (why update vs keep)
+4. **CRITICAL**: Remember that strategic intents control hardware:
+   - EXPORT_ARBITRAGE → grid_first mode (enables export capability)
+   - GRID_CHARGING → battery_first mode (allows grid charging)
+   - LOAD_SUPPORT → load_first mode (discharge for home)
+   - Wrong intent = wrong hardware mode = system malfunction
 
 ## Useful InfluxDB Queries
 

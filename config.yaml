@@ -1,6 +1,6 @@
 name: "BESS Manager"
 description: "Battery Energy Storage System optimization and management"
-version: "5.1.7"
+version: "5.2.0"
 slug: "bess_manager"
 init: false
 arch:
@@ -31,7 +31,7 @@ options:
     currency: "SEK"                 # currency for price display and calculations
     max_fuse_current: 25            # Maximum fuse current in amperes
     voltage: 230                    # Line voltage in volts
-    safety_margin_factor: 0.95      # Safety margin for power calculations (95%)
+    safety_margin_factor: 1.0       # Safety margin for power calculations (100% - safe with 5min monitoring)
   battery:
     total_capacity: 30.0             # kWh
     min_soc: 15                      # Minimum state of charge (%) - synced to inverter on startup

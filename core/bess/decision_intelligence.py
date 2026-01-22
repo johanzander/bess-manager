@@ -438,11 +438,12 @@ def create_decision_data(
     Returns:
         Enhanced DecisionData with all fields populated including advanced flow patterns
     """
-    # Determine strategic intent using economics-based decision (not flow-based inference)
-    # This is the authoritative source of intent - decided at optimization time
+    # Determine strategic intent based on actual energy flows
+    # CRITICAL: Intent controls hardware behavior via Growatt schedule
+    # Must accurately reflect actual action, not just economic conditions
     if power < -0.1:  # Discharging
-        # Economics-based: export is profitable when sell_price > cost_basis
-        if sell_price > cost_basis:
+        # Check actual flows: are we exporting to grid?
+        if energy_data.battery_to_grid > 0.1:
             strategic_intent = "EXPORT_ARBITRAGE"
         else:
             strategic_intent = "LOAD_SUPPORT"

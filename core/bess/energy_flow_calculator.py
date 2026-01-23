@@ -103,15 +103,15 @@ class EnergyFlowCalculator:
                 current_value = float(current_value)
                 previous_value = float(previous_value)
 
-                # Handle day rollover (when value decreases)
+                # Handle sensor value decrease (fluctuation or measurement noise)
                 if current_value < previous_value:
-                    logger.info(
-                        "Detected rollover for %s: %s → %s",
+                    logger.debug(
+                        "Sensor %s decreased: %.2f → %.2f (treating as zero)",
                         sensor_name,
                         previous_value,
                         current_value,
                     )
-                    flows[flow_key] = current_value
+                    flows[flow_key] = 0.0
                 else:
                     flows[flow_key] = current_value - previous_value
 

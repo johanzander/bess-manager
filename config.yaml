@@ -1,6 +1,6 @@
 name: "BESS Manager"
 description: "Battery Energy Storage System optimization and management"
-version: "5.3.1"
+version: "5.4.0"
 slug: "bess_manager"
 init: false
 arch:
@@ -24,6 +24,7 @@ auth_api: true
 options:
   influxdb:
     url: "http://homeassistant.local:8086/api/v2/query"
+    bucket: "home_assistant/autogen" # Note: default (if not specified in HA) is homeassistant/autogen
     username: "your_db_username_here"
     password: "your_db_password_here"
   home:
@@ -92,6 +93,7 @@ options:
 schema:
   influxdb:
     url: str
+    bucket: str
     username: str
     password: str
   home:

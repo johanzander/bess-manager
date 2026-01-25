@@ -19,7 +19,7 @@ def get_influxdb_config():
     """Load InfluxDB config with environment variable precedence.
 
     Configuration priority (highest to lowest):
-    1. Environment variables (HA_DB_URL, HA_DB_USER_NAME, HA_DB_PASSWORD)
+    1. Environment variables (HA_DB_URL, HA_DB_BUCKET, HA_DB_USER_NAME, HA_DB_PASSWORD)
     2. /data/options.json influxdb section
 
     This supports both environments:
@@ -27,7 +27,7 @@ def get_influxdb_config():
     - Development: Environment variables override (from .env, keeps secrets out of git)
 
     Returns:
-        dict: Configuration with url, username, and password keys
+        dict: Configuration with url, bucket, username, and password keys
 
     Raises:
         KeyError: If configuration is incomplete from all sources
@@ -35,16 +35,18 @@ def get_influxdb_config():
     """
     # Check environment variables first (highest priority - development override)
     url = os.getenv("HA_DB_URL")
+    bucket = os.getenv("HA_DB_BUCKET")
     username = os.getenv("HA_DB_USER_NAME")
     password = os.getenv("HA_DB_PASSWORD")
-
+    
     # If all environment variables are set, use them
-    if url and username and password:
+    if url and username and password and bucket:
         _LOGGER.debug("Loaded InfluxDB config from environment variables")
         return {
             "url": url,
             "username": username,
             "password": password,
+            "bucket": bucket,
         }
 
     # Otherwise, read from options.json (production path)
@@ -55,9 +57,10 @@ def get_influxdb_config():
     _LOGGER.debug("Loaded InfluxDB config from options.json")
 
     return {
-        "url": influxdb["url"],
-        "username": influxdb["username"],
-        "password": influxdb["password"],
+        "url": influxdb.get("url", ""),
+        "username": influxdb.get("username", ""),
+        "password": influxdb.get("password", ""),
+        "bucket": influxdb.get("bucket", ""),
     }
 
 
@@ -90,10 +93,10 @@ def get_sensor_data(sensors_list, start_time=None, stop_time=None) -> dict:
 
     # Get configuration
     influxdb_config = get_influxdb_config()
-
-    url = influxdb_config.get("url", "")
-    username = influxdb_config.get("username", "")
-    password = influxdb_config.get("password", "")
+    url = influxdb_config["url"]
+    bucket = influxdb_config["bucket"]
+    username = influxdb_config["username"]
+    password = influxdb_config["password"]
 
     # Validate required configuration
     if not url or not username or not password:
@@ -118,7 +121,7 @@ def get_sensor_data(sensors_list, start_time=None, stop_time=None) -> dict:
     )
 
     # Time-bounded query (always uses range since we always have start_time)
-    flux_query = f"""from(bucket: "home_assistant/autogen")
+    flux_query = f"""from(bucket: "{bucket}")
                     |> range(start: {start_str}, stop: {end_str})
                     |> filter(fn: (r) => {sensor_filter})
                     |> filter(fn: (r) => r["_field"] == "value")
@@ -223,11 +226,12 @@ def get_sensor_data_batch(sensors_list, target_date) -> dict:
 
     # Get configuration
     influxdb_config = get_influxdb_config()
-    url = influxdb_config.get("url", "")
-    username = influxdb_config.get("username", "")
-    password = influxdb_config.get("password", "")
+    url = influxdb_config["url"]
+    bucket = influxdb_config["bucket"]
+    username = influxdb_config["username"]
+    password = influxdb_config["password"]
 
-    if not url or not username or not password:
+    if not url or not username or not password or not bucket:
         _LOGGER.error("InfluxDB configuration is incomplete")
         return {"status": "error", "message": "Incomplete InfluxDB configuration"}
 
@@ -246,7 +250,7 @@ def get_sensor_data_batch(sensors_list, target_date) -> dict:
 
     # Batch query: Get ALL data points, then for each period we'll find the last value
     # BEFORE that period's end time (same logic as individual queries for sparse data)
-    flux_query = f"""from(bucket: "home_assistant/autogen")
+    flux_query = f"""from(bucket: "{bucket}")
                     |> range(start: {start_str}, stop: {end_str})
                     |> filter(fn: (r) => {sensor_filter})
                     |> filter(fn: (r) => r["_field"] == "value")

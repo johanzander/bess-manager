@@ -1575,23 +1575,27 @@ class BatterySystemManager:
         tracking the actual costs paid to acquire that energy throughout the day.
 
         Algorithm:
-        1. Iterate through all completed periods before current_period
-        2. For charging periods: Add grid costs and cycle costs to running total
+        1. Initialize with pre-existing battery energy from first recorded period
+           - Assign cycle_cost to this energy (unknown acquisition cost)
+        2. Iterate through all completed periods before current_period
+        3. For charging periods: Add grid costs and cycle costs to running total
            - Solar charging: Only cycle cost (solar is free)
            - Grid charging: Buy price + cycle cost
-        3. For discharging periods: Remove proportional cost from running total
+        4. For discharging periods: Remove proportional cost from running total
            - Use weighted average cost per kWh in battery
            - Maintains FIFO-like cost accounting
-        4. Final result: running_total_cost / running_energy = marginal cost per kWh
+        5. Final result: running_total_cost / running_energy = marginal cost per kWh
 
         Example:
-            Period 10: Charged 5 kWh from grid at 1.5 SEK/kWh + 0.05 cycle cost
-                       → running_cost = 7.75 SEK, running_energy = 5 kWh
+            Start of day: Battery has 4.2 kWh at cycle_cost (0.5 SEK/kWh)
+                       → running_cost = 2.10 SEK, running_energy = 4.2 kWh
+            Period 8:  Charged 0.6 kWh from grid at 2.5 SEK/kWh + 0.5 cycle cost
+                       → running_cost = 2.10 + 1.80 = 3.90 SEK
+                       → running_energy = 4.8 kWh
+                       → cost_basis = 3.90/4.8 = 0.81 SEK/kWh
             Period 15: Discharged 2 kWh
-                       → avg_cost = 7.75/5 = 1.55 SEK/kWh
-                       → running_cost = 4.65 SEK, running_energy = 3 kWh
-            Period 20: Marginal cost = 4.65/3 = 1.55 SEK/kWh
-                       → Only discharge if sell price > 1.55 SEK/kWh
+                       → avg_cost = 3.90/4.8 = 0.81 SEK/kWh
+                       → running_cost = 2.28 SEK, running_energy = 2.8 kWh
 
         This ensures discharge decisions account for the actual acquisition cost
         of the energy, not just cycle wear.
@@ -1609,8 +1613,19 @@ class BatterySystemManager:
         if not completed_periods:
             return self.battery_settings.cycle_cost_per_kwh
 
-        running_energy = 0.0
-        running_total_cost = 0.0
+        # Initialize with pre-existing battery energy from the first recorded period.
+        # This energy was already in the battery at the start of tracking (e.g., from
+        # overnight). We assign it a cost basis of cycle_cost since we don't know its
+        # original acquisition cost. Without this, the cost basis calculation ignores
+        # pre-existing energy and produces inflated values when small amounts of
+        # expensive energy are added to a battery that already has significant charge.
+        first_period_idx = min(completed_periods)
+        first_event = self.historical_store.get_period(first_period_idx)
+        assert first_event is not None, "First period must exist"
+
+        initial_soe = first_event.energy.battery_soe_start
+        running_energy = initial_soe
+        running_total_cost = initial_soe * self.battery_settings.cycle_cost_per_kwh
 
         for period in sorted(completed_periods):
             if period >= current_period:

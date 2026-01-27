@@ -11,6 +11,7 @@ from typing import ClassVar
 import requests
 
 from .exceptions import SystemConfigurationError
+from .runtime_failure_tracker import RuntimeFailureTracker
 
 logger = logging.getLogger(__name__)
 # logger.setLevel(logging.DEBUG)
@@ -40,6 +41,8 @@ def run_request(http_method, *args, **kwargs):
 
 class HomeAssistantAPIController:
     """A class for interacting with Inverter controls via Home Assistant REST API."""
+
+    failure_tracker: RuntimeFailureTracker | None
 
     def _get_sensor_display_name(self, sensor_key: str) -> str:
         """Get display name for a sensor key from METHOD_SENSOR_MAP."""
@@ -116,6 +119,9 @@ class HomeAssistantAPIController:
 
         # Store Growatt device ID for TOU operations
         self.growatt_device_id = growatt_device_id
+
+        # Runtime failure tracker (injected by BatterySystemManager)
+        self.failure_tracker = None
 
         # Create persistent session for connection reuse (400x faster)
         self.session = requests.Session()
@@ -448,7 +454,12 @@ class HomeAssistantAPIController:
         }
 
         try:
-            response = self._api_request("get", f"/api/states/{entity_id}")
+            response = self._api_request(
+                "get",
+                f"/api/states/{entity_id}",
+                operation=f"Check sensor info for '{method_name}'",
+                category="sensor_read"
+            )
             if not response:
                 result.update(
                     {
@@ -478,12 +489,14 @@ class HomeAssistantAPIController:
         """Validate sensors for multiple methods at once."""
         return [self.get_method_sensor_info(method) for method in method_list]
 
-    def _api_request(self, method, path, **kwargs):
+    def _api_request(self, method, path, operation=None, category=None, **kwargs):
         """Make an API request to Home Assistant with retry logic.
 
         Args:
             method: HTTP method ('get', 'post', etc.)
             path: API path (without base URL)
+            operation: Optional human-readable operation description for failure tracking
+            category: Optional operation category for failure tracking
             **kwargs: Additional arguments for requests
 
         Returns:
@@ -565,6 +578,19 @@ class HomeAssistantAPIController:
                         self.max_attempts,
                         str(e),
                     )
+
+                    # Record runtime failure if failure tracker is available
+                    if self.failure_tracker:
+                        # Use provided operation/category or fall back to generic description
+                        operation_description = operation or f"{method.upper()} {path}"
+                        operation_category = category or "other"
+
+                        self.failure_tracker.record_failure(
+                            operation=operation_description,
+                            category=operation_category,
+                            error=e
+                        )
+
                     raise  # Re-raise the last exception
 
     def _service_call_with_retry(self, service_domain, service_name, **kwargs):
@@ -617,7 +643,13 @@ class HomeAssistantAPIController:
             path += "?" + urllib.parse.urlencode(query_params)
 
         # Make API call
-        return self._api_request("post", path, json=json_data)
+        return self._api_request(
+            "post",
+            path,
+            operation=f"Call {service_domain}.{service_name}",
+            category="battery_control" if service_domain in ["number", "switch"] else "inverter_control" if service_domain == "growatt_server" else "other",
+            json=json_data
+        )
 
     def _get_sensor_value(self, sensor_name):
         """Get value from any sensor by name using unified entity resolution."""
@@ -628,7 +660,12 @@ class HomeAssistantAPIController:
             )
 
             # Make API call to get state
-            response = self._api_request("get", f"/api/states/{entity_id}")
+            response = self._api_request(
+                "get",
+                f"/api/states/{entity_id}",
+                operation=f"Read sensor '{sensor_name}'",
+                category="sensor_read"
+            )
 
             if response and "state" in response:
                 return float(response["state"])
@@ -645,6 +682,15 @@ class HomeAssistantAPIController:
             return 0.0
         except requests.RequestException as e:
             logger.error("Error fetching sensor %s: %s", sensor_name, str(e))
+
+            # Record runtime failure if failure tracker is available
+            if self.failure_tracker:
+                self.failure_tracker.record_failure(
+                    operation=f"Read sensor '{sensor_name}'",
+                    category="sensor_read",
+                    error=e
+                )
+
             return 0.0
 
     def get_estimated_consumption(self):
@@ -756,7 +802,12 @@ class HomeAssistantAPIController:
         """Return True if grid charging is enabled."""
         try:
             entity_id = self._get_entity_for_service("grid_charge")
-            response = self._api_request("get", f"/api/states/{entity_id}")
+            response = self._api_request(
+                "get",
+                f"/api/states/{entity_id}",
+                operation="Check grid charge switch state",
+                category="sensor_read"
+            )
             if response and "state" in response:
                 return response["state"] == "on"
             return False
@@ -876,7 +927,12 @@ class HomeAssistantAPIController:
                 f"Solar forecast sensor '{sensor_key}' not configured in sensors mapping"
             )
 
-        response = self._api_request("get", f"/api/states/{entity_id}")
+        response = self._api_request(
+            "get",
+            f"/api/states/{entity_id}",
+            operation="Get solar forecast data",
+            category="sensor_read"
+        )
 
         if not response or "attributes" not in response:
             raise SystemConfigurationError(
@@ -947,7 +1003,12 @@ class HomeAssistantAPIController:
             logger.debug(f"Fetching Nordpool prices for {time_label} from {entity_id}")
 
             # Get entity state
-            entity_response = self._api_request("get", f"/api/states/{entity_id}")
+            entity_response = self._api_request(
+                "get",
+                f"/api/states/{entity_id}",
+                operation=f"Get Nordpool prices for {time_label}",
+                category="sensor_read"
+            )
 
             if not entity_response:
                 logger.error(
@@ -1031,7 +1092,12 @@ class HomeAssistantAPIController:
                 entity_id, _ = self._resolve_entity_id(sensor)
 
                 # Get sensor state
-                response = self._api_request("get", f"/api/states/{entity_id}")
+                response = self._api_request(
+                    "get",
+                    f"/api/states/{entity_id}",
+                    operation=f"Get sensor data for '{sensor}'",
+                    category="sensor_read"
+                )
                 if response and "state" in response:
                     try:
                         # Store the value, converting to float for numeric sensors

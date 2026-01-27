@@ -2062,3 +2062,72 @@ Please check the BESS Manager logs for details.
             media_type="text/markdown",
             headers={"Content-Disposition": f"attachment; filename={filename}"},
         )
+
+
+@router.get("/api/runtime-failures")
+async def get_runtime_failures():
+    """Get all active runtime failures.
+
+    Returns a list of runtime failures that have occurred during system operation.
+    Failures are tracked when API calls to Home Assistant fail after all retry attempts.
+
+    Returns:
+        list[dict]: List of active runtime failures with details
+    """
+    from app import bess_controller
+
+    try:
+        failures = bess_controller.system.get_runtime_failures()
+        # Convert to dict format for API response
+        return [failure.__dict__ for failure in failures]
+    except Exception as e:
+        logger.error(f"Error getting runtime failures: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.post("/api/runtime-failures/{failure_id}/dismiss")
+async def dismiss_runtime_failure(failure_id: str):
+    """Dismiss a specific runtime failure.
+
+    Marks the failure as acknowledged, removing it from the active failures list.
+    The failure will no longer appear in the UI.
+
+    Args:
+        failure_id: Unique identifier of the failure to dismiss
+
+    Returns:
+        dict: Success confirmation
+    """
+    from app import bess_controller
+
+    try:
+        success = bess_controller.system.dismiss_runtime_failure(failure_id)
+        if not success:
+            raise HTTPException(status_code=404, detail=f"Failure with id {failure_id} not found")
+
+        return {"success": True, "message": f"Failure {failure_id} dismissed"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error dismissing runtime failure {failure_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.post("/api/runtime-failures/dismiss-all")
+async def dismiss_all_runtime_failures():
+    """Dismiss all active runtime failures.
+
+    Marks all failures as acknowledged, clearing the active failures list.
+    No failures will appear in the UI until new failures occur.
+
+    Returns:
+        dict: Success confirmation with count of dismissed failures
+    """
+    from app import bess_controller
+
+    try:
+        count = bess_controller.system.dismiss_all_runtime_failures()
+        return {"success": True, "message": f"Dismissed {count} runtime failures"}
+    except Exception as e:
+        logger.error(f"Error dismissing all runtime failures: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e

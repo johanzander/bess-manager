@@ -6,8 +6,10 @@ import { Clock, AlertCircle } from 'lucide-react';
 import EnergyFlowCards from '../components/EnergyFlowCards';
 import SystemStatusCard from '../components/SystemStatusCard';
 import AlertBanner from '../components/AlertBanner';
+import { RuntimeFailureAlerts } from '../components/RuntimeFailureAlerts';
 import api from '../lib/api';
 import { useUserPreferences } from '../hooks/useUserPreferences';
+import { useRuntimeFailures } from '../hooks/useRuntimeFailures';
 
 interface DashboardProps {
   onLoadingChange: (loading: boolean) => void;
@@ -89,6 +91,9 @@ export default function DashboardPage({
   
   const [healthSummary, setHealthSummary] = useState<HealthSummary | null>(null);
   const [dismissedBanner, setDismissedBanner] = useState(false);
+
+  // Runtime failures state
+  const { failures, dismissFailure, dismissAllFailures } = useRuntimeFailures();
 
   // Historical data status state
   interface HistoricalDataStatus {
@@ -255,6 +260,13 @@ export default function DashboardPage({
         </div>
       )}
       
+      {/* Runtime Failure Alerts */}
+      <RuntimeFailureAlerts
+        failures={failures}
+        onDismiss={dismissFailure}
+        onDismissAll={dismissAllFailures}
+      />
+
       {/* System Status Header */}
       <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
         <div className="flex items-center justify-between">

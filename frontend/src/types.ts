@@ -229,4 +229,14 @@ export interface SnapshotToSnapshotComparison {
   growattScheduleB: any[];
 }
 
+export interface RuntimeFailure {
+  id: string;
+  timestamp: string;
+  operation: string;
+  category: string;
+  error_message: string;
+  error_type: string;
+  retry_count: number;
+}
+
 

@@ -25,6 +25,7 @@ from .models import DecisionData, EconomicData, PeriodData, infer_intent_from_fl
 from .power_monitor import HomePowerMonitor
 from .prediction_snapshot import PredictionSnapshotStore
 from .price_manager import HomeAssistantSource, PriceManager, PriceSource
+from .runtime_failure_tracker import RuntimeFailureTracker
 from .schedule_store import ScheduleStore
 from .sensor_collector import SensorCollector
 from .settings import BatterySettings, HomeSettings, PriceSettings
@@ -130,6 +131,12 @@ class BatterySystemManager:
 
         # Critical sensor failure tracking for graceful degradation
         self._critical_sensor_failures = []
+
+        self._runtime_failure_tracker = RuntimeFailureTracker()
+
+        # Inject failure tracker into controller if available
+        if self._controller:
+            self._controller.failure_tracker = self._runtime_failure_tracker
 
         logger.debug("BatterySystemManager initialized")
 
@@ -244,7 +251,7 @@ class BatterySystemManager:
             self._handle_special_cases(current_period, prepare_next_day)
 
             # Get price data
-            prices, price_entries = self._get_price_data(prepare_next_day)
+            prices, _ = self._get_price_data(prepare_next_day)
             if not prices:
                 logger.warning("Schedule update aborted: No price data available")
                 return False
@@ -382,7 +389,7 @@ class BatterySystemManager:
                 optimization_period=optimization_period,
                 daily_view=daily_view,
                 growatt_schedule=growatt_schedule,
-                predicted_daily_savings=optimization_result.economic_summary.grid_to_battery_solar_savings,
+                predicted_daily_savings=optimization_result.economic_summary.grid_to_battery_solar_savings if optimization_result.economic_summary else 0.0,
             )
 
             logger.debug(
@@ -1778,6 +1785,33 @@ class BatterySystemManager:
     def get_cached_health_results(self) -> dict[str, Any] | None:
         """Get cached health check results from startup (avoids re-running expensive checks)."""
         return getattr(self, "_cached_health_results", None)
+
+    def get_runtime_failures(self) -> list:
+        """Get all active (non-dismissed) runtime API failures.
+
+        Returns:
+            List of RuntimeFailure objects sorted by timestamp (newest first)
+        """
+        return self._runtime_failure_tracker.get_active_failures()
+
+    def dismiss_runtime_failure(self, failure_id: str) -> None:
+        """Dismiss a specific runtime failure notification.
+
+        Args:
+            failure_id: UUID of the failure to dismiss
+
+        Raises:
+            ValueError: If failure ID not found
+        """
+        self._runtime_failure_tracker.dismiss_failure(failure_id)
+
+    def dismiss_all_runtime_failures(self) -> int:
+        """Dismiss all active runtime failures.
+
+        Returns:
+            Number of failures dismissed
+        """
+        return self._runtime_failure_tracker.dismiss_all()
 
     def _get_today_price_data(self) -> list[float]:
         """Get today's price data for reports and views."""

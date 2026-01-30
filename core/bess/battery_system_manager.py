@@ -29,7 +29,7 @@ from .runtime_failure_tracker import RuntimeFailureTracker
 from .schedule_store import ScheduleStore
 from .sensor_collector import SensorCollector
 from .settings import BatterySettings, HomeSettings, PriceSettings
-from .time_utils import TIMEZONE, format_period
+from .time_utils import TIMEZONE, format_period, get_period_count
 
 logger = logging.getLogger(__name__)
 
@@ -1052,9 +1052,11 @@ class BatterySystemManager:
                 f"Got {len(period_data_list)} period data objects from optimization"
             )
 
+            # Use actual array length for DST safety (92/96/100 periods)
+            num_periods = len(combined_soe)
             for i, period_data in enumerate(period_data_list):
                 target_period = optimization_period + i
-                if target_period < 96:
+                if target_period < num_periods:
                     logger.debug(
                         f"  Mapping period data index {i} (action={period_data.decision.battery_action:.1f}) to period {target_period}"
                     )
@@ -1067,7 +1069,7 @@ class BatterySystemManager:
             # Log the corrected SOE progression
             logger.info("CORRECTED SOE progression:")
             for p in range(
-                max(0, optimization_period - 1), min(96, optimization_period + 4)
+                max(0, optimization_period - 1), min(num_periods, optimization_period + 4)
             ):
                 soc_percent = (
                     combined_soe[p] / self.battery_settings.total_capacity
@@ -1080,10 +1082,33 @@ class BatterySystemManager:
             # Create strategic intents array from OptimizationResult
             # DP intents are authoritative - do NOT override with inferred intents from historical data
             # (that causes feedback loop: export → inferred EXPORT_ARBITRAGE → grid_first mode → more export)
-            full_day_strategic_intents = ["IDLE"] * 96
+            #
+            # IMPORTANT: Preserve previous strategic intents for past periods (0 to optimization_period-1)
+            # to avoid the "majority IDLE" bug where updating at :45 (period 3 of an hour) causes
+            # periods 0,1,2 to default to IDLE, flipping the hourly intent and dropping TOU coverage.
+            if (
+                self._schedule_manager.strategic_intents
+                and len(self._schedule_manager.strategic_intents) >= optimization_period
+            ):
+                # Preserve previous intents for past periods
+                full_day_strategic_intents = self._schedule_manager.strategic_intents.copy()
+                logger.debug(
+                    f"Preserving {optimization_period} past strategic intents from previous schedule"
+                )
+            else:
+                # First run of the day or no previous schedule - initialize to IDLE
+                # Use get_period_count() to handle DST (92/96/100 periods)
+                today = datetime.now(tz=TIMEZONE).date()
+                num_periods = get_period_count(today)
+                full_day_strategic_intents = ["IDLE"] * num_periods
+                logger.debug(
+                    f"No previous strategic intents available, initializing {num_periods} periods to IDLE"
+                )
+
+            # Fill in optimized periods from the new optimization result
             for i, period_data in enumerate(period_data_list):
                 target_period = optimization_period + i
-                if target_period < 96:
+                if target_period < len(full_day_strategic_intents):
                     full_day_strategic_intents[target_period] = (
                         period_data.decision.strategic_intent
                     )

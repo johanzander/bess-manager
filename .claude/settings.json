@@ -10,6 +10,7 @@
       "Bash(./.venv/bin/pytest:*)",
       "Bash(./.venv/bin/python -m pytest:*)"
     ],
+    "deny": [],
     "ask": [
       "Bash(git commit:*)",
       "Bash(git push:*)",
@@ -17,7 +18,9 @@
       "Bash(git rebase:*)",
       "Bash(git merge:*)",
       "Bash(rm:*)"
-    ],
-    "deny": []
+    ]
+  },
+  "enabledPlugins": {
+    "code-review@claude-plugins-official": true
   }
 }

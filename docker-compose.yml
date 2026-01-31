@@ -7,6 +7,7 @@ services:
     volumes:
       - ./backend:/app:delegated
       - ./core:/app/core:delegated
+      - ./frontend/dist:/app/frontend:delegated
       - ./backend/dev-options.json:/data/options.json:ro
     environment:
       - TZ=Europe/Stockholm
@@ -36,7 +37,7 @@ services:
       - ./frontend:/app
       - /app/node_modules
     ports:
-      - "5173:5173"
+      - "5174:5174"
     environment:
       - TZ=Europe/Stockholm
       - VITE_API_URL=http://bess-dev:8080

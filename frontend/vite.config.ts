@@ -7,7 +7,7 @@ export default defineConfig({
   base: './', // Use relative paths instead of absolute paths for assets
   server: {
     host: '0.0.0.0', // Allow connections from outside the container
-    port: 5173,
+    port: 5174,
     proxy: {
       '/api': {
         target: 'http://bess-dev:8080', // Direct reference to the container name

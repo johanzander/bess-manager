@@ -3,10 +3,8 @@ API endpoints for battery and electricity settings, dashboard data, and decision
 
 """
 
-import os
 from datetime import datetime
 
-import requests
 from api_conversion import convert_keys_to_camel_case
 from api_dataclasses import (
     APIBatterySettings,
@@ -23,36 +21,6 @@ from loguru import logger
 from core.bess.health_check import run_system_health_checks
 
 router = APIRouter()
-
-
-def verify_ha_token(token: str) -> bool:
-    """Verify a Home Assistant token by calling HA's API.
-
-    This follows HA add-on best practices: validate tokens against HA's own
-    auth system rather than implementing custom authentication.
-
-    Args:
-        token: Home Assistant long-lived access token to verify.
-
-    Returns:
-        True if token is valid, False otherwise.
-    """
-    # Determine HA URL based on environment (inside HA vs dev mode)
-    if os.getenv("HASSIO_TOKEN"):
-        ha_url = "http://supervisor/core"
-    else:
-        ha_url = os.environ.get("HA_URL", "http://supervisor/core")
-
-    try:
-        response = requests.get(
-            f"{ha_url}/api/",
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=10,
-        )
-        return response.status_code == 200
-    except requests.RequestException as e:
-        logger.warning(f"Token verification failed: {e}")
-        return False
 
 
 @router.get("/api/settings/battery")
@@ -674,7 +642,6 @@ async def get_decision_intelligence_mock():
     - Multi-hour strategy explanations
     """
     try:
-
         current_hour = datetime.now().hour
         patterns = []
 
@@ -1638,7 +1605,6 @@ async def get_historical_data_status():
     from app import bess_controller
 
     try:
-
         # Get today's periods (quarterly resolution)
         periods = bess_controller.system.historical_store.get_today_periods()
         current_hour = datetime.now().hour
@@ -2032,18 +1998,15 @@ async def compare_two_snapshots(
 
 
 @router.get("/api/export-debug-data")
-async def export_debug_data(token: str | None = None):
+async def export_debug_data():
     """Export comprehensive debug data as markdown report.
 
     Returns a markdown file containing all system state, logs, historical data,
     predictions, schedules, and settings for debugging purposes.
 
-    For browser access via HA ingress, no token is needed (HA handles auth).
-    For external programmatic access (e.g., MCP server), provide a valid
-    Home Assistant long-lived access token as query parameter.
-
-    Args:
-        token: Optional HA long-lived access token for external API access.
+    Security:
+    - Via HA ingress (browser): HA handles authentication
+    - Via direct port 8080 (local network): Network access is the auth
 
     Returns:
         PlainTextResponse: Markdown file with complete debug data
@@ -2052,15 +2015,9 @@ async def export_debug_data(token: str | None = None):
 
     from fastapi.responses import PlainTextResponse
 
+    from app import bess_controller
     from core.bess.debug_data_exporter import DebugDataAggregator
     from core.bess.debug_report_formatter import DebugReportFormatter
-
-    from app import bess_controller
-
-    # Verify token if provided (for external API access)
-    # When accessed via ingress, HA handles auth so no token needed
-    if token and not verify_ha_token(token):
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
 
     try:
         # Aggregate all system data
@@ -2094,7 +2051,7 @@ async def export_debug_data(token: str | None = None):
 Failed to generate debug export:
 
 ```
-{str(e)}
+{e!s}
 ```
 
 Please check the BESS Manager logs for details.
@@ -2147,7 +2104,9 @@ async def dismiss_runtime_failure(failure_id: str):
     try:
         success = bess_controller.system.dismiss_runtime_failure(failure_id)
         if not success:
-            raise HTTPException(status_code=404, detail=f"Failure with id {failure_id} not found")
+            raise HTTPException(
+                status_code=404, detail=f"Failure with id {failure_id} not found"
+            )
 
         return {"success": True, "message": f"Failure {failure_id} dismissed"}
     except HTTPException:

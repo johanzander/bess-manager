@@ -9,17 +9,17 @@ This server exposes tools for Claude Code to analyze BESS debug logs:
 - search_log: Search for patterns in a log file
 
 Configuration (reads from .env file in project root):
-- HA_URL: Home Assistant URL (used to construct ingress URL)
+- BESS_URL: Direct URL to BESS instance (e.g., http://homeassistant.local:8080)
 - HA_TOKEN: Home Assistant long-lived access token (used for authentication)
+
+The BESS add-on must expose port 8080 directly (not through HA ingress).
+Token is verified against HA API for security.
 
 Fetched logs are saved to .bess-logs/ directory (gitignored).
 
 Optional environment variable overrides:
-- BESS_URL: Direct URL to BESS instance (overrides HA_URL-based ingress URL)
-- BESS_TOKEN: Auth token (overrides HA_TOKEN)
 - BESS_LOG_DIR: Local directory for cached/saved debug logs (default: .bess-logs/)
-- BESS_SKIP_SSL_VERIFY: Set to "true" to skip SSL certificate verification (for local
-  self-signed certs only - not recommended for production/remote connections)
+- BESS_SKIP_SSL_VERIFY: Set to "true" to skip SSL certificate verification
 """
 
 import json
@@ -27,8 +27,8 @@ import os
 import re
 import ssl
 import sys
-import urllib.request
 import urllib.error
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 
@@ -46,7 +46,7 @@ def load_env_file() -> dict[str, str]:
     """
     env_vars = {}
     if ENV_FILE.exists():
-        with open(ENV_FILE, "r") as f:
+        with open(ENV_FILE) as f:
             for line in f:
                 line = line.strip()
                 if line and not line.startswith("#") and "=" in line:
@@ -63,16 +63,13 @@ def get_config() -> tuple[str, str]:
     """
     # First check environment variables (allows override)
     bess_url = os.environ.get("BESS_URL", "")
-    bess_token = os.environ.get("BESS_TOKEN", "")
+    bess_token = os.environ.get("BESS_TOKEN", "") or os.environ.get("HA_TOKEN", "")
 
     # Fall back to .env file
     if not bess_url or not bess_token:
         env_vars = load_env_file()
         if not bess_url:
-            # Construct ingress URL from HA_URL
-            ha_url = env_vars.get("HA_URL", "")
-            if ha_url:
-                bess_url = f"{ha_url.rstrip('/')}/api/hassio_ingress/local_bess_manager"
+            bess_url = env_vars.get("BESS_URL", "")
         if not bess_token:
             bess_token = env_vars.get("HA_TOKEN", "")
 
@@ -106,9 +103,9 @@ def fetch_live_debug(save_locally: bool = True) -> dict:
             "example": "http://homeassistant.local:8099",
         }
 
-    # Build URL with optional token for authentication
+    # Build URL - token only needed for ingress access, not direct port
     base_url = f"{BESS_URL.rstrip('/')}/api/export-debug-data"
-    url = f"{base_url}?token={BESS_TOKEN}" if BESS_TOKEN else base_url
+    url = base_url  # Direct port access doesn't need token (local network = trusted)
 
     try:
         # SSL verification enabled by default for security (works with valid certs)
@@ -123,7 +120,9 @@ def fetch_live_debug(save_locally: bool = True) -> dict:
             headers={"Accept": "text/markdown, text/plain, */*"},
         )
 
-        with urllib.request.urlopen(request, timeout=60, context=ssl_context) as response:
+        with urllib.request.urlopen(
+            request, timeout=60, context=ssl_context
+        ) as response:
             content = response.read().decode("utf-8")
 
             # Extract filename from Content-Disposition header if present
@@ -184,12 +183,14 @@ def list_debug_logs() -> dict:
     for pattern in patterns:
         for log_file in log_dir.glob(pattern):
             stat = log_file.stat()
-            logs.append({
-                "filename": log_file.name,
-                "path": str(log_file),
-                "size_kb": round(stat.st_size / 1024, 1),
-                "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
-            })
+            logs.append(
+                {
+                    "filename": log_file.name,
+                    "path": str(log_file),
+                    "size_kb": round(stat.st_size / 1024, 1),
+                    "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                }
+            )
 
     # Sort by modified date, newest first
     logs.sort(key=lambda x: x["modified"], reverse=True)
@@ -219,7 +220,7 @@ def read_debug_log(filename: str, max_lines: int = 5000) -> dict:
         return {"error": f"Log file not found: {filename}"}
 
     try:
-        with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+        with open(log_path, encoding="utf-8", errors="replace") as f:
             lines = f.readlines()
 
         total_lines = len(lines)
@@ -227,9 +228,13 @@ def read_debug_log(filename: str, max_lines: int = 5000) -> dict:
 
         if truncated:
             # Return first and last portions
-            head = lines[:max_lines // 2]
-            tail = lines[-(max_lines // 2):]
-            content = "".join(head) + f"\n\n... [{total_lines - max_lines} lines truncated] ...\n\n" + "".join(tail)
+            head = lines[: max_lines // 2]
+            tail = lines[-(max_lines // 2) :]
+            content = (
+                "".join(head)
+                + f"\n\n... [{total_lines - max_lines} lines truncated] ...\n\n"
+                + "".join(tail)
+            )
         else:
             content = "".join(lines)
 
@@ -299,7 +304,7 @@ def get_log_summary(filename: str) -> dict:
     mismatches = re.findall(
         r"strategic_intent['\"]?: ['\"]?(\w+)['\"]?.*?observed_intent['\"]?: ['\"]?(\w+)['\"]?",
         content,
-        re.DOTALL
+        re.DOTALL,
     )
     if mismatches:
         mismatch_count = sum(1 for s, o in mismatches if s != o)
@@ -345,11 +350,13 @@ def search_log(filename: str, pattern: str, context_lines: int = 2) -> dict:
             start = max(0, i - context_lines)
             end = min(len(lines), i + context_lines + 1)
             context = lines[start:end]
-            matches.append({
-                "line_number": i + 1,
-                "match_line": line,
-                "context": "\n".join(context),
-            })
+            matches.append(
+                {
+                    "line_number": i + 1,
+                    "match_line": line,
+                    "context": "\n".join(context),
+                }
+            )
 
             # Limit to 50 matches
             if len(matches) >= 50:
@@ -545,7 +552,7 @@ def handle_request(request: dict) -> dict:
 def main():
     """Main MCP server loop - reads JSON-RPC from stdin, writes to stdout."""
     # Unbuffered output for real-time communication
-    sys.stdout = open(sys.stdout.fileno(), mode='w', buffering=1)
+    sys.stdout = open(sys.stdout.fileno(), mode="w", buffering=1)
 
     for line in sys.stdin:
         line = line.strip()

@@ -62,13 +62,37 @@ Tested with MIN/TLX inverters
 ![Dashboard Overview](./assets/dashboard.png)
 *Beautiful energy flow visualization with real-time optimization results*
 
-![Savings Analysis](./assets/savings.png)  
+![Savings Analysis](./assets/savings.png)
 *Detailed savings breakdown with battery actions and ROi calculations*
 
 ![Battery Schedule](.assets/battery-schedule.png)
 *Intelligent scheduling showing charge/discharge decisions with price predictions*
 
 > 📸 **Screenshot placeholders** - Add actual screenshots to `docs/images/` directory
+
+## Claude Code Integration
+
+BESS Manager includes an MCP (Model Context Protocol) server for integration with Claude Code, enabling AI-assisted debugging and log analysis.
+
+To enable, add to `.claude/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "bess": {
+      "command": "python3",
+      "args": ["scripts/bess-mcp-server.py"]
+    }
+  }
+}
+```
+
+Configure connection in `.env`:
+
+```bash
+HA_URL=https://your-homeassistant-url
+HA_TOKEN=your-long-lived-access-token
+```
 
 ## Documentation
 

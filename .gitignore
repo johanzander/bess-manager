@@ -45,3 +45,4 @@ build/
 
 # Miscellaneous
 *.log
+.bess-logs/

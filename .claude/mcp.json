@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "bess": {
+      "command": "python3",
+      "args": ["scripts/bess-mcp-server.py"]
+    }
+  }
+}

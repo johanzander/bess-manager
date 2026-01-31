@@ -5,6 +5,75 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.7.0] - 2026-01-31
+
+### Added
+
+- MCP server for BESS debug log analysis - enables Claude Code to fetch and analyze debug logs directly
+- Token-based authentication for debug export API endpoint (for external/programmatic access)
+- `.bess-logs/` directory for cached debug logs (gitignored)
+
+### Changed
+
+- SSL certificate verification enabled by default for MCP server connections (security improvement)
+- Optional `BESS_SKIP_SSL_VERIFY=true` environment variable for local self-signed certificates
+
+## [5.6.0] - 2026-01-27
+
+General release consolidating recent fixes.
+
+## [5.5.0] - 2026-01-27
+
+### Fixed
+
+- Cost basis calculation now correctly accounts for pre-existing battery energy
+
+## [5.4.0] - 2026-01-26
+
+### Added
+
+- InfluxDB bucket now configurable by end user in config.yaml
+
+## [5.3.1] - 2026-01-23
+
+### Fixed
+
+- Improved sensor value handling in EnergyFlowCalculator
+
+## [5.3.0] - 2026-01-22
+
+### Changed
+
+- Updated safety margin to 100%
+- Removed "60 öringen" threshold
+- Removed step-wise power adjustments
+
+## [5.2.0] - 2026-01-22
+
+General release consolidating v5.1.x fixes.
+
+## [5.1.7] - 2026-01-18
+
+### Fixed
+
+- Missing period handling when HA sensors unavailable
+- DailyViewBuilder now creates placeholder periods instead of skipping them when sensor data is unavailable (e.g., HA restart)
+- Snapshot comparison API no longer crashes with IndexError
+
+### Added
+
+- `_create_missing_period()` to create placeholders with `data_source="missing"`
+- Recovery of planned intent from persisted storage when available
+- `missing_count` field in DailyView for transparency
+
+## [5.1.6] - 2026-01-18
+
+### Changed
+
+- Refactored strategic intent to use economics-based decisions
+- Strategic intent now derived from economic analysis rather than inferred from energy flows
+- Prevents feedback loop where observed exports were incorrectly classified as EXPORT_ARBITRAGE
+
 ## [5.1.5] - 2026-01-17
 
 ### Fixed

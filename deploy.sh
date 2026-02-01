@@ -46,7 +46,9 @@ if [ -f "$TARGET_PATH/config.yaml" ]; then
 fi
 
 # Use rsync to exclude unwanted files and handle permissions better
-rsync -rlptv --delete \
+# --inplace: avoid temp files (needed for SMB/mounted volumes)
+# --no-times/--no-perms: don't try to set attributes the filesystem doesn't support
+rsync -rv --delete --inplace --no-times --no-perms --no-owner --no-group \
   --exclude='.DS_Store' \
   --exclude='*.pyc' \
   --exclude='__pycache__/' \
@@ -61,34 +63,34 @@ rsync -rlptv --delete \
 # Restore user configuration from backup if it exists
 if [ -f "$TARGET_PATH/config.yaml.backup" ]; then
     echo "Preserving user configuration..."
-    
+
     # Extract user settings from backup
     INFLUX_URL=$(grep "url:" "$TARGET_PATH/config.yaml.backup" | head -1 | sed 's/.*url: *"//' | sed 's/".*//')
     INFLUX_USER=$(grep "username:" "$TARGET_PATH/config.yaml.backup" | head -1 | sed 's/.*username: *"//' | sed 's/".*//')
     INFLUX_PASS=$(grep "password:" "$TARGET_PATH/config.yaml.backup" | head -1 | sed 's/.*password: *"//' | sed 's/".*//')
     CONFIG_ENTRY_ID=$(grep "config_entry_id:" "$TARGET_PATH/config.yaml.backup" | sed 's/.*config_entry_id: *"//' | sed 's/".*//')
-    
+
     # Only update if values are not defaults
     if [ "$INFLUX_URL" != "http://homeassistant.local:8086/api/v2/query" ]; then
         sed -i '' "s|url: \"http://homeassistant.local:8086/api/v2/query\"|url: \"$INFLUX_URL\"|" "$TARGET_PATH/config.yaml"
         echo "  - Restored InfluxDB URL"
     fi
-    
+
     if [ "$INFLUX_USER" != "your_db_username_here" ]; then
         sed -i '' "s/username: \"your_db_username_here\"/username: \"$INFLUX_USER\"/" "$TARGET_PATH/config.yaml"
         echo "  - Restored InfluxDB username"
     fi
-    
+
     if [ "$INFLUX_PASS" != "your_db_password_here" ]; then
         sed -i '' "s/password: \"your_db_password_here\"/password: \"$INFLUX_PASS\"/" "$TARGET_PATH/config.yaml"
         echo "  - Restored InfluxDB password"
     fi
-    
+
     if [ ! -z "$CONFIG_ENTRY_ID" ] && [ "$CONFIG_ENTRY_ID" != "01K3Y99FD3MDZYVFX2XSWR4888" ]; then
         sed -i '' "s/config_entry_id: \"01K3Y99FD3MDZYVFX2XSWR4888\"/config_entry_id: \"$CONFIG_ENTRY_ID\"/" "$TARGET_PATH/config.yaml"
         echo "  - Restored Nordpool config entry ID"
     fi
-    
+
     # Clean up backup
     rm "$TARGET_PATH/config.yaml.backup"
 fi

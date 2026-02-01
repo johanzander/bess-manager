@@ -5,6 +5,27 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.0.0] - 2026-02-01
+
+### Changed
+
+- TOU scheduling now uses 15-minute resolution instead of hourly aggregation
+- Eliminates "charging gaps" where minority intents were lost due to hourly majority voting
+- Each 15-minute strategic intent period now directly maps to TOU segments
+- Schedule comparison uses minute-level precision for accurate differential updates
+
+### Added
+
+- `_group_periods_by_mode()` groups consecutive 15-min periods by battery mode
+- `_groups_to_tou_intervals()` converts period groups to Growatt TOU intervals
+- `_enforce_segment_limit()` handles 9-segment hardware limit using duration-based priority
+- DST handling for fall-back scenarios (100 periods) with proper time capping
+
+### Fixed
+
+- Single strategic period (e.g., 15-min GRID_CHARGING) now creates TOU segment instead of being outvoted
+- Overlap detection uses minute-level precision instead of hour-level
+
 ## [5.7.0] - 2026-01-31
 
 ### Added

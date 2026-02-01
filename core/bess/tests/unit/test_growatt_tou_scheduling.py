@@ -19,7 +19,9 @@ from core.bess.growatt_schedule import GrowattScheduleManager
 from core.bess.settings import BatterySettings
 
 
-def hourly_to_quarterly(hourly_intents: dict[int, str], default: str = "IDLE") -> list[str]:
+def hourly_to_quarterly(
+    hourly_intents: dict[int, str], default: str = "IDLE"
+) -> list[str]:
     """Convert hourly strategic intents to quarterly (96 periods).
 
     Args:
@@ -61,11 +63,13 @@ class TestStrategicIntentExecution:
 
     def test_export_arbitrage_enables_battery_discharge(self, scheduler):
         """Test that EXPORT_ARBITRAGE strategic intent enables battery discharge during target hours."""
-        strategic_intents = hourly_to_quarterly({
-            20: "EXPORT_ARBITRAGE",
-            21: "EXPORT_ARBITRAGE",
-            22: "EXPORT_ARBITRAGE",
-        })
+        strategic_intents = hourly_to_quarterly(
+            {
+                20: "EXPORT_ARBITRAGE",
+                21: "EXPORT_ARBITRAGE",
+                22: "EXPORT_ARBITRAGE",
+            }
+        )
 
         scheduler.current_hour = 0
         scheduler.strategic_intents = strategic_intents
@@ -92,7 +96,9 @@ class TestStrategicIntentExecution:
 
     def test_grid_charging_enables_battery_charge(self, scheduler):
         """Test that GRID_CHARGING strategic intent enables battery charging during target hours."""
-        strategic_intents = hourly_to_quarterly({3: "GRID_CHARGING", 4: "GRID_CHARGING"})
+        strategic_intents = hourly_to_quarterly(
+            {3: "GRID_CHARGING", 4: "GRID_CHARGING"}
+        )
 
         scheduler.current_hour = 0
         scheduler.strategic_intents = strategic_intents
@@ -120,10 +126,12 @@ class TestStrategicIntentExecution:
 
     def test_solar_storage_enables_battery_charge(self, scheduler):
         """Test that SOLAR_STORAGE strategic intent enables battery charging."""
-        strategic_intents = hourly_to_quarterly({
-            12: "SOLAR_STORAGE",
-            13: "SOLAR_STORAGE",
-        })
+        strategic_intents = hourly_to_quarterly(
+            {
+                12: "SOLAR_STORAGE",
+                13: "SOLAR_STORAGE",
+            }
+        )
 
         scheduler.current_hour = 0
         scheduler.strategic_intents = strategic_intents
@@ -139,12 +147,14 @@ class TestStrategicIntentExecution:
 
     def test_mixed_strategic_intents_execute_correctly(self, scheduler):
         """Test that different strategic intents in the same schedule work correctly."""
-        strategic_intents = hourly_to_quarterly({
-            3: "GRID_CHARGING",
-            12: "SOLAR_STORAGE",
-            19: "EXPORT_ARBITRAGE",
-            20: "EXPORT_ARBITRAGE",
-        })
+        strategic_intents = hourly_to_quarterly(
+            {
+                3: "GRID_CHARGING",
+                12: "SOLAR_STORAGE",
+                19: "EXPORT_ARBITRAGE",
+                20: "EXPORT_ARBITRAGE",
+            }
+        )
 
         scheduler.current_hour = 0
         scheduler.strategic_intents = strategic_intents
@@ -224,10 +234,12 @@ class TestHardwareConstraints:
 
     def test_no_overlapping_intervals_simple_case(self, scheduler):
         """Test that simple strategic intents produce non-overlapping intervals."""
-        strategic_intents = hourly_to_quarterly({
-            10: "GRID_CHARGING",
-            15: "EXPORT_ARBITRAGE",
-        })
+        strategic_intents = hourly_to_quarterly(
+            {
+                10: "GRID_CHARGING",
+                15: "EXPORT_ARBITRAGE",
+            }
+        )
 
         scheduler.current_hour = 0
         scheduler.strategic_intents = strategic_intents
@@ -238,14 +250,16 @@ class TestHardwareConstraints:
 
     def test_no_overlapping_intervals_complex_case(self, scheduler):
         """Test that complex strategic patterns never produce overlaps."""
-        strategic_intents = hourly_to_quarterly({
-            0: "GRID_CHARGING",
-            5: "GRID_CHARGING",
-            6: "SOLAR_STORAGE",
-            19: "EXPORT_ARBITRAGE",
-            20: "EXPORT_ARBITRAGE",
-            23: "EXPORT_ARBITRAGE",
-        })
+        strategic_intents = hourly_to_quarterly(
+            {
+                0: "GRID_CHARGING",
+                5: "GRID_CHARGING",
+                6: "SOLAR_STORAGE",
+                19: "EXPORT_ARBITRAGE",
+                20: "EXPORT_ARBITRAGE",
+                23: "EXPORT_ARBITRAGE",
+            }
+        )
 
         scheduler.current_hour = 0
         scheduler.strategic_intents = strategic_intents
@@ -258,11 +272,13 @@ class TestHardwareConstraints:
 
     def test_chronological_order_simple_case(self, scheduler):
         """Test that intervals are in chronological order."""
-        strategic_intents = hourly_to_quarterly({
-            3: "GRID_CHARGING",
-            15: "EXPORT_ARBITRAGE",
-            22: "EXPORT_ARBITRAGE",
-        })
+        strategic_intents = hourly_to_quarterly(
+            {
+                3: "GRID_CHARGING",
+                15: "EXPORT_ARBITRAGE",
+                22: "EXPORT_ARBITRAGE",
+            }
+        )
 
         scheduler.current_hour = 0
         scheduler.strategic_intents = strategic_intents
@@ -275,12 +291,14 @@ class TestHardwareConstraints:
 
     def test_chronological_order_out_of_order_input(self, scheduler):
         """Test that chronological order is maintained even with out-of-order strategic intents."""
-        strategic_intents = hourly_to_quarterly({
-            23: "EXPORT_ARBITRAGE",
-            1: "GRID_CHARGING",
-            12: "SOLAR_STORAGE",
-            5: "GRID_CHARGING",
-        })
+        strategic_intents = hourly_to_quarterly(
+            {
+                23: "EXPORT_ARBITRAGE",
+                1: "GRID_CHARGING",
+                12: "SOLAR_STORAGE",
+                5: "GRID_CHARGING",
+            }
+        )
 
         scheduler.current_hour = 0
         scheduler.strategic_intents = strategic_intents
@@ -293,11 +311,13 @@ class TestHardwareConstraints:
 
     def test_cross_midnight_patterns_work(self, scheduler):
         """Test that strategic intents spanning midnight work correctly."""
-        strategic_intents = hourly_to_quarterly({
-            23: "EXPORT_ARBITRAGE",
-            0: "GRID_CHARGING",
-            1: "GRID_CHARGING",
-        })
+        strategic_intents = hourly_to_quarterly(
+            {
+                23: "EXPORT_ARBITRAGE",
+                0: "GRID_CHARGING",
+                1: "GRID_CHARGING",
+            }
+        )
 
         scheduler.current_hour = 0
         scheduler.strategic_intents = strategic_intents
@@ -338,10 +358,12 @@ class TestOperationalEfficiency:
         current_hour = 15
 
         # Update with new strategic intent (only affects future)
-        new_intents = hourly_to_quarterly({
-            10: "GRID_CHARGING",
-            20: "EXPORT_ARBITRAGE",
-        })
+        new_intents = hourly_to_quarterly(
+            {
+                10: "GRID_CHARGING",
+                20: "EXPORT_ARBITRAGE",
+            }
+        )
 
         write_count = scheduler.apply_schedule_and_count_writes(
             new_intents, current_hour
@@ -356,10 +378,12 @@ class TestOperationalEfficiency:
     def test_no_writes_for_identical_schedule(self, scheduler):
         """Test that identical schedules don't trigger unnecessary writes."""
         # Set up initial schedule
-        strategic_intents = hourly_to_quarterly({
-            10: "GRID_CHARGING",
-            20: "EXPORT_ARBITRAGE",
-        })
+        strategic_intents = hourly_to_quarterly(
+            {
+                10: "GRID_CHARGING",
+                20: "EXPORT_ARBITRAGE",
+            }
+        )
 
         scheduler.current_hour = 0
         scheduler.strategic_intents = strategic_intents
@@ -427,11 +451,13 @@ class TestEdgeCases:
 
     def test_consecutive_periods_work_correctly(self, scheduler):
         """Test that consecutive strategic periods are handled correctly."""
-        strategic_intents = hourly_to_quarterly({
-            20: "EXPORT_ARBITRAGE",
-            21: "EXPORT_ARBITRAGE",
-            22: "EXPORT_ARBITRAGE",
-        })
+        strategic_intents = hourly_to_quarterly(
+            {
+                20: "EXPORT_ARBITRAGE",
+                21: "EXPORT_ARBITRAGE",
+                22: "EXPORT_ARBITRAGE",
+            }
+        )
 
         scheduler.current_hour = 0
         scheduler.strategic_intents = strategic_intents
@@ -506,11 +532,13 @@ class TestMidHourScheduleUpdate:
         """
         # Simulate a schedule where ALL 4 periods of hour 0 should be GRID_CHARGING
         # This is what we'd expect from a full-day optimization at 00:00
-        full_hour_intents = hourly_to_quarterly({
-            0: "GRID_CHARGING",
-            1: "GRID_CHARGING",
-            2: "GRID_CHARGING",
-        })
+        full_hour_intents = hourly_to_quarterly(
+            {
+                0: "GRID_CHARGING",
+                1: "GRID_CHARGING",
+                2: "GRID_CHARGING",
+            }
+        )
 
         # Apply initial schedule at hour 0
         scheduler.current_hour = 0
@@ -518,7 +546,9 @@ class TestMidHourScheduleUpdate:
         scheduler._consolidate_and_convert_with_strategic_intents()
 
         # Verify hour 0 is configured for charging
-        assert scheduler.is_hour_configured_for_charging(0), "Hour 0 should initially be charging"
+        assert scheduler.is_hour_configured_for_charging(
+            0
+        ), "Hour 0 should initially be charging"
 
         # Now simulate what happens at period 3 (00:45)
         # The BUG: past periods (0,1,2) get marked as IDLE, flipping the majority
@@ -540,17 +570,16 @@ class TestMidHourScheduleUpdate:
         scheduler._consolidate_and_convert_with_strategic_intents()
 
         # Hour 0 should STILL be configured for charging
-        assert scheduler.is_hour_configured_for_charging(0), \
-            "Hour 0 should remain charging after mid-hour update"
+        assert scheduler.is_hour_configured_for_charging(
+            0
+        ), "Hour 0 should remain charging after mid-hour update"
 
-    def test_partial_hour_intents_use_priority_tiebreak(self, scheduler):
-        """Test that partial hour with 2 IDLE + 2 GRID_CHARGING uses priority tiebreak.
+    def test_partial_hour_charging_periods_create_tou_segment(self, scheduler):
+        """Test that GRID_CHARGING periods within an hour create a TOU segment.
 
-        When updating at :30 (period 2), we have:
-        - Periods 0,1 = IDLE (past, defaulted)
-        - Periods 2,3 = GRID_CHARGING (from optimization)
-
-        With tie (2-2), GRID_CHARGING should win due to higher priority.
+        With 15-min resolution, periods 2-3 (00:30-00:59) being GRID_CHARGING
+        creates a TOU segment that covers those periods, making the hour
+        configured for charging.
         """
         # 2 IDLE + 2 GRID_CHARGING in hour 0
         mixed_intents = ["IDLE"] * 96
@@ -563,29 +592,32 @@ class TestMidHourScheduleUpdate:
         scheduler.strategic_intents = mixed_intents
         scheduler._consolidate_and_convert_with_strategic_intents()
 
-        # With tie-breaking priority, GRID_CHARGING (priority 4) beats IDLE (priority 0)
-        assert scheduler.is_hour_configured_for_charging(0), \
-            "Hour 0 should be charging when tie-break favors GRID_CHARGING"
+        # 15-min resolution creates TOU segment for GRID_CHARGING periods
+        assert scheduler.is_hour_configured_for_charging(
+            0
+        ), "Hour 0 should be charging due to GRID_CHARGING periods 2-3"
 
-    def test_majority_idle_does_flip_intent(self, scheduler):
-        """Test that majority IDLE does correctly flip intent (expected behavior).
+    def test_single_strategic_period_preserved(self, scheduler):
+        """Test that 15-min resolution preserves individual strategic periods.
 
-        When 3 of 4 periods are IDLE, the hour should correctly become IDLE.
-        This is the expected behavior - we just need to ensure past periods
-        aren't incorrectly marked as IDLE when they had active intents.
+        With 15-minute resolution, even a single GRID_CHARGING period should
+        create a TOU segment. This prevents the "charging gaps" that occurred
+        with hourly majority voting where minority intents were lost.
         """
-        # 3 IDLE + 1 GRID_CHARGING - majority IDLE
+        # 95 IDLE + 1 GRID_CHARGING - single period preserved
         mostly_idle = ["IDLE"] * 96
-        mostly_idle[3] = "GRID_CHARGING"  # Only period 3
+        mostly_idle[3] = "GRID_CHARGING"  # Only period 3 (00:45-00:59)
 
         scheduler.current_hour = 0
         scheduler.strategic_intents = mostly_idle
         scheduler._consolidate_and_convert_with_strategic_intents()
 
-        # With 3 IDLE vs 1 GRID_CHARGING, hour 0 should be IDLE (load_first)
+        # With 15-min resolution, the single GRID_CHARGING period creates a TOU segment
+        # This is the key improvement over hourly majority voting
         mode = scheduler.get_hour_battery_mode(0)
-        assert mode == "load_first", \
-            f"Hour 0 should be load_first when majority is IDLE, got {mode}"
+        assert (
+            mode == "battery_first"
+        ), f"Hour 0 should be battery_first due to preserved GRID_CHARGING period, got {mode}"
 
 
 class TestScheduleIntegrity:
@@ -606,10 +638,12 @@ class TestScheduleIntegrity:
         ), "Morning schedule should enable charging at 10"
 
         # Afternoon update (simulating new price data)
-        afternoon_intents = hourly_to_quarterly({
-            10: "GRID_CHARGING",
-            20: "EXPORT_ARBITRAGE",
-        })
+        afternoon_intents = hourly_to_quarterly(
+            {
+                10: "GRID_CHARGING",
+                20: "EXPORT_ARBITRAGE",
+            }
+        )
 
         scheduler.current_hour = 15  # Afternoon update
         scheduler.strategic_intents = afternoon_intents
@@ -633,16 +667,18 @@ class TestScheduleIntegrity:
 
     def test_extreme_fragmentation_scenario(self, scheduler):
         """Test extreme case with many scattered strategic periods."""
-        strategic_intents = hourly_to_quarterly({
-            2: "GRID_CHARGING",
-            5: "GRID_CHARGING",
-            8: "GRID_CHARGING",
-            11: "GRID_CHARGING",
-            14: "EXPORT_ARBITRAGE",
-            17: "EXPORT_ARBITRAGE",
-            20: "EXPORT_ARBITRAGE",
-            23: "EXPORT_ARBITRAGE",
-        })
+        strategic_intents = hourly_to_quarterly(
+            {
+                2: "GRID_CHARGING",
+                5: "GRID_CHARGING",
+                8: "GRID_CHARGING",
+                11: "GRID_CHARGING",
+                14: "EXPORT_ARBITRAGE",
+                17: "EXPORT_ARBITRAGE",
+                20: "EXPORT_ARBITRAGE",
+                23: "EXPORT_ARBITRAGE",
+            }
+        )
 
         scheduler.current_hour = 0
         scheduler.strategic_intents = strategic_intents

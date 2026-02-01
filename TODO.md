@@ -197,6 +197,27 @@ But at noon every day we get tomorrows schedule. We could use this information t
 - Check if all sensors in config.yaml are actually needed and used (lifetime e.g.)
 - Fix dark mode button
 
+**TOU Segment Matching is Fragile**:
+The current TOU comparison uses exact matching on start_time, end_time, batt_mode. If a segment shifts by 15 minutes (e.g., 00:00-00:59 → 00:15-01:14), it's seen as completely different, resulting in 2 hardware writes (disable old + add new) instead of 1 update. Consider:
+
+- Overlap-based matching: If segments overlap significantly and have same mode, treat as "same"
+- Smart merging: Detect when segments can be extended/shortened rather than replaced
+
+**Remove Hourly Aggregation Legacy**:
+With 15-min TOU resolution implemented, the hourly aggregation code is now legacy. Power rates are already set per-period in `_apply_period_settings()`. The following should be refactored or removed:
+
+- `_calculate_hourly_settings_with_strategic_intents()` - aggregates 15-min periods back to hourly
+- `get_hourly_settings()` - returns hourly settings (used by power monitor and display)
+- `_get_hourly_intent()` - majority voting for hourly intent (no longer needed for TOU)
+- `hourly_settings` dict - stores the aggregated hourly data
+
+To remove:
+
+1. Update `adjust_charging_power()` in `battery_system_manager.py` to use period-based settings
+2. Update schedule display table to show 15-min periods (or keep hourly summary for readability)
+3. Update `get_strategic_intent_summary()` to work directly with periods
+4. Remove the hourly aggregation methods listed above
+
 **Sensor Collector InfluxDB Usage**:
 Based on the code analysis: The function `_get_hour_readings` in SensorCollector is called by `collect_energy_data(hour)`. This is not called every hour automatically by the system; it is called when the system wants to collect and record data for a specific hour. The actual historical data for the dashboard is served from the HistoricalDataStore, which is an in-memory store populated by calls to `record_energy_data` (which uses the output of `collect_energy_data`).
 

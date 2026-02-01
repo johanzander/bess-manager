@@ -389,7 +389,11 @@ class BatterySystemManager:
                 optimization_period=optimization_period,
                 daily_view=daily_view,
                 growatt_schedule=growatt_schedule,
-                predicted_daily_savings=optimization_result.economic_summary.grid_to_battery_solar_savings if optimization_result.economic_summary else 0.0,
+                predicted_daily_savings=(
+                    optimization_result.economic_summary.grid_to_battery_solar_savings
+                    if optimization_result.economic_summary
+                    else 0.0
+                ),
             )
 
             logger.debug(
@@ -1069,7 +1073,8 @@ class BatterySystemManager:
             # Log the corrected SOE progression
             logger.info("CORRECTED SOE progression:")
             for p in range(
-                max(0, optimization_period - 1), min(num_periods, optimization_period + 4)
+                max(0, optimization_period - 1),
+                min(num_periods, optimization_period + 4),
             ):
                 soc_percent = (
                     combined_soe[p] / self.battery_settings.total_capacity
@@ -1091,7 +1096,9 @@ class BatterySystemManager:
                 and len(self._schedule_manager.strategic_intents) >= optimization_period
             ):
                 # Preserve previous intents for past periods
-                full_day_strategic_intents = self._schedule_manager.strategic_intents.copy()
+                full_day_strategic_intents = (
+                    self._schedule_manager.strategic_intents.copy()
+                )
                 logger.debug(
                     f"Preserving {optimization_period} past strategic intents from previous schedule"
                 )
@@ -1109,9 +1116,9 @@ class BatterySystemManager:
             for i, period_data in enumerate(period_data_list):
                 target_period = optimization_period + i
                 if target_period < len(full_day_strategic_intents):
-                    full_day_strategic_intents[target_period] = (
-                        period_data.decision.strategic_intent
-                    )
+                    full_day_strategic_intents[
+                        target_period
+                    ] = period_data.decision.strategic_intent
 
             # Store initial SOC in OptimizationResult for DailyViewBuilder
             if self._initial_soe is not None:
@@ -1214,7 +1221,7 @@ class BatterySystemManager:
         if prepare_next_day:
             # Compare full day TOU settings for tomorrow (from start of day)
             schedules_differ, reason = self._schedule_manager.compare_schedules(
-                other_schedule=temp_growatt, from_hour=0
+                other_schedule=temp_growatt, from_period=0
             )
 
             logger.info(
@@ -1226,10 +1233,9 @@ class BatterySystemManager:
 
         # Normal case: compare TOU settings from current period onwards
         try:
-            # Convert period to hour for Growatt TOU comparison (hardware operates hourly)
-            from_hour = period // 4
+            # Use period directly for 15-min granularity comparison
             schedules_differ, reason = self._schedule_manager.compare_schedules(
-                other_schedule=temp_growatt, from_hour=from_hour
+                other_schedule=temp_growatt, from_period=period
             )
 
             if schedules_differ:
@@ -1285,16 +1291,28 @@ class BatterySystemManager:
             )
 
             effective_period = 0 if prepare_next_day else period
-            effective_hour = effective_period // 4
+            effective_minute = effective_period * 15
+
+            # Helper functions for minute-level time calculations
+            def start_minute(interval: dict) -> int:
+                """Get start time as minutes since midnight."""
+                parts = interval["start_time"].split(":")
+                return int(parts[0]) * 60 + int(parts[1])
+
+            def end_minute(interval: dict) -> int:
+                """Get end time as minutes since midnight."""
+                parts = interval["end_time"].split(":")
+                return int(parts[0]) * 60 + int(parts[1])
 
             # Find segments to disable and update
             to_disable = []
             to_update = []
 
             logger.info(
-                "Analyzing TOU changes from period %d (hour %02d) onwards...",
+                "Analyzing TOU changes from period %d (%02d:%02d) onwards...",
                 effective_period,
-                effective_hour,
+                effective_period // 4,
+                (effective_period % 4) * 15,
             )
 
             # CRITICAL FIX: When new schedule is empty, disable ALL current TOU segments
@@ -1329,14 +1347,9 @@ class BatterySystemManager:
                 logger.info("Total segments marked for clearing: %d", len(to_disable))
             else:
                 # Normal case: differential update (only update future segments)
-                # Identify segments to disable
+                # Identify segments to disable (segments ending at or after effective_minute)
                 for current in current_tou:
-                    start_time_parts = current["start_time"].split(":")
-                    start_hour = int(start_time_parts[0])
-                    if (
-                        start_hour >= effective_hour
-                        or int(current["end_time"].split(":")[0]) >= effective_hour
-                    ):
+                    if end_minute(current) >= effective_minute:
                         has_match = any(
                             segment["start_time"] == current["start_time"]
                             and segment["end_time"] == current["end_time"]
@@ -1356,13 +1369,9 @@ class BatterySystemManager:
                                 current["batt_mode"],
                             )
 
-            # Identify segments to add/update
+            # Identify segments to add/update (segments ending at or after effective_minute)
             for segment in new_tou:
-                start_hour = int(segment["start_time"].split(":")[0])
-                if (
-                    start_hour >= effective_hour
-                    or int(segment["end_time"].split(":")[0]) >= effective_hour
-                ):
+                if end_minute(segment) >= effective_minute:
                     existing_match = any(
                         current["start_time"] == segment["start_time"]
                         and current["end_time"] == segment["end_time"]
@@ -1380,10 +1389,10 @@ class BatterySystemManager:
                             segment["batt_mode"],
                         )
 
-            # Check for overlaps and add to disable list
+            # Check for overlaps and add to disable list (using minute-level precision)
             for update_segment in to_update:
-                update_start = int(update_segment["start_time"].split(":")[0])
-                update_end = int(update_segment["end_time"].split(":")[0])
+                update_start = start_minute(update_segment)
+                update_end = end_minute(update_segment)
 
                 for current_segment in current_tou:
                     if any(
@@ -1394,9 +1403,10 @@ class BatterySystemManager:
                     if not current_segment.get("enabled", True):
                         continue
 
-                    current_start = int(current_segment["start_time"].split(":")[0])
-                    current_end = int(current_segment["end_time"].split(":")[0])
+                    current_start = start_minute(current_segment)
+                    current_end = end_minute(current_segment)
 
+                    # Check for time overlap
                     if update_start <= current_end and update_end >= current_start:
                         if not any(
                             d.get("segment_id") == current_segment.get("segment_id")

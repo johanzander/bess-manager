@@ -89,16 +89,17 @@ class GrowattScheduleManager:
     - IDLE → load_first (normal operation)
     """
 
-    # Priority for tie-breaking only (when 2 intents each have 2 periods in an hour)
-    # With proper DP economics-based decisions, ties should be rare (all 4 periods
-    # in an hour typically have the same intent). When ties occur, prefer action over
-    # inaction. The specific ordering within "action" intents doesn't matter much.
-    INTENT_PRIORITY: ClassVar[dict[str, int]] = {
-        "GRID_CHARGING": 4,
-        "EXPORT_ARBITRAGE": 3,
-        "LOAD_SUPPORT": 2,
-        "SOLAR_STORAGE": 1,
-        "IDLE": 0,  # Lowest - prefer any action over inaction
+    # Map strategic intents to Growatt battery modes.
+    # This determines which mode each intent triggers on the inverter.
+    # - battery_first: Grid powers home, battery preserved (or charged if AC charge enabled)
+    # - load_first: Battery discharges to support home load (inverter default behavior)
+    # - grid_first: Priority to export to grid
+    INTENT_TO_MODE: ClassVar[dict[str, str]] = {
+        "GRID_CHARGING": "battery_first",  # Enable AC charging for arbitrage
+        "SOLAR_STORAGE": "battery_first",  # Priority to battery charging from solar
+        "LOAD_SUPPORT": "load_first",  # Priority to battery discharge for load
+        "EXPORT_ARBITRAGE": "grid_first",  # Priority to grid export for profit
+        "IDLE": "load_first",  # Normal operation, allows battery discharge
     }
 
     def __init__(self, battery_settings: BatterySettings) -> None:
@@ -165,25 +166,16 @@ class GrowattScheduleManager:
     def _get_hourly_intent(self, hour: int) -> str:
         """Get dominant strategic intent for an hour by aggregating 4 quarterly periods.
 
-        This method converts quarterly strategic intents (96 periods, 15-min intervals)
-        into hourly strategic intents (24 hours) using majority rule with priority-based
-        tie-breaking.
+        LEGACY: This method is only used for hourly power rate display/logging.
+        With 15-min TOU resolution, actual battery mode control is done by TOU
+        segments via _group_periods_by_mode(). This method should be removed
+        once hourly aggregation is fully deprecated (see TODO.md).
 
         Args:
             hour: Hour (0-23) to get intent for
 
         Returns:
-            Dominant strategic intent for this hour
-
-        Logic:
-        - Each hour has 4 quarterly periods (15-minute intervals)
-        - Use most common intent in the 4 periods (majority rule)
-        - If tie, use INTENT_PRIORITY for tie-breaking (action > inaction)
-
-        Example:
-            Hour 5 has periods 20-23 with intents [IDLE, GRID_CHARGING, GRID_CHARGING, IDLE]
-            Count: GRID_CHARGING=2, IDLE=2 (tie)
-            Result: GRID_CHARGING (priority 5 > 1)
+            Dominant strategic intent for this hour (most common, alphabetical tie-break)
         """
         if not self.strategic_intents:
             raise ValueError("No strategic intents available")
@@ -198,14 +190,273 @@ class GrowattScheduleManager:
         ]
 
         # Count occurrences of each intent
-        intent_counts = {}
+        intent_counts: dict[str, int] = {}
         for intent in period_intents:
             intent_counts[intent] = intent_counts.get(intent, 0) + 1
 
-        # Find dominant intent (most common, tie-break by priority)
+        # Find dominant intent (most common, alphabetical tie-break)
         max_count = max(intent_counts.values())
         candidates = [i for i, c in intent_counts.items() if c == max_count]
-        return max(candidates, key=lambda x: self.INTENT_PRIORITY.get(x, 0))
+        return min(candidates)  # Alphabetical: deterministic tie-break
+
+    def _group_periods_by_mode(self, start_period: int = 0) -> list[dict]:
+        """Group consecutive 15-min periods by their battery mode.
+
+        This is the core of the new 15-minute resolution TOU scheduling.
+        Instead of aggregating to hours, we work directly with periods.
+
+        Args:
+            start_period: Period to start from (0-95), typically current_period
+
+        Returns:
+            List of period groups:
+            [
+                {
+                    'mode': 'battery_first'|'grid_first'|'load_first',
+                    'start_period': int,
+                    'end_period': int (inclusive),
+                    'intents': list[str],  # Original intents for debugging
+                },
+                ...
+            ]
+        """
+        if not self.strategic_intents:
+            return []
+
+        groups = []
+        current_mode = None
+        group_start = None
+        group_intents = []
+
+        num_periods = len(self.strategic_intents)
+
+        for period in range(start_period, num_periods):
+            intent = self.strategic_intents[period]
+            mode = self.INTENT_TO_MODE.get(intent, "load_first")
+
+            if mode != current_mode:
+                # Save previous group if exists
+                if current_mode is not None:
+                    groups.append(
+                        {
+                            "mode": current_mode,
+                            "start_period": group_start,
+                            "end_period": period - 1,
+                            "intents": group_intents,
+                        }
+                    )
+
+                # Start new group
+                current_mode = mode
+                group_start = period
+                group_intents = [intent]
+            else:
+                group_intents.append(intent)
+
+        # Add final group
+        if current_mode is not None and group_start is not None:
+            groups.append(
+                {
+                    "mode": current_mode,
+                    "start_period": group_start,
+                    "end_period": num_periods - 1,
+                    "intents": group_intents,
+                }
+            )
+
+        return groups
+
+    def _period_to_time(self, period: int) -> tuple[int, int]:
+        """Convert period number to hour and minute.
+
+        Note: During DST transitions, the number of periods varies:
+        - Normal day: 96 periods (24 hours)
+        - Spring forward: 92 periods (23 hours)
+        - Fall back: 100 periods (25 hours)
+
+        For periods >= 96 (fall-back extra hour), hour will be >= 24.
+        Callers must handle this (e.g., cap to 23:59 for TOU schedules).
+
+        Args:
+            period: Period number (0-95 normally, 0-99 during fall-back)
+
+        Returns:
+            Tuple of (hour, minute) - hour may exceed 23 during DST fall-back
+        """
+        hour = period // 4
+        minute = (period % 4) * 15
+        return hour, minute
+
+    def _groups_to_tou_intervals(self, groups: list[dict]) -> list[dict]:
+        """Convert period groups to Growatt TOU intervals.
+
+        Only creates intervals for non-default modes (battery_first, grid_first).
+        load_first is the inverter default and doesn't need explicit TOU segments.
+
+        Args:
+            groups: List of period groups from _group_periods_by_mode()
+
+        Returns:
+            List of TOU intervals ready for Growatt
+        """
+        intervals = []
+        segment_id = 1
+
+        for group in groups:
+            # Skip load_first - it's the inverter default
+            if group["mode"] == "load_first":
+                continue
+
+            start_hour, start_minute = self._period_to_time(group["start_period"])
+            end_hour, end_minute = self._period_to_time(group["end_period"])
+            # End minute should be the last minute of the period (14, 29, 44, or 59)
+            end_minute = end_minute + 14
+
+            # Handle DST fall-back: periods >= 96 produce hour >= 24
+            # Skip segments that start beyond 23:59 (can't represent in TOU)
+            if start_hour >= 24:
+                logger.warning(
+                    "Skipping DST fall-back segment starting at hour %d (beyond 23:59)",
+                    start_hour,
+                )
+                continue
+
+            # Cap end time to 23:59
+            if end_hour >= 24:
+                end_hour = 23
+                end_minute = 59
+
+            # Summarize intents for logging
+            intent_counts: dict[str, int] = {}
+            for intent in group["intents"]:
+                intent_counts[intent] = intent_counts.get(intent, 0) + 1
+            intent_summary = ", ".join(
+                f"{intent}({count})"
+                for intent, count in sorted(intent_counts.items(), key=lambda x: -x[1])
+            )
+
+            interval = {
+                "segment_id": segment_id,
+                "batt_mode": group["mode"],
+                "start_time": f"{start_hour:02d}:{start_minute:02d}",
+                "end_time": f"{end_hour:02d}:{end_minute:02d}",
+                "enabled": True,
+                "strategic_intent": intent_summary,
+            }
+            intervals.append(interval)
+            segment_id += 1
+
+            logger.info(
+                "TOU segment #%d: %s-%s (%s) from %d periods: %s",
+                interval["segment_id"],
+                interval["start_time"],
+                interval["end_time"],
+                interval["batt_mode"],
+                len(group["intents"]),
+                intent_summary,
+            )
+
+        return intervals
+
+    def _enforce_segment_limit(self, intervals: list[dict]) -> list[dict]:
+        """Enforce the 9 TOU segment limit by dropping shortest segments.
+
+        Growatt inverters support a maximum of 9 TOU segments. When 15-minute
+        resolution creates more segments, we must drop some.
+
+        Strategy: Keep longest segments (duration-based priority)
+        ----------------------------------------------------------
+        Rationale: Longer segments represent more sustained battery actions
+        and typically have greater economic impact. Short segments often
+        arise from transient price fluctuations.
+
+        Alternative strategies considered:
+        - Mode priority (GRID_CHARGING > EXPORT_ARBITRAGE > others): Would
+          preserve arbitrage opportunities but might drop long idle periods
+          that are actually important for battery preservation.
+        - Chronological (keep earliest): Simple but ignores segment importance.
+        - Economic value: Would require price data access at this layer.
+
+        The duration-based approach balances simplicity with effectiveness.
+        In practice, hitting the 9-segment limit is rare with typical price
+        patterns (usually 3-6 mode transitions per day).
+
+        Args:
+            intervals: List of TOU intervals (may exceed max_intervals)
+
+        Returns:
+            List of TOU intervals, capped at max_intervals (9)
+        """
+        if len(intervals) <= self.max_intervals:
+            return intervals
+
+        logger.warning(
+            "TOU SEGMENT LIMIT EXCEEDED: %d segments generated, maximum is %d",
+            len(intervals),
+            self.max_intervals,
+        )
+
+        def get_duration_minutes(interval: dict) -> int:
+            start_parts = interval["start_time"].split(":")
+            end_parts = interval["end_time"].split(":")
+            start_mins = int(start_parts[0]) * 60 + int(start_parts[1])
+            end_mins = int(end_parts[0]) * 60 + int(end_parts[1])
+            return end_mins - start_mins + 1
+
+        # Calculate durations without mutating input (use separate mapping)
+        durations: dict[int, int] = {}
+        for idx, interval in enumerate(intervals):
+            durations[idx] = get_duration_minutes(interval)
+
+        # Sort indices by duration descending
+        sorted_indices = sorted(
+            range(len(intervals)), key=lambda i: durations[i], reverse=True
+        )
+
+        kept_indices = sorted_indices[: self.max_intervals]
+        dropped_indices = sorted_indices[self.max_intervals :]
+
+        # Log summary
+        total_dropped_minutes = sum(durations[i] for i in dropped_indices)
+        logger.warning(
+            "Dropping %d segments (%d minutes total) using duration-based priority",
+            len(dropped_indices),
+            total_dropped_minutes,
+        )
+
+        # Log each dropped segment with details
+        for idx in dropped_indices:
+            interval = intervals[idx]
+            logger.warning(
+                "  DROPPED: %s-%s (%s) - %d minutes - intents: %s",
+                interval["start_time"],
+                interval["end_time"],
+                interval["batt_mode"],
+                durations[idx],
+                interval.get("strategic_intent", "unknown"),
+            )
+
+        # Log what we're keeping
+        logger.info("Keeping %d segments:", len(kept_indices))
+        for idx in kept_indices:
+            interval = intervals[idx]
+            logger.info(
+                "  KEPT: %s-%s (%s) - %d minutes",
+                interval["start_time"],
+                interval["end_time"],
+                interval["batt_mode"],
+                durations[idx],
+            )
+
+        # Build result list sorted by start time
+        kept = [intervals[i] for i in kept_indices]
+        kept.sort(key=lambda x: x["start_time"])
+
+        # Reassign segment IDs in chronological order
+        for i, interval in enumerate(kept, 1):
+            interval["segment_id"] = i
+
+        return kept
 
     def _calculate_hourly_settings_with_strategic_intents(self):
         """Pre-calculate hourly settings using strategic intents and proper power rates.
@@ -245,9 +496,10 @@ class GrowattScheduleManager:
                         battery_action += self.current_schedule.actions[period]
 
             # Calculate power rates from battery action
-            charge_power_rate, discharge_power_rate = (
-                self._calculate_power_rates_from_action(battery_action, intent)
-            )
+            (
+                charge_power_rate,
+                discharge_power_rate,
+            ) = self._calculate_power_rates_from_action(battery_action, intent)
 
             # Determine settings based on strategic intent
             if intent == "GRID_CHARGING":
@@ -283,7 +535,7 @@ class GrowattScheduleManager:
                 discharge_rate = 0
                 charge_rate = 100
                 state = "idle"
-                batt_mode = "load_first"
+                batt_mode = self.INTENT_TO_MODE["IDLE"]
             else:
                 raise ValueError(f"Unknown strategic intent at hour {hour}: {intent}")
 
@@ -341,8 +593,17 @@ class GrowattScheduleManager:
         )
 
     def _consolidate_and_convert_with_strategic_intents(self):
-        """Convert strategic intents to TOU intervals."""
+        """Convert strategic intents to TOU intervals using 15-minute resolution.
 
+        This method works directly with 15-minute periods instead of aggregating
+        to hourly intervals. This eliminates the "gap problem" where majority
+        voting created holes in charging schedules.
+
+        Algorithm:
+        1. Group consecutive 15-min periods by their mapped battery mode
+        2. Create TOU intervals for non-default (battery_first, grid_first) groups
+        3. Enforce 9-segment limit if needed
+        """
         if not self.strategic_intents:
             logger.warning(
                 "No strategic intents available, falling back to action-based analysis"
@@ -350,58 +611,56 @@ class GrowattScheduleManager:
             self._consolidate_and_convert_fallback()
             return
 
+        # Calculate current period from current hour
+        current_period = self.current_hour * 4
+
         logger.info(
-            "Converting %d strategic intents to TOU intervals from hour %d",
+            "Converting %d strategic intents to TOU intervals from period %d (hour %d) "
+            "using 15-minute resolution",
             len(self.strategic_intents),
+            current_period,
             self.current_hour,
         )
 
-        # Map strategic intents to battery modes
-        intent_to_mode = {
-            "GRID_CHARGING": "battery_first",  # Enable AC charging for arbitrage
-            "SOLAR_STORAGE": "battery_first",  # Priority to battery charging from solar
-            "LOAD_SUPPORT": "load_first",  # Priority to battery discharge for load
-            "EXPORT_ARBITRAGE": "grid_first",  # Priority to grid export for profit
-            "IDLE": "load_first",  # Normal load_first operation
-        }
+        # Log the intent-to-mode mapping being used
+        logger.info("Intent to mode mapping: %s", self.INTENT_TO_MODE)
 
-        # Initialize new TOU intervals - preserve past intervals unless corrupted
+        # Check for corrupted existing intervals
         old_intervals = getattr(self, "tou_intervals", []).copy()
-
-        # RECOVERY: Check if existing intervals are corrupted and need clearing
         if old_intervals:
             intervals_valid = self.validate_tou_intervals_ordering(
                 old_intervals, "before_strategic_intent_conversion"
             )
-
             if not intervals_valid:
                 logger.warning(
-                    "🔄 TOU RECOVERY: Existing intervals are corrupted, clearing and rebuilding with strategic intents"
+                    "🔄 TOU RECOVERY: Existing intervals are corrupted, clearing and rebuilding"
                 )
-                logger.warning("Corrupted intervals being cleared:")
                 for interval in old_intervals:
                     logger.warning(
-                        f"  Segment {interval.get('segment_id', '?')}: {interval.get('start_time', '?')}-{interval.get('end_time', '?')} {interval.get('batt_mode', '?')} {'(enabled)' if interval.get('enabled') else '(disabled)'}"
+                        "  Corrupted: Segment %s: %s-%s %s",
+                        interval.get("segment_id", "?"),
+                        interval.get("start_time", "?"),
+                        interval.get("end_time", "?"),
+                        interval.get("batt_mode", "?"),
                     )
-                # Clear corrupted intervals - we have strategic intents to rebuild properly
                 old_intervals = []
-                # CRITICAL: Set flag to force hardware write since corruption was detected
-                # Even if comparison shows no difference, we need to clear hardware
                 self.corruption_detected = True
                 logger.warning(
-                    "⚠️  CORRUPTION FLAG SET - Hardware write will be FORCED to clear corrupted intervals"
-                )
-                logger.info(
-                    "✅ Corrupted intervals cleared, rebuilding from strategic intents"
+                    "⚠️  CORRUPTION FLAG SET - Hardware write will be FORCED"
                 )
 
+        # Start fresh
         self.tou_intervals = []
 
-        # Copy past intervals (completely in the past)
+        # Copy past intervals (completely in the past) - preserve history
         past_intervals_copied = 0
         for interval in old_intervals:
-            end_hour = int(interval["end_time"].split(":")[0])
-            if end_hour < self.current_hour and interval["enabled"]:
+            end_parts = interval["end_time"].split(":")
+            end_hour = int(end_parts[0])
+            end_minute = int(end_parts[1])
+            end_period = end_hour * 4 + (end_minute // 15)
+
+            if end_period < current_period and interval.get("enabled", True):
                 logger.debug(
                     "Keeping past interval: %s-%s",
                     interval["start_time"],
@@ -412,118 +671,50 @@ class GrowattScheduleManager:
 
         logger.info("Copied %d past intervals", past_intervals_copied)
 
-        # Group consecutive hours by battery mode
-        mode_periods = []
-        current_mode = None
-        current_period_start = None
-
-        for hour in range(self.current_hour, 24):
-            # Get dominant strategic intent for this hour (aggregates 4 quarterly periods)
-            intent = self._get_hourly_intent(hour)
-            hour_mode = intent_to_mode.get(intent, "load_first")
-
-            # Log quarterly details for debugging
-            start_period = hour * 4
-            end_period = min(start_period + 4, len(self.strategic_intents))
-            period_intents = [
-                self.strategic_intents[p] for p in range(start_period, end_period)
-            ]
-
-            logger.debug(
-                "Hour %02d (periods %d-%d): intents=%s → dominant=%s → mode=%s",
-                hour,
-                start_period,
-                end_period - 1,
-                period_intents,
-                intent,
-                hour_mode,
-            )
-
-            if hour_mode != current_mode:
-                # Save previous period if exists
-                if current_mode is not None and current_period_start is not None:
-                    mode_periods.append(
-                        {
-                            "mode": current_mode,
-                            "start_hour": current_period_start,
-                            "end_hour": hour - 1,
-                            "intent_summary": self._get_period_intent_summary(
-                                current_period_start, hour - 1
-                            ),
-                        }
-                    )
-
-                # Start new period
-                current_mode = hour_mode
-                current_period_start = hour
-
-        # Add final period
-        if current_mode is not None and current_period_start is not None:
-            mode_periods.append(
-                {
-                    "mode": current_mode,
-                    "start_hour": current_period_start,
-                    "end_hour": 23,
-                    "intent_summary": self._get_period_intent_summary(
-                        current_period_start, 23
-                    ),
-                }
-            )
-
-        logger.info("Strategic intent-based mode periods: %s", mode_periods)
-
-        # Create TOU intervals for non-load_first modes only (without segment IDs yet)
-        for period in mode_periods:
-            if period["mode"] in ["battery_first", "grid_first"]:
-                start_time = f"{period['start_hour']:02d}:00"
-                end_time = f"{period['end_hour']:02d}:59"
-
-                self.tou_intervals.append(
-                    {
-                        "segment_id": None,  # Will assign chronologically later
-                        "batt_mode": period["mode"],
-                        "start_time": start_time,
-                        "end_time": end_time,
-                        "enabled": True,
-                        "strategic_intent": period["intent_summary"],
-                        "start_hour": period["start_hour"],  # For sorting
-                    }
-                )
-
-        # CRITICAL: Sort all intervals by start time to ensure chronological order
-        # Extract start_hour from start_time for intervals that don't have it (past intervals)
-        for interval in self.tou_intervals:
-            if "start_hour" not in interval:
-                interval["start_hour"] = int(interval["start_time"].split(":")[0])
-
-        self.tou_intervals.sort(key=lambda interval: interval["start_hour"])
-
-        # Reassign sequential segment IDs in chronological order
-        for i, interval in enumerate(self.tou_intervals, 1):
-            interval["segment_id"] = i
-            # Remove the temporary sort key
-            interval.pop("start_hour", None)
-
-            logger.info(
-                "TOU segment #%d: %s-%s (%s) based on strategic intents: %s",
-                interval["segment_id"],
-                interval["start_time"],
-                interval["end_time"],
-                interval["batt_mode"],
-                interval["strategic_intent"],
-            )
-
-        # Apply max intervals limit
-        if len(self.tou_intervals) > self.max_intervals:
-            logger.warning(
-                "Too many TOU intervals (%d), truncating to maximum (%d)",
-                len(self.tou_intervals),
-                self.max_intervals,
-            )
-            self.tou_intervals = self.tou_intervals[: self.max_intervals]
+        # Group consecutive periods by mode (the core new algorithm)
+        period_groups = self._group_periods_by_mode(current_period)
 
         logger.info(
-            "TOU conversion complete: %d total intervals", len(self.tou_intervals)
+            "Grouped %d periods into %d mode groups",
+            len(self.strategic_intents) - current_period,
+            len(period_groups),
+        )
+
+        # Log the groups for debugging
+        for group in period_groups:
+            start_h, start_m = self._period_to_time(group["start_period"])
+            end_h, end_m = self._period_to_time(group["end_period"])
+            end_m += 14  # Show actual end minute
+            logger.debug(
+                "Mode group: %s from %02d:%02d to %02d:%02d (%d periods)",
+                group["mode"],
+                start_h,
+                start_m,
+                end_h,
+                end_m,
+                len(group["intents"]),
+            )
+
+        # Convert groups to TOU intervals
+        new_intervals = self._groups_to_tou_intervals(period_groups)
+
+        # Add new intervals to the list
+        self.tou_intervals.extend(new_intervals)
+
+        # Sort by start time to ensure chronological order
+        self.tou_intervals.sort(key=lambda x: x["start_time"])
+
+        # Reassign segment IDs in chronological order
+        for i, interval in enumerate(self.tou_intervals, 1):
+            interval["segment_id"] = i
+
+        # Enforce segment limit if needed
+        if len(self.tou_intervals) > self.max_intervals:
+            self.tou_intervals = self._enforce_segment_limit(self.tou_intervals)
+
+        logger.info(
+            "TOU conversion complete: %d total intervals (15-min resolution)",
+            len(self.tou_intervals),
         )
 
     def _get_period_intent_summary(self, start_hour: int, end_hour: int) -> str:
@@ -672,9 +863,28 @@ class GrowattScheduleManager:
         }
         return descriptions.get(intent, "Unknown intent")
 
-    def compare_schedules(self, other_schedule, from_hour=0):
-        """Enhanced schedule comparison - TOU intervals only (what's actually in the inverter)."""
-        logger.info(f"Comparing TOU intervals from hour {from_hour:02d}:00 onwards")
+    def compare_schedules(self, other_schedule, from_period: int = 0):
+        """Compare TOU intervals from a specific period onwards.
+
+        Uses 15-minute period granularity to match TOU segment resolution.
+
+        Args:
+            other_schedule: The new schedule to compare against
+            from_period: Period number (0-95) to start comparison from
+
+        Returns:
+            Tuple of (schedules_differ: bool, reason: str)
+        """
+        from_minute = from_period * 15
+        from_hour = from_period // 4
+        from_min_in_hour = (from_period % 4) * 15
+
+        logger.info(
+            "Comparing TOU intervals from period %d (%02d:%02d) onwards",
+            from_period,
+            from_hour,
+            from_min_in_hour,
+        )
 
         # CRITICAL: If corruption was detected, force hardware write regardless of comparison
         if self.corruption_detected:
@@ -693,24 +903,23 @@ class GrowattScheduleManager:
         logger.info(f"Current schedule has {len(current_tou)} TOU intervals")
         logger.info(f"New schedule has {len(new_tou)} TOU intervals")
 
-        # Find relevant intervals (from current hour onwards)
+        def interval_end_minute(interval: dict) -> int:
+            """Get end time as minutes since midnight."""
+            parts = interval["end_time"].split(":")
+            return int(parts[0]) * 60 + int(parts[1])
+
+        # Find relevant intervals (ending at or after from_minute)
         relevant_current = []
         relevant_new = []
 
         for interval in current_tou:
-            start_hour = int(interval["start_time"].split(":")[0])
-            end_hour = int(interval["end_time"].split(":")[0])
-            if (start_hour >= from_hour or end_hour >= from_hour) and interval.get(
-                "enabled", True
-            ):
+            end_minute = interval_end_minute(interval)
+            if end_minute >= from_minute and interval.get("enabled", True):
                 relevant_current.append(interval)
 
         for interval in new_tou:
-            start_hour = int(interval["start_time"].split(":")[0])
-            end_hour = int(interval["end_time"].split(":")[0])
-            if (start_hour >= from_hour or end_hour >= from_hour) and interval.get(
-                "enabled", True
-            ):
+            end_minute = interval_end_minute(interval)
+            if end_minute >= from_minute and interval.get("enabled", True):
                 relevant_new.append(interval)
 
         logger.info(

@@ -67,10 +67,24 @@ interface ScheduleHour {
   batterySocEndFormatted?: string;
 }
 
+interface PeriodGroup {
+  startTime: string;
+  endTime: string;
+  mode: string;
+  dominantIntent: string;
+  intentCounts: Record<string, number>;
+  periodCount: number;
+  durationMinutes: number;
+  chargePowerRate: number;
+  dischargePowerRate: number;
+  gridCharge: boolean;
+}
+
 interface GrowattSchedule {
   currentHour: number;
   touIntervals: TOUInterval[];
   scheduleData: ScheduleHour[];
+  periodGroups: PeriodGroup[];
   batteryCapacity: number;
   lastUpdated: string;
 }
@@ -480,6 +494,27 @@ const InverterStatusDashboard: React.FC = () => {
   const currentHour = new Date().getHours();
   const currentHourData = getMergedHourData(currentHour);
 
+  // Find current period group from 15-minute resolution data
+  const getCurrentPeriodGroup = () => {
+    if (!growattSchedule?.periodGroups) return null;
+    const now = new Date();
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+
+    for (const group of growattSchedule.periodGroups) {
+      const [startH, startM] = group.startTime.split(':').map(Number);
+      const [endH, endM] = group.endTime.split(':').map(Number);
+      const groupStartMinutes = startH * 60 + startM;
+      const groupEndMinutes = endH * 60 + endM;
+
+      if (currentMinutes >= groupStartMinutes && currentMinutes <= groupEndMinutes) {
+        return group;
+      }
+    }
+    return null;
+  };
+
+  const currentPeriodGroup = getCurrentPeriodGroup();
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -549,18 +584,18 @@ const InverterStatusDashboard: React.FC = () => {
           icon={TrendingUp}
           color="green"
           keyMetric="Strategic Intent"
-          keyValue={currentHourData?.strategicIntent?.replace('_', ' ') || 'IDLE'}
+          keyValue={currentPeriodGroup?.dominantIntent?.replace(/_/g, ' ') || currentHourData?.strategicIntent?.replace('_', ' ') || 'IDLE'}
           keyUnit=""
           status={{
             icon: getValue(currentHourData?.batteryAction) ?
               (getValue(currentHourData?.batteryAction) > 0 ? TrendingUp : TrendingDown) : CheckCircle,
-            text: `Hour ${currentHourData?.hour || 0}:00`,
+            text: currentPeriodGroup ? `${currentPeriodGroup.startTime} - ${currentPeriodGroup.endTime}` : `Hour ${currentHourData?.hour || 0}:00`,
             color: 'blue'
           }}
           metrics={[
             {
               label: "Current Mode",
-              value: formatBatteryMode(currentBatteryMode),
+              value: formatBatteryMode(currentPeriodGroup?.mode || currentBatteryMode),
               unit: "",
               icon: Battery
             },
@@ -624,147 +659,113 @@ const InverterStatusDashboard: React.FC = () => {
         />
       </div>
 
-      {/* 24-Hour Schedule */}
+      {/* Period-Based Schedule (Grouped View) */}
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
         <div className="p-6">
           <div className="flex items-center mb-6">
             <Calendar className="h-5 w-5 text-blue-600 mr-2" />
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">24-Hour Schedule Overview</h3>
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Schedule Overview (15-min Resolution)</h3>
           </div>
-          
-          {growattSchedule?.scheduleData && dashboardData?.hourlyData ? (
+
+          {growattSchedule?.periodGroups && growattSchedule.periodGroups.length > 0 ? (
             <div className="overflow-x-auto bg-white dark:bg-gray-800 rounded-lg shadow">
               <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
                 <thead className="bg-gray-50 dark:bg-gray-700">
                   <tr>
-                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                       <div className="flex items-center">
                         <Clock className="h-4 w-4 mr-1" />
-                        Time
+                        Time Period
                       </div>
                     </th>
-                    <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider border-r border-gray-300 dark:border-gray-600" colSpan={3}>
-                      <div className="flex items-center justify-center">
-                        <TrendingUp className="h-4 w-4 mr-1" />
-                        Algorithm Strategy
-                      </div>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                      Duration
                     </th>
-                    <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider" colSpan={3}>
-                      <div className="flex items-center justify-center">
-                        <Settings className="h-4 w-4 mr-1" />
-                        Inverter Settings
-                      </div>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                      Battery Mode
                     </th>
-                  </tr>
-                  <tr className="bg-gray-50 dark:bg-gray-700">
-                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-400 dark:text-gray-400">Hour</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-400 dark:text-gray-400">Intent</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-400 dark:text-gray-400">Target SOC</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-400 dark:text-gray-400 border-r border-gray-300 dark:border-gray-600">Action</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-400 dark:text-gray-400">Mode</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-400 dark:text-gray-400">Power Rate</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-400 dark:text-gray-400">Grid Charge</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                      Strategic Intent
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                      Power Rate
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                      Grid Charge
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                  {Array.from({length: 24}, (_, hour) => getMergedHourData(hour)).map((hour, index) => {
-                    if (!hour) return null;
-                    const isCurrentHour = hour.hour === growattSchedule?.currentHour;
-                    
+                  {growattSchedule.periodGroups.map((group, index) => {
+                    // Check if current time falls within this period group
+                    const now = new Date();
+                    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+                    const [startH, startM] = group.startTime.split(':').map(Number);
+                    const [endH, endM] = group.endTime.split(':').map(Number);
+                    const groupStartMinutes = startH * 60 + startM;
+                    const groupEndMinutes = endH * 60 + endM;
+                    const isCurrentPeriod = currentMinutes >= groupStartMinutes && currentMinutes <= groupEndMinutes;
+
+                    // Format duration
+                    const formatDuration = (minutes: number): string => {
+                      const hours = Math.floor(minutes / 60);
+                      const mins = minutes % 60;
+                      if (hours === 0) return `${mins}min`;
+                      if (mins === 0) return `${hours}h`;
+                      return `${hours}h ${mins}min`;
+                    };
+
                     return (
-                      <tr key={index} className={`${
-                        isCurrentHour ? 'bg-blue-50 dark:bg-blue-900/20' : ''
-                      } ${!hour.isActual ? 'opacity-75' : ''}`}>
-                        <td className="px-3 py-4 whitespace-nowrap text-sm">
+                      <tr
+                        key={index}
+                        className={isCurrentPeriod ? 'bg-blue-50 dark:bg-blue-900/20' : ''}
+                      >
+                        <td className="px-4 py-4 whitespace-nowrap text-sm">
                           <div className="flex items-center">
-                            <div>
-                              <div className="font-medium text-gray-900 dark:text-white text-right">
-                                <div>{hour.hour.toString().padStart(2, '0')}:00</div>
-                                <div className="text-xs text-gray-400 dark:text-gray-500 font-normal">-{hour.hour.toString().padStart(2, '0')}:59</div>
-                              </div>
-                              <div className="text-xs text-gray-500 dark:text-gray-400">
-                                {isCurrentHour ? 'Current' : 
-                                 hour.isActual ? 'Actual' : 'Predicted'}
-                              </div>
+                            <div className="font-medium text-gray-900 dark:text-white">
+                              {group.startTime} - {group.endTime}
                             </div>
+                            {isCurrentPeriod && (
+                              <span className="ml-2 px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300 rounded">
+                                Now
+                              </span>
+                            )}
                           </div>
                         </td>
-                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
-                          <span className="font-medium">
-                            {hour.strategicIntent?.replace('_', ' ') || 'IDLE'}
+                        <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">
+                          {formatDuration(group.durationMinutes)}
+                        </td>
+                        <td className="px-4 py-4 whitespace-nowrap text-sm">
+                          {getBatteryModeDisplay(group.mode)}
+                        </td>
+                        <td className="px-4 py-4 whitespace-nowrap text-sm">
+                          <span className={`px-2 py-1 rounded text-xs font-medium ${getIntentColor(group.dominantIntent)}`}>
+                            {group.dominantIntent.replace(/_/g, ' ')}
                           </span>
                         </td>
-                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
-                          <span className="font-medium">{getDisplayText(hour.batterySocEndFormatted)}</span>
-                        </td>
-                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
-                          {(() => {
-                            const batteryAction = hour.batteryAction || 0;
-                            const formattedAction = getDisplayText(hour.batteryActionFormatted);
-
-                            // Prioritize actual battery action value over schedule action
-                            if (batteryAction > 0.01) {
-                              return (
-                                <div className="flex items-center text-green-600">
-                                  <span className="text-xs mr-1">⚡</span>
-                                  <span className="font-medium">
-                                    {formattedAction || `Charge ${batteryAction.toFixed(1)} kWh`}
-                                  </span>
-                                </div>
-                              );
-                            }
-
-                            if (batteryAction < -0.01) {
-                              return (
-                                <div className="flex items-center text-orange-600">
-                                  <span className="text-xs mr-1">⚡</span>
-                                  <span className="font-medium">
-                                    {formattedAction || `Discharge ${Math.abs(batteryAction).toFixed(1)} kWh`}
-                                  </span>
-                                </div>
-                              );
-                            }
-
-                            return (
-                              <div className="flex items-center text-gray-500 dark:text-gray-400">
-                                <span className="text-xs mr-1">⏸️</span>
-                                <span>Idle</span>
-                              </div>
-                            );
-                          })()}
-                        </td>
-                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
-                          <span className="font-medium">
-                            {hour.isActual ? 'N/A' : (
-                              hour.batteryMode === 'load_first' ? 'Load First' :
-                              hour.batteryMode === 'battery_first' ? 'Battery First' :
-                              hour.batteryMode === 'grid_first' ? 'Grid First' : hour.batteryMode
-                            )}
-                          </span>
-                        </td>
-                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
+                        <td className="px-4 py-4 whitespace-nowrap text-sm">
                           <div className="space-y-1">
-                            {hour.isActual ? (
-                              <div className="text-gray-500 dark:text-gray-400">N/A</div>
-                            ) : (
-                              <>
-                                {hour.action === 'CHARGE' && hour.chargePowerRate > 0 && (
-                                  <div className="text-green-600">C: {hour.chargePowerRate}%</div>
-                                )}
-                                {(hour.action === 'DISCHARGE' || hour.action === 'EXPORT') && hour.dischargePowerRate > 0 && (
-                                  <div className="text-orange-600">D: {hour.dischargePowerRate}%</div>
-                                )}
-                                {(hour.action === 'IDLE' || hour.chargePowerRate === 0 || hour.dischargePowerRate === 0) && (
-                                  <div className="text-gray-500 dark:text-gray-400">0%</div>
-                                )}
-                              </>
+                            {group.chargePowerRate > 0 && (
+                              <div className="text-green-600 dark:text-green-400">
+                                C: {group.chargePowerRate}%
+                              </div>
+                            )}
+                            {group.dischargePowerRate > 0 && (
+                              <div className="text-orange-600 dark:text-orange-400">
+                                D: {group.dischargePowerRate}%
+                              </div>
+                            )}
+                            {group.chargePowerRate === 0 && group.dischargePowerRate === 0 && (
+                              <div className="text-gray-500 dark:text-gray-400">-</div>
                             )}
                           </div>
                         </td>
-                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
-                          <span className="font-medium">
-                            {hour.isActual ? 'N/A' : (hour.gridCharge ? '✓ Enabled' : '✗ Disabled')}
-                          </span>
+                        <td className="px-4 py-4 whitespace-nowrap text-sm">
+                          {group.gridCharge ? (
+                            <span className="text-green-600 dark:text-green-400 font-medium">Enabled</span>
+                          ) : (
+                            <span className="text-gray-400 dark:text-gray-500">Disabled</span>
+                          )}
                         </td>
                       </tr>
                     );

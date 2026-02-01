@@ -65,6 +65,7 @@ ROBUST RECOVERY: When TOU corruption detected (overlaps, wrong order, duplicates
 """
 
 import logging
+from datetime import datetime
 from typing import ClassVar
 
 from .dp_schedule import DPSchedule
@@ -100,6 +101,24 @@ class GrowattScheduleManager:
         "LOAD_SUPPORT": "load_first",  # Priority to battery discharge for load
         "EXPORT_ARBITRAGE": "grid_first",  # Priority to grid export for profit
         "IDLE": "load_first",  # Normal operation, allows battery discharge
+    }
+
+    # Map strategic intents to inverter control settings
+    # Each intent determines: grid_charge, charge_rate, discharge_rate
+    INTENT_TO_CONTROL: ClassVar[dict[str, dict[str, bool | int]]] = {
+        "GRID_CHARGING": {"grid_charge": True, "charge_rate": 100, "discharge_rate": 0},
+        "SOLAR_STORAGE": {
+            "grid_charge": False,
+            "charge_rate": 100,
+            "discharge_rate": 0,
+        },
+        "LOAD_SUPPORT": {"grid_charge": False, "charge_rate": 0, "discharge_rate": 100},
+        "EXPORT_ARBITRAGE": {
+            "grid_charge": False,
+            "charge_rate": 0,
+            "discharge_rate": 100,
+        },
+        "IDLE": {"grid_charge": False, "charge_rate": 100, "discharge_rate": 0},
     }
 
     def __init__(self, battery_settings: BatterySettings) -> None:
@@ -265,6 +284,105 @@ class GrowattScheduleManager:
             )
 
         return groups
+
+    def get_detailed_period_groups(self) -> list[dict]:
+        """Get period groups with full control parameters for display/API.
+
+        Groups consecutive 15-minute periods ONLY when ALL parameters are identical:
+        - Strategic intent
+        - Battery mode
+        - Grid charge
+        - Charge power rate
+        - Discharge power rate
+
+        Returns:
+            List of period groups with all control parameters
+        """
+        if not self.strategic_intents:
+            return []
+
+        num_periods = len(self.strategic_intents)
+
+        # Build detailed settings for each 15-minute period
+        period_settings = []
+        for period in range(num_periods):
+            intent = self.strategic_intents[period]
+            mode = self.INTENT_TO_MODE.get(intent, "load_first")
+            control = self.INTENT_TO_CONTROL.get(
+                intent, {"grid_charge": False, "charge_rate": 100, "discharge_rate": 0}
+            )
+
+            period_settings.append(
+                {
+                    "period": period,
+                    "intent": intent,
+                    "mode": mode,
+                    "grid_charge": control["grid_charge"],
+                    "charge_rate": control["charge_rate"],
+                    "discharge_rate": control["discharge_rate"],
+                }
+            )
+
+        # Group consecutive periods with identical settings
+        groups = []
+        current_group = None
+
+        for ps in period_settings:
+            if current_group is not None and (
+                ps["intent"] == current_group["intent"]
+                and ps["mode"] == current_group["mode"]
+                and ps["grid_charge"] == current_group["grid_charge"]
+                and ps["charge_rate"] == current_group["charge_rate"]
+                and ps["discharge_rate"] == current_group["discharge_rate"]
+            ):
+                current_group["end_period"] = ps["period"]
+                current_group["count"] += 1
+            else:
+                if current_group is not None:
+                    groups.append(current_group)
+                current_group = {
+                    "start_period": ps["period"],
+                    "end_period": ps["period"],
+                    "intent": ps["intent"],
+                    "mode": ps["mode"],
+                    "grid_charge": ps["grid_charge"],
+                    "charge_rate": ps["charge_rate"],
+                    "discharge_rate": ps["discharge_rate"],
+                    "count": 1,
+                }
+
+        if current_group is not None:
+            groups.append(current_group)
+
+        # Convert to display format with time strings
+        result = []
+        for group in groups:
+            start_h, start_m = self._period_to_time(group["start_period"])
+            end_h, end_m = self._period_to_time(group["end_period"])
+            end_m += 14  # Last minute of period
+
+            # Handle DST: cap to 23:59
+            if end_h >= 24:
+                end_h = 23
+                end_m = 59
+
+            result.append(
+                {
+                    "start_time": f"{start_h:02d}:{start_m:02d}",
+                    "end_time": f"{end_h:02d}:{end_m:02d}",
+                    "start_period": group["start_period"],
+                    "end_period": group["end_period"],
+                    "intent": group["intent"],
+                    "mode": group["mode"],
+                    "grid_charge": group["grid_charge"],
+                    "charge_rate": group["charge_rate"],
+                    "discharge_rate": group["discharge_rate"],
+                    "period_count": group["count"],
+                    "duration_minutes": group["count"] * 15,
+                }
+            )
+
+        return result
 
     def _period_to_time(self, period: int) -> tuple[int, int]:
         """Convert period number to hour and minute.
@@ -1281,61 +1399,50 @@ class GrowattScheduleManager:
         logger.info("\n".join(lines))
 
     def log_detailed_schedule(self, header=None):
-        """Log comprehensive schedule view with strategic intents and power rates."""
+        """Log comprehensive schedule view with 15-minute periods and all control parameters."""
         if header:
             logger.info(header)
 
-        if not self.current_schedule:
-            logger.info("No schedule available")
+        groups = self.get_detailed_period_groups()
+        if not groups:
+            logger.info("No schedule data available")
             return
 
+        now = datetime.now()
+        current_period = now.hour * 4 + now.minute // 15
+
         lines = [
-            "\n╔════╦══════════════════╦═══════════════╦═════════════╦═══════════════╦═══════════════╦═══════════════════════════════╗",
-            "║ Hr ║ Strategic Intent ║ Battery Mode  ║ Grid Charge ║ Charge Rate % ║Discharge Rate%║         Description           ║",
-            "╠════╬══════════════════╬═══════════════╬═════════════╬═══════════════╬═══════════════╬═══════════════════════════════╣",
+            "\n╔═══════════════╦══════════╦══════════════════╦═══════════════╦═════════════╦═════════════╦═══════════════╗",
+            "║  Time Period  ║ Duration ║ Strategic Intent ║ Battery Mode  ║ Grid Charge ║ Charge Rate ║Discharge Rate ║",
+            "╠═══════════════╬══════════╬══════════════════╬═══════════════╬═════════════╬═════════════╬═══════════════╣",
         ]
 
-        # Iterate over actual hourly settings (handles DST with 23/24/25 hours)
-        for hour in sorted(self.hourly_settings.keys()):
-            settings = self.get_hourly_settings(hour)
-            intent = settings.get("strategic_intent", "IDLE")
-            batt_mode = settings.get("batt_mode", "load_first")
-            grid_charge = settings.get("grid_charge", False)
-            charge_rate = settings.get("charge_rate", 0)
-            discharge_rate = settings.get("discharge_rate", 0)
-            battery_action_kw = settings.get("battery_action_kw", 0.0)
-            description = self._get_intent_description(intent)
+        for group in groups:
+            time_range = f"{group['start_time']}-{group['end_time']}"
 
-            # Mark current hour
-            hour_marker = "*" if hour == self.current_hour else " "
+            # Duration
+            duration_mins = group["duration_minutes"]
+            if duration_mins >= 60:
+                duration = f"{duration_mins // 60}h{duration_mins % 60:02d}m"
+            else:
+                duration = f"{duration_mins}min"
 
-            # Add battery action info to description showing both rates
-            if abs(battery_action_kw) > 0.01:
-                if battery_action_kw > 0:
-                    description += f" ({battery_action_kw:.1f}kW→{charge_rate}%C)"
-                else:
-                    description += (
-                        f" ({abs(battery_action_kw):.1f}kW→{discharge_rate}%D)"
-                    )
-            elif charge_rate > 0 or discharge_rate > 0:
-                # Show rates even if no significant action (edge cases)
-                if charge_rate > 0:
-                    description += f" (C:{charge_rate}%)"
-                if discharge_rate > 0:
-                    description += f" (D:{discharge_rate}%)"
+            # Mark current period
+            is_current = group["start_period"] <= current_period <= group["end_period"]
+            marker = "*" if is_current else " "
 
             row = (
-                f"║{hour:02d}{hour_marker}║ {intent:17} ║ {batt_mode:13} ║"
-                f" {grid_charge!s:11} ║ {charge_rate:13} ║ {discharge_rate:13} ║ {description[:29]:29} ║"
+                f"║{marker}{time_range:13} ║ {duration:8} ║ {group['intent']:16} ║ {group['mode']:13} ║"
+                f" {group['grid_charge']!s:11} ║ {group['charge_rate']:11}% ║ {group['discharge_rate']:13}% ║"
             )
             lines.append(row)
 
         lines.append(
-            "╚═══╩═══════════════════╩═══════════════╩═════════════╩═══════════════╩═══════════════╩═══════════════════════════════╝"
+            "╚═══════════════╩══════════╩══════════════════╩═══════════════╩═════════════╩═════════════╩═══════════════╝"
         )
-        lines.append("* indicates current hour")
+        lines.append("* indicates current period")
         lines.append(
-            "C=Charge%, D=Discharge% (kW→% shows DP action converted to hardware percentage)"
+            "Intent mapping: GRID_CHARGING/SOLAR_STORAGE→battery_first, EXPORT_ARBITRAGE→grid_first, IDLE/LOAD_SUPPORT→load_first"
         )
 
         logger.info("\n".join(lines))

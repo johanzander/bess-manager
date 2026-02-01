@@ -1299,10 +1299,33 @@ async def get_growatt_detailed_schedule():
                 )
                 idle_hours += 1
 
+        # Get period groups from schedule manager (15-minute resolution)
+        period_groups = []
+        try:
+            raw_groups = schedule_manager.get_detailed_period_groups()
+            for group in raw_groups:
+                period_groups.append(
+                    {
+                        "start_time": group["start_time"],
+                        "end_time": group["end_time"],
+                        "mode": group["mode"],
+                        "dominant_intent": group["intent"],
+                        "intent_counts": {group["intent"]: group["period_count"]},
+                        "period_count": group["period_count"],
+                        "duration_minutes": group["duration_minutes"],
+                        "charge_power_rate": group["charge_rate"],
+                        "discharge_power_rate": group["discharge_rate"],
+                        "grid_charge": group["grid_charge"],
+                    }
+                )
+        except (ValueError, KeyError, AttributeError) as e:
+            logger.error(f"Failed to get period groups: {e}")
+
         response = {
             "current_hour": current_hour,
             "tou_intervals": tou_intervals,
             "schedule_data": schedule_data,
+            "period_groups": period_groups,
             "mode_distribution": mode_distribution,
             "intent_distribution": intent_distribution,
             "hour_distribution": {

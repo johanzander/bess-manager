@@ -72,6 +72,9 @@ docker-compose down --remove-orphans
 echo "Removing any existing containers to force rebuild..."
 docker-compose rm -f
 
+echo "Building frontend..."
+(cd frontend && npm run build)
+
 echo "Building and starting development container with Python 3.10..."
 docker-compose up --build -d
 

@@ -6,10 +6,9 @@ and snapshots into a structured export for debugging purposes.
 
 import logging
 import sys
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 from .battery_system_manager import BatterySystemManager
 from .health_check import run_system_health_checks
@@ -51,13 +50,17 @@ class DebugDataAggregator:
         self.system = system
         self._start_time = datetime.now()
 
-    def aggregate_all_data(self) -> DebugDataExport:
+    def aggregate_all_data(self, compact: bool = True) -> DebugDataExport:
         """Collect all system data into structured export.
+
+        Args:
+            compact: If True (default), include only the latest schedule/snapshot
+                and last 2000 lines of logs. If False, include everything.
 
         Returns:
             DebugDataExport containing all system state and history
         """
-        logger.info("Starting debug data aggregation")
+        logger.info("Starting debug data aggregation (compact=%s)", compact)
 
         return DebugDataExport(
             export_timestamp=datetime.now().isoformat(),
@@ -70,11 +73,11 @@ class DebugDataAggregator:
             home_settings=self._serialize_home_settings(),
             historical_periods=self._serialize_historical_data(),
             historical_summary=self._summarize_historical_data(),
-            schedules=self._serialize_schedules(),
+            schedules=self._serialize_schedules(compact=compact),
             schedules_summary=self._summarize_schedules(),
-            snapshots=self._serialize_snapshots(),
+            snapshots=self._serialize_snapshots(compact=compact),
             snapshots_summary=self._summarize_snapshots(),
-            todays_log_content=self._read_todays_log(),
+            todays_log_content=self._read_todays_log(compact=compact),
             log_file_info=self._get_log_file_info(),
         )
 
@@ -87,7 +90,7 @@ class DebugDataAggregator:
         try:
             config_path = Path(__file__).parent.parent.parent / "config.yaml"
             if config_path.exists():
-                with open(config_path, "r") as f:
+                with open(config_path) as f:
                     for line in f:
                         if line.startswith("version:"):
                             # Extract version string, removing quotes
@@ -116,7 +119,7 @@ class DebugDataAggregator:
         try:
             return run_system_health_checks(self.system)
         except Exception as e:
-            logger.error(f"Failed to run health checks: {e}", exc_info=True)
+            logger.exception(f"Failed to run health checks: {e}")
             return {
                 "error": str(e),
                 "message": "Health checks failed during export",
@@ -162,7 +165,7 @@ class DebugDataAggregator:
                     result.append(None)
             return result
         except Exception as e:
-            logger.error(f"Failed to serialize historical data: {e}", exc_info=True)
+            logger.exception(f"Failed to serialize historical data: {e}")
             return []
 
     def _summarize_historical_data(self) -> dict:
@@ -189,27 +192,33 @@ class DebugDataAggregator:
                 "last_period": non_null[-1].period if non_null else None,
             }
         except Exception as e:
-            logger.error(f"Failed to summarize historical data: {e}", exc_info=True)
+            logger.exception(f"Failed to summarize historical data: {e}")
             return {"error": str(e)}
 
-    def _serialize_schedules(self) -> list[dict]:
+    def _serialize_schedules(self, compact: bool = True) -> list[dict]:
         """Serialize optimization schedules from today.
+
+        Args:
+            compact: If True, only include the latest schedule.
 
         Returns:
             List of schedule dictionaries
         """
         try:
+            if compact:
+                latest = self.system.schedule_store.get_latest_schedule()
+                return [asdict(latest)] if latest else []
             schedules = self.system.schedule_store.get_all_schedules_today()
-            result = []
-            for schedule in schedules:
-                result.append(asdict(schedule))
-            return result
+            return [asdict(schedule) for schedule in schedules]
         except Exception as e:
-            logger.error(f"Failed to serialize schedules: {e}", exc_info=True)
+            logger.exception(f"Failed to serialize schedules: {e}")
             return []
 
     def _summarize_schedules(self) -> dict:
         """Create summary statistics for schedules.
+
+        Always reports totals regardless of compact mode, so the reader
+        knows how many schedules exist even when only the latest is included.
 
         Returns:
             Summary dictionary with counts and timestamps
@@ -229,23 +238,27 @@ class DebugDataAggregator:
                 "last_optimization": schedules[-1].timestamp.isoformat(),
             }
         except Exception as e:
-            logger.error(f"Failed to summarize schedules: {e}", exc_info=True)
+            logger.exception(f"Failed to summarize schedules: {e}")
             return {"error": str(e)}
 
-    def _serialize_snapshots(self) -> list[dict]:
+    def _serialize_snapshots(self, compact: bool = True) -> list[dict]:
         """Serialize prediction snapshots from today.
+
+        Args:
+            compact: If True, only include the latest snapshot.
 
         Returns:
             List of snapshot dictionaries
         """
         try:
             snapshots = self.system.prediction_snapshot_store.get_all_snapshots_today()
-            result = []
-            for snapshot in snapshots:
-                result.append(asdict(snapshot))
-            return result
+            if not snapshots:
+                return []
+            if compact:
+                return [asdict(snapshots[-1])]
+            return [asdict(snapshot) for snapshot in snapshots]
         except Exception as e:
-            logger.error(f"Failed to serialize snapshots: {e}", exc_info=True)
+            logger.exception(f"Failed to serialize snapshots: {e}")
             return []
 
     def _summarize_snapshots(self) -> dict:
@@ -269,11 +282,16 @@ class DebugDataAggregator:
                 "last_snapshot": snapshots[-1].snapshot_timestamp.isoformat(),
             }
         except Exception as e:
-            logger.error(f"Failed to summarize snapshots: {e}", exc_info=True)
+            logger.exception(f"Failed to summarize snapshots: {e}")
             return {"error": str(e)}
 
-    def _read_todays_log(self) -> str:
+    _COMPACT_LOG_LINES = 2000
+
+    def _read_todays_log(self, compact: bool = True) -> str:
         """Read today's log file content.
+
+        Args:
+            compact: If True, only include the last 2000 lines.
 
         Returns:
             Log file content as string, or error message if not available
@@ -286,11 +304,21 @@ class DebugDataAggregator:
             if not log_file.exists():
                 return f"Log file not found: {log_file}"
 
-            with open(log_file, "r") as f:
-                return f.read()
+            with open(log_file) as f:
+                if not compact:
+                    return f.read()
+                lines = f.readlines()
+                total = len(lines)
+                if total <= self._COMPACT_LOG_LINES:
+                    return "".join(lines)
+                truncated = lines[-self._COMPACT_LOG_LINES :]
+                return (
+                    f"[Truncated: showing last {self._COMPACT_LOG_LINES} of {total} lines. "
+                    f"Use compact=false for full log.]\n" + "".join(truncated)
+                )
         except Exception as e:
-            logger.error(f"Failed to read today's log file: {e}", exc_info=True)
-            return f"Error reading log file: {str(e)}"
+            logger.exception(f"Failed to read today's log file: {e}")
+            return f"Error reading log file: {e!s}"
 
     def _get_log_file_info(self) -> dict:
         """Get metadata about today's log file.
@@ -318,5 +346,5 @@ class DebugDataAggregator:
                 "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
             }
         except Exception as e:
-            logger.error(f"Failed to get log file info: {e}", exc_info=True)
+            logger.exception(f"Failed to get log file info: {e}")
             return {"error": str(e)}

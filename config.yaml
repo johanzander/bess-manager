@@ -1,6 +1,6 @@
 name: "BESS Manager"
 description: "Battery Energy Storage System optimization and management"
-version: "6.0.2"
+version: "6.0.4"
 slug: "bess_manager"
 init: false
 arch:
@@ -39,7 +39,7 @@ options:
     max_soc: 95                      # Maximum state of charge (%) - synced to inverter on startup
     max_charge_discharge_power: 15.0 # kW
     cycle_cost: 0.50                 # Battery wear cost per kWh (excl. VAT) - use your local currency
-    min_action_profit_threshold: 5.0 # Minimum profit threshold for any battery action (in your currency)
+    min_action_profit_threshold: 8.0 # Minimum profit threshold for any battery action (in your currency)
   electricity_price:
     area: "SE4"                      # Area for Nordpool pricing
     markup_rate: 0.08                # Electricity markup per kWh (in your currency, e.g. 8 öre/kWh for SEK)
@@ -76,7 +76,7 @@ options:
     current_l3: "sensor.current_l3_gustavsgatan_32a"                 # Phase 3 current
     # === Lifetime Energy Totals ===
     lifetime_solar_energy: "sensor.rkm0d7n04x_lifetime_total_solar_energy"
-    lifetime_load_consumption: "sensor.rkm0d7n04x_load_consumption_today"
+    lifetime_load_consumption: "sensor.rkm0d7n04x_lifetime_total_load_consumption"
     lifetime_self_consumption: "sensor.rkm0d7n04x_lifetime_self_consumption"
     lifetime_import_from_grid: "sensor.rkm0d7n04x_lifetime_import_from_grid"
     lifetime_export_to_grid: "sensor.rkm0d7n04x_lifetime_total_export_to_grid"

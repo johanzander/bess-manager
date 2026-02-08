@@ -5,6 +5,23 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.0.4] - 2026-02-08
+
+### Added
+
+- Compact mode for debug data export - reduces export size by including only latest schedule/snapshot and last 2000 log lines
+- `compact` query parameter on `/api/export-debug-data` endpoint (defaults to `true`)
+
+### Changed
+
+- MCP server `fetch_live_debug` now uses `compact` parameter instead of `save_locally`
+- Increased MCP server fetch timeout from 60s to 90s for large exports
+- Raised `min_action_profit_threshold` default from 5.0 to 8.0 SEK
+
+### Fixed
+
+- Corrected `lifetime_load_consumption` sensor name in config.yaml (was pointing to daily sensor instead of lifetime)
+
 ## [6.0.0] - 2026-02-01
 
 ### Changed

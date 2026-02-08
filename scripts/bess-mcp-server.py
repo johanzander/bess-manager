@@ -88,14 +88,16 @@ def get_log_dir() -> Path:
     return DEFAULT_LOG_DIR
 
 
-def fetch_live_debug(save_locally: bool = True) -> dict:
-    """Fetch live debug data from running BESS instance.
+def fetch_live_debug(compact: bool = True) -> dict:
+    """Fetch live debug data from running BESS instance and save to disk.
 
     Args:
-        save_locally: If True, save the fetched log to local log directory
+        compact: If True (default), fetch compact export (latest schedule/snapshot,
+            last 2000 log lines). If False, fetch full export (all schedules,
+            snapshots, and complete log).
 
     Returns:
-        Dict with debug content and metadata
+        Dict with file path and metadata (no inline content).
     """
     if not BESS_URL:
         return {
@@ -105,11 +107,10 @@ def fetch_live_debug(save_locally: bool = True) -> dict:
 
     # Build URL - token only needed for ingress access, not direct port
     base_url = f"{BESS_URL.rstrip('/')}/api/export-debug-data"
-    url = base_url  # Direct port access doesn't need token (local network = trusted)
+    compact_param = "true" if compact else "false"
+    url = f"{base_url}?compact={compact_param}"
 
     try:
-        # SSL verification enabled by default for security (works with valid certs)
-        # Can be disabled via BESS_SKIP_SSL_VERIFY=true for local self-signed certs
         ssl_context = ssl.create_default_context()
         if os.environ.get("BESS_SKIP_SSL_VERIFY", "").lower() == "true":
             ssl_context.check_hostname = False
@@ -121,37 +122,38 @@ def fetch_live_debug(save_locally: bool = True) -> dict:
         )
 
         with urllib.request.urlopen(
-            request, timeout=60, context=ssl_context
+            request, timeout=90, context=ssl_context
         ) as response:
             content = response.read().decode("utf-8")
-
-            # Extract filename from Content-Disposition header if present
             content_disposition = response.headers.get("Content-Disposition", "")
-            if "filename=" in content_disposition:
-                filename = content_disposition.split("filename=")[-1].strip('"')
-            else:
-                timestamp = datetime.now().strftime("%Y-%m-%d-%H%M%S")
-                filename = f"bess-debug-{timestamp}.md"
 
-            result = {
-                "source": "live",
-                "url": url,
-                "filename": filename,
-                "content_length": len(content),
-                "line_count": content.count("\n") + 1,
-                "content": content,
-            }
+        # Extract filename from Content-Disposition header if present
+        if "filename=" in content_disposition:
+            filename = content_disposition.split("filename=")[-1].strip('"')
+        else:
+            timestamp = datetime.now().strftime("%Y-%m-%d-%H%M%S")
+            filename = f"bess-debug-{timestamp}.md"
 
-            # Optionally save to local log directory
-            if save_locally:
-                log_dir = get_log_dir()
-                log_dir.mkdir(parents=True, exist_ok=True)
-                local_path = log_dir / filename
-                with open(local_path, "w", encoding="utf-8") as f:
-                    f.write(content)
-                result["saved_to"] = str(local_path)
+        # Always save to local log directory (the response can be tens of MB,
+        # far too large to return inline via the MCP JSON-RPC protocol without
+        # causing the server to hang on JSON serialization and pipe I/O)
+        log_dir = get_log_dir()
+        log_dir.mkdir(parents=True, exist_ok=True)
+        local_path = log_dir / filename
+        with open(local_path, "w", encoding="utf-8") as f:
+            f.write(content)
 
-            return result
+        result = {
+            "source": "live",
+            "url": url,
+            "filename": filename,
+            "saved_to": str(local_path),
+            "content_length": len(content),
+            "line_count": content.count("\n") + 1,
+            "hint": "Log saved to disk. Use read_debug_log, get_log_summary, or search_log to examine it.",
+        }
+
+        return result
 
     except urllib.error.HTTPError as e:
         return {
@@ -376,13 +378,13 @@ def search_log(filename: str, pattern: str, context_lines: int = 2) -> dict:
 TOOLS = [
     {
         "name": "fetch_live_debug",
-        "description": "Fetch live debug data from running BESS instance via HTTP. Requires BESS_URL to be configured. Optionally saves the log locally for future reference.",
+        "description": "Fetch live debug data from running BESS instance via HTTP and save to disk. Requires BESS_URL to be configured. Returns file path and metadata; use read_debug_log/get_log_summary/search_log to examine content.",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "save_locally": {
+                "compact": {
                     "type": "boolean",
-                    "description": "Save fetched log to local log directory (default true)",
+                    "description": "If true (default), fetch compact export with only latest schedule/snapshot and last 2000 log lines. Set to false for full export.",
                     "default": True,
                 },
             },
@@ -497,9 +499,8 @@ def handle_request(request: dict) -> dict:
         arguments = params.get("arguments", {})
 
         if tool_name == "fetch_live_debug":
-            result = fetch_live_debug(
-                arguments.get("save_locally", True),
-            )
+            compact = arguments.get("compact", True)
+            result = fetch_live_debug(compact=compact)
         elif tool_name == "list_debug_logs":
             result = list_debug_logs()
         elif tool_name == "read_debug_log":

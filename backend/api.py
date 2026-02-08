@@ -2021,11 +2021,15 @@ async def compare_two_snapshots(
 
 
 @router.get("/api/export-debug-data")
-async def export_debug_data():
+async def export_debug_data(compact: bool = True):
     """Export comprehensive debug data as markdown report.
 
     Returns a markdown file containing all system state, logs, historical data,
     predictions, schedules, and settings for debugging purposes.
+
+    Args:
+        compact: If True (default), include only the latest schedule/snapshot
+            and last 2000 lines of logs. Set to False for the full export.
 
     Security:
     - Via HA ingress (browser): HA handles authentication
@@ -2045,7 +2049,7 @@ async def export_debug_data():
     try:
         # Aggregate all system data
         aggregator = DebugDataAggregator(bess_controller.system)
-        export_data = aggregator.aggregate_all_data()
+        export_data = aggregator.aggregate_all_data(compact=compact)
 
         # Format as markdown report
         formatter = DebugReportFormatter()

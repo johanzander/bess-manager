@@ -174,6 +174,49 @@ But at noon every day we get tomorrows schedule. We could use this information t
 - Optimization decision logs with reasoning export
 - Integration with external analytics tools (Grafana, etc.)
 
+## 🟠 **POTENTIAL IMPROVEMENTS**
+
+### Optimizer vs Dashboard Savings Baseline Mismatch
+
+**Impact**: Medium | **Effort**: Medium | **Dependencies**: DP algorithm, models.py, daily_view_builder
+
+**Description**: The optimizer and dashboard use different baselines for calculating savings, which causes confusing discrepancies between predicted and actual savings numbers.
+
+**The Two Calculations**:
+
+| | Optimizer (`dp_battery_algorithm.py:897-906`) | Dashboard (`models.py:231-242`) |
+|---|---|---|
+| **Baseline** | Grid-only: `consumption × buy_price` | Solar-only: `(consumption - solar) × buy_price - excess_solar × sell_price` |
+| **Solar in baseline?** | No — set to zero (`solar_only_cost=total_base_cost, # Simplified`) | Yes — uses real solar production data |
+| **Formula** | `total_base_cost - total_optimized_cost` | `solar_only_cost - hourly_cost` |
+| **Used for** | Profitability gate decision (line 933) | Dashboard `total_savings` display |
+
+**Why This Matters**:
+
+The dashboard metric is correct — it answers "did the battery save money vs just having solar?" The optimizer's metric conflates solar savings with battery savings. When the optimizer reports +46 SEK, that includes value from solar production that you'd earn regardless of battery operation.
+
+**Concrete Risk**: The profitability gate (`grid_to_battery_solar_savings < min_action_profit_threshold`) compares against the grid-only baseline. On sunny days with high solar production, this could approve battery schedules that appear profitable (because solar savings are included) but are actually unprofitable when measured by the dashboard's correct solar-only baseline.
+
+In winter (low solar), the impact is negligible since both baselines converge. In summer (high solar), the optimizer could systematically overestimate battery profitability.
+
+**Potential Fix**: Change the optimizer's `total_base_cost` to use the solar-only baseline:
+
+```python
+# Current (grid-only baseline):
+total_base_cost = sum(home_consumption[i] * buy_price[i] for i in range(len(buy_price)))
+
+# Proposed (solar-only baseline - matches dashboard):
+total_base_cost = sum(
+    max(0, home_consumption[i] - solar_production[i]) * buy_price[i]
+    - max(0, solar_production[i] - home_consumption[i]) * sell_price[i]
+    for i in range(len(buy_price))
+)
+```
+
+This would make the profitability gate compare apples-to-apples with the dashboard savings, and prevent approving battery operations that lose money relative to the solar-only baseline.
+
+---
+
 ## 🔧 **TECHNICAL DEBT**
 
 ### FormattingContext Architecture

@@ -157,33 +157,40 @@ class BatterySystemManager:
         """
         logger.info("Syncing SOC limits from config to inverter...")
 
-        # Sync minimum SOC (discharge stop)
         configured_min_soc = self.battery_settings.min_soc
-        self.controller.set_discharge_stop_soc(configured_min_soc)
-        logger.info(f"Set discharge_stop_soc to {configured_min_soc}%")
-
-        # Sync maximum SOC (charge stop)
         configured_max_soc = self.battery_settings.max_soc
-        self.controller.set_charge_stop_soc(configured_max_soc)
-        logger.info(f"Set charge_stop_soc to {configured_max_soc}%")
 
-        # Verify sync by reading back values
-        actual_min_soc = self.controller.get_discharge_stop_soc()
-        actual_max_soc = self.controller.get_charge_stop_soc()
+        try:
+            # Sync minimum SOC (discharge stop)
+            self.controller.set_discharge_stop_soc(configured_min_soc)
+            logger.info(f"Set discharge_stop_soc to {configured_min_soc}%")
 
-        # Log verification results
-        if (
-            actual_min_soc == configured_min_soc
-            and actual_max_soc == configured_max_soc
-        ):
-            logger.info(
-                f"SOC limits verified: min={actual_min_soc}%, max={actual_max_soc}%"
-            )
-        else:
+            # Sync maximum SOC (charge stop)
+            self.controller.set_charge_stop_soc(configured_max_soc)
+            logger.info(f"Set charge_stop_soc to {configured_max_soc}%")
+
+            # Verify sync by reading back values
+            actual_min_soc = self.controller.get_discharge_stop_soc()
+            actual_max_soc = self.controller.get_charge_stop_soc()
+
+            # Log verification results
+            if (
+                actual_min_soc == configured_min_soc
+                and actual_max_soc == configured_max_soc
+            ):
+                logger.info(
+                    f"SOC limits verified: min={actual_min_soc}%, max={actual_max_soc}%"
+                )
+            else:
+                logger.warning(
+                    f"SOC limit mismatch detected! "
+                    f"Configured: min={configured_min_soc}%, max={configured_max_soc}% | "
+                    f"Actual: min={actual_min_soc}%, max={actual_max_soc}%"
+                )
+        except Exception as e:
             logger.warning(
-                f"SOC limit mismatch detected! "
-                f"Configured: min={configured_min_soc}%, max={configured_max_soc}% | "
-                f"Actual: min={actual_min_soc}%, max={actual_max_soc}%"
+                f"Could not sync SOC limits to inverter at startup (inverter may be temporarily unreachable): {e}. "
+                f"Inverter will retain its current limits. System startup will continue."
             )
 
     def start(self) -> None:

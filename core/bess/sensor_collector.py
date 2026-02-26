@@ -31,7 +31,9 @@ class SensorCollector:
 
         # Batch mode: fetch all periods in 1-2 queries instead of 176 (98% faster)
         self._batch_cache = {}  # {date: {period: {sensor: value}}}
-        self._batch_cache_loaded_on = {}  # {date: date_loaded} - tracks when each batch was loaded
+        self._batch_cache_loaded_on = (
+            {}
+        )  # {date: date_loaded} - tracks when each batch was loaded
 
         # Simple cache: last known cumulative sensor readings (for current - previous = delta)
         self._last_readings: dict[str, float] | None = None
@@ -330,7 +332,16 @@ class SensorCollector:
         result = get_sensor_data_batch(self.cumulative_sensors, target_date)
 
         if result.get("status") == "success":
-            self._batch_cache[target_date] = result.get("data", {})
+            data = result.get("data", {})
+            if not data:
+                logger.warning(
+                    "Batch data for %s returned no periods — InfluxDB query matched "
+                    "no sensor data (check sensor names, bucket, and time range). "
+                    "Not caching empty result so next period will retry.",
+                    target_date.strftime("%Y-%m-%d"),
+                )
+                return False
+            self._batch_cache[target_date] = data
             self._batch_cache_loaded_on[target_date] = today
             logger.info(
                 "Batch data loaded: %d periods for %s (loaded on %s)",

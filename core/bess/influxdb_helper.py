@@ -38,7 +38,7 @@ def get_influxdb_config():
     bucket = os.getenv("HA_DB_BUCKET")
     username = os.getenv("HA_DB_USER_NAME")
     password = os.getenv("HA_DB_PASSWORD")
-    
+
     # If all environment variables are set, use them
     if url and username and password and bucket:
         _LOGGER.debug("Loaded InfluxDB config from environment variables")
@@ -121,11 +121,13 @@ def get_sensor_data(sensors_list, start_time=None, stop_time=None) -> dict:
     )
 
     # Time-bounded query (always uses range since we always have start_time)
+    # Note: The _measurement filter already uniquely identifies the sensors,
+    # so the "domain" tag filter is omitted for compatibility with InfluxDB 1.x
+    # setups where this tag may not be present.
     flux_query = f"""from(bucket: "{bucket}")
                     |> range(start: {start_str}, stop: {end_str})
                     |> filter(fn: (r) => {sensor_filter})
                     |> filter(fn: (r) => r["_field"] == "value")
-                    |> filter(fn: (r) => r["domain"] == "sensor")
                     |> last()
                     """
 
@@ -221,8 +223,12 @@ def get_sensor_data_batch(sensors_list, target_date) -> dict:
         target_date = target_date.date()
 
     # Create start and end times for the full day
-    start_datetime = datetime.combine(target_date, datetime.min.time()).replace(tzinfo=local_tz)
-    end_datetime = datetime.combine(target_date, datetime.max.time()).replace(tzinfo=local_tz)
+    start_datetime = datetime.combine(target_date, datetime.min.time()).replace(
+        tzinfo=local_tz
+    )
+    end_datetime = datetime.combine(target_date, datetime.max.time()).replace(
+        tzinfo=local_tz
+    )
 
     # Get configuration
     influxdb_config = get_influxdb_config()
@@ -241,7 +247,9 @@ def get_sensor_data_batch(sensors_list, target_date) -> dict:
     }
 
     # Format times for InfluxDB query (UTC)
-    start_str = start_datetime.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%SZ")
+    start_str = start_datetime.astimezone(ZoneInfo("UTC")).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
     end_str = end_datetime.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     sensor_filter = " or ".join(
@@ -249,12 +257,14 @@ def get_sensor_data_batch(sensors_list, target_date) -> dict:
     )
 
     # Batch query: Get ALL data points, then for each period we'll find the last value
-    # BEFORE that period's end time (same logic as individual queries for sparse data)
+    # BEFORE that period's end time (same logic as individual queries for sparse data).
+    # Note: The _measurement filter already uniquely identifies the sensors,
+    # so the "domain" tag filter is omitted for compatibility with InfluxDB 1.x
+    # setups where this tag may not be present.
     flux_query = f"""from(bucket: "{bucket}")
                     |> range(start: {start_str}, stop: {end_str})
                     |> filter(fn: (r) => {sensor_filter})
                     |> filter(fn: (r) => r["_field"] == "value")
-                    |> filter(fn: (r) => r["domain"] == "sensor")
                     |> sort(columns: ["_time"])
                     """
 
@@ -262,7 +272,7 @@ def get_sensor_data_batch(sensors_list, target_date) -> dict:
         _LOGGER.info(
             "Batch fetching sensor data for %s (%d sensors, 96 periods)",
             target_date.strftime("%Y-%m-%d"),
-            len(sensors_list)
+            len(sensors_list),
         )
         _LOGGER.info("Querying sensors: %s", sensors_list)
 
@@ -301,12 +311,11 @@ def get_sensor_data_batch(sensors_list, target_date) -> dict:
         _LOGGER.info("Sensor counts in response: %s", measurements)
 
         # Parse the batch response
-        period_data = _parse_batch_response(response.text, target_date, local_tz, sensors_list)
-
-        _LOGGER.info(
-            "Batch fetch complete: got data for %d periods",
-            len(period_data)
+        period_data = _parse_batch_response(
+            response.text, target_date, local_tz, sensors_list
         )
+
+        _LOGGER.info("Batch fetch complete: got data for %d periods", len(period_data))
 
         # Debug: log which periods we got
         if period_data:
@@ -315,7 +324,7 @@ def get_sensor_data_batch(sensors_list, target_date) -> dict:
                 "Periods found in batch: %s...%s (total: %d)",
                 periods[:5] if len(periods) > 5 else periods,
                 periods[-5:] if len(periods) > 5 else [],
-                len(periods)
+                len(periods),
             )
             # Log sensor counts for first few periods
             for p in periods[:3]:
@@ -324,7 +333,7 @@ def get_sensor_data_batch(sensors_list, target_date) -> dict:
                     "Period %d has %d sensors: %s",
                     p,
                     len(sensors),
-                    sensors[:5] if len(sensors) > 5 else sensors
+                    sensors[:5] if len(sensors) > 5 else sensors,
                 )
 
         return {"status": "success", "data": period_data}
@@ -337,7 +346,9 @@ def get_sensor_data_batch(sensors_list, target_date) -> dict:
         return {"status": "error", "message": f"Unexpected error: {e!s}"}
 
 
-def _parse_batch_response(response_text, target_date, local_tz, sensors_list) -> dict[int, dict[str, float]]:
+def _parse_batch_response(
+    response_text, target_date, local_tz, sensors_list
+) -> dict[int, dict[str, float]]:
     """Parse batch InfluxDB response and group by period number.
 
     For sparse data (like SOC sensor), this finds the last value BEFORE each period boundary,
@@ -384,7 +395,9 @@ def _parse_batch_response(response_text, target_date, local_tz, sensors_list) ->
 
     # Step 2.5: For sensors with sparse data, fetch the last known value from before the day started
     # This mimics the behavior of individual queries with last() which look at ALL historical data
-    day_start = datetime.combine(target_date, datetime.min.time()).replace(tzinfo=local_tz)
+    day_start = datetime.combine(target_date, datetime.min.time()).replace(
+        tzinfo=local_tz
+    )
 
     # Collect all sensors that need initial values first (batch them)
     sensors_needing_initial_values = []
@@ -396,27 +409,47 @@ def _parse_batch_response(response_text, target_date, local_tz, sensors_list) ->
         if sensor_name not in sensor_data or not sensor_data[sensor_name]:
             # Sensor has no data at all for this day
             needs_initial_value = True
-            _LOGGER.debug("Sensor %s has no data for %s, will fetch initial value", sensor_name, target_date)
+            _LOGGER.debug(
+                "Sensor %s has no data for %s, will fetch initial value",
+                sensor_name,
+                target_date,
+            )
         else:
             # Sensor has data, but check if first data point is after day start
             first_timestamp = sensor_data[sensor_name][0][0]
             if first_timestamp > day_start:
                 needs_initial_value = True
-                _LOGGER.debug("Sensor %s first data at %s (after day start), will fetch initial value", sensor_name, first_timestamp)
+                _LOGGER.debug(
+                    "Sensor %s first data at %s (after day start), will fetch initial value",
+                    sensor_name,
+                    first_timestamp,
+                )
 
         if needs_initial_value:
             sensors_needing_initial_values.append(sensor_name)
 
     # Batch fetch all initial values in a single query
     if sensors_needing_initial_values:
-        _LOGGER.info("Batch fetching initial values for %d sensors", len(sensors_needing_initial_values))
-        result = get_sensor_data(sensors_needing_initial_values, stop_time=day_start - timedelta(seconds=1))
+        _LOGGER.info(
+            "Batch fetching initial values for %d sensors",
+            len(sensors_needing_initial_values),
+        )
+        result = get_sensor_data(
+            sensors_needing_initial_values, stop_time=day_start - timedelta(seconds=1)
+        )
 
         if result.get("status") == "success" and result.get("data"):
             for sensor_name in sensors_needing_initial_values:
-                sensor_value = result["data"].get(f"sensor.{sensor_name}") or result["data"].get(sensor_name)
+                sensor_value = result["data"].get(f"sensor.{sensor_name}") or result[
+                    "data"
+                ].get(sensor_name)
                 if sensor_value is not None:
-                    _LOGGER.debug("Found initial value for %s: %.2f (from before %s)", sensor_name, sensor_value, target_date)
+                    _LOGGER.debug(
+                        "Found initial value for %s: %.2f (from before %s)",
+                        sensor_name,
+                        sensor_value,
+                        target_date,
+                    )
                     # Add this as a data point just before the day started
                     initial_datapoint = (day_start - timedelta(seconds=1), sensor_value)
                     if sensor_name in sensor_data:
@@ -428,7 +461,9 @@ def _parse_batch_response(response_text, target_date, local_tz, sensors_list) ->
 
     # Step 3: For each period, find last value BEFORE period end time
     period_data = {}
-    day_start = datetime.combine(target_date, datetime.min.time()).replace(tzinfo=local_tz)
+    day_start = datetime.combine(target_date, datetime.min.time()).replace(
+        tzinfo=local_tz
+    )
 
     for period in range(96):
         # Calculate period end time (e.g., period 0 ends at 00:14:59)
@@ -451,6 +486,8 @@ def _parse_batch_response(response_text, target_date, local_tz, sensors_list) ->
     # Remove empty periods
     period_data = {p: data for p, data in period_data.items() if data}
 
-    _LOGGER.debug("Parsed %d sensors with data for %d periods", len(sensor_data), len(period_data))
+    _LOGGER.debug(
+        "Parsed %d sensors with data for %d periods", len(sensor_data), len(period_data)
+    )
 
     return period_data

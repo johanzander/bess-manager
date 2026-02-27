@@ -327,17 +327,25 @@ const InverterStatusDashboard: React.FC = () => {
       }
       setError(null);
       
-      const [statusData, scheduleData, batteryData, dashboardDataResult] = await Promise.all([
+      const results = await Promise.allSettled([
         fetchInverterStatus(),
         fetchGrowattSchedule(),
         fetchBatterySettings(),
         fetchDashboardData()
       ]);
-      
-      setInverterStatus(statusData);
-      setGrowattSchedule(scheduleData);
-      setBatterySettings(batteryData);
-      setDashboardData(dashboardDataResult);
+
+      if (results[0].status === 'fulfilled') setInverterStatus(results[0].value);
+      else console.warn('Failed to fetch inverter status:', results[0].reason);
+
+      if (results[1].status === 'fulfilled') setGrowattSchedule(results[1].value);
+      else console.warn('Failed to fetch growatt schedule:', results[1].reason);
+
+      if (results[2].status === 'fulfilled') setBatterySettings(results[2].value);
+      else console.warn('Failed to fetch battery settings:', results[2].reason);
+
+      if (results[3].status === 'fulfilled') setDashboardData(results[3].value);
+      else console.warn('Failed to fetch dashboard data:', results[3].reason);
+
       setLastUpdate(new Date());
       
       if (isInitialLoad) {

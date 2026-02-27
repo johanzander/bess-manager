@@ -5,6 +5,12 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.1.2] - 2026-02-27
+
+### Fixed
+
+- Inverter page no longer shows blank/zero data when the dashboard endpoint fails. Changed `Promise.all` to `Promise.allSettled` so each API fetch succeeds or fails independently. A failing `/api/dashboard` (e.g. when no optimization schedule exists) no longer discards successful results from inverter status, schedule, and battery settings endpoints.
+
 ## [6.1.1] - 2026-02-27
 
 ### Fixed

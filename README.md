@@ -6,15 +6,15 @@ Intelligent Battery Energy Storage System (BESS) management and optimization for
 
 ## Overview
 
-The BESS Battery Manager is a sophisticated Home Assistant add-on that automatically optimizes Growatt inverter battery storage systems using dynamic programming algorithms and Nordic electricity market pricing. It continuously analyzes published electricity prices, solar production forecasts, and consumption predictions to determine optimal charge/discharge schedules that minimize your electricity costs.
+The BESS Battery Manager is a sophisticated Home Assistant add-on that automatically optimizes Growatt inverter battery storage systems using dynamic programming algorithms and electricity market pricing. It continuously analyzes published electricity prices, solar production forecasts, and consumption predictions to determine optimal charge/discharge schedules that minimize your electricity costs.
 
-The system requires the Growatt, Nordpool, and solar forecast (e.g., Solcast) Home Assistant integrations to function, and optionally uses InfluxDB for historical data storage. Unlike simple timer-based systems, BESS Manager makes intelligent decisions by weighing multiple factors: current battery state, published hourly electricity prices, solar weather forecasts, consumption estimates, and battery degradation costs. The system updates its optimization strategy every hour as new sensor data becomes available, ensuring your battery always operates in the most economically beneficial way while respecting technical constraints like charge rates and depth-of-discharge limits.
+The system requires the Growatt, a price source (Nordpool or Octopus Energy), and solar forecast (e.g., Solcast) Home Assistant integrations to function, and optionally uses InfluxDB for historical data storage. Unlike simple timer-based systems, BESS Manager makes intelligent decisions by weighing multiple factors: current battery state, published electricity prices, solar weather forecasts, consumption estimates, and battery degradation costs. The system updates its optimization strategy every hour as new sensor data becomes available, ensuring your battery always operates in the most economically beneficial way while respecting technical constraints like charge rates and depth-of-discharge limits.
 
 ## Key Capabilities
 
 **Dynamic Programming Optimization**: Solves 24-hour battery scheduling as an optimization problem, considering electricity prices, solar forecasts, consumption patterns, and battery constraints to find the globally optimal charge/discharge schedule.
 
-**Nordpool Market Integration**: Automatically retrieves electricity prices from Nordic power markets to be used by optimization algorithm.
+**Electricity Market Integration**: Supports Nordpool (Nordic markets, 15-min resolution) and Octopus Energy Agile tariff (UK market, 30-min resolution with separate import/export rates).
 
 **Battery Wear Economics**: Incorporates battery degradation costs (cycle cost) into optimization calculations to balance immediate savings against long-term battery life.
 
@@ -48,7 +48,7 @@ Tested with MIN/TLX inverters
 
 ### Required Integrations
 
-- 📊 **Nordpool** integration for electricity prices
+- 📊 **Nordpool** or **Octopus Energy** integration for electricity prices
 - 🏠 **Growatt** integration for battery control and energy monitoring
 - ☀️ **Solar forecast** integration (e.g., Solcast) for production predictions
 

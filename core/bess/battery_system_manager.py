@@ -643,7 +643,14 @@ class BatterySystemManager:
     def _get_price_data(
         self, prepare_next_day: bool
     ) -> tuple[list[float] | None, list[dict[str, Any]] | None]:
-        """Get price data - preserves original logic."""
+        """Get price data, normalized to 15-minute (quarterly) resolution.
+
+        The entire system (period indices, historical store, Growatt schedule,
+        sensor collection) operates on 15-minute periods (96/day).  Price sources
+        may deliver coarser granularity (e.g. 30-min for Octopus, 60-min for
+        official Nordpool).  This method expands such prices so every downstream
+        consumer always sees one entry per 15-minute slot.
+        """
         try:
             if prepare_next_day:
                 price_entries = self._price_manager.get_tomorrow_prices()
@@ -655,31 +662,32 @@ class BatterySystemManager:
                 logger.warning("No prices available")
                 return None, None
 
+            # Normalize to 15-minute resolution if the source uses coarser periods
+            period_hours = self._price_manager.price_source.period_duration_hours
+            if period_hours > 0.25:
+                repeat_factor = int(period_hours / 0.25)
+                original_count = len(price_entries)
+                price_entries = [
+                    entry for entry in price_entries for _ in range(repeat_factor)
+                ]
+                logger.info(
+                    "Normalized %d prices (%sh periods) to %d quarterly entries",
+                    original_count,
+                    period_hours,
+                    len(price_entries),
+                )
+
             prices = [entry["price"] for entry in price_entries]
 
-            # DP algorithm supports variable horizon and period duration
-            # Nordpool: 92-100 quarterly periods (DST), Octopus: 48 half-hourly
-            period_hours = self._price_manager.price_source.period_duration_hours
-            if period_hours == 0.25:
-                # Nordpool quarterly: handle DST transitions
-                if len(prices) == 92:
-                    logger.info(
-                        "Detected DST spring forward transition (92 quarterly periods)"
-                    )
-                elif len(prices) == 100:
-                    logger.info(
-                        "Detected DST fall back transition (100 quarterly periods)"
-                    )
-                elif len(prices) != 96:
-                    logger.warning(
-                        f"Expected 96 quarterly prices but got {len(prices)}"
-                    )
-            else:
-                expected = int(24 / period_hours)
+            # Validate quarterly period count (handles DST: 92, 96, or 100)
+            if len(prices) == 92:
                 logger.info(
-                    f"Got {len(prices)} prices "
-                    f"({period_hours}h periods, expected ~{expected})"
+                    "Detected DST spring forward transition (92 quarterly periods)"
                 )
+            elif len(prices) == 100:
+                logger.info("Detected DST fall back transition (100 quarterly periods)")
+            elif len(prices) != 96:
+                logger.warning(f"Expected 96 quarterly prices but got {len(prices)}")
 
             return prices, price_entries
 
@@ -1030,7 +1038,7 @@ class BatterySystemManager:
                 initial_soe=current_soe,
                 battery_settings=self.battery_settings,
                 initial_cost_basis=initial_cost_basis,
-                period_duration_hours=self._price_manager.price_source.period_duration_hours,
+                period_duration_hours=0.25,  # Always quarterly after normalization in _get_price_data
             )
 
             # Add timestamps to period data (algorithm is time-agnostic, operates on relative indices)

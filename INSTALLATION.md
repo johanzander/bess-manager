@@ -6,7 +6,7 @@ Complete guide for installing and configuring BESS Battery Manager for Home Assi
 
 - Home Assistant OS, Container, or Supervised
 - Growatt battery system with Home Assistant integration
-- Nordpool integration configured
+- Electricity price integration: **Nordpool** (Nordic markets) or **Octopus Energy** (UK market)
 
 ## Step 1: Install the Add-on
 
@@ -106,11 +106,25 @@ home:
   safety_margin_factor: 0.95        # Safety margin (95%)
 
 electricity_price:
-  area: "SE4"                       # Nordpool area
+  area: "SE4"                       # Nordpool area (or "UK" for Octopus)
   markup_rate: 0.08                 # Markup (per kWh, in your currency)
   vat_multiplier: 1.25              # VAT (1.25 = 25%)
   additional_costs: 1.03            # Additional costs (per kWh)
   tax_reduction: 0.6518             # Tax reduction for sold energy (per kWh)
+
+# Price provider selection (choose one)
+nordpool:
+  price_provider: "nordpool"        # "nordpool", "nordpool_official", or "octopus"
+  use_official_integration: false   # Set true for official HA Nordpool integration
+  config_entry_id: ""               # Required when use_official_integration is true
+
+# Octopus Energy configuration (only needed when price_provider is "octopus")
+# See "Octopus Energy Setup" section below for details
+octopus:
+  import_today_entity: ""
+  import_tomorrow_entity: ""
+  export_today_entity: ""
+  export_tomorrow_entity: ""
 
 sensors:
   # Battery sensors (required)
@@ -132,7 +146,7 @@ sensors:
   # Consumption forecast (required)
   48h_avg_grid_import: "sensor.48h_average_grid_import_power"  # From Step 2
 
-  # Price sensors (required)
+  # Price sensors (required for Nordpool, not needed for Octopus)
   nordpool_kwh_today: "sensor.nordpool_kwh_your_area"
   nordpool_kwh_tomorrow: "sensor.nordpool_kwh_your_area"
 
@@ -156,6 +170,36 @@ sensors:
   # lifetime_export_to_grid: "sensor.your_lifetime_export_to_grid"
   # ev_energy_meter: "sensor.your_ev_energy_meter"
 ```
+
+### Octopus Energy Setup
+
+If you're using Octopus Energy (UK), set `price_provider: "octopus"` and configure the entity IDs.
+
+**1. Find your entity IDs** in Developer Tools > States, search for `octopus_energy_electricity`:
+
+```yaml
+octopus:
+  import_today_entity: "event.octopus_energy_electricity_<MPAN>_<SERIAL>_current_day_rates"
+  import_tomorrow_entity: "event.octopus_energy_electricity_<MPAN>_<SERIAL>_next_day_rates"
+  export_today_entity: "event.octopus_energy_electricity_<MPAN>_<SERIAL>_export_current_day_rates"
+  export_tomorrow_entity: "event.octopus_energy_electricity_<MPAN>_<SERIAL>_export_next_day_rates"
+```
+
+**2. Adjust electricity_price settings** - Octopus prices are already VAT-inclusive in GBP/kWh:
+
+```yaml
+home:
+  currency: "GBP"
+
+electricity_price:
+  area: "UK"
+  markup_rate: 0.0
+  vat_multiplier: 1.0
+  additional_costs: 0.0
+  tax_reduction: 0.0           # Adjust if you receive SEG payments
+```
+
+**3. Set cycle_cost and min_action_profit_threshold in GBP** (see notes below).
 
 ### ⚠️ Important Configuration Notes
 

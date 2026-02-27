@@ -5,6 +5,24 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.1.1] - 2026-02-27
+
+### Fixed
+
+- `get_tomorrow_prices()` now catches `PriceDataUnavailableError` in addition to `ValueError`, so the "return empty list if not yet available" fallback actually works for Octopus Energy.
+- Octopus Energy rate validation accepts 46-48 rates instead of requiring exactly 48. Octopus publishes rates incrementally and the last couple of half-hours may arrive slightly later.
+
+## [6.1.0] - 2026-02-27
+
+### Added
+
+- Octopus Energy Agile tariff support as a new price source alongside Nordpool. Fetches import and export rates from HA event entities at 30-minute resolution with VAT-inclusive GBP/kWh prices.
+- `price_provider` configuration field to select between `nordpool`, `nordpool_official`, and `octopus` price sources.
+- Separate import and export rate entities for Octopus Energy, allowing direct sell price data instead of calculated fallback.
+- `period_duration_hours` on `PriceSource` to support different rate resolutions (15-min Nordpool, 30-min Octopus).
+- `get_sell_prices_for_date()` on `PriceSource` for sources that provide direct export/sell rates.
+- Documentation for Octopus Energy setup in README, Installation Guide, and User Guide.
+
 ## [6.0.6] - 2026-02-26
 
 ### Fixed

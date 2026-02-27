@@ -14,6 +14,7 @@ from .price_manager import PriceSource
 logger = logging.getLogger(__name__)
 
 EXPECTED_PERIODS_PER_DAY = 48
+MIN_PERIODS_PER_DAY = 46
 
 
 class OctopusEnergySource(PriceSource):
@@ -158,11 +159,20 @@ class OctopusEnergySource(PriceSource):
         # Filter rates for the target date and sort chronologically
         filtered_rates = self._filter_rates_for_date(rates, target_date)
 
-        if len(filtered_rates) != EXPECTED_PERIODS_PER_DAY:
+        if len(filtered_rates) < MIN_PERIODS_PER_DAY:
             raise PriceDataUnavailableError(
                 date=target_date,
                 message=(
-                    f"Expected {EXPECTED_PERIODS_PER_DAY} {rate_type} rates for {target_date}, "
+                    f"Expected at least {MIN_PERIODS_PER_DAY} {rate_type} rates for {target_date}, "
+                    f"got {len(filtered_rates)} from {entity_id}"
+                ),
+            )
+        if len(filtered_rates) > EXPECTED_PERIODS_PER_DAY:
+            raise PriceDataUnavailableError(
+                date=target_date,
+                message=(
+                    f"Too many {rate_type} rates for {target_date}: "
+                    f"expected at most {EXPECTED_PERIODS_PER_DAY}, "
                     f"got {len(filtered_rates)} from {entity_id}"
                 ),
             )

@@ -501,7 +501,7 @@ class PriceManager:
         tomorrow = datetime.now().date() + timedelta(days=1)
         try:
             return self.get_price_data(tomorrow)
-        except ValueError:
+        except (ValueError, PriceDataUnavailableError):
             return []  # Return empty list instead of raising error
 
     def get_prices(self, target_date: date | None = None) -> list:

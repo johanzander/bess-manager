@@ -123,11 +123,42 @@ class TestImportRateFetching:
         with pytest.raises(SystemConfigurationError):
             source.get_prices_for_date(day_after)
 
-    def test_wrong_period_count_raises_error(self):
-        """Rates with fewer than 48 entries should fail validation."""
+    def test_too_few_rates_raises_error(self):
+        """Rates below minimum threshold should fail validation."""
         today = datetime.now().date()
-        rates = _make_rates(today, count=24)  # Only 24 periods
+        rates = _make_rates(today, count=20)  # Well below minimum of 46
         controller = _make_ha_controller(rates)
+        source = _make_source(controller)
+
+        with pytest.raises(PriceDataUnavailableError):
+            source.get_prices_for_date(today)
+
+    def test_partial_rates_accepted(self):
+        """46-47 rates should be accepted (Octopus publishes incrementally)."""
+        today = datetime.now().date()
+        for count in (46, 47):
+            rates = _make_rates(today, count=count)
+            controller = _make_ha_controller(rates)
+            source = _make_source(controller)
+
+            prices = source.get_prices_for_date(today)
+            assert len(prices) == count
+
+    def test_too_many_rates_raises_error(self):
+        """More than 48 rates for a single date should fail validation."""
+        today = datetime.now().date()
+        rates = _make_rates(today, count=48)
+        # Add duplicate rates that also fall on today to exceed 48
+        extra = _make_rates(today, count=2, base_value=0.50)
+        # Adjust extra start times to be within the same day but unique
+        for i, rate in enumerate(extra):
+            start = datetime.combine(today, datetime.min.time()) + timedelta(
+                minutes=15 * i
+            )
+            rate["start"] = start.isoformat()
+            rate["end"] = (start + timedelta(minutes=15)).isoformat()
+        all_rates = rates + extra
+        controller = _make_ha_controller(all_rates)
         source = _make_source(controller)
 
         with pytest.raises(PriceDataUnavailableError):

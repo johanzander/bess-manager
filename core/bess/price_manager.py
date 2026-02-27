@@ -18,6 +18,15 @@ class PriceSource:
     This defines the interface that all price sources must implement.
     """
 
+    @property
+    def period_duration_hours(self) -> float:
+        """Duration of each price period in hours.
+
+        Returns:
+            0.25 for quarterly (Nordpool), 0.5 for half-hourly (Octopus), etc.
+        """
+        return 0.25
+
     def get_prices_for_date(self, target_date: date) -> list:
         """Get prices for a specific date.
 
@@ -25,12 +34,27 @@ class PriceSource:
             target_date: The date to get prices for
 
         Returns:
-            List of hourly prices for the specified date
+            List of prices for the specified date (one per period)
 
         Raises:
             NotImplementedError: If the source doesn't implement this method
         """
         raise NotImplementedError("Price sources must implement get_prices_for_date")
+
+    def get_sell_prices_for_date(self, target_date: date) -> list[float] | None:
+        """Get separate sell/export prices for a specific date.
+
+        Override this method when the price source provides distinct export rates
+        (e.g., Octopus Energy). Returns None by default, meaning sell prices are
+        calculated from buy prices using markup/tax reduction.
+
+        Args:
+            target_date: The date to get sell prices for
+
+        Returns:
+            List of sell prices per period, or None if not applicable
+        """
+        return None
 
     def perform_health_check(self) -> dict:
         """Perform health check on the price source.
@@ -416,17 +440,27 @@ class PriceManager:
             # Get raw prices from the source
             raw_prices = self.price_source.get_prices_for_date(target_date)
 
+            # Check for separate sell/export prices (e.g., Octopus Energy)
+            direct_sell_prices = self.price_source.get_sell_prices_for_date(target_date)
+
             # Format prices with timestamp and calculations
             price_data = []
             base_timestamp = datetime.combine(target_date, datetime.min.time())
+            period_hours = self.price_source.period_duration_hours
 
-            for hour, price in enumerate(raw_prices):
-                timestamp = base_timestamp + timedelta(hours=hour)
+            for index, price in enumerate(raw_prices):
+                timestamp = base_timestamp + timedelta(hours=index * period_hours)
+
+                if direct_sell_prices is not None:
+                    sell_price = direct_sell_prices[index]
+                else:
+                    sell_price = self._calculate_sell_price(price)
+
                 price_entry = {
                     "timestamp": timestamp.strftime("%Y-%m-%d %H:%M"),
                     "price": price,
                     "buyPrice": self._calculate_buy_price(price),
-                    "sellPrice": self._calculate_sell_price(price),
+                    "sellPrice": sell_price,
                 }
                 price_data.append(price_entry)
 
@@ -527,24 +561,19 @@ class PriceManager:
             price_data = self.get_price_data(target_date)
             return [entry["sellPrice"] for entry in price_data]
 
-
     def get_available_prices(self) -> tuple[list[float], list[float]]:
-        """Get all available prices at quarterly resolution starting at today 00:00.
+        """Get all available prices starting at today 00:00.
 
-        Nordpool provides quarterly prices (96 periods/day) directly.
+        Period count depends on the price source resolution:
+        - Nordpool: 96 periods/day (15-min quarterly)
+        - Octopus Energy: 48 periods/day (30-min half-hourly)
+
         Automatically tries tomorrow, falls back to today only.
 
         Returns:
             (buy_prices, sell_prices) tuple where:
             - Index 0 = today 00:00
-            - Index 96 = tomorrow 00:00 (if available)
-            - Length: 96 (today only) or 192 (today + tomorrow)
-
-        Example at 14:00:
-            buy, sell = get_available_prices()
-            # buy[0] = today 00:00
-            # buy[56] = today 14:00 (current period)
-            # Caller slices: buy[56:] for optimization from now
+            - Length: periods_per_day (today only) or 2x (today + tomorrow)
         """
         today = datetime.now().date()
         tomorrow = today + timedelta(days=1)
@@ -607,14 +636,14 @@ class PriceManager:
 
             price_data = f"\n{title}:\n"
             price_data += "-" * 50 + "\n"
-            price_data += "Hour   | Nordpool Price | Retail Price  | Sell Price\n"
+            price_data += "Time   | Base Price     | Buy Price     | Sell Price\n"
             price_data += "-" * 50 + "\n"
 
             for entry in prices:
-                hour = entry["timestamp"].split()[1][:5]
-                price_str = f"{hour}  | {entry['price']:.4f} SEK    | "
-                buy_str = f"{entry['buyPrice']:.4f} SEK  | "
-                sell_str = f"{entry['sellPrice']:.4f} SEK\n"
+                time_str = entry["timestamp"].split()[1][:5]
+                price_str = f"{time_str}  | {entry['price']:.4f}        | "
+                buy_str = f"{entry['buyPrice']:.4f}       | "
+                sell_str = f"{entry['sellPrice']:.4f}\n"
                 price_data += price_str + buy_str + sell_str
 
             self._logger.info(price_data)

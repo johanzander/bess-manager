@@ -128,10 +128,11 @@ class BESSController:
             logger.info("Enabling test mode - hardware writes will be simulated")
         self.ha_controller.set_test_mode(test_mode)
 
-        # Extract nordpool configuration
+        # Extract nordpool and octopus configuration
         nordpool_config = options.get("nordpool", {})
+        nordpool_config["octopus"] = options.get("octopus", {})
 
-        # Create Battery System Manager with nordpool configuration
+        # Create Battery System Manager with price provider configuration
         # Let the system manager choose the appropriate price source
         self.system = BatterySystemManager(
             self.ha_controller,

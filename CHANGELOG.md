@@ -5,6 +5,12 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.1.3] - 2026-02-27
+
+### Fixed
+
+- Octopus Energy prices (48 half-hourly) are now normalized to 15-minute quarterly resolution before entering the optimization pipeline. The system internally uses 96 periods/day (15-min each) for period indices, historical store, and Growatt schedules. Passing 48-element price arrays caused `list assignment index out of range` when the 15-min period index (e.g. 90) exceeded the array size, preventing any optimization from running.
+
 ## [6.1.2] - 2026-02-27
 
 ### Fixed

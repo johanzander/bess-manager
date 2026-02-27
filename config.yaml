@@ -47,8 +47,14 @@ options:
     additional_costs: 1.03           # Additional costs per kWh in your currency (e.g. SE: 28.90 öre överföringsavgift + 53.50 öre energiskatt + moms)
     tax_reduction: 0.6518            # Tax reduction for sold energy in your currency (e.g. SE: 60 öre skattereduktion + 5.18 öre förlustersättning)
   nordpool:
+    price_provider: "nordpool"  # "nordpool" (legacy sensor), "nordpool_official", or "octopus"
     use_official_integration: true  # Set to true to use official HA Nord Pool integration
     config_entry_id: "01K3Y99FD3MDZYVFX2XSWR4888"  # Required when use_official_integration is true
+  octopus:
+    import_today_entity: ""       # HA entity for today's Octopus import rates
+    import_tomorrow_entity: ""    # HA entity for tomorrow's Octopus import rates
+    export_today_entity: ""       # HA entity for today's Octopus export rates
+    export_tomorrow_entity: ""    # HA entity for tomorrow's Octopus export rates
   growatt:
     device_id: "fbafceb07a1cc74c351ef4310fa430a0"  # Growatt device ID for TOU segment operations
   sensors:
@@ -116,8 +122,14 @@ schema:
     additional_costs: float
     tax_reduction: float
   nordpool:
+    price_provider: str
     use_official_integration: bool
     config_entry_id: str
+  octopus:
+    import_today_entity: str
+    import_tomorrow_entity: str
+    export_today_entity: str
+    export_tomorrow_entity: str
   growatt:
     device_id: str
   sensors:

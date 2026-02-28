@@ -5,6 +5,12 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.3.0] - 2026-02-28
+
+### Added
+
+- Historical data now persists across restarts. Dashboard energy flow chart and Hourly Battery Actions & Savings page retain their data when BESS restarts instead of showing empty charts. Data is saved to `/config/bess_historical_data.json` after each 15-minute recording period and loaded on startup if from today, following the same persistence pattern used by `ScheduleStore`.
+
 ## [6.2.2] - 2026-02-28
 
 ### Fixed

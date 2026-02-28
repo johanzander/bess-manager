@@ -1988,6 +1988,13 @@ class BatterySystemManager:
         try:
             if "battery" in settings:
                 self.battery_settings.update(**settings["battery"])
+                # Propagate battery capacity to components that store their own copy
+                new_capacity = self.battery_settings.total_capacity
+                self.sensor_collector.battery_capacity = new_capacity
+                self.sensor_collector.energy_flow_calculator.battery_capacity = (
+                    new_capacity
+                )
+                self.historical_store.total_capacity = new_capacity
 
             if "home" in settings:
                 self.home_settings.update(**settings["home"])
@@ -1996,7 +2003,9 @@ class BatterySystemManager:
                 self.price_settings.update(**settings["price"])
                 self._price_manager.markup_rate = self.price_settings.markup_rate
                 self._price_manager.vat_multiplier = self.price_settings.vat_multiplier
-                self._price_manager.additional_costs = self.price_settings.additional_costs
+                self._price_manager.additional_costs = (
+                    self.price_settings.additional_costs
+                )
                 self._price_manager.tax_reduction = self.price_settings.tax_reduction
                 self._price_manager.area = self.price_settings.area
                 self._price_manager.clear_cache()

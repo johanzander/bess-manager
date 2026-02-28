@@ -22,8 +22,9 @@ class PriceSource:
     def period_duration_hours(self) -> float:
         """Duration of each price period in hours.
 
-        Returns:
-            0.25 for quarterly (Nordpool), 0.5 for half-hourly (Octopus), etc.
+        All sources must return 0.25 (quarterly / 15-minute periods) to match
+        the system-wide period model. Sources with coarser raw data (e.g. Octopus
+        30-min) must expand internally before returning prices.
         """
         return 0.25
 
@@ -390,6 +391,17 @@ class PriceManager:
         self._tomorrow_prices = None
         self._tomorrow_date = None
 
+    def clear_cache(self) -> None:
+        """Clear cached price data.
+
+        Must be called when pricing parameters (markup, VAT, additional costs)
+        change, since cached prices were calculated with the old values.
+        """
+        self._today_prices = None
+        self._today_date = None
+        self._tomorrow_prices = None
+        self._tomorrow_date = None
+
     def _calculate_buy_price(self, base_price: float) -> float:
         """Calculate retail buy price from Nordpool base price.
 
@@ -564,16 +576,13 @@ class PriceManager:
     def get_available_prices(self) -> tuple[list[float], list[float]]:
         """Get all available prices starting at today 00:00.
 
-        Period count depends on the price source resolution:
-        - Nordpool: 96 periods/day (15-min quarterly)
-        - Octopus Energy: 48 periods/day (30-min half-hourly)
-
+        All sources provide 96 quarterly (15-minute) periods per day.
         Automatically tries tomorrow, falls back to today only.
 
         Returns:
             (buy_prices, sell_prices) tuple where:
             - Index 0 = today 00:00
-            - Length: periods_per_day (today only) or 2x (today + tomorrow)
+            - Length: 96 (today only) or 192 (today + tomorrow)
         """
         today = datetime.now().date()
         tomorrow = today + timedelta(days=1)

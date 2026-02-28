@@ -79,10 +79,10 @@ def _make_source(controller):
 class TestOctopusEnergySourceProperties:
     """Test basic properties of OctopusEnergySource."""
 
-    def test_period_duration_hours_is_half_hour(self):
+    def test_period_duration_hours_is_quarterly(self):
         controller = MagicMock()
         source = _make_source(controller)
-        assert source.period_duration_hours == 0.5
+        assert source.period_duration_hours == 0.25
 
     def test_default_price_source_period_duration_is_quarter(self):
         """Verify the base PriceSource default is 0.25 (Nordpool)."""
@@ -101,9 +101,13 @@ class TestImportRateFetching:
 
         prices = source.get_prices_for_date(today)
 
-        assert len(prices) == 48
+        # 48 half-hourly rates expanded to 96 quarterly periods
+        assert len(prices) == 96
+        # Each raw rate is duplicated: indices 0,1 from rate 0; indices 94,95 from rate 47
         assert prices[0] == rates[0]["value_inc_vat"]
-        assert prices[47] == rates[47]["value_inc_vat"]
+        assert prices[1] == rates[0]["value_inc_vat"]
+        assert prices[94] == rates[47]["value_inc_vat"]
+        assert prices[95] == rates[47]["value_inc_vat"]
 
     def test_fetch_tomorrow_import_rates(self):
         tomorrow = datetime.now().date() + timedelta(days=1)
@@ -113,7 +117,7 @@ class TestImportRateFetching:
 
         prices = source.get_prices_for_date(tomorrow)
 
-        assert len(prices) == 48
+        assert len(prices) == 96
 
     def test_rejects_date_beyond_tomorrow(self):
         day_after = datetime.now().date() + timedelta(days=2)
@@ -142,7 +146,8 @@ class TestImportRateFetching:
             source = _make_source(controller)
 
             prices = source.get_prices_for_date(today)
-            assert len(prices) == count
+            # Each raw rate is expanded to 2 quarterly periods
+            assert len(prices) == count * 2
 
     def test_too_many_rates_raises_error(self):
         """More than 48 rates for a single date should fail validation."""
@@ -198,8 +203,10 @@ class TestExportRateFetching:
         sell_prices = source.get_sell_prices_for_date(today)
 
         assert sell_prices is not None
-        assert len(sell_prices) == 48
+        assert len(sell_prices) == 96
+        # Each raw rate is duplicated into two quarterly periods
         assert sell_prices[0] == export_rates[0]["value_inc_vat"]
+        assert sell_prices[1] == export_rates[0]["value_inc_vat"]
 
     def test_no_export_entity_returns_none(self):
         today = datetime.now().date()
@@ -246,7 +253,7 @@ class TestDateFilteringAndSorting:
         source = _make_source(controller)
 
         prices = source.get_prices_for_date(today)
-        assert len(prices) == 48
+        assert len(prices) == 96  # 48 raw rates expanded to 96 quarterly
 
     def test_sorts_rates_chronologically(self):
         """Rates should be sorted by start time regardless of input order."""
@@ -259,9 +266,10 @@ class TestDateFilteringAndSorting:
         source = _make_source(controller)
 
         prices = source.get_prices_for_date(today)
-        assert len(prices) == 48
-        # First price should be the midnight rate (lowest index)
+        assert len(prices) == 96
+        # First price should be the midnight rate (lowest index), duplicated
         assert prices[0] == 0.20  # base_value for index 0
+        assert prices[1] == 0.20  # same rate, second quarterly period
 
 
 class TestHealthCheck:
@@ -314,14 +322,15 @@ class TestPriceManagerIntegration:
 
         price_data = pm.get_price_data(today)
 
-        assert len(price_data) == 48
-        # Sell price should come directly from export rates, not calculated
+        assert len(price_data) == 96
+        # Sell price should come directly from export rates (duplicated for quarterly)
         assert price_data[0]["sellPrice"] == export_rates[0]["value_inc_vat"]
+        assert price_data[1]["sellPrice"] == export_rates[0]["value_inc_vat"]
         # Buy price should still be calculated from import rates
         assert price_data[0]["buyPrice"] == import_rates[0]["value_inc_vat"]
 
-    def test_price_manager_timestamps_use_half_hour_spacing(self):
-        """Timestamps should be 30 minutes apart for Octopus."""
+    def test_price_manager_timestamps_use_quarter_hour_spacing(self):
+        """Timestamps should be 15 minutes apart (quarterly resolution)."""
         today = datetime.now().date()
         rates = _make_rates(today)
         controller = _make_ha_controller(rates)
@@ -338,10 +347,11 @@ class TestPriceManagerIntegration:
 
         price_data = pm.get_price_data(today)
 
-        # First entry at 00:00, second at 00:30
+        # 15-minute spacing: 00:00, 00:15, 00:30, 00:45
         assert price_data[0]["timestamp"].endswith("00:00")
-        assert price_data[1]["timestamp"].endswith("00:30")
-        assert price_data[2]["timestamp"].endswith("01:00")
+        assert price_data[1]["timestamp"].endswith("00:15")
+        assert price_data[2]["timestamp"].endswith("00:30")
+        assert price_data[3]["timestamp"].endswith("00:45")
 
     def test_price_manager_fallback_sell_without_export(self):
         """Without export entity, sell price should use calculated formula."""

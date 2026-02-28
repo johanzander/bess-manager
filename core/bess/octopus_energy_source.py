@@ -2,7 +2,9 @@
 Octopus Energy Agile tariff price source.
 
 Fetches import and export rates from Octopus Energy HA event entities.
-Prices are VAT-inclusive in GBP/kWh at 30-minute resolution (48 periods/day).
+Prices are VAT-inclusive in GBP/kWh. Raw data arrives at 30-minute resolution
+(48 periods/day) and is expanded to 15-minute quarterly resolution (96 periods/day)
+to match the system-wide period model.
 """
 
 import logging
@@ -13,15 +15,17 @@ from .price_manager import PriceSource
 
 logger = logging.getLogger(__name__)
 
-EXPECTED_PERIODS_PER_DAY = 48
-MIN_PERIODS_PER_DAY = 46
+EXPECTED_RAW_PERIODS = 48  # Octopus provides 48 half-hourly slots
+MIN_RAW_PERIODS = 46  # Allow slightly fewer during incremental publishing
 
 
 class OctopusEnergySource(PriceSource):
     """Price source for Octopus Energy Agile tariff via Home Assistant event entities.
 
+    Raw data arrives at 30-minute resolution (48 half-hourly slots per day) and is
+    expanded to 96 quarterly (15-minute) periods to match the system-wide period model.
+
     Key differences from Nordpool:
-    - 30-minute periods (48/day) instead of 15-minute (96/day)
     - Separate import and export rate entities
     - Prices are already VAT-inclusive final prices in GBP/kWh
     - Data comes from HA event entity attributes (rates list)
@@ -52,8 +56,8 @@ class OctopusEnergySource(PriceSource):
 
     @property
     def period_duration_hours(self) -> float:
-        """Octopus Energy uses 30-minute periods."""
-        return 0.5
+        """Quarterly (15-minute) periods, matching the system-wide resolution."""
+        return 0.25
 
     def get_prices_for_date(self, target_date: date) -> list[float]:
         """Get import rates from Octopus Energy for the specified date.
@@ -62,7 +66,8 @@ class OctopusEnergySource(PriceSource):
             target_date: The date to get import prices for
 
         Returns:
-            List of 48 import rates in GBP/kWh (VAT-inclusive)
+            List of 96 quarterly import rates in GBP/kWh (VAT-inclusive),
+            expanded from 48 half-hourly raw rates
 
         Raises:
             PriceDataUnavailableError: If rates cannot be fetched
@@ -90,7 +95,8 @@ class OctopusEnergySource(PriceSource):
             target_date: The date to get export prices for
 
         Returns:
-            List of 48 export rates in GBP/kWh, or None if no export entity configured
+            List of 96 quarterly export rates in GBP/kWh (expanded from 48 raw),
+            or None if no export entity configured
         """
         if not self.export_today_entity and not self.export_tomorrow_entity:
             return None
@@ -120,13 +126,16 @@ class OctopusEnergySource(PriceSource):
     ) -> list[float]:
         """Fetch rates from a Home Assistant event entity.
 
+        Octopus provides 48 half-hourly rates. Each rate is duplicated to produce
+        96 quarterly (15-minute) periods matching the system-wide resolution.
+
         Args:
             entity_id: HA entity ID to fetch from
             target_date: Date to filter rates for
             rate_type: "import" or "export" (for logging)
 
         Returns:
-            List of 48 rate values (value_inc_vat) sorted chronologically
+            List of 96 quarterly rate values (value_inc_vat) sorted chronologically
 
         Raises:
             PriceDataUnavailableError: If rates cannot be fetched or validated
@@ -159,33 +168,37 @@ class OctopusEnergySource(PriceSource):
         # Filter rates for the target date and sort chronologically
         filtered_rates = self._filter_rates_for_date(rates, target_date)
 
-        if len(filtered_rates) < MIN_PERIODS_PER_DAY:
+        if len(filtered_rates) < MIN_RAW_PERIODS:
             raise PriceDataUnavailableError(
                 date=target_date,
                 message=(
-                    f"Expected at least {MIN_PERIODS_PER_DAY} {rate_type} rates for {target_date}, "
+                    f"Expected at least {MIN_RAW_PERIODS} {rate_type} rates for {target_date}, "
                     f"got {len(filtered_rates)} from {entity_id}"
                 ),
             )
-        if len(filtered_rates) > EXPECTED_PERIODS_PER_DAY:
+        if len(filtered_rates) > EXPECTED_RAW_PERIODS:
             raise PriceDataUnavailableError(
                 date=target_date,
                 message=(
                     f"Too many {rate_type} rates for {target_date}: "
-                    f"expected at most {EXPECTED_PERIODS_PER_DAY}, "
+                    f"expected at most {EXPECTED_RAW_PERIODS}, "
                     f"got {len(filtered_rates)} from {entity_id}"
                 ),
             )
 
-        # Extract value_inc_vat from each rate entry
-        prices = [float(rate["value_inc_vat"]) for rate in filtered_rates]
+        # Extract value_inc_vat from each half-hourly rate entry
+        half_hourly_prices = [float(rate["value_inc_vat"]) for rate in filtered_rates]
+
+        # Expand 48 half-hourly prices → 96 quarterly prices (duplicate each)
+        quarterly_prices = [p for p in half_hourly_prices for _ in range(2)]
 
         logger.info(
-            f"Fetched {len(prices)} Octopus {rate_type} rates for {target_date}: "
-            f"range {min(prices):.4f} - {max(prices):.4f} GBP/kWh"
+            f"Fetched {len(half_hourly_prices)} Octopus {rate_type} rates for {target_date} "
+            f"(expanded to {len(quarterly_prices)} quarterly periods): "
+            f"range {min(half_hourly_prices):.4f} - {max(half_hourly_prices):.4f} GBP/kWh"
         )
 
-        return prices
+        return quarterly_prices
 
     def _filter_rates_for_date(
         self, rates: list[dict], target_date: date

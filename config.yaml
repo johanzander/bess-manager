@@ -1,6 +1,6 @@
 name: "BESS Manager"
 description: "Battery Energy Storage System optimization and management"
-version: "6.2.2"
+version: "6.2.3"
 slug: "bess_manager"
 init: false
 arch:
@@ -28,35 +28,35 @@ options:
     username: "your_db_username_here"
     password: "your_db_password_here"
   home:
-    consumption: 3.5                # default hourly consumption in kWh
-    currency: "SEK"                 # currency for price display and calculations
-    max_fuse_current: 25            # Maximum fuse current in amperes
-    voltage: 230                    # Line voltage in volts
-    safety_margin_factor: 1.0       # Safety margin for power calculations (100% - safe with 5min monitoring)
+    consumption: 3.5 # default hourly consumption in kWh
+    currency: "SEK" # currency for price display and calculations
+    max_fuse_current: 25 # Maximum fuse current in amperes
+    voltage: 230 # Line voltage in volts
+    safety_margin_factor: 1.0 # Safety margin for power calculations (100% - safe with 5min monitoring)
   battery:
-    total_capacity: 30.0             # kWh
-    min_soc: 15                      # Minimum state of charge (%) - synced to inverter on startup
-    max_soc: 95                      # Maximum state of charge (%) - synced to inverter on startup
+    total_capacity: 30.0 # kWh
+    min_soc: 15 # Minimum state of charge (%) - synced to inverter on startup
+    max_soc: 95 # Maximum state of charge (%) - synced to inverter on startup
     max_charge_discharge_power: 15.0 # kW
-    cycle_cost: 0.50                 # Battery wear cost per kWh (excl. VAT) - use your local currency
+    cycle_cost: 0.50 # Battery wear cost per kWh (excl. VAT) - use your local currency
     min_action_profit_threshold: 8.0 # Minimum profit threshold for any battery action (in your currency)
   electricity_price:
-    area: "SE4"                      # Area for Nordpool pricing
-    markup_rate: 0.08                # Electricity markup per kWh (in your currency, e.g. 8 öre/kWh for SEK)
-    vat_multiplier: 1.25             # 25% VAT
-    additional_costs: 1.03           # Additional costs per kWh in your currency (e.g. SE: 28.90 öre överföringsavgift + 53.50 öre energiskatt + moms)
-    tax_reduction: 0.6518            # Tax reduction for sold energy in your currency (e.g. SE: 60 öre skattereduktion + 5.18 öre förlustersättning)
+    area: "SE4" # Area for Nordpool pricing
+    markup_rate: 0.08 # Electricity markup per kWh (in your currency, e.g. 8 öre/kWh for SEK)
+    vat_multiplier: 1.25 # 25% VAT
+    additional_costs: 1.03 # Additional costs per kWh in your currency (e.g. SE: 28.90 öre överföringsavgift + 53.50 öre energiskatt + moms)
+    tax_reduction: 0.6518 # Tax reduction for sold energy in your currency (e.g. SE: 60 öre skattereduktion + 5.18 öre förlustersättning)
   nordpool:
-    price_provider: "nordpool"  # "nordpool" (legacy sensor), "nordpool_official", or "octopus"
-    use_official_integration: true  # Set to true to use official HA Nord Pool integration
-    config_entry_id: "01K3Y99FD3MDZYVFX2XSWR4888"  # Required when use_official_integration is true
+    price_provider: "nordpool" # "nordpool" (legacy sensor), "nordpool_official", or "octopus"
+    use_official_integration: true # Set to true to use official HA Nord Pool integration
+    config_entry_id: "01K3Y99FD3MDZYVFX2XSWR4888" # Required when use_official_integration is true
   octopus:
-    import_today_entity: ""       # HA entity for today's Octopus import rates
-    import_tomorrow_entity: ""    # HA entity for tomorrow's Octopus import rates
-    export_today_entity: ""       # HA entity for today's Octopus export rates
-    export_tomorrow_entity: ""    # HA entity for tomorrow's Octopus export rates
+    import_today_entity: "" # HA entity for today's Octopus import rates
+    import_tomorrow_entity: "" # HA entity for tomorrow's Octopus import rates
+    export_today_entity: "" # HA entity for today's Octopus export rates
+    export_tomorrow_entity: "" # HA entity for tomorrow's Octopus export rates
   growatt:
-    device_id: "fbafceb07a1cc74c351ef4310fa430a0"  # Growatt device ID for TOU segment operations
+    device_id: "fbafceb07a1cc74c351ef4310fa430a0" # Growatt device ID for TOU segment operations
   sensors:
     # === Battery Control & Status ===
     battery_soc: "sensor.rkm0d7n04x_statement_of_charge_soc"
@@ -66,20 +66,20 @@ options:
     battery_discharging_power_rate: "number.rkm0d7n04x_battery_discharge_power_limit"
     grid_charge: "switch.rkm0d7n04x_ac_charge"
     # === Real-time Power Sensors (Primary - Live Power Flow) ===
-    pv_power: "sensor.rkm0d7n04x_internal_wattage"                    # Total solar DC production
-    local_load_power: "sensor.rkm0d7n04x_local_load_power"           # Home consumption
-    import_power: "sensor.rkm0d7n04x_import_power"                   # Grid import
-    export_power: "sensor.rkm0d7n04x_export_power"                   # Grid export
-    battery_charge_power: "sensor.rkm0d7n04x_battery_1_charging_w"     # Battery charging power
-    battery_discharge_power: "sensor.rkm0d7n04x_battery_1_discharging_w"  # Battery discharging power
+    pv_power: "sensor.rkm0d7n04x_internal_wattage" # Total solar DC production
+    local_load_power: "sensor.rkm0d7n04x_local_load_power" # Home consumption
+    import_power: "sensor.rkm0d7n04x_import_power" # Grid import
+    export_power: "sensor.rkm0d7n04x_export_power" # Grid export
+    battery_charge_power: "sensor.rkm0d7n04x_battery_1_charging_w" # Battery charging power
+    battery_discharge_power: "sensor.rkm0d7n04x_battery_1_discharging_w" # Battery discharging power
     # === Real-time Power Sensors (Advanced/Diagnostic - not required) ===
-    output_power: "sensor.rkm0d7n04x_output_power"                   # Output power
-    self_power: "sensor.rkm0d7n04x_self_power"                       # Solar contributing to AC loads
-    system_power: "sensor.rkm0d7n04x_system_power"                   # System power throughput
+    output_power: "sensor.rkm0d7n04x_output_power" # Output power
+    self_power: "sensor.rkm0d7n04x_self_power" # Solar contributing to AC loads
+    system_power: "sensor.rkm0d7n04x_system_power" # System power throughput
     # === Grid Current Monitoring (not required) ===
-    current_l1: "sensor.current_l1_gustavsgatan_32a"                 # Phase 1 current
-    current_l2: "sensor.current_l2_gustavsgatan_32a"                 # Phase 2 current
-    current_l3: "sensor.current_l3_gustavsgatan_32a"                 # Phase 3 current
+    current_l1: "sensor.current_l1_gustavsgatan_32a" # Phase 1 current
+    current_l2: "sensor.current_l2_gustavsgatan_32a" # Phase 2 current
+    current_l3: "sensor.current_l3_gustavsgatan_32a" # Phase 3 current
     # === Lifetime Energy Totals ===
     lifetime_solar_energy: "sensor.rkm0d7n04x_lifetime_total_solar_energy"
     lifetime_load_consumption: "sensor.rkm0d7n04x_lifetime_total_load_consumption"
@@ -89,12 +89,12 @@ options:
     lifetime_battery_charged: "sensor.rkm0d7n04x_lifetime_total_all_batteries_charged"
     lifetime_battery_discharged: "sensor.rkm0d7n04x_lifetime_total_all_batteries_discharged"
     lifetime_system_production: "sensor.rkm0d7n04x_lifetime_system_production"
-    ev_energy_meter: "sensor.zap263668_energy_meter"                 # EV charging energy (lifetime)
+    ev_energy_meter: "sensor.zap263668_energy_meter" # EV charging energy (lifetime)
     # === Electricity Pricing ===
-    nordpool_kwh_today: "sensor.nordpool_kwh_se4_sek_2_10_025"       # Today's NordPool prices
-    nordpool_kwh_tomorrow: "sensor.nordpool_kwh_se4_sek_2_10_025"    # Tomorrow's NordPool prices
+    nordpool_kwh_today: "sensor.nordpool_kwh_se4_sek_2_10_025" # Today's NordPool prices
+    nordpool_kwh_tomorrow: "sensor.nordpool_kwh_se4_sek_2_10_025" # Tomorrow's NordPool prices
     # === Solar & Consumption Forecasting ===
-    48h_avg_grid_import: "sensor.48h_average_grid_import_power"       # 48h average consumption
+    48h_avg_grid_import: "sensor.48h_average_grid_import_power" # 48h average consumption
     solar_forecast_today: "sensor.solcast_pv_forecast_forecast_today" # Today's solar forecast
 schema:
   influxdb:

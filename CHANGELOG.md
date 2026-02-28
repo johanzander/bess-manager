@@ -5,6 +5,13 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.2.1] - 2026-02-28
+
+### Fixed
+
+- Octopus Energy prices no longer display at ~1.33 GBP/kWh. The `PriceManager` retained Swedish default pricing parameters (markup=0.08, VAT=1.25, additional=1.03) because `update_settings()` updated the settings dataclass but never propagated the new values to the running `PriceManager`. Settings are now forwarded and the price cache is cleared on update.
+- Octopus Energy 30-minute rates are now expanded to 96 quarterly (15-minute) periods at the source level, ensuring correct timestamps and consistent resolution across all code paths. The previous normalization at the BSM level duplicated price-entry dicts which carried wrong timestamps.
+
 ## [6.2.0] - 2026-02-28
 
 ### Fixed

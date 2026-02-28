@@ -5,6 +5,14 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.2.0] - 2026-02-28
+
+### Fixed
+
+- InfluxDB queries now work with both 1.x and 2.x data models. In 1.x, `_measurement` holds the unit of measurement (e.g. `%`, `W`) and the entity ID is stored in an `entity_id` tag; in 2.x, `_measurement` holds the entity ID directly. Query filters now match on either field.
+- CSV response parsers now detect column positions from the header row instead of using hardcoded indices, preventing silent data loss when InfluxDB returns columns in a different order depending on version and tag configuration.
+- Diagnostic logging in batch queries uses header-aware column detection and logs raw response lines when zero sensors are found, making InfluxDB version mismatches immediately visible in logs.
+
 ## [6.1.3] - 2026-02-27
 
 ### Fixed

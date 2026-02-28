@@ -15,7 +15,8 @@ from core.bess.models import OptimizationResult
 logger = logging.getLogger(__name__)
 
 # Persistence path for strategic intents (survives restart)
-PERSIST_PATH = Path("/config/bess_strategic_intents.json")
+# /data is HA add-on persistent storage, always available without map config
+PERSIST_PATH = Path("/data/bess_strategic_intents.json")
 
 
 @dataclass

@@ -643,13 +643,10 @@ class BatterySystemManager:
     def _get_price_data(
         self, prepare_next_day: bool
     ) -> tuple[list[float] | None, list[dict[str, Any]] | None]:
-        """Get price data, normalized to 15-minute (quarterly) resolution.
+        """Get price data in 15-minute (quarterly) resolution.
 
-        The entire system (period indices, historical store, Growatt schedule,
-        sensor collection) operates on 15-minute periods (96/day).  Price sources
-        may deliver coarser granularity (e.g. 30-min for Octopus, 60-min for
-        official Nordpool).  This method expands such prices so every downstream
-        consumer always sees one entry per 15-minute slot.
+        All price sources return 96 quarterly periods per day. Sources with
+        coarser raw data (e.g. Octopus 30-min) expand internally.
         """
         try:
             if prepare_next_day:
@@ -1997,6 +1994,12 @@ class BatterySystemManager:
 
             if "price" in settings:
                 self.price_settings.update(**settings["price"])
+                self._price_manager.markup_rate = self.price_settings.markup_rate
+                self._price_manager.vat_multiplier = self.price_settings.vat_multiplier
+                self._price_manager.additional_costs = self.price_settings.additional_costs
+                self._price_manager.tax_reduction = self.price_settings.tax_reduction
+                self._price_manager.area = self.price_settings.area
+                self._price_manager.clear_cache()
 
             logger.info("Settings updated successfully")
 

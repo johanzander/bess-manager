@@ -117,12 +117,13 @@ def get_sensor_data(sensors_list, start_time=None, stop_time=None) -> dict:
     end_str = stop_time.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     # Build sensor filter compatible with both InfluxDB 1.x and 2.x:
-    # - InfluxDB 2.x: _measurement contains the entity_id (e.g. "sensor.xyz_...")
-    # - InfluxDB 1.x: _measurement contains the unit (e.g. "%", "W"), entity_id is a tag
+    # - InfluxDB 2.x: _measurement contains the full entity_id (e.g. "sensor.xyz_...")
+    # - InfluxDB 1.x: _measurement contains the unit (e.g. "%", "W"),
+    #   entity_id tag stores the short name without domain prefix (e.g. "xyz_...")
     sensor_conditions = []
     for sensor in sensors_list:
         sensor_conditions.append(
-            f'r["_measurement"] == "sensor.{sensor}" or r["entity_id"] == "sensor.{sensor}"'
+            f'r["_measurement"] == "sensor.{sensor}" or r["entity_id"] == "{sensor}"'
         )
     sensor_filter = " or ".join(f"({c})" for c in sensor_conditions)
 
@@ -182,17 +183,26 @@ def _build_column_index(data_lines: list[str]) -> dict[str, int] | None:
 def _extract_sensor_name(parts: list[str], col_map: dict[str, int]) -> str:
     """Extract the sensor entity_id from a CSV row, supporting both InfluxDB versions.
 
-    InfluxDB 2.x stores the entity_id in _measurement.
-    InfluxDB 1.x stores it in the entity_id tag column.
+    InfluxDB 2.x stores the full entity_id (e.g. "sensor.xyz_...") in _measurement.
+    InfluxDB 1.x stores the short name without domain prefix (e.g. "xyz_...") in the
+    entity_id tag column, with the domain ("sensor") in a separate domain tag.
+
+    Returns a normalized name always prefixed with "sensor." so downstream consumers
+    (e.g. _normalize_sensor_readings) can consistently strip the prefix.
     """
     entity_id_idx = col_map.get("entity_id")
     measurement_idx = col_map.get("_measurement")
 
-    # Prefer entity_id tag if it exists and looks like a sensor entity
+    # Prefer entity_id tag if present and non-empty
     if entity_id_idx is not None and entity_id_idx < len(parts):
         entity_val = parts[entity_id_idx].strip()
-        if entity_val.startswith("sensor."):
-            return entity_val
+        if entity_val:
+            # InfluxDB 2.x: already has "sensor." prefix
+            if entity_val.startswith("sensor."):
+                return entity_val
+            # InfluxDB 1.x: short name without prefix — normalize it
+            if entity_val and entity_val != "entity_id":
+                return f"sensor.{entity_val}"
 
     # Fall back to _measurement (InfluxDB 2.x stores entity_id here)
     if measurement_idx is not None and measurement_idx < len(parts):
@@ -302,12 +312,13 @@ def get_sensor_data_batch(sensors_list, target_date) -> dict:
     end_str = end_datetime.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     # Build sensor filter compatible with both InfluxDB 1.x and 2.x:
-    # - InfluxDB 2.x: _measurement contains the entity_id (e.g. "sensor.xyz_...")
-    # - InfluxDB 1.x: _measurement contains the unit (e.g. "%", "W"), entity_id is a tag
+    # - InfluxDB 2.x: _measurement contains the full entity_id (e.g. "sensor.xyz_...")
+    # - InfluxDB 1.x: _measurement contains the unit (e.g. "%", "W"),
+    #   entity_id tag stores the short name without domain prefix (e.g. "xyz_...")
     sensor_conditions = []
     for sensor in sensors_list:
         sensor_conditions.append(
-            f'r["_measurement"] == "sensor.{sensor}" or r["entity_id"] == "sensor.{sensor}"'
+            f'r["_measurement"] == "sensor.{sensor}" or r["entity_id"] == "{sensor}"'
         )
     sensor_filter = " or ".join(f"({c})" for c in sensor_conditions)
 

@@ -15,7 +15,8 @@ from core.bess.time_utils import TIMEZONE, get_period_count
 
 logger = logging.getLogger(__name__)
 
-PERSIST_PATH = Path("/config/bess_historical_data.json")
+# /data is HA add-on persistent storage, always available without map config
+PERSIST_PATH = Path("/data/bess_historical_data.json")
 
 
 class HistoricalDataStore:

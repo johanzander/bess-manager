@@ -623,7 +623,7 @@ class GrowattScheduleManager:
             if intent == "GRID_CHARGING":
                 grid_charge = True
                 discharge_rate = 0
-                charge_rate = charge_power_rate
+                charge_rate = 100  # Always charge at full power; power monitor handles fuse protection
                 state = "charging"
                 batt_mode = "battery_first"
 

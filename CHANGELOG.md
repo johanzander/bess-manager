@@ -5,6 +5,12 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.3.3] - 2026-03-01
+
+### Fixed
+
+- Grid charging now uses 100% charge power rate. Previously the charge rate was derived from the optimizer's planned power level, causing the battery to charge slowly during cheap grid periods instead of at full speed. The optimizer controls *which* periods to charge (strategic intent), while the power monitor handles fuse protection — there was no need to additionally throttle the rate.
+
 ## [6.3.0] - 2026-02-28
 
 ### Added

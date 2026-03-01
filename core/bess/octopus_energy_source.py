@@ -54,11 +54,6 @@ class OctopusEnergySource(PriceSource):
         self.export_today_entity = export_today_entity
         self.export_tomorrow_entity = export_tomorrow_entity
 
-    @property
-    def period_duration_hours(self) -> float:
-        """Quarterly (15-minute) periods, matching the system-wide resolution."""
-        return 0.25
-
     def get_prices_for_date(self, target_date: date) -> list[float]:
         """Get import rates from Octopus Energy for the specified date.
 
@@ -248,9 +243,9 @@ class OctopusEnergySource(PriceSource):
         }
         try:
             import_prices = self.get_prices_for_date(today)
-            import_check["message"] = (
-                f"Successfully fetched {len(import_prices)} import rates for today"
-            )
+            import_check[
+                "message"
+            ] = f"Successfully fetched {len(import_prices)} import rates for today"
         except Exception as e:
             import_check["status"] = "ERROR"
             import_check["message"] = f"Failed to fetch import rates: {e}"
@@ -266,9 +261,9 @@ class OctopusEnergySource(PriceSource):
         try:
             export_prices = self.get_sell_prices_for_date(today)
             if export_prices is not None:
-                export_check["message"] = (
-                    f"Successfully fetched {len(export_prices)} export rates for today"
-                )
+                export_check[
+                    "message"
+                ] = f"Successfully fetched {len(export_prices)} export rates for today"
             else:
                 export_check["message"] = "No export entity configured"
         except Exception as e:

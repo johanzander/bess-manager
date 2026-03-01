@@ -116,14 +116,18 @@ def get_sensor_data(sensors_list, start_time=None, stop_time=None) -> dict:
     start_str = start_time.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%SZ")
     end_str = stop_time.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    sensor_filter = " or ".join(
-        [f'r["_measurement"] == "sensor.{sensor}"' for sensor in sensors_list]
-    )
+    # Build sensor filter compatible with both InfluxDB 1.x and 2.x:
+    # - InfluxDB 2.x: _measurement contains the full entity_id (e.g. "sensor.xyz_...")
+    # - InfluxDB 1.x: _measurement contains the unit (e.g. "%", "W"),
+    #   entity_id tag stores the short name without domain prefix (e.g. "xyz_...")
+    sensor_conditions = []
+    for sensor in sensors_list:
+        sensor_conditions.append(
+            f'r["_measurement"] == "sensor.{sensor}" or r["entity_id"] == "{sensor}"'
+        )
+    sensor_filter = " or ".join(f"({c})" for c in sensor_conditions)
 
     # Time-bounded query (always uses range since we always have start_time)
-    # Note: The _measurement filter already uniquely identifies the sensors,
-    # so the "domain" tag filter is omitted for compatibility with InfluxDB 1.x
-    # setups where this tag may not be present.
     flux_query = f"""from(bucket: "{bucket}")
                     |> range(start: {start_str}, stop: {end_str})
                     |> filter(fn: (r) => {sensor_filter})
@@ -163,29 +167,84 @@ def get_sensor_data(sensors_list, start_time=None, stop_time=None) -> dict:
         return {"status": "error", "message": f"Unexpected error: {e!s}"}
 
 
+def _build_column_index(data_lines: list[str]) -> dict[str, int] | None:
+    """Find the header row in CSV data lines and return a column name-to-index map.
+
+    The header row is the first non-empty line that contains known InfluxDB column
+    names like '_value' and '_time'. Returns None if no header row is found.
+    """
+    for line in data_lines:
+        parts = [p.strip() for p in line.split(",")]
+        if "_value" in parts and "_time" in parts:
+            return {name: idx for idx, name in enumerate(parts)}
+    return None
+
+
+def _extract_sensor_name(parts: list[str], col_map: dict[str, int]) -> str:
+    """Extract the sensor entity_id from a CSV row, supporting both InfluxDB versions.
+
+    InfluxDB 2.x stores the full entity_id (e.g. "sensor.xyz_...") in _measurement.
+    InfluxDB 1.x stores the short name without domain prefix (e.g. "xyz_...") in the
+    entity_id tag column, with the domain ("sensor") in a separate domain tag.
+
+    Returns a normalized name always prefixed with "sensor." so downstream consumers
+    (e.g. _normalize_sensor_readings) can consistently strip the prefix.
+    """
+    entity_id_idx = col_map.get("entity_id")
+    measurement_idx = col_map.get("_measurement")
+
+    # Prefer entity_id tag if present and non-empty
+    if entity_id_idx is not None and entity_id_idx < len(parts):
+        entity_val = parts[entity_id_idx].strip()
+        if entity_val:
+            # InfluxDB 2.x: already has "sensor." prefix
+            if entity_val.startswith("sensor."):
+                return entity_val
+            # InfluxDB 1.x: short name without prefix — normalize it
+            if entity_val and entity_val != "entity_id":
+                return f"sensor.{entity_val}"
+
+    # Fall back to _measurement (InfluxDB 2.x stores entity_id here)
+    if measurement_idx is not None and measurement_idx < len(parts):
+        measurement_val = parts[measurement_idx].strip()
+        if measurement_val.startswith("sensor."):
+            return measurement_val
+
+    return ""
+
+
 def parse_influxdb_response(response_text) -> dict:
-    """Parse InfluxDB response to extract the latest measurement for each sensor."""
+    """Parse InfluxDB response to extract the latest measurement for each sensor.
+
+    Uses header-aware column detection to support both InfluxDB 1.x and 2.x,
+    where columns may appear at different positions depending on the tag set.
+    """
     readings = {}
     lines = response_text.strip().split("\n")
 
     # Skip metadata rows (lines starting with '#')
     data_lines = [line for line in lines if not line.startswith("#")]
 
-    # Process each data line
+    col_map = _build_column_index(data_lines)
+    if col_map is None:
+        _LOGGER.warning("No header row found in InfluxDB response")
+        return readings
+
+    value_idx = col_map["_value"]
+
+    # Process each data line (skip the header row itself)
     for line in data_lines:
         parts = line.split(",")
         try:
-            # Ensure the line has enough parts and the value can be converted to float
-            if len(parts) < 9 or parts[6] == "_value":
+            # Skip header row and short lines
+            if len(parts) <= value_idx or parts[value_idx].strip() == "_value":
                 continue
 
-            # Extract sensor name (_measurement) and value (_value)
-            sensor_name = parts[
-                10
-            ].strip()  # _measurement is the 11th column (index 10)
-            value = float(parts[6].strip())  # _value is the 7th column (index 6)
+            sensor_name = _extract_sensor_name(parts, col_map)
+            if not sensor_name:
+                continue
 
-            # Store the value in the readings dictionary with the sensor name
+            value = float(parts[value_idx].strip())
             readings[sensor_name] = value
         except (IndexError, ValueError) as e:
             _LOGGER.error("Failed to parse line: %s, error: %s", line, e)
@@ -252,15 +311,19 @@ def get_sensor_data_batch(sensors_list, target_date) -> dict:
     )
     end_str = end_datetime.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    sensor_filter = " or ".join(
-        [f'r["_measurement"] == "sensor.{sensor}"' for sensor in sensors_list]
-    )
+    # Build sensor filter compatible with both InfluxDB 1.x and 2.x:
+    # - InfluxDB 2.x: _measurement contains the full entity_id (e.g. "sensor.xyz_...")
+    # - InfluxDB 1.x: _measurement contains the unit (e.g. "%", "W"),
+    #   entity_id tag stores the short name without domain prefix (e.g. "xyz_...")
+    sensor_conditions = []
+    for sensor in sensors_list:
+        sensor_conditions.append(
+            f'r["_measurement"] == "sensor.{sensor}" or r["entity_id"] == "{sensor}"'
+        )
+    sensor_filter = " or ".join(f"({c})" for c in sensor_conditions)
 
     # Batch query: Get ALL data points, then for each period we'll find the last value
     # BEFORE that period's end time (same logic as individual queries for sparse data).
-    # Note: The _measurement filter already uniquely identifies the sensors,
-    # so the "domain" tag filter is omitted for compatibility with InfluxDB 1.x
-    # setups where this tag may not be present.
     flux_query = f"""from(bucket: "{bucket}")
                     |> range(start: {start_str}, stop: {end_str})
                     |> filter(fn: (r) => {sensor_filter})
@@ -301,14 +364,23 @@ def get_sensor_data_batch(sensors_list, target_date) -> dict:
         data_lines = [line for line in response_lines if not line.startswith("#")]
         _LOGGER.info("InfluxDB returned %d data lines (non-header)", len(data_lines))
 
-        # Log unique measurements to see what sensors we got
+        # Log unique sensors found using header-aware column detection
+        col_map = _build_column_index(data_lines)
         measurements = {}
-        for line in data_lines:
-            parts = line.split(",")
-            if len(parts) > 10 and parts[10] != "entity_id" and parts[6] != "_value":
-                sensor = parts[10].strip()
-                measurements[sensor] = measurements.get(sensor, 0) + 1
+        if col_map is not None:
+            value_idx = col_map["_value"]
+            for line in data_lines:
+                parts = line.split(",")
+                if len(parts) <= value_idx or parts[value_idx].strip() == "_value":
+                    continue
+                sensor = _extract_sensor_name(parts, col_map)
+                if sensor:
+                    measurements[sensor] = measurements.get(sensor, 0) + 1
         _LOGGER.info("Sensor counts in response: %s", measurements)
+        if not measurements and data_lines:
+            _LOGGER.warning(
+                "Zero sensors found. First 3 data lines: %s", data_lines[:3]
+            )
 
         # Parse the batch response
         period_data = _parse_batch_response(
@@ -366,18 +438,31 @@ def _parse_batch_response(
     lines = response_text.strip().split("\n")
     data_lines = [line for line in lines if not line.startswith("#")]
 
+    col_map = _build_column_index(data_lines)
+    if col_map is None:
+        _LOGGER.warning("No header row found in batch InfluxDB response")
+        return {}
+
+    value_idx = col_map["_value"]
+    time_idx = col_map["_time"]
+
     # Step 1: Parse all data points grouped by sensor
     sensor_data = {}  # {sensor_name: [(timestamp, value), ...]}
 
     for line in data_lines:
         parts = line.split(",")
         try:
-            if len(parts) < 11 or parts[6] == "_value":
+            if (
+                len(parts) <= max(value_idx, time_idx)
+                or parts[value_idx].strip() == "_value"
+            ):
                 continue
 
-            timestamp_str = parts[5].strip()
-            sensor_name = parts[10].strip()
-            value = float(parts[6].strip())
+            timestamp_str = parts[time_idx].strip()
+            sensor_name = _extract_sensor_name(parts, col_map)
+            if not sensor_name:
+                continue
+            value = float(parts[value_idx].strip())
 
             timestamp = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
             timestamp_local = timestamp.astimezone(local_tz)
@@ -404,9 +489,12 @@ def _parse_batch_response(
 
     for sensor_name in sensors_list:
         # Check if sensor needs initial value from previous day
+        # sensor_data keys are prefixed with "sensor." (from _extract_sensor_name),
+        # but sensors_list contains entity IDs without prefix
+        prefixed_name = f"sensor.{sensor_name}"
         needs_initial_value = False
 
-        if sensor_name not in sensor_data or not sensor_data[sensor_name]:
+        if prefixed_name not in sensor_data or not sensor_data[prefixed_name]:
             # Sensor has no data at all for this day
             needs_initial_value = True
             _LOGGER.debug(
@@ -416,7 +504,7 @@ def _parse_batch_response(
             )
         else:
             # Sensor has data, but check if first data point is after day start
-            first_timestamp = sensor_data[sensor_name][0][0]
+            first_timestamp = sensor_data[prefixed_name][0][0]
             if first_timestamp > day_start:
                 needs_initial_value = True
                 _LOGGER.debug(
@@ -451,13 +539,15 @@ def _parse_batch_response(
                         target_date,
                     )
                     # Add this as a data point just before the day started
+                    # Use prefixed name to match sensor_data keys from _extract_sensor_name
+                    prefixed_name = f"sensor.{sensor_name}"
                     initial_datapoint = (day_start - timedelta(seconds=1), sensor_value)
-                    if sensor_name in sensor_data:
+                    if prefixed_name in sensor_data:
                         # Prepend to existing data
-                        sensor_data[sensor_name].insert(0, initial_datapoint)
+                        sensor_data[prefixed_name].insert(0, initial_datapoint)
                     else:
                         # Create new list with just this initial value
-                        sensor_data[sensor_name] = [initial_datapoint]
+                        sensor_data[prefixed_name] = [initial_datapoint]
 
     # Step 3: For each period, find last value BEFORE period end time
     period_data = {}

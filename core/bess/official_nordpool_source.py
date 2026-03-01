@@ -187,32 +187,3 @@ class OfficialNordpoolSource(PriceSource):
 
         health_check["checks"] = [service_check, config_check]
         return health_check
-
-
-class LegacyNordpoolSource(PriceSource):
-    """Price source for legacy/custom Nordpool integrations using sensor attributes.
-
-    This maintains compatibility with custom Nordpool components that provide
-    'today', 'tomorrow', 'raw_today', 'raw_tomorrow' attributes.
-    """
-
-    def __init__(self, ha_controller, vat_multiplier: float) -> None:
-        """Initialize with Home Assistant controller.
-
-        Args:
-            ha_controller: Controller with access to Home Assistant
-            vat_multiplier: VAT multiplier for price conversion
-        """
-        self.ha_controller = ha_controller
-        self.vat_multiplier = vat_multiplier
-
-    def get_prices_for_date(self, target_date: date) -> list[float]:
-        """Get prices from legacy Nordpool sensor attributes.
-
-        This is the existing logic that expects sensor attributes.
-        """
-        from .price_manager import HomeAssistantSource
-
-        # Use the existing HomeAssistantSource logic
-        legacy_source = HomeAssistantSource(self.ha_controller, self.vat_multiplier)
-        return legacy_source.get_prices_for_date(target_date)

@@ -1,6 +1,6 @@
 name: "BESS Manager"
 description: "Battery Energy Storage System optimization and management"
-version: "6.0.6"
+version: "6.2.0"
 slug: "bess_manager"
 init: false
 arch:
@@ -46,9 +46,18 @@ options:
     vat_multiplier: 1.25             # 25% VAT
     additional_costs: 1.03           # Additional costs per kWh in your currency (e.g. SE: 28.90 öre överföringsavgift + 53.50 öre energiskatt + moms)
     tax_reduction: 0.6518            # Tax reduction for sold energy in your currency (e.g. SE: 60 öre skattereduktion + 5.18 öre förlustersättning)
-  nordpool:
-    use_official_integration: true  # Set to true to use official HA Nord Pool integration
-    config_entry_id: "01K3Y99FD3MDZYVFX2XSWR4888"  # Required when use_official_integration is true
+  energy_provider:
+    provider: "nordpool_official"  # "nordpool" (legacy sensor), "nordpool_official", or "octopus"
+    nordpool:
+      today_entity: "sensor.nordpool_kwh_se4_sek_2_10_025"
+      tomorrow_entity: "sensor.nordpool_kwh_se4_sek_2_10_025"
+    nordpool_official:
+      config_entry_id: "01K3Y99FD3MDZYVFX2XSWR4888"
+    octopus:
+      import_today_entity: ""       # HA entity for today's Octopus import rates
+      import_tomorrow_entity: ""    # HA entity for tomorrow's Octopus import rates
+      export_today_entity: ""       # HA entity for today's Octopus export rates
+      export_tomorrow_entity: ""    # HA entity for tomorrow's Octopus export rates
   growatt:
     device_id: "fbafceb07a1cc74c351ef4310fa430a0"  # Growatt device ID for TOU segment operations
   sensors:
@@ -84,9 +93,6 @@ options:
     lifetime_battery_discharged: "sensor.rkm0d7n04x_lifetime_total_all_batteries_discharged"
     lifetime_system_production: "sensor.rkm0d7n04x_lifetime_system_production"
     ev_energy_meter: "sensor.zap263668_energy_meter"                 # EV charging energy (lifetime)
-    # === Electricity Pricing ===
-    nordpool_kwh_today: "sensor.nordpool_kwh_se4_sek_2_10_025"       # Today's NordPool prices
-    nordpool_kwh_tomorrow: "sensor.nordpool_kwh_se4_sek_2_10_025"    # Tomorrow's NordPool prices
     # === Solar & Consumption Forecasting ===
     48h_avg_grid_import: "sensor.48h_average_grid_import_power"       # 48h average consumption
     solar_forecast_today: "sensor.solcast_pv_forecast_forecast_today" # Today's solar forecast
@@ -115,9 +121,18 @@ schema:
     vat_multiplier: float
     additional_costs: float
     tax_reduction: float
-  nordpool:
-    use_official_integration: bool
-    config_entry_id: str
+  energy_provider:
+    provider: str
+    nordpool:
+      today_entity: str
+      tomorrow_entity: str
+    nordpool_official:
+      config_entry_id: str
+    octopus:
+      import_today_entity: str
+      import_tomorrow_entity: str
+      export_today_entity: str
+      export_tomorrow_entity: str
   growatt:
     device_id: str
   sensors:
@@ -141,8 +156,6 @@ schema:
     lifetime_system_production: str
     lifetime_self_consumption: str
     ev_energy_meter: str
-    nordpool_kwh_today: str
-    nordpool_kwh_tomorrow: str
     48h_avg_grid_import: str
     solar_forecast_today: str
     pv_power: str

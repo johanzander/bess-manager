@@ -125,7 +125,7 @@ export interface ElectricitySettings {
   vatMultiplier: number;
   additionalCosts: number;
   taxReduction: number;
-  area: 'SE1' | 'SE2' | 'SE3' | 'SE4';
+  area: string;
 }
 
 export interface ScheduleData {

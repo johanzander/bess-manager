@@ -5,6 +5,26 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.2.0] - 2026-03-01
+
+### Added
+
+- Octopus Energy Agile tariff support as a new price source alongside Nordpool. Fetches import and export rates from Home Assistant event entities at 30-minute resolution with VAT-inclusive GBP/kWh prices.
+- Separate import and export rate entities for Octopus Energy, allowing direct sell price data instead of calculated fallback.
+- `get_sell_prices_for_date()` on `PriceSource` for sources that provide direct export/sell rates.
+- Documentation for Octopus Energy setup in README, Installation Guide, and User Guide.
+
+### Changed
+
+- **Breaking:** Unified energy provider configuration into a single `energy_provider:` section. The previous `nordpool:` top-level section and `nordpool_kwh_today`/`nordpool_kwh_tomorrow` sensor entries have been replaced. See [UPGRADE.md](UPGRADE.md) for migration instructions.
+- Price logging now uses currency-neutral column headers instead of hardcoded "SEK".
+
+### Removed
+
+- `use_official_integration` boolean from config (replaced by `energy_provider.provider` field).
+- `nordpool_kwh_today`/`nordpool_kwh_tomorrow` from `sensors:` section (moved to `energy_provider.nordpool`).
+- Dead code: `LegacyNordpoolSource` class and unused Nordpool price methods from `ha_api_controller.py`.
+
 ## [6.0.6] - 2026-02-26
 
 ### Fixed

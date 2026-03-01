@@ -174,8 +174,8 @@ The logs show:
 
 **Solutions**:
 
-- Check electricity price sensor is working
-- Verify price spread is significant (>0.50 SEK/kWh difference)
+- Check electricity price integration is working (Nordpool or Octopus Energy)
+- Verify price spread is significant enough to justify battery wear
 - Wait for price volatility periods
 
 ### "Savings are negative"
@@ -235,8 +235,8 @@ The logs show:
 
 ### Price Settings
 
-- **Area**: Must match your actual Nordpool pricing area
-- **Additional Costs**: Include all taxes, fees, and markup for accurate calculations
+- **Area**: Must match your pricing area (Nordpool area code, or "UK" for Octopus)
+- **Additional Costs**: Include all taxes, fees, and markup for accurate calculations (set to 0 for Octopus as prices are VAT-inclusive)
 
 ### Consumption Prediction
 

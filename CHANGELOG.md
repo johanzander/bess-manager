@@ -5,6 +5,12 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.3.5] - 2026-03-01
+
+### Fixed
+
+- Historical data no longer lost after restart. A sensor name prefix mismatch in the InfluxDB batch query parser caused initial-value lookups to always create duplicate entries under non-prefixed keys, which then overwrote correct per-period values during normalization. Every period received yesterday's stale values instead of today's actual readings — producing flat SOC (stuck at previous day's last value) and zero energy deltas across the entire day. The fix aligns the prefix convention so initial values are correctly merged into existing sensor data.
+
 ## [6.3.3] - 2026-03-01
 
 ### Fixed

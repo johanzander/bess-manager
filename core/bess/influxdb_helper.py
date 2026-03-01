@@ -489,9 +489,12 @@ def _parse_batch_response(
 
     for sensor_name in sensors_list:
         # Check if sensor needs initial value from previous day
+        # sensor_data keys are prefixed with "sensor." (from _extract_sensor_name),
+        # but sensors_list contains entity IDs without prefix
+        prefixed_name = f"sensor.{sensor_name}"
         needs_initial_value = False
 
-        if sensor_name not in sensor_data or not sensor_data[sensor_name]:
+        if prefixed_name not in sensor_data or not sensor_data[prefixed_name]:
             # Sensor has no data at all for this day
             needs_initial_value = True
             _LOGGER.debug(
@@ -501,7 +504,7 @@ def _parse_batch_response(
             )
         else:
             # Sensor has data, but check if first data point is after day start
-            first_timestamp = sensor_data[sensor_name][0][0]
+            first_timestamp = sensor_data[prefixed_name][0][0]
             if first_timestamp > day_start:
                 needs_initial_value = True
                 _LOGGER.debug(
@@ -536,13 +539,15 @@ def _parse_batch_response(
                         target_date,
                     )
                     # Add this as a data point just before the day started
+                    # Use prefixed name to match sensor_data keys from _extract_sensor_name
+                    prefixed_name = f"sensor.{sensor_name}"
                     initial_datapoint = (day_start - timedelta(seconds=1), sensor_value)
-                    if sensor_name in sensor_data:
+                    if prefixed_name in sensor_data:
                         # Prepend to existing data
-                        sensor_data[sensor_name].insert(0, initial_datapoint)
+                        sensor_data[prefixed_name].insert(0, initial_datapoint)
                     else:
                         # Create new list with just this initial value
-                        sensor_data[sensor_name] = [initial_datapoint]
+                        sensor_data[prefixed_name] = [initial_datapoint]
 
     # Step 3: For each period, find last value BEFORE period end time
     period_data = {}

@@ -128,15 +128,15 @@ class BESSController:
             logger.info("Enabling test mode - hardware writes will be simulated")
         self.ha_controller.set_test_mode(test_mode)
 
-        # Extract nordpool configuration
-        nordpool_config = options.get("nordpool", {})
+        # Extract energy provider configuration
+        energy_provider_config = options.get("energy_provider", {})
 
-        # Create Battery System Manager with nordpool configuration
+        # Create Battery System Manager with price provider configuration
         # Let the system manager choose the appropriate price source
         self.system = BatterySystemManager(
             self.ha_controller,
             price_source=None,  # Let system manager auto-select based on config
-            nordpool_config=nordpool_config,
+            energy_provider_config=energy_provider_config,
         )
 
         # Create scheduler with increased misfire grace time to avoid unnecessary warnings

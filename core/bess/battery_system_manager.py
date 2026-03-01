@@ -22,6 +22,7 @@ from .ha_api_controller import HomeAssistantAPIController
 from .health_check import run_system_health_checks
 from .historical_data_store import HistoricalDataStore
 from .models import DecisionData, EconomicData, PeriodData, infer_intent_from_flows
+from .octopus_energy_source import OctopusEnergySource
 from .power_monitor import HomePowerMonitor
 from .prediction_snapshot import PredictionSnapshotStore
 from .price_manager import HomeAssistantSource, PriceManager, PriceSource
@@ -50,7 +51,7 @@ class BatterySystemManager:
         self,
         controller: HomeAssistantAPIController | None = None,
         price_source: PriceSource | None = None,
-        nordpool_config: dict | None = None,
+        energy_provider_config: dict | None = None,
     ):
         """Initialize with same interface as original BatterySystemManager."""
 
@@ -58,7 +59,7 @@ class BatterySystemManager:
         self.battery_settings = BatterySettings()
         self.home_settings = HomeSettings()
         self.price_settings = PriceSettings()
-        self._nordpool_config = nordpool_config or {}
+        self._energy_provider_config = energy_provider_config or {}
 
         # Store controller reference
         self._controller = controller
@@ -89,29 +90,7 @@ class BatterySystemManager:
 
         # Initialize price manager
         if not price_source:
-            # Check if official Nordpool integration should be used
-            nordpool_config = getattr(self, "_nordpool_config", None)
-            if nordpool_config is None:
-                nordpool_config = {}
-            use_official = nordpool_config.get("use_official_integration", False)
-            config_entry_id = nordpool_config.get("config_entry_id")
-
-            if use_official and config_entry_id:
-                # Use official Home Assistant Nordpool integration
-                from .official_nordpool_source import OfficialNordpoolSource
-
-                price_source = OfficialNordpoolSource(
-                    controller,
-                    config_entry_id,
-                    vat_multiplier=self.price_settings.vat_multiplier,
-                )
-                logger.info("Using official Home Assistant Nordpool integration")
-            else:
-                # Use legacy sensor-based approach (current custom component)
-                price_source = HomeAssistantSource(
-                    controller, vat_multiplier=self.price_settings.vat_multiplier
-                )
-                logger.info("Using legacy/custom Nordpool sensor integration")
+            price_source = self._create_price_source(controller)
 
         self._price_manager = PriceManager(
             price_source=price_source,
@@ -146,6 +125,62 @@ class BatterySystemManager:
         if self._controller is None:
             raise RuntimeError("Controller not initialized - system not started")
         return self._controller
+
+    def _create_price_source(self, controller) -> PriceSource:
+        """Create the appropriate price source based on energy_provider config.
+
+        Supports three price providers:
+        - "nordpool": Legacy custom Nordpool sensor component
+        - "nordpool_official": Official HA Nordpool integration via service calls
+        - "octopus": Octopus Energy Agile tariff via HA event entities
+
+        Args:
+            controller: HomeAssistantAPIController instance
+
+        Returns:
+            Configured PriceSource instance
+        """
+        config = self._energy_provider_config
+        provider = config.get("provider", "nordpool")
+
+        if provider == "octopus":
+            octopus_config = config.get("octopus", {})
+            price_source = OctopusEnergySource(
+                ha_controller=controller,
+                import_today_entity=octopus_config["import_today_entity"],
+                import_tomorrow_entity=octopus_config["import_tomorrow_entity"],
+                export_today_entity=octopus_config["export_today_entity"],
+                export_tomorrow_entity=octopus_config["export_tomorrow_entity"],
+            )
+            logger.info("Using Octopus Energy Agile tariff price source")
+            return price_source
+
+        if provider == "nordpool_official":
+            nordpool_official_config = config.get("nordpool_official", {})
+            config_entry_id = nordpool_official_config["config_entry_id"]
+            from .official_nordpool_source import OfficialNordpoolSource
+
+            price_source = OfficialNordpoolSource(
+                controller,
+                config_entry_id,
+                vat_multiplier=self.price_settings.vat_multiplier,
+            )
+            logger.info("Using official Home Assistant Nordpool integration")
+            return price_source
+
+        if provider == "nordpool":
+            nordpool_config = config.get("nordpool", {})
+            logger.info("Using legacy/custom Nordpool sensor integration")
+            return HomeAssistantSource(
+                controller,
+                vat_multiplier=self.price_settings.vat_multiplier,
+                today_entity=nordpool_config["today_entity"],
+                tomorrow_entity=nordpool_config["tomorrow_entity"],
+            )
+
+        raise SystemConfigurationError(
+            message=f"Unknown energy provider: {provider!r}. Must be 'nordpool', 'nordpool_official', or 'octopus'."
+        )
 
     def _sync_soc_limits(self) -> None:
         """
@@ -258,7 +293,7 @@ class BatterySystemManager:
             self._handle_special_cases(current_period, prepare_next_day)
 
             # Get price data
-            prices, _ = self._get_price_data(prepare_next_day)
+            prices, price_entries = self._get_price_data(prepare_next_day)
             if not prices:
                 logger.warning("Schedule update aborted: No price data available")
                 return False
@@ -283,11 +318,12 @@ class BatterySystemManager:
 
             optimization_period, optimization_data = optimization_data_result
 
-            # Run optimization using DP algorithm with quarterly resolution
+            # Run optimization using DP algorithm
             optimization_result = self._run_optimization(
                 optimization_period,
                 optimization_data,
                 prices,
+                price_entries,
                 prepare_next_day,
             )
 
@@ -601,7 +637,11 @@ class BatterySystemManager:
     def _get_price_data(
         self, prepare_next_day: bool
     ) -> tuple[list[float] | None, list[dict[str, Any]] | None]:
-        """Get price data - preserves original logic."""
+        """Get price data in 15-minute (quarterly) resolution.
+
+        All price sources return 96 quarterly periods per day. Sources with
+        coarser raw data (e.g. Octopus 30-min) expand internally.
+        """
         try:
             if prepare_next_day:
                 price_entries = self._price_manager.get_tomorrow_prices()
@@ -615,8 +655,7 @@ class BatterySystemManager:
 
             prices = [entry["price"] for entry in price_entries]
 
-            # Prices are quarterly (96 periods) - DP algorithm supports variable horizon
-            # Handle DST transitions (quarterly)
+            # Validate quarterly period count (handles DST: 92, 96, or 100)
             if len(prices) == 92:
                 logger.info(
                     "Detected DST spring forward transition (92 quarterly periods)"
@@ -917,6 +956,7 @@ class BatterySystemManager:
         optimization_period: int,
         optimization_data: dict[str, list[float]],
         prices: list[float],
+        price_entries: list[dict[str, Any]],
         prepare_next_day: bool,
     ) -> OptimizationResult | None:
         """Run optimization - now returns OptimizationResult directly."""
@@ -959,11 +999,11 @@ class BatterySystemManager:
                 f"Running optimization for {n_periods} periods from {format_period(optimization_period)}"
             )
 
-            # Calculate buy and sell prices
-            buy_prices = self._price_manager.get_buy_prices(raw_prices=remaining_prices)
-            sell_prices = self._price_manager.get_sell_prices(
-                raw_prices=remaining_prices
-            )
+            # Get buy and sell prices from pre-calculated price entries
+            # This preserves direct sell prices from sources like Octopus Energy
+            remaining_entries = price_entries[optimization_period:]
+            buy_prices = [entry["buyPrice"] for entry in remaining_entries]
+            sell_prices = [entry["sellPrice"] for entry in remaining_entries]
 
             # Run DP optimization with strategic intent capture - returns OptimizationResult directly
             result = optimize_battery_schedule(
@@ -974,6 +1014,7 @@ class BatterySystemManager:
                 initial_soe=current_soe,
                 battery_settings=self.battery_settings,
                 initial_cost_basis=initial_cost_basis,
+                period_duration_hours=0.25,  # Always quarterly after normalization in _get_price_data
             )
 
             # Add timestamps to period data (algorithm is time-agnostic, operates on relative indices)
@@ -1123,9 +1164,9 @@ class BatterySystemManager:
             for i, period_data in enumerate(period_data_list):
                 target_period = optimization_period + i
                 if target_period < len(full_day_strategic_intents):
-                    full_day_strategic_intents[
-                        target_period
-                    ] = period_data.decision.strategic_intent
+                    full_day_strategic_intents[target_period] = (
+                        period_data.decision.strategic_intent
+                    )
 
             # Store initial SOC in OptimizationResult for DailyViewBuilder
             if self._initial_soe is not None:
@@ -1932,6 +1973,14 @@ class BatterySystemManager:
 
             if "price" in settings:
                 self.price_settings.update(**settings["price"])
+                self._price_manager.markup_rate = self.price_settings.markup_rate
+                self._price_manager.vat_multiplier = self.price_settings.vat_multiplier
+                self._price_manager.additional_costs = (
+                    self.price_settings.additional_costs
+                )
+                self._price_manager.tax_reduction = self.price_settings.tax_reduction
+                self._price_manager.area = self.price_settings.area
+                self._price_manager.clear_cache()
 
             logger.info("Settings updated successfully")
 

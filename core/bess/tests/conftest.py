@@ -150,10 +150,6 @@ class MockHomeAssistantController(HomeAssistantAPIController):
         """Get TOU settings."""
         return self.settings["tou_settings"]
 
-    def get_nordpool_prices_today(self) -> list[float]:
-        """Get the current Nordpool prices for today."""
-        return [1.0] * 24
-
     # Additional methods for integration tests
     def set_charging_power_rate(self, rate):
         """Set battery charge power rate."""
@@ -433,7 +429,11 @@ def sample_solar_data():
 @pytest.fixture
 def base_system(mock_controller):
     """Provide a clean system instance with mock controller."""
-    return BatterySystemManager(controller=mock_controller)
+    from core.bess.price_manager import MockSource
+
+    return BatterySystemManager(
+        controller=mock_controller, price_source=MockSource([1.0] * 96)
+    )
 
 
 @pytest.fixture

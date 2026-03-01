@@ -201,7 +201,7 @@ def _extract_sensor_name(parts: list[str], col_map: dict[str, int]) -> str:
             if entity_val.startswith("sensor."):
                 return entity_val
             # InfluxDB 1.x: short name without prefix — normalize it
-            if entity_val and entity_val != "entity_id":
+            if entity_val != "entity_id":
                 return f"sensor.{entity_val}"
 
     # Fall back to _measurement (InfluxDB 2.x stores entity_id here)
@@ -539,7 +539,6 @@ def _parse_batch_response(
                         target_date,
                     )
                     # Add this as a data point just before the day started
-                    # Use prefixed name to match sensor_data keys from _extract_sensor_name
                     prefixed_name = f"sensor.{sensor_name}"
                     initial_datapoint = (day_start - timedelta(seconds=1), sensor_value)
                     if prefixed_name in sensor_data:

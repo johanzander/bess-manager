@@ -40,6 +40,7 @@ class DailyViewBuilder:
         self.historical_store = historical_store
         self.schedule_store = schedule_store
         self.battery_settings = battery_settings
+        self._warned_missing_periods: set[int] = set()
 
     def _create_missing_period(self, period: int, today: date) -> PeriodData:
         """Create a placeholder for a period with no available data.
@@ -128,10 +129,12 @@ class DailyViewBuilder:
                 else:
                     # No historical data AND no predicted data for this period
                     # This can happen when HA restarts and sensor data is unavailable
-                    logger.warning(
-                        f"No data available for period {i} ({format_period(i)}) - "
-                        f"creating placeholder (HA sensor data unavailable)"
-                    )
+                    if i not in self._warned_missing_periods:
+                        logger.warning(
+                            f"No data available for period {i} ({format_period(i)}) - "
+                            f"creating placeholder (HA sensor data unavailable)"
+                        )
+                        self._warned_missing_periods.add(i)
                     placeholder = self._create_missing_period(i, today)
                     periods.append(placeholder)
 
@@ -145,7 +148,7 @@ class DailyViewBuilder:
         predicted_count = len(periods) - actual_count - missing_count
 
         if missing_count > 0:
-            logger.warning(
+            logger.debug(
                 f"DailyView has {missing_count} missing period(s) - "
                 f"sensor data was unavailable (e.g., HA restart)"
             )

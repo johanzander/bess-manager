@@ -108,6 +108,9 @@ class BatterySystemManager:
         self._current_schedule = None
         self._initial_soe = None
 
+        # Schedule verification flag - set when deployment has failures
+        self._schedule_needs_verification = False
+
         # Critical sensor failure tracking for graceful degradation
         self._critical_sensor_failures = []
 
@@ -291,6 +294,14 @@ class BatterySystemManager:
                 current_period,
                 format_period(current_period),
             )
+
+        # Re-read inverter state if previous deployment had failures
+        if self._schedule_needs_verification:
+            logger.warning(
+                "Previous deployment had failures - re-reading inverter state before optimization"
+            )
+            self._initialize_tou_schedule_from_inverter()
+            self._schedule_needs_verification = False
 
         is_first_run = self._current_schedule is None
 
@@ -1497,6 +1508,9 @@ class BatterySystemManager:
                 if self._controller is None:
                     logger.error("Cannot apply schedule: controller is not available")
                 else:
+                    total_writes = len(to_disable) + len(to_update)
+                    deployment_failures = 0
+
                     # Disable first to avoid overlaps
                     for segment in to_disable:
                         try:
@@ -1520,6 +1534,7 @@ class BatterySystemManager:
                             )
                             logger.debug("SUCCESS: Segment disabled")
                         except Exception as e:
+                            deployment_failures += 1
                             logger.error("FAILED: Failed to disable TOU segment: %s", e)
 
                     # Then update/add
@@ -1545,19 +1560,37 @@ class BatterySystemManager:
                             )
                             logger.debug("SUCCESS: Segment updated")
                         except Exception as e:
+                            deployment_failures += 1
                             logger.error("FAILED: Failed to update TOU segment: %s", e)
+
+                    succeeded = total_writes - deployment_failures
+                    logger.info(
+                        "Schedule deployment: %d/%d segment writes succeeded, %d failed",
+                        succeeded,
+                        total_writes,
+                        deployment_failures,
+                    )
+
+                    if deployment_failures > 0:
+                        self._schedule_needs_verification = True
+                        logger.warning(
+                            "Deployment had %d failures - in-memory state NOT updated, "
+                            "will re-read inverter state before next optimization",
+                            deployment_failures,
+                        )
             else:
                 logger.info("No TOU segment changes needed")
 
-            # Update schedule manager
-            self._schedule_manager = temp_growatt
+            # Only update in-memory state if all hardware writes succeeded
+            if not self._schedule_needs_verification:
+                self._schedule_manager = temp_growatt
 
-            # CRITICAL: Clear corruption flag after successful hardware write
-            if temp_growatt.corruption_detected:
-                logger.info(
-                    "✅ Corruption recovery complete - clearing corruption flag after successful hardware write"
-                )
-                temp_growatt.corruption_detected = False
+                # CRITICAL: Clear corruption flag after successful hardware write
+                if temp_growatt.corruption_detected:
+                    logger.info(
+                        "Corruption recovery complete - clearing corruption flag after successful hardware write"
+                    )
+                    temp_growatt.corruption_detected = False
 
             # Apply current period settings
             if not prepare_next_day:

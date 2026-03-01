@@ -111,7 +111,7 @@ class HomeAssistantAPIController:
             "Content-Type": "application/json",
         }
         self.max_attempts = 4
-        self.retry_delay = 4  # seconds
+        self.retry_base_delay = 2  # seconds (exponential backoff: 2, 4, 8, 16)
         self.test_mode = False
 
         # Use provided sensor configuration
@@ -458,7 +458,7 @@ class HomeAssistantAPIController:
                 "get",
                 f"/api/states/{entity_id}",
                 operation=f"Check sensor info for '{method_name}'",
-                category="sensor_read"
+                category="sensor_read",
             )
             if not response:
                 result.update(
@@ -489,7 +489,15 @@ class HomeAssistantAPIController:
         """Validate sensors for multiple methods at once."""
         return [self.get_method_sensor_info(method) for method in method_list]
 
-    def _api_request(self, method, path, operation=None, category=None, **kwargs):
+    def _api_request(
+        self,
+        method,
+        path,
+        operation=None,
+        category=None,
+        context: dict | None = None,
+        **kwargs,
+    ):
         """Make an API request to Home Assistant with retry logic.
 
         Args:
@@ -497,6 +505,7 @@ class HomeAssistantAPIController:
             path: API path (without base URL)
             operation: Optional human-readable operation description for failure tracking
             category: Optional operation category for failure tracking
+            context: Optional context dict for failure tracking (segment_id, params, etc.)
             **kwargs: Additional arguments for requests
 
         Returns:
@@ -561,15 +570,16 @@ class HomeAssistantAPIController:
                     raise  # Fail immediately on 404
 
                 if attempt < self.max_attempts - 1:  # Not the last attempt
+                    delay = self.retry_base_delay * (2**attempt)
                     logger.warning(
                         "API request to %s failed on attempt %d/%d: %s. Retrying in %d seconds...",
                         url,
                         attempt + 1,
                         self.max_attempts,
                         str(e),
-                        self.retry_delay,
+                        delay,
                     )
-                    time.sleep(self.retry_delay)
+                    time.sleep(delay)
                 else:  # Last attempt failed
                     logger.error(
                         "API request to %s failed on final attempt %d/%d: %s",
@@ -588,7 +598,8 @@ class HomeAssistantAPIController:
                         self.failure_tracker.record_failure(
                             operation=operation_description,
                             category=operation_category,
-                            error=e
+                            error=e,
+                            context=context,
                         )
 
                     raise  # Re-raise the last exception
@@ -642,13 +653,27 @@ class HomeAssistantAPIController:
 
             path += "?" + urllib.parse.urlencode(query_params)
 
+        # Build context from service call kwargs for failure tracking
+        context = {
+            k: v for k, v in kwargs.items() if k not in ("return_response", "blocking")
+        }
+
         # Make API call
         return self._api_request(
             "post",
             path,
             operation=f"Call {service_domain}.{service_name}",
-            category="battery_control" if service_domain in ["number", "switch"] else "inverter_control" if service_domain == "growatt_server" else "other",
-            json=json_data
+            category=(
+                "battery_control"
+                if service_domain in ["number", "switch"]
+                else (
+                    "inverter_control"
+                    if service_domain == "growatt_server"
+                    else "other"
+                )
+            ),
+            context=context,
+            json=json_data,
         )
 
     def _get_sensor_value(self, sensor_name):
@@ -664,7 +689,7 @@ class HomeAssistantAPIController:
                 "get",
                 f"/api/states/{entity_id}",
                 operation=f"Read sensor '{sensor_name}'",
-                category="sensor_read"
+                category="sensor_read",
             )
 
             if response and "state" in response:
@@ -688,7 +713,7 @@ class HomeAssistantAPIController:
                 self.failure_tracker.record_failure(
                     operation=f"Read sensor '{sensor_name}'",
                     category="sensor_read",
-                    error=e
+                    error=e,
                 )
 
             return 0.0
@@ -806,7 +831,7 @@ class HomeAssistantAPIController:
                 "get",
                 f"/api/states/{entity_id}",
                 operation="Check grid charge switch state",
-                category="sensor_read"
+                category="sensor_read",
             )
             if response and "state" in response:
                 return response["state"] == "on"
@@ -931,7 +956,7 @@ class HomeAssistantAPIController:
             "get",
             f"/api/states/{entity_id}",
             operation="Get solar forecast data",
-            category="sensor_read"
+            category="sensor_read",
         )
 
         if not response or "attributes" not in response:
@@ -1007,7 +1032,7 @@ class HomeAssistantAPIController:
                 "get",
                 f"/api/states/{entity_id}",
                 operation=f"Get Nordpool prices for {time_label}",
-                category="sensor_read"
+                category="sensor_read",
             )
 
             if not entity_response:
@@ -1096,7 +1121,7 @@ class HomeAssistantAPIController:
                     "get",
                     f"/api/states/{entity_id}",
                     operation=f"Get sensor data for '{sensor}'",
-                    category="sensor_read"
+                    category="sensor_read",
                 )
                 if response and "state" in response:
                     try:

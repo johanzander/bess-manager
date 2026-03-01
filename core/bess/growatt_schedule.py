@@ -615,7 +615,7 @@ class GrowattScheduleManager:
 
             # Calculate power rates from battery action
             (
-                charge_power_rate,
+                _,
                 discharge_power_rate,
             ) = self._calculate_power_rates_from_action(battery_action, intent)
 
@@ -623,7 +623,8 @@ class GrowattScheduleManager:
             if intent == "GRID_CHARGING":
                 grid_charge = True
                 discharge_rate = 0
-                charge_rate = charge_power_rate
+                # Always full power; power monitor caps to fuse headroom
+                charge_rate = 100
                 state = "charging"
                 batt_mode = "battery_first"
 

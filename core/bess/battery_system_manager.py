@@ -1546,17 +1546,14 @@ class BatterySystemManager:
         if strategic_intent == "GRID_CHARGING":
             grid_charge = True
             discharge_rate = 0
-            charge_rate = 100  # Full power for grid charging
 
         elif strategic_intent == "SOLAR_STORAGE":
             grid_charge = False
             discharge_rate = 0
-            charge_rate = 100  # Full power for solar storage
 
         elif strategic_intent == "LOAD_SUPPORT":
             grid_charge = False
             discharge_rate = 100  # Full discharge for load support
-            charge_rate = 0
 
         elif strategic_intent == "EXPORT_ARBITRAGE":
             grid_charge = False
@@ -1570,12 +1567,10 @@ class BatterySystemManager:
                 discharge_rate = min(100, max(0, int(discharge_power_pct)))
             else:
                 discharge_rate = 0
-            charge_rate = 0
 
         elif strategic_intent == "IDLE":
             grid_charge = False
             discharge_rate = 0
-            charge_rate = 100  # Allow solar charging
 
         else:
             logger.warning(
@@ -1583,18 +1578,16 @@ class BatterySystemManager:
             )
             grid_charge = False
             discharge_rate = 0
-            charge_rate = 100
 
         hour = period // 4
         logger.info(
-            "Period %d (%02d:%02d): Intent=%s, Action=%.2f kWh (%.2f kW), ChargeRate=%d%%, DischargeRate=%d%%",
+            "Period %d (%02d:%02d): Intent=%s, Action=%.2f kWh (%.2f kW), DischargeRate=%d%%",
             period,
             hour,
             (period % 4) * 15,
             strategic_intent,
             battery_action_kwh,
             battery_action_kw,
-            charge_rate,
             discharge_rate,
         )
 

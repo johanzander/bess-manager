@@ -14,6 +14,37 @@ Thanks to [@pookey](https://github.com/pookey) for contributing this fix (PR #20
 - InfluxDB CSV parsing now uses header-aware column detection instead of hardcoded indices, supporting both InfluxDB 1.x and 2.x where columns appear at different positions depending on version and tag configuration. Queries also match on both `_measurement` and `entity_id` tag to handle both data models.
 - Historical data no longer lost after restart. A sensor name prefix mismatch in the batch query parser caused initial-value lookups to create duplicate entries that overwrote correct per-period values during normalization, producing flat SOC and zero energy deltas across the entire day.
 
+## [7.0.0] - 2026-03-01
+
+Thanks to [@pookey](https://github.com/pookey) for contributing Octopus Energy support (PR #19).
+
+### Added
+
+- Octopus Energy Agile tariff support as a new price source alongside Nordpool. Fetches import and export rates from Home Assistant event entities at 30-minute resolution with VAT-inclusive GBP/kWh prices.
+- Separate import and export rate entities for Octopus Energy, allowing direct sell price data instead of calculated fallback.
+- `get_sell_prices_for_date()` on `PriceSource` for sources that provide direct export/sell rates.
+- `PriceManager.clear_cache()` to propagate settings changes at runtime without restart.
+- Documentation for Octopus Energy setup in README, Installation Guide, and User Guide.
+- UPGRADE.md with step-by-step migration instructions for the breaking config change.
+
+### Changed
+
+- **Breaking:** Unified energy provider configuration into a single `energy_provider:` section. The previous `nordpool:` top-level section and `nordpool_kwh_today`/`nordpool_kwh_tomorrow` sensor entries have been replaced. See [UPGRADE.md](UPGRADE.md) for migration instructions.
+- Price logging now uses currency-neutral column headers instead of hardcoded "SEK".
+- `HomeAssistantSource` now takes entity IDs directly via constructor instead of looking them up from the sensor map.
+- Pricing parameters (markup, VAT, additional costs) now propagate immediately when updated via settings without requiring a restart.
+
+### Removed
+
+- `use_official_integration` boolean from config (replaced by `energy_provider.provider` field).
+- `nordpool_kwh_today`/`nordpool_kwh_tomorrow` from `sensors:` section (moved to `energy_provider.nordpool`).
+- Dead code: `LegacyNordpoolSource` class and unused Nordpool price methods from `ha_api_controller.py`.
+
+### Fixed
+
+- Grid charging now always charges at full power (100%) instead of being throttled to the DP algorithm's planned kW. The DP power level is an energy model artifact, not a hardware rate limit — the power monitor already handles fuse protection correctly. Previously, `hourly_settings` stored a proportional rate (e.g. 25% when the DP planned 1.5 kW out of 6 kW max), causing the inverter to charge far slower than it should during cheap price periods.
+- Removed dead `charge_rate` local variable from `_apply_period_schedule` which was computed but never applied to hardware, eliminating the misleading split-brain between two code paths.
+
 ## [6.0.7] - 2026-03-01
 
 ### Fixed

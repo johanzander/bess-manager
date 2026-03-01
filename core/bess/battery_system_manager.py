@@ -1961,15 +1961,15 @@ class BatterySystemManager:
         return self.daily_view_builder.build_daily_view(current_period)
 
     def adjust_charging_power(self) -> None:
-        """Adjust charging power based on house consumption."""
-        try:
-            # Get current hour settings to ensure power monitor uses the correct target
-            current_hour = datetime.now().hour
-            settings = self._schedule_manager.get_hourly_settings(current_hour)
-            charge_rate = settings.get("charge_rate", 0)
+        """Adjust charging power based on house consumption.
 
+        Always targets 100% charge rate when grid charging is active.
+        The power monitor handles fuse protection by throttling based on
+        actual phase loads — no need to pre-limit the target here.
+        """
+        try:
             if self._power_monitor:
-                self._power_monitor.update_target_charging_power(charge_rate)
+                self._power_monitor.update_target_charging_power(100)
                 self._power_monitor.adjust_battery_charging()
 
         except (AttributeError, ValueError, KeyError) as e:

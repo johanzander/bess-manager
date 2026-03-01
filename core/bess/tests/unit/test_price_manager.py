@@ -38,10 +38,6 @@ def test_direct_price_initialization():
 def test_controller_price_fetching():
     """Test price fetching from controller."""
     mock_controller = MagicMock()
-    mock_controller.sensors = {
-        "nordpool_kwh_today": "sensor.nordpool_kwh_se4_sek_2_10_025",
-        "nordpool_kwh_tomorrow": "sensor.nordpool_kwh_se4_sek_2_10_025",
-    }
 
     today_date = datetime.now().date()
     tomorrow_date = today_date + timedelta(days=1)
@@ -75,13 +71,14 @@ def test_controller_price_fetching():
             }
         return None
 
-    def mock_get_entity_for_service(sensor_key):
-        return "sensor.nordpool_kwh_se4_sek_2_10_025"
-
     mock_controller._api_request = mock_api_request
-    mock_controller._get_entity_for_service = mock_get_entity_for_service
 
-    ha_source = HomeAssistantSource(mock_controller, vat_multiplier=1.25)
+    ha_source = HomeAssistantSource(
+        mock_controller,
+        vat_multiplier=1.25,
+        today_entity="sensor.nordpool_kwh_se4_sek_2_10_025",
+        tomorrow_entity="sensor.nordpool_kwh_se4_sek_2_10_025",
+    )
     pm = PriceManager(
         price_source=ha_source,
         markup_rate=0.1,
@@ -153,9 +150,6 @@ def test_mock_source():
 def test_home_assistant_source_vat_parameter():
     """Test that the VAT multiplier parameter in HomeAssistantSource works correctly."""
     mock_controller = MagicMock()
-    mock_controller.sensors = {
-        "nordpool_kwh_today": "sensor.nordpool_kwh_se4_sek_2_10_025",
-    }
 
     today_date = datetime.now().date()
 
@@ -175,26 +169,36 @@ def test_home_assistant_source_vat_parameter():
             return {"attributes": {"raw_today": raw_today_data}}
         return None
 
-    def mock_get_entity_for_service(sensor_key):
-        return "sensor.nordpool_kwh_se4_sek_2_10_025"
-
     mock_controller._api_request = mock_api_request
-    mock_controller._get_entity_for_service = mock_get_entity_for_service
+
+    entity = "sensor.nordpool_kwh_se4_sek_2_10_025"
 
     # Test with default VAT multiplier (1.25)
-    ha_source_default = HomeAssistantSource(mock_controller, vat_multiplier=1.25)
+    ha_source_default = HomeAssistantSource(
+        mock_controller,
+        vat_multiplier=1.25,
+        today_entity=entity,
+        tomorrow_entity=entity,
+    )
     prices_default = ha_source_default.get_prices_for_date(today_date)
     assert prices_default[0] == 1.6  # 2.0 / 1.25 = 1.6
 
     # Test with custom VAT multiplier (1.20 for 20% VAT)
-    ha_source_custom = HomeAssistantSource(mock_controller, vat_multiplier=1.20)
+    ha_source_custom = HomeAssistantSource(
+        mock_controller,
+        vat_multiplier=1.20,
+        today_entity=entity,
+        tomorrow_entity=entity,
+    )
     prices_custom = ha_source_custom.get_prices_for_date(today_date)
     assert round(prices_custom[0], 4) == round(2.0 / 1.20, 4)  # ~1.6667
 
 
 def test_get_available_prices_today_only():
     """Should return today's prices at quarterly resolution when tomorrow unavailable."""
-    mock_source = MockSource(test_prices=[0.5] * 96)  # Nordpool provides 96 quarterly prices
+    mock_source = MockSource(
+        test_prices=[0.5] * 96
+    )  # Nordpool provides 96 quarterly prices
     pm = PriceManager(
         price_source=mock_source,
         markup_rate=0.05,
@@ -220,7 +224,9 @@ def test_get_available_prices_today_only():
 
 def test_get_available_prices_today_and_tomorrow():
     """Should return today + tomorrow at quarterly resolution when both available."""
-    mock_source = MockSource(test_prices=[0.5] * 96)  # Nordpool provides 96 quarterly prices
+    mock_source = MockSource(
+        test_prices=[0.5] * 96
+    )  # Nordpool provides 96 quarterly prices
     pm = PriceManager(
         price_source=mock_source,
         markup_rate=0.05,
@@ -286,7 +292,9 @@ def test_get_available_prices_returns_full_arrays_from_midnight():
 
 def test_get_available_prices_returns_tuple():
     """Should return a tuple of (buy_prices, sell_prices)."""
-    mock_source = MockSource(test_prices=[0.5] * 96)  # Nordpool provides 96 quarterly prices
+    mock_source = MockSource(
+        test_prices=[0.5] * 96
+    )  # Nordpool provides 96 quarterly prices
     pm = PriceManager(
         price_source=mock_source,
         markup_rate=0.05,

@@ -18,6 +18,16 @@ class PriceSource:
     This defines the interface that all price sources must implement.
     """
 
+    @property
+    def period_duration_hours(self) -> float:
+        """Duration of each price period in hours.
+
+        All sources must return 0.25 (quarterly / 15-minute periods) to match
+        the system-wide period model. Sources with coarser raw data (e.g. Octopus
+        30-min) must expand internally before returning prices.
+        """
+        return 0.25
+
     def get_prices_for_date(self, target_date: date) -> list:
         """Get prices for a specific date.
 
@@ -25,12 +35,27 @@ class PriceSource:
             target_date: The date to get prices for
 
         Returns:
-            List of hourly prices for the specified date
+            List of prices for the specified date (one per period)
 
         Raises:
             NotImplementedError: If the source doesn't implement this method
         """
         raise NotImplementedError("Price sources must implement get_prices_for_date")
+
+    def get_sell_prices_for_date(self, target_date: date) -> list[float] | None:
+        """Get separate sell/export prices for a specific date.
+
+        Override this method when the price source provides distinct export rates
+        (e.g., Octopus Energy). Returns None by default, meaning sell prices are
+        calculated from buy prices using markup/tax reduction.
+
+        Args:
+            target_date: The date to get sell prices for
+
+        Returns:
+            List of sell prices per period, or None if not applicable
+        """
+        return None
 
     def perform_health_check(self) -> dict:
         """Perform health check on the price source.
@@ -92,16 +117,26 @@ class HomeAssistantSource(PriceSource):
     consistently return VAT-exclusive prices.
     """
 
-    def __init__(self, ha_controller, vat_multiplier: float) -> None:
-        """Initialize with Home Assistant controller.
+    def __init__(
+        self,
+        ha_controller,
+        vat_multiplier: float,
+        today_entity: str,
+        tomorrow_entity: str,
+    ) -> None:
+        """Initialize with Home Assistant controller and entity IDs.
 
         Args:
             ha_controller: Controller with access to Home Assistant
             vat_multiplier: VAT multiplier used to convert VAT-inclusive prices to VAT-exclusive
                             (must be provided from config.yaml)
+            today_entity: HA entity ID for today's Nordpool prices
+            tomorrow_entity: HA entity ID for tomorrow's Nordpool prices
         """
         self.ha_controller = ha_controller
         self.vat_multiplier = vat_multiplier
+        self.today_entity = today_entity
+        self.tomorrow_entity = tomorrow_entity
 
     def get_prices_for_date(self, target_date: date) -> list:
         """Get prices from Home Assistant for the specified date.
@@ -120,9 +155,9 @@ class HomeAssistantSource(PriceSource):
             )
 
         try:
-            # Fetch sensor data from both sensors
-            today_data = self._fetch_sensor_attributes("nordpool_kwh_today")
-            tomorrow_data = self._fetch_sensor_attributes("nordpool_kwh_tomorrow")
+            # Fetch sensor data from both sensors using configured entity IDs
+            today_data = self._fetch_sensor_attributes(self.today_entity)
+            tomorrow_data = self._fetch_sensor_attributes(self.tomorrow_entity)
 
             # Try both sensors - use whichever has valid data for our target date
             for sensor_data, sensor_name in [
@@ -150,15 +185,17 @@ class HomeAssistantSource(PriceSource):
                 message=f"Failed to get price data for {target_date}: {e}",
             ) from e
 
-    def _fetch_sensor_attributes(self, sensor_key):
-        """Fetch attributes from the configured Nordpool sensor via HA controller's sensor mapping."""
+    def _fetch_sensor_attributes(self, entity_id: str):
+        """Fetch attributes from the specified Nordpool sensor entity.
+
+        Args:
+            entity_id: HA entity ID to fetch attributes from
+        """
         try:
-            # Use HA controller's sensor mapping to get the actual entity ID
-            entity_id = self.ha_controller.sensors.get(sensor_key)
             if not entity_id:
                 return None
 
-            # Fetch sensor state with attributes using the mapped entity ID
+            # Fetch sensor state with attributes using the entity ID directly
             response = self.ha_controller._api_request(
                 "get", f"/api/states/{entity_id}"
             )
@@ -366,6 +403,17 @@ class PriceManager:
         self._tomorrow_prices = None
         self._tomorrow_date = None
 
+    def clear_cache(self) -> None:
+        """Clear cached price data.
+
+        Must be called when pricing parameters (markup, VAT, additional costs)
+        change, since cached prices were calculated with the old values.
+        """
+        self._today_prices = None
+        self._today_date = None
+        self._tomorrow_prices = None
+        self._tomorrow_date = None
+
     def _calculate_buy_price(self, base_price: float) -> float:
         """Calculate retail buy price from Nordpool base price.
 
@@ -416,17 +464,27 @@ class PriceManager:
             # Get raw prices from the source
             raw_prices = self.price_source.get_prices_for_date(target_date)
 
+            # Check for separate sell/export prices (e.g., Octopus Energy)
+            direct_sell_prices = self.price_source.get_sell_prices_for_date(target_date)
+
             # Format prices with timestamp and calculations
             price_data = []
             base_timestamp = datetime.combine(target_date, datetime.min.time())
+            period_hours = self.price_source.period_duration_hours
 
-            for hour, price in enumerate(raw_prices):
-                timestamp = base_timestamp + timedelta(hours=hour)
+            for index, price in enumerate(raw_prices):
+                timestamp = base_timestamp + timedelta(hours=index * period_hours)
+
+                if direct_sell_prices is not None:
+                    sell_price = direct_sell_prices[index]
+                else:
+                    sell_price = self._calculate_sell_price(price)
+
                 price_entry = {
                     "timestamp": timestamp.strftime("%Y-%m-%d %H:%M"),
                     "price": price,
                     "buyPrice": self._calculate_buy_price(price),
-                    "sellPrice": self._calculate_sell_price(price),
+                    "sellPrice": sell_price,
                 }
                 price_data.append(price_entry)
 
@@ -467,7 +525,7 @@ class PriceManager:
         tomorrow = datetime.now().date() + timedelta(days=1)
         try:
             return self.get_price_data(tomorrow)
-        except ValueError:
+        except (ValueError, PriceDataUnavailableError):
             return []  # Return empty list instead of raising error
 
     def get_prices(self, target_date: date | None = None) -> list:
@@ -527,24 +585,16 @@ class PriceManager:
             price_data = self.get_price_data(target_date)
             return [entry["sellPrice"] for entry in price_data]
 
-
     def get_available_prices(self) -> tuple[list[float], list[float]]:
-        """Get all available prices at quarterly resolution starting at today 00:00.
+        """Get all available prices starting at today 00:00.
 
-        Nordpool provides quarterly prices (96 periods/day) directly.
+        All sources provide 96 quarterly (15-minute) periods per day.
         Automatically tries tomorrow, falls back to today only.
 
         Returns:
             (buy_prices, sell_prices) tuple where:
             - Index 0 = today 00:00
-            - Index 96 = tomorrow 00:00 (if available)
             - Length: 96 (today only) or 192 (today + tomorrow)
-
-        Example at 14:00:
-            buy, sell = get_available_prices()
-            # buy[0] = today 00:00
-            # buy[56] = today 14:00 (current period)
-            # Caller slices: buy[56:] for optimization from now
         """
         today = datetime.now().date()
         tomorrow = today + timedelta(days=1)
@@ -607,14 +657,14 @@ class PriceManager:
 
             price_data = f"\n{title}:\n"
             price_data += "-" * 50 + "\n"
-            price_data += "Hour   | Nordpool Price | Retail Price  | Sell Price\n"
+            price_data += "Time   | Base Price     | Buy Price     | Sell Price\n"
             price_data += "-" * 50 + "\n"
 
             for entry in prices:
-                hour = entry["timestamp"].split()[1][:5]
-                price_str = f"{hour}  | {entry['price']:.4f} SEK    | "
-                buy_str = f"{entry['buyPrice']:.4f} SEK  | "
-                sell_str = f"{entry['sellPrice']:.4f} SEK\n"
+                time_str = entry["timestamp"].split()[1][:5]
+                price_str = f"{time_str}  | {entry['price']:.4f}        | "
+                buy_str = f"{entry['buyPrice']:.4f}       | "
+                sell_str = f"{entry['sellPrice']:.4f}\n"
                 price_data += price_str + buy_str + sell_str
 
             self._logger.info(price_data)

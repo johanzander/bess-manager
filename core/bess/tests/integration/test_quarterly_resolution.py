@@ -8,6 +8,7 @@ import pytest  # type: ignore
 
 from core.bess.battery_system_manager import BatterySystemManager
 from core.bess.dp_battery_algorithm import optimize_battery_schedule
+from core.bess.price_manager import MockSource
 from core.bess.settings import BatterySettings
 from core.bess.tests.conftest import MockHomeAssistantController
 
@@ -47,9 +48,7 @@ class TestQuarterlyOptimization:
         # Verify economic summary is valid
         assert result.economic_summary is not None, "Economic summary should be present"
         economic_summary = result.economic_summary
-        assert (
-            economic_summary.grid_only_cost > 0
-        ), "Grid-only cost should be positive"
+        assert economic_summary.grid_only_cost > 0, "Grid-only cost should be positive"
         assert (
             economic_summary.grid_to_battery_solar_savings >= 0
         ), "Savings should be non-negative"
@@ -84,7 +83,10 @@ class TestQuarterlyOptimization:
 
     def test_quarterly_daily_view_creation(self, quarterly_test_scenario):
         """Test that DailyViewBuilder works with quarterly optimization results."""
-        manager = BatterySystemManager(controller=MockHomeAssistantController())
+        manager = BatterySystemManager(
+            controller=MockHomeAssistantController(),
+            price_source=MockSource([1.0] * 96),
+        )
         battery_settings = BatterySettings()
         data = quarterly_test_scenario
 
@@ -170,7 +172,9 @@ class TestQuarterlyDataStructures:
 
             # All energy values should be non-negative
             assert energy.solar_production >= 0, f"Period {i}: Solar should be >= 0"
-            assert energy.home_consumption >= 0, f"Period {i}: Consumption should be >= 0"
+            assert (
+                energy.home_consumption >= 0
+            ), f"Period {i}: Consumption should be >= 0"
             assert energy.battery_charged >= 0, f"Period {i}: Charging should be >= 0"
             assert (
                 energy.battery_discharged >= 0
@@ -196,7 +200,9 @@ class TestQuarterlyVsHourlyComparison:
     when given the same data at different resolutions.
     """
 
-    @pytest.mark.skip(reason="Comparison test - implement after hourly tests are stable")
+    @pytest.mark.skip(
+        reason="Comparison test - implement after hourly tests are stable"
+    )
     def test_quarterly_aggregates_to_hourly(self, quarterly_test_scenario):
         """Test that quarterly results aggregate to similar hourly results.
 
@@ -207,7 +213,9 @@ class TestQuarterlyVsHourlyComparison:
         # TODO: Implement quarterly-to-hourly aggregation comparison
         pass
 
-    @pytest.mark.skip(reason="Comparison test - implement after hourly tests are stable")
+    @pytest.mark.skip(
+        reason="Comparison test - implement after hourly tests are stable"
+    )
     def test_savings_comparable_across_resolutions(self, quarterly_test_scenario):
         """Test that total daily savings are comparable between resolutions.
 

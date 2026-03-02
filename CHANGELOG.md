@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tomorrow's solar forecast support via Solcast's `solar_forecast_tomorrow` sensor for extended horizon calculations.
 - Dashboard charts now display tomorrow's optimization data when available, with visual distinction (reduced opacity, midnight separator, +HH time labels).
 - New `tomorrowData` field in dashboard API response extracts tomorrow's period data from the ScheduleStore.
+- Inverter page Schedule Overview now shows tomorrow's planned schedule when available, with indigo separator and reduced opacity.
+- `get_detailed_period_groups()` accepts optional `intents` parameter for grouping any strategic intent list.
 - DST-safe timestamp calculation using `period_index_to_timestamp()` utility instead of manual arithmetic.
 
 ### Changed

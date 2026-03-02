@@ -85,6 +85,7 @@ interface GrowattSchedule {
   touIntervals: TOUInterval[];
   scheduleData: ScheduleHour[];
   periodGroups: PeriodGroup[];
+  tomorrowPeriodGroups: PeriodGroup[] | null;
   batteryCapacity: number;
   lastUpdated: string;
 }
@@ -706,7 +707,6 @@ const InverterStatusDashboard: React.FC = () => {
                     const groupEndMinutes = endH * 60 + endM;
                     const isCurrentPeriod = currentMinutes >= groupStartMinutes && currentMinutes <= groupEndMinutes;
 
-                    // Format duration
                     const formatDuration = (minutes: number): string => {
                       const hours = Math.floor(minutes / 60);
                       const mins = minutes % 60;
@@ -771,6 +771,73 @@ const InverterStatusDashboard: React.FC = () => {
                     );
                   })}
                 </tbody>
+                {growattSchedule.tomorrowPeriodGroups && growattSchedule.tomorrowPeriodGroups.length > 0 && (
+                  <>
+                    <thead className="bg-indigo-50 dark:bg-indigo-900/30">
+                      <tr>
+                        <th colSpan={6} className="px-4 py-3 text-left text-xs font-semibold text-indigo-700 dark:text-indigo-300 uppercase tracking-wider">
+                          Tomorrow&apos;s Planned Schedule
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700 opacity-75">
+                      {growattSchedule.tomorrowPeriodGroups.map((group, index) => {
+                        const formatDuration = (minutes: number): string => {
+                          const hours = Math.floor(minutes / 60);
+                          const mins = minutes % 60;
+                          if (hours === 0) return `${mins}min`;
+                          if (mins === 0) return `${hours}h`;
+                          return `${hours}h ${mins}min`;
+                        };
+
+                        return (
+                          <tr key={`tomorrow-${index}`}>
+                            <td className="px-4 py-4 whitespace-nowrap text-sm">
+                              <div className="font-medium text-gray-900 dark:text-white">
+                                {group.startTime} - {group.endTime}
+                              </div>
+                            </td>
+                            <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">
+                              {formatDuration(group.durationMinutes)}
+                            </td>
+                            <td className="px-4 py-4 whitespace-nowrap text-sm">
+                              {getBatteryModeDisplay(group.mode)}
+                            </td>
+                            <td className="px-4 py-4 whitespace-nowrap text-sm">
+                              <span className={`px-2 py-1 rounded text-xs font-medium ${getIntentColor(group.dominantIntent)}`}>
+                                {group.dominantIntent.replace(/_/g, ' ')}
+                              </span>
+                            </td>
+                            <td className="px-4 py-4 whitespace-nowrap text-sm">
+                              <div className="space-y-1">
+                                {group.chargePowerRate > 0 && (
+                                  <div className="text-green-600 dark:text-green-400">
+                                    C: {group.chargePowerRate}%
+                                  </div>
+                                )}
+                                {group.dischargePowerRate > 0 && (
+                                  <div className="text-orange-600 dark:text-orange-400">
+                                    D: {group.dischargePowerRate}%
+                                  </div>
+                                )}
+                                {group.chargePowerRate === 0 && group.dischargePowerRate === 0 && (
+                                  <div className="text-gray-500 dark:text-gray-400">-</div>
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-4 py-4 whitespace-nowrap text-sm">
+                              {group.gridCharge ? (
+                                <span className="text-green-600 dark:text-green-400 font-medium">Enabled</span>
+                              ) : (
+                                <span className="text-gray-400 dark:text-gray-500">Disabled</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </>
+                )}
               </table>
             </div>
           ) : (

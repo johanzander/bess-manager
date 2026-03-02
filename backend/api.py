@@ -327,6 +327,35 @@ async def get_dashboard_data(
                 f"Aggregated to {len(hourly_dataclass_instances)} hourly periods"
             )
 
+        # Extract tomorrow's optimization data from ScheduleStore
+        tomorrow_data: list[APIDashboardHourlyData] | None = None
+        try:
+            stored_schedule = (
+                bess_controller.system.schedule_store.get_latest_schedule()
+            )
+            if stored_schedule:
+                opt_result = stored_schedule.optimization_result
+                opt_period = stored_schedule.optimization_period
+                tomorrow_periods = []
+                for period_idx in range(96, 192):
+                    data_idx = period_idx - opt_period
+                    if 0 <= data_idx < len(opt_result.period_data):
+                        tomorrow_periods.append(opt_result.period_data[data_idx])
+                if tomorrow_periods:
+                    tomorrow_data = [
+                        APIDashboardHourlyData.from_internal(
+                            p, battery_capacity, currency
+                        )
+                        for p in tomorrow_periods
+                    ]
+                    if resolution == "hourly":
+                        tomorrow_data = _aggregate_quarterly_to_hourly(
+                            tomorrow_data, battery_capacity, currency
+                        )
+        except Exception as e:
+            logger.warning(f"Failed to get tomorrow's optimization data: {e}")
+            tomorrow_data = None
+
         # Calculate basic totals from dataclass fields directly (no dict access)
         basic_totals = {
             "totalSolarProduction": sum(
@@ -402,6 +431,7 @@ async def get_dashboard_data(
             currency=currency,
             hourly_data_instances=hourly_dataclass_instances,
             resolution=resolution,
+            tomorrow_data=tomorrow_data,
         )
 
         logger.debug("Dashboard response created successfully using dataclasses")

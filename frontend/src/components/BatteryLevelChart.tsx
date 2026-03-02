@@ -6,11 +6,12 @@ import { DataResolution } from '../hooks/useUserPreferences';
 
 interface BatteryLevelChartProps {
   hourlyData: HourlyData[];
+  tomorrowData?: HourlyData[] | null;
   settings: any; // Adjust type as needed
   resolution: DataResolution;
 }
 
-export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData, resolution }) => {
+export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData, tomorrowData, resolution }) => {
   // Reactive dark mode detection
   const [isDarkMode, setIsDarkMode] = useState(
     document.documentElement.classList.contains('dark')
@@ -110,15 +111,61 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
       dataSource: dataSource,
       isActual: dataSource === 'actual',
       isPredicted: dataSource === 'predicted',
+      isTomorrow: false,
       // Include FormattedValue objects for tooltip
       batterySocEndFormatted: hour.batterySocEnd,
       batteryActionFormatted: hour.batteryAction,
       buyPriceFormatted: hour.buyPrice
     };
   });
-    
+
+  // Append tomorrow's data with hour offset 24+
+  const hasTomorrowData = tomorrowData && tomorrowData.length > 0;
+  if (hasTomorrowData) {
+    for (const [idx, hour] of tomorrowData.entries()) {
+      if (hour.batteryAction === undefined) {
+        console.warn(`Missing key: batteryAction in tomorrow data at index ${idx}`);
+        continue;
+      }
+      const batteryAction = getValue(hour.batteryAction);
+      const batterySocPercent = getValue(hour.batterySocEnd);
+      const price = getValue(hour.buyPrice);
+      const periodNum = hour.period ?? idx;
+      const dataSource = hour.dataSource ?? 'predicted';
+
+      let xPosition: number;
+      if (resolution === 'quarter-hourly') {
+        xPosition = 24 + periodNum / 4 + 0.125;
+      } else {
+        xPosition = 24 + periodNum + 0.5;
+      }
+
+      chartData.push({
+        hour: xPosition,
+        periodNum,
+        hourLabel: periodToTimeString(periodNum, resolution),
+        batterySocPercent,
+        action: batteryAction,
+        price,
+        dataSource,
+        isActual: false,
+        isPredicted: true,
+        isTomorrow: true,
+        batterySocEndFormatted: hour.batterySocEnd,
+        batteryActionFormatted: hour.batteryAction,
+        buyPriceFormatted: hour.buyPrice
+      });
+    }
+  }
+
+  // Compute max hour for X-axis
+  const maxHourValue = hasTomorrowData
+    ? Math.ceil(Math.max(...chartData.map(d => d.hour)))
+    : 24;
+  const xAxisTicks = Array.from({ length: maxHourValue + 1 }, (_, i) => i);
+
   const maxAction = Math.max(...chartData.map(d => Math.abs(d.action || 0)), 1);
-  const maxPrice = Math.max(...chartData.map(h => h.price), 1);  // Already uses canonical buyPrice internally
+  const maxPrice = Math.max(...chartData.map(h => h.price), 1);
 
   return (
     <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
@@ -132,8 +179,13 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
               tick={{ fill: colors.text, fontSize: 12 }}
               axisLine={{ stroke: colors.text }}
               tickLine={{ stroke: colors.text }}
-              ticks={Array.from({ length: 25 }, (_, i) => i)}
-              tickFormatter={(value) => `${Math.floor(value).toString().padStart(2, '0')}:00`}
+              ticks={xAxisTicks}
+              tickFormatter={(value: number) => {
+                if (value >= 24) {
+                  return `+${Math.floor(value - 24).toString().padStart(2, '0')}:00`;
+                }
+                return `${Math.floor(value).toString().padStart(2, '0')}:00`;
+              }}
             />
             
             {/* Left Y-axis for Battery SOC (%) */}
@@ -206,11 +258,13 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
                 }
                 return ['N/A', name];
               }}
-              labelFormatter={(label, payload) => {
+              labelFormatter={(_label, payload) => {
                 // Get period index from the first data point in tooltip
                 if (payload && payload.length > 0) {
                   const periodNum = payload[0].payload.periodNum;
-                  return periodToTimeRange(periodNum, resolution);
+                  const isTmrw = payload[0].payload.isTomorrow;
+                  const timeRange = periodToTimeRange(periodNum, resolution);
+                  return isTmrw ? `Tomorrow ${timeRange}` : timeRange;
                 }
                 return '';
               }}
@@ -219,9 +273,8 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
             
             <ReferenceLine yAxisId="action" y={0} stroke={colors.grid} strokeDasharray="2 2" />
 
-            {/* Hourly vertical grid lines - calculate from data length */}
-            {/* For quarterly data (96 periods), still show 24 hour lines */}
-            {Array.from({ length: 25 }, (_, i) => (
+            {/* Hourly vertical grid lines - extend for tomorrow data */}
+            {Array.from({ length: maxHourValue + 1 }, (_, i) => (
               <ReferenceLine
                 key={`hour-${i}`}
                 x={i}
@@ -232,6 +285,18 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
                 strokeDasharray="5 5"
               />
             ))}
+
+            {/* Midnight separator when tomorrow data exists */}
+            {hasTomorrowData && (
+              <ReferenceLine
+                x={24}
+                yAxisId="left"
+                stroke={colors.text}
+                strokeDasharray="4 4"
+                strokeWidth={1.5}
+                label={{ value: 'Tomorrow', position: 'top', fill: colors.text, fontSize: 11 }}
+              />
+            )}
             
             <Area
               yAxisId="left"
@@ -264,9 +329,10 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
                 const { payload, x, y, width, height } = props;
                 const action = payload.action || 0;
                 const isActual = payload.isActual;
-                
+                const isTmrw = payload.isTomorrow;
+
                 const fillColor = action >= 0 ? '#16a34a' : '#dc2626';
-                const opacity = isActual ? 0.9 : 0.6;
+                const opacity = isTmrw ? 0.35 : (isActual ? 0.9 : 0.6);
                 
                 return (
                   <rect 
@@ -304,6 +370,12 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
           <div className="w-4 h-1" style={{ backgroundColor: '#9CA3AF', borderStyle: 'dashed', borderWidth: '1px 0' }}></div>
           <span className="text-gray-700 dark:text-gray-300 ml-2">Electricity Price</span>
         </div>
+        {hasTomorrowData && (
+          <div className="flex items-center text-xs text-gray-600 dark:text-gray-400">
+            <div className="w-4 h-3 rounded mr-1" style={{ backgroundColor: '#16a34a', opacity: 0.35 }}></div>
+            <span>Tomorrow</span>
+          </div>
+        )}
       </div>
     </div>
   );

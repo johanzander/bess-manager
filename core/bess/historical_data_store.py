@@ -11,6 +11,7 @@ from datetime import datetime
 from pathlib import Path
 
 from core.bess.models import DecisionData, EconomicData, EnergyData, PeriodData
+from core.bess.settings import BatterySettings
 from core.bess.time_utils import TIMEZONE, get_period_count
 
 logger = logging.getLogger(__name__)
@@ -26,18 +27,20 @@ class HistoricalDataStore:
     Only stores today's data in memory. Persists to disk for restart recovery.
     """
 
-    def __init__(self, battery_capacity_kwh: float, persist_path: Path | None = None):
+    def __init__(
+        self, battery_settings: BatterySettings, persist_path: Path | None = None
+    ):
         """Initialize the historical data store.
 
         Args:
-            battery_capacity_kwh: Total battery capacity for SOC calculations
+            battery_settings: Battery settings reference (shared, always up-to-date)
             persist_path: Optional custom path for persistence file (for testing)
         """
         # Simple storage: period_index → PeriodData
         self._records: dict[int, PeriodData] = {}
 
-        # Store battery capacity for SOC calculations
-        self.total_capacity = battery_capacity_kwh
+        # Store battery settings reference for SOC calculations
+        self.battery_settings = battery_settings
 
         self._persist_path = persist_path or PERSIST_PATH
 

@@ -7,6 +7,7 @@ import pytest
 
 from core.bess.historical_data_store import HistoricalDataStore
 from core.bess.models import DecisionData, EnergyData, PeriodData
+from core.bess.settings import BatterySettings
 
 TIMEZONE = ZoneInfo("Europe/Stockholm")
 
@@ -14,7 +15,7 @@ TIMEZONE = ZoneInfo("Europe/Stockholm")
 @pytest.fixture
 def store():
     """Create a fresh HistoricalDataStore for testing."""
-    return HistoricalDataStore(battery_capacity_kwh=30.0)
+    return HistoricalDataStore(battery_settings=BatterySettings(total_capacity=30.0))
 
 
 @pytest.fixture
@@ -123,11 +124,11 @@ def test_get_stored_count(store, sample_period_data):
 
 
 def test_total_capacity_stored(store):
-    """Should store battery capacity."""
-    assert store.total_capacity == 30.0
+    """Should store battery capacity via settings reference."""
+    assert store.battery_settings.total_capacity == 30.0
 
 
 def test_custom_battery_capacity():
-    """Should accept custom battery capacity."""
-    store = HistoricalDataStore(battery_capacity_kwh=50.0)
-    assert store.total_capacity == 50.0
+    """Should accept custom battery capacity via settings."""
+    store = HistoricalDataStore(battery_settings=BatterySettings(total_capacity=50.0))
+    assert store.battery_settings.total_capacity == 50.0

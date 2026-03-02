@@ -4,7 +4,7 @@ Complete replacement for battery_system.py that preserves ALL functionality.
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any
 
 from .daily_view_builder import DailyView, DailyViewBuilder
@@ -30,7 +30,12 @@ from .runtime_failure_tracker import RuntimeFailureTracker
 from .schedule_store import ScheduleStore
 from .sensor_collector import SensorCollector
 from .settings import BatterySettings, HomeSettings, PriceSettings
-from .time_utils import TIMEZONE, format_period, get_period_count
+from .time_utils import (
+    TIMEZONE,
+    format_period,
+    get_period_count,
+    period_index_to_timestamp,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1156,19 +1161,8 @@ class BatterySystemManager:
             # Calculate actual period index
             actual_period = optimization_period + i
 
-            # Convert period index to datetime
-            # Period 0-95: today, 96-191: tomorrow, etc.
-            day_offset = actual_period // 96  # Which day (0=today, 1=tomorrow, etc.)
-            period_in_day = actual_period % 96  # Period within the day (0-95)
-            period_hour = period_in_day // 4  # Hour within day (0-23)
-            period_minute = (period_in_day % 4) * 15  # Minute (0, 15, 30, 45)
-
-            # Create timestamp starting from today
-            now = datetime.now()
-            base_date = now.replace(
-                hour=period_hour, minute=period_minute, second=0, microsecond=0
-            )
-            timestamp = base_date + timedelta(days=day_offset)
+            # Convert period index to timezone-aware timestamp using DST-safe utility
+            timestamp = period_index_to_timestamp(actual_period)
 
             # Update the period_data with correct period index and timestamp (dataclass is mutable)
             period_data.period = actual_period

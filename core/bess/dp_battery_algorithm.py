@@ -545,6 +545,7 @@ def _run_dynamic_programming(
     solar_production: list[float] | None = None,
     initial_soe: float | None = None,
     initial_cost_basis: float = 0.0,
+    terminal_value_per_kwh: float = 0.0,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict]:
     """
     Enhanced DP that stores the PeriodData objects calculated during optimization.
@@ -564,6 +565,13 @@ def _run_dynamic_programming(
 
     # Initialize DP arrays (same as before)
     V = np.zeros((horizon + 1, len(soe_levels)))
+
+    # Terminal value: assign value to usable energy remaining at end of horizon
+    if terminal_value_per_kwh > 0.0:
+        for i, soe in enumerate(soe_levels):
+            usable_energy = soe - battery_settings.min_soe_kwh
+            V[horizon, i] = max(0.0, usable_energy) * terminal_value_per_kwh
+
     policy = np.zeros((horizon, len(soe_levels)))
     C = np.full((horizon + 1, len(soe_levels)), initial_cost_basis)
 
@@ -805,6 +813,7 @@ def optimize_battery_schedule(
     initial_soe: float | None = None,
     initial_cost_basis: float | None = None,
     period_duration_hours: float = 0.25,
+    terminal_value_per_kwh: float = 0.0,
 ) -> OptimizationResult:
     """
     Battery optimization that eliminates dual cost calculation by using
@@ -819,6 +828,9 @@ def optimize_battery_schedule(
         initial_soe: Initial battery state of energy (kWh), defaults to min_soe
         initial_cost_basis: Initial cost basis for battery cycling, defaults to cycle_cost
         period_duration_hours: Duration of each period in hours (always 0.25 for quarterly resolution)
+        terminal_value_per_kwh: Value assigned to each kWh of usable energy remaining at
+            end of horizon. Used to prevent end-of-day battery dumping when tomorrow's
+            prices aren't available yet. Defaults to 0.0 (no terminal value).
 
     Returns:
         OptimizationResult with optimal battery schedule
@@ -866,6 +878,7 @@ def optimize_battery_schedule(
         battery_settings=battery_settings,
         initial_cost_basis=initial_cost_basis,
         dt=dt,
+        terminal_value_per_kwh=terminal_value_per_kwh,
     )
 
     # Step 2: Extract optimal path results directly from stored DP data

@@ -1351,11 +1351,54 @@ async def get_growatt_detailed_schedule():
         except (ValueError, KeyError, AttributeError) as e:
             logger.error(f"Failed to get period groups: {e}")
 
+        # Extract tomorrow's period groups from ScheduleStore (same source as dashboard)
+        tomorrow_period_groups: list[dict] | None = None
+        try:
+            stored_schedule = (
+                bess_controller.system.schedule_store.get_latest_schedule()
+            )
+            if stored_schedule:
+                opt_result = stored_schedule.optimization_result
+                opt_period = stored_schedule.optimization_period
+                tomorrow_intents = []
+                for period_idx in range(96, 192):
+                    data_idx = period_idx - opt_period
+                    if 0 <= data_idx < len(opt_result.period_data):
+                        tomorrow_intents.append(
+                            opt_result.period_data[data_idx].decision.strategic_intent
+                        )
+                if tomorrow_intents:
+                    raw_tomorrow_groups = schedule_manager.get_detailed_period_groups(
+                        intents=tomorrow_intents
+                    )
+                    tomorrow_period_groups = []
+                    for group in raw_tomorrow_groups:
+                        tomorrow_period_groups.append(
+                            {
+                                "start_time": group["start_time"],
+                                "end_time": group["end_time"],
+                                "mode": group["mode"],
+                                "dominant_intent": group["intent"],
+                                "intent_counts": {
+                                    group["intent"]: group["period_count"]
+                                },
+                                "period_count": group["period_count"],
+                                "duration_minutes": group["duration_minutes"],
+                                "charge_power_rate": group["charge_rate"],
+                                "discharge_power_rate": group["discharge_rate"],
+                                "grid_charge": group["grid_charge"],
+                            }
+                        )
+        except Exception as e:
+            logger.warning(f"Failed to get tomorrow's period groups: {e}")
+            tomorrow_period_groups = None
+
         response = {
             "current_hour": current_hour,
             "tou_intervals": tou_intervals,
             "schedule_data": schedule_data,
             "period_groups": period_groups,
+            "tomorrow_period_groups": tomorrow_period_groups,
             "mode_distribution": mode_distribution,
             "intent_distribution": intent_distribution,
             "hour_distribution": {

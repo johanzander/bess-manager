@@ -7,20 +7,22 @@ while separating it from sensor collection and predictions.
 
 import logging
 
+from .settings import BatterySettings
+
 logger = logging.getLogger(__name__)
 
 
 class EnergyFlowCalculator:
     """Calculates all energy flows in the systemand validates energy balance."""
 
-    def __init__(self, battery_capacity_kwh: float, ha_controller):
+    def __init__(self, battery_settings: BatterySettings, ha_controller):
         """Initialize energy flow calculator.
 
         Args:
-            battery_capacity_kwh: Total battery capacity for SOC calculations
+            battery_settings: Battery settings reference (shared, always up-to-date)
             ha_controller: HA controller for sensor resolution (required)
         """
-        self.battery_capacity = battery_capacity_kwh
+        self.battery_settings = battery_settings
         self.ha_controller = ha_controller
         self.sensor_to_flow_map = self._build_sensor_flow_mapping()
 

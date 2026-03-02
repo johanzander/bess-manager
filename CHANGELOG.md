@@ -5,6 +5,12 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.3.6] - 2026-03-02
+
+### Changed
+
+- `SensorCollector`, `EnergyFlowCalculator`, and `HistoricalDataStore` now receive a shared `BatterySettings` reference instead of a bare `float` capacity. Components always read the live value from the shared settings object, eliminating the need for manual capacity propagation in `update_settings()`. This matches the pattern already used by `DailyViewBuilder` and `GrowattScheduleManager`.
+
 ## [6.3.5] - 2026-03-01
 
 ### Fixed

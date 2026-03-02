@@ -1001,6 +1001,27 @@ class BatterySystemManager:
             buy_prices = [entry["buyPrice"] for entry in remaining_entries]
             sell_prices = [entry["sellPrice"] for entry in remaining_entries]
 
+            # Compute terminal value from tomorrow's prices to prevent the optimizer from
+            # treating stored energy as worthless at end-of-day and exporting prematurely.
+            # Only applied to intraday updates; prepare_next_day already has a full horizon.
+            terminal_buy_price: float | None = None
+            if not prepare_next_day:
+                tomorrow_entries = self._price_manager.get_tomorrow_prices()
+                if tomorrow_entries:
+                    terminal_buy_price = sum(
+                        e["buyPrice"] for e in tomorrow_entries
+                    ) / len(tomorrow_entries)
+                    logger.debug(
+                        f"Terminal value: using tomorrow mean buy price {terminal_buy_price:.4f} SEK/kWh"
+                    )
+                else:
+                    terminal_buy_price = (
+                        sum(buy_prices) / len(buy_prices) if buy_prices else None
+                    )
+                    logger.debug(
+                        f"Terminal value: tomorrow prices unavailable, using today remaining mean {terminal_buy_price:.4f} SEK/kWh"
+                    )
+
             # Run DP optimization with strategic intent capture - returns OptimizationResult directly
             result = optimize_battery_schedule(
                 buy_price=buy_prices,
@@ -1011,6 +1032,7 @@ class BatterySystemManager:
                 battery_settings=self.battery_settings,
                 initial_cost_basis=initial_cost_basis,
                 period_duration_hours=0.25,  # Always quarterly after normalization in _get_price_data
+                terminal_buy_price=terminal_buy_price,
             )
 
             # Add timestamps to period data (algorithm is time-agnostic, operates on relative indices)

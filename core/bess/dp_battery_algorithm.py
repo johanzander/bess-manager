@@ -290,7 +290,6 @@ def _calculate_reward(
             )
 
     elif power < 0:  # Discharging
-
         # Discharged energy can be used for:
         # 1. Avoiding grid purchases (saves buy_price per kWh delivered)
         # 2. Grid export (earns sell_price per kWh delivered)
@@ -545,6 +544,7 @@ def _run_dynamic_programming(
     solar_production: list[float] | None = None,
     initial_soe: float | None = None,
     initial_cost_basis: float = 0.0,
+    terminal_buy_price: float | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict]:
     """
     Enhanced DP that stores the PeriodData objects calculated during optimization.
@@ -566,6 +566,17 @@ def _run_dynamic_programming(
     V = np.zeros((horizon + 1, len(soe_levels)))
     policy = np.zeros((horizon, len(soe_levels)))
     C = np.full((horizon + 1, len(soe_levels)), initial_cost_basis)
+
+    # Set terminal value: energy remaining at end of horizon has value because it
+    # avoids buying from the grid in the next period. Without this, the optimizer
+    # treats stored energy as worthless at end-of-day and exports prematurely.
+    if terminal_buy_price is not None:
+        V[horizon, :] = (
+            soe_levels * terminal_buy_price * battery_settings.efficiency_discharge
+        )
+        logger.debug(
+            f"Terminal value set using buy price {terminal_buy_price:.4f} SEK/kWh"
+        )
 
     # Store PeriodData objects calculated during DP
     stored_period_data = {}  # Key: (t, i), Value: PeriodData
@@ -805,6 +816,7 @@ def optimize_battery_schedule(
     initial_soe: float | None = None,
     initial_cost_basis: float | None = None,
     period_duration_hours: float = 0.25,
+    terminal_buy_price: float | None = None,
 ) -> OptimizationResult:
     """
     Battery optimization that eliminates dual cost calculation by using
@@ -866,6 +878,7 @@ def optimize_battery_schedule(
         battery_settings=battery_settings,
         initial_cost_basis=initial_cost_basis,
         dt=dt,
+        terminal_buy_price=terminal_buy_price,
     )
 
     # Step 2: Extract optimal path results directly from stored DP data

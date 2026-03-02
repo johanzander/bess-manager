@@ -5,6 +5,12 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.2.0] - 2026-03-02
+
+### Changed
+
+- DP optimizer now assigns a non-zero terminal value to energy remaining in the battery at the end of the optimization horizon. Previously, stored energy was treated as worthless at midnight, causing the optimizer to export battery energy late in the day even when holding it for self-consumption would be more economic. The terminal value is set to `SOE × mean_tomorrow_buy_price × efficiency_discharge`, using tomorrow's Nordpool prices when available (after ~13:00–16:00 depending on area) and falling back to the mean of today's remaining prices otherwise.
+
 ## [7.1.1] - 2026-03-02
 
 ### Fixed

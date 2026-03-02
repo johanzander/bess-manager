@@ -12,16 +12,27 @@
 
 **Impact**: High | **Effort**: Medium | **Dependencies**: Price manager, DP algorithm
 
-**Description**: Use tomorrow's electricity prices to extend optimization beyond 24 hours, enabling better arbitrage decisions across day boundaries.
+**Description**: Use tomorrow's electricity prices to extend the intraday optimization horizon to cover today + tomorrow (up to 192 periods), enabling true cross-day arbitrage decisions.
 
-**Implementation**:
+**Background**: The intraday optimizer (runs every 15 min) currently uses only `get_today_prices()`, giving a shrinking horizon toward midnight. A zero terminal value caused the optimizer to export battery energy late in the day rather than holding it for self-consumption overnight/tomorrow. **Option 3 (terminal value from tomorrow's mean price) was deployed as a minimal fix** — it stops premature exporting but does not enable true cross-day arbitrage.
 
-- Modify OptimizationManager to fetch tomorrow's prices when available (usually after 13:00)
-- Extend DP algorithm input to handle 48+ hour horizons
-- Update ViewBuilder to display extended optimization results
-- Add multi-day TOU schedule management
+**Infrastructure already in place**:
 
-**Economic Impact**: Significant - enables optimal charging/discharging decisions that span multiple days
+- `get_available_prices()` in `price_manager.py` already returns up to 192 periods (today + tomorrow) with automatic fallback
+- `get_tomorrow_prices()` already exists and returns empty list when not yet published
+- `_run_optimization()` slices `prices[optimization_period:]`, so extending prices to 192 periods naturally extends the horizon
+- Array length mismatch guards already exist in `_run_optimization()` for consumption/solar
+
+**Remaining work**:
+
+1. **`_get_price_data()`** (`battery_system_manager.py`): swap `get_today_prices()` → `get_available_prices()` for intraday runs (not `prepare_next_day`)
+2. **`_gather_optimization_data()`**: extend consumption/solar arrays to cover tomorrow's periods (96–191) using predictions. Consumption: reuse `get_estimated_consumption()` flat average (no date dependency). Solar: needs `get_solar_forecast_tomorrow()` — Solcast publishes tomorrow's forecast in HA but the controller isn't wired to it yet (biggest unknown)
+3. **Schedule application**: decisions for periods 96–191 are computed but must NOT be applied to today's TOU — only periods `optimization_period`–95 go to the inverter. Verify nothing in view builder / savings calc chokes on extended results
+4. **Edge cases**: midnight boundary, tomorrow prices unavailable before ~13:00, `prepare_next_day` should remain unchanged (already uses full 96-period tomorrow horizon)
+
+**Solar forecast for tomorrow**: Check if `sensor.solcast_pv_forecast_tomorrow` or equivalent exists in HA. If yes, add `get_solar_forecast_tomorrow()` to `ha_api_controller.py` alongside existing `get_solar_forecast()`. If not available, fall back to today's solar pattern as approximation.
+
+**Economic Impact**: Enables optimal charge/discharge decisions across day boundaries — e.g. avoid exporting at 17:00 if tomorrow morning has cheap import prices, or charge tonight if tomorrow afternoon has high export prices
 
 ## 🟡 **HIGH PRIORITY** (Core Functionality)
 

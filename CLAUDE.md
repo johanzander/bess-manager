@@ -166,13 +166,13 @@ cd frontend && npm run lint:fix  # Fix TypeScript issues
    ```bash
    # Search for similar functionality
    grep -r "dataclass\|serialization\|formatting" --include="*.py"
-   grep -r "HealthStatus\|SystemHealth" --include="*.ts" --include="*.tsx" 
+   grep -r "HealthStatus\|SystemHealth" --include="*.ts" --include="*.tsx"
    find . -name "*api*" -name "*model*" -name "*conversion*"
    ```
 
 1. **Examine Related Files**:
    - `backend/api_dataclasses.py` - existing API models
-   - `backend/api_conversion.py` - serialization utilities  
+   - `backend/api_conversion.py` - serialization utilities
    - `frontend/src/types.ts` - TypeScript interfaces
    - `core/bess/` - domain models and services
    - Any files matching the functionality you plan to add
@@ -200,7 +200,7 @@ cd frontend && npm run lint:fix  # Fix TypeScript issues
 ## Codebase Analysis for Sensor Formatting
 
 ### Existing Infrastructure Found:
-- ✅ API Dataclasses: `backend/api_dataclasses.py` 
+- ✅ API Dataclasses: `backend/api_dataclasses.py`
 - ✅ Serialization: `backend/api_conversion.py`
 - ✅ Health Types: `frontend/src/types.ts`
 - ✅ Health Endpoint: `/api/system-health` in `backend/api.py`
@@ -211,7 +211,7 @@ cd frontend && npm run lint:fix  # Fix TypeScript issues
 
 ### Minimal Required Changes:
 1. Add unit metadata to existing METHOD_SENSOR_MAP
-2. Create SensorFormattingService 
+2. Create SensorFormattingService
 3. Integrate with existing health check system
 ```
 
@@ -326,9 +326,8 @@ This script automatically checks:
 **Rules**:
 
 1. **Never commit automatically** - Always wait for the user to explicitly say "commit" or "please commit"
-2. **No AI attribution in commits** - Never include "Claude", "AI-generated", or similar references in commit messages
-3. **Show changes first** - Always show what will be committed and get approval before running git commit
-4. **Clean commit messages** - Write clear, professional commit messages that describe what changed and why
+2. **Show changes first** - Always show what will be committed and get approval before running git commit
+3. **Clean commit messages** - Write clear, professional commit messages that describe what changed and why
 
 **Examples**:
 
@@ -545,10 +544,10 @@ assert slot_start_times == ['02:40', '05:20']  # Specific slot boundaries
 def test_export_arbitrage_enables_battery_discharge():
     strategic_intents[20] = 'EXPORT_ARBITRAGE'
     scheduler.apply_schedule(strategic_intents)
-    
+
     # Test BEHAVIOR: Battery should discharge during target hour
     assert scheduler.is_hour_configured_for_export(20)
-    
+
     # Test CONSTRAINTS: Hardware requirements must be met
     assert scheduler.has_no_overlapping_intervals()
     assert scheduler.intervals_are_chronologically_ordered()

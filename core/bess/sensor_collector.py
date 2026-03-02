@@ -9,6 +9,7 @@ from .energy_flow_calculator import EnergyFlowCalculator
 from .health_check import perform_health_check
 from .influxdb_helper import get_sensor_data_batch
 from .models import EnergyData
+from .settings import BatterySettings
 
 logger = logging.getLogger(__name__)
 
@@ -16,17 +17,17 @@ logger = logging.getLogger(__name__)
 class SensorCollector:
     """Collects sensor data from InfluxDB and calculates energy flows with strategic intent reconstruction."""
 
-    def __init__(self, ha_controller, battery_capacity_kwh: float):
+    def __init__(self, ha_controller, battery_settings: BatterySettings):
         """Initialize sensor collector.
 
         Args:
             ha_controller: Home Assistant API controller
-            battery_capacity_kwh: Battery capacity in kWh
+            battery_settings: Battery settings reference (shared, always up-to-date)
         """
         self.ha_controller = ha_controller
-        self.battery_capacity = battery_capacity_kwh
+        self.battery_settings = battery_settings
         self.energy_flow_calculator = EnergyFlowCalculator(
-            battery_capacity_kwh, ha_controller
+            battery_settings, ha_controller
         )
 
         # Batch mode: fetch all periods in 1-2 queries instead of 176 (98% faster)
@@ -253,8 +254,8 @@ class SensorCollector:
             )
 
         # Convert SOC to SOE
-        soe_start = (battery_soc_start / 100.0) * self.battery_capacity
-        soe_end = (battery_soc_end / 100.0) * self.battery_capacity
+        soe_start = (battery_soc_start / 100.0) * self.battery_settings.total_capacity
+        soe_end = (battery_soc_end / 100.0) * self.battery_settings.total_capacity
 
         # Create EnergyData directly - detailed flows calculated automatically in __post_init__
         energy_data = EnergyData(

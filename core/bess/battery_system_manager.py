@@ -65,16 +65,12 @@ class BatterySystemManager:
         self._controller = controller
 
         # Initialize core data stores with proper component separation
-        self.historical_store = HistoricalDataStore(
-            self.battery_settings.total_capacity
-        )
+        self.historical_store = HistoricalDataStore(self.battery_settings)
         self.schedule_store = ScheduleStore()
         self.prediction_snapshot_store = PredictionSnapshotStore()
 
         # Initialize specialized components
-        self.sensor_collector = SensorCollector(
-            controller, self.battery_settings.total_capacity
-        )
+        self.sensor_collector = SensorCollector(controller, self.battery_settings)
 
         # Initialize view builder
         self.daily_view_builder = DailyViewBuilder(

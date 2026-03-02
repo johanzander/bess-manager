@@ -87,7 +87,8 @@ def populate_historical_data(
             period_data = PeriodData(
                 period=period_index,  # Consecutive period: 0, 1, 2, 3...
                 energy=energy_data,
-                timestamp=base_time + timedelta(minutes=period_index * 15),  # 15-minute increments
+                timestamp=base_time
+                + timedelta(minutes=period_index * 15),  # 15-minute increments
                 data_source="actual",
                 economic=economic_data,
                 decision=DecisionData(),
@@ -124,9 +125,7 @@ class TestCompleteWorkflows:
         assert success, "Should create and apply schedule"
 
         # Verify optimization was performed
-        latest_schedule = (
-            quarterly_battery_system.schedule_store.get_latest_schedule()
-        )
+        latest_schedule = quarterly_battery_system.schedule_store.get_latest_schedule()
         assert latest_schedule is not None, "Should have created schedule"
 
         # Verify hardware received commands (should have some calls due to arbitrage opportunities)
@@ -175,7 +174,9 @@ class TestCompleteWorkflows:
         hourly_solar = [0.0] * 6 + [8.0] * 8 + [0.0] * 10  # 24 elements
         hourly_consumption = [4.0] * 24
         controller.solar_forecast = hourly_to_quarterly(hourly_solar)  # 96 elements
-        controller.consumption_forecast = hourly_to_quarterly(hourly_consumption)  # 96 elements
+        controller.consumption_forecast = hourly_to_quarterly(
+            hourly_consumption
+        )  # 96 elements
 
         # POPULATE HISTORICAL DATA for past hours
         populate_historical_data(quarterly_battery_system, 0, current_hour - 1)
@@ -190,12 +191,13 @@ class TestCompleteWorkflows:
         latest_schedule = quarterly_battery_system.schedule_store.get_latest_schedule()
         assert latest_schedule is not None, "Should store optimization results"
 
-        # Verify data consistency - quarterly resolution means 96 periods per day
+        # Verify data consistency - optimization may extend to 192 periods
+        # when tomorrow's prices are available (extended horizon feature)
         period_data = latest_schedule.optimization_result.period_data
-        expected_periods = 96 - current_period  # Remaining periods in day
+        min_expected_periods = 96 - current_period  # At least remaining today
         assert (
-            len(period_data) == expected_periods
-        ), f"Should have {expected_periods} quarterly periods of schedule data"
+            len(period_data) >= min_expected_periods
+        ), f"Should have at least {min_expected_periods} quarterly periods of schedule data, got {len(period_data)}"
 
         # Verify all periods have PeriodData structure
         for i, period in enumerate(period_data):
@@ -224,32 +226,40 @@ class TestDailyViewGeneration:
         assert success, "Should create schedule"
 
         # Get daily view with explicit current period (no more real-time dependency!)
-        daily_view = quarterly_battery_system.get_current_daily_view(current_period=current_period)
+        daily_view = quarterly_battery_system.get_current_daily_view(
+            current_period=current_period
+        )
         assert daily_view is not None, "Should return daily view"
         assert len(daily_view.periods) == 96, "Should have complete 96-period view"
 
         # Verify data sources are correctly marked
-        actual_count = sum(
-            1 for h in daily_view.periods if h.data_source == "actual"
-        )
+        actual_count = sum(1 for h in daily_view.periods if h.data_source == "actual")
         predicted_count = sum(
             1 for h in daily_view.periods if h.data_source == "predicted"
         )
 
         expected_actual = current_hour * 4  # Convert hours to periods
         expected_predicted = 96 - expected_actual
-        assert actual_count == expected_actual, f"Should have {expected_actual} actual periods"
+        assert (
+            actual_count == expected_actual
+        ), f"Should have {expected_actual} actual periods"
         assert (
             predicted_count == expected_predicted
         ), f"Should have {expected_predicted} predicted periods"
 
         # Verify period data structure
         for i, period_data in enumerate(daily_view.periods):
-            assert isinstance(period_data, PeriodData), f"Period {i} should be PeriodData"
-            assert period_data.period == i, f"Period {i} should have correct period number"
+            assert isinstance(
+                period_data, PeriodData
+            ), f"Period {i} should be PeriodData"
+            assert (
+                period_data.period == i
+            ), f"Period {i} should have correct period number"
 
             if i < expected_actual:
-                assert period_data.data_source == "actual", f"Period {i} should be actual"
+                assert (
+                    period_data.data_source == "actual"
+                ), f"Period {i} should be actual"
             else:
                 assert (
                     period_data.data_source == "predicted"
@@ -290,7 +300,9 @@ class TestDailyViewGeneration:
         expected_actual_periods = current_hour * 4
         for i, period_data in enumerate(daily_view.periods):
             if i < expected_actual_periods:
-                assert period_data.data_source == "actual", f"Period {i} should be actual"
+                assert (
+                    period_data.data_source == "actual"
+                ), f"Period {i} should be actual"
             else:
                 assert (
                     period_data.data_source == "predicted"
@@ -323,8 +335,10 @@ class TestDailyViewGeneration:
         # Verify period counts
         assert daily_view.actual_count >= 0, "Actual count should be non-negative"
         assert daily_view.predicted_count >= 0, "Predicted count should be non-negative"
-        assert len(daily_view.periods) == daily_view.actual_count + daily_view.predicted_count, \
-            "Total periods should equal actual + predicted counts"
+        assert (
+            len(daily_view.periods)
+            == daily_view.actual_count + daily_view.predicted_count
+        ), "Total periods should equal actual + predicted counts"
 
 
 class TestSystemResilience:
@@ -373,17 +387,15 @@ class TestPerformanceWorkflows:
         assert success, "Optimization should complete successfully"
 
         optimization_time = end_time - start_time
-        # Quarterly resolution (96 periods) takes longer than hourly (24 periods)
+        # Quarterly resolution with extended horizon (up to 192 periods) takes longer
         # Dynamic programming complexity is O(T * S * A) where T=periods, S=states, A=actions
-        # 96 periods vs 24 periods = 4x more work, so 30s is reasonable for quarterly resolution
+        # With extended horizon (192 periods), 120s is reasonable for DP optimization
         assert (
-            optimization_time < 30.0
-        ), f"Optimization should complete in under 30 seconds, took {optimization_time:.2f}s"
+            optimization_time < 120.0
+        ), f"Optimization should complete in under 120 seconds, took {optimization_time:.2f}s"
 
         # Verify result quality with explicit current hour
-        latest_schedule = (
-            quarterly_battery_system.schedule_store.get_latest_schedule()
-        )
+        latest_schedule = quarterly_battery_system.schedule_store.get_latest_schedule()
         assert latest_schedule is not None, "Should produce valid schedule"
 
         economic_summary = latest_schedule.optimization_result.economic_summary
@@ -410,28 +422,28 @@ class TestDataFlowValidation:
         assert success, "Should complete workflow"
 
         # Get data at different stages with explicit current hour
-        latest_schedule = (
-            quarterly_battery_system.schedule_store.get_latest_schedule()
-        )
+        latest_schedule = quarterly_battery_system.schedule_store.get_latest_schedule()
         daily_view = quarterly_battery_system.get_current_daily_view(
             current_period=current_period
         )
 
         # Verify consistency between schedule and daily view
+        # With extended horizon, schedule_data may have more periods (up to 192)
+        # than today's daily_view, so compare only today's predicted periods
         schedule_data = latest_schedule.optimization_result.period_data
         predicted_view_data = [
             h for h in daily_view.periods if h.data_source == "predicted"
         ]
 
-        assert len(schedule_data) == len(
+        # Schedule should have at least as many periods as predicted view
+        assert len(schedule_data) >= len(
             predicted_view_data
-        ), "Schedule and predicted view should have same length"
+        ), "Schedule should have at least as many periods as predicted view"
 
-        # Verify hour consistency for predicted hours
+        # Verify hour consistency for predicted hours (today only)
         for i, (sched_hour, view_hour) in enumerate(
             zip(schedule_data, predicted_view_data, strict=False)
         ):
-            #            assert sched_hour.hour == view_hour.hour, f"Predicted hour {i} should be consistent"
             assert isinstance(
                 sched_hour, PeriodData
             ), f"Schedule hour {i} should be PeriodData"
@@ -453,9 +465,7 @@ class TestDataFlowValidation:
         assert success, "Should create schedule"
 
         # Get strategic intents from different sources with explicit current hour
-        latest_schedule = (
-            quarterly_battery_system.schedule_store.get_latest_schedule()
-        )
+        latest_schedule = quarterly_battery_system.schedule_store.get_latest_schedule()
         schedule_intents = [
             h.decision.strategic_intent
             for h in latest_schedule.optimization_result.period_data
@@ -470,10 +480,12 @@ class TestDataFlowValidation:
             if h.data_source == "predicted"
         ]
 
-        # Verify consistency for predicted hours
+        # With extended horizon, schedule may have more intents (tomorrow) than daily view (today only)
+        # Compare only today's portion
+        today_schedule_intents = schedule_intents[: len(predicted_view_intents)]
         assert (
-            schedule_intents == predicted_view_intents
-        ), "Strategic intents should be consistent between schedule and predicted view hours"
+            today_schedule_intents == predicted_view_intents
+        ), "Strategic intents should be consistent between schedule and predicted view hours (today)"
 
         # Verify valid intents
         valid_intents = {

@@ -5,6 +5,14 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.4.0] - 2026-03-02
+
+### Added
+
+- Extended DP optimization horizon. When tomorrow's electricity prices are available, the optimizer now considers up to 192 periods (2 days) instead of just today's 96, preventing suboptimal end-of-day battery dumping. Only today's schedule is ever deployed to the Growatt inverter — tomorrow's data is purely an optimization input.
+- Terminal value fallback for end-of-horizon energy. When tomorrow's prices aren't published yet, the DP algorithm assigns an estimated value to energy remaining in the battery at the end of the horizon, preventing the optimizer from treating stored energy as worthless and exporting at unfavorable rates.
+- Tomorrow's solar forecast support. Added `get_solar_forecast_tomorrow()` to `HomeAssistantAPIController` backed by Solcast's tomorrow forecast sensor, providing the optimizer with next-day solar production data for extended horizon calculations.
+
 ## [6.3.6] - 2026-03-02
 
 ### Changed

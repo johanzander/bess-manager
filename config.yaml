@@ -1,6 +1,6 @@
 name: "BESS Manager"
 description: "Battery Energy Storage System optimization and management"
-version: "6.3.6"
+version: "6.4.0"
 slug: "bess_manager"
 init: false
 arch:
@@ -96,6 +96,7 @@ options:
     # === Solar & Consumption Forecasting ===
     48h_avg_grid_import: "sensor.48h_average_grid_import_power" # 48h average consumption
     solar_forecast_today: "sensor.solcast_pv_forecast_forecast_today" # Today's solar forecast
+    solar_forecast_tomorrow: "sensor.solcast_pv_forecast_forecast_tomorrow" # Tomorrow's solar forecast
 schema:
   influxdb:
     url: str
@@ -157,6 +158,7 @@ schema:
     nordpool_kwh_tomorrow: str
     48h_avg_grid_import: str
     solar_forecast_today: str
+    solar_forecast_tomorrow: str
     pv_power: str
     local_load_power: str
     import_power: str

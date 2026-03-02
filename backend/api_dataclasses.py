@@ -760,6 +760,7 @@ class APIDashboardResponse:
 
     # Main data structures
     hourlyData: list[APIDashboardHourlyData]
+    tomorrowData: list[APIDashboardHourlyData] | None
     summary: APIDashboardSummary
     costAndSavings: APICostAndSavings
     realTimePower: APIRealTimePower
@@ -778,6 +779,7 @@ class APIDashboardResponse:
         currency: str,
         hourly_data_instances: list | None = None,
         resolution: str = "quarter-hourly",
+        tomorrow_data: list[APIDashboardHourlyData] | None = None,
     ) -> APIDashboardResponse:
         """Create complete dashboard response from internal data."""
 
@@ -877,6 +879,7 @@ class APIDashboardResponse:
             batterySoe=create_formatted_value(battery_soe, "energy_kwh_only", currency),
             # Main data structures
             hourlyData=hourly_data,
+            tomorrowData=tomorrow_data,
             summary=summary,
             costAndSavings=cost_and_savings,
             realTimePower=real_time_power,

@@ -5,6 +5,22 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.5.0] - 2026-03-02
+
+### Added
+
+- Dashboard charts now display tomorrow's optimization data when available. Both the Energy Flow Chart and Battery SOC & Actions chart extend past midnight, showing predicted energy flows, SOC trajectory, battery actions, and prices for the next day.
+- Vertical midnight separator line with "Tomorrow" label clearly marks the today/tomorrow boundary on both charts.
+- Tomorrow's data rendered with reduced opacity overlays and bar opacity to visually distinguish from today's predictions.
+- X-axis labels show +00, +01, etc. for tomorrow's hours; tooltips prefix "Tomorrow" when hovering over next-day data.
+- New `tomorrowData` field in dashboard API response (`/api/dashboard`) extracts tomorrow's period data from the ScheduleStore optimization result.
+- Resolution toggle (15min / 60min) works correctly with the extended horizon data.
+
+### Notes
+
+- Tomorrow's data is display-only. The Growatt inverter schedule deployment remains today-only since TOU segments are date-unaware.
+- When tomorrow's prices haven't been published yet (typically before ~13:00), charts display exactly as before.
+
 ## [6.4.0] - 2026-03-02
 
 ### Added

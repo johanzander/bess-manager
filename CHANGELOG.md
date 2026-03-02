@@ -5,6 +5,21 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.3.0] - 2026-03-02
+
+### Added
+
+- Extended DP optimization horizon with tomorrow's prices. When tomorrow's electricity prices are available, the optimizer considers up to 192 periods (2 days) instead of just today's 96, preventing suboptimal end-of-day battery dumping. Only today's schedule is ever deployed to the Growatt inverter.
+- Terminal value fallback for end-of-horizon energy. When tomorrow's prices aren't published yet, the DP algorithm assigns an estimated value (avg buy price × discharge efficiency − cycle cost) to usable energy remaining at the end of the horizon, preventing the optimizer from treating stored energy as worthless.
+- Tomorrow's solar forecast support via Solcast's `solar_forecast_tomorrow` sensor for extended horizon calculations.
+- Dashboard charts now display tomorrow's optimization data when available, with visual distinction (reduced opacity, midnight separator, +HH time labels).
+- New `tomorrowData` field in dashboard API response extracts tomorrow's period data from the ScheduleStore.
+- DST-safe timestamp calculation using `period_index_to_timestamp()` utility instead of manual arithmetic.
+
+### Changed
+
+- Replaced v7.2.0's simple `terminal_buy_price` (raw average × efficiency) with `terminal_value_per_kwh` that respects `min_soe` and subtracts cycle cost, and returns 0.0 when the horizon already includes tomorrow's data.
+
 ## [7.2.0] - 2026-03-02
 
 ### Changed

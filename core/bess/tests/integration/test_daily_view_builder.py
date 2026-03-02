@@ -38,7 +38,7 @@ def battery_settings():
 @pytest.fixture
 def historical_store(battery_settings):
     """Historical store with some actual data."""
-    store = HistoricalDataStore(battery_capacity_kwh=battery_settings.total_capacity)
+    store = HistoricalDataStore(battery_settings=battery_settings)
     return store
 
 
@@ -112,9 +112,7 @@ def test_midday_mix_actual_and_predicted(
     """Midday (period 56): past = actual, future = predicted."""
     # Add actual data for periods 0-55 (past)
     for i in range(56):
-        historical_store.record_period(
-            i, create_period_data(i, "actual", savings=5.0)
-        )
+        historical_store.record_period(i, create_period_data(i, "actual", savings=5.0))
 
     # Create predicted data for all 96 periods
     periods = [create_period_data(i, "predicted", savings=10.0) for i in range(96)]
@@ -149,9 +147,7 @@ def test_end_of_day_mostly_actual(view_builder, historical_store, schedule_store
     """Late evening (period 92): most data is actual."""
     # Add actual data for periods 0-91
     for i in range(92):
-        historical_store.record_period(
-            i, create_period_data(i, "actual", savings=7.0)
-        )
+        historical_store.record_period(i, create_period_data(i, "actual", savings=7.0))
 
     # Create predicted data
     periods = [create_period_data(i, "predicted", savings=10.0) for i in range(96)]
@@ -229,9 +225,7 @@ def test_different_periods_throughout_day(
     """Test actual/predicted split at different times of day."""
     # Add actual data for all past periods
     for i in range(96):
-        historical_store.record_period(
-            i, create_period_data(i, "actual", savings=5.0)
-        )
+        historical_store.record_period(i, create_period_data(i, "actual", savings=5.0))
 
     # Create predicted data
     periods = [create_period_data(i, "predicted", savings=10.0) for i in range(96)]

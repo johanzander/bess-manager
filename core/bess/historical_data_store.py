@@ -8,6 +8,7 @@ import logging
 from datetime import datetime
 
 from core.bess.models import PeriodData
+from core.bess.settings import BatterySettings
 from core.bess.time_utils import TIMEZONE, get_period_count
 
 logger = logging.getLogger(__name__)
@@ -20,17 +21,17 @@ class HistoricalDataStore:
     Only stores today's data in memory.
     """
 
-    def __init__(self, battery_capacity_kwh: float):
+    def __init__(self, battery_settings: BatterySettings):
         """Initialize the historical data store.
 
         Args:
-            battery_capacity_kwh: Total battery capacity for SOC calculations
+            battery_settings: Battery settings reference (shared, always up-to-date)
         """
         # Simple storage: period_index → PeriodData
         self._records: dict[int, PeriodData] = {}
 
-        # Store battery capacity for SOC calculations
-        self.total_capacity = battery_capacity_kwh
+        # Store battery settings reference for SOC calculations
+        self.battery_settings = battery_settings
 
         logger.debug("Initialized HistoricalDataStore")
 

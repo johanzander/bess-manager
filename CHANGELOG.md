@@ -5,6 +5,18 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.6.0] - 2026-03-02
+
+### Added
+
+- Inverter page "Schedule Overview (15-min Resolution)" now shows tomorrow's planned schedule when tomorrow's prices are available. Period groups are rendered below today's table with an indigo separator header and reduced opacity to distinguish predicted from active data.
+- `get_detailed_period_groups()` accepts an optional `intents` parameter, allowing it to group any strategic intent list (not just the active schedule).
+- `/api/growatt/detailed_schedule` response includes `tomorrowPeriodGroups` extracted from the ScheduleStore optimization result, following the same pattern as the dashboard's `tomorrowData`.
+
+### Fixed
+
+- Unused `charge_power_rate` variable in `GrowattScheduleManager` now prefixed with underscore to satisfy ruff RUF059.
+
 ## [6.5.0] - 2026-03-02
 
 ### Added

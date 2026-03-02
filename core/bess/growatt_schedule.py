@@ -285,7 +285,9 @@ class GrowattScheduleManager:
 
         return groups
 
-    def get_detailed_period_groups(self) -> list[dict]:
+    def get_detailed_period_groups(
+        self, intents: list[str] | None = None
+    ) -> list[dict]:
         """Get period groups with full control parameters for display/API.
 
         Groups consecutive 15-minute periods ONLY when ALL parameters are identical:
@@ -295,18 +297,23 @@ class GrowattScheduleManager:
         - Charge power rate
         - Discharge power rate
 
+        Args:
+            intents: Optional list of strategic intents to group. If None,
+                     uses self.strategic_intents (today's schedule).
+
         Returns:
             List of period groups with all control parameters
         """
-        if not self.strategic_intents:
+        effective_intents = intents if intents is not None else self.strategic_intents
+        if not effective_intents:
             return []
 
-        num_periods = len(self.strategic_intents)
+        num_periods = len(effective_intents)
 
         # Build detailed settings for each 15-minute period
         period_settings = []
         for period in range(num_periods):
-            intent = self.strategic_intents[period]
+            intent = effective_intents[period]
             mode = self.INTENT_TO_MODE.get(intent, "load_first")
             control = self.INTENT_TO_CONTROL.get(
                 intent, {"grid_charge": False, "charge_rate": 100, "discharge_rate": 0}
@@ -615,7 +622,7 @@ class GrowattScheduleManager:
 
             # Calculate power rates from battery action
             (
-                charge_power_rate,
+                _charge_power_rate,
                 discharge_power_rate,
             ) = self._calculate_power_rates_from_action(battery_action, intent)
 

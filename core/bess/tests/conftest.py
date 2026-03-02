@@ -66,6 +66,7 @@ class MockHomeAssistantController(HomeAssistantAPIController):
         # Default: 4.5 kWh/hour = 1.125 kWh per quarter-hour
         self.consumption_forecast = [1.125] * 96
         self.solar_forecast = [0.0] * 96
+        self.solar_forecast_tomorrow = [0.0] * 96
 
         # Call tracking for integration tests
         self.calls = {
@@ -91,6 +92,10 @@ class MockHomeAssistantController(HomeAssistantAPIController):
     def get_solar_forecast(self, day_offset=0):  # type: ignore[unused-argument]
         """Get solar forecast data in quarterly resolution (96 periods)."""
         return self.solar_forecast
+
+    def get_solar_forecast_tomorrow(self):
+        """Get solar forecast for tomorrow in quarterly resolution (96 periods)."""
+        return self.solar_forecast_tomorrow
 
     def grid_charge_enabled(self):
         """Check if grid charging is enabled."""

@@ -637,6 +637,10 @@ class BatterySystemManager:
 
         All price sources return 96 quarterly periods per day. Sources with
         coarser raw data (e.g. Octopus 30-min) expand internally.
+
+        When prepare_next_day=False, attempts to extend today's prices with
+        tomorrow's data for improved end-of-day optimization. The extended
+        horizon is capped at 192 periods (2 days).
         """
         try:
             if prepare_next_day:
@@ -645,14 +649,37 @@ class BatterySystemManager:
             else:
                 price_entries = self._price_manager.get_today_prices()
 
+                # Extend with tomorrow's prices when available
+                tomorrow_entries = self._price_manager.get_tomorrow_prices()
+                if tomorrow_entries:
+                    price_entries = price_entries + tomorrow_entries
+                    logger.info(
+                        "Extended price horizon with %d tomorrow entries (total: %d)",
+                        len(tomorrow_entries),
+                        len(price_entries),
+                    )
+
             if not price_entries:
                 logger.warning("No prices available")
                 return None, None
 
+            # Cap at 192 periods (2 days maximum)
+            if len(price_entries) > 192:
+                price_entries = price_entries[:192]
+                logger.info("Capped price entries at 192 periods (2 days)")
+
             prices = [entry["price"] for entry in price_entries]
 
             # Validate quarterly period count (handles DST: 92, 96, or 100)
-            if len(prices) == 92:
+            today_period_count = get_period_count(datetime.now(tz=TIMEZONE).date())
+            if not prepare_next_day and len(prices) > today_period_count:
+                logger.info(
+                    "Extended horizon: %d periods (%d today + %d tomorrow)",
+                    len(prices),
+                    today_period_count,
+                    len(prices) - today_period_count,
+                )
+            elif len(prices) == 92:
                 logger.info(
                     "Detected DST spring forward transition (92 quarterly periods)"
                 )
@@ -874,6 +901,31 @@ class BatterySystemManager:
             predictions_consumption = self.controller.get_estimated_consumption()
             predictions_solar = self.controller.get_solar_forecast()
 
+            # Extend predictions for tomorrow when horizon exceeds today
+            if period_count > len(predictions_consumption):
+                # Consumption: repeat today's uniform pattern for tomorrow
+                tomorrow_consumption = predictions_consumption.copy()
+                predictions_consumption = predictions_consumption + tomorrow_consumption
+                logger.info(
+                    "Extended consumption predictions to %d periods for tomorrow horizon",
+                    len(predictions_consumption),
+                )
+
+            if period_count > len(predictions_solar):
+                # Solar: use tomorrow's forecast if available, else zeros
+                try:
+                    tomorrow_solar = self.controller.get_solar_forecast_tomorrow()
+                    logger.info(
+                        "Extended solar predictions with tomorrow's forecast (%d periods)",
+                        len(tomorrow_solar),
+                    )
+                except SystemConfigurationError:
+                    tomorrow_solar = [0.0] * 96
+                    logger.info(
+                        "Tomorrow's solar forecast unavailable, using zeros for extended horizon"
+                    )
+                predictions_solar = predictions_solar + tomorrow_solar
+
             # Track running SOC for proper progression
             running_soe = current_soe
 
@@ -947,6 +999,56 @@ class BatterySystemManager:
 
         return optimization_period, optimization_data
 
+    def _calculate_terminal_value(
+        self, buy_prices: list[float], optimization_period: int
+    ) -> float:
+        """Calculate terminal value per kWh for the DP optimization.
+
+        When the horizon already extends past today (i.e. tomorrow's prices are
+        included), return 0.0 since the DP has explicit future data. Otherwise,
+        estimate value from today's average buy price adjusted for efficiency
+        and cycle cost.
+
+        Args:
+            buy_prices: Full buy price array (from optimization_period onwards)
+            optimization_period: Current optimization starting period
+
+        Returns:
+            Terminal value per kWh (floored at 0.0)
+        """
+        today_period_count = get_period_count(datetime.now(tz=TIMEZONE).date())
+        remaining_today = today_period_count - optimization_period
+        total_horizon = len(buy_prices)
+
+        # If horizon extends past today, DP has explicit tomorrow data
+        if total_horizon > remaining_today:
+            logger.info(
+                "Horizon extends past today (%d > %d remaining), terminal value = 0.0",
+                total_horizon,
+                remaining_today,
+            )
+            return 0.0
+
+        # Estimate terminal value from today's buy prices
+        if not buy_prices:
+            return 0.0
+
+        avg_buy_price = sum(buy_prices) / len(buy_prices)
+        terminal_value = (
+            avg_buy_price * self.battery_settings.efficiency_discharge
+            - self.battery_settings.cycle_cost_per_kwh
+        )
+        terminal_value = max(0.0, terminal_value)
+
+        logger.info(
+            "Terminal value: %.3f SEK/kWh (avg_buy=%.3f, efficiency=%.2f, cycle_cost=%.3f)",
+            terminal_value,
+            avg_buy_price,
+            self.battery_settings.efficiency_discharge,
+            self.battery_settings.cycle_cost_per_kwh,
+        )
+        return terminal_value
+
     def _run_optimization(
         self,
         optimization_period: int,
@@ -1001,26 +1103,10 @@ class BatterySystemManager:
             buy_prices = [entry["buyPrice"] for entry in remaining_entries]
             sell_prices = [entry["sellPrice"] for entry in remaining_entries]
 
-            # Compute terminal value from tomorrow's prices to prevent the optimizer from
-            # treating stored energy as worthless at end-of-day and exporting prematurely.
-            # Only applied to intraday updates; prepare_next_day already has a full horizon.
-            terminal_buy_price: float | None = None
-            if not prepare_next_day:
-                tomorrow_entries = self._price_manager.get_tomorrow_prices()
-                if tomorrow_entries:
-                    terminal_buy_price = sum(
-                        e["buyPrice"] for e in tomorrow_entries
-                    ) / len(tomorrow_entries)
-                    logger.debug(
-                        f"Terminal value: using tomorrow mean buy price {terminal_buy_price:.4f} SEK/kWh"
-                    )
-                else:
-                    terminal_buy_price = (
-                        sum(buy_prices) / len(buy_prices) if buy_prices else None
-                    )
-                    logger.debug(
-                        f"Terminal value: tomorrow prices unavailable, using today remaining mean {terminal_buy_price:.4f} SEK/kWh"
-                    )
+            # Calculate terminal value for end-of-horizon energy valuation
+            terminal_value = self._calculate_terminal_value(
+                buy_prices, optimization_period
+            )
 
             # Run DP optimization with strategic intent capture - returns OptimizationResult directly
             result = optimize_battery_schedule(
@@ -1032,7 +1118,7 @@ class BatterySystemManager:
                 battery_settings=self.battery_settings,
                 initial_cost_basis=initial_cost_basis,
                 period_duration_hours=0.25,  # Always quarterly after normalization in _get_price_data
-                terminal_buy_price=terminal_buy_price,
+                terminal_value_per_kwh=terminal_value,
             )
 
             # Add timestamps to period data (algorithm is time-agnostic, operates on relative indices)
@@ -1199,6 +1285,29 @@ class BatterySystemManager:
                 optimization_result=result,
                 optimization_period=optimization_period,
             )
+
+            # Truncate all arrays to today's period count before creating DPSchedule.
+            # The optimizer may have used an extended horizon (up to 192 periods) to make
+            # better decisions for today, but DPSchedule and GrowattScheduleManager are
+            # day-centric and the Growatt inverter has no date awareness in TOU segments.
+            if not prepare_next_day:
+                today_period_count = get_period_count(datetime.now(tz=TIMEZONE).date())
+                if len(combined_soe) > today_period_count:
+                    logger.info(
+                        "Truncating schedule arrays from %d to %d periods (today only)",
+                        len(combined_soe),
+                        today_period_count,
+                    )
+                    combined_soe = combined_soe[:today_period_count]
+                    combined_actions = combined_actions[:today_period_count]
+                    solar_charged = solar_charged[:today_period_count]
+                    prices = prices[:today_period_count]
+                    optimization_data["full_consumption"] = optimization_data[
+                        "full_consumption"
+                    ][:today_period_count]
+                    optimization_data["full_solar"] = optimization_data["full_solar"][
+                        :today_period_count
+                    ]
 
             # Create DPSchedule with corrected SOE and strategic intents
             # Convert EconomicSummary to dict for DPSchedule

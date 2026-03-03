@@ -5,6 +5,14 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.7.0] - 2026-03-03
+
+### Changed
+
+- Growatt TOU schedule now includes tomorrow's optimized intents for past time slots. Since TOU segments are dateless (HH:MM only), slots before the current hour won't fire again until tomorrow — they now carry tomorrow's plan instead of stale today intents. When tomorrow's prices aren't available, behavior is unchanged.
+- Schedule comparison and hardware writes cover all segments (period 0 onwards) when tomorrow's intents are stitched, ensuring the inverter receives the full rolling 24h schedule.
+- Removed dead code in `_consolidate_and_convert_with_strategic_intents()`: the `current_period` variable was always 0 and the past-interval-copying loop never executed. All periods are now explicitly processed from period 0.
+
 ## [6.6.0] - 2026-03-02
 
 ### Added

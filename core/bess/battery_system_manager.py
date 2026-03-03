@@ -363,7 +363,7 @@ class BatterySystemManager:
                 logger.error("Failed to create updated schedule")
                 return False
 
-            temp_schedule, temp_growatt = schedule_result
+            temp_schedule, temp_growatt, has_tomorrow_intents = schedule_result
 
             # Determine if we should apply the new schedule
             should_apply, reason = self._should_apply_schedule(
@@ -373,6 +373,7 @@ class BatterySystemManager:
                 temp_growatt,
                 optimization_period,
                 temp_schedule,
+                has_tomorrow_intents,
             )
 
             # Apply schedule if needed
@@ -383,6 +384,7 @@ class BatterySystemManager:
                     temp_growatt,
                     reason,
                     prepare_next_day,
+                    has_tomorrow_intents,
                 )
             else:
                 # Update current schedule even when TOU doesn't change
@@ -1208,7 +1210,7 @@ class BatterySystemManager:
         optimization_data: dict[str, list[float]],
         is_first_run: bool,
         prepare_next_day: bool,
-    ) -> tuple[DPSchedule, GrowattScheduleManager] | None:
+    ) -> tuple[DPSchedule, GrowattScheduleManager, bool] | None:
         """Create updated schedule from OptimizationResult with strategic intents and CORRECT SOC mapping."""
 
         try:
@@ -1296,6 +1298,30 @@ class BatterySystemManager:
                 if target_period < len(full_day_strategic_intents):
                     full_day_strategic_intents[target_period] = (
                         period_data.decision.strategic_intent
+                    )
+
+            # Stitch tomorrow's intents into past periods (0 to optimization_period-1).
+            # Growatt TOU segments are dateless (HH:MM only), so when it's e.g. 10:00,
+            # the slot at 02:00 has already passed today — the next time it fires is tomorrow.
+            # If the optimizer produced extended horizon data (tomorrow), use those intents
+            # for past time slots so the inverter gets tomorrow's plan for those hours.
+            has_tomorrow_intents = False
+            if not prepare_next_day:
+                today_period_count = get_period_count(datetime.now(tz=TIMEZONE).date())
+                tomorrow_start_idx = today_period_count - optimization_period
+                for j in range(optimization_period):
+                    tomorrow_idx = tomorrow_start_idx + j
+                    if tomorrow_idx < len(period_data_list):
+                        full_day_strategic_intents[j] = period_data_list[
+                            tomorrow_idx
+                        ].decision.strategic_intent
+                        has_tomorrow_intents = True
+
+                if has_tomorrow_intents:
+                    logger.info(
+                        "Stitched tomorrow's intents into %d past periods (0 to %d)",
+                        optimization_period,
+                        optimization_period - 1,
                     )
 
             # Store initial SOC in OptimizationResult for DailyViewBuilder
@@ -1396,7 +1422,7 @@ class BatterySystemManager:
             logger.info(f"Creating Growatt schedule for period={effective_period}")
             temp_growatt.create_schedule(temp_schedule)
 
-            return temp_schedule, temp_growatt
+            return temp_schedule, temp_growatt, has_tomorrow_intents
 
         except Exception as e:
             import traceback
@@ -1413,6 +1439,7 @@ class BatterySystemManager:
         temp_growatt: GrowattScheduleManager,
         optimization_period: int,
         temp_schedule: DPSchedule,
+        has_tomorrow_intents: bool,
     ) -> tuple[bool, str]:
         """Determine if schedule should be applied based on TOU differences from current period onwards."""
 
@@ -1432,11 +1459,13 @@ class BatterySystemManager:
             )
             return schedules_differ, f"Next day: {reason}"
 
-        # Normal case: compare TOU settings from current period onwards
+        # Normal case: compare TOU settings from current period onwards.
+        # When tomorrow's intents are stitched, compare from period 0 (full day)
+        # since past time slots now contain new tomorrow intents.
         try:
-            # Use period directly for 15-min granularity comparison
+            compare_from = 0 if has_tomorrow_intents else period
             schedules_differ, reason = self._schedule_manager.compare_schedules(
-                other_schedule=temp_growatt, from_period=period
+                other_schedule=temp_growatt, from_period=compare_from
             )
 
             if schedules_differ:
@@ -1457,6 +1486,7 @@ class BatterySystemManager:
         temp_growatt: GrowattScheduleManager,
         reason: str,
         prepare_next_day: bool,
+        has_tomorrow_intents: bool,
     ) -> None:
         """Apply schedule to hardware - preserves original TOU logic."""
 
@@ -1492,7 +1522,11 @@ class BatterySystemManager:
             )
 
             effective_period = 0 if prepare_next_day else period
-            effective_minute = effective_period * 15
+            effective_minute = (
+                0
+                if (prepare_next_day or has_tomorrow_intents)
+                else effective_period * 15
+            )
 
             # Helper functions for minute-level time calculations
             def start_minute(interval: dict) -> int:

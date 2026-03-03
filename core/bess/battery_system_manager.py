@@ -4,7 +4,7 @@ Complete replacement for battery_system.py that preserves ALL functionality.
 """
 
 import logging
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from .daily_view_builder import DailyView, DailyViewBuilder
@@ -965,7 +965,8 @@ class BatterySystemManager:
                         len(tomorrow_solar),
                     )
                 except SystemConfigurationError:
-                    tomorrow_solar = [0.0] * 96
+                    tomorrow_date = date.today() + timedelta(days=1)
+                    tomorrow_solar = [0.0] * get_period_count(tomorrow_date)
                     logger.info(
                         "Tomorrow's solar forecast unavailable, using zeros for extended horizon"
                     )

@@ -3,7 +3,7 @@ API endpoints for battery and electricity settings, dashboard data, and decision
 
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from api_conversion import convert_keys_to_camel_case
 from api_dataclasses import (
@@ -19,6 +19,7 @@ from fastapi import APIRouter, HTTPException, Query
 from loguru import logger
 
 from core.bess.health_check import run_system_health_checks
+from core.bess.time_utils import get_period_count
 
 router = APIRouter()
 
@@ -336,8 +337,15 @@ async def get_dashboard_data(
             if stored_schedule:
                 opt_result = stored_schedule.optimization_result
                 opt_period = stored_schedule.optimization_period
+                today_period_count = get_period_count(datetime.now().date())
+                tomorrow_period_count = get_period_count(
+                    datetime.now().date() + timedelta(days=1)
+                )
                 tomorrow_periods = []
-                for period_idx in range(96, 192):
+                for period_idx in range(
+                    today_period_count,
+                    today_period_count + tomorrow_period_count,
+                ):
                     data_idx = period_idx - opt_period
                     if 0 <= data_idx < len(opt_result.period_data):
                         tomorrow_periods.append(opt_result.period_data[data_idx])
@@ -1360,8 +1368,15 @@ async def get_growatt_detailed_schedule():
             if stored_schedule:
                 opt_result = stored_schedule.optimization_result
                 opt_period = stored_schedule.optimization_period
+                today_period_count = get_period_count(datetime.now().date())
+                tomorrow_period_count = get_period_count(
+                    datetime.now().date() + timedelta(days=1)
+                )
                 tomorrow_intents = []
-                for period_idx in range(96, 192):
+                for period_idx in range(
+                    today_period_count,
+                    today_period_count + tomorrow_period_count,
+                ):
                     data_idx = period_idx - opt_period
                     if 0 <= data_idx < len(opt_result.period_data):
                         tomorrow_intents.append(

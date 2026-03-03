@@ -4,7 +4,7 @@ Complete replacement for battery_system.py that preserves ALL functionality.
 """
 
 import logging
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from .daily_view_builder import DailyView, DailyViewBuilder
@@ -927,7 +927,8 @@ class BatterySystemManager:
                         len(tomorrow_solar),
                     )
                 except SystemConfigurationError:
-                    tomorrow_solar = [0.0] * 96
+                    tomorrow_date = date.today() + timedelta(days=1)
+                    tomorrow_solar = [0.0] * get_period_count(tomorrow_date)
                     logger.info(
                         "Tomorrow's solar forecast unavailable, using zeros for extended horizon"
                     )
@@ -1264,9 +1265,9 @@ class BatterySystemManager:
             for i, period_data in enumerate(period_data_list):
                 target_period = optimization_period + i
                 if target_period < len(full_day_strategic_intents):
-                    full_day_strategic_intents[
-                        target_period
-                    ] = period_data.decision.strategic_intent
+                    full_day_strategic_intents[target_period] = (
+                        period_data.decision.strategic_intent
+                    )
 
             # Stitch tomorrow's intents into past periods (0 to optimization_period-1).
             # Growatt TOU segments are dateless (HH:MM only), so when it's e.g. 10:00,

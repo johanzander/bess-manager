@@ -8,7 +8,7 @@
 
 **Description**: Discharge power seems to always be 100% leading to higher export than intended during EXPORT_ARBITRAGE operations.
 
-### 1. **Extended Horizon Optimization**
+### ~~1. **Extended Horizon Optimization**~~ ✅ Completed (v6.4.0-v6.6.0, PRs #21-#23)
 
 **Impact**: High | **Effort**: Medium | **Dependencies**: Price manager, DP algorithm
 
@@ -16,12 +16,10 @@
 
 **Implementation**:
 
-- Modify OptimizationManager to fetch tomorrow's prices when available (usually after 13:00)
-- Extend DP algorithm input to handle 48+ hour horizons
-- Update ViewBuilder to display extended optimization results
-- Add multi-day TOU schedule management
-
-**Economic Impact**: Significant - enables optimal charging/discharging decisions that span multiple days
+- ✅ Modify OptimizationManager to fetch tomorrow's prices when available (PR #21)
+- ✅ Extend DP algorithm input to handle 48+ hour horizons (PR #21, 192 periods)
+- ✅ Update ViewBuilder to display extended optimization results (PR #22 dashboard, PR #23 inverter)
+- N/A Multi-day TOU schedule management — Growatt TOU segments are dateless (HH:MM), so multi-day TOU isn't possible at the hardware level. The optimizer uses tomorrow's data for better decisions, but only today's schedule is deployed.
 
 ## 🟡 **HIGH PRIORITY** (Core Functionality)
 
@@ -127,10 +125,12 @@
 
 **Current State**: The inverter sometimes charges/discharges small amounts like 0.1kW. Or its a rounding error or inefficiencies losses when calculating flows. I don't think its a strategic intent, but it is interpreted as one.
 
-### 9. Add multi day view
+### ~~9. Add multi day view~~ ✅ Completed (v6.4.0-v6.6.0, PRs #21-#23)
 
 **Problem**: Today we only operate on 24h intervals.
 But at noon every day we get tomorrows schedule. We could use this information to take better economic decisions. It would mean changing a lot of places where 24h is hard coded.
+
+**Resolution**: The DP optimizer now considers up to 192 periods (2 days) when tomorrow's prices are available (PR #21). Dashboard charts (PR #22) and inverter schedule overview (PR #23) display the extended horizon. TOU deployment remains today-only due to Growatt hardware limitations.
 
 ## 🔄 **ARCHITECTURAL IMPROVEMENTS** (From Historical Design Analysis)
 

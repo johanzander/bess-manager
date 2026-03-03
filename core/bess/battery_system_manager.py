@@ -21,7 +21,13 @@ from .growatt_schedule import GrowattScheduleManager
 from .ha_api_controller import HomeAssistantAPIController
 from .health_check import run_system_health_checks
 from .historical_data_store import HistoricalDataStore
-from .models import DecisionData, EconomicData, PeriodData, infer_intent_from_flows
+from .models import (
+    DecisionData,
+    EconomicData,
+    EconomicSummary,
+    PeriodData,
+    infer_intent_from_flows,
+)
 from .octopus_energy_source import OctopusEnergySource
 from .power_monitor import HomePowerMonitor
 from .prediction_snapshot import PredictionSnapshotStore
@@ -1329,6 +1335,43 @@ class BatterySystemManager:
                     optimization_data["full_solar"] = optimization_data["full_solar"][
                         :today_period_count
                     ]
+
+            # Recalculate EconomicSummary scoped to today only.
+            # The DP algorithm computes economic_summary over the full extended horizon
+            # (up to 192 periods), which inflates profitability gate and prediction snapshots.
+            if not prepare_next_day:
+                today_period_count = get_period_count(datetime.now(tz=TIMEZONE).date())
+                today_result_count = today_period_count - optimization_period
+                today_result_periods = period_data_list[:today_result_count]
+                today_base_cost = sum(
+                    pd.economic.grid_only_cost for pd in today_result_periods
+                )
+                today_optimized_cost = sum(
+                    pd.economic.hourly_cost for pd in today_result_periods
+                )
+                today_charged = sum(
+                    pd.energy.battery_charged for pd in today_result_periods
+                )
+                today_discharged = sum(
+                    pd.energy.battery_discharged for pd in today_result_periods
+                )
+                today_savings = today_base_cost - today_optimized_cost
+
+                result.economic_summary = EconomicSummary(
+                    grid_only_cost=today_base_cost,
+                    solar_only_cost=today_base_cost,
+                    battery_solar_cost=today_optimized_cost,
+                    grid_to_solar_savings=0.0,
+                    grid_to_battery_solar_savings=today_savings,
+                    solar_to_battery_solar_savings=today_savings,
+                    grid_to_battery_solar_savings_pct=(
+                        (today_savings / today_base_cost) * 100
+                        if today_base_cost > 0
+                        else 0
+                    ),
+                    total_charged=today_charged,
+                    total_discharged=today_discharged,
+                )
 
             # Create DPSchedule with corrected SOE and strategic intents
             # Convert EconomicSummary to dict for DPSchedule

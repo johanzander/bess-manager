@@ -15,8 +15,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dashboard charts now display tomorrow's optimization data when available, with visual distinction (reduced opacity, midnight separator, +HH time labels).
 - New `tomorrowData` field in dashboard API response extracts tomorrow's period data from the ScheduleStore.
 - Inverter page Schedule Overview now shows tomorrow's planned schedule when available, with indigo separator and reduced opacity.
+- Savings page "Tomorrow's Projected Savings" collapsible section. When tomorrow's optimization data is available, a toggle button appears below the hourly table showing the period count. Expanding reveals three summary cards (Grid-Only Cost, Optimized Cost, Projected Savings) and a full hourly breakdown table with indigo-themed headers and reduced opacity, matching the Inverter page's visual pattern.
+- `tomorrowData` field added to the `DashboardResponse` TypeScript interface, aligning the frontend type with the backend API response.
 - `get_detailed_period_groups()` accepts optional `intents` parameter for grouping any strategic intent list.
 - DST-safe timestamp calculation using `period_index_to_timestamp()` utility instead of manual arithmetic.
+
+### Fixed
+
+- EconomicSummary now scoped to today-only periods. The DP algorithm computes economics over the full extended horizon (up to 192 periods), which inflated the profitability gate threshold and prediction snapshot values. After array truncation, the economic summary is recalculated from only today's period data so that stored schedules, prediction snapshots, and log messages reflect accurate single-day figures.
 
 ### Changed
 

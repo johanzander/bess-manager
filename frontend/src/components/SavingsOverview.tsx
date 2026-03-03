@@ -1,5 +1,5 @@
-import React from 'react';
-import { Zap } from 'lucide-react';
+import React, { useState } from 'react';
+import { ChevronRight, Zap } from 'lucide-react';
 import { FormattedValue } from '../types';
 import FormattedValueComponent from './FormattedValue';
 import { useDashboardData } from '../hooks/useDashboardData';
@@ -12,6 +12,7 @@ interface SavingsOverviewProps {
 
 export const SavingsOverview: React.FC<SavingsOverviewProps> = ({ resolution }) => {
   const { data: dashboardData, loading, error } = useDashboardData(undefined, resolution);
+  const [showTomorrow, setShowTomorrow] = useState(false);
 
   // Helper function to get numeric value from FormattedValue objects (for calculations)
   const getNumericValue = (field: any) => {
@@ -399,10 +400,204 @@ export const SavingsOverview: React.FC<SavingsOverviewProps> = ({ resolution }) 
         <p className="text-gray-600 dark:text-gray-300">
           Battery actions: <span className="bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 px-1 rounded">blue = charging</span>,
           <span className="bg-orange-100 dark:bg-orange-900/30 text-orange-800 dark:text-orange-300 px-1 rounded">orange = discharging</span>.
-          The "Savings" column shows hourly optimization: positive (green) = money saved, 
+          The "Savings" column shows hourly optimization: positive (green) = money saved,
           zero (black) = break-even, negative (red) = additional cost that hour.
         </p>
       </div>
+
+      {/* Tomorrow's Projected Savings */}
+      {dashboardData.tomorrowData && dashboardData.tomorrowData.length > 0 && (() => {
+        const tomorrowGridOnlyCost = dashboardData.tomorrowData!.reduce(
+          (sum: number, h: any) => sum + getNumericValue(h.gridOnlyCost), 0
+        );
+        const tomorrowOptimizedCost = dashboardData.tomorrowData!.reduce(
+          (sum: number, h: any) => sum + getNumericValue(h.hourlyCost), 0
+        );
+        const tomorrowSavings = tomorrowGridOnlyCost - tomorrowOptimizedCost;
+        const currencyUnit = dashboardData.tomorrowData![0]?.hourlyCost?.unit || '???';
+
+        return (
+          <div className="mt-6">
+            <button
+              onClick={() => setShowTomorrow(!showTomorrow)}
+              className="flex items-center gap-2 text-sm font-medium text-indigo-700 dark:text-indigo-300 hover:text-indigo-900 dark:hover:text-indigo-100 transition-colors"
+            >
+              <ChevronRight className={`h-4 w-4 transition-transform ${showTomorrow ? 'rotate-90' : ''}`} />
+              Tomorrow&apos;s Projected Savings ({dashboardData.tomorrowData!.length} periods)
+            </button>
+
+            {showTomorrow && (
+              <div className="mt-4 pt-4 border-t-2 border-indigo-200 dark:border-indigo-800">
+                {/* Tomorrow Summary Cards */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 opacity-75">
+                  <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg text-center border border-blue-200 dark:border-blue-800">
+                    <div className="text-2xl font-bold text-gray-900 dark:text-white">
+                      {tomorrowGridOnlyCost.toFixed(2)}
+                    </div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400">{currencyUnit}</div>
+                    <div className="text-sm text-gray-600 dark:text-gray-300">Grid-Only Cost</div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400">Without solar or battery</div>
+                  </div>
+
+                  <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-lg text-center border border-green-200 dark:border-green-800">
+                    <div className="text-2xl font-bold text-gray-900 dark:text-white">
+                      {tomorrowOptimizedCost.toFixed(2)}
+                    </div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400">{currencyUnit}</div>
+                    <div className="text-sm text-gray-600 dark:text-gray-300">Optimized Cost</div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400">With solar &amp; battery</div>
+                  </div>
+
+                  <div className="bg-purple-50 dark:bg-purple-900/20 p-4 rounded-lg text-center border border-purple-200 dark:border-purple-800">
+                    <div className={`text-2xl font-bold ${tomorrowSavings >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                      {tomorrowSavings.toFixed(2)}
+                    </div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400">{currencyUnit}</div>
+                    <div className="text-sm text-gray-600 dark:text-gray-300">Projected Savings</div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400">
+                      {tomorrowGridOnlyCost > 0 ? `${((tomorrowSavings / tomorrowGridOnlyCost) * 100).toFixed(1)}%` : '0%'}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Tomorrow Hourly Table */}
+                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700 opacity-75">
+                  <thead className="bg-indigo-50 dark:bg-indigo-900/30">
+                    <tr>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-indigo-700 dark:text-indigo-300 uppercase tracking-wider border border-gray-300 dark:border-gray-600">
+                        Hour
+                      </th>
+                      <th className="px-3 py-2 text-center text-xs font-medium text-indigo-700 dark:text-indigo-300 uppercase tracking-wider border border-gray-300 dark:border-gray-600">
+                        Price
+                      </th>
+                      <th className="px-3 py-2 text-center text-xs font-medium text-indigo-700 dark:text-indigo-300 uppercase tracking-wider border border-gray-300 dark:border-gray-600">
+                        Solar
+                      </th>
+                      <th className="px-3 py-2 text-center text-xs font-medium text-indigo-700 dark:text-indigo-300 uppercase tracking-wider border border-gray-300 dark:border-gray-600">
+                        Consumption
+                      </th>
+                      <th className="px-3 py-2 text-center text-xs font-medium text-indigo-700 dark:text-indigo-300 uppercase tracking-wider border border-gray-300 dark:border-gray-600">
+                        Battery Action
+                      </th>
+                      <th className="px-3 py-2 text-center text-xs font-medium text-indigo-700 dark:text-indigo-300 uppercase tracking-wider border border-gray-300 dark:border-gray-600">
+                        Battery Level
+                      </th>
+                      <th className="px-3 py-2 text-center text-xs font-medium text-indigo-700 dark:text-indigo-300 uppercase tracking-wider border border-gray-300 dark:border-gray-600">
+                        Grid Import
+                      </th>
+                      <th className="px-3 py-2 text-center text-xs font-medium text-indigo-700 dark:text-indigo-300 uppercase tracking-wider border border-gray-300 dark:border-gray-600">
+                        Grid Export
+                      </th>
+                      <th className="px-3 py-2 text-center text-xs font-medium text-indigo-700 dark:text-indigo-300 uppercase tracking-wider border border-gray-300 dark:border-gray-600">
+                        Actual Cost
+                      </th>
+                      <th className="px-3 py-2 text-center text-xs font-medium text-indigo-700 dark:text-indigo-300 uppercase tracking-wider border border-gray-300 dark:border-gray-600">
+                        Savings
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                    {dashboardData.tomorrowData!.map((hour: any, index: number) => (
+                      <tr key={index} className="bg-white dark:bg-gray-800">
+                        <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600">
+                          <div className="flex items-center">
+                            <div className="text-right">
+                              <div>{periodToTimeString(hour.period, resolution)}</div>
+                              <div className="text-xs text-gray-400 dark:text-gray-500">{periodToEndTime(hour.period, resolution)}</div>
+                            </div>
+                            <span className="ml-2 text-xs bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 px-2 py-1 rounded">
+                              Predicted
+                            </span>
+                          </div>
+                        </td>
+
+                        <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
+                          <div className="font-medium">{getDisplayValue(hour.buyPrice)}</div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(hour.buyPrice)}</div>
+                        </td>
+
+                        <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
+                          <div className={`font-medium ${getNumericValue(hour.solarProduction) > 0 ? 'text-yellow-600 dark:text-yellow-400' : 'text-gray-400 dark:text-gray-500'}`}>
+                            {getDisplayValue(hour.solarProduction)}
+                          </div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(hour.solarProduction)}</div>
+                        </td>
+
+                        <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
+                          <div className="font-medium">{getDisplayValue(hour.homeConsumption)}</div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(hour.homeConsumption)}</div>
+                        </td>
+
+                        <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
+                          <div className="flex flex-col items-center space-y-1">
+                            {getNumericValue(hour.batteryCharged) > 0.01 && (
+                              <span className="text-sm font-medium text-blue-600 dark:text-blue-400 bg-blue-100 dark:bg-blue-900/30 px-2 py-1 rounded flex items-center">
+                                <Zap className="h-3 w-3 mr-1" />
+                                +{getDisplayValue(hour.batteryCharged)}
+                              </span>
+                            )}
+                            {getNumericValue(hour.batteryDischarged) > 0.01 && (
+                              <span className="text-sm font-medium text-orange-600 dark:text-orange-400 bg-orange-100 dark:bg-orange-900/30 px-2 py-1 rounded flex items-center">
+                                <Zap className="h-3 w-3 mr-1" />
+                                -{getDisplayValue(hour.batteryDischarged)}
+                              </span>
+                            )}
+                            {getNumericValue(hour.batteryCharged) <= 0.01 && getNumericValue(hour.batteryDischarged) <= 0.01 && (
+                              <span className="text-sm text-gray-500 dark:text-gray-400">&mdash;</span>
+                            )}
+                          </div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400">kWh</div>
+                        </td>
+
+                        <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
+                          <div className="font-medium">{getFormattedText(hour.batterySocEnd)}</div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400">
+                            {getFormattedText(hour.batterySoeEnd) || 'N/A'}
+                          </div>
+                        </td>
+
+                        <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
+                          <div className={`font-medium ${getNumericValue(hour.gridImported) > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-400 dark:text-gray-500'}`}>
+                            {getDisplayValue(hour.gridImported)}
+                          </div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(hour.gridImported)}</div>
+                        </td>
+
+                        <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
+                          <div className={`font-medium ${getNumericValue(hour.gridExported) > 0 ? 'text-green-600 dark:text-green-400' : 'text-gray-400 dark:text-gray-500'}`}>
+                            {getDisplayValue(hour.gridExported)}
+                          </div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(hour.gridExported)}</div>
+                        </td>
+
+                        <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
+                          <div className={`font-medium ${
+                            Math.abs(getNumericValue(hour.hourlyCost)) < 0.01 ? 'text-gray-900 dark:text-white' :
+                            getNumericValue(hour.hourlyCost) > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'
+                          }`}>
+                            {getDisplayValue(hour.hourlyCost)}
+                          </div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(hour.hourlyCost)}</div>
+                        </td>
+
+                        <td className="px-3 py-2 whitespace-nowrap text-sm border border-gray-300 dark:border-gray-600 text-center">
+                          <div className={`font-medium ${
+                            Math.abs(getNumericValue(hour.hourlySavings)) < 0.01 ? 'text-gray-900 dark:text-white' :
+                            getNumericValue(hour.hourlySavings) > 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
+                          }`}>
+                            {getDisplayValue(hour.hourlySavings)}
+                          </div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(hour.hourlySavings)}</div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 };

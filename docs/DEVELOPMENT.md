@@ -2,6 +2,14 @@
 
 This guide helps you set up a development environment for the BESS Battery Manager add-on.
 
+## Documentation
+
+- **[SOFTWARE_DESIGN.md](SOFTWARE_DESIGN.md)** — Architecture, components, and data flow
+- **[INSTALLATION.md](INSTALLATION.md)** — Add-on installation and sensor configuration
+- **[USER_GUIDE.md](USER_GUIDE.md)** — Dashboard and interface guide
+- **[CLAUDE.md](../CLAUDE.md)** — Coding guidelines and architecture conventions for Claude Code
+- **[TODO.md](../TODO.md)** — Prioritized improvements and known issues
+
 ## Development Environment Setup
 
 ### Prerequisites
@@ -279,4 +287,4 @@ The build output will be in:
 
 - `build/repository/` - For custom repository distribution
 
-For deployment instructions, see [DEPLOYMENT.md](DEPLOYMENT.md).
+For installation instructions, see [INSTALLATION.md](INSTALLATION.md).

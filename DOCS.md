@@ -6,7 +6,7 @@ Battery Energy Storage System optimization and management for Home Assistant.
 
 BESS Battery Manager is a comprehensive solution for optimizing battery energy storage systems. It uses dynamic programming algorithms to minimize electricity costs by intelligently scheduling battery charge/discharge cycles based on:
 
-- Nordpool electricity spot prices
+- Electricity spot prices (Nordpool or Octopus Energy)
 - Solar production forecasts
 - Home consumption patterns
 - Battery capacity and efficiency
@@ -23,7 +23,7 @@ BESS Battery Manager is a comprehensive solution for optimizing battery energy s
 
 ## Installation
 
-For detailed installation instructions, see the [Installation Guide](https://github.com/johanzander/bess-manager/blob/main/INSTALLATION.md).
+For detailed installation instructions, see the [Installation Guide](https://github.com/johanzander/bess-manager/blob/main/docs/INSTALLATION.md).
 
 ### Quick Start
 
@@ -66,19 +66,16 @@ The add-on requires sensors for:
 
 - Battery: SOC, charge/discharge power, control switches
 - Solar: Production, consumption, grid import/export
-- Pricing: Nordpool spot prices (today and tomorrow)
+- Pricing: Electricity spot prices via Nordpool or Octopus Energy (today and tomorrow)
 - Consumption: 48-hour average forecast
 
-See the [Installation Guide](https://github.com/johanzander/bess-manager/blob/main/INSTALLATION.md) for complete sensor configuration examples.
+See the [Installation Guide](https://github.com/johanzander/bess-manager/blob/main/docs/INSTALLATION.md) for complete sensor configuration examples.
 
 ## Usage
 
 ### Web Interface
 
-Access the BESS Manager dashboard via:
-
-- **Ingress**: Settings → Add-ons → BESS Manager → Open Web UI
-- **Direct**: `http://homeassistant.local:8080`
+Access the BESS Manager dashboard via Settings → Add-ons → BESS Manager → Open Web UI.
 
 ### Dashboard Pages
 
@@ -91,7 +88,7 @@ Access the BESS Manager dashboard via:
 ## How It Works
 
 1. **Data Collection**: Gathers real-time data from Home Assistant sensors
-2. **Price Optimization**: Analyzes Nordpool electricity prices (today + tomorrow)
+2. **Price Optimization**: Analyzes electricity prices from Nordpool or Octopus Energy (today + tomorrow)
 3. **Solar Forecast**: Integrates solar production predictions
 4. **Battery Optimization**: Dynamic programming algorithm generates optimal 24-hour schedule
 5. **Schedule Deployment**: Converts optimization results to Growatt TOU intervals
@@ -109,21 +106,11 @@ Check add-on logs for detailed information:
 
 Settings → Add-ons → BESS Manager → Log
 
-### Common Issues
-
-**Problem**: Battery charges during expensive hours
-
-**Solution**: Verify `cycle_cost` is set in the correct currency and matches your battery's actual degradation cost
-
-**Problem**: Missing sensor data
-
-**Solution**: Check all required sensors are configured and returning valid data in System Health page
-
 ## Support
 
 - **Documentation**: [Full documentation](https://github.com/johanzander/bess-manager)
 - **Issues**: [Report bugs](https://github.com/johanzander/bess-manager/issues)
-- **User Guide**: [Detailed user guide](https://github.com/johanzander/bess-manager/blob/main/USER_GUIDE.md)
+- **User Guide**: [Detailed user guide](https://github.com/johanzander/bess-manager/blob/main/docs/USER_GUIDE.md)
 
 ## License
 

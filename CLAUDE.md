@@ -109,14 +109,14 @@ cd frontend && npm run lint:fix  # Fix TypeScript issues
 - **HomeAssistantAPIController**: Centralized interface to HA with sensor abstraction
 - **SensorCollector**: Aggregates real-time energy data from HA sensors
 - **GrowattScheduleManager**: Converts optimization results to Growatt inverter commands
-- **PriceManager**: Handles Nordpool electricity pricing with markup calculations
+- **PriceManager**: Handles electricity pricing (Nordpool/Octopus Energy) with markup calculations
 - **HealthCheck**: Comprehensive system and sensor validation
 
 #### Data Flow
 
 1. **Hourly Updates**: Scheduler triggers optimization every hour
 2. **Sensor Collection**: Real-time data from HA sensors (battery, solar, grid, consumption)
-3. **Price Integration**: Nordpool spot prices with VAT/markup calculations
+3. **Price Integration**: Electricity spot prices (Nordpool/Octopus Energy) with VAT/markup calculations
 4. **Optimization**: DP algorithm generates 24-hour battery schedule
 5. **Schedule Deployment**: TOU intervals sent to Growatt inverter
 6. **Monitoring**: Dashboard displays real-time status and historical analysis
@@ -468,7 +468,7 @@ else:
 
 - **Battery**: SOC, charge/discharge power, mode status
 - **Solar**: Production, home consumption, grid import/export
-- **Pricing**: Nordpool spot prices with area configuration
+- **Pricing**: Electricity spot prices (Nordpool or Octopus Energy) with area configuration
 - **Grid**: Import/export power and energy totals
 
 ### Add-on Configuration

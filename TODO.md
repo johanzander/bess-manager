@@ -2,12 +2,6 @@
 
 ## 🔴 **CRITICAL PRIORITY** (System Reliability)
 
-### 0. **Fix Battery Discharge Power Control Bug**
-
-**Impact**: High | **Effort**: Medium | **Dependencies**: Growatt inverter control
-
-**Description**: Discharge power seems to always be 100% leading to higher export than intended during EXPORT_ARBITRAGE operations.
-
 ### 1. **Extended Horizon Optimization**
 
 **Impact**: High | **Effort**: Medium | **Dependencies**: Price manager, DP algorithm
@@ -42,7 +36,7 @@
 
 **Description**: Core feature enhancement showing detailed battery optimization reasoning
 
-**Current State**: `BatteryLevelChart` shows basic SOC but lacks prediction breakdown
+**Current State**: `BatteryLevelChart.tsx` exists with SOC and battery action visualization. Missing: cost breakdown table and actual/predicted timeline split.
 
 **Implementation**:
 
@@ -62,6 +56,37 @@
 - Create cost breakdown table component
 - Add hover tooltips with detailed calculations
 - Integrate with backend hourly cost data
+
+---
+
+### 2. **Complete Decision Intelligence Implementation**
+
+**Impact**: Medium-High | **Effort**: Medium | **Dependencies**: `decision_intelligence.py`, `sensor_collector.py`, `dp_battery_algorithm.py`
+
+**Vision**: Transform the DP battery optimization from a "black box" into a transparent, educational system that helps users understand complex energy economics and multi-hour optimization strategies. Users should see real SEK values for each energy pathway and understand *why* the optimizer made each decision — not just what it decided.
+
+**What is working** (future/predicted hours only):
+
+- Advanced flow pattern recognition: `SOLAR_TO_HOME_AND_BATTERY`, `GRID_TO_HOME_PLUS_BATTERY_TO_GRID`, etc.
+- Economic chain explanations: multi-hour strategy reasoning with real SEK values
+- Future target hours: identifies when arbitrage opportunities occur
+- Frontend `DecisionFramework.tsx` component is complete and consuming enhanced data
+
+**Gap 1: Historical hours show fallback values**
+
+Past periods (already executed) still show:
+
+- `advanced_flow_pattern: "NO_PATTERN_DETECTED"`
+- `detailed_flow_values: {}`
+- `economic_chain: "Historical data - basic strategic intent"`
+
+Root cause: the historical data pipeline (`SensorCollector` → `HistoricalDataStore`) does not run through `decision_intelligence.py`. Fix: apply `create_decision_data()` when recording historical periods, using actual energy flow data and prices from that period.
+
+**Gap 2: Future economic values showing 0.00 SEK**
+
+Future arbitrage calculations (the "expected arbitrage value" in economic chain explanations) show 0.00 SEK. Needs investigation in DP algorithm economic chain value computation and how future target hour values are propagated.
+
+**Files**: `core/bess/decision_intelligence.py`, `core/bess/dp_battery_algorithm.py`, `core/bess/sensor_collector.py`, `frontend/src/components/DecisionFramework.tsx`
 
 ---
 
@@ -89,7 +114,7 @@
 
 **Impact**: Medium | **Effort**: High | **Dependencies**: Backend decision logging
 
-**Current State**: Only shows high-level intent, lacks decision reasoning
+**Current State**: `InsightsPage.tsx` renders `PredictionAnalysisView` but lacks decision reasoning, algorithm transparency, and confidence metrics
 
 **Implementation**:
 
@@ -121,6 +146,8 @@
 - **Visual indicators**: Clear UI indication when running in demo/mock mode
 
 **Benefits**: Users can evaluate the system before full HA integration, developers can test without hardware, easier onboarding experience
+
+**Current State**: `ha_api_controller.py` has a basic `test_mode` / `set_test_mode()` infrastructure but no synthetic data generation or UI indicators.
 
 **Technical Tasks**:
 
@@ -247,9 +274,7 @@ This would make the profitability gate compare apples-to-apples with the dashboa
 ### Other Technical Debt
 
 - Refactor all API endpoints to use dataclass-based serialization (with robust mapping for all field variants) for consistent, type-safe, and future-proof API responses. Ensure all details and fields are preserved as in the original dict-based implementation.
-- Add power monitoring sensors to health check.
 - Check if all sensors in config.yaml are actually needed and used (lifetime e.g.)
-- Fix dark mode button
 
 **TOU Segment Matching is Fragile**:
 The current TOU comparison uses exact matching on start_time, end_time, batt_mode. If a segment shifts by 15 minutes (e.g., 00:00-00:59 → 00:15-01:14), it's seen as completely different, resulting in 2 hardware writes (disable old + add new) instead of 1 update. Consider:

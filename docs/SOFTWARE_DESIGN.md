@@ -181,9 +181,9 @@ class StoredSchedule:
 
 **Key Responsibilities**:
 
-- Fetch Nordpool spot prices for current day and next day
+- Fetch electricity spot prices for current day and next day (Nordpool or Octopus Energy)
 - Calculate retail buy/sell prices with markup, VAT, additional costs
-- Support multiple price areas (SE1-SE4)
+- Support multiple price areas (Nordpool SE1-SE4, Octopus Agile UK)
 - Provide price forecasts for optimization
 
 **Price Calculation**:
@@ -388,7 +388,7 @@ The system operates on **quarterly resolution (15-minute periods)** throughout t
 
 ```text
 ┌─────────────────────────────────────────────────────────────────┐
-│                      Nordpool API                               │
+│             Price Provider (Nordpool / Octopus Energy)          │
 │           Provides: 96 quarterly prices (15-min)                │
 │           Format: Arrays indexed 0-95 for today                 │
 └────────────────────────────┬────────────────────────────────────┘
@@ -397,7 +397,7 @@ The system operates on **quarterly resolution (15-minute periods)** throughout t
 ┌─────────────────────────────────────────────────────────────────┐
 │                      PriceManager                               │
 │  - get_available_prices() → (buy[96], sell[96])                 │
-│  - Uses Nordpool quarterly data directly (no expansion)         │
+│  - Normalises provider data to quarterly arrays (no expansion)  │
 │  - DST-aware: validates 92-100 periods                          │
 │  - Simple array indexing: index 0 = today 00:00-00:15           │
 └────────────────────────────┬────────────────────────────────────┘
@@ -468,7 +468,7 @@ The system operates on **quarterly resolution (15-minute periods)** throughout t
 
 **Data Flow**:
 
-- **Nordpool**: Provides 96 quarterly prices directly
+- **Price Provider**: Nordpool or Octopus Energy provides quarterly prices
 - **Optimization**: Operates on 96-period arrays
 - **Storage**: Indexes by period_index (0-95)
 - **InfluxDB**: Queries at 15-minute boundaries

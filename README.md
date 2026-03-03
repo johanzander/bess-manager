@@ -96,10 +96,10 @@ HA_TOKEN=your-long-lived-access-token
 
 ## Documentation
 
-- 🔧 **[Installation Guide](INSTALLATION.md)** - Complete setup instructions
-- 📚 **[User Guide](USER_GUIDE.md)** - Understanding the interface and results
-- 🏗️ **[Software Architecture](SOFTWARE_DESIGN.md)** - Technical design and system architecture
-- 👨‍💻 **[Development Guide](DEVELOPMENT.md)** - Contributing and development setup
+- 🔧 **[Installation Guide](docs/INSTALLATION.md)** - Complete setup instructions
+- 📚 **[User Guide](docs/USER_GUIDE.md)** - Understanding the interface and results
+- 🏗️ **[Software Architecture](docs/SOFTWARE_DESIGN.md)** - Technical design and system architecture
+- 👨‍💻 **[Development Guide](docs/DEVELOPMENT.md)** - Contributing and development setup
 
 ## Community & Support
 

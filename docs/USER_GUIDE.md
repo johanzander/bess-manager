@@ -51,7 +51,7 @@ This beautiful flowing chart shows how energy moves through your system:
 Shows battery charge level throughout the day with strategic context:
 
 - **Purple periods**: Grid charging (storing cheap electricity)
-- **Yellow periods**: Solar storage (storing free solar energy)  
+- **Yellow periods**: Solar storage (storing free solar energy)
 - **Blue periods**: Load support (using battery to power home)
 - **Green periods**: Export arbitrage (selling stored energy for profit)
 - **Gray periods**: Idle (no significant battery activity)
@@ -93,7 +93,7 @@ The system status card provides key metrics and health information:
 - **When**: Typically night hours with low electricity prices
 - **Indicator**: Battery charging, grid import high
 
-#### ☀️ SOLAR_STORAGE  
+#### ☀️ SOLAR_STORAGE
 
 - **What**: Charging battery with excess solar production
 - **Why**: Store free solar energy for evening/night use

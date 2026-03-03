@@ -5,6 +5,17 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.8.0] - 2026-03-03
+
+### Fixed
+
+- EconomicSummary now scoped to today-only periods. The DP algorithm computes economics over the full extended horizon (up to 192 periods), which inflated the profitability gate threshold and prediction snapshot values. After array truncation, the economic summary is recalculated from only today's period data so that stored schedules, prediction snapshots, and log messages reflect accurate single-day figures.
+
+### Added
+
+- Savings page "Tomorrow's Projected Savings" collapsible section. When tomorrow's optimization data is available, a toggle button appears below the hourly table showing the period count. Expanding reveals three summary cards (Grid-Only Cost, Optimized Cost, Projected Savings) and a full hourly breakdown table with indigo-themed headers and reduced opacity, matching the Inverter page's visual pattern.
+- `tomorrowData` field added to the `DashboardResponse` TypeScript interface, aligning the frontend type with the backend API response.
+
 ## [6.7.0] - 2026-03-03
 
 ### Changed

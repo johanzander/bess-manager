@@ -147,7 +147,8 @@ export interface DashboardResponse {
   
   // Main data
   hourlyData: DashboardHourlyData[];
-  
+  tomorrowData?: DashboardHourlyData[] | null;
+
   // Enhanced summaries
   summary: DashboardSummary;
   totals: DashboardTotals;

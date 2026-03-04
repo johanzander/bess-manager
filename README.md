@@ -108,6 +108,10 @@ HA_TOKEN=your-long-lived-access-token
 - 📢 **Updates**: Follow repository for latest features
 - ⭐ **Like it?** Star the repository to support development!
 
+## Contributors
+
+- **[@pookey](https://github.com/pookey)** — Extended DP optimization horizon with tomorrow's prices (v7.3.0, [PR #22](https://github.com/johanzander/bess-manager/pull/22))
+
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.

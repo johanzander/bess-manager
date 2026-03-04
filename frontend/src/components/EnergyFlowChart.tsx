@@ -329,10 +329,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
               domain={[0, maxHour]}
               label={{ value: hasTomorrowData ? 'Hour' : 'Hour of Day', position: 'insideBottom', offset: -10 }}
               tickFormatter={(hour: number) => {
-                if (hour >= 24) {
-                  return `+${Math.floor(hour - 24).toString().padStart(2, '0')}`;
-                }
-                return Math.floor(hour).toString().padStart(2, '0');
+                return Math.floor(hour % 24).toString().padStart(2, '0');
               }}
             />
             <YAxis 
@@ -448,24 +445,14 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
               dot={false}
               connectNulls
             />
-            {/* Overlay for predicted hours (today only) */}
-            <rect
-              x={((chartData.findIndex(d => !d.isActual && !d.isTomorrow) || chartData.length) / chartData.length) * 100 + '%'}
-              y={0}
-              width={(((chartData.findIndex(d => d.isTomorrow) > -1 ? chartData.findIndex(d => d.isTomorrow) : chartData.length) - (chartData.findIndex(d => !d.isActual && !d.isTomorrow) || chartData.length)) / chartData.length) * 100 + '%'}
-              height="100%"
-              fill={isDarkMode ? 'rgba(120,120,120,0.12)' : 'rgba(120,120,120,0.10)'}
-              pointerEvents="none"
-              style={{ position: 'absolute', zIndex: 1 }}
-            />
-            {/* Overlay for tomorrow hours - more prominent */}
-            {hasTomorrowData && (
+            {/* Overlay for predicted + tomorrow hours - single unified grey */}
+            {chartData.findIndex(d => !d.isActual) > -1 && (
               <rect
-                x={((chartData.findIndex(d => d.isTomorrow) || chartData.length) / chartData.length) * 100 + '%'}
+                x={((chartData.findIndex(d => !d.isActual) / chartData.length) * 100) + '%'}
                 y={0}
-                width={((chartData.length - (chartData.findIndex(d => d.isTomorrow) || chartData.length)) / chartData.length) * 100 + '%'}
+                width={(((chartData.length - chartData.findIndex(d => !d.isActual)) / chartData.length) * 100) + '%'}
                 height="100%"
-                fill={isDarkMode ? 'rgba(120,120,120,0.22)' : 'rgba(120,120,120,0.18)'}
+                fill={isDarkMode ? 'rgba(120,120,120,0.12)' : 'rgba(120,120,120,0.10)'}
                 pointerEvents="none"
                 style={{ position: 'absolute', zIndex: 1 }}
               />
@@ -517,12 +504,6 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
             <div className="w-4 h-3 rounded mr-1" style={{ background: isDarkMode ? 'rgba(120,120,120,0.12)' : 'rgba(120,120,120,0.10)' }}></div>
             <span>Predicted hours</span>
           </div>
-          {hasTomorrowData && (
-            <div className="flex items-center">
-              <div className="w-4 h-3 rounded mr-1" style={{ background: isDarkMode ? 'rgba(120,120,120,0.22)' : 'rgba(120,120,120,0.18)' }}></div>
-              <span>Tomorrow</span>
-            </div>
-          )}
         </div>
       </div>
     </div>

@@ -285,7 +285,9 @@ class GrowattScheduleManager:
 
         return groups
 
-    def get_detailed_period_groups(self) -> list[dict]:
+    def get_detailed_period_groups(
+        self, intents: list[str] | None = None
+    ) -> list[dict]:
         """Get period groups with full control parameters for display/API.
 
         Groups consecutive 15-minute periods ONLY when ALL parameters are identical:
@@ -295,18 +297,23 @@ class GrowattScheduleManager:
         - Charge power rate
         - Discharge power rate
 
+        Args:
+            intents: Optional list of strategic intents to group. If None,
+                     uses self.strategic_intents (today's schedule).
+
         Returns:
             List of period groups with all control parameters
         """
-        if not self.strategic_intents:
+        effective_intents = intents if intents is not None else self.strategic_intents
+        if not effective_intents:
             return []
 
-        num_periods = len(self.strategic_intents)
+        num_periods = len(effective_intents)
 
         # Build detailed settings for each 15-minute period
         period_settings = []
         for period in range(num_periods):
-            intent = self.strategic_intents[period]
+            intent = effective_intents[period]
             mode = self.INTENT_TO_MODE.get(intent, "load_first")
             control = self.INTENT_TO_CONTROL.get(
                 intent, {"grid_charge": False, "charge_rate": 100, "discharge_rate": 0}
@@ -615,7 +622,7 @@ class GrowattScheduleManager:
 
             # Calculate power rates from battery action
             (
-                _,
+                _charge_power_rate,
                 discharge_power_rate,
             ) = self._calculate_power_rates_from_action(battery_action, intent)
 
@@ -730,31 +737,24 @@ class GrowattScheduleManager:
             self._consolidate_and_convert_fallback()
             return
 
-        # Calculate current period from current hour
-        current_period = self.current_hour * 4
-
         logger.info(
-            "Converting %d strategic intents to TOU intervals from period %d (hour %d) "
-            "using 15-minute resolution",
+            "Converting %d strategic intents to TOU intervals using 15-minute resolution",
             len(self.strategic_intents),
-            current_period,
-            self.current_hour,
         )
 
         # Log the intent-to-mode mapping being used
         logger.info("Intent to mode mapping: %s", self.INTENT_TO_MODE)
 
-        # Check for corrupted existing intervals
-        old_intervals = getattr(self, "tou_intervals", []).copy()
-        if old_intervals:
+        # Check for corrupted existing intervals before clearing
+        if self.tou_intervals:
             intervals_valid = self.validate_tou_intervals_ordering(
-                old_intervals, "before_strategic_intent_conversion"
+                self.tou_intervals, "before_strategic_intent_conversion"
             )
             if not intervals_valid:
                 logger.warning(
-                    "🔄 TOU RECOVERY: Existing intervals are corrupted, clearing and rebuilding"
+                    "TOU RECOVERY: Existing intervals are corrupted, clearing and rebuilding"
                 )
-                for interval in old_intervals:
+                for interval in self.tou_intervals:
                     logger.warning(
                         "  Corrupted: Segment %s: %s-%s %s",
                         interval.get("segment_id", "?"),
@@ -762,40 +762,18 @@ class GrowattScheduleManager:
                         interval.get("end_time", "?"),
                         interval.get("batt_mode", "?"),
                     )
-                old_intervals = []
                 self.corruption_detected = True
-                logger.warning(
-                    "⚠️  CORRUPTION FLAG SET - Hardware write will be FORCED"
-                )
+                logger.warning("CORRUPTION FLAG SET - Hardware write will be FORCED")
 
-        # Start fresh
+        # Start fresh - all periods are processed from 0
         self.tou_intervals = []
 
-        # Copy past intervals (completely in the past) - preserve history
-        past_intervals_copied = 0
-        for interval in old_intervals:
-            end_parts = interval["end_time"].split(":")
-            end_hour = int(end_parts[0])
-            end_minute = int(end_parts[1])
-            end_period = end_hour * 4 + (end_minute // 15)
-
-            if end_period < current_period and interval.get("enabled", True):
-                logger.debug(
-                    "Keeping past interval: %s-%s",
-                    interval["start_time"],
-                    interval["end_time"],
-                )
-                self.tou_intervals.append(interval.copy())
-                past_intervals_copied += 1
-
-        logger.info("Copied %d past intervals", past_intervals_copied)
-
-        # Group consecutive periods by mode (the core new algorithm)
-        period_groups = self._group_periods_by_mode(current_period)
+        # Group all periods by mode from start of day
+        period_groups = self._group_periods_by_mode(0)
 
         logger.info(
             "Grouped %d periods into %d mode groups",
-            len(self.strategic_intents) - current_period,
+            len(self.strategic_intents),
             len(period_groups),
         )
 

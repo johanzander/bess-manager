@@ -292,6 +292,13 @@ class HomeAssistantAPIController:
             "precision": 1,
             "conversion_threshold": None,
         },
+        "get_solar_forecast_tomorrow": {
+            "sensor_key": "solar_forecast_tomorrow",
+            "name": "Solar Forecast Tomorrow",
+            "unit": "list",
+            "precision": 1,
+            "conversion_threshold": None,
+        },
         # Lifetime and meter sensors (added for abstraction)
         "get_battery_charged_lifetime": {
             "sensor_key": "lifetime_battery_charged",
@@ -898,22 +905,18 @@ class HomeAssistantAPIController:
         """Get the current load for L3."""
         return self._get_sensor_value("current_l3")
 
-    def get_solar_forecast(self):
-        """Get solar forecast data in quarterly resolution (96 periods).
+    def _parse_solar_forecast(self, sensor_key: str) -> list[float]:
+        """Fetch and parse Solcast detailedHourly data into 96 quarterly values.
 
-        Fetches hourly solar forecast from Solcast integration and upscales to
-        15-minute resolution by dividing each hourly value by 4.
+        Args:
+            sensor_key: The sensor key to look up in the sensors mapping.
 
         Returns:
-            list[float]: 96 quarterly solar production values in kWh per quarter-hour
+            list[float]: 96 quarterly solar production values in kWh per quarter-hour.
 
         Raises:
-            SystemConfigurationError: If solar forecast sensor is not configured or unavailable
+            SystemConfigurationError: If sensor is not configured or data unavailable.
         """
-        # Determine which sensor key to use
-        sensor_key = "solar_forecast_today"
-
-        # Get entity ID from sensor config
         entity_id = self.sensors.get(sensor_key)
         if not entity_id:
             raise SystemConfigurationError(
@@ -965,6 +968,34 @@ class HomeAssistantAPIController:
             quarterly_values.extend([quarter_value] * 4)
 
         return quarterly_values
+
+    def get_solar_forecast(self):
+        """Get solar forecast data in quarterly resolution (96 periods).
+
+        Fetches hourly solar forecast from Solcast integration and upscales to
+        15-minute resolution by dividing each hourly value by 4.
+
+        Returns:
+            list[float]: 96 quarterly solar production values in kWh per quarter-hour
+
+        Raises:
+            SystemConfigurationError: If solar forecast sensor is not configured or unavailable
+        """
+        return self._parse_solar_forecast("solar_forecast_today")
+
+    def get_solar_forecast_tomorrow(self) -> list[float]:
+        """Get tomorrow's solar forecast in quarterly resolution (96 periods).
+
+        Fetches hourly solar forecast for tomorrow from Solcast integration
+        and upscales to 15-minute resolution.
+
+        Returns:
+            list[float]: 96 quarterly solar production values in kWh per quarter-hour
+
+        Raises:
+            SystemConfigurationError: If solar forecast sensor is not configured or unavailable
+        """
+        return self._parse_solar_forecast("solar_forecast_tomorrow")
 
     def get_sensor_data(self, sensors_list):
         """Get current sensor data via Home Assistant REST API.

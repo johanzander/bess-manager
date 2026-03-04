@@ -4,20 +4,6 @@ import { HourlyData } from '../types';
 import { periodToTimeRange } from '../utils/timeUtils';
 import { DataResolution } from '../hooks/useUserPreferences';
 
-interface ChartDataPoint {
-  hour: number;
-  periodNum: number;
-  solar: number;
-  batteryOut: number;
-  gridIn: number;
-  home: number;
-  batteryIn: number;
-  gridOut: number;
-  // Price data
-  price: number;
-  // Meta data
-  isActual: boolean;
-}
 
 const CustomTooltip = ({ active, payload, label, resolution }: any) => {
   if (active && payload && payload.length) {
@@ -29,7 +15,13 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
 
     // Get time range from period number stored in data
     const periodNum = data.periodNum;
-    const timeRange = periodToTimeRange(periodNum, resolution);
+    const isTomorrow = data.isTomorrow;
+    // For tomorrow data, use the period number relative to tomorrow
+    // In quarter-hourly mode, periods are offset by 96; in hourly, by 24
+    const tomorrowOffset = resolution === 'quarter-hourly' ? 96 : 24;
+    const displayPeriodNum = isTomorrow ? periodNum - tomorrowOffset : periodNum;
+    const timeRange = periodToTimeRange(displayPeriodNum, resolution);
+    const dayLabel = isTomorrow ? 'Tomorrow' : '';
 
     // Map chart dataKeys to their corresponding FormattedValue fields
     const getFormattedText = (dataKey: string): string => {
@@ -63,10 +55,12 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
       return null; // Don't show tooltip if all energy values are zero
     }
 
+    const statusLabel = data.isActual ? '(Actual)' : '(Predicted)';
+
     return (
       <div className="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg p-3 shadow-lg">
         <p className="font-semibold mb-2 text-gray-900 dark:text-white">
-          Hour {timeRange} {data.isActual ? '(Actual)' : '(Predicted)'}
+          {dayLabel ? `${dayLabel} ` : ''}Hour {timeRange} {statusLabel}
         </p>
         <div className="space-y-1 text-sm">
           {sources.length > 0 && (
@@ -101,9 +95,10 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
   return null;
 };export const EnergyFlowChart: React.FC<{
   dailyViewData: HourlyData[];
+  tomorrowData?: HourlyData[] | null;
   currentHour: number;
   resolution: DataResolution;
-}> = ({ dailyViewData, resolution }) => {
+}> = ({ dailyViewData, tomorrowData, resolution }) => {
   
   // Helper function to get currency unit from price data
   const getCurrencyUnit = () => {
@@ -150,10 +145,18 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
     gridLines: isDarkMode ? '#374151' : '#e5e7eb',
   };
 
+  // Extract values from FormattedValue objects or fallback to raw numbers
+  const getValue = (field: any) => {
+    if (typeof field === 'object' && field?.value !== undefined) {
+      return field.value;
+    }
+    return field || 0;
+  };
+
   // Shift timeline - data for hour 0 (00:00-01:00) should appear at position 1
   // Support both hourly (24 periods) and quarterly (96 periods) data
   const numDataPoints = dailyViewData?.length || 24;
-  const chartData: ChartDataPoint[] = Array.from({ length: numDataPoints + 1 }, (_, index) => {
+  const chartData: any[] = Array.from({ length: numDataPoints + 1 }, (_, index) => {
     if (index === 0) {
       // Add empty data point at the start (before 00:00)
       return {
@@ -166,6 +169,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
         batteryIn: 0,
         gridOut: 0,
         isActual: true,
+        isTomorrow: false,
         price: 0,
       };
     }
@@ -173,21 +177,14 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
     const dailyViewHour = dailyViewData?.[dataIndex];
     const isActual = dailyViewHour?.dataSource === 'actual';
     const periodNum = dataIndex;
-    // Extract values from FormattedValue objects or fallback to raw numbers
-    const getValue = (field: any) => {
-      if (typeof field === 'object' && field?.value !== undefined) {
-        return field.value;
-      }
-      return field || 0;
-    };
 
     // Map unified API data format to chart format
     const solarProduction = getValue(dailyViewHour?.solarProduction);
     const homeConsumption = getValue(dailyViewHour?.homeConsumption);
-    const batteryCharged = getValue(dailyViewHour?.batteryCharged) || 0; // actual energy charged
-    const batteryDischarged = getValue(dailyViewHour?.batteryDischarged) || 0; // actual energy discharged
-    const gridImported = getValue(dailyViewHour?.gridImported) || 0; // actual grid import
-    const gridExported = getValue(dailyViewHour?.gridExported) || 0; // actual grid export
+    const batteryCharged = getValue(dailyViewHour?.batteryCharged) || 0;
+    const batteryDischarged = getValue(dailyViewHour?.batteryDischarged) || 0;
+    const gridImported = getValue(dailyViewHour?.gridImported) || 0;
+    const gridExported = getValue(dailyViewHour?.gridExported) || 0;
 
     // Calculate x-axis position
     const hourPosition = resolution === 'quarter-hourly' ? (periodNum / 4) + 1 : index;
@@ -196,12 +193,13 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
       hour: hourPosition,
       periodNum,
       solar: solarProduction,
-      batteryOut: batteryDischarged, // discharge (actual energy flow)
+      batteryOut: batteryDischarged,
       gridIn: gridImported,
-      home: -homeConsumption, // negative for consumption display
-      batteryIn: batteryCharged > 0 ? -batteryCharged : 0, // charge (actual energy flow, negative for display)
-      gridOut: gridExported > 0 ? -gridExported : 0, // grid export (negative for display)
+      home: -homeConsumption,
+      batteryIn: batteryCharged > 0 ? -batteryCharged : 0,
+      gridOut: gridExported > 0 ? -gridExported : 0,
       isActual,
+      isTomorrow: false,
       price: getValue(dailyViewHour?.buyPrice),
       // Include FormattedValue objects for tooltip
       solarProductionFormatted: dailyViewHour?.solarProduction,
@@ -213,6 +211,53 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
       buyPriceFormatted: dailyViewHour?.buyPrice,
     };
   });
+
+  // Append tomorrow's data with hour offset 24+
+  const hasTomorrowData = tomorrowData && tomorrowData.length > 0;
+  if (hasTomorrowData) {
+    for (const [idx, hourData] of tomorrowData.entries()) {
+      const periodNum = hourData.period ?? idx;
+      const hourPosition = resolution === 'quarter-hourly'
+        ? 24 + (periodNum / 4) + (1 / 4)
+        : 24 + periodNum + 1;
+
+      const solarProduction = getValue(hourData?.solarProduction);
+      const homeConsumption = getValue(hourData?.homeConsumption);
+      const batteryCharged = getValue(hourData?.batteryCharged) || 0;
+      const batteryDischarged = getValue(hourData?.batteryDischarged) || 0;
+      const gridImported = getValue(hourData?.gridImported) || 0;
+      const gridExported = getValue(hourData?.gridExported) || 0;
+
+      // Store period num with offset so tooltip can detect tomorrow
+      const tomorrowPeriodOffset = resolution === 'quarter-hourly' ? 96 : 24;
+      chartData.push({
+        hour: hourPosition,
+        periodNum: tomorrowPeriodOffset + periodNum,
+        solar: solarProduction,
+        batteryOut: batteryDischarged,
+        gridIn: gridImported,
+        home: -homeConsumption,
+        batteryIn: batteryCharged > 0 ? -batteryCharged : 0,
+        gridOut: gridExported > 0 ? -gridExported : 0,
+        isActual: false,
+        isTomorrow: true,
+        price: getValue(hourData?.buyPrice),
+        // Include FormattedValue objects for tooltip
+        solarProductionFormatted: hourData?.solarProduction,
+        homeConsumptionFormatted: hourData?.homeConsumption,
+        batteryChargedFormatted: hourData?.batteryCharged,
+        batteryDischargedFormatted: hourData?.batteryDischarged,
+        gridImportedFormatted: hourData?.gridImported,
+        gridExportedFormatted: hourData?.gridExported,
+        buyPriceFormatted: hourData?.buyPrice,
+      } as any);
+    }
+  }
+
+  // Compute max hour for X-axis domain
+  const maxHour = hasTomorrowData
+    ? Math.ceil(Math.max(...chartData.map(d => d.hour)))
+    : (resolution === 'quarter-hourly' ? 24.25 : 24);
 
   return (
     <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
@@ -277,12 +322,15 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
             </defs>
             
             <CartesianGrid strokeDasharray="5 5" stroke={colors.gridLines} strokeOpacity={0.3} strokeWidth={0.5} />
-            <XAxis 
-              dataKey="hour" 
+            <XAxis
+              dataKey="hour"
               stroke={colors.text}
               tick={{ fontSize: 12 }}
-              label={{ value: 'Hour of Day', position: 'insideBottom', offset: -10 }}
-              tickFormatter={(hour) => hour.toString().padStart(2, '0')}
+              domain={[0, maxHour]}
+              label={{ value: hasTomorrowData ? 'Hour' : 'Hour of Day', position: 'insideBottom', offset: -10 }}
+              tickFormatter={(hour: number) => {
+                return Math.floor(hour % 24).toString().padStart(2, '0');
+              }}
             />
             <YAxis 
               stroke={colors.text}
@@ -311,6 +359,17 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
             
             {/* Reference line at zero to separate sources from consumption */}
             <ReferenceLine y={0} stroke={colors.text} strokeWidth={2} />
+
+            {/* Midnight separator when tomorrow data exists */}
+            {hasTomorrowData && (
+              <ReferenceLine
+                x={24}
+                stroke={colors.text}
+                strokeDasharray="4 4"
+                strokeWidth={1.5}
+                label={{ value: 'Tomorrow', position: 'top', fill: colors.text, fontSize: 11 }}
+              />
+            )}
             
             {/* ENERGY SOURCES - Single series, style by isActual */}
             <Area
@@ -386,16 +445,18 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
               dot={false}
               connectNulls
             />
-            {/* Overlay for predicted hours */}
-            <rect
-              x={((chartData.findIndex(d => !d.isActual) || chartData.length) / chartData.length) * 100 + '%'}
-              y={0}
-              width={((chartData.length - (chartData.findIndex(d => !d.isActual) || chartData.length)) / chartData.length) * 100 + '%'}
-              height="100%"
-              fill={isDarkMode ? 'rgba(120,120,120,0.12)' : 'rgba(120,120,120,0.10)'}
-              pointerEvents="none"
-              style={{ position: 'absolute', zIndex: 1 }}
-            />
+            {/* Overlay for predicted + tomorrow hours - single unified grey */}
+            {chartData.findIndex(d => !d.isActual) > -1 && (
+              <rect
+                x={((chartData.findIndex(d => !d.isActual) / chartData.length) * 100) + '%'}
+                y={0}
+                width={(((chartData.length - chartData.findIndex(d => !d.isActual)) / chartData.length) * 100) + '%'}
+                height="100%"
+                fill={isDarkMode ? 'rgba(120,120,120,0.12)' : 'rgba(120,120,120,0.10)'}
+                pointerEvents="none"
+                style={{ position: 'absolute', zIndex: 1 }}
+              />
+            )}
             
             {/* Price line on secondary Y-axis */}
             <Line
@@ -439,7 +500,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
             <div className="w-4 h-3 rounded mr-1 border border-gray-400" style={{ backgroundColor: 'transparent', borderStyle: 'solid', borderWidth: 1 }}></div>
             <span>Actual hours</span>
           </div>
-          <div className="flex items-center">
+          <div className="flex items-center mr-3">
             <div className="w-4 h-3 rounded mr-1" style={{ background: isDarkMode ? 'rgba(120,120,120,0.12)' : 'rgba(120,120,120,0.10)' }}></div>
             <span>Predicted hours</span>
           </div>

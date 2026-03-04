@@ -203,10 +203,14 @@ def test_all_scenarios(scenario_name):
 
         # Validate SOE bounds in kWh (with tolerance for floating-point precision)
         assert (
-            battery["min_soe_kwh"] - soe_tolerance <= soe_start_kwh <= battery["max_soe_kwh"] + soe_tolerance
+            battery["min_soe_kwh"] - soe_tolerance
+            <= soe_start_kwh
+            <= battery["max_soe_kwh"] + soe_tolerance
         ), f"SOE start {soe_start_kwh:.2f} kWh outside bounds [{battery['min_soe_kwh']}, {battery['max_soe_kwh']}]"
         assert (
-            battery["min_soe_kwh"] - soe_tolerance <= soe_end_kwh <= battery["max_soe_kwh"] + soe_tolerance
+            battery["min_soe_kwh"] - soe_tolerance
+            <= soe_end_kwh
+            <= battery["max_soe_kwh"] + soe_tolerance
         ), f"SOE end {soe_end_kwh:.2f} kWh outside bounds [{battery['min_soe_kwh']}, {battery['max_soe_kwh']}]"
 
         # Battery action should respect power limits - access through strategy field

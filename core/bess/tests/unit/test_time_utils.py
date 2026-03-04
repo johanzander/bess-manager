@@ -20,7 +20,7 @@ def test_normal_day_has_96_periods():
     assert get_period_count(normal_day) == 96
 
 
-@patch('core.bess.time_utils.datetime')
+@patch("core.bess.time_utils.datetime")
 def test_timestamp_to_period_index_today(mock_datetime):
     """Should convert today's timestamp to period index."""
     # Mock "today" as 2025-11-15
@@ -39,7 +39,7 @@ def test_timestamp_to_period_index_today(mock_datetime):
     assert timestamp_to_period_index(dt_evening) == 95  # Last period
 
 
-@patch('core.bess.time_utils.datetime')
+@patch("core.bess.time_utils.datetime")
 def test_timestamp_to_period_index_tomorrow(mock_datetime):
     """Should convert tomorrow's timestamp to period index."""
     # Mock "today" as 2025-11-15
@@ -55,7 +55,7 @@ def test_timestamp_to_period_index_tomorrow(mock_datetime):
     assert timestamp_to_period_index(dt_tomorrow_afternoon) == 152  # 96 + 56
 
 
-@patch('core.bess.time_utils.datetime')
+@patch("core.bess.time_utils.datetime")
 def test_period_index_to_timestamp(mock_datetime):
     """Should convert period index to timestamp."""
     # Mock "today" as 2025-11-15
@@ -81,7 +81,7 @@ def test_period_index_to_timestamp(mock_datetime):
     assert dt.minute == 0
 
 
-@patch('core.bess.time_utils.datetime')
+@patch("core.bess.time_utils.datetime")
 def test_roundtrip_conversion(mock_datetime):
     """period_index → timestamp → period_index should roundtrip."""
     # Mock "today" as 2025-11-15
@@ -95,7 +95,7 @@ def test_roundtrip_conversion(mock_datetime):
         assert recovered_idx == period_idx, f"Roundtrip failed for period {period_idx}"
 
 
-@patch('core.bess.time_utils.datetime')
+@patch("core.bess.time_utils.datetime")
 def test_get_current_period_index(mock_datetime):
     """Should return current period index."""
     # Mock current time as 2025-11-15 14:30
@@ -119,7 +119,7 @@ def test_negative_period_index_raises_error():
         period_index_to_timestamp(-1)
 
 
-@patch('core.bess.time_utils.datetime')
+@patch("core.bess.time_utils.datetime")
 def test_past_timestamp_raises_error(mock_datetime):
     """Should raise error for past timestamps (before today)."""
     # Mock "today" as 2025-11-15
@@ -133,7 +133,7 @@ def test_past_timestamp_raises_error(mock_datetime):
         timestamp_to_period_index(yesterday)
 
 
-@patch('core.bess.time_utils.datetime')
+@patch("core.bess.time_utils.datetime")
 def test_future_beyond_tomorrow_raises_error(mock_datetime):
     """Should raise error for timestamps beyond tomorrow."""
     # Mock "today" as 2025-11-15
@@ -153,7 +153,7 @@ def test_period_index_beyond_tomorrow_raises_error():
         period_index_to_timestamp(200)  # Way beyond tomorrow
 
 
-@patch('core.bess.time_utils.datetime')
+@patch("core.bess.time_utils.datetime")
 def test_midnight_is_period_zero(mock_datetime):
     """Midnight should be period 0."""
     mock_now = datetime(2025, 11, 15, 12, 0, tzinfo=TIMEZONE)
@@ -164,7 +164,7 @@ def test_midnight_is_period_zero(mock_datetime):
     assert timestamp_to_period_index(dt) == 0
 
 
-@patch('core.bess.time_utils.datetime')
+@patch("core.bess.time_utils.datetime")
 def test_end_of_day_is_period_95(mock_datetime):
     """23:45 should be period 95."""
     mock_now = datetime(2025, 11, 15, 12, 0, tzinfo=TIMEZONE)

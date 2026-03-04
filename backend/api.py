@@ -3,7 +3,7 @@ API endpoints for battery and electricity settings, dashboard data, and decision
 
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from api_conversion import convert_keys_to_camel_case
 from api_dataclasses import (
@@ -19,6 +19,7 @@ from fastapi import APIRouter, HTTPException, Query
 from loguru import logger
 
 from core.bess.health_check import run_system_health_checks
+from core.bess.time_utils import get_period_count
 
 router = APIRouter()
 
@@ -327,6 +328,42 @@ async def get_dashboard_data(
                 f"Aggregated to {len(hourly_dataclass_instances)} hourly periods"
             )
 
+        # Extract tomorrow's optimization data from ScheduleStore
+        tomorrow_data: list[APIDashboardHourlyData] | None = None
+        try:
+            stored_schedule = (
+                bess_controller.system.schedule_store.get_latest_schedule()
+            )
+            if stored_schedule:
+                opt_result = stored_schedule.optimization_result
+                opt_period = stored_schedule.optimization_period
+                today_period_count = get_period_count(datetime.now().date())
+                tomorrow_period_count = get_period_count(
+                    datetime.now().date() + timedelta(days=1)
+                )
+                tomorrow_periods = []
+                for period_idx in range(
+                    today_period_count,
+                    today_period_count + tomorrow_period_count,
+                ):
+                    data_idx = period_idx - opt_period
+                    if 0 <= data_idx < len(opt_result.period_data):
+                        tomorrow_periods.append(opt_result.period_data[data_idx])
+                if tomorrow_periods:
+                    tomorrow_data = [
+                        APIDashboardHourlyData.from_internal(
+                            p, battery_capacity, currency
+                        )
+                        for p in tomorrow_periods
+                    ]
+                    if resolution == "hourly":
+                        tomorrow_data = _aggregate_quarterly_to_hourly(
+                            tomorrow_data, battery_capacity, currency
+                        )
+        except (AttributeError, KeyError, ValueError) as e:
+            logger.warning(f"Failed to get tomorrow's optimization data: {e}")
+            tomorrow_data = None
+
         # Calculate basic totals from dataclass fields directly (no dict access)
         basic_totals = {
             "totalSolarProduction": sum(
@@ -402,6 +439,7 @@ async def get_dashboard_data(
             currency=currency,
             hourly_data_instances=hourly_dataclass_instances,
             resolution=resolution,
+            tomorrow_data=tomorrow_data,
         )
 
         logger.debug("Dashboard response created successfully using dataclasses")
@@ -1321,11 +1359,61 @@ async def get_growatt_detailed_schedule():
         except (ValueError, KeyError, AttributeError) as e:
             logger.error(f"Failed to get period groups: {e}")
 
+        # Extract tomorrow's period groups from ScheduleStore (same source as dashboard)
+        tomorrow_period_groups: list[dict] | None = None
+        try:
+            stored_schedule = (
+                bess_controller.system.schedule_store.get_latest_schedule()
+            )
+            if stored_schedule:
+                opt_result = stored_schedule.optimization_result
+                opt_period = stored_schedule.optimization_period
+                today_period_count = get_period_count(datetime.now().date())
+                tomorrow_period_count = get_period_count(
+                    datetime.now().date() + timedelta(days=1)
+                )
+                tomorrow_intents = []
+                for period_idx in range(
+                    today_period_count,
+                    today_period_count + tomorrow_period_count,
+                ):
+                    data_idx = period_idx - opt_period
+                    if 0 <= data_idx < len(opt_result.period_data):
+                        tomorrow_intents.append(
+                            opt_result.period_data[data_idx].decision.strategic_intent
+                        )
+                if tomorrow_intents:
+                    raw_tomorrow_groups = schedule_manager.get_detailed_period_groups(
+                        intents=tomorrow_intents
+                    )
+                    tomorrow_period_groups = []
+                    for group in raw_tomorrow_groups:
+                        tomorrow_period_groups.append(
+                            {
+                                "start_time": group["start_time"],
+                                "end_time": group["end_time"],
+                                "mode": group["mode"],
+                                "dominant_intent": group["intent"],
+                                "intent_counts": {
+                                    group["intent"]: group["period_count"]
+                                },
+                                "period_count": group["period_count"],
+                                "duration_minutes": group["duration_minutes"],
+                                "charge_power_rate": group["charge_rate"],
+                                "discharge_power_rate": group["discharge_rate"],
+                                "grid_charge": group["grid_charge"],
+                            }
+                        )
+        except (AttributeError, KeyError, ValueError) as e:
+            logger.warning(f"Failed to get tomorrow's period groups: {e}")
+            tomorrow_period_groups = None
+
         response = {
             "current_hour": current_hour,
             "tou_intervals": tou_intervals,
             "schedule_data": schedule_data,
             "period_groups": period_groups,
+            "tomorrow_period_groups": tomorrow_period_groups,
             "mode_distribution": mode_distribution,
             "intent_distribution": intent_distribution,
             "hour_distribution": {

@@ -49,6 +49,7 @@ export default function DashboardPage({
       buyPrice?: number;
       sellPrice?: number;
     }>;
+    tomorrowData?: Array<any> | null;
     currentHour?: number;
     dataSources?: Record<string, any>;
     summary?: {
@@ -343,6 +344,7 @@ export default function DashboardPage({
               <div className="mb-8">
                 <EnergyFlowChart
                   dailyViewData={dashboardData.hourlyData as any}
+                  tomorrowData={dashboardData.tomorrowData as any}
                   currentHour={currentHour}
                   resolution={dataResolution}
                 />
@@ -356,6 +358,7 @@ export default function DashboardPage({
             <div className="mb-8">
               <BatteryLevelChart
                 hourlyData={dashboardData.hourlyData as any}
+                tomorrowData={dashboardData.tomorrowData as any}
                 settings={settings}
                 resolution={dataResolution}
               />

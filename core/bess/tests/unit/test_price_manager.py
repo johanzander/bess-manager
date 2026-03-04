@@ -194,7 +194,9 @@ def test_home_assistant_source_vat_parameter():
 
 def test_get_available_prices_today_only():
     """Should return today's prices at quarterly resolution when tomorrow unavailable."""
-    mock_source = MockSource(test_prices=[0.5] * 96)  # Nordpool provides 96 quarterly prices
+    mock_source = MockSource(
+        test_prices=[0.5] * 96
+    )  # Nordpool provides 96 quarterly prices
     pm = PriceManager(
         price_source=mock_source,
         markup_rate=0.05,
@@ -220,7 +222,9 @@ def test_get_available_prices_today_only():
 
 def test_get_available_prices_today_and_tomorrow():
     """Should return today + tomorrow at quarterly resolution when both available."""
-    mock_source = MockSource(test_prices=[0.5] * 96)  # Nordpool provides 96 quarterly prices
+    mock_source = MockSource(
+        test_prices=[0.5] * 96
+    )  # Nordpool provides 96 quarterly prices
     pm = PriceManager(
         price_source=mock_source,
         markup_rate=0.05,
@@ -286,7 +290,9 @@ def test_get_available_prices_returns_full_arrays_from_midnight():
 
 def test_get_available_prices_returns_tuple():
     """Should return a tuple of (buy_prices, sell_prices)."""
-    mock_source = MockSource(test_prices=[0.5] * 96)  # Nordpool provides 96 quarterly prices
+    mock_source = MockSource(
+        test_prices=[0.5] * 96
+    )  # Nordpool provides 96 quarterly prices
     pm = PriceManager(
         price_source=mock_source,
         markup_rate=0.05,

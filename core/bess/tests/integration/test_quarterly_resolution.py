@@ -47,9 +47,7 @@ class TestQuarterlyOptimization:
         # Verify economic summary is valid
         assert result.economic_summary is not None, "Economic summary should be present"
         economic_summary = result.economic_summary
-        assert (
-            economic_summary.grid_only_cost > 0
-        ), "Grid-only cost should be positive"
+        assert economic_summary.grid_only_cost > 0, "Grid-only cost should be positive"
         assert (
             economic_summary.grid_to_battery_solar_savings >= 0
         ), "Savings should be non-negative"
@@ -170,7 +168,9 @@ class TestQuarterlyDataStructures:
 
             # All energy values should be non-negative
             assert energy.solar_production >= 0, f"Period {i}: Solar should be >= 0"
-            assert energy.home_consumption >= 0, f"Period {i}: Consumption should be >= 0"
+            assert (
+                energy.home_consumption >= 0
+            ), f"Period {i}: Consumption should be >= 0"
             assert energy.battery_charged >= 0, f"Period {i}: Charging should be >= 0"
             assert (
                 energy.battery_discharged >= 0
@@ -196,7 +196,9 @@ class TestQuarterlyVsHourlyComparison:
     when given the same data at different resolutions.
     """
 
-    @pytest.mark.skip(reason="Comparison test - implement after hourly tests are stable")
+    @pytest.mark.skip(
+        reason="Comparison test - implement after hourly tests are stable"
+    )
     def test_quarterly_aggregates_to_hourly(self, quarterly_test_scenario):
         """Test that quarterly results aggregate to similar hourly results.
 
@@ -207,7 +209,9 @@ class TestQuarterlyVsHourlyComparison:
         # TODO: Implement quarterly-to-hourly aggregation comparison
         pass
 
-    @pytest.mark.skip(reason="Comparison test - implement after hourly tests are stable")
+    @pytest.mark.skip(
+        reason="Comparison test - implement after hourly tests are stable"
+    )
     def test_savings_comparable_across_resolutions(self, quarterly_test_scenario):
         """Test that total daily savings are comparable between resolutions.
 

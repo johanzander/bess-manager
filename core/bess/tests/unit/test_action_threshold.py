@@ -70,7 +70,9 @@ class TestActionThreshold:
         # With threshold=0, profitability gate should still reject money-losing operations
         # The marginal_profit_scenario results in -0.18 SEK savings (loses money)
         # So profitability gate should reject it and use all-IDLE schedule
-        assert result.economic_summary is not None, "Economic summary should not be None"
+        assert (
+            result.economic_summary is not None
+        ), "Economic summary should not be None"
         total_savings = result.economic_summary.grid_to_battery_solar_savings
 
         # Verify profitability gate worked: should have 0 or positive savings (IDLE fallback)
@@ -109,7 +111,9 @@ class TestActionThreshold:
         # Profitability gate should reject optimization with savings below threshold
         # marginal_profit_scenario produces negative or very low savings
         # With threshold=1.5, it should be rejected and IDLE schedule used
-        assert result.economic_summary is not None, "Economic summary should not be None"
+        assert (
+            result.economic_summary is not None
+        ), "Economic summary should not be None"
         savings = result.economic_summary.grid_to_battery_solar_savings
 
         # Verify profitability gate blocked the optimization
@@ -146,7 +150,9 @@ class TestActionThreshold:
         )
 
         # Should still have significant savings despite threshold
-        assert result.economic_summary is not None, "Economic summary should not be None"
+        assert (
+            result.economic_summary is not None
+        ), "Economic summary should not be None"
         savings = result.economic_summary.grid_to_battery_solar_savings
         assert (
             savings > 15.0

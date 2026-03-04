@@ -27,11 +27,19 @@ class TestScheduleCreation:
 
         # Verify period_data contains PeriodData objects
         for i, period_data in enumerate(optimization_result.period_data):
-            assert isinstance(period_data, PeriodData), f"Period {i} should be PeriodData"
-            assert period_data.period == i, f"Period {i} should have correct period value"
+            assert isinstance(
+                period_data, PeriodData
+            ), f"Period {i} should be PeriodData"
+            assert (
+                period_data.period == i
+            ), f"Period {i} should have correct period value"
             assert hasattr(period_data, "energy"), f"Period {i} should have energy data"
-            assert hasattr(period_data, "economic"), f"Period {i} should have economic data"
-            assert hasattr(period_data, "decision"), f"Period {i} should have decision data"
+            assert hasattr(
+                period_data, "economic"
+            ), f"Period {i} should have economic data"
+            assert hasattr(
+                period_data, "decision"
+            ), f"Period {i} should have decision data"
 
     def test_create_quarterly_update_schedule(self, quarterly_battery_system):
         """Test creating quarterly period update schedule (mid-day update)."""
@@ -210,7 +218,7 @@ class TestScheduleUpdates:
         """Test schedule persistence for different optimization scenarios."""
         # Test different scenarios starting from period 0
         scenarios = [
-            (0, True),   # Next day preparation
+            (0, True),  # Next day preparation
             (0, False),  # Intraday update
         ]
 
@@ -218,9 +226,13 @@ class TestScheduleUpdates:
             success = quarterly_battery_system.update_battery_schedule(
                 period, prepare_next_day=prepare_next_day
             )
-            assert success, f"Should create schedule for period {period}, prepare_next_day={prepare_next_day}"
+            assert (
+                success
+            ), f"Should create schedule for period {period}, prepare_next_day={prepare_next_day}"
 
-            latest_schedule = quarterly_battery_system.schedule_store.get_latest_schedule()
+            latest_schedule = (
+                quarterly_battery_system.schedule_store.get_latest_schedule()
+            )
             assert (
                 latest_schedule.optimization_period == period
             ), f"Should track optimization period {period}"
@@ -310,23 +322,35 @@ class TestScheduleValidation:
         # Test negative period
         try:
             quarterly_battery_system.update_battery_schedule(-1, prepare_next_day=False)
-            raise AssertionError("Should raise SystemConfigurationError for negative period")
+            raise AssertionError(
+                "Should raise SystemConfigurationError for negative period"
+            )
         except Exception as e:
-            assert "Invalid period" in str(e) or "SystemConfigurationError" in str(type(e))
+            assert "Invalid period" in str(e) or "SystemConfigurationError" in str(
+                type(e)
+            )
 
     def test_schedule_data_integrity(self, quarterly_battery_system):
         """Test that schedule data maintains integrity."""
-        success = quarterly_battery_system.update_battery_schedule(0, prepare_next_day=True)
+        success = quarterly_battery_system.update_battery_schedule(
+            0, prepare_next_day=True
+        )
         assert success, "Should create schedule"
 
         latest_schedule = quarterly_battery_system.schedule_store.get_latest_schedule()
 
         # Verify period sequence
-        for i, period_data in enumerate(latest_schedule.optimization_result.period_data):
-            assert period_data.period == i, f"Period {i} should have correct period value"
+        for i, period_data in enumerate(
+            latest_schedule.optimization_result.period_data
+        ):
+            assert (
+                period_data.period == i
+            ), f"Period {i} should have correct period value"
 
         # Verify energy balance for each period
-        for i, period_data in enumerate(latest_schedule.optimization_result.period_data):
+        for i, period_data in enumerate(
+            latest_schedule.optimization_result.period_data
+        ):
             energy = period_data.energy
 
             # Basic energy balance checks

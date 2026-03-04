@@ -293,7 +293,10 @@ class DebugReportFormatter:
 **Last Modified**: {modified}"""
 
         # Check if log content is available
-        if "not found" in export.todays_log_content.lower() or "error" in export.todays_log_content.lower():
+        if (
+            "not found" in export.todays_log_content.lower()
+            or "error" in export.todays_log_content.lower()
+        ):
             return summary + f"\n\n*{export.todays_log_content}*"
 
         # Count log lines
@@ -343,7 +346,7 @@ class DebugReportFormatter:
 An error occurred while generating the debug report:
 
 ```
-{str(error)}
+{error!s}
 ```
 
 ## Partial Data

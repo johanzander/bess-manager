@@ -63,7 +63,9 @@ class DailyViewBuilder:
         hour = period // 4
         minute = (period % 4) * 15
         timestamp = datetime.combine(
-            today, datetime.min.time().replace(hour=hour, minute=minute), tzinfo=TIMEZONE
+            today,
+            datetime.min.time().replace(hour=hour, minute=minute),
+            tzinfo=TIMEZONE,
         )
 
         return PeriodData(

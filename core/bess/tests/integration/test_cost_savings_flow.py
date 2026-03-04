@@ -299,7 +299,11 @@ class TestCostSavingsFlow:
                 home_consumption=test_scenario_data["consumption"][hour] / 4,
                 battery_charged=(0.5 / 4 if hour < 4 else 0.0),
                 battery_discharged=(0.0 if hour < 4 else 0.2 / 4),
-                grid_imported=(test_scenario_data["consumption"][hour] + (0.5 if hour < 4 else -0.2)) / 4,
+                grid_imported=(
+                    test_scenario_data["consumption"][hour]
+                    + (0.5 if hour < 4 else -0.2)
+                )
+                / 4,
                 grid_exported=0.0,
                 battery_soe_start=3.0 + period_index * 0.075,  # Gradual SOE change
                 battery_soe_end=3.0 + (period_index + 1) * 0.075,
@@ -339,11 +343,12 @@ class TestCostSavingsFlow:
         for period_index in range(32):
             # Find the period data in daily_view.periods by matching period index
             period_data = next(
-                (p for p in daily_view.periods if p.period == period_index),
-                None
+                (p for p in daily_view.periods if p.period == period_index), None
             )
 
-            assert period_data is not None, f"Period {period_index} not found in daily view"
+            assert (
+                period_data is not None
+            ), f"Period {period_index} not found in daily view"
 
             # Verify this period uses actual data
             assert (

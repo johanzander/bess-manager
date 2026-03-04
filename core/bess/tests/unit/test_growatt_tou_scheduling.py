@@ -207,7 +207,7 @@ class TestStrategicIntentExecution:
     def test_load_support_uses_default_mode(self, scheduler):
         """Test that LOAD_SUPPORT strategic intent uses default behavior."""
         strategic_intents = hourly_to_quarterly(
-            {h: "LOAD_SUPPORT" for h in range(12)} | {5: "GRID_CHARGING"}
+            dict.fromkeys(range(12), "LOAD_SUPPORT") | {5: "GRID_CHARGING"}
         )
 
         scheduler.current_hour = 0
@@ -480,7 +480,7 @@ class TestEdgeCases:
     def test_alternating_strategic_intents(self, scheduler):
         """Test alternating strategic intents pattern."""
         strategic_intents = hourly_to_quarterly(
-            {hour: "GRID_CHARGING" for hour in range(0, 24, 4)}
+            dict.fromkeys(range(0, 24, 4), "GRID_CHARGING")
         )
 
         scheduler.current_hour = 0

@@ -8,7 +8,7 @@
 
 **Description**: Discharge power seems to always be 100% leading to higher export than intended during EXPORT_ARBITRAGE operations.
 
-### ~~1. **Extended Horizon Optimization**~~ ✅ Completed (v6.4.0-v6.6.0, PRs #21-#23)
+### ~~1. **Extended Horizon Optimization**~~ ✅ Completed (v7.2.0-v7.3.0, PRs #21-#22)
 
 **Impact**: High | **Effort**: Medium | **Dependencies**: Price manager, DP algorithm
 
@@ -160,7 +160,7 @@ Future arbitrage calculations (the "expected arbitrage value" in economic chain 
 
 **Current State**: The inverter sometimes charges/discharges small amounts like 0.1kW. Or its a rounding error or inefficiencies losses when calculating flows. I don't think its a strategic intent, but it is interpreted as one.
 
-### ~~9. Add multi day view~~ ✅ Completed (v6.4.0-v6.6.0, PRs #21-#23)
+### ~~9. Add multi day view~~ ✅ Completed (v7.2.0-v7.3.0, PRs #21-#22)
 
 **Problem**: Today we only operate on 24h intervals.
 But at noon every day we get tomorrows schedule. We could use this information to take better economic decisions. It would mean changing a lot of places where 24h is hard coded.

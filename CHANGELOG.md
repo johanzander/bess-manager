@@ -9,31 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Extended DP optimization horizon with tomorrow's prices. When tomorrow's electricity prices are available, the optimizer considers up to 192 periods (2 days) instead of just today's 96, preventing suboptimal end-of-day battery dumping. Only today's schedule is ever deployed to the Growatt inverter.
-- Terminal value fallback for end-of-horizon energy. When tomorrow's prices aren't published yet, the DP algorithm assigns an estimated value (avg buy price × discharge efficiency − cycle cost) to usable energy remaining at the end of the horizon, preventing the optimizer from treating stored energy as worthless.
-- Tomorrow's solar forecast support via Solcast's `solar_forecast_tomorrow` sensor for extended horizon calculations.
-- Dashboard charts now display tomorrow's optimization data when available, with visual distinction (reduced opacity, midnight separator). Tomorrow hours are shown as 00–23 on a continuous x-axis.
-- New `tomorrowData` field in dashboard API response extracts tomorrow's period data from the ScheduleStore.
-- Inverter page Schedule Overview now shows tomorrow's planned schedule when available, with indigo separator and reduced opacity.
-- Savings page "Tomorrow's Projected Savings" collapsible section. When tomorrow's optimization data is available, a toggle button appears below the hourly table showing the period count. Expanding reveals three summary cards (Grid-Only Cost, Optimized Cost, Projected Savings) and a full hourly breakdown table with indigo-themed headers and reduced opacity, matching the Inverter page's visual pattern.
-- `tomorrowData` field added to the `DashboardResponse` TypeScript interface, aligning the frontend type with the backend API response.
-- `get_detailed_period_groups()` accepts optional `intents` parameter for grouping any strategic intent list.
-- DST-safe timestamp calculation using `period_index_to_timestamp()` utility instead of manual arithmetic.
+- Extended optimization horizon to 2 days when tomorrow's prices are available, enabling true cross-day arbitrage decisions. Only today's schedule is deployed to the inverter. (thanks [@pookey](https://github.com/pookey))
+- Terminal value fallback when tomorrow's prices aren't yet published, preventing the optimizer from treating stored battery energy as worthless at end of day.
+- Tomorrow's solar forecast support via Solcast `solar_forecast_tomorrow` sensor.
+- Dashboard, Inverter, and Savings pages show tomorrow's planned schedule when available.
+- DST-safe period-to-timestamp conversion throughout.
 
 ### Fixed
 
-- EconomicSummary now scoped to today-only periods. The DP algorithm computes economics over the full extended horizon (up to 192 periods), which inflated the profitability gate threshold and prediction snapshot values. After array truncation, the economic summary is recalculated from only today's period data so that stored schedules, prediction snapshots, and log messages reflect accurate single-day figures.
-
-### Changed
-
-- Replaced v7.2.0's simple `terminal_buy_price` (raw average × efficiency) with `terminal_value_per_kwh` that respects `min_soe` and subtracts cycle cost, and returns 0.0 when the horizon already includes tomorrow's data.
-- Removed dead code in `_consolidate_and_convert_with_strategic_intents()` where `current_period` was always 0 and the past-interval-copying loop never executed.
+- Economic summary and profitability gate now scoped to today-only periods, preventing inflated savings figures when the horizon extends into tomorrow.
 
 ## [7.2.0] - 2026-03-02
 
 ### Changed
 
-- DP optimizer now assigns a non-zero terminal value to energy remaining in the battery at the end of the optimization horizon. Previously, stored energy was treated as worthless at midnight, causing the optimizer to export battery energy late in the day even when holding it for self-consumption would be more economic. The terminal value is set to `SOE × mean_tomorrow_buy_price × efficiency_discharge`, using tomorrow's Nordpool prices when available (after ~13:00–16:00 depending on area) and falling back to the mean of today's remaining prices otherwise.
+- DP optimizer assigns terminal value to stored battery energy at end of horizon, preventing premature end-of-day export.
 
 ## [7.1.1] - 2026-03-02
 

@@ -88,9 +88,7 @@ class RuntimeFailureTracker:
             self._failures.append(failure)
             self._enforce_max_size()
 
-        logger.warning(
-            f"Runtime failure recorded [{category}]: {operation} - {error}"
-        )
+        logger.warning(f"Runtime failure recorded [{category}]: {operation} - {error}")
 
         return failure
 
@@ -163,4 +161,6 @@ class RuntimeFailureTracker:
         if to_remove > 0:
             dismissed = dismissed[to_remove:]
             self._failures = active + dismissed
-            logger.debug(f"Evicted {to_remove} old dismissed failures (max size enforcement)")
+            logger.debug(
+                f"Evicted {to_remove} old dismissed failures (max size enforcement)"
+            )

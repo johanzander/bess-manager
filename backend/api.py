@@ -360,7 +360,7 @@ async def get_dashboard_data(
                         tomorrow_data = _aggregate_quarterly_to_hourly(
                             tomorrow_data, battery_capacity, currency
                         )
-        except Exception as e:
+        except (AttributeError, KeyError, ValueError) as e:
             logger.warning(f"Failed to get tomorrow's optimization data: {e}")
             tomorrow_data = None
 
@@ -1404,7 +1404,7 @@ async def get_growatt_detailed_schedule():
                                 "grid_charge": group["grid_charge"],
                             }
                         )
-        except Exception as e:
+        except (AttributeError, KeyError, ValueError) as e:
             logger.warning(f"Failed to get tomorrow's period groups: {e}")
             tomorrow_period_groups = None
 

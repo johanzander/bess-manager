@@ -159,7 +159,7 @@ schema:
     ev_energy_meter: str
     48h_avg_grid_import: str
     solar_forecast_today: str
-    solar_forecast_tomorrow: str
+    solar_forecast_tomorrow: str?
     pv_power: str
     local_load_power: str
     import_power: str

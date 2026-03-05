@@ -313,6 +313,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
             <CartesianGrid strokeDasharray="5 5" stroke={colors.gridLines} strokeOpacity={0.3} strokeWidth={0.5} />
             <XAxis
               dataKey="hour"
+              type="number"
               stroke={colors.text}
               tick={{ fontSize: 12 }}
               domain={[0, maxHour]}

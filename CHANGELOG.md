@@ -5,6 +5,12 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.10.1] - 2026-03-05
+
+### Fixed
+
+- Predicted hours background shading on Energy Flow Chart was invisible because the XAxis used category mode. Added `type="number"` so `ReferenceArea` can render at any coordinate within the domain, not just at data point positions.
+
 ## [6.10.0] - 2026-03-05
 
 ### Fixed

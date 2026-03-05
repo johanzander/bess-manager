@@ -1,10 +1,6 @@
 name: "BESS Manager"
 description: "Battery Energy Storage System optimization and management"
-<<<<<<< worktree-chart_improvement
-version: "6.10.2"
-=======
-version: "6.10.1"
->>>>>>> main
+version: "6.10.3"
 slug: "bess_manager"
 init: false
 arch:

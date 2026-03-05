@@ -8,10 +8,6 @@ import { DataResolution } from '../hooks/useUserPreferences';
 const CustomTooltip = ({ active, payload, label, resolution }: any) => {
   if (active && payload && payload.length) {
     const data = payload[0].payload;
-    if (label === 0) {
-      // Skip tooltip for the empty starting point
-      return null;
-    }
 
     // Get time range from period number stored in data
     const periodNum = data.periodNum;
@@ -153,30 +149,13 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
     return field || 0;
   };
 
-  // Shift timeline - data for hour 0 (00:00-01:00) should appear at position 1
-  // Support both hourly (24 periods) and quarterly (96 periods) data
+  // Map each period to a chart data point positioned at the START of its hour
+  // For stepAfter rendering: data at x=0 shows from 0→1, data at x=1 shows from 1→2, etc.
   const numDataPoints = dailyViewData?.length || 24;
-  const chartData: any[] = Array.from({ length: numDataPoints + 1 }, (_, index) => {
-    if (index === 0) {
-      // Add empty data point at the start (before 00:00)
-      return {
-        hour: 0,
-        periodNum: 0,
-        solar: 0,
-        batteryOut: 0,
-        gridIn: 0,
-        home: 0,
-        batteryIn: 0,
-        gridOut: 0,
-        isActual: true,
-        isTomorrow: false,
-        price: null,
-      };
-    }
-    const dataIndex = index - 1;
-    const dailyViewHour = dailyViewData?.[dataIndex];
+  const chartData: any[] = Array.from({ length: numDataPoints }, (_, index) => {
+    const dailyViewHour = dailyViewData?.[index];
     const isActual = dailyViewHour?.dataSource === 'actual';
-    const periodNum = dataIndex;
+    const periodNum = index;
 
     // Map unified API data format to chart format
     const solarProduction = getValue(dailyViewHour?.solarProduction);
@@ -186,8 +165,8 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
     const gridImported = getValue(dailyViewHour?.gridImported) || 0;
     const gridExported = getValue(dailyViewHour?.gridExported) || 0;
 
-    // Calculate x-axis position
-    const hourPosition = resolution === 'quarter-hourly' ? (periodNum / 4) + 1 : index;
+    // Calculate x-axis position (start of period)
+    const hourPosition = resolution === 'quarter-hourly' ? (periodNum / 4) : periodNum;
 
     return {
       hour: hourPosition,
@@ -218,8 +197,8 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
     for (const [idx, hourData] of tomorrowData.entries()) {
       const periodNum = hourData.period ?? idx;
       const hourPosition = resolution === 'quarter-hourly'
-        ? 24 + (periodNum / 4) + (1 / 4)
-        : 24 + periodNum + 1;
+        ? 24 + (periodNum / 4)
+        : 24 + periodNum;
 
       const solarProduction = getValue(hourData?.solarProduction);
       const homeConsumption = getValue(hourData?.homeConsumption);
@@ -255,9 +234,10 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
   }
 
   // Compute max hour for X-axis domain
+  // Add 1 to include room for the last stepAfter to render
   const maxHour = hasTomorrowData
-    ? Math.ceil(Math.max(...chartData.map(d => d.hour)))
-    : (resolution === 'quarter-hourly' ? 24.25 : 24);
+    ? Math.ceil(Math.max(...chartData.map(d => d.hour))) + 1
+    : 24;
 
   // Explicit tick positions at whole hours
   const xAxisTicks = Array.from({ length: Math.ceil(maxHour) + 1 }, (_, i) => i);

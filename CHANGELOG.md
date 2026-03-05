@@ -5,6 +5,13 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.10.0] - 2026-03-05
+
+### Fixed
+
+- Energy flow chart no longer starts with a fake zero-point at x=0 that caused all data lines to ramp from zero to the first real value.
+- Data points positioned at start of each period (x=0 for hour 00:00-01:00) instead of offset positions, so chart data aligns correctly with hour grid lines on both charts.
+
 ## [6.9.1] - 2026-03-05
 
 ### Fixed

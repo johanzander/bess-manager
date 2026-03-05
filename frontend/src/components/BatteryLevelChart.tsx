@@ -95,14 +95,12 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
     }
     const dataSource = hour.dataSource;
 
-    // Calculate x-axis position (center of period)
+    // Calculate x-axis position (start of period)
     let xPosition: number;
     if (resolution === 'quarter-hourly') {
-      // For quarterly: convert period to hour position (period 4 = hour 1.0)
-      xPosition = periodNum / 4 + 0.125; // Center in 15-min period (0.125 = 1/8 hour)
+      xPosition = periodNum / 4;
     } else {
-      // For hourly: center in hour
-      xPosition = periodNum + 0.5;
+      xPosition = periodNum;
     }
 
     return {
@@ -141,9 +139,9 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
 
       let xPosition: number;
       if (resolution === 'quarter-hourly') {
-        xPosition = 24 + periodNum / 4 + 0.125;
+        xPosition = 24 + periodNum / 4;
       } else {
-        xPosition = 24 + periodNum + 0.5;
+        xPosition = 24 + periodNum;
       }
 
       chartData.push({
@@ -164,9 +162,9 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
     }
   }
 
-  // Compute max hour for X-axis
+  // Compute max hour for X-axis (add 1 for stepAfter to render last period)
   const maxHourValue = hasTomorrowData
-    ? Math.ceil(Math.max(...chartData.map(d => d.hour)))
+    ? Math.ceil(Math.max(...chartData.map(d => d.hour))) + 1
     : 24;
   const xAxisTicks = Array.from({ length: maxHourValue + 1 }, (_, i) => i);
 

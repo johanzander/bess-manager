@@ -371,17 +371,6 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
             {/* Reference line at zero to separate sources from consumption */}
             <ReferenceLine y={0} stroke={colors.text} strokeWidth={2} />
 
-            {/* Midnight separator when tomorrow data exists */}
-            {hasTomorrowData && (
-              <ReferenceLine
-                x={24}
-                stroke={colors.text}
-                strokeDasharray="4 4"
-                strokeWidth={1.5}
-                label={{ value: 'Tomorrow', position: 'top', fill: colors.text, fontSize: 11 }}
-              />
-            )}
-            
             {/* ENERGY SOURCES - Single series, style by isActual */}
             <Area
               type="monotone"

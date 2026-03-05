@@ -289,17 +289,6 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
               />
             ))}
 
-            {/* Midnight separator when tomorrow data exists */}
-            {hasTomorrowData && (
-              <ReferenceLine
-                x={24}
-                yAxisId="left"
-                stroke={colors.text}
-                strokeDasharray="4 4"
-                strokeWidth={1.5}
-                label={{ value: 'Tomorrow', position: 'top', fill: colors.text, fontSize: 11 }}
-              />
-            )}
             
             <Area
               yAxisId="left"

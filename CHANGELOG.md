@@ -17,8 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Electricity price line on both charts changed from smooth interpolation (`monotone`) to step function (`stepAfter`), accurately representing that prices are flat within each period.
-- Removed tomorrow background shading overlay on Energy Flow Chart. Tomorrow data still plots normally, distinguished by the midnight separator line.
-- Removed "Tomorrow" legend swatch from Energy Flow Chart legend (redundant with separator line).
+- Removed tomorrow background shading overlay and midnight separator line on both charts. Tomorrow data still plots normally, visually distinguishable by the repeating x-axis hour labels.
+- Removed "Tomorrow" legend swatch from Energy Flow Chart legend.
 - X-axis now uses explicit tick positions at whole hours with `interval={0}` to prevent duplicate labels and ensure grid alignment.
 
 ## [6.8.0] - 2026-03-03

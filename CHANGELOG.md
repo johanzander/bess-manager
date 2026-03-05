@@ -5,6 +5,14 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.8.1] - 2026-03-05
+
+### Fixed
+
+- Sensor data corruption when HA sensors are temporarily unavailable. When Growatt cloud went offline, `_get_sensor_value()` silently returned `0.0` for all lifetime cumulative sensors, poisoning the delta cache. The next collection cycle computed deltas against zero, attributing the entire lifetime sensor total (e.g., 4278 kWh) to a single 15-minute period. Now returns `None` on failure so the period is skipped and the cache remains valid.
+- Sensor failures no longer abort the optimization cycle. Energy data collection errors in `_update_energy_data()` are now caught and logged, allowing the optimization to proceed even when a sensor is temporarily unavailable.
+- `_normalize_sensor_readings()` no longer stores `0.0` for unparseable sensor values, which could also corrupt delta calculations. Invalid values are now skipped.
+
 ## [6.8.0] - 2026-03-03
 
 ### Fixed

@@ -1018,8 +1018,13 @@ class BatterySystemManager:
 
         When the horizon already extends past today (i.e. tomorrow's prices are
         included), return 0.0 since the DP has explicit future data. Otherwise,
-        estimate value from today's average buy price adjusted for efficiency
+        estimate value from the last known buy price adjusted for efficiency
         and cycle cost.
+
+        Using the last known price (rather than an average) avoids inflating the
+        terminal value with peak prices that appear earlier in the horizon. The
+        last price in the day is typically an overnight off-peak price, which is
+        the best proxy for what overnight recharging would cost tomorrow.
 
         Args:
             buy_prices: Full buy price array (from optimization_period onwards)
@@ -1041,21 +1046,26 @@ class BatterySystemManager:
             )
             return 0.0
 
-        # Estimate terminal value from today's buy prices
+        # Estimate terminal value from the last known non-zero buy price.
+        # This represents the expected overnight recharge cost: the last price
+        # before midnight is typically an off-peak rate, which is a far better
+        # proxy than an average that includes evening peaks.
         if not buy_prices:
             return 0.0
 
-        avg_buy_price = sum(buy_prices) / len(buy_prices)
+        last_known_price = next(
+            (p for p in reversed(buy_prices) if p > 0), buy_prices[0]
+        )
         terminal_value = (
-            avg_buy_price * self.battery_settings.efficiency_discharge
+            last_known_price * self.battery_settings.efficiency_discharge
             - self.battery_settings.cycle_cost_per_kwh
         )
         terminal_value = max(0.0, terminal_value)
 
         logger.info(
-            "Terminal value: %.3f SEK/kWh (avg_buy=%.3f, efficiency=%.2f, cycle_cost=%.3f)",
+            "Terminal value: %.3f/kWh (last_known_price=%.3f, efficiency=%.2f, cycle_cost=%.3f)",
             terminal_value,
-            avg_buy_price,
+            last_known_price,
             self.battery_settings.efficiency_discharge,
             self.battery_settings.cycle_cost_per_kwh,
         )

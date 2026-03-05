@@ -5,6 +5,12 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.3.1] - 2026-03-05
+
+### Fixed
+
+- Terminal value calculation now uses the last known non-zero price in the remaining horizon rather than the average of all remaining prices. Using the average inflated the terminal value when evening peak prices were included, causing the optimizer to incorrectly prefer holding battery charge over discharging during high-price periods. The last known price (typically an overnight off-peak rate) is a more accurate proxy for the expected cost of recharging tomorrow.
+
 ## [7.3.0] - 2026-03-04
 
 ### Added

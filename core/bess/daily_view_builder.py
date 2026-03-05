@@ -119,7 +119,7 @@ class DailyViewBuilder:
         num_periods = get_period_count(today)
 
         for i in range(num_periods):
-            if i < current_period and historical_periods[i] is not None:
+            if i <= current_period and historical_periods[i] is not None:
                 # Past: use actual sensor data
                 periods.append(historical_periods[i])
             else:

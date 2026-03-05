@@ -242,9 +242,9 @@ def test_different_periods_throughout_day(
     for current_period in test_periods:
         view = view_builder.build_daily_view(current_period=current_period)
 
-        # Behavior: actual_count should equal current_period
-        assert view.actual_count == current_period
-        assert view.predicted_count == 96 - current_period
+        # Behavior: actual_count includes the current in-progress period
+        assert view.actual_count == current_period + 1
+        assert view.predicted_count == 96 - (current_period + 1)
         assert len(view.periods) == 96
 
 

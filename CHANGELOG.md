@@ -5,6 +5,12 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.10.2] - 2026-03-05
+
+### Fixed
+
+- Current in-progress period was incorrectly labeled as "Predicted" in chart tooltips. Changed strict less-than to less-than-or-equal when comparing period index to current period, so the active quarter-hour uses actual sensor data when available.
+
 ## [6.10.1] - 2026-03-05
 
 ### Fixed

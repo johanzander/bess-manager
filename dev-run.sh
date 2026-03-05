@@ -39,31 +39,48 @@ if [ ! -f backend/requirements.txt ]; then
   exit 1
 fi
 
-# Extract options from config.yaml to backend/dev-options.json for development
+# Extract options to backend/dev-options.json for development
+# Prefers myconfig.yaml (personal, gitignored) over config.yaml (add-on manifest)
 # Note: InfluxDB credentials are passed as environment variables, not in options.json
-echo "Extracting development options from config.yaml..."
-if [ -f config.yaml ]; then
-  ./.venv/bin/python << 'EOF'
+echo "Extracting development options..."
+if [ -f myconfig.yaml ]; then
+  echo "  Using myconfig.yaml (personal config)"
+  CONFIG_FILE=myconfig.yaml
+elif [ -f config.yaml ]; then
+  echo "  Using config.yaml (add-on defaults)"
+  CONFIG_FILE=config.yaml
+else
+  echo "Warning: No config file found in root directory"
+  CONFIG_FILE=""
+fi
+
+if [ -n "$CONFIG_FILE" ]; then
+  ./.venv/bin/python << EOF
 import yaml
 import json
 
-with open('config.yaml', 'r') as f:
+with open('$CONFIG_FILE', 'r') as f:
     config = yaml.safe_load(f)
 
-options = config.get('options', {})
+# myconfig.yaml has settings at root level; config.yaml nests them under 'options'
+options = config.get('options', config)
 
 # Remove InfluxDB from options - credentials come from environment variables
 if 'influxdb' in options:
     del options['influxdb']
     print("  → InfluxDB credentials will be loaded from environment variables")
 
+# Remove non-option keys that may be present in config.yaml (add-on metadata)
+for key in ['name', 'description', 'version', 'slug', 'init', 'arch', 'startup',
+            'boot', 'ports', 'ingress', 'ingress_port', 'panel_icon', 'panel_title',
+            'panel_admin', 'hassio_api', 'homeassistant_api', 'auth_api', 'schema']:
+    options.pop(key, None)
+
 with open('backend/dev-options.json', 'w') as f:
     json.dump(options, f, indent=2)
 
 print("✓ Created backend/dev-options.json (simulates /data/options.json in HA)")
 EOF
-else
-  echo "Warning: config.yaml not found in root directory"
 fi
 
 echo "Stopping any existing containers..."

@@ -83,8 +83,12 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
       throw new Error(`MISSING DATA: batteryAction is required but missing at index ${index}`);
     }
     const batteryAction = getValue(hour.batteryAction);
-    const batterySocPercent = getValue(hour.batterySocEnd); // Extract from FormattedValue
-    const price = getValue(hour.buyPrice); // Extract from FormattedValue
+    const rawSoc = getValue(hour.batterySocEnd);
+    const isActual = hour.dataSource === 'actual';
+    // Treat zero SOC on predicted periods as missing data
+    const batterySocPercent = (rawSoc === 0 && !isActual) ? null : rawSoc;
+    const rawPrice = getValue(hour.buyPrice);
+    const price = rawPrice || null; // Treat zero/missing price as null
     const periodNum = hour.period ?? index;
     if (hour.dataSource === undefined) {
       throw new Error(`MISSING DATA: dataSource is required but missing at index ${index}`);
@@ -128,8 +132,10 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
         continue;
       }
       const batteryAction = getValue(hour.batteryAction);
-      const batterySocPercent = getValue(hour.batterySocEnd);
-      const price = getValue(hour.buyPrice);
+      const rawSocTmrw = getValue(hour.batterySocEnd);
+      const batterySocPercent = rawSocTmrw === 0 ? null : rawSocTmrw;
+      const rawPriceTmrw = getValue(hour.buyPrice);
+      const price = rawPriceTmrw || null;
       const periodNum = hour.period ?? idx;
       const dataSource = hour.dataSource ?? 'predicted';
 
@@ -165,7 +171,7 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
   const xAxisTicks = Array.from({ length: maxHourValue + 1 }, (_, i) => i);
 
   const maxAction = Math.max(...chartData.map(d => Math.abs(d.action || 0)), 1);
-  const maxPrice = Math.max(...chartData.map(h => h.price), 1);
+  const maxPrice = Math.max(...chartData.map(h => h.price ?? 0), 1);
 
   return (
     <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
@@ -175,16 +181,13 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
             <CartesianGrid strokeDasharray="5 5" stroke={colors.grid} strokeOpacity={0.3} strokeWidth={0.5} />
             <XAxis
               dataKey="hour"
-              interval="preserveStartEnd"
+              interval={0}
               tick={{ fill: colors.text, fontSize: 12 }}
               axisLine={{ stroke: colors.text }}
               tickLine={{ stroke: colors.text }}
               ticks={xAxisTicks}
               tickFormatter={(value: number) => {
-                if (value >= 24) {
-                  return `+${Math.floor(value - 24).toString().padStart(2, '0')}:00`;
-                }
-                return `${Math.floor(value).toString().padStart(2, '0')}:00`;
+                return `${(Math.floor(value) % 24).toString().padStart(2, '0')}:00`;
               }}
             />
             
@@ -286,17 +289,6 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
               />
             ))}
 
-            {/* Midnight separator when tomorrow data exists */}
-            {hasTomorrowData && (
-              <ReferenceLine
-                x={24}
-                yAxisId="left"
-                stroke={colors.text}
-                strokeDasharray="4 4"
-                strokeWidth={1.5}
-                label={{ value: 'Tomorrow', position: 'top', fill: colors.text, fontSize: 11 }}
-              />
-            )}
             
             <Area
               yAxisId="left"
@@ -311,13 +303,14 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
             
             <Line
               yAxisId="right"
-              type="monotone"
+              type="stepAfter"
               dataKey="price"
               stroke="#9CA3AF"
               strokeWidth={1.5}
               strokeDasharray="3 3"
               name="Electricity Price"
               dot={false}
+              connectNulls={false}
             />
             
             <Bar 

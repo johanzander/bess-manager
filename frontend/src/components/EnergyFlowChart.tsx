@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ComposedChart, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
+import { ComposedChart, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, ReferenceArea } from 'recharts';
 import { HourlyData } from '../types';
 import { periodToTimeRange } from '../utils/timeUtils';
 import { DataResolution } from '../hooks/useUserPreferences';
@@ -170,7 +170,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
         gridOut: 0,
         isActual: true,
         isTomorrow: false,
-        price: 0,
+        price: null,
       };
     }
     const dataIndex = index - 1;
@@ -200,7 +200,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
       gridOut: gridExported > 0 ? -gridExported : 0,
       isActual,
       isTomorrow: false,
-      price: getValue(dailyViewHour?.buyPrice),
+      price: getValue(dailyViewHour?.buyPrice) || null,
       // Include FormattedValue objects for tooltip
       solarProductionFormatted: dailyViewHour?.solarProduction,
       homeConsumptionFormatted: dailyViewHour?.homeConsumption,
@@ -241,7 +241,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
         gridOut: gridExported > 0 ? -gridExported : 0,
         isActual: false,
         isTomorrow: true,
-        price: getValue(hourData?.buyPrice),
+        price: getValue(hourData?.buyPrice) || null,
         // Include FormattedValue objects for tooltip
         solarProductionFormatted: hourData?.solarProduction,
         homeConsumptionFormatted: hourData?.homeConsumption,
@@ -258,6 +258,15 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
   const maxHour = hasTomorrowData
     ? Math.ceil(Math.max(...chartData.map(d => d.hour)))
     : (resolution === 'quarter-hourly' ? 24.25 : 24);
+
+  // Explicit tick positions at whole hours
+  const xAxisTicks = Array.from({ length: Math.ceil(maxHour) + 1 }, (_, i) => i);
+
+  // Find predicted hours range for shading
+  const firstPredictedIdx = chartData.findIndex(d => !d.isActual && !d.isTomorrow);
+  const lastTodayIdx = chartData.findIndex(d => d.isTomorrow);
+  const firstPredictedHour = firstPredictedIdx > -1 ? chartData[firstPredictedIdx].hour : null;
+  const lastTodayHour = lastTodayIdx > -1 ? chartData[lastTodayIdx - 1]?.hour : maxHour;
 
   return (
     <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
@@ -327,12 +336,11 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
               stroke={colors.text}
               tick={{ fontSize: 12 }}
               domain={[0, maxHour]}
-              label={{ value: hasTomorrowData ? 'Hour' : 'Hour of Day', position: 'insideBottom', offset: -10 }}
+              ticks={xAxisTicks}
+              interval={0}
+              label={{ value: 'Hour of Day', position: 'insideBottom', offset: -10 }}
               tickFormatter={(hour: number) => {
-                if (hour >= 24) {
-                  return `+${Math.floor(hour - 24).toString().padStart(2, '0')}`;
-                }
-                return Math.floor(hour).toString().padStart(2, '0');
+                return (Math.floor(hour) % 24).toString().padStart(2, '0');
               }}
             />
             <YAxis 
@@ -449,31 +457,18 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
               connectNulls
             />
             {/* Overlay for predicted hours (today only) */}
-            <rect
-              x={((chartData.findIndex(d => !d.isActual && !d.isTomorrow) || chartData.length) / chartData.length) * 100 + '%'}
-              y={0}
-              width={(((chartData.findIndex(d => d.isTomorrow) > -1 ? chartData.findIndex(d => d.isTomorrow) : chartData.length) - (chartData.findIndex(d => !d.isActual && !d.isTomorrow) || chartData.length)) / chartData.length) * 100 + '%'}
-              height="100%"
-              fill={isDarkMode ? 'rgba(120,120,120,0.12)' : 'rgba(120,120,120,0.10)'}
-              pointerEvents="none"
-              style={{ position: 'absolute', zIndex: 1 }}
-            />
-            {/* Overlay for tomorrow hours - more prominent */}
-            {hasTomorrowData && (
-              <rect
-                x={((chartData.findIndex(d => d.isTomorrow) || chartData.length) / chartData.length) * 100 + '%'}
-                y={0}
-                width={((chartData.length - (chartData.findIndex(d => d.isTomorrow) || chartData.length)) / chartData.length) * 100 + '%'}
-                height="100%"
-                fill={isDarkMode ? 'rgba(120,120,120,0.22)' : 'rgba(120,120,120,0.18)'}
-                pointerEvents="none"
-                style={{ position: 'absolute', zIndex: 1 }}
+            {firstPredictedHour !== null && (
+              <ReferenceArea
+                x1={firstPredictedHour}
+                x2={lastTodayHour}
+                fill={isDarkMode ? 'rgba(120,120,120,0.12)' : 'rgba(120,120,120,0.10)'}
+                ifOverflow="hidden"
               />
             )}
             
             {/* Price line on secondary Y-axis */}
             <Line
-              type="monotone"
+              type="stepAfter"
               dataKey="price"
               yAxisId="price"
               stroke="#9CA3AF"
@@ -481,6 +476,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
               dot={false}
               strokeDasharray="3 3"
               name="Electricity Price"
+              connectNulls={false}
             />
           </ComposedChart>
         </ResponsiveContainer>
@@ -517,12 +513,6 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
             <div className="w-4 h-3 rounded mr-1" style={{ background: isDarkMode ? 'rgba(120,120,120,0.12)' : 'rgba(120,120,120,0.10)' }}></div>
             <span>Predicted hours</span>
           </div>
-          {hasTomorrowData && (
-            <div className="flex items-center">
-              <div className="w-4 h-3 rounded mr-1" style={{ background: isDarkMode ? 'rgba(120,120,120,0.22)' : 'rgba(120,120,120,0.18)' }}></div>
-              <span>Tomorrow</span>
-            </div>
-          )}
         </div>
       </div>
     </div>

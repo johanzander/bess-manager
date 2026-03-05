@@ -475,15 +475,11 @@ class SensorCollector:
                     readings[key[7:]] = float(value)
             except (ValueError, TypeError):
                 logger.warning(
-                    "Invalid value for sensor %s: %s (type: %s)",
+                    "Skipping sensor %s with invalid value: %s (type: %s)",
                     key,
                     value,
                     type(value).__name__,
                 )
-                # Store as 0.0 for numeric sensors to prevent calculation errors
-                readings[key] = 0.0
-                if key.startswith("sensor."):
-                    readings[key[7:]] = 0.0
 
         # Validate that we have the minimum required sensors
         # Check for required sensors using resolved entity IDs

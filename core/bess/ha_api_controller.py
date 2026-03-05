@@ -700,18 +700,28 @@ class HomeAssistantAPIController:
             )
 
             if response and "state" in response:
-                return float(response["state"])
+                state = response["state"]
+                # HA reports "unavailable" or "unknown" when sensors are offline
+                if isinstance(state, str) and state in ("unavailable", "unknown"):
+                    logger.warning(
+                        "Sensor %s (entity_id: %s) is %s",
+                        sensor_name,
+                        entity_id,
+                        state,
+                    )
+                    return None
+                return float(state)
             else:
                 logger.warning(
                     "Sensor %s (entity_id: %s) returned invalid response or no state",
                     sensor_name,
                     entity_id,
                 )
-                return 0.0
+                return None
 
         except (ValueError, TypeError):
             logger.warning("Could not get value for %s", sensor_name)
-            return 0.0
+            return None
         except requests.RequestException as e:
             logger.error("Error fetching sensor %s: %s", sensor_name, str(e))
 
@@ -723,7 +733,7 @@ class HomeAssistantAPIController:
                     error=e,
                 )
 
-            return 0.0
+            return None
 
     def get_estimated_consumption(self):
         """Get estimated consumption in quarterly resolution (96 periods).

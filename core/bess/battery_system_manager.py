@@ -756,7 +756,15 @@ class BatterySystemManager:
             # Use sensor collector to get complete energy data with detailed flows
             # Uses live sensors for current data (fast)
             # Falls back to InfluxDB for historical data at startup/restart
-            energy_data = self.sensor_collector.collect_energy_data(prev_period)
+            try:
+                energy_data = self.sensor_collector.collect_energy_data(prev_period)
+            except (RuntimeError, KeyError, ValueError) as e:
+                logger.warning(
+                    f"Sensor data collection failed for period {prev_period} "
+                    f"({format_period(prev_period)}): {e}. "
+                    f"Skipping energy recording but continuing with optimization."
+                )
+                return
 
             logger.info(
                 f"Collected energy data for period {prev_period} ({format_period(prev_period)}) - "

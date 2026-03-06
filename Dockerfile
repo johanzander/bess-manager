@@ -22,19 +22,16 @@ LABEL \
     org.label-schema.vcs-url="https://github.com/johanzander/bess-manager"
 
 # Install requirements for add-on
-RUN apk add --no-cache \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
-    py3-pip \
+    python3-pip \
+    python3-venv \
     python3-dev \
     gcc \
-    g++ \
-    musl-dev \
-    cmake \
-    make \
-    libgomp \
     bash \
     nodejs \
-    npm
+    npm \
+    && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /app

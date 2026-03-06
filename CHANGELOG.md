@@ -5,6 +5,12 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.0.2] - 2026-03-06
+
+### Changed
+
+- Switched Docker base image from Alpine to Debian (bookworm). Alpine uses musl libc which has no prebuilt wheels for xgboost, scikit-learn, or pandas — forcing compilation from source on every install (~15+ minutes on typical hardware, longer on low-spec machines). Debian's glibc base uses prebuilt manylinux wheels, reducing pip install from 15+ minutes to under 1 minute.
+
 ## [7.0.1] - 2026-03-06
 
 ### Fixed

@@ -103,7 +103,10 @@ class SensorCollector:
         # Determine if we're doing historical backfill or runtime collection
         # Historical: period < current - 1 (collecting old data during startup)
         # Runtime: period == current - 1 (collecting just-completed period)
-        is_historical_backfill = period < current_period - 1
+        # ALSO treat as historical if no cache exists (startup/restart) - using live
+        # sensors for the last completed period would include energy from the
+        # currently in-progress period, inflating the last period's data
+        is_historical_backfill = period < current_period - 1 or self._last_readings is None
 
         if is_historical_backfill:
             # HISTORICAL BACKFILL: Use InfluxDB for both current and previous readings

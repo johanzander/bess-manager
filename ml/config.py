@@ -134,6 +134,11 @@ def load_config(
         _LOGGER.debug("Loaded .env from %s", dotenv_path)
 
     if app_options is not None:
+        if "ml" not in app_options:
+            raise KeyError(
+                "ML config section 'ml' is missing from add-on options. "
+                "Add the 'ml' section to config.yaml to use ML features."
+            )
         _LOGGER.info("ML config built from app options")
         return _build_from_app_options(app_options)
 

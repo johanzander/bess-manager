@@ -2140,19 +2140,7 @@ async def get_ml_report():
     with open(report_path) as f:
         report = json.load(f)
 
-    # Use cached predictions if available, otherwise generate on demand
     predictions = system._ml_forecast_cache
-    if predictions is None:
-        try:
-            from ml.predictor import predict_next_24h
-
-            predictions = predict_next_24h(ml_cfg)
-            system._ml_forecast_cache = predictions
-            from datetime import date
-
-            system._ml_forecast_cache_date = date.today()
-        except Exception as e:
-            logger.warning("Could not generate ML predictions for report: %s", e)
 
     forecast_date = (
         system._ml_forecast_cache_date.isoformat()

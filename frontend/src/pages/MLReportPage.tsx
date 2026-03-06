@@ -23,6 +23,7 @@ interface MLMetrics {
 
 interface MLReportData {
   isActive: boolean;
+  activeStrategy?: string;
   modelAvailable: boolean;
   lastTrained?: string;
   trainSize?: number;
@@ -33,6 +34,7 @@ interface MLReportData {
   forecastDate?: string;
   predictions?: number[];
   yesterdayProfile?: number[];
+  weekAvgProfile?: number[];
 }
 
 function formatDateTime(iso: string): string {
@@ -111,7 +113,9 @@ const MLReportPage: React.FC = () => {
           <div>
             <p className="font-medium text-blue-800 dark:text-blue-200">ML prediction not active</p>
             <p className="text-sm text-blue-700 dark:text-blue-300 mt-1">
-              Set <code className="font-mono bg-blue-100 dark:bg-blue-800 px-1 rounded">consumption_strategy: ml_prediction</code> in your configuration to enable the ML forecast engine.
+              Set <code className="font-mono bg-blue-100 dark:bg-blue-800 px-1 rounded">consumption_strategy</code> to{' '}
+              <code className="font-mono bg-blue-100 dark:bg-blue-800 px-1 rounded">ml_prediction</code> or{' '}
+              <code className="font-mono bg-blue-100 dark:bg-blue-800 px-1 rounded">influxdb_profile</code> in your configuration to enable the ML forecast engine.
             </p>
           </div>
         </div>
@@ -132,7 +136,13 @@ const MLReportPage: React.FC = () => {
       {data?.modelAvailable && data.metrics && (
         <>
           <SummaryCards data={data} />
-          <ForecastChart predictions={data.predictions} yesterday={data.yesterdayProfile} forecastDate={data.forecastDate} />
+          <ForecastChart
+            predictions={data.predictions}
+            yesterday={data.yesterdayProfile}
+            weekAvg={data.weekAvgProfile}
+            forecastDate={data.forecastDate}
+            activeStrategy={data.activeStrategy}
+          />
           <MetricsTable metrics={data.metrics} baselines={data.baselines ?? {}} />
           <FeatureImportanceChart features={data.featureImportance ?? []} />
         </>
@@ -213,28 +223,39 @@ const SummaryCards: React.FC<SummaryCardsProps> = ({ data }) => {
 interface ForecastChartProps {
   predictions?: number[];
   yesterday?: number[];
+  weekAvg?: number[];
   forecastDate?: string;
+  activeStrategy?: string;
 }
 
-const ForecastChart: React.FC<ForecastChartProps> = ({ predictions, yesterday, forecastDate }) => {
-  if (!predictions?.length) return null;
+const TOOLTIP_LABELS: Record<string, string> = {
+  predicted: 'ML Predicted',
+  weekAvg: 'Weekly Average',
+  yesterday: 'Yesterday',
+};
 
-  const chartData = predictions.map((pred, i) => {
-    const hour = Math.floor(i / 4);
-    const min = (i % 4) * 15;
-    const label = i % 4 === 0 ? `${String(hour).padStart(2, '0')}:00` : '';
+const ForecastChart: React.FC<ForecastChartProps> = ({ predictions, yesterday, weekAvg, forecastDate, activeStrategy }) => {
+  const hasAnyData = predictions?.length || weekAvg?.length;
+  if (!hasAnyData) return null;
+
+  const length = Math.max(predictions?.length ?? 0, weekAvg?.length ?? 0, yesterday?.length ?? 0);
+  const chartData = Array.from({ length }, (_, i) => {
+    const label = i % 4 === 0 ? `${String(Math.floor(i / 4)).padStart(2, '0')}:00` : '';
     return {
       period: i,
       label,
-      predicted: Math.round(pred * 1000) / 1000,
+      predicted: predictions?.[i] !== undefined ? Math.round(predictions[i] * 1000) / 1000 : undefined,
+      weekAvg: weekAvg?.[i] !== undefined ? Math.round(weekAvg[i] * 1000) / 1000 : undefined,
       yesterday: yesterday?.[i] !== undefined ? Math.round(yesterday[i] * 1000) / 1000 : undefined,
     };
   });
 
+  const strategyLabel = activeStrategy === 'influxdb_profile' ? ' (using Weekly Average)' : '';
+
   return (
     <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
       <h2 className="text-base font-semibold text-gray-900 dark:text-white mb-1">
-        Consumption Forecast
+        Consumption Forecast{strategyLabel}
       </h2>
       <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
         96-period forecast{forecastDate ? ` for ${forecastDate}` : ''} vs yesterday's actual (kWh per 15 min)
@@ -252,7 +273,7 @@ const ForecastChart: React.FC<ForecastChartProps> = ({ predictions, yesterday, f
           <Tooltip
             formatter={(value: number, name: string) => [
               `${value} kWh`,
-              name === 'predicted' ? 'Predicted' : 'Yesterday',
+              TOOLTIP_LABELS[name] ?? name,
             ]}
             labelFormatter={(_, payload) => {
               if (!payload?.length) return '';
@@ -262,15 +283,28 @@ const ForecastChart: React.FC<ForecastChartProps> = ({ predictions, yesterday, f
               return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
             }}
           />
-          <Legend />
-          <Line
-            type="monotone"
-            dataKey="predicted"
-            stroke="#3b82f6"
-            dot={false}
-            strokeWidth={2}
-            name="predicted"
-          />
+          <Legend formatter={(value: string) => TOOLTIP_LABELS[value] ?? value} />
+          {predictions?.length ? (
+            <Line
+              type="monotone"
+              dataKey="predicted"
+              stroke="#3b82f6"
+              dot={false}
+              strokeWidth={2}
+              name="predicted"
+            />
+          ) : null}
+          {weekAvg?.length ? (
+            <Line
+              type="monotone"
+              dataKey="weekAvg"
+              stroke="#10b981"
+              dot={false}
+              strokeWidth={2}
+              strokeDasharray={activeStrategy === 'influxdb_profile' ? undefined : '6 3'}
+              name="weekAvg"
+            />
+          ) : null}
           {yesterday?.length ? (
             <Line
               type="monotone"

@@ -2122,7 +2122,8 @@ async def get_ml_report():
     from app import bess_controller
 
     system = bess_controller.system
-    is_active = system.home_settings.consumption_strategy == "ml_prediction"
+    strategy = system.home_settings.consumption_strategy
+    is_active = strategy in ("ml_prediction", "influxdb_profile")
 
     try:
         from ml.config import load_config
@@ -2147,16 +2148,19 @@ async def get_ml_report():
     )
 
     yesterday_profile = None
+    week_avg_profile = None
     try:
         from ml.data_fetcher import fetch_history_context
 
         history = fetch_history_context(ml_cfg)
         yesterday_profile = history["yesterday_profile"]
+        week_avg_profile = history["week_avg_profile"]
     except Exception as e:
-        logger.warning("Could not fetch yesterday profile for ML report: %s", e)
+        logger.warning("Could not fetch history context for ML report: %s", e)
 
     return {
         "isActive": is_active,
+        "activeStrategy": strategy,
         "modelAvailable": True,
         "lastTrained": report["trained_at"],
         "trainSize": report["train_size"],
@@ -2169,6 +2173,7 @@ async def get_ml_report():
         "forecastDate": forecast_date,
         "predictions": predictions,
         "yesterdayProfile": yesterday_profile,
+        "weekAvgProfile": week_avg_profile,
     }
 
 

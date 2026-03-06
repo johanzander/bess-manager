@@ -202,6 +202,7 @@ def generate_economic_chain(
     immediate_value: float,
     future_value: float,
     cost_basis: float,
+    currency: str,
 ) -> str:
     """
     Generate economic chain explanation.
@@ -214,7 +215,8 @@ def generate_economic_chain(
         strategic_intent: Strategic intent
         immediate_value: Immediate economic value
         future_value: Future economic value
-        cost_basis: Cost basis of stored energy (SEK/kWh)
+        cost_basis: Cost basis of stored energy per kWh
+        currency: Currency code for display
 
     Returns:
         Economic chain explanation string
@@ -222,25 +224,26 @@ def generate_economic_chain(
     Examples:
         - "Hour 02: Store grid energy (-2.84 SEK) → Future discharge opportunity
           (+7.23 SEK) → Net strategy: +4.39 SEK"
-        - "Hour 19: Export arbitrage (+5.12 SEK) ← Previous storage at 1.2 SEK/kWh
-          → Arbitrage profit: +3.92 SEK"
+        - "Hour 19: Export arbitrage (+5.12 EUR) ← Previous storage at 1.2 EUR/kWh
+          → Arbitrage profit: +3.92 EUR"
     """
+    c = currency
     # Build context-specific economic explanations
     if strategic_intent == "GRID_CHARGING":
         if energy_data.grid_to_battery > 0.1:
             storage_amount = energy_data.grid_to_battery
             return (
                 f"Hour {hour:02d}: Store {storage_amount:.1f}kWh grid energy "
-                f"({immediate_value:+.2f} SEK) → Future discharge opportunity "
-                f"(+{future_value:.2f} SEK) → Net strategy: "
-                f"{immediate_value + future_value:+.2f} SEK"
+                f"({immediate_value:+.2f} {c}) → Future discharge opportunity "
+                f"(+{future_value:.2f} {c}) → Net strategy: "
+                f"{immediate_value + future_value:+.2f} {c}"
             )
         else:
             return (
                 f"Hour {hour:02d}: Grid charging strategy "
-                f"({immediate_value:+.2f} SEK) → Expected future value "
-                f"(+{future_value:.2f} SEK) → Net: "
-                f"{immediate_value + future_value:+.2f} SEK"
+                f"({immediate_value:+.2f} {c}) → Expected future value "
+                f"(+{future_value:.2f} {c}) → Net: "
+                f"{immediate_value + future_value:+.2f} {c}"
             )
 
     elif strategic_intent == "SOLAR_STORAGE":
@@ -248,16 +251,16 @@ def generate_economic_chain(
             storage_amount = energy_data.solar_to_battery
             return (
                 f"Hour {hour:02d}: Store {storage_amount:.1f}kWh free solar "
-                f"({immediate_value:+.2f} SEK) → Future value realization "
-                f"(+{future_value:.2f} SEK) → Net strategy: "
-                f"{immediate_value + future_value:+.2f} SEK"
+                f"({immediate_value:+.2f} {c}) → Future value realization "
+                f"(+{future_value:.2f} {c}) → Net strategy: "
+                f"{immediate_value + future_value:+.2f} {c}"
             )
         else:
             return (
                 f"Hour {hour:02d}: Solar storage strategy "
-                f"({immediate_value:+.2f} SEK) → Future opportunity "
-                f"(+{future_value:.2f} SEK) → Net: "
-                f"{immediate_value + future_value:+.2f} SEK"
+                f"({immediate_value:+.2f} {c}) → Future opportunity "
+                f"(+{future_value:.2f} {c}) → Net: "
+                f"{immediate_value + future_value:+.2f} {c}"
             )
 
     elif strategic_intent == "EXPORT_ARBITRAGE":
@@ -265,15 +268,15 @@ def generate_economic_chain(
             export_amount = energy_data.battery_to_grid
             return (
                 f"Hour {hour:02d}: Export {export_amount:.1f}kWh for arbitrage "
-                f"(+{immediate_value:.2f} SEK) ← Previous storage at "
-                f"{cost_basis:.2f} SEK/kWh → Arbitrage profit: "
-                f"{immediate_value:+.2f} SEK"
+                f"(+{immediate_value:.2f} {c}) ← Previous storage at "
+                f"{cost_basis:.2f} {c}/kWh → Arbitrage profit: "
+                f"{immediate_value:+.2f} {c}"
             )
         else:
             return (
                 f"Hour {hour:02d}: Export arbitrage execution "
-                f"(+{immediate_value:.2f} SEK) ← Strategic storage "
-                f"→ Net profit: {immediate_value:+.2f} SEK"
+                f"(+{immediate_value:.2f} {c}) ← Strategic storage "
+                f"→ Net profit: {immediate_value:+.2f} {c}"
             )
 
     elif strategic_intent == "LOAD_SUPPORT":
@@ -281,22 +284,22 @@ def generate_economic_chain(
             support_amount = energy_data.battery_to_home
             return (
                 f"Hour {hour:02d}: Battery supplies {support_amount:.1f}kWh to home "
-                f"({immediate_value:+.2f} SEK saved) ← Previous strategic storage at "
-                f"{cost_basis:.2f} SEK/kWh → Net value: {immediate_value:+.2f} SEK"
+                f"({immediate_value:+.2f} {c} saved) ← Previous strategic storage at "
+                f"{cost_basis:.2f} {c}/kWh → Net value: {immediate_value:+.2f} {c}"
             )
         else:
             # Edge case: LOAD_SUPPORT intent but no significant battery_to_home
             # This could happen with very small discharge amounts or calculation edge cases
             return (
                 f"Hour {hour:02d}: Minimal battery home support "
-                f"({immediate_value:+.2f} SEK) ← Battery available but minimal "
-                f"discharge needed → Net value: {immediate_value:+.2f} SEK"
+                f"({immediate_value:+.2f} {c}) ← Battery available but minimal "
+                f"discharge needed → Net value: {immediate_value:+.2f} {c}"
             )
 
     else:  # IDLE
         return (
             f"Hour {hour:02d}: Optimal idle - no beneficial battery action available "
-            f"→ Net value: {immediate_value:+.2f} SEK"
+            f"→ Net value: {immediate_value:+.2f} {c}"
         )
 
 
@@ -311,11 +314,11 @@ def calculate_detailed_flow_values(
 
     Args:
         energy_data: Complete energy flow data
-        buy_price: Current electricity purchase price (SEK/kWh)
-        sell_price: Current electricity sale price (SEK/kWh)
+        buy_price: Current electricity purchase price per kWh
+        sell_price: Current electricity sale price per kWh
 
     Returns:
-        Dict mapping flow names to economic values (SEK)
+        Dict mapping flow names to economic values in configured currency
 
     Examples:
         {
@@ -414,6 +417,7 @@ def create_decision_data(
     buy_price: float,
     sell_price: float,
     dt: float,
+    currency: str,
 ) -> DecisionData:
     """
     Create enhanced DecisionData with rich pattern analysis and economic reasoning.
@@ -426,14 +430,15 @@ def create_decision_data(
         power: Battery power action (+ charge, - discharge) in kW
         energy_data: Complete energy flow data
         hour: Current hour (0-23)
-        cost_basis: Cost basis of stored energy (SEK/kWh)
+        cost_basis: Cost basis of stored energy per kWh
         reward: Total reward from DP calculation
         import_cost: Grid import cost (energy_data.grid_imported * current_buy_price)
         export_revenue: Grid export revenue (energy_data.grid_exported * current_sell_price)
         battery_wear_cost: Battery degradation cost
-        buy_price: Current electricity purchase price (SEK/kWh)
-        sell_price: Current electricity sale price (SEK/kWh)
+        buy_price: Current electricity purchase price per kWh
+        sell_price: Current electricity sale price per kWh
         dt: Period duration in hours (e.g., 0.25 for quarterly, 1.0 for hourly)
+        currency: Currency code for display in economic chain explanations
 
     Returns:
         Enhanced DecisionData with all fields populated including advanced flow patterns
@@ -480,6 +485,7 @@ def create_decision_data(
         immediate_value=immediate_value,
         future_value=future_value,
         cost_basis=cost_basis,
+        currency=currency,
     )
 
     # Advanced flow pattern analysis from decisionframework.md

@@ -11,18 +11,18 @@
 export interface FormattedValue {
   value: number;        // Raw numeric value for calculations/sorting
   display: string;      // Formatted number without unit ("84.87", "700")
-  unit: string;         // Unit label ("SEK", "kWh", "Wh", "%")
-  text: string;         // Complete formatted text ("84.87 SEK", "700 Wh")
+  unit: string;         // Unit label (currency code, "kWh", "Wh", "%")
+  text: string;         // Complete formatted text ("84.87 EUR", "700 Wh")
 }
 export interface HourlyData {
   // Core display fields (use these for UI)
   period: number;  // Period index (0-23 for hourly, 0-95 for quarterly)
 
   // Economic fields (use these for cost calculations)
-  batteryCycleCost?: number;   // SEK battery wear
-  gridCost?: number;           // SEK net grid cost
-  hourlyCost?: number;         // SEK total cost
-  hourlySavings?: number;      // SEK savings
+  batteryCycleCost?: number;   // battery wear cost
+  gridCost?: number;           // net grid cost
+  hourlyCost?: number;         // total cost
+  hourlySavings?: number;      // savings
 
   // Battery state (established in SOC/SOE naming fix)
   batterySoeStart?: number;    // kWh
@@ -54,10 +54,10 @@ export interface HourlyData {
   batteryAction?: FormattedValue;
   
   // Additional economic fields
-  solarOnlyCost?: number;      // SEK
-  gridOnlyCost?: number;       // SEK
-  batterySavings?: number;     // SEK
-  solarSavings?: number;       // SEK - Solar-Only vs Grid-Only savings
+  solarOnlyCost?: number;
+  gridOnlyCost?: number;
+  batterySavings?: number;
+  solarSavings?: number;       // Solar-Only vs Grid-Only savings
   
   // Metadata
   dataSource?: string;  // 'actual' | 'predicted' | others
@@ -66,18 +66,18 @@ export interface HourlyData {
 
 export interface ScheduleSummary {
   // Baseline costs (what scenarios would cost)
-  gridOnlyCost: number;       // SEK if only using grid
-  solarOnlyCost: number;      // SEK if solar + grid (no battery)
-  optimizedCost: number;      // SEK with battery optimization
-  
+  gridOnlyCost: number;       // cost if only using grid
+  solarOnlyCost: number;      // cost if solar + grid (no battery)
+  optimizedCost: number;      // cost with battery optimization
+
   // Component costs (breakdown of optimized scenario)
-  totalGridCost: number;      // SEK net grid costs
-  totalBatteryCycleCost: number; // SEK battery wear costs
-  
+  totalGridCost: number;      // net grid costs
+  totalBatteryCycleCost: number; // battery wear costs
+
   // Savings calculations (vs baselines)
-  totalSavings: number;       // SEK total savings vs grid-only
-  solarSavings: number;       // SEK savings from solar vs grid-only  
-  batterySavings: number;     // SEK additional savings from battery
+  totalSavings: number;       // total savings vs grid-only
+  solarSavings: number;       // savings from solar vs grid-only
+  batterySavings: number;     // additional savings from battery
   
   // Energy totals (for context)
   totalSolarProduction: number;   // kWh
@@ -105,7 +105,7 @@ export interface BatterySettings {
   maxDischargePowerKw: number;  // kW max discharge power
   
   // Economic settings
-  cycleCostPerKwh: number;      // SEK/kWh wear cost
+  cycleCostPerKwh: number;      // wear cost per kWh
   chargingPowerRate: number;    // % of max power to use
   dischargingPowerRate: number; // % of max power to use for discharge
   

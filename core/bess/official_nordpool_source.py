@@ -43,7 +43,7 @@ class OfficialNordpoolSource(PriceSource):
             target_date: The date to get prices for
 
         Returns:
-            List of hourly prices in SEK/kWh (VAT-exclusive)
+            List of hourly prices per kWh (VAT-exclusive)
 
         Raises:
             ValueError: If prices cannot be fetched
@@ -106,14 +106,14 @@ class OfficialNordpoolSource(PriceSource):
             for entry in price_entries:
                 # Official integration returns prices in [Currency]/MWh
                 price_mwh = float(entry["price"])
-                # Convert to SEK/kWh
+                # Convert from per MWh to per kWh
                 price_kwh = price_mwh / 1000.0
                 prices.append(price_kwh)
 
             logger.info(
                 f"Successfully fetched {len(prices)} prices from official Nordpool integration"
             )
-            logger.debug(f"Price range: {min(prices):.3f} - {max(prices):.3f} SEK/kWh")
+            logger.debug(f"Price range: {min(prices):.3f} - {max(prices):.3f} per kWh")
 
             return prices
 

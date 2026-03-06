@@ -72,7 +72,7 @@ class PredictionSnapshotStore:
         self._snapshots.append(snapshot)
 
         logger.debug(
-            "Stored snapshot at period %d: predicted savings %.2f SEK, %d periods, %d TOU intervals",
+            "Stored snapshot at period %d: predicted savings %.2f, %d periods, %d TOU intervals",
             optimization_period,
             predicted_daily_savings,
             len(daily_view.periods),

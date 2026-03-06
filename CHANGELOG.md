@@ -5,6 +5,20 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.0.0] - 2026-03-06
+
+### Added
+
+- ML energy consumption predictor (`ml/` module). XGBoost model trained on historical InfluxDB sensor data produces 96 quarter-hourly forecasts using cyclical time encoding, daylight hours, weather data, and historical consumption context. Integrates with the battery optimizer via `consumption_strategy: ml_prediction` with daily retrain at 23:00 and cached predictions.
+- Configurable consumption forecasting via `consumption_strategy` setting in the `home` config section. Four strategies available:
+  - `sensor` (default): Reads the existing 48h-average HA sensor. Backwards-compatible, no changes needed for existing users.
+  - `fixed`: Uses the `home.consumption` config value as a flat forecast. No sensors required.
+  - `influxdb_profile`: Queries InfluxDB for a 7-day weekly average profile, producing a shaped 96-value forecast that reflects actual daily usage patterns.
+  - `ml_prediction`: Runs a trained XGBoost ML model with weather forecast data for weather-aware consumption predictions.
+- ML Report tab in the web UI showing forecast chart (predicted vs yesterday), model metrics comparison table (XGBoost vs baselines), and feature importance visualization. Served by new `/api/ml-report` endpoint reading a training sidecar file.
+- ML CLI tools: `train`, `predict`, `evaluate`, `baseline`, `report`, and `fetch-data` commands for standalone model development.
+- `consumptionStrategy` field exposed in the battery settings API and frontend TypeScript types.
+
 ## [6.10.3] - 2026-03-05
 
 ### Fixed

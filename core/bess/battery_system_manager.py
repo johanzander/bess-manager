@@ -63,6 +63,7 @@ class BatterySystemManager:
         controller: HomeAssistantAPIController | None = None,
         price_source: PriceSource | None = None,
         nordpool_config: dict | None = None,
+        addon_options: dict | None = None,
     ):
         """Initialize with same interface as original BatterySystemManager."""
 
@@ -71,6 +72,7 @@ class BatterySystemManager:
         self.home_settings = HomeSettings()
         self.price_settings = PriceSettings()
         self._nordpool_config = nordpool_config or {}
+        self._addon_options = addon_options or {}
 
         # Store controller reference
         self._controller = controller
@@ -115,6 +117,10 @@ class BatterySystemManager:
         self._current_schedule = None
         self._initial_soe = None
 
+        # Prediction caches (populated by _fetch_predictions)
+        self._consumption_predictions: list[float] | None = None
+        self._solar_predictions: list[float] | None = None
+
         # Schedule verification flag - set when deployment has failures
         self._schedule_needs_verification = False
 
@@ -126,6 +132,10 @@ class BatterySystemManager:
         # Inject failure tracker into controller if available
         if self._controller:
             self._controller.failure_tracker = self._runtime_failure_tracker
+
+        # ML forecast cache — keyed by date to auto-invalidate at midnight
+        self._ml_forecast_cache: list[float] | None = None
+        self._ml_forecast_cache_date: date | None = None
 
         logger.debug("BatterySystemManager initialized")
 
@@ -266,6 +276,11 @@ class BatterySystemManager:
 
                 # Initialize historical data - using improved sensor collector
                 self._fetch_and_initialize_historical_data()
+
+                # Retrain ML model before first forecast so boot uses fresh data
+                if self.home_settings.consumption_strategy == "ml_prediction":
+                    logger.info("Retraining ML model on startup...")
+                    self._retrain_ml_model()
 
                 # Fetch predictions
                 self._fetch_predictions()
@@ -602,6 +617,117 @@ class BatterySystemManager:
         except Exception as e:
             logger.error(f"Failed to initialize historical data: {e}")
 
+    def _get_consumption_forecast(self) -> list[float]:
+        """Get consumption forecast based on the configured strategy.
+
+        Dispatches to the appropriate data source based on
+        home_settings.consumption_strategy.
+
+        Returns:
+            List of 96 float values (kWh per 15-minute period).
+        """
+        strategy = self.home_settings.consumption_strategy
+
+        if strategy == "sensor":
+            return self.controller.get_estimated_consumption()
+
+        if strategy == "fixed":
+            quarterly = self.home_settings.default_hourly / 4.0
+            return [quarterly] * 96
+
+        if strategy == "influxdb_profile":
+            return self._get_influxdb_profile_forecast()
+
+        if strategy == "ml_prediction":
+            return self._get_ml_prediction_forecast()
+
+        raise ValueError(f"Unknown consumption_strategy: '{strategy}'")
+
+    def _get_influxdb_profile_forecast(self) -> list[float]:
+        """Get consumption forecast from InfluxDB weekly average profile.
+
+        Queries InfluxDB for the past 7 days of the target consumption
+        sensor and returns the 96-value weekly average profile.
+        """
+        from ml.data_fetcher import fetch_history_context
+
+        influxdb_config = self._addon_options.get("influxdb")
+        if not influxdb_config:
+            raise ValueError(
+                "influxdb_profile strategy requires 'influxdb' section in add-on config"
+            )
+
+        sensors_config = self._addon_options.get("sensors", {})
+        target_sensor = sensors_config.get("local_load_power", "")
+        if not target_sensor:
+            raise ValueError(
+                "influxdb_profile strategy requires 'local_load_power' sensor configured"
+            )
+
+        # Strip 'sensor.' prefix if present — fetch_history_context adds it
+        if target_sensor.startswith("sensor."):
+            target_sensor = target_sensor[len("sensor.") :]
+
+        ml_config = self._addon_options.get("ml", {})
+        location = ml_config.get("location")
+        if not location:
+            raise ValueError(
+                "influxdb_profile strategy requires 'ml.location' section in add-on config"
+            )
+
+        config = {
+            "influxdb": influxdb_config,
+            "location": location,
+            "target": {
+                "sensor": target_sensor,
+                "unit": "W",
+            },
+        }
+
+        context = fetch_history_context(config)
+        return context["week_avg_profile"]
+
+    def _get_ml_prediction_forecast(self) -> list[float]:
+        """Get consumption forecast from the ML prediction model.
+
+        Results are cached for the current calendar day. The cache is
+        invalidated by _retrain_ml_model() and by _handle_special_cases()
+        before the next-day prediction refresh.
+        """
+        from ml.config import load_config
+        from ml.predictor import predict_next_24h
+
+        today = date.today()
+        if self._ml_forecast_cache is not None and self._ml_forecast_cache_date == today:
+            logger.debug("Using cached ML forecast for %s", today)
+            return self._ml_forecast_cache
+
+        ml_config = load_config(app_options=self._addon_options)
+        predictions = predict_next_24h(ml_config)
+        self._ml_forecast_cache = predictions
+        self._ml_forecast_cache_date = today
+        logger.info("Generated fresh ML forecast: total=%.2f kWh", sum(predictions))
+        return predictions
+
+    def _retrain_ml_model(self) -> None:
+        """Retrain the ML model and invalidate the forecast cache.
+
+        Called at system boot and daily at 23:00 so the model captures
+        the latest consumption data before tomorrow's forecast is generated.
+        """
+        from ml.config import load_config
+        from ml.trainer import train_model
+
+        ml_config = load_config(app_options=self._addon_options)
+        result = train_model(ml_config)
+        self._ml_forecast_cache = None
+        self._ml_forecast_cache_date = None
+        logger.info(
+            "ML model retrained: MAE=%.4f kWh, train_size=%d",
+            result["metrics"]["mae_kwh"],
+            result["train_size"],
+        )
+
     def _fetch_predictions(self) -> None:
         """Fetch consumption and solar predictions and store them."""
         try:
@@ -609,7 +735,7 @@ class BatterySystemManager:
                 logger.warning("Cannot fetch predictions: controller is not available")
                 return
 
-            consumption_predictions = self._controller.get_estimated_consumption()
+            consumption_predictions = self._get_consumption_forecast()
             solar_predictions = self._controller.get_solar_forecast()
 
             # Store the predictions (this was missing!)
@@ -658,6 +784,9 @@ class BatterySystemManager:
             # Clear historical store to prevent yesterday's data from appearing as today's future data
             self.historical_store.clear()
             self.prediction_snapshot_store.clear()
+            # Force a fresh ML forecast covering tomorrow's window
+            self._ml_forecast_cache = None
+            self._ml_forecast_cache_date = None
             self._fetch_predictions()
 
     def _get_price_data(
@@ -933,7 +1062,7 @@ class BatterySystemManager:
 
         if prepare_next_day:
             # For next day, use predictions only
-            consumption_predictions = self.controller.get_estimated_consumption()
+            consumption_predictions = self._get_consumption_forecast()
             solar_predictions = self.controller.get_solar_forecast()
 
             consumption_data = consumption_predictions
@@ -951,7 +1080,7 @@ class BatterySystemManager:
             completed_periods = [
                 i for i, p in enumerate(today_periods) if p is not None
             ]
-            predictions_consumption = self.controller.get_estimated_consumption()
+            predictions_consumption = self._get_consumption_forecast()
             predictions_solar = self.controller.get_solar_forecast()
 
             # Extend predictions for tomorrow when horizon exceeds today
@@ -2262,8 +2391,10 @@ class BatterySystemManager:
     def _log_battery_system_config(self) -> None:
         """Log the current battery configuration - reproduces original functionality."""
         try:
-            # Get energy data for consumption info (like original)
-            predictions_consumption = self.controller.get_estimated_consumption()
+            # Use already-fetched predictions — avoids triggering a heavy pipeline
+            # (InfluxDB query or ML inference) just for a log message
+            assert self._consumption_predictions is not None
+            predictions_consumption = self._consumption_predictions
 
             # Get current SOC
             if self._controller:

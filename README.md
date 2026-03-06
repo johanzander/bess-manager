@@ -20,6 +20,8 @@ The system requires the Growatt, a price source (Nordpool or Octopus Energy), an
 
 **Hourly Re-optimization**: Recalculates the optimal 24-hour schedule every hour as predicted values become actual.
 
+**Consumption Forecasting**: Four configurable strategies for predicting home consumption — from a simple fixed value to InfluxDB weekly profiles and ML-based weather-aware predictions. Set `consumption_strategy` in config to choose.
+
 **Comprehensive Energy Tracking**: Tracks all energy flows (solar production, grid import/export, battery charge/discharge, home consumption) with detailed cost analysis and savings calculations.
 
 **Power Monitoring & Fuse Protection**: Monitors grid current to prevent overloading electrical fuses by limiting battery charging when household consumption is high.

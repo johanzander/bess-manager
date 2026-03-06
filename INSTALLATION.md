@@ -41,14 +41,32 @@ Complete guide for installing and configuring BESS Battery Manager for Home Assi
    - Find "BESS Battery Manager" in Local add-ons
    - Click "Install"
 
-## Step 2: Create Home Consumption Sensor
+## Step 2: Choose a Consumption Strategy
 
-BESS needs a consumption sensor. How to predict home energy consumption is outside the scope of this AddOn.
-Here is an example of a template sensor that predicts the future consumption based on last 48h consumption average. This approach is sufficient for good optimization perfomrance.
+BESS needs a consumption forecast to optimize battery scheduling. Four strategies are available, configured via `consumption_strategy` in the `home` section. Start with the simplest approach and graduate to smarter options as data accumulates.
 
-### Example sensor
+### Strategy Overview
 
-Add to `configuration.yaml`:
+| Strategy | Description | Requirements |
+|---|---|---|
+| `sensor` | Reads a 48h-average HA sensor, returns a flat forecast | HA template sensor (see below) |
+| `fixed` | Uses the `home.consumption` config value as a flat forecast | Nothing extra |
+| `influxdb_profile` | Queries InfluxDB for a 7-day weekly average profile with daily shape | InfluxDB with sensor history |
+| `ml_prediction` | Runs an ML model with weather forecast for a shaped prediction | Trained model + HA weather entity |
+
+Set your chosen strategy in `config.yaml`:
+
+```yaml
+home:
+  consumption: 3.5
+  consumption_strategy: "sensor"   # "sensor" | "fixed" | "influxdb_profile" | "ml_prediction"
+```
+
+### Strategy: `sensor` (default)
+
+This is the default and works out of the box for existing users. It reads a 48h-average sensor from Home Assistant and returns a flat consumption value for all 96 quarter-hourly periods.
+
+Create a template sensor in `configuration.yaml`:
 
 ```yaml
 template:
@@ -80,6 +98,65 @@ sensor:
 
 **EV charging:** Exclude if managed separately. Include if you want BESS to optimize around it.
 
+### Strategy: `fixed`
+
+The simplest strategy. Uses the `home.consumption` value from config as a flat forecast. No sensors or integrations required.
+
+```yaml
+home:
+  consumption: 3.5                 # kWh per hour — used as the fixed forecast value
+  consumption_strategy: "fixed"
+```
+
+Every 15-minute period gets `consumption / 4` (e.g., 3.5 kWh/h becomes 0.875 kWh per period). Useful when you have no consumption sensor set up or want a stable baseline.
+
+### Strategy: `influxdb_profile`
+
+Queries InfluxDB for the past 7 days of your `local_load_power` sensor and computes a weekly average profile. Unlike `sensor` and `fixed`, this produces a **shaped** 96-value forecast that reflects your actual daily usage pattern (low at night, peaks during morning/evening).
+
+**Requirements:**
+
+- InfluxDB configured in the `influxdb` section of `config.yaml`
+- The `local_load_power` sensor configured in the `sensors` section
+
+```yaml
+home:
+  consumption_strategy: "influxdb_profile"
+
+influxdb:
+  url: "http://homeassistant.local:8086/api/v2/query"
+  bucket: "home_assistant/autogen"
+  username: "your_db_username"
+  password: "your_db_password"
+
+sensors:
+  local_load_power: "sensor.your_home_consumption"
+```
+
+### Strategy: `ml_prediction`
+
+Uses a trained XGBoost ML model to generate weather-aware consumption predictions. This produces the most accurate shaped forecast by combining historical patterns with weather forecast data (temperature, cloud coverage, wind speed).
+
+**Requirements:**
+
+- A trained ML model (see [ML README](ml/README.md) for training instructions)
+- Weather forecast entity in Home Assistant
+- InfluxDB with historical sensor data (for training and history context)
+
+```yaml
+home:
+  consumption_strategy: "ml_prediction"
+```
+
+The ML model is configured separately in `ml_config.yaml`. See the [ML Energy Consumption Predictor](ml/README.md) documentation for setup and training.
+
+### Which Strategy Should I Choose?
+
+- **New installation, no InfluxDB**: Start with `fixed` or `sensor`
+- **Have InfluxDB with 1+ week of history**: Use `influxdb_profile` for a shaped profile with no ML setup
+- **Have InfluxDB with 30+ days of history**: Use `ml_prediction` for the best accuracy
+- **Want the simplest setup**: Use `fixed` with a reasonable consumption estimate
+
 ## Step 3: Configure BESS Manager
 
 Edit the add-on configuration:
@@ -100,6 +177,7 @@ battery:
 
 home:
   consumption: 3.5                  # Default hourly consumption (kWh)
+  consumption_strategy: "sensor"    # How to forecast consumption (see below)
   currency: "EUR"                   # Your currency (SEK, EUR, NOK)
   max_fuse_current: 25              # Maximum fuse current (A)
   voltage: 230                      # Line voltage (V)
@@ -143,8 +221,8 @@ sensors:
   import_power: "sensor.your_grid_import"
   export_power: "sensor.your_grid_export"
 
-  # Consumption forecast (required)
-  48h_avg_grid_import: "sensor.48h_average_grid_import_power"  # From Step 2
+  # Consumption forecast (required for "sensor" strategy, see Step 2)
+  48h_avg_grid_import: "sensor.48h_average_grid_import_power"
 
   # Price sensors (required for Nordpool, not needed for Octopus)
   nordpool_kwh_today: "sensor.nordpool_kwh_your_area"
@@ -281,7 +359,7 @@ This setting controls when the battery should be used. The optimization algorith
 
 **Problem:** Missing consumption data
 
-**Solution:** Check 48h average sensor is working (Step 2)
+**Solution:** Check your `consumption_strategy` setting and its requirements (Step 2). For `sensor`, verify the 48h average sensor is returning data. For `influxdb_profile`, check InfluxDB connectivity. For `ml_prediction`, ensure the model is trained.
 
 **Problem:** Battery charges during expensive hours, discharges during cheap hours
 

@@ -66,8 +66,19 @@ The add-on requires sensors for:
 
 - Battery: SOC, charge/discharge power, control switches
 - Solar: Production, consumption, grid import/export
-- Pricing: Nordpool spot prices (today and tomorrow)
-- Consumption: 48-hour average forecast
+- Pricing: Electricity spot prices via Nordpool or Octopus Energy (today and tomorrow)
+- Consumption: Depends on `consumption_strategy` setting (see below)
+
+### Consumption Forecasting
+
+Four strategies are available for consumption forecasting, configured via `consumption_strategy` in the `home` section:
+
+| Strategy | Sensor requirements |
+|---|---|
+| `sensor` (default) | `48h_avg_grid_import` sensor configured |
+| `fixed` | None (uses `home.consumption` value) |
+| `influxdb_profile` | `local_load_power` sensor + InfluxDB |
+| `ml_prediction` | Trained ML model + HA weather entity |
 
 See the [Installation Guide](https://github.com/johanzander/bess-manager/blob/main/INSTALLATION.md) for complete sensor configuration examples.
 

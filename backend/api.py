@@ -32,11 +32,14 @@ async def get_battery_settings():
     try:
         settings = bess_controller.system.get_settings()
         battery_settings = settings["battery"]
-        estimated_consumption = settings["home"].default_hourly
+        home_settings = settings["home"]
+        estimated_consumption = home_settings.default_hourly
 
         # Create APIBatterySettings using existing method
         api_settings = APIBatterySettings.from_internal(
-            battery_settings, estimated_consumption
+            battery_settings,
+            estimated_consumption,
+            consumption_strategy=home_settings.consumption_strategy,
         )
         return api_settings.__dict__
 
@@ -2108,6 +2111,65 @@ async def compare_two_snapshots(
     except Exception as e:
         logger.error(f"Error comparing snapshots: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.get("/api/ml-report")
+async def get_ml_report():
+    """Return ML model report: metrics, feature importance, predictions vs yesterday."""
+    import json
+    from pathlib import Path
+
+    from app import bess_controller
+
+    system = bess_controller.system
+    is_active = system.home_settings.consumption_strategy == "ml_prediction"
+
+    try:
+        from ml.config import load_config
+
+        ml_cfg = load_config(app_options=system._addon_options)
+        report_path = Path(ml_cfg["model_path"]).with_suffix(".report.json")
+    except Exception as e:
+        logger.warning("Could not load ML config for report: %s", e)
+        return {"isActive": is_active, "modelAvailable": False}
+
+    if not report_path.exists():
+        return {"isActive": is_active, "modelAvailable": False}
+
+    with open(report_path) as f:
+        report = json.load(f)
+
+    predictions = system._ml_forecast_cache
+    forecast_date = (
+        system._ml_forecast_cache_date.isoformat()
+        if system._ml_forecast_cache_date
+        else None
+    )
+
+    yesterday_profile = None
+    try:
+        from ml.data_fetcher import fetch_history_context
+
+        history = fetch_history_context(ml_cfg)
+        yesterday_profile = history["yesterday_profile"]
+    except Exception as e:
+        logger.warning("Could not fetch yesterday profile for ML report: %s", e)
+
+    return {
+        "isActive": is_active,
+        "modelAvailable": True,
+        "lastTrained": report["trained_at"],
+        "trainSize": report["train_size"],
+        "testSize": report["test_size"],
+        "metrics": convert_keys_to_camel_case(report["metrics"]),
+        "baselines": {
+            k: convert_keys_to_camel_case(v) for k, v in report["baselines"].items()
+        },
+        "featureImportance": report["feature_importance"],
+        "forecastDate": forecast_date,
+        "predictions": predictions,
+        "yesterdayProfile": yesterday_profile,
+    }
 
 
 @router.get("/api/export-debug-data")

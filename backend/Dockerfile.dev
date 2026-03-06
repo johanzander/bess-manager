@@ -16,6 +16,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy rest of the code
 COPY backend/ /app/
 COPY core/bess /app/core/bess
+COPY ml/ /app/ml/
 
 # Expose port
 EXPOSE 8080

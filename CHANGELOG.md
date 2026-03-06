@@ -5,6 +5,12 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.0.12] - 2026-03-06
+
+### Fixed
+
+- Terminal value calculation now uses the median of remaining buy prices instead of the last known non-zero price. The previous approach was provider-specific (worked for Octopus Agile by accident but not Nordpool). The median is outlier-resistant, works across all price providers, and correctly handles negative prices which the `p > 0` filter incorrectly skipped.
+
 ## [7.0.11] - 2026-03-06
 
 ### Removed

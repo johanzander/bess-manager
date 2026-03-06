@@ -277,8 +277,8 @@ class BatterySystemManager:
                 # Initialize historical data - using improved sensor collector
                 self._fetch_and_initialize_historical_data()
 
-                # Retrain ML model before first forecast so boot uses fresh data
-                if self.home_settings.consumption_strategy == "ml_prediction":
+                # Retrain ML model on boot if ml config is present (for report data)
+                if self._addon_options.get("ml"):
                     logger.info("Retraining ML model on startup...")
                     self._retrain_ml_model()
 

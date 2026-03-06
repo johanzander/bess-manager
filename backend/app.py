@@ -258,7 +258,7 @@ class BESSController:
 
         # ML model daily retrain at 23:00 — 55 minutes before next-day prep so
         # the retrained model is used when tomorrow's forecast is generated at 23:55
-        if self.system.home_settings.consumption_strategy == "ml_prediction":
+        if self.system._addon_options.get("ml"):
             self.scheduler.add_job(
                 self.system._retrain_ml_model,
                 CronTrigger(hour=23, minute=0),

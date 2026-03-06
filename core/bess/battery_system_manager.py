@@ -768,19 +768,7 @@ class BatterySystemManager:
             from ml.config import load_config
             from ml.trainer import train_model
 
-            influxdb_config = self._addon_options.get("influxdb", {})
-            config = load_config(
-                ml_section=ml_config_section,
-                influxdb_url=influxdb_config.get("url", ""),
-                influxdb_bucket=influxdb_config.get("bucket", ""),
-                influxdb_user=influxdb_config.get("username", ""),
-                influxdb_password=influxdb_config.get("password", ""),
-            )
-
-            target_sensor = self._controller.sensors.get("local_load_power", "")
-            if target_sensor and not target_sensor.startswith("sensor."):
-                target_sensor = f"sensor.{target_sensor}"
-            config["target"] = {"sensor": target_sensor}
+            config = load_config(app_options=self._addon_options)
 
             train_model(config)
             # Invalidate forecast cache so next call regenerates
@@ -800,19 +788,7 @@ class BatterySystemManager:
             from ml.config import load_config
             from ml.predictor import predict
 
-            influxdb_config = self._addon_options.get("influxdb", {})
-            config = load_config(
-                ml_section=ml_config_section,
-                influxdb_url=influxdb_config.get("url", ""),
-                influxdb_bucket=influxdb_config.get("bucket", ""),
-                influxdb_user=influxdb_config.get("username", ""),
-                influxdb_password=influxdb_config.get("password", ""),
-            )
-
-            target_sensor = self._controller.sensors.get("local_load_power", "")
-            if target_sensor and not target_sensor.startswith("sensor."):
-                target_sensor = f"sensor.{target_sensor}"
-            config["target"] = {"sensor": target_sensor}
+            config = load_config(app_options=self._addon_options)
 
             predictions = predict(config)
             if predictions is not None and len(predictions) > 0:

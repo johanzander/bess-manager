@@ -5,6 +5,12 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.0.7] - 2026-03-06
+
+### Fixed
+
+- Startup crash (`KeyError: 'HA_DB_URL'`) when ML model trains on boot in production. The ML config builder required InfluxDB credentials as environment variables, but in the HA add-on they come from options.json. Now falls back to the `influxdb` section in app options when env vars are not set.
+
 ## [7.0.6] - 2026-03-06
 
 ### Changed

@@ -53,8 +53,10 @@ def _resolve_recursive(obj: object) -> object:
 def _build_from_app_options(app_options: dict) -> dict:
     """Build ML config dict from the main app options (/data/options.json).
 
-    InfluxDB and HA credentials are read from environment variables (they are
-    never written to options.json). ML settings come from the 'ml' section.
+    InfluxDB credentials are resolved with env-var precedence (for dev) falling
+    back to the 'influxdb' section in app_options (production / HA options.json).
+    HA credentials come from environment variables set by run.sh.
+    ML settings come from the 'ml' section.
     The target sensor is derived from sensors.local_load_power.
     """
     ml = app_options["ml"]
@@ -70,16 +72,20 @@ def _build_from_app_options(app_options: dict) -> dict:
         for k, v in raw_feature_sensors.items()
     }
 
+    # InfluxDB: env vars take precedence (dev), fall back to app_options (production)
+    influxdb_opts = app_options.get("influxdb", {})
+    influxdb_config = {
+        "url": os.environ.get("HA_DB_URL") or influxdb_opts.get("url", ""),
+        "bucket": os.environ.get("HA_DB_BUCKET") or influxdb_opts.get("bucket", ""),
+        "username": os.environ.get("HA_DB_USER_NAME") or influxdb_opts.get("username", ""),
+        "password": os.environ.get("HA_DB_PASSWORD") or influxdb_opts.get("password", ""),
+    }
+
     return {
-        "influxdb": {
-            "url": os.environ["HA_DB_URL"],
-            "bucket": os.environ["HA_DB_BUCKET"],
-            "username": os.environ["HA_DB_USER_NAME"],
-            "password": os.environ["HA_DB_PASSWORD"],
-        },
+        "influxdb": influxdb_config,
         "ha_api": {
-            "url": os.environ["HA_URL"],
-            "token": os.environ["HA_TOKEN"],
+            "url": os.environ.get("HA_URL", "http://supervisor/core"),
+            "token": os.environ.get("HA_TOKEN", ""),
             "weather_entity": ml["weather_entity"],
         },
         "location": ml["location"],

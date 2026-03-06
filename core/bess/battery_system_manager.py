@@ -277,10 +277,34 @@ class BatterySystemManager:
                 # Initialize historical data - using improved sensor collector
                 self._fetch_and_initialize_historical_data()
 
-                # Retrain ML model on boot if ml config is present (for report data)
+                # Validate strategy-config compatibility
+                strategy = self.home_settings.consumption_strategy
+                ml_config_present = bool(self._addon_options.get("ml"))
+
+                if strategy == "ml_prediction" and not ml_config_present:
+                    logger.error(
+                        "consumption_strategy is 'ml_prediction' but 'ml' config section "
+                        "is missing. Falling back to 'fixed' strategy."
+                    )
+                    self.home_settings.consumption_strategy = "fixed"
+
+                if strategy == "influxdb_profile":
+                    ml_location = self._addon_options.get("ml", {}).get("location")
+                    if not ml_location:
+                        logger.error(
+                            "consumption_strategy is 'influxdb_profile' but 'ml.location' "
+                            "is not configured. Falling back to 'fixed' strategy."
+                        )
+                        self.home_settings.consumption_strategy = "fixed"
+
+                # Retrain ML model on boot and generate predictions (for report data)
                 if self._addon_options.get("ml"):
-                    logger.info("Retraining ML model on startup...")
-                    self._retrain_ml_model()
+                    try:
+                        logger.info("Retraining ML model on startup...")
+                        self._retrain_ml_model()
+                        self._generate_ml_predictions()
+                    except Exception as e:
+                        logger.error("ML model training/prediction failed on startup: %s", e)
 
                 # Fetch predictions
                 self._fetch_predictions()
@@ -727,6 +751,17 @@ class BatterySystemManager:
             result["metrics"]["mae_kwh"],
             result["train_size"],
         )
+
+    def _generate_ml_predictions(self) -> None:
+        """Generate and cache ML predictions regardless of active strategy."""
+        from ml.config import load_config
+        from ml.predictor import predict_next_24h
+
+        ml_config = load_config(app_options=self._addon_options)
+        predictions = predict_next_24h(ml_config)
+        self._ml_forecast_cache = predictions
+        self._ml_forecast_cache_date = date.today()
+        logger.info("ML predictions cached: total=%.2f kWh", sum(predictions))
 
     def _fetch_predictions(self) -> None:
         """Fetch consumption and solar predictions and store them."""

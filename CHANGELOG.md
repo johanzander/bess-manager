@@ -5,6 +5,15 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.0.9] - 2026-03-06
+
+### Fixed
+
+- ML predictions now generated proactively on boot and daily after retrain, so the ML Report tab shows data regardless of `consumption_strategy` (previously only populated on-demand for `ml_prediction`)
+- System crash when `ml` config section is missing and `consumption_strategy` is set to `ml_prediction` or `influxdb_profile`. Now falls back to `fixed` strategy with a clear error log
+- ML config `load_config()` now raises a descriptive `KeyError` when the `ml` section is missing, instead of a cryptic error from inside the config builder
+- ML training failure on boot no longer crashes the entire system — errors are logged and startup continues
+
 ## [7.0.8] - 2026-03-06
 
 ### Fixed

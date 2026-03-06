@@ -5,6 +5,12 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.0.11] - 2026-03-06
+
+### Removed
+
+- Remove disk persistence from HistoricalDataStore. This was a workaround for InfluxDB data-fetching bugs that have since been fixed. On startup, `_fetch_and_initialize_historical_data()` rebuilds all periods from InfluxDB, making the JSON persistence file redundant. Strategic intent persistence (ScheduleStore) is unaffected.
+
 ## [7.0.10] - 2026-03-06
 
 ### Fixed

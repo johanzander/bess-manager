@@ -1740,15 +1740,6 @@ async def get_historical_data_status():
                 else "Historical data is complete for today."
             ),
             "timestamp": datetime.now().isoformat(),
-            "persistence": {
-                "path": str(bess_controller.system.historical_store._persist_path),
-                "file_exists": bess_controller.system.historical_store._persist_path.exists(),
-                "file_size_bytes": (
-                    bess_controller.system.historical_store._persist_path.stat().st_size
-                    if bess_controller.system.historical_store._persist_path.exists()
-                    else None
-                ),
-            },
         }
 
         return convert_keys_to_camel_case(status)

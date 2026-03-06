@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ComposedChart, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
+import { ComposedChart, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, ReferenceArea } from 'recharts';
 import { HourlyData } from '../types';
 import { periodToTimeRange } from '../utils/timeUtils';
 import { DataResolution } from '../hooks/useUserPreferences';
@@ -8,19 +8,11 @@ import { DataResolution } from '../hooks/useUserPreferences';
 const CustomTooltip = ({ active, payload, label, resolution }: any) => {
   if (active && payload && payload.length) {
     const data = payload[0].payload;
-    if (label === 0) {
-      // Skip tooltip for the empty starting point
-      return null;
-    }
 
     // Get time range from period number stored in data
     const periodNum = data.periodNum;
     const isTomorrow = data.isTomorrow;
-    // For tomorrow data, use the period number relative to tomorrow
-    // In quarter-hourly mode, periods are offset by 96; in hourly, by 24
-    const tomorrowOffset = resolution === 'quarter-hourly' ? 96 : 24;
-    const displayPeriodNum = isTomorrow ? periodNum - tomorrowOffset : periodNum;
-    const timeRange = periodToTimeRange(displayPeriodNum, resolution);
+    const timeRange = periodToTimeRange(periodNum, resolution);
     const dayLabel = isTomorrow ? 'Tomorrow' : '';
 
     // Map chart dataKeys to their corresponding FormattedValue fields
@@ -153,30 +145,13 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
     return field || 0;
   };
 
-  // Shift timeline - data for hour 0 (00:00-01:00) should appear at position 1
-  // Support both hourly (24 periods) and quarterly (96 periods) data
+  // Map each period to a chart data point positioned at the START of its hour
+  // For stepAfter rendering: data at x=0 shows from 0→1, data at x=1 shows from 1→2, etc.
   const numDataPoints = dailyViewData?.length || 24;
-  const chartData: any[] = Array.from({ length: numDataPoints + 1 }, (_, index) => {
-    if (index === 0) {
-      // Add empty data point at the start (before 00:00)
-      return {
-        hour: 0,
-        periodNum: 0,
-        solar: 0,
-        batteryOut: 0,
-        gridIn: 0,
-        home: 0,
-        batteryIn: 0,
-        gridOut: 0,
-        isActual: true,
-        isTomorrow: false,
-        price: 0,
-      };
-    }
-    const dataIndex = index - 1;
-    const dailyViewHour = dailyViewData?.[dataIndex];
+  const chartData: any[] = Array.from({ length: numDataPoints }, (_, index) => {
+    const dailyViewHour = dailyViewData?.[index];
     const isActual = dailyViewHour?.dataSource === 'actual';
-    const periodNum = dataIndex;
+    const periodNum = index;
 
     // Map unified API data format to chart format
     const solarProduction = getValue(dailyViewHour?.solarProduction);
@@ -186,8 +161,8 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
     const gridImported = getValue(dailyViewHour?.gridImported) || 0;
     const gridExported = getValue(dailyViewHour?.gridExported) || 0;
 
-    // Calculate x-axis position
-    const hourPosition = resolution === 'quarter-hourly' ? (periodNum / 4) + 1 : index;
+    // Calculate x-axis position (start of period)
+    const hourPosition = resolution === 'quarter-hourly' ? (periodNum / 4) : periodNum;
 
     return {
       hour: hourPosition,
@@ -216,10 +191,13 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
   const hasTomorrowData = tomorrowData && tomorrowData.length > 0;
   if (hasTomorrowData) {
     for (const [idx, hourData] of tomorrowData.entries()) {
-      const periodNum = hourData.period ?? idx;
+      const rawPeriodNum = hourData.period ?? idx;
+      // Normalize period numbers: API may return 96-191 (continuation from today) or 0-95
+      const tomorrowPeriodsPerDay = resolution === 'quarter-hourly' ? 96 : 24;
+      const periodNum = rawPeriodNum >= tomorrowPeriodsPerDay ? rawPeriodNum - tomorrowPeriodsPerDay : rawPeriodNum;
       const hourPosition = resolution === 'quarter-hourly'
-        ? 24 + (periodNum / 4) + (1 / 4)
-        : 24 + periodNum + 1;
+        ? 24 + (periodNum / 4)
+        : 24 + periodNum;
 
       const solarProduction = getValue(hourData?.solarProduction);
       const homeConsumption = getValue(hourData?.homeConsumption);
@@ -228,11 +206,9 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
       const gridImported = getValue(hourData?.gridImported) || 0;
       const gridExported = getValue(hourData?.gridExported) || 0;
 
-      // Store period num with offset so tooltip can detect tomorrow
-      const tomorrowPeriodOffset = resolution === 'quarter-hourly' ? 96 : 24;
       chartData.push({
         hour: hourPosition,
-        periodNum: tomorrowPeriodOffset + periodNum,
+        periodNum,
         solar: solarProduction,
         batteryOut: batteryDischarged,
         gridIn: gridImported,
@@ -255,9 +231,19 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
   }
 
   // Compute max hour for X-axis domain
+  // Add 1 to include room for the last stepAfter to render
   const maxHour = hasTomorrowData
-    ? Math.ceil(Math.max(...chartData.map(d => d.hour)))
-    : (resolution === 'quarter-hourly' ? 24.25 : 24);
+    ? Math.ceil(Math.max(...chartData.map(d => d.hour))) + 1
+    : 24;
+
+  // Explicit tick positions at whole hours
+  const xAxisTicks = Array.from({ length: Math.ceil(maxHour) + 1 }, (_, i) => i);
+
+  // Find predicted hours range for shading
+  const firstPredictedIdx = chartData.findIndex(d => !d.isActual && !d.isTomorrow);
+  const lastTodayIdx = chartData.findIndex(d => d.isTomorrow);
+  const firstPredictedHour = firstPredictedIdx > -1 ? chartData[firstPredictedIdx].hour : null;
+  const lastTodayHour = lastTodayIdx > -1 ? chartData[lastTodayIdx - 1]?.hour : maxHour;
 
   return (
     <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
@@ -324,12 +310,15 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
             <CartesianGrid strokeDasharray="5 5" stroke={colors.gridLines} strokeOpacity={0.3} strokeWidth={0.5} />
             <XAxis
               dataKey="hour"
+              type="number"
               stroke={colors.text}
               tick={{ fontSize: 12 }}
               domain={[0, maxHour]}
-              label={{ value: hasTomorrowData ? 'Hour' : 'Hour of Day', position: 'insideBottom', offset: -10 }}
+              ticks={xAxisTicks}
+              interval={0}
+              label={{ value: 'Hour of Day', position: 'insideBottom', offset: -10 }}
               tickFormatter={(hour: number) => {
-                return Math.floor(hour % 24).toString().padStart(2, '0');
+                return (Math.floor(hour) % 24).toString().padStart(2, '0');
               }}
             />
             <YAxis 
@@ -360,17 +349,6 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
             {/* Reference line at zero to separate sources from consumption */}
             <ReferenceLine y={0} stroke={colors.text} strokeWidth={2} />
 
-            {/* Midnight separator when tomorrow data exists */}
-            {hasTomorrowData && (
-              <ReferenceLine
-                x={24}
-                stroke={colors.text}
-                strokeDasharray="4 4"
-                strokeWidth={1.5}
-                label={{ value: 'Tomorrow', position: 'top', fill: colors.text, fontSize: 11 }}
-              />
-            )}
-            
             {/* ENERGY SOURCES - Single series, style by isActual */}
             <Area
               type="monotone"
@@ -445,22 +423,19 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
               dot={false}
               connectNulls
             />
-            {/* Overlay for predicted + tomorrow hours - single unified grey */}
-            {chartData.findIndex(d => !d.isActual) > -1 && (
-              <rect
-                x={((chartData.findIndex(d => !d.isActual) / chartData.length) * 100) + '%'}
-                y={0}
-                width={(((chartData.length - chartData.findIndex(d => !d.isActual)) / chartData.length) * 100) + '%'}
-                height="100%"
+            {/* Overlay for predicted hours (today only) */}
+            {firstPredictedHour !== null && (
+              <ReferenceArea
+                x1={firstPredictedHour}
+                x2={lastTodayHour}
                 fill={isDarkMode ? 'rgba(120,120,120,0.12)' : 'rgba(120,120,120,0.10)'}
-                pointerEvents="none"
-                style={{ position: 'absolute', zIndex: 1 }}
+                ifOverflow="hidden"
               />
             )}
-            
+
             {/* Price line on secondary Y-axis */}
             <Line
-              type="monotone"
+              type="stepAfter"
               dataKey="price"
               yAxisId="price"
               stroke="#9CA3AF"
@@ -468,6 +443,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
               dot={false}
               strokeDasharray="3 3"
               name="Electricity Price"
+              connectNulls={false}
             />
           </ComposedChart>
         </ResponsiveContainer>

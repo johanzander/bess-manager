@@ -4,6 +4,7 @@ Complete replacement for battery_system.py that preserves ALL functionality.
 """
 
 import logging
+import statistics
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -1018,13 +1019,14 @@ class BatterySystemManager:
 
         When the horizon already extends past today (i.e. tomorrow's prices are
         included), return 0.0 since the DP has explicit future data. Otherwise,
-        estimate value from the last known buy price adjusted for efficiency
+        estimate value from the median buy price adjusted for efficiency
         and cycle cost.
 
-        Using the last known price (rather than an average) avoids inflating the
-        terminal value with peak prices that appear earlier in the horizon. The
-        last price in the day is typically an overnight off-peak price, which is
-        the best proxy for what overnight recharging would cost tomorrow.
+        Using the median of remaining buy prices avoids inflating the terminal
+        value with peak prices. The median is outlier-resistant, so evening
+        peaks cannot pull up the estimate regardless of price provider
+        (Nordpool, Octopus Agile, etc.). It also correctly handles negative
+        prices, which are valid in both markets.
 
         Args:
             buy_prices: Full buy price array (from optimization_period onwards)
@@ -1046,26 +1048,23 @@ class BatterySystemManager:
             )
             return 0.0
 
-        # Estimate terminal value from the last known non-zero buy price.
-        # This represents the expected overnight recharge cost: the last price
-        # before midnight is typically an off-peak rate, which is a far better
-        # proxy than an average that includes evening peaks.
+        # Estimate terminal value from the median buy price. The median is
+        # resistant to outliers (peaks), works across all price providers,
+        # and correctly handles negative prices.
         if not buy_prices:
             return 0.0
 
-        last_known_price = next(
-            (p for p in reversed(buy_prices) if p > 0), buy_prices[0]
-        )
+        median_price = statistics.median(buy_prices)
         terminal_value = (
-            last_known_price * self.battery_settings.efficiency_discharge
+            median_price * self.battery_settings.efficiency_discharge
             - self.battery_settings.cycle_cost_per_kwh
         )
         terminal_value = max(0.0, terminal_value)
 
         logger.info(
-            "Terminal value: %.3f/kWh (last_known_price=%.3f, efficiency=%.2f, cycle_cost=%.3f)",
+            "Terminal value: %.3f/kWh (median_price=%.3f, efficiency=%.2f, cycle_cost=%.3f)",
             terminal_value,
-            last_known_price,
+            median_price,
             self.battery_settings.efficiency_discharge,
             self.battery_settings.cycle_cost_per_kwh,
         )

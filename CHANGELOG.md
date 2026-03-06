@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Terminal value calculation now uses the last known non-zero price in the remaining horizon rather than the average of all remaining prices. Using the average inflated the terminal value when evening peak prices were included, causing the optimizer to incorrectly prefer holding battery charge over discharging during high-price periods. The last known price (typically an overnight off-peak rate) is a more accurate proxy for the expected cost of recharging tomorrow.
+- Terminal value calculation now uses the median of remaining buy prices instead of the average. The average inflated the terminal value when evening peak prices were included, causing the optimizer to incorrectly prefer holding battery charge over discharging during high-price periods. The median is outlier-resistant (peaks cannot inflate it), works correctly across all price providers (Nordpool, Octopus Agile), and properly handles negative prices which are valid in both markets.
 
 ## [7.3.0] - 2026-03-04
 

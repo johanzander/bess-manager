@@ -28,7 +28,7 @@ const SavingsPage: React.FC = () => {
     vatMultiplier: 1.25,
     additionalCosts: 0.45,
     taxReduction: 0.1,
-    area: 'SE3' as const
+    area: 'SE3'
   };
 
   return (

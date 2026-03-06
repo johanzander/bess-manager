@@ -31,23 +31,21 @@ def _camel_to_snake(name: str) -> str:
 
 # Price settings defaults
 DEFAULT_AREA = "SE4"
-MARKUP_RATE = 0.08  # 8 öre/kWh
+MARKUP_RATE = 0.08  # per kWh in configured currency
 VAT_MULTIPLIER = 1.25  # 25% VAT
-ADDITIONAL_COSTS = (
-    1.03  # överföringsavgift: 28.90 öre, energiskatt: 53.50 öre + 25% moms
-)
-TAX_REDUCTION = 0.0518  # 5.18 öre förlustersättning
-MIN_PROFIT = 0.2  # Minimim profit (SEK/kWh) to consider a charge/discharge cycle
-USE_ACTUAL_PRICE = False  # Use raw Nordpool spot prices or includue markup, VAT, etc.
+ADDITIONAL_COSTS = 1.03  # additional costs per kWh (grid fees, energy tax, etc.)
+TAX_REDUCTION = 0.0518  # tax reduction for sold energy per kWh
+MIN_PROFIT = 0.2  # Minimum profit per kWh to consider a charge/discharge cycle
+USE_ACTUAL_PRICE = False  # Use raw Nordpool spot prices or include markup, VAT, etc.
 
 # Battery settings defaults
 BATTERY_STORAGE_SIZE_KWH = 30.0
 BATTERY_MIN_SOC = 10  # percentage
 BATTERY_MAX_SOC = 100  # percentage
 BATTERY_MAX_CHARGE_DISCHARGE_POWER_KW = 15.0
-BATTERY_CHARGE_CYCLE_COST_SEK = 0.40  # SEK/kWh excl. VAT
+BATTERY_CHARGE_CYCLE_COST = 0.40  # per kWh excl. VAT
 BATTERY_MIN_ACTION_PROFIT_THRESHOLD = (
-    0.0  # SEK fixed minimum profit threshold for any battery action (0.0 for tests)
+    0.0  # fixed minimum profit threshold for any battery action (0.0 for tests)
 )
 BATTERY_DEFAULT_CHARGING_POWER_RATE = 40  # percentage
 BATTERY_EFFICIENCY_CHARGE = 0.97  # Mix of solar (98%) and grid (95%) charging
@@ -67,7 +65,7 @@ SAFETY_MARGIN_FACTOR = 1.0  # Safety margin for power calculations (100%)
 # - We monitor every 5min, so 100% is safe
 
 # Currency defaults
-DEFAULT_CURRENCY = "SEK"  # Default currency for price display
+DEFAULT_CURRENCY = "SEK"  # Default currency for price display (override in config.yaml)
 
 
 @dataclass
@@ -104,7 +102,7 @@ class BatterySettings:
     max_charge_power_kw: float = BATTERY_MAX_CHARGE_DISCHARGE_POWER_KW
     max_discharge_power_kw: float = BATTERY_MAX_CHARGE_DISCHARGE_POWER_KW
     charging_power_rate: float = BATTERY_DEFAULT_CHARGING_POWER_RATE
-    cycle_cost_per_kwh: float = BATTERY_CHARGE_CYCLE_COST_SEK
+    cycle_cost_per_kwh: float = BATTERY_CHARGE_CYCLE_COST
     min_action_profit_threshold: float = (
         BATTERY_MIN_ACTION_PROFIT_THRESHOLD  # NEW FIELD
     )
@@ -145,7 +143,7 @@ class BatterySettings:
                 "max_discharge_power_kw", BATTERY_MAX_CHARGE_DISCHARGE_POWER_KW
             )
             self.cycle_cost_per_kwh = battery_config.get(
-                "cycle_cost_per_kwh", BATTERY_CHARGE_CYCLE_COST_SEK
+                "cycle_cost_per_kwh", BATTERY_CHARGE_CYCLE_COST
             )
             self.min_action_profit_threshold = battery_config.get(
                 "min_action_profit_threshold", BATTERY_MIN_ACTION_PROFIT_THRESHOLD

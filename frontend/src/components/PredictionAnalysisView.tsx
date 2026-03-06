@@ -218,7 +218,7 @@ const PredictionAnalysisView: React.FC = () => {
 
         // Get final SOE values (last period)
         const lastPeriod = comparison.periodComparisons[comparison.periodComparisons.length - 1];
-        const currency = lastPeriod?.snapshotA.cost.unit || 'SEK';
+        const currency = lastPeriod?.snapshotA.cost.unit || '???';
 
         return (
         <div className="space-y-6">

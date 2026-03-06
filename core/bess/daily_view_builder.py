@@ -158,7 +158,7 @@ class DailyViewBuilder:
         logger.info(
             f"Built view: {len(periods)} periods "
             f"({actual_count} actual, {predicted_count} predicted, {missing_count} missing), "
-            f"total savings: {total_savings:.2f} SEK"
+            f"total savings: {total_savings:.2f}"
         )
 
         return DailyView(

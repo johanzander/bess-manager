@@ -29,8 +29,8 @@ After optimization completes, the total savings are compared against the thresho
 - If total_savings < min_action_profit_threshold: Reject optimization and use all-IDLE schedule (do nothing)
 
 This ensures the battery only operates when it provides meaningful economic benefit:
-Default: 1.5 SEK - configurable via battery.min_action_profit_threshold_sek in config.yaml
-Example: 1.5 SEK threshold means optimization must save at least 1.5 SEK to be executed
+Configurable via battery.min_action_profit_threshold in config.yaml (in your currency).
+Example: a threshold of 1.5 means optimization must save at least 1.5 to be executed
 Otherwise the battery stays idle - better to do nothing than operate for marginal gains
 
 STRATEGIC INTENT CAPTURE:
@@ -176,6 +176,7 @@ def _calculate_reward(
     sell_price: list[float],
     solar_production: float,
     cost_basis: float,
+    currency: str,
 ) -> tuple[float, float, PeriodData]:
     """
     Calculate reward with proper cycle cost accounting and CORRECTED discharge profitability checks.
@@ -192,11 +193,11 @@ def _calculate_reward(
     - Discharge only profitable if this value > cost_basis
     - Must account for discharge efficiency losses
 
-    Example for stored energy costing 2.61 SEK/kWh:
+    Example for stored energy costing 2.61/kWh:
     - If buy_price = 2.58, sell_price = 1.81
-    - Avoid purchase value: 2.58 x 0.95 = 2.45 SEK/kWh stored
-    - Export value: 1.81 x 0.95 = 1.72 SEK/kWh stored
-    - Best value: max(2.45, 1.72) = 2.45 SEK/kWh stored
+    - Avoid purchase value: 2.58 x 0.95 = 2.45/kWh stored
+    - Export value: 1.81 x 0.95 = 1.72/kWh stored
+    - Best value: max(2.45, 1.72) = 2.45/kWh stored
     - 2.45 < 2.61 → UNPROFITABLE (correctly blocked)
     """
 
@@ -315,7 +316,7 @@ def _calculate_reward(
                 f"Buy: {current_buy_price:.3f}, Sell: {current_sell_price:.3f}, "
                 f"Avoid value: {avoid_purchase_value:.3f}, Export value: {export_value:.3f}, "
                 f"Best value: {effective_value_per_kwh_stored:.3f} <= "
-                f"Cost basis: {cost_basis:.3f} SEK/kWh stored"
+                f"Cost basis: {cost_basis:.3f} {currency}/kWh stored"
             )
 
             # Return negative infinity to prevent this action in optimization
@@ -376,6 +377,7 @@ def _calculate_reward(
         buy_price=current_buy_price,
         sell_price=current_sell_price,
         dt=dt,
+        currency=currency,
     )
 
     # ============================================================================
@@ -546,6 +548,7 @@ def _run_dynamic_programming(
     initial_soe: float | None = None,
     initial_cost_basis: float = 0.0,
     terminal_value_per_kwh: float = 0.0,
+    currency: str = "SEK",
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict]:
     """
     Enhanced DP that stores the PeriodData objects calculated during optimization.
@@ -629,6 +632,7 @@ def _run_dynamic_programming(
                     buy_price=buy_price,
                     sell_price=sell_price,
                     cost_basis=C[t, i],
+                    currency=currency,
                 )
 
                 # Skip if unprofitable
@@ -814,6 +818,7 @@ def optimize_battery_schedule(
     initial_cost_basis: float | None = None,
     period_duration_hours: float = 0.25,
     terminal_value_per_kwh: float = 0.0,
+    currency: str = "SEK",
 ) -> OptimizationResult:
     """
     Battery optimization that eliminates dual cost calculation by using
@@ -879,6 +884,7 @@ def optimize_battery_schedule(
         initial_cost_basis=initial_cost_basis,
         dt=dt,
         terminal_value_per_kwh=terminal_value_per_kwh,
+        currency=currency,
     )
 
     # Step 2: Extract optimal path results directly from stored DP data
@@ -937,7 +943,7 @@ def optimize_battery_schedule(
     logger.info(
         f"Direct Results: Grid-only cost: {total_base_cost:.2f}, "
         f"Optimized cost: {total_optimized_cost:.2f}, "
-        f"Savings: {grid_to_battery_solar_savings:.2f} SEK ({economic_summary.grid_to_battery_solar_savings_pct:.1f}%)"
+        f"Savings: {grid_to_battery_solar_savings:.2f} {currency} ({economic_summary.grid_to_battery_solar_savings_pct:.1f}%)"
     )
 
     # ============================================================================
@@ -945,8 +951,8 @@ def optimize_battery_schedule(
     # ============================================================================
     if grid_to_battery_solar_savings < battery_settings.min_action_profit_threshold:
         logger.warning(
-            f"Optimization savings ({grid_to_battery_solar_savings:.2f} SEK) below "
-            f"minimum threshold ({battery_settings.min_action_profit_threshold:.2f} SEK). "
+            f"Optimization savings ({grid_to_battery_solar_savings:.2f} {currency}) below "
+            f"minimum threshold ({battery_settings.min_action_profit_threshold:.2f} {currency}). "
             f"Using all-IDLE schedule instead."
         )
         return _create_idle_schedule(

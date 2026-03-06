@@ -373,7 +373,7 @@ class PriceManager:
             vat_multiplier: VAT multiplier applied to buy prices
             additional_costs: Additional fixed costs added to buy prices
             tax_reduction: Tax reduction applied to sell prices
-            area: Price area code (default: "SE3")
+            area: Price area code (e.g. "SE4", "NO1", "DK1")
         """
         self.price_source = price_source
         self.markup_rate = markup_rate

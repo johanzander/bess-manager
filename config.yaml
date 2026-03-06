@@ -1,7 +1,7 @@
 name: "BESS Manager"
 description: "Battery Energy Storage System optimization and management"
 
-version: "7.0.3"
+version: "7.0.4"
 
 slug: "bess_manager"
 init: false
@@ -171,6 +171,13 @@ schema:
     battery_charging_power_rate: str
     battery_discharging_power_rate: str
     grid_charge: str
+    pv_power: str
+    local_load_power: str
+    import_power: str
+    export_power: str
+    output_power: str
+    self_power: str
+    system_power: str
     current_l1: str
     current_l2: str
     current_l3: str

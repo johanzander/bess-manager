@@ -12,11 +12,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
     // Get time range from period number stored in data
     const periodNum = data.periodNum;
     const isTomorrow = data.isTomorrow;
-    // For tomorrow data, use the period number relative to tomorrow
-    // In quarter-hourly mode, periods are offset by 96; in hourly, by 24
-    const tomorrowOffset = resolution === 'quarter-hourly' ? 96 : 24;
-    const displayPeriodNum = isTomorrow ? periodNum - tomorrowOffset : periodNum;
-    const timeRange = periodToTimeRange(displayPeriodNum, resolution);
+    const timeRange = periodToTimeRange(periodNum, resolution);
     const dayLabel = isTomorrow ? 'Tomorrow' : '';
 
     // Map chart dataKeys to their corresponding FormattedValue fields
@@ -195,7 +191,10 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
   const hasTomorrowData = tomorrowData && tomorrowData.length > 0;
   if (hasTomorrowData) {
     for (const [idx, hourData] of tomorrowData.entries()) {
-      const periodNum = hourData.period ?? idx;
+      const rawPeriodNum = hourData.period ?? idx;
+      // Normalize period numbers: API may return 96-191 (continuation from today) or 0-95
+      const tomorrowPeriodsPerDay = resolution === 'quarter-hourly' ? 96 : 24;
+      const periodNum = rawPeriodNum >= tomorrowPeriodsPerDay ? rawPeriodNum - tomorrowPeriodsPerDay : rawPeriodNum;
       const hourPosition = resolution === 'quarter-hourly'
         ? 24 + (periodNum / 4)
         : 24 + periodNum;
@@ -207,11 +206,9 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
       const gridImported = getValue(hourData?.gridImported) || 0;
       const gridExported = getValue(hourData?.gridExported) || 0;
 
-      // Store period num with offset so tooltip can detect tomorrow
-      const tomorrowPeriodOffset = resolution === 'quarter-hourly' ? 96 : 24;
       chartData.push({
         hour: hourPosition,
-        periodNum: tomorrowPeriodOffset + periodNum,
+        periodNum,
         solar: solarProduction,
         batteryOut: batteryDischarged,
         gridIn: gridImported,

@@ -1,7 +1,7 @@
 name: "BESS Manager"
 description: "Battery Energy Storage System optimization and management"
 
-version: "7.0.2"
+version: "7.0.3"
 
 slug: "bess_manager"
 init: false
@@ -213,10 +213,3 @@ schema:
         max_depth: int
         learning_rate: float
         min_child_weight: int
-    pv_power: str
-    local_load_power: str
-    import_power: str
-    export_power: str
-    output_power: str
-    self_power: str
-    system_power: str

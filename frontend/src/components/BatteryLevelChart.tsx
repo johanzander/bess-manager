@@ -134,7 +134,10 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
       const batterySocPercent = rawSocTmrw === 0 ? null : rawSocTmrw;
       const rawPriceTmrw = getValue(hour.buyPrice);
       const price = rawPriceTmrw || null;
-      const periodNum = hour.period ?? idx;
+      // Normalize period numbers: API may return 96-191 (continuation from today) or 0-95
+      const rawPeriodNum = hour.period ?? idx;
+      const tomorrowPeriodsPerDay = resolution === 'quarter-hourly' ? 96 : 24;
+      const periodNum = rawPeriodNum >= tomorrowPeriodsPerDay ? rawPeriodNum - tomorrowPeriodsPerDay : rawPeriodNum;
       const dataSource = hour.dataSource ?? 'predicted';
 
       let xPosition: number;

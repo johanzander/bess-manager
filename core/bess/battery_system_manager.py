@@ -1312,6 +1312,7 @@ class BatterySystemManager:
                 initial_cost_basis=initial_cost_basis,
                 period_duration_hours=0.25,  # Always quarterly after normalization in _get_price_data
                 terminal_value_per_kwh=terminal_value,
+                currency=self.home_settings.currency,
             )
 
             # Add timestamps to period data (algorithm is time-agnostic, operates on relative indices)
@@ -2076,16 +2077,16 @@ class BatterySystemManager:
            - Maintains FIFO-like cost accounting
         5. Final result: running_total_cost / running_energy = marginal cost per kWh
 
-        Example:
-            Start of day: Battery has 4.2 kWh at cycle_cost (0.5 SEK/kWh)
-                       → running_cost = 2.10 SEK, running_energy = 4.2 kWh
-            Period 8:  Charged 0.6 kWh from grid at 2.5 SEK/kWh + 0.5 cycle cost
-                       → running_cost = 2.10 + 1.80 = 3.90 SEK
+        Example (using 0.5/kWh cycle cost, 2.5/kWh grid price):
+            Start of day: Battery has 4.2 kWh at cycle_cost (0.5/kWh)
+                       → running_cost = 2.10, running_energy = 4.2 kWh
+            Period 8:  Charged 0.6 kWh from grid at 2.5/kWh + 0.5 cycle cost
+                       → running_cost = 2.10 + 1.80 = 3.90
                        → running_energy = 4.8 kWh
-                       → cost_basis = 3.90/4.8 = 0.81 SEK/kWh
+                       → cost_basis = 3.90/4.8 = 0.81/kWh
             Period 15: Discharged 2 kWh
-                       → avg_cost = 3.90/4.8 = 0.81 SEK/kWh
-                       → running_cost = 2.28 SEK, running_energy = 2.8 kWh
+                       → avg_cost = 3.90/4.8 = 0.81/kWh
+                       → running_cost = 2.28, running_energy = 2.8 kWh
 
         This ensures discharge decisions account for the actual acquisition cost
         of the energy, not just cycle wear.
@@ -2094,7 +2095,7 @@ class BatterySystemManager:
             current_period: Current period index (0-95)
 
         Returns:
-            float: Marginal cost of battery energy in SEK/kWh
+            float: Marginal cost of battery energy per kWh
                   Falls back to cycle_cost_per_kwh if no historical data
         """
         # Get completed periods
@@ -2416,7 +2417,7 @@ class BatterySystemManager:
     ║ Reserved Capacity                ║ {self.battery_settings.total_capacity * (self.battery_settings.min_soc / 100):>12.1f} kWh ║
     ║ Usable Capacity                  ║ {self.battery_settings.total_capacity * (1 - self.battery_settings.min_soc / 100):>12.1f} kWh ║
     ║ Max Charge/Discharge Power       ║ {self.battery_settings.max_discharge_power_kw:>12.1f} kW  ║
-    ║ Charge Cycle Cost                ║ {self.battery_settings.cycle_cost_per_kwh:>12.2f} SEK ║
+    ║ Charge Cycle Cost                ║ {self.battery_settings.cycle_cost_per_kwh:>12.2f} {self.home_settings.currency:>3s} ║
     ╠══════════════════════════════════╬══════════════════╣
     ║ Initial SOE                      ║ {self.battery_settings.total_capacity * (current_soc / 100):>12.1f} kWh ║
     ║ Charging Power Rate              ║ {self.battery_settings.charging_power_rate:>12.1f} %   ║

@@ -45,10 +45,10 @@ options:
     min_action_profit_threshold: 8.0 # Minimum profit threshold for any battery action (in your currency)
   electricity_price:
     area: "SE4" # Area for Nordpool pricing
-    markup_rate: 0.08 # Electricity markup per kWh (in your currency, e.g. 8 öre/kWh for SEK)
-    vat_multiplier: 1.25 # 25% VAT
-    additional_costs: 1.03 # Additional costs per kWh in your currency (e.g. SE: 28.90 öre överföringsavgift + 53.50 öre energiskatt + moms)
-    tax_reduction: 0.6518 # Tax reduction for sold energy in your currency (e.g. SE: 60 öre skattereduktion + 5.18 öre förlustersättning)
+    markup_rate: 0.08 # Electricity markup per kWh (in your currency)
+    vat_multiplier: 1.25 # VAT multiplier (e.g. 1.25 for 25% VAT)
+    additional_costs: 1.03 # Additional costs per kWh in your currency (grid fees, energy tax, etc.)
+    tax_reduction: 0.6518 # Tax reduction for sold energy per kWh in your currency
   nordpool:
     price_provider: "nordpool" # "nordpool" (legacy sensor), "nordpool_official", or "octopus"
     use_official_integration: true # Set to true to use official HA Nord Pool integration

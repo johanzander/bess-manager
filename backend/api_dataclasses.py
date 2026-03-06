@@ -27,7 +27,7 @@ def create_formatted_value(
     Args:
         value: The numeric value to format
         unit_type: Type of unit ("currency", "energy_kwh_only", "percentage", "price", etc.)
-        currency: Currency code (SEK, NOK, EUR, USD, etc.)
+        currency: Currency code (e.g. EUR, GBP, SEK, NOK, USD)
         precision: Override default decimal places (None = use defaults: currency=2, energy=2, percentage=1, price=2)
     """
     if unit_type == "currency":
@@ -92,7 +92,7 @@ class APIBatterySettings:
     maxDischargePowerKw: float  # kW - maximum discharge power
 
     # Economic settings
-    cycleCostPerKwh: float  # SEK/kWh - cost per cycle
+    cycleCostPerKwh: float  # cost per kWh per cycle
     chargingPowerRate: float  # % - charging power rate
     efficiencyCharge: float  # % - charging efficiency
     efficiencyDischarge: float  # % - discharge efficiency

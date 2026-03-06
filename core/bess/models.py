@@ -170,19 +170,19 @@ class EnergyData:
 class EconomicData:
     """Economic analysis data for one time period."""
 
-    buy_price: float = 0.0  # SEK/kWh - price to buy from grid
-    sell_price: float = 0.0  # SEK/kWh - price to sell to grid
-    grid_cost: float = 0.0  # SEK - cost of grid interactions (imports - exports)
-    battery_cycle_cost: float = 0.0  # SEK - battery degradation cost
-    hourly_cost: float = 0.0  # SEK - total optimized cost for this hour
-    grid_only_cost: float = 0.0  # SEK - pure grid cost (home_consumption * buy_price)
+    buy_price: float = 0.0  # per kWh - price to buy from grid
+    sell_price: float = 0.0  # per kWh - price to sell to grid
+    grid_cost: float = 0.0  # cost of grid interactions (imports - exports)
+    battery_cycle_cost: float = 0.0  # battery degradation cost
+    hourly_cost: float = 0.0  # total optimized cost for this hour
+    grid_only_cost: float = 0.0  # pure grid cost (home_consumption * buy_price)
     solar_only_cost: float = (
-        0.0  # SEK - cost with solar only (no battery - algorithm baseline)
+        0.0  # cost with solar only (no battery - algorithm baseline)
     )
-    hourly_savings: float = 0.0  # SEK - savings vs baseline scenario
+    hourly_savings: float = 0.0  # savings vs baseline scenario
     solar_savings: float = field(
         default=0.0, init=False
-    )  # SEK - calculated automatically
+    )  # calculated automatically
 
     def __post_init__(self):
         """Calculate derived economic fields."""
@@ -209,9 +209,9 @@ class EconomicData:
 
         Args:
             energy_data: Energy flows for the period
-            buy_price: Price to buy from grid (SEK/kWh)
-            sell_price: Price to sell to grid (SEK/kWh)
-            battery_cycle_cost: Battery degradation cost (SEK) - should include actual wear cost
+            buy_price: Price to buy from grid (per kWh)
+            sell_price: Price to sell to grid (per kWh)
+            battery_cycle_cost: Battery degradation cost - should include actual wear cost
 
         Returns:
             EconomicData with all calculated fields
@@ -257,12 +257,12 @@ class EconomicData:
 class EconomicSummary:
     """Economic summary for optimization results."""
 
-    grid_only_cost: float  # SEK - cost using only grid electricity
+    grid_only_cost: float  # cost using only grid electricity
     solar_only_cost: float
     battery_solar_cost: float
-    grid_to_solar_savings: float  # SEK - savings from solar vs grid-only
+    grid_to_solar_savings: float  # savings from solar vs grid-only
     grid_to_battery_solar_savings: (
-        float  # SEK - savings from battery+solar vs grid-only
+        float  # savings from battery+solar vs grid-only
     )
     solar_to_battery_solar_savings: float
     grid_to_battery_solar_savings_pct: float  # % - percentage savings vs grid-only
@@ -283,7 +283,7 @@ class DecisionData:
     battery_action: float | None = (
         None  # kWh per period - planned battery energy action (+ charge, - discharge)
     )
-    cost_basis: float = 0.0  # SEK/kWh - cost basis of stored energy
+    cost_basis: float = 0.0  # per kWh - cost basis of stored energy
 
     # Enhanced intelligence fields (optional)
     pattern_name: str = ""  # Name of detected pattern
@@ -299,7 +299,7 @@ class DecisionData:
     )
     detailed_flow_values: dict[str, float] = field(
         default_factory=dict
-    )  # Value per flow (SEK)
+    )  # Value per flow in configured currency
     future_target_hours: list[int] = field(
         default_factory=list
     )  # When future opportunity occurs

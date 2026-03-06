@@ -23,19 +23,19 @@ class PeriodDeviation:
     predicted_battery_action: float  # kWh (charge - discharge)
     predicted_consumption: float  # kWh
     predicted_solar: float  # kWh
-    predicted_savings: float  # SEK
+    predicted_savings: float  # in configured currency
 
     # Actual values (from current DailyView)
     actual_battery_action: float  # kWh
     actual_consumption: float  # kWh
     actual_solar: float  # kWh
-    actual_savings: float  # SEK
+    actual_savings: float  # in configured currency
 
     # Deviations (actual - predicted)
     battery_action_deviation: float  # kWh
     consumption_deviation: float  # kWh
     solar_deviation: float  # kWh
-    savings_deviation: float  # SEK
+    savings_deviation: float  # in configured currency
 
     deviation_type: str  # "CONSUMPTION_HIGHER", "SOLAR_LOWER", etc.
 
@@ -49,9 +49,9 @@ class SnapshotComparison:
     period_deviations: list[PeriodDeviation]
 
     # Aggregate metrics
-    total_predicted_savings: float  # SEK
-    total_actual_savings: float  # SEK
-    savings_deviation: float  # SEK
+    total_predicted_savings: float  # in configured currency
+    total_actual_savings: float  # in configured currency
+    savings_deviation: float  # in configured currency
 
     primary_deviation_cause: str  # "consumption", "solar", "battery_control"
 
@@ -168,7 +168,7 @@ class PredictionAnalyzer:
         savings_deviation = total_actual_savings - total_predicted_savings
 
         logger.info(
-            "Snapshot comparison: predicted %.2f SEK, actual %.2f SEK, deviation %.2f SEK (%s)",
+            "Snapshot comparison: predicted %.2f, actual %.2f, deviation %.2f (%s)",
             total_predicted_savings,
             total_actual_savings,
             savings_deviation,

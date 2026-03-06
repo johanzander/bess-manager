@@ -276,6 +276,21 @@ class HomeAssistantAPIController:
             "conversion_threshold": None,
         },
         # Energy totals
+        # Price sensors
+        "get_nordpool_prices_today": {
+            "sensor_key": "nordpool_kwh_today",
+            "name": "Nord Pool Prices Today",
+            "unit": "list",
+            "precision": 1,
+            "conversion_threshold": None,
+        },
+        "get_nordpool_prices_tomorrow": {
+            "sensor_key": "nordpool_kwh_tomorrow",
+            "name": "Nord Pool Prices Tomorrow",
+            "unit": "list",
+            "precision": 1,
+            "conversion_threshold": None,
+        },
         # Home consumption forecast
         "get_estimated_consumption": {
             "sensor_key": "48h_avg_grid_import",
@@ -996,6 +1011,93 @@ class HomeAssistantAPIController:
             SystemConfigurationError: If solar forecast sensor is not configured or unavailable
         """
         return self._parse_solar_forecast("solar_forecast_tomorrow")
+
+    def _get_nordpool_prices(self, is_tomorrow=False):
+        """Get Nordpool prices from Home Assistant sensor.
+
+        Args:
+            is_tomorrow: If True, get tomorrow's prices, otherwise today's
+
+        Returns:
+            list: List of hourly prices (may be 23, 24, or 25 hours for DST)
+
+        Raises:
+            ValueError: If prices are not available for the date
+        """
+        time_label = "tomorrow" if is_tomorrow else "today"
+        try:
+            sensor_key = (
+                "nordpool_kwh_tomorrow" if is_tomorrow else "nordpool_kwh_today"
+            )
+            entity_id = self.sensors.get(sensor_key)
+            if not entity_id:
+                logger.warning(f"No entity ID configured for {sensor_key}")
+                raise ValueError(f"Missing entity ID configuration for {sensor_key}")
+
+            logger.debug(f"Fetching Nordpool prices for {time_label} from {entity_id}")
+
+            entity_response = self._api_request(
+                "get",
+                f"/api/states/{entity_id}",
+                operation=f"Get Nordpool prices for {time_label}",
+                category="sensor_read",
+            )
+
+            if not entity_response:
+                logger.error(
+                    f"Could not retrieve Nordpool sensor state for {time_label}"
+                )
+                raise ValueError(f"Nordpool prices for {time_label} are unavailable")
+
+            attributes = entity_response.get("attributes", {})
+
+            # Try to get raw data from attributes first
+            raw_data_key = "raw_tomorrow" if is_tomorrow else "raw_today"
+            raw_data = attributes.get(raw_data_key)
+
+            if raw_data:
+                try:
+                    processed_prices = [hour_data["value"] for hour_data in raw_data]
+                    logger.debug(
+                        f"Successfully extracted {len(processed_prices)} hourly prices from {raw_data_key}"
+                    )
+                    return processed_prices
+                except (KeyError, TypeError) as e:
+                    logger.warning(f"Invalid raw data format in {raw_data_key}: {e}")
+
+            # Fallback to the regular array if raw data isn't available
+            regular_data_key = "tomorrow" if is_tomorrow else "today"
+            regular_prices = attributes.get(regular_data_key)
+
+            if regular_prices and isinstance(regular_prices, list):
+                logger.info(
+                    f"Using '{regular_data_key}' attribute with {len(regular_prices)} hourly prices"
+                )
+                return regular_prices
+
+            if is_tomorrow and attributes.get("tomorrow_valid") is False:
+                logger.error(
+                    "Tomorrow's prices are not yet available (tomorrow_valid=false)"
+                )
+                raise ValueError("Tomorrow's Nordpool prices are not yet available")
+
+            logger.error(
+                f"Could not find price data for {time_label} in Nordpool sensor attributes"
+            )
+            logger.debug(f"Available attributes: {list(attributes.keys())}")
+            raise ValueError(f"Nordpool prices for {time_label} are unavailable")
+
+        except Exception as e:
+            logger.error(f"Error fetching Nordpool prices for {time_label}: {e!s}")
+            raise
+
+    def get_nordpool_prices_today(self):
+        """Get today's Nordpool prices from Home Assistant sensor."""
+        return self._get_nordpool_prices(is_tomorrow=False)
+
+    def get_nordpool_prices_tomorrow(self):
+        """Get tomorrow's Nordpool prices from Home Assistant sensor."""
+        return self._get_nordpool_prices(is_tomorrow=True)
 
     def get_sensor_data(self, sensors_list):
         """Get current sensor data via Home Assistant REST API.

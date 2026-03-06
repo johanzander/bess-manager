@@ -62,7 +62,8 @@ class BatterySystemManager:
         self,
         controller: HomeAssistantAPIController | None = None,
         price_source: PriceSource | None = None,
-        energy_provider_config: dict | None = None,
+        nordpool_config: dict | None = None,
+        addon_options: dict | None = None,
     ):
         """Initialize with same interface as original BatterySystemManager."""
 
@@ -70,7 +71,8 @@ class BatterySystemManager:
         self.battery_settings = BatterySettings()
         self.home_settings = HomeSettings()
         self.price_settings = PriceSettings()
-        self._energy_provider_config = energy_provider_config or {}
+        self._nordpool_config = nordpool_config or {}
+        self._addon_options = addon_options or {}
 
         # Store controller reference
         self._controller = controller
@@ -115,6 +117,10 @@ class BatterySystemManager:
         self._current_schedule = None
         self._initial_soe = None
 
+        # Prediction caches (populated by _fetch_predictions)
+        self._consumption_predictions: list[float] | None = None
+        self._solar_predictions: list[float] | None = None
+
         # Critical sensor failure tracking for graceful degradation
         self._critical_sensor_failures = []
 
@@ -123,6 +129,10 @@ class BatterySystemManager:
         # Inject failure tracker into controller if available
         if self._controller:
             self._controller.failure_tracker = self._runtime_failure_tracker
+
+        # ML forecast cache — keyed by date to auto-invalidate at midnight
+        self._ml_forecast_cache: list[float] | None = None
+        self._ml_forecast_cache_date: date | None = None
 
         logger.debug("BatterySystemManager initialized")
 
@@ -134,10 +144,10 @@ class BatterySystemManager:
         return self._controller
 
     def _create_price_source(self, controller) -> PriceSource:
-        """Create the appropriate price source based on energy_provider config.
+        """Create the appropriate price source based on nordpool_config.
 
         Supports three price providers:
-        - "nordpool": Legacy custom Nordpool sensor component
+        - "nordpool" (default): Legacy custom Nordpool sensor component
         - "nordpool_official": Official HA Nordpool integration via service calls
         - "octopus": Octopus Energy Agile tariff via HA event entities
 
@@ -147,24 +157,44 @@ class BatterySystemManager:
         Returns:
             Configured PriceSource instance
         """
-        config = self._energy_provider_config
-        provider = config["provider"]
+        nordpool_config = self._nordpool_config
+        # Support both "price_provider" (new config) and "provider" (legacy energy_provider)
+        price_provider = nordpool_config.get(
+            "price_provider", nordpool_config.get("provider", "nordpool")
+        )
 
-        if provider == "octopus":
-            octopus_config = config["octopus"]
+        if price_provider == "octopus":
+            octopus_config = nordpool_config.get("octopus", {})
             price_source = OctopusEnergySource(
                 ha_controller=controller,
-                import_today_entity=octopus_config["import_today_entity"],
-                import_tomorrow_entity=octopus_config["import_tomorrow_entity"],
-                export_today_entity=octopus_config["export_today_entity"],
-                export_tomorrow_entity=octopus_config["export_tomorrow_entity"],
+                import_today_entity=octopus_config.get("import_today_entity", ""),
+                import_tomorrow_entity=octopus_config.get("import_tomorrow_entity", ""),
+                export_today_entity=octopus_config.get("export_today_entity", ""),
+                export_tomorrow_entity=octopus_config.get("export_tomorrow_entity", ""),
             )
             logger.info("Using Octopus Energy Agile tariff price source")
             return price_source
 
-        if provider == "nordpool_official":
-            nordpool_official_config = config["nordpool_official"]
-            config_entry_id = nordpool_official_config["config_entry_id"]
+        if price_provider == "nordpool_official":
+            # Support both flat config_entry_id and nested nordpool_official.config_entry_id
+            config_entry_id = nordpool_config.get(
+                "config_entry_id"
+            ) or nordpool_config.get("nordpool_official", {}).get("config_entry_id")
+            if config_entry_id:
+                from .official_nordpool_source import OfficialNordpoolSource
+
+                price_source = OfficialNordpoolSource(
+                    controller,
+                    config_entry_id,
+                    vat_multiplier=self.price_settings.vat_multiplier,
+                )
+                logger.info("Using official Home Assistant Nordpool integration")
+                return price_source
+
+        # Also support legacy use_official_integration flag for backward compatibility
+        use_official = nordpool_config.get("use_official_integration", False)
+        config_entry_id = nordpool_config.get("config_entry_id")
+        if use_official and config_entry_id:
             from .official_nordpool_source import OfficialNordpoolSource
 
             price_source = OfficialNordpoolSource(
@@ -175,18 +205,10 @@ class BatterySystemManager:
             logger.info("Using official Home Assistant Nordpool integration")
             return price_source
 
-        if provider == "nordpool":
-            nordpool_config = config["nordpool"]
-            logger.info("Using legacy/custom Nordpool sensor integration")
-            return HomeAssistantSource(
-                controller,
-                vat_multiplier=self.price_settings.vat_multiplier,
-                today_entity=nordpool_config["today_entity"],
-                tomorrow_entity=nordpool_config["tomorrow_entity"],
-            )
-
-        raise SystemConfigurationError(
-            message=f"Unknown energy provider: {provider!r}. Must be 'nordpool', 'nordpool_official', or 'octopus'."
+        # Default: legacy sensor-based Nordpool
+        logger.info("Using legacy/custom Nordpool sensor integration")
+        return HomeAssistantSource(
+            controller, vat_multiplier=self.price_settings.vat_multiplier
         )
 
     def _sync_soc_limits(self) -> None:
@@ -257,6 +279,37 @@ class BatterySystemManager:
 
                 # Initialize historical data - using improved sensor collector
                 self._fetch_and_initialize_historical_data()
+
+                # Validate strategy-config compatibility
+                strategy = self.home_settings.consumption_strategy
+                ml_config_present = bool(self._addon_options.get("ml"))
+
+                if strategy == "ml_prediction" and not ml_config_present:
+                    logger.error(
+                        "consumption_strategy is 'ml_prediction' but 'ml' config section "
+                        "is missing. Falling back to 'fixed' strategy."
+                    )
+                    self.home_settings.consumption_strategy = "fixed"
+
+                if strategy == "influxdb_profile":
+                    ml_location = self._addon_options.get("ml", {}).get("location")
+                    if not ml_location:
+                        logger.error(
+                            "consumption_strategy is 'influxdb_profile' but 'ml.location' "
+                            "is not configured. Falling back to 'fixed' strategy."
+                        )
+                        self.home_settings.consumption_strategy = "fixed"
+
+                # Retrain ML model on boot and generate predictions (for report data)
+                if self._addon_options.get("ml"):
+                    try:
+                        logger.info("Retraining ML model on startup...")
+                        self._retrain_ml_model()
+                        self._generate_ml_predictions()
+                    except Exception as e:
+                        logger.error(
+                            "ML model training/prediction failed on startup: %s", e
+                        )
 
                 # Fetch predictions
                 self._fetch_predictions()
@@ -583,6 +636,199 @@ class BatterySystemManager:
         except Exception as e:
             logger.error(f"Failed to initialize historical data: {e}")
 
+    def _get_consumption_forecast(self) -> list[float] | None:
+        """Dispatch consumption forecast based on the configured strategy.
+
+        Returns:
+            List of 96 quarter-hourly consumption values (kWh), or None on failure.
+        """
+        strategy = self.home_settings.consumption_strategy
+        logger.debug("Consumption strategy: %s", strategy)
+
+        if strategy == "sensor":
+            return self._controller.get_estimated_consumption()
+
+        if strategy == "fixed":
+            hourly = self.home_settings.default_hourly
+            return [hourly / 4] * get_period_count()
+
+        if strategy == "influxdb_profile":
+            return self._get_influxdb_profile_forecast()
+
+        if strategy == "ml_prediction":
+            return self._get_ml_prediction_forecast()
+
+        logger.error(
+            "Unknown consumption_strategy: %s — falling back to sensor", strategy
+        )
+        return self._controller.get_estimated_consumption()
+
+    def _get_influxdb_profile_forecast(self) -> list[float] | None:
+        """Build a consumption forecast from the InfluxDB 7-day average profile."""
+        try:
+            from .influxdb_helper import get_power_sensor_data_batch
+
+            ml_config = self._addon_options.get("ml", {})
+            location = ml_config.get("location", {})
+            tz_name = location.get("timezone", "UTC")
+
+            influxdb_config = self._addon_options.get("influxdb", {})
+            url = influxdb_config.get("url", "")
+            bucket = influxdb_config.get("bucket", "")
+            username = influxdb_config.get("username", "")
+            password = influxdb_config.get("password", "")
+
+            if not url or not bucket:
+                logger.warning("InfluxDB not configured — cannot use influxdb_profile")
+                return None
+
+            load_sensor = self._controller.sensors.get("local_load_power")
+            if not load_sensor:
+                logger.warning("No local_load_power sensor for influxdb_profile")
+                return None
+
+            entity_id = (
+                f"sensor.{load_sensor}"
+                if not load_sensor.startswith("sensor.")
+                else load_sensor
+            )
+
+            from datetime import timezone as _tz
+
+            import pytz
+
+            tz = pytz.timezone(tz_name)
+            now = datetime.now(tz)
+            end = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            start = end - timedelta(days=7)
+
+            data = get_power_sensor_data_batch(
+                influxdb_url=url,
+                influxdb_bucket=bucket,
+                influxdb_user=username,
+                influxdb_password=password,
+                entity_ids=[entity_id],
+                start=start,
+                end=end,
+            )
+
+            if not data or entity_id not in data:
+                logger.warning("No InfluxDB data returned for load sensor")
+                return None
+
+            records = data[entity_id]
+            period_count = get_period_count()
+            buckets: dict[int, list[float]] = {i: [] for i in range(period_count)}
+            for rec in records:
+                ts = rec["time"]
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=_tz.utc)
+                local = ts.astimezone(tz)
+                period = local.hour * 4 + local.minute // 15
+                if 0 <= period < period_count:
+                    buckets[period].append(rec["value_kwh"])
+
+            profile = []
+            fallback = self.home_settings.default_hourly / 4
+            for i in range(period_count):
+                vals = buckets[i]
+                profile.append(sum(vals) / len(vals) if vals else fallback)
+
+            logger.info(
+                "Built influxdb_profile forecast: daily total=%.1f kWh",
+                sum(profile),
+            )
+            return profile
+
+        except Exception as e:
+            logger.error("influxdb_profile forecast failed: %s", e)
+            return None
+
+    def _get_ml_prediction_forecast(self) -> list[float] | None:
+        """Return cached ML predictions, regenerating if date has changed."""
+        today = date.today()
+        if (
+            self._ml_forecast_cache_date == today
+            and self._ml_forecast_cache is not None
+        ):
+            return self._ml_forecast_cache
+
+        # Cache miss — regenerate
+        self._generate_ml_predictions()
+        return self._ml_forecast_cache
+
+    def _retrain_ml_model(self) -> None:
+        """Retrain the ML model using the latest data."""
+        try:
+            ml_config_section = self._addon_options.get("ml")
+            if not ml_config_section:
+                logger.debug("No ML config — skipping retrain")
+                return
+
+            from ml.config import load_config
+            from ml.trainer import train_model
+
+            influxdb_config = self._addon_options.get("influxdb", {})
+            config = load_config(
+                ml_section=ml_config_section,
+                influxdb_url=influxdb_config.get("url", ""),
+                influxdb_bucket=influxdb_config.get("bucket", ""),
+                influxdb_user=influxdb_config.get("username", ""),
+                influxdb_password=influxdb_config.get("password", ""),
+            )
+
+            target_sensor = self._controller.sensors.get("local_load_power", "")
+            if target_sensor and not target_sensor.startswith("sensor."):
+                target_sensor = f"sensor.{target_sensor}"
+            config["target"] = {"sensor": target_sensor}
+
+            train_model(config)
+            # Invalidate forecast cache so next call regenerates
+            self._ml_forecast_cache = None
+            self._ml_forecast_cache_date = None
+            logger.info("ML model retrained successfully")
+        except Exception as e:
+            logger.error("ML retrain failed: %s", e)
+
+    def _generate_ml_predictions(self) -> None:
+        """Generate and cache ML predictions regardless of active strategy."""
+        try:
+            ml_config_section = self._addon_options.get("ml")
+            if not ml_config_section:
+                return
+
+            from ml.config import load_config
+            from ml.predictor import predict
+
+            influxdb_config = self._addon_options.get("influxdb", {})
+            config = load_config(
+                ml_section=ml_config_section,
+                influxdb_url=influxdb_config.get("url", ""),
+                influxdb_bucket=influxdb_config.get("bucket", ""),
+                influxdb_user=influxdb_config.get("username", ""),
+                influxdb_password=influxdb_config.get("password", ""),
+            )
+
+            target_sensor = self._controller.sensors.get("local_load_power", "")
+            if target_sensor and not target_sensor.startswith("sensor."):
+                target_sensor = f"sensor.{target_sensor}"
+            config["target"] = {"sensor": target_sensor}
+
+            predictions = predict(config)
+            if predictions is not None and len(predictions) > 0:
+                self._ml_forecast_cache = list(predictions)
+                self._ml_forecast_cache_date = date.today()
+                logger.info(
+                    "ML predictions generated: %d periods, daily total=%.1f kWh",
+                    len(predictions),
+                    sum(predictions),
+                )
+            else:
+                logger.warning("ML predict returned empty results")
+
+        except Exception as e:
+            logger.error("ML prediction generation failed: %s", e)
+
     def _fetch_predictions(self) -> None:
         """Fetch consumption and solar predictions and store them."""
         try:
@@ -590,7 +836,7 @@ class BatterySystemManager:
                 logger.warning("Cannot fetch predictions: controller is not available")
                 return
 
-            consumption_predictions = self._controller.get_estimated_consumption()
+            consumption_predictions = self._get_consumption_forecast()
             solar_predictions = self._controller.get_solar_forecast()
 
             # Store the predictions (this was missing!)
@@ -891,7 +1137,7 @@ class BatterySystemManager:
 
         if prepare_next_day:
             # For next day, use predictions only
-            consumption_predictions = self.controller.get_estimated_consumption()
+            consumption_predictions = self._get_consumption_forecast()
             solar_predictions = self.controller.get_solar_forecast()
 
             consumption_data = consumption_predictions
@@ -909,7 +1155,7 @@ class BatterySystemManager:
             completed_periods = [
                 i for i, p in enumerate(today_periods) if p is not None
             ]
-            predictions_consumption = self.controller.get_estimated_consumption()
+            predictions_consumption = self._get_consumption_forecast()
             predictions_solar = self.controller.get_solar_forecast()
 
             # Extend predictions for tomorrow when horizon exceeds today
@@ -2149,7 +2395,11 @@ class BatterySystemManager:
         """Log the current battery configuration - reproduces original functionality."""
         try:
             # Get energy data for consumption info (like original)
-            predictions_consumption = self.controller.get_estimated_consumption()
+            predictions_consumption = (
+                self._consumption_predictions
+                or self._get_consumption_forecast()
+                or [self.home_settings.default_hourly / 4] * get_period_count()
+            )
 
             # Get current SOC
             if self._controller:

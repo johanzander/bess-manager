@@ -128,15 +128,17 @@ class BESSController:
             logger.info("Enabling test mode - hardware writes will be simulated")
         self.ha_controller.set_test_mode(test_mode)
 
-        # Extract energy provider configuration
-        energy_provider_config = options.get("energy_provider", {})
+        # Extract nordpool and octopus configuration
+        nordpool_config = options.get("nordpool", options.get("energy_provider", {}))
+        nordpool_config["octopus"] = options.get("octopus", {})
 
         # Create Battery System Manager with price provider configuration
         # Let the system manager choose the appropriate price source
         self.system = BatterySystemManager(
             self.ha_controller,
             price_source=None,  # Let system manager auto-select based on config
-            energy_provider_config=energy_provider_config,
+            nordpool_config=nordpool_config,
+            addon_options=options,
         )
 
         # Create scheduler with increased misfire grace time to avoid unnecessary warnings
@@ -254,6 +256,20 @@ class BESSController:
             misfire_grace_time=30,  # Allow 30 seconds of misfire before warning
         )
 
+        # ML model daily retrain at 23:00 — 55 minutes before next-day prep so
+        # the retrained model is used when tomorrow's forecast is generated at 23:55
+        if self.system._addon_options.get("ml"):
+
+            def _retrain_and_predict():
+                self.system._retrain_ml_model()
+                self.system._generate_ml_predictions()
+
+            self.scheduler.add_job(
+                _retrain_and_predict,
+                CronTrigger(hour=23, minute=0),
+                misfire_grace_time=120,
+            )
+
         # Charging power adjustment (every 5 minutes)
         self.scheduler.add_job(
             self.system.adjust_charging_power,
@@ -324,7 +340,7 @@ class BESSController:
                     )
 
             # Required home settings
-            required_home_keys = ["consumption", "currency"]
+            required_home_keys = ["consumption", "consumption_strategy", "currency"]
             for key in required_home_keys:
                 if key not in home_config:
                     raise ValueError(
@@ -345,6 +361,7 @@ class BESSController:
                 },
                 "home": {
                     "defaultHourly": home_config["consumption"],
+                    "consumptionStrategy": home_config["consumption_strategy"],
                     "currency": home_config["currency"],
                 },
                 "price": {

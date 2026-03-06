@@ -55,7 +55,11 @@ else
 fi
 
 if [ -n "$CONFIG_FILE" ]; then
-  ./.venv/bin/python << EOF
+  PYTHON_BIN="./.venv/bin/python"
+  if [ ! -x "$PYTHON_BIN" ]; then
+    PYTHON_BIN="python3"
+  fi
+  $PYTHON_BIN << EOF
 import yaml
 import json
 
@@ -90,6 +94,12 @@ echo "Removing any existing containers to force rebuild..."
 docker-compose rm -f
 
 echo "Building frontend..."
+# Remove frontend/dist if Docker previously created it as a directory (happens when
+# build was skipped and the volume mount target didn't exist yet)
+if [ -d frontend/dist ] && [ ! -f frontend/dist/index.html ]; then
+  echo "  Removing stale frontend/dist directory..."
+  rm -rf frontend/dist
+fi
 (cd frontend && npm run build)
 
 echo "Building and starting development container with Python 3.10..."

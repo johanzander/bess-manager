@@ -238,11 +238,16 @@ The logs show:
 - **Area**: Must match your pricing area (Nordpool area code, or "UK" for Octopus)
 - **Additional Costs**: Include all taxes, fees, and markup for accurate calculations (set to 0 for Octopus as prices are VAT-inclusive)
 
-### Consumption Prediction
+### Consumption Strategy
 
-- System learns your patterns automatically
-- Manually adjust if you have predictable high-usage periods
-- Consider seasonal variations (heating/cooling)
+BESS supports four consumption forecasting strategies, configured via `consumption_strategy` in the `home` section of your add-on config:
+
+- **`sensor`** (default): Reads a 48h-average HA sensor. Simple, flat forecast. Works out of the box.
+- **`fixed`**: Uses the `home.consumption` config value. No sensors needed. Good starting point.
+- **`influxdb_profile`**: Queries InfluxDB for a 7-day average profile. Produces a shaped forecast reflecting your actual daily pattern (low at night, peaks at mealtimes). Requires InfluxDB with 1+ week of history.
+- **`ml_prediction`**: Runs an XGBoost ML model with weather data. Most accurate, adapts to temperature and seasonal changes. Requires a trained model (see [ML README](ml/README.md)).
+
+Start with `sensor` or `fixed` and upgrade to `influxdb_profile` or `ml_prediction` as you accumulate data. See the [Installation Guide](INSTALLATION.md) for detailed setup instructions for each strategy.
 
 ## Advanced Features
 

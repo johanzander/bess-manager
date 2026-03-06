@@ -1,6 +1,8 @@
 name: "BESS Manager"
 description: "Battery Energy Storage System optimization and management"
-version: "6.10.3"
+
+version: "7.0.0"
+
 slug: "bess_manager"
 init: false
 arch:
@@ -28,11 +30,12 @@ options:
     username: "your_db_username_here"
     password: "your_db_password_here"
   home:
-    consumption: 3.5 # default hourly consumption in kWh
-    currency: "SEK" # currency for price display and calculations
-    max_fuse_current: 25 # Maximum fuse current in amperes
-    voltage: 230 # Line voltage in volts
-    safety_margin_factor: 1.0 # Safety margin for power calculations (100% - safe with 5min monitoring)
+    consumption: 3.5                # default hourly consumption in kWh
+    consumption_strategy: "sensor"  # "sensor" | "fixed" | "influxdb_profile" | "ml_prediction"
+    currency: "SEK"                 # currency for price display and calculations
+    max_fuse_current: 25            # Maximum fuse current in amperes
+    voltage: 230                    # Line voltage in volts
+    safety_margin_factor: 1.0       # Safety margin for power calculations (100% - safe with 5min monitoring)
   battery:
     total_capacity: 30.0 # kWh
     min_soc: 15 # Minimum state of charge (%) - synced to inverter on startup
@@ -97,6 +100,31 @@ options:
     48h_avg_grid_import: "sensor.48h_average_grid_import_power" # 48h average consumption
     solar_forecast_today: "sensor.solcast_pv_forecast_forecast_today" # Today's solar forecast
     solar_forecast_tomorrow: "sensor.solcast_pv_forecast_forecast_tomorrow" # Tomorrow's solar forecast
+  ml:
+    location:
+      latitude: 52.930951
+      longitude: -1.109422
+      timezone: "Europe/London"
+    weather_entity: "weather.forecast_home"
+    feature_sensors:
+      outdoor_temperature: "sensor.hue_outdoor_motion_sensor_1_temperature"
+    derived_features:
+      hour_of_day: true
+      day_of_week: false
+      daylight_hours: false
+    history_context:
+      yesterday_same_hour: true
+      yesterday_total: true
+      week_avg_same_hour: true
+      recent_24h_mean: true
+    training:
+      days_of_history: 30
+      test_split: 0.2
+      model_params:
+        n_estimators: 200
+        max_depth: 6
+        learning_rate: 0.1
+        min_child_weight: 3
 schema:
   influxdb:
     url: str
@@ -105,6 +133,7 @@ schema:
     password: str
   home:
     consumption: float
+    consumption_strategy: str
     currency: str
     max_fuse_current: int
     voltage: int
@@ -159,6 +188,31 @@ schema:
     48h_avg_grid_import: str
     solar_forecast_today: str
     solar_forecast_tomorrow: str
+  ml:
+    location:
+      latitude: float
+      longitude: float
+      timezone: str
+    weather_entity: str
+    feature_sensors:
+      outdoor_temperature: str
+    derived_features:
+      hour_of_day: bool
+      day_of_week: bool
+      daylight_hours: bool
+    history_context:
+      yesterday_same_hour: bool
+      yesterday_total: bool
+      week_avg_same_hour: bool
+      recent_24h_mean: bool
+    training:
+      days_of_history: int
+      test_split: float
+      model_params:
+        n_estimators: int
+        max_depth: int
+        learning_rate: float
+        min_child_weight: int
     pv_power: str
     local_load_power: str
     import_power: str

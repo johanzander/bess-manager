@@ -175,7 +175,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
       gridOut: gridExported > 0 ? -gridExported : 0,
       isActual,
       isTomorrow: false,
-      price: getValue(dailyViewHour?.buyPrice),
+      price: getValue(dailyViewHour?.buyPrice) || null,
       // Include FormattedValue objects for tooltip
       solarProductionFormatted: dailyViewHour?.solarProduction,
       homeConsumptionFormatted: dailyViewHour?.homeConsumption,
@@ -217,7 +217,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
         gridOut: gridExported > 0 ? -gridExported : 0,
         isActual: false,
         isTomorrow: true,
-        price: getValue(hourData?.buyPrice),
+        price: getValue(hourData?.buyPrice) || null,
         // Include FormattedValue objects for tooltip
         solarProductionFormatted: hourData?.solarProduction,
         homeConsumptionFormatted: hourData?.homeConsumption,

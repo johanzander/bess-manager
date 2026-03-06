@@ -83,8 +83,12 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
       throw new Error(`MISSING DATA: batteryAction is required but missing at index ${index}`);
     }
     const batteryAction = getValue(hour.batteryAction);
-    const batterySocPercent = getValue(hour.batterySocEnd);
-    const price = getValue(hour.buyPrice);
+    const rawSoc = getValue(hour.batterySocEnd);
+    const isActual = hour.dataSource === 'actual';
+    // Treat zero SOC on predicted periods as missing data
+    const batterySocPercent = (rawSoc === 0 && !isActual) ? null : rawSoc;
+    const rawPrice = getValue(hour.buyPrice);
+    const price = rawPrice || null; // Treat zero/missing price as null
     const periodNum = hour.period ?? index;
     if (hour.dataSource === undefined) {
       throw new Error(`MISSING DATA: dataSource is required but missing at index ${index}`);
@@ -126,8 +130,10 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
         continue;
       }
       const batteryAction = getValue(hour.batteryAction);
-      const batterySocPercent = getValue(hour.batterySocEnd);
-      const price = getValue(hour.buyPrice);
+      const rawSocTmrw = getValue(hour.batterySocEnd);
+      const batterySocPercent = rawSocTmrw === 0 ? null : rawSocTmrw;
+      const rawPriceTmrw = getValue(hour.buyPrice);
+      const price = rawPriceTmrw || null;
       // Normalize period numbers: API may return 96-191 (continuation from today) or 0-95
       const rawPeriodNum = hour.period ?? idx;
       const tomorrowPeriodsPerDay = resolution === 'quarter-hourly' ? 96 : 24;

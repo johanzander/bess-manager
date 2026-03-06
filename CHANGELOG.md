@@ -5,6 +5,12 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.0.10] - 2026-03-06
+
+### Fixed
+
+- ML weather forecast fetch failing inside HA add-on container. The ML config used `HA_TOKEN` env var but the HA supervisor sets `HASSIO_TOKEN`. Now checks `HASSIO_TOKEN` first (matching `app.py` controller pattern), falling back to `HA_TOKEN` for local dev.
+
 ## [7.0.9] - 2026-03-06
 
 ### Fixed

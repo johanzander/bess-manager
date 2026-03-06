@@ -64,11 +64,11 @@ def _build_from_app_options(app_options: dict) -> dict:
 
     local_load = sensors.get("local_load_power", "")
     if local_load.startswith("sensor."):
-        local_load = local_load[len("sensor."):]
+        local_load = local_load[len("sensor.") :]
 
     raw_feature_sensors = ml.get("feature_sensors", {})
     feature_sensors = {
-        k: v[len("sensor."):] if isinstance(v, str) and v.startswith("sensor.") else v
+        k: v[len("sensor.") :] if isinstance(v, str) and v.startswith("sensor.") else v
         for k, v in raw_feature_sensors.items()
     }
 
@@ -77,15 +77,21 @@ def _build_from_app_options(app_options: dict) -> dict:
     influxdb_config = {
         "url": os.environ.get("HA_DB_URL") or influxdb_opts.get("url", ""),
         "bucket": os.environ.get("HA_DB_BUCKET") or influxdb_opts.get("bucket", ""),
-        "username": os.environ.get("HA_DB_USER_NAME") or influxdb_opts.get("username", ""),
-        "password": os.environ.get("HA_DB_PASSWORD") or influxdb_opts.get("password", ""),
+        "username": os.environ.get("HA_DB_USER_NAME")
+        or influxdb_opts.get("username", ""),
+        "password": os.environ.get("HA_DB_PASSWORD")
+        or influxdb_opts.get("password", ""),
     }
 
     return {
         "influxdb": influxdb_config,
         "ha_api": {
-            "url": os.environ.get("HA_URL", "http://supervisor/core"),
-            "token": os.environ.get("HA_TOKEN", ""),
+            "url": (
+                "http://supervisor/core"
+                if os.environ.get("HASSIO_TOKEN")
+                else os.environ.get("HA_URL", "http://supervisor/core")
+            ),
+            "token": os.environ.get("HASSIO_TOKEN") or os.environ.get("HA_TOKEN", ""),
             "weather_entity": ml["weather_entity"],
         },
         "location": ml["location"],

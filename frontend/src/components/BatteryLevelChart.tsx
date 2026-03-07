@@ -383,12 +383,16 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
           <div className="w-4 h-1" style={{ backgroundColor: '#9CA3AF', borderStyle: 'dashed', borderWidth: '1px 0' }}></div>
           <span className="text-gray-700 dark:text-gray-300 ml-2">Electricity Price</span>
         </div>
-        {hasTomorrowData && (
-          <div className="flex items-center text-xs text-gray-600 dark:text-gray-400">
-            <div className="w-4 h-3 rounded mr-1" style={{ backgroundColor: '#16a34a', opacity: 0.35 }}></div>
-            <span>Tomorrow</span>
+        <div className="flex items-center text-xs text-gray-600 dark:text-gray-400 ml-4">
+          <div className="flex items-center mr-3">
+            <div className="w-4 h-3 rounded mr-1 border border-gray-400" style={{ backgroundColor: 'transparent' }}></div>
+            <span>Actual hours</span>
           </div>
-        )}
+          <div className="flex items-center mr-3">
+            <div className="w-4 h-3 rounded mr-1" style={{ background: isDarkMode ? 'rgba(120,120,120,0.25)' : 'rgba(120,120,120,0.15)' }}></div>
+            <span>Predicted hours</span>
+          </div>
+        </div>
       </div>
     </div>
   );

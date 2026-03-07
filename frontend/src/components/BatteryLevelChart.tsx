@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, ComposedChart, Area, Line } from 'recharts';
+import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, ReferenceArea, ComposedChart, Area, Line } from 'recharts';
 import { HourlyData } from '../types';
 import { periodToTimeString, periodToTimeRange } from '../utils/timeUtils';
 import { DataResolution } from '../hooks/useUserPreferences';
@@ -274,6 +274,28 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
                 strokeDasharray="5 5"
               />
             ))}
+
+            {/* Grey background for tomorrow's data */}
+            {hasTomorrowData && (
+              <ReferenceArea
+                yAxisId="left"
+                x1={24}
+                x2={maxHourValue}
+                fill={isDarkMode ? '#374151' : '#f3f4f6'}
+                fillOpacity={0.5}
+              />
+            )}
+
+            {/* Today/tomorrow divider */}
+            {hasTomorrowData && (
+              <ReferenceLine
+                x={24}
+                yAxisId="left"
+                stroke={isDarkMode ? '#9CA3AF' : '#6b7280'}
+                strokeWidth={1.5}
+                label={{ value: 'Tomorrow', position: 'insideTopRight', fontSize: 11, fill: isDarkMode ? '#9CA3AF' : '#6b7280' }}
+              />
+            )}
 
             <Area
               yAxisId="left"

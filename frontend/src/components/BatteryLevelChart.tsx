@@ -281,8 +281,7 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
                 yAxisId="left"
                 x1={24}
                 x2={maxHourValue}
-                fill={isDarkMode ? '#374151' : '#f3f4f6'}
-                fillOpacity={0.5}
+                fill={isDarkMode ? 'rgba(120,120,120,0.12)' : 'rgba(120,120,120,0.08)'}
               />
             )}
 
@@ -291,9 +290,10 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
               <ReferenceLine
                 x={24}
                 yAxisId="left"
-                stroke={isDarkMode ? '#9CA3AF' : '#6b7280'}
-                strokeWidth={1.5}
-                label={{ value: 'Tomorrow', position: 'insideTopRight', fontSize: 11, fill: isDarkMode ? '#9CA3AF' : '#6b7280' }}
+                stroke="#9CA3AF"
+                strokeWidth={1}
+                strokeDasharray="4 4"
+                label={{ value: 'Tomorrow', position: 'insideTopRight', fontSize: 11, fill: '#9CA3AF' }}
               />
             )}
 

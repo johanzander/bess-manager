@@ -438,6 +438,26 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
               />
             )}
 
+            {/* Grey background for tomorrow's data */}
+            {hasTomorrowData && (
+              <ReferenceArea
+                x1={24}
+                x2={maxHour}
+                fill={isDarkMode ? 'rgba(120,120,120,0.12)' : 'rgba(120,120,120,0.08)'}
+              />
+            )}
+
+            {/* Today/tomorrow divider */}
+            {hasTomorrowData && (
+              <ReferenceLine
+                x={24}
+                stroke="#9CA3AF"
+                strokeWidth={1}
+                strokeDasharray="4 4"
+                label={{ value: 'Tomorrow', position: 'insideTopRight', fontSize: 11, fill: '#9CA3AF' }}
+              />
+            )}
+
             {/* Price line on secondary Y-axis */}
             <Line
               type="stepBefore"

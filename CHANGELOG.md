@@ -5,6 +5,12 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.1.1] - 2026-03-07
+
+### Fixed
+
+- ML predictions missing from ML Report page. The 23:00 cron job generated predictions but the 23:55 next-day preparation wiped them without regenerating. Moved ML prediction generation from 23:00 to 23:55 so predictions survive into the new day.
+
 ## [7.1.0] - 2026-03-07
 
 ### Changed

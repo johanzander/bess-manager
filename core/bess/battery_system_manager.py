@@ -122,6 +122,10 @@ class BatterySystemManager:
         self._consumption_predictions: list[float] | None = None
         self._solar_predictions: list[float] | None = None
 
+        # ML forecast cache (populated by _generate_ml_predictions)
+        self._ml_forecast_cache: list[float] | None = None
+        self._ml_forecast_cache_date: date | None = None
+
         # Critical sensor failure tracking for graceful degradation
         self._critical_sensor_failures = []
 
@@ -267,6 +271,15 @@ class BatterySystemManager:
 
                 # Validate consumption strategy configuration
                 strategy = self.home_settings.consumption_strategy
+                ml_config_present = bool(self._addon_options.get("ml"))
+
+                if strategy == "ml_prediction" and not ml_config_present:
+                    logger.error(
+                        "consumption_strategy is 'ml_prediction' but 'ml' config section "
+                        "is missing. Falling back to 'fixed' strategy."
+                    )
+                    self.home_settings.consumption_strategy = "fixed"
+
                 if strategy == "influxdb_7d_avg":
                     if not self.home_settings.timezone:
                         logger.error(
@@ -274,6 +287,17 @@ class BatterySystemManager:
                             "is not configured. Falling back to 'fixed' strategy."
                         )
                         self.home_settings.consumption_strategy = "fixed"
+
+                # Retrain ML model on boot and generate predictions (for report data)
+                if self._addon_options.get("ml"):
+                    try:
+                        logger.info("Retraining ML model on startup...")
+                        self._retrain_ml_model()
+                        self._generate_ml_predictions()
+                    except Exception as e:
+                        logger.error(
+                            "ML model training/prediction failed on startup: %s", e
+                        )
 
                 # Fetch predictions
                 self._fetch_predictions()
@@ -655,6 +679,9 @@ class BatterySystemManager:
         if strategy == "influxdb_7d_avg":
             return self._get_influxdb_7d_avg_forecast()
 
+        if strategy == "ml_prediction":
+            return self._get_ml_prediction_forecast()
+
         raise ValueError(f"Unknown consumption_strategy: '{strategy}'")
 
     def _get_influxdb_7d_avg_forecast(self) -> list[float]:
@@ -725,6 +752,74 @@ class BatterySystemManager:
         )
 
         return avg_profile
+
+    def _get_ml_prediction_forecast(self) -> list[float]:
+        """Get consumption forecast from the ML prediction model.
+
+        Results are cached for the current calendar day. The cache is
+        invalidated by _retrain_ml_model() and by _handle_special_cases()
+        before the next-day prediction refresh.
+        """
+        today = date.today()
+        if (
+            self._ml_forecast_cache_date == today
+            and self._ml_forecast_cache is not None
+        ):
+            return self._ml_forecast_cache
+
+        # Generate fresh predictions
+        self._generate_ml_predictions()
+        if self._ml_forecast_cache is not None:
+            return self._ml_forecast_cache
+
+        # Fallback if ML prediction fails
+        logger.warning("ML prediction failed, falling back to fixed consumption")
+        quarterly = self.home_settings.default_hourly / 4.0
+        return [quarterly] * 96
+
+    def _retrain_ml_model(self) -> None:
+        """Retrain the ML model using the latest InfluxDB data."""
+        from ml.config import load_config
+        from ml.trainer import train_model
+
+        try:
+            ml_config = load_config(app_options=self._addon_options)
+            train_model(ml_config)
+            logger.info("ML model retrained successfully")
+
+            # Invalidate cache so next forecast uses fresh model
+            self._ml_forecast_cache = None
+            self._ml_forecast_cache_date = None
+
+        except Exception as e:
+            logger.exception("Failed to retrain ML model: %s", e)
+
+    def _generate_ml_predictions(self) -> None:
+        """Generate ML predictions for today and cache them."""
+        from ml.config import load_config
+        from ml.predictor import predict
+
+        try:
+            ml_config = load_config(app_options=self._addon_options)
+            predictions = predict(ml_config)
+
+            if predictions is not None and len(predictions) == 96:
+                self._ml_forecast_cache = list(predictions)
+                self._ml_forecast_cache_date = date.today()
+                total = sum(predictions)
+                logger.info(
+                    "ML predictions generated: %.1f kWh total for %s",
+                    total,
+                    date.today(),
+                )
+            else:
+                logger.warning(
+                    "ML prediction returned invalid result: %s",
+                    type(predictions).__name__,
+                )
+
+        except Exception as e:
+            logger.exception("Failed to generate ML predictions: %s", e)
 
     def _handle_special_cases(self, period: int, prepare_next_day: bool) -> None:
         """Handle special cases like midnight transition."""

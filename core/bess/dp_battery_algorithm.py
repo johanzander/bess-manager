@@ -24,14 +24,23 @@ KEY FEATURES:
 
 MINIMUM PROFIT THRESHOLD SYSTEM:
 The minimum profit threshold prevents unprofitable battery operations through a post-optimization profitability gate.
-After optimization completes, the total savings are compared against the threshold:
-- If total_savings >= min_action_profit_threshold: Execute the optimized schedule
-- If total_savings < min_action_profit_threshold: Reject optimization and use all-IDLE schedule (do nothing)
+After optimization completes, the total savings are compared against an effective threshold derived from the configured
+value scaled proportionally to the remaining horizon fraction:
 
-This ensures the battery only operates when it provides meaningful economic benefit:
+    effective_threshold = min_action_profit_threshold * max(THRESHOLD_HORIZON_FLOOR, horizon / total_periods)
+
+- If total_savings >= effective_threshold: Execute the optimized schedule
+- If total_savings < effective_threshold: Reject optimization and use all-IDLE schedule (do nothing)
+
+The scaling ensures the bar is proportional to how much of the day remains. A run at midnight faces the full threshold;
+a run at 20:00 with only 4 hours left faces roughly 1/6 of it. Without scaling, late-day runs are held to an
+unreachable standard and legitimate evening discharge opportunities get blocked.
+
+THRESHOLD_HORIZON_FLOOR (0.15) prevents the effective threshold from collapsing to near-zero at end of day, which
+would allow the battery to cycle for trivially small gains in the final hour or two.
+
 Configurable via battery.min_action_profit_threshold in config.yaml (in your currency).
-Example: a threshold of 1.5 means optimization must save at least 1.5 to be executed
-Otherwise the battery stays idle - better to do nothing than operate for marginal gains
+Example: a threshold of 8.0 at 16:00 (8/24 remaining) becomes an effective threshold of 8.0 * 0.33 = 2.67
 
 STRATEGIC INTENT CAPTURE:
 The algorithm now captures the strategic reasoning behind each decision:
@@ -946,12 +955,23 @@ def optimize_battery_schedule(
     )
 
     # ============================================================================
-    # PROFITABILITY GATE: Reject optimization if savings below threshold
+    # PROFITABILITY GATE: Reject optimization if savings below effective threshold
     # ============================================================================
-    if grid_to_battery_solar_savings < battery_settings.min_action_profit_threshold:
+    # Scale the threshold proportionally to the remaining horizon so that mid-day
+    # and late-day runs are not held to a full-day savings bar.
+    # A floor of 15% prevents the threshold from collapsing to near-zero at end of day.
+    THRESHOLD_HORIZON_FLOOR = 0.15
+    total_periods = round(24.0 / dt)
+    horizon_fraction = max(THRESHOLD_HORIZON_FLOOR, horizon / total_periods)
+    effective_threshold = (
+        battery_settings.min_action_profit_threshold * horizon_fraction
+    )
+    if grid_to_battery_solar_savings < effective_threshold:
         logger.warning(
             f"Optimization savings ({grid_to_battery_solar_savings:.2f} {currency}) below "
-            f"minimum threshold ({battery_settings.min_action_profit_threshold:.2f} {currency}). "
+            f"effective threshold ({effective_threshold:.2f} {currency}) "
+            f"(configured: {battery_settings.min_action_profit_threshold:.2f}, "
+            f"horizon: {horizon}/{total_periods} periods, scale: {horizon_fraction:.2f}). "
             f"Using all-IDLE schedule instead."
         )
         return _create_idle_schedule(

@@ -91,13 +91,12 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
     }
     const dataSource = hour.dataSource;
 
-    // Calculate x-axis position at period END
-    // With stepBefore, hovering tick "01" shows period 00:00-01:00
+    // Calculate x-axis position at period START
     let xPosition: number;
     if (resolution === 'quarter-hourly') {
-      xPosition = (periodNum + 1) / 4;
+      xPosition = periodNum / 4;
     } else {
-      xPosition = periodNum + 1;
+      xPosition = periodNum;
     }
 
     return {
@@ -137,9 +136,9 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
 
       let xPosition: number;
       if (resolution === 'quarter-hourly') {
-        xPosition = 24 + (periodNum + 1) / 4;
+        xPosition = 24 + periodNum / 4;
       } else {
-        xPosition = 24 + periodNum + 1;
+        xPosition = 24 + periodNum;
       }
 
       chartData.push({

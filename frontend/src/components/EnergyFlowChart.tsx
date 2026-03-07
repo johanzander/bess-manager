@@ -146,7 +146,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
   };
 
   // Map each period to a chart data point positioned at the START of its hour
-  // Data positioned at period END with stepBefore: tick N shows period (N-1)→N
+  // Data positioned at period START with stepAfter: bar from x to x+1 shows period x→x+1
   const numDataPoints = dailyViewData?.length || 24;
   const chartData: any[] = Array.from({ length: numDataPoints }, (_, index) => {
     const dailyViewHour = dailyViewData?.[index];
@@ -161,9 +161,9 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
     const gridImported = getValue(dailyViewHour?.gridImported) || 0;
     const gridExported = getValue(dailyViewHour?.gridExported) || 0;
 
-    // Calculate x-axis position at period END (tick N = end of period N-1)
-    // With stepBefore, hovering tick "01" shows period 00:00-01:00
-    const hourPosition = resolution === 'quarter-hourly' ? (periodNum + 1) / 4 : periodNum + 1;
+    // Calculate x-axis position at period START
+    // stepAfter renders bar from x to x+1, so period 0 fills 00:00-01:00
+    const hourPosition = resolution === 'quarter-hourly' ? periodNum / 4 : periodNum;
 
     return {
       hour: hourPosition,
@@ -197,8 +197,8 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
       const tomorrowPeriodsPerDay = resolution === 'quarter-hourly' ? 96 : 24;
       const periodNum = rawPeriodNum >= tomorrowPeriodsPerDay ? rawPeriodNum - tomorrowPeriodsPerDay : rawPeriodNum;
       const hourPosition = resolution === 'quarter-hourly'
-        ? 24 + (periodNum + 1) / 4
-        : 24 + periodNum + 1;
+        ? 24 + periodNum / 4
+        : 24 + periodNum;
 
       const solarProduction = getValue(hourData?.solarProduction);
       const homeConsumption = getValue(hourData?.homeConsumption);
@@ -353,7 +353,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
 
             {/* ENERGY SOURCES - Single series, style by isActual */}
             <Area
-              type="stepBefore"
+              type="stepAfter"
               dataKey="solar"
               stackId="sources"
               stroke={colors.solar}
@@ -365,7 +365,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
               connectNulls
             />
             <Area
-              type="stepBefore"
+              type="stepAfter"
               dataKey="batteryOut"
               stackId="sources"
               stroke={colors.battery}
@@ -377,7 +377,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
               connectNulls
             />
             <Area
-              type="stepBefore"
+              type="stepAfter"
               dataKey="gridIn"
               stackId="sources"
               stroke={colors.grid}
@@ -390,7 +390,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
             />
             {/* ENERGY CONSUMPTION - Single series, style by isActual */}
             <Area
-              type="stepBefore"
+              type="stepAfter"
               dataKey="home"
               stackId="consumption"
               stroke={colors.home}
@@ -402,7 +402,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
               connectNulls
             />
             <Area
-              type="stepBefore"
+              type="stepAfter"
               dataKey="batteryIn"
               stackId="consumption"
               stroke={colors.battery}
@@ -414,7 +414,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
               connectNulls
             />
             <Area
-              type="stepBefore"
+              type="stepAfter"
               dataKey="gridOut"
               stackId="consumption"
               stroke={colors.gridExport}
@@ -437,7 +437,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
 
             {/* Price line on secondary Y-axis */}
             <Line
-              type="stepBefore"
+              type="stepAfter"
               dataKey="price"
               yAxisId="price"
               stroke="#9CA3AF"

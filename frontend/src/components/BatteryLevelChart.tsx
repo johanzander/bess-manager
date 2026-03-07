@@ -91,12 +91,13 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
     }
     const dataSource = hour.dataSource;
 
-    // Calculate x-axis position (start of period)
+    // Calculate x-axis position at period END
+    // With stepBefore, hovering tick "01" shows period 00:00-01:00
     let xPosition: number;
     if (resolution === 'quarter-hourly') {
-      xPosition = periodNum / 4;
+      xPosition = (periodNum + 1) / 4;
     } else {
-      xPosition = periodNum;
+      xPosition = periodNum + 1;
     }
 
     return {
@@ -136,9 +137,9 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
 
       let xPosition: number;
       if (resolution === 'quarter-hourly') {
-        xPosition = 24 + periodNum / 4;
+        xPosition = 24 + (periodNum + 1) / 4;
       } else {
-        xPosition = 24 + periodNum;
+        xPosition = 24 + periodNum + 1;
       }
 
       chartData.push({
@@ -159,9 +160,9 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
     }
   }
 
-  // Compute max hour for X-axis (add 1 for stepAfter to render last period)
+  // Period 23 is at x=24 (period END), so today-only maxHour is naturally 24
   const maxHourValue = hasTomorrowData
-    ? Math.ceil(Math.max(...chartData.map(d => d.hour))) + 1
+    ? Math.ceil(Math.max(...chartData.map(d => d.hour)))
     : 24;
   const xAxisTicks = Array.from({ length: maxHourValue + 1 }, (_, i) => i);
 
@@ -286,7 +287,7 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
 
             <Area
               yAxisId="left"
-              type="stepAfter"
+              type="stepBefore"
               dataKey="batterySocPercent"
               stroke="#16a34a"
               strokeWidth={2}

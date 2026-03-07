@@ -146,7 +146,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
   };
 
   // Map each period to a chart data point positioned at the START of its hour
-  // For stepAfter rendering: data at x=0 shows from 0→1, data at x=1 shows from 1→2, etc.
+  // Data positioned at period END with stepBefore: tick N shows period (N-1)→N
   const numDataPoints = dailyViewData?.length || 24;
   const chartData: any[] = Array.from({ length: numDataPoints }, (_, index) => {
     const dailyViewHour = dailyViewData?.[index];
@@ -161,8 +161,9 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
     const gridImported = getValue(dailyViewHour?.gridImported) || 0;
     const gridExported = getValue(dailyViewHour?.gridExported) || 0;
 
-    // Calculate x-axis position (start of period)
-    const hourPosition = resolution === 'quarter-hourly' ? (periodNum / 4) : periodNum;
+    // Calculate x-axis position at period END (tick N = end of period N-1)
+    // With stepBefore, hovering tick "01" shows period 00:00-01:00
+    const hourPosition = resolution === 'quarter-hourly' ? (periodNum + 1) / 4 : periodNum + 1;
 
     return {
       hour: hourPosition,
@@ -196,8 +197,8 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
       const tomorrowPeriodsPerDay = resolution === 'quarter-hourly' ? 96 : 24;
       const periodNum = rawPeriodNum >= tomorrowPeriodsPerDay ? rawPeriodNum - tomorrowPeriodsPerDay : rawPeriodNum;
       const hourPosition = resolution === 'quarter-hourly'
-        ? 24 + (periodNum / 4)
-        : 24 + periodNum;
+        ? 24 + (periodNum + 1) / 4
+        : 24 + periodNum + 1;
 
       const solarProduction = getValue(hourData?.solarProduction);
       const homeConsumption = getValue(hourData?.homeConsumption);
@@ -231,18 +232,11 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
   }
 
   // Compute max hour for X-axis domain
-  // Add 1 to include room for the last stepAfter to render
+  // Period 23 is at x=24, so today-only maxHour is naturally 24
   const maxHour = hasTomorrowData
-    ? Math.ceil(Math.max(...chartData.map(d => d.hour))) + 1
+    ? Math.ceil(Math.max(...chartData.map(d => d.hour)))
     : 24;
 
-  // Add terminal sentinel at maxHour so monotone Area charts render the last period segment (23→24)
-  const lastPoint = chartData[chartData.length - 1];
-  chartData.push({
-    ...lastPoint,
-    hour: maxHour,
-    solar: 0, batteryOut: 0, gridIn: 0, home: 0, batteryIn: 0, gridOut: 0,
-  });
 
   // Explicit tick positions at whole hours
   const xAxisTicks = Array.from({ length: Math.ceil(maxHour) + 1 }, (_, i) => i);
@@ -359,7 +353,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
 
             {/* ENERGY SOURCES - Single series, style by isActual */}
             <Area
-              type="stepAfter"
+              type="stepBefore"
               dataKey="solar"
               stackId="sources"
               stroke={colors.solar}
@@ -371,7 +365,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
               connectNulls
             />
             <Area
-              type="stepAfter"
+              type="stepBefore"
               dataKey="batteryOut"
               stackId="sources"
               stroke={colors.battery}
@@ -383,7 +377,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
               connectNulls
             />
             <Area
-              type="stepAfter"
+              type="stepBefore"
               dataKey="gridIn"
               stackId="sources"
               stroke={colors.grid}
@@ -396,7 +390,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
             />
             {/* ENERGY CONSUMPTION - Single series, style by isActual */}
             <Area
-              type="stepAfter"
+              type="stepBefore"
               dataKey="home"
               stackId="consumption"
               stroke={colors.home}
@@ -408,7 +402,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
               connectNulls
             />
             <Area
-              type="stepAfter"
+              type="stepBefore"
               dataKey="batteryIn"
               stackId="consumption"
               stroke={colors.battery}
@@ -420,7 +414,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
               connectNulls
             />
             <Area
-              type="stepAfter"
+              type="stepBefore"
               dataKey="gridOut"
               stackId="consumption"
               stroke={colors.gridExport}
@@ -443,7 +437,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
 
             {/* Price line on secondary Y-axis */}
             <Line
-              type="stepAfter"
+              type="stepBefore"
               dataKey="price"
               yAxisId="price"
               stroke="#9CA3AF"

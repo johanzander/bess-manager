@@ -5,6 +5,12 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.2.0] - 2026-03-07
+
+### Added
+
+- Battery Mode Schedule timeline on Dashboard page. Shows a color-coded horizontal bar of strategic intents (Grid Charging, Solar Storage, Load Support, Export Arbitrage, Idle) across the 24-hour schedule, including tomorrow's plan when available. Supports hover tooltips, current-hour marker, and both hourly and quarter-hourly resolution.
+
 ## [7.1.1] - 2026-03-07
 
 ### Fixed

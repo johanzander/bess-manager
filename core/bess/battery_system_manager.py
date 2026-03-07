@@ -8,6 +8,7 @@ import statistics
 from datetime import date, datetime, timedelta
 from typing import Any
 
+from . import time_utils
 from .daily_view_builder import DailyView, DailyViewBuilder
 from .dp_battery_algorithm import (
     OptimizationResult,
@@ -38,7 +39,6 @@ from .schedule_store import ScheduleStore
 from .sensor_collector import SensorCollector
 from .settings import BatterySettings, HomeSettings, PriceSettings
 from .time_utils import (
-    TIMEZONE,
     format_period,
     get_period_count,
     period_index_to_timestamp,
@@ -436,7 +436,7 @@ class BatterySystemManager:
 
             # Store snapshot
             self.prediction_snapshot_store.store_snapshot(
-                snapshot_timestamp=datetime.now(tz=TIMEZONE),
+                snapshot_timestamp=datetime.now(tz=time_utils.TIMEZONE),
                 optimization_period=optimization_period,
                 daily_view=daily_view,
                 growatt_schedule=growatt_schedule,
@@ -480,7 +480,7 @@ class BatterySystemManager:
     def _fetch_and_initialize_historical_data(self) -> None:
         """Fetch and initialize historical data using quarterly resolution."""
         try:
-            now = datetime.now(tz=TIMEZONE)
+            now = datetime.now(tz=time_utils.TIMEZONE)
             current_period = now.hour * 4 + now.minute // 15
 
             logger.info(
@@ -539,7 +539,7 @@ class BatterySystemManager:
                         period_data = PeriodData(
                             period=period,  # For backward compatibility, still called 'hour'
                             energy=period_energy_data,
-                            timestamp=datetime.now(tz=TIMEZONE),
+                            timestamp=datetime.now(tz=time_utils.TIMEZONE),
                             data_source="actual",
                             economic=economic_data,
                             decision=DecisionData(
@@ -683,7 +683,9 @@ class BatterySystemManager:
             prices = [entry["price"] for entry in price_entries]
 
             # Validate quarterly period count (handles DST: 92, 96, or 100)
-            today_period_count = get_period_count(datetime.now(tz=TIMEZONE).date())
+            today_period_count = get_period_count(
+                datetime.now(tz=time_utils.TIMEZONE).date()
+            )
             if not prepare_next_day and len(prices) > today_period_count:
                 logger.info(
                     "Extended horizon: %d periods (%d today + %d tomorrow)",
@@ -767,7 +769,7 @@ class BatterySystemManager:
             period_data = PeriodData(
                 period=prev_period,
                 energy=energy_data,
-                timestamp=datetime.now(tz=TIMEZONE),
+                timestamp=datetime.now(tz=time_utils.TIMEZONE),
                 data_source="actual",
                 economic=economic_data,
                 decision=DecisionData(
@@ -1031,7 +1033,9 @@ class BatterySystemManager:
         Returns:
             Terminal value per kWh (floored at 0.0)
         """
-        today_period_count = get_period_count(datetime.now(tz=TIMEZONE).date())
+        today_period_count = get_period_count(
+            datetime.now(tz=time_utils.TIMEZONE).date()
+        )
         remaining_today = today_period_count - optimization_period
         total_horizon = len(buy_prices)
 
@@ -1262,7 +1266,7 @@ class BatterySystemManager:
             else:
                 # First run of the day or no previous schedule - initialize to IDLE
                 # Use get_period_count() to handle DST (92/96/100 periods)
-                today = datetime.now(tz=TIMEZONE).date()
+                today = datetime.now(tz=time_utils.TIMEZONE).date()
                 num_periods = get_period_count(today)
                 full_day_strategic_intents = ["IDLE"] * num_periods
                 logger.debug(
@@ -1273,9 +1277,9 @@ class BatterySystemManager:
             for i, period_data in enumerate(period_data_list):
                 target_period = optimization_period + i
                 if target_period < len(full_day_strategic_intents):
-                    full_day_strategic_intents[
-                        target_period
-                    ] = period_data.decision.strategic_intent
+                    full_day_strategic_intents[target_period] = (
+                        period_data.decision.strategic_intent
+                    )
 
             # Store initial SOC in OptimizationResult for DailyViewBuilder
             if self._initial_soe is not None:
@@ -1296,7 +1300,9 @@ class BatterySystemManager:
             # better decisions for today, but DPSchedule and GrowattScheduleManager are
             # day-centric and the Growatt inverter has no date awareness in TOU segments.
             if not prepare_next_day:
-                today_period_count = get_period_count(datetime.now(tz=TIMEZONE).date())
+                today_period_count = get_period_count(
+                    datetime.now(tz=time_utils.TIMEZONE).date()
+                )
                 if len(combined_soe) > today_period_count:
                     logger.info(
                         "Truncating schedule arrays from %d to %d periods (today only)",
@@ -1318,7 +1324,9 @@ class BatterySystemManager:
             # The DP algorithm computes economic_summary over the full extended horizon
             # (up to 192 periods), which inflates profitability gate and prediction snapshots.
             if not prepare_next_day:
-                today_period_count = get_period_count(datetime.now(tz=TIMEZONE).date())
+                today_period_count = get_period_count(
+                    datetime.now(tz=time_utils.TIMEZONE).date()
+                )
                 today_result_count = today_period_count - optimization_period
                 today_result_periods = period_data_list[:today_result_count]
                 today_base_cost = sum(
@@ -2087,7 +2095,7 @@ class BatterySystemManager:
             SystemConfigurationError: If current_period is not in valid range 0-95
         """
         # Calculate current period from current time if not provided
-        now = datetime.now(tz=TIMEZONE)
+        now = datetime.now(tz=time_utils.TIMEZONE)
         if current_period is None:
             current_period = now.hour * 4 + now.minute // 15
         else:
@@ -2271,7 +2279,7 @@ class BatterySystemManager:
             logger.info("No energy data to display")
             return
 
-        now = datetime.now(tz=TIMEZONE)
+        now = datetime.now(tz=time_utils.TIMEZONE)
         current_period = now.hour * 4 + now.minute // 15
 
         # Create table header

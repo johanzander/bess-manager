@@ -5,6 +5,14 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.4.5] - 2026-03-07
+
+### Fixed
+
+- Startup data collection for the last completed period used live sensors instead of InfluxDB, causing inflated values (e.g. ~2x) and leaving the next period nearly empty on the chart. (thanks [@pookey](https://github.com/pookey))
+- Chart price line now shows visual gaps instead of dropping to zero when price data is unavailable.
+- BatteryLevelChart SOC line no longer shows a flat 0% line for predicted hours with no data.
+
 ## [7.4.4] - 2026-03-07
 
 ### Fixed

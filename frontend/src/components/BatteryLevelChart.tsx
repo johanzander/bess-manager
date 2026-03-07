@@ -183,7 +183,7 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
               tickLine={{ stroke: colors.text }}
               ticks={xAxisTicks}
               tickFormatter={(value: number) => {
-                return `${(Math.floor(value) % 24).toString().padStart(2, '0')}:00`;
+                return `${(Math.floor(value) % 24).toString().padStart(2, '0')}`;
               }}
             />
             

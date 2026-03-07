@@ -172,6 +172,12 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
     : 24;
   const xAxisTicks = Array.from({ length: maxHourValue + 1 }, (_, i) => i);
 
+  // Find predicted hours range for today (same logic as EnergyFlowChart)
+  const firstPredictedIdx = chartData.findIndex(d => !d.isActual && !d.isTomorrow);
+  const lastTodayIdx = chartData.findIndex(d => d.isTomorrow);
+  const firstPredictedHour = firstPredictedIdx > -1 ? chartData[firstPredictedIdx].hour : null;
+  const lastTodayHour = lastTodayIdx > -1 ? chartData[lastTodayIdx - 1]?.hour : maxHourValue;
+
   const maxAction = Math.max(...chartData.map(d => Math.abs(d.action || 0)), 1);
   const maxPrice = Math.max(...chartData.map(h => h.price ?? 0), 1);
 
@@ -274,6 +280,17 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
                 strokeDasharray="5 5"
               />
             ))}
+
+            {/* Overlay for predicted hours (today only) */}
+            {firstPredictedHour !== null && (
+              <ReferenceArea
+                yAxisId="left"
+                x1={firstPredictedHour}
+                x2={lastTodayHour}
+                fill={isDarkMode ? 'rgba(120,120,120,0.12)' : 'rgba(120,120,120,0.10)'}
+                ifOverflow="hidden"
+              />
+            )}
 
             {/* Grey background for tomorrow's data */}
             {hasTomorrowData && (

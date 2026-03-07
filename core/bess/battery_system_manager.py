@@ -829,6 +829,12 @@ class BatterySystemManager:
             self._ml_forecast_cache = None
             self._ml_forecast_cache_date = None
             self._fetch_predictions()
+            # Generate ML predictions for report page (regardless of active strategy)
+            if self._addon_options.get("ml"):
+                try:
+                    self._generate_ml_predictions()
+                except Exception as e:
+                    logger.warning("Failed to generate ML predictions for next day: %s", e)
 
     def _get_price_data(
         self, prepare_next_day: bool

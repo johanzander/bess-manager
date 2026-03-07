@@ -9,7 +9,7 @@ import log_config  # noqa: F401
 from api import router as endpoints_router
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -420,3 +420,9 @@ async def root_index():
 
 # All API endpoints are found in api.py and are imported via the router
 # The endpoints router is included in the app instance at the top of this file
+
+
+# SPA catch-all: serve index.html for any path not matched by API or asset routes
+@app.get("/{full_path:path}")
+async def spa_fallback(full_path: str, request: Request):
+    return FileResponse("/app/frontend/index.html")

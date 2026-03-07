@@ -4,6 +4,20 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- XGBoost ML energy consumption predictor with `ml_prediction` strategy option. Trains on InfluxDB historical data, uses weather forecasts from HA, and generates 96 quarter-hourly predictions. Includes ML Report dashboard page showing model metrics, feature importance, and forecast comparison.
+
+### Changed
+
+- Docker base image switched from Alpine 3.19 to Debian Bookworm to support xgboost and scikit-learn wheel installation.
+
+### Note
+
+The ML predictor is experimental. In testing so far, predictions are roughly on par with or slightly worse than a simple 7-day average (`influxdb_7d_avg`). It adds significant startup time (model retrain on boot) and heavy dependencies (xgboost, scikit-learn). It is included as an optional feature for experimentation — the `influxdb_7d_avg` strategy is recommended for production use.
+
 ## [8.3.0] - 2026-04-19
 
 ### Fixed

@@ -13,3 +13,6 @@ pyyaml
 watchdog
 numpy
 pandas
+scikit-learn
+xgboost
+astral

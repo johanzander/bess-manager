@@ -336,6 +336,15 @@ class BESSController:
             misfire_grace_time=30,  # Allow 30 seconds of misfire before warning
         )
 
+        # ML model daily retrain at 23:00 — retrain only, predictions are
+        # generated at 23:55 in _handle_special_cases after cache is cleared
+        if self.system._addon_options.get("ml"):
+            self.scheduler.add_job(
+                self.system._retrain_ml_model,
+                CronTrigger(hour=23, minute=0),
+                misfire_grace_time=120,
+            )
+
         # Charging power adjustment (every 5 minutes)
         self.scheduler.add_job(
             self.system.adjust_charging_power,

@@ -2636,3 +2636,68 @@ async def setup_complete(payload: APISetupCompletePayload):
     except Exception as e:
         logger.error(f"Error completing setup: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.get("/api/ml-report")
+async def get_ml_report():
+    """Return ML model report: metrics, feature importance, predictions vs yesterday."""
+    import json
+    from pathlib import Path
+
+    from app import bess_controller
+
+    system = bess_controller.system
+    strategy = system.home_settings.consumption_strategy
+    is_active = strategy in ("ml_prediction", "influxdb_7d_avg")
+
+    try:
+        from ml.config import load_config
+
+        ml_cfg = load_config(app_options=system._addon_options)
+        report_path = Path(ml_cfg["model_path"]).with_suffix(".report.json")
+    except Exception as e:
+        logger.warning("Could not load ML config for report: %s", e)
+        return {"isActive": is_active, "modelAvailable": False}
+
+    if not report_path.exists():
+        return {"isActive": is_active, "modelAvailable": False}
+
+    with open(report_path) as f:
+        report = json.load(f)
+
+    predictions = system._ml_forecast_cache
+
+    forecast_date = (
+        system._ml_forecast_cache_date.isoformat()
+        if system._ml_forecast_cache_date
+        else None
+    )
+
+    yesterday_profile = None
+    week_avg_profile = None
+    try:
+        from ml.data_fetcher import fetch_history_context
+
+        history = fetch_history_context(ml_cfg)
+        yesterday_profile = history["yesterday_profile"]
+        week_avg_profile = history["week_avg_profile"]
+    except Exception as e:
+        logger.warning("Could not fetch history context for ML report: %s", e)
+
+    return {
+        "isActive": is_active,
+        "activeStrategy": strategy,
+        "modelAvailable": True,
+        "lastTrained": report["trained_at"],
+        "trainSize": report["train_size"],
+        "testSize": report["test_size"],
+        "metrics": convert_keys_to_camel_case(report["metrics"]),
+        "baselines": {
+            k: convert_keys_to_camel_case(v) for k, v in report["baselines"].items()
+        },
+        "featureImportance": report["feature_importance"],
+        "forecastDate": forecast_date,
+        "predictions": predictions,
+        "yesterdayProfile": yesterday_profile,
+        "weekAvgProfile": week_avg_profile,
+    }

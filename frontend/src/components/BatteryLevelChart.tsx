@@ -177,8 +177,8 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
     <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
       <div className="h-80">
         <ResponsiveContainer width="100%" height="100%">
-          <ComposedChart data={chartData}>
-            <CartesianGrid strokeDasharray="5 5" stroke={colors.grid} strokeOpacity={0.3} strokeWidth={0.5} />
+          <ComposedChart data={chartData} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
+            <CartesianGrid strokeDasharray="5 5" stroke={colors.grid} strokeOpacity={isDarkMode ? 0.15 : 0.3} strokeWidth={0.5} />
             <XAxis
               dataKey="hour"
               interval={0}
@@ -192,47 +192,50 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
             />
             
             {/* Left Y-axis for Battery SOC (%) */}
-            <YAxis 
-              yAxisId="left" 
+            <YAxis
+              yAxisId="left"
+              width={60}
               stroke={colors.text}
-              domain={[0, 100]} 
+              domain={[0, 100]}
               tick={{ fontSize: 12 }}
               tickFormatter={(value) => `${Math.round(value)}%`}
-              label={{ 
-                value: 'Battery SOC (%)', 
-                angle: -90, 
-                position: 'insideLeft', 
+              label={{
+                value: 'Battery SOC (%)',
+                angle: -90,
+                position: 'insideLeft',
                 style: { textAnchor: 'middle', dominantBaseline: 'central' }
               }}
             />
-            
+
             {/* Right Y-axis for Electricity Price */}
-            <YAxis 
-              yAxisId="right" 
-              orientation="right" 
+            <YAxis
+              yAxisId="right"
+              orientation="right"
+              width={60}
               stroke={colors.text}
               domain={[0, Math.ceil(maxPrice * 1.2 * 10) / 10]}
               tick={{ fontSize: 11 }}
               tickFormatter={(value) => value.toLocaleString('sv-SE', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
-              label={{ 
-                value: `Electricity Price (${currencyUnit}/kWh)`, 
-                angle: 90, 
-                position: 'insideRight', 
+              label={{
+                value: `Electricity Price (${currencyUnit}/kWh)`,
+                angle: 90,
+                position: 'insideRight',
                 style: { textAnchor: 'middle', dominantBaseline: 'central' }
               }}
             />
-            
+
             {/* Third Y-axis for Battery Actions (kWh) */}
-            <YAxis 
+            <YAxis
               yAxisId="action"
               orientation="right"
+              width={60}
               stroke={colors.text}
               domain={[-maxAction * 1.2, maxAction * 1.2]}
               tick={{ fontSize: 12 }}
               tickFormatter={(value) => value.toLocaleString('sv-SE', {minimumFractionDigits: 1, maximumFractionDigits: 1})}
-              label={{ 
-                value: 'Battery Action (kWh)', 
-                angle: 90, 
+              label={{
+                value: 'Battery Action (kWh)',
+                angle: 90,
                 position: 'outside',
                 offset: 40,
                 style: { textAnchor: 'middle', dominantBaseline: 'central' }

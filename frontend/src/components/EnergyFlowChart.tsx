@@ -242,7 +242,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
         <ResponsiveContainer>
           <ComposedChart
             data={chartData}
-            margin={{ top: 20, right: 30, left: 20, bottom: 60 }}
+            margin={{ top: 20, right: 65, left: 5, bottom: 60 }}
           >
             <defs>
               {/* Solid colors for actual data */}
@@ -298,7 +298,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
               </linearGradient>
             </defs>
             
-            <CartesianGrid strokeDasharray="5 5" stroke={colors.gridLines} strokeOpacity={0.3} strokeWidth={0.5} />
+            <CartesianGrid strokeDasharray="5 5" stroke={colors.gridLines} strokeOpacity={isDarkMode ? 0.15 : 0.3} strokeWidth={0.5} />
             <XAxis
               dataKey="hour"
               type="number"
@@ -312,25 +312,27 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
                 return (Math.floor(hour) % 24).toString().padStart(2, '0');
               }}
             />
-            <YAxis 
+            <YAxis
+              width={60}
               stroke={colors.text}
               tick={{ fontSize: 12 }}
-              label={{ 
-                value: 'Energy (kWh)', 
-                angle: -90, 
-                position: 'insideLeft', 
+              label={{
+                value: 'Energy (kWh)',
+                angle: -90,
+                position: 'insideLeft',
                 style: { textAnchor: 'middle', dominantBaseline: 'central' }
               }}
             />
-            <YAxis 
+            <YAxis
               yAxisId="price"
               orientation="right"
+              width={60}
               stroke={colors.text}
               tick={{ fontSize: 11 }}
               tickFormatter={(value) => value.toLocaleString('sv-SE', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
-              label={{ 
-                value: `Electricity Price (${currencyUnit}/kWh)`, 
-                angle: 90, 
+              label={{
+                value: `Electricity Price (${currencyUnit}/kWh)`,
+                angle: 90,
                 position: 'insideRight',
                 style: { textAnchor: 'middle', dominantBaseline: 'central' }
               }}

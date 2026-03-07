@@ -115,6 +115,7 @@ export interface BatterySettings {
   
   // Consumption estimate
   estimatedConsumption: number; // kWh daily estimate
+  consumptionStrategy: string;  // "sensor", "fixed", "influxdb_7d_avg", or "ml_prediction"
   
   // Price settings
   useActualPrice?: boolean;     // use actual vs estimated prices

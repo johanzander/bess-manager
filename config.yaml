@@ -30,6 +30,8 @@ options:
   home:
     consumption: 3.5                # default hourly consumption in kWh
     currency: "SEK"                 # currency for price display and calculations
+    consumption_strategy: "sensor"  # "sensor" (HA 48h avg), "fixed", "influxdb_7d_avg", or "ml_prediction"
+    timezone: "Europe/Stockholm"    # IANA timezone for schedule calculations
     max_fuse_current: 25            # Maximum fuse current in amperes
     voltage: 230                    # Line voltage in volts
     safety_margin_factor: 1.0       # Safety margin for power calculations (100% - safe with 5min monitoring)
@@ -97,6 +99,31 @@ options:
     48h_avg_grid_import: "sensor.48h_average_grid_import_power"       # 48h average consumption
     solar_forecast_today: "sensor.solcast_pv_forecast_forecast_today" # Today's solar forecast
     solar_forecast_tomorrow: "sensor.solcast_pv_forecast_forecast_tomorrow" # Tomorrow's solar forecast
+  ml:
+    location:
+      latitude: 59.3293
+      longitude: 18.0686
+      timezone: "Europe/Stockholm"
+    weather_entity: "weather.forecast_home"
+    feature_sensors:
+      outdoor_temperature: "your_temperature_sensor_id"
+    derived_features:
+      hour_of_day: true
+      day_of_week: false
+      daylight_hours: false
+    history_context:
+      yesterday_same_hour: true
+      yesterday_total: true
+      week_avg_same_hour: true
+      recent_24h_mean: true
+    training:
+      days_of_history: 30
+      test_split: 0.2
+      model_params:
+        n_estimators: 200
+        max_depth: 6
+        learning_rate: 0.1
+        min_child_weight: 3
 schema:
   influxdb:
     url: str
@@ -106,6 +133,8 @@ schema:
   home:
     consumption: float
     currency: str
+    consumption_strategy: str
+    timezone: str
     max_fuse_current: int
     voltage: int
     safety_margin_factor: float
@@ -167,3 +196,28 @@ schema:
     output_power: str
     self_power: str
     system_power: str
+  ml:
+    location:
+      latitude: float
+      longitude: float
+      timezone: str
+    weather_entity: str
+    feature_sensors:
+      outdoor_temperature: str
+    derived_features:
+      hour_of_day: bool
+      day_of_week: bool
+      daylight_hours: bool
+    history_context:
+      yesterday_same_hour: bool
+      yesterday_total: bool
+      week_avg_same_hour: bool
+      recent_24h_mean: bool
+    training:
+      days_of_history: int
+      test_split: float
+      model_params:
+        n_estimators: int
+        max_depth: int
+        learning_rate: float
+        min_child_weight: int

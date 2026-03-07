@@ -22,15 +22,16 @@ LABEL \
     org.label-schema.vcs-url="https://github.com/johanzander/bess-manager"
 
 # Install requirements for add-on
-RUN apk add --no-cache \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
-    py3-pip \
+    python3-pip \
+    python3-venv \
     python3-dev \
     gcc \
-    musl-dev \
     bash \
     nodejs \
-    npm
+    npm \
+    && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /app
@@ -38,8 +39,9 @@ WORKDIR /app
 # Copy Python application files from backend directory
 COPY backend/app.py backend/api.py backend/api_conversion.py backend/api_dataclasses.py backend/log_config.py backend/requirements.txt ./
 
-# Copy core directory
+# Copy core directory and ML module
 COPY core/ /app/core/
+COPY ml/ /app/ml/
 
 # Build and copy frontend
 WORKDIR /tmp/frontend

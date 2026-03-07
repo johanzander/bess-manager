@@ -162,6 +162,8 @@ class HomeSettings:
     default_hourly: float = HOME_HOURLY_CONSUMPTION_KWH
     min_valid: float = MIN_CONSUMPTION
     currency: str = DEFAULT_CURRENCY
+    consumption_strategy: str = "sensor"
+    timezone: str = "Europe/Stockholm"
 
     def update(self, **kwargs: Any) -> None:
         """Update settings from dict."""
@@ -189,4 +191,8 @@ class HomeSettings:
                 "consumption", HOME_HOURLY_CONSUMPTION_KWH
             )
             self.currency = config["home"].get("currency", DEFAULT_CURRENCY)
+            self.consumption_strategy = home_config.get(
+                "consumption_strategy", "sensor"
+            )
+            self.timezone = home_config.get("timezone", "Europe/Stockholm")
         return self

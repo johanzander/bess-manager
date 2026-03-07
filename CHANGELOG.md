@@ -5,6 +5,16 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.4.2] - 2026-03-07
+
+### Fixed
+
+- EnergyFlowChart and BatteryLevelChart data now aligned to period start, eliminating one-period misalignment caused by a fake zero-point offset. (thanks [@pookey](https://github.com/pookey))
+- Electricity price line now renders as a step function instead of smooth interpolation.
+- Predicted hours shading now uses Recharts ReferenceArea instead of a raw SVG rect that rendered at incorrect coordinates.
+- Tomorrow period numbers normalised correctly when API returns them as 96-191 continuation.
+- X-axis tick labels use modulo 24 for clean hour display across the day boundary.
+
 ## [7.4.1] - 2026-03-07
 
 ### Fixed

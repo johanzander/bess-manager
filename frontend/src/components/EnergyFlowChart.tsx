@@ -101,31 +101,17 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
   // Get the actual currency unit for the chart label
   const currencyUnit = getCurrencyUnit();
 
-  // Reactive dark mode detection
+  // Reactive dark mode detection — uses prefers-color-scheme to match Tailwind's 'media' strategy
   const [isDarkMode, setIsDarkMode] = useState(
-    document.documentElement.classList.contains('dark')
+    window.matchMedia('(prefers-color-scheme: dark)').matches
   );
 
-  // Listen for dark mode changes
   useEffect(() => {
-    const observer = new MutationObserver((mutations) => {
-      mutations.forEach((mutation) => {
-        if (mutation.type === 'attributes' && mutation.attributeName === 'class') {
-          const newIsDarkMode = document.documentElement.classList.contains('dark');
-          if (newIsDarkMode !== isDarkMode) {
-            setIsDarkMode(newIsDarkMode);
-          }
-        }
-      });
-    });
-
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ['class'],
-    });
-
-    return () => observer.disconnect();
-  }, [isDarkMode]);
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const handler = (e: MediaQueryListEvent) => setIsDarkMode(e.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
   
   const colors = {
     solar: '#fbbf24',        // Yellow

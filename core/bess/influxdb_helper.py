@@ -203,7 +203,7 @@ def _extract_sensor_name(parts: list[str], col_map: dict[str, int]) -> str:
             if entity_val.startswith("sensor."):
                 return entity_val
             # InfluxDB 1.x: short name without prefix — normalize it
-            if entity_val != "entity_id":
+            if entity_val and entity_val != "entity_id":
                 return f"sensor.{entity_val}"
 
     # Fall back to _measurement (InfluxDB 2.x stores entity_id here)
@@ -541,6 +541,7 @@ def _parse_batch_response(
                         target_date,
                     )
                     # Add this as a data point just before the day started
+                    # Use prefixed name to match sensor_data keys from _extract_sensor_name
                     prefixed_name = f"sensor.{sensor_name}"
                     initial_datapoint = (day_start - timedelta(seconds=1), sensor_value)
                     if prefixed_name in sensor_data:
@@ -579,6 +580,209 @@ def _parse_batch_response(
 
     _LOGGER.debug(
         "Parsed %d sensors with data for %d periods", len(sensor_data), len(period_data)
+    )
+
+    return period_data
+
+
+def get_power_sensor_data_batch(power_sensors: list[str], target_date) -> dict:
+    """Fetch average power (W) per period and convert to energy (kWh).
+
+    Power sensors report instantaneous wattage every ~5 minutes. By averaging
+    all readings within each 15-minute period and converting W -> kWh, we get
+    much higher resolution than cumulative energy sensors (which only increment
+    in 0.1 kWh steps).
+
+    Args:
+        power_sensors: List of power sensor entity IDs (without 'sensor.' prefix)
+        target_date: Date to fetch data for (datetime.date or datetime)
+
+    Returns:
+        dict: {
+            "status": "success" or "error",
+            "message": error message if status is "error",
+            "data": {
+                0: {sensor1: avg_kwh, sensor2: avg_kwh, ...},
+                ...
+                95: {...}
+            }
+        }
+    """
+    local_tz = time_utils.TIMEZONE
+
+    if isinstance(target_date, datetime):
+        target_date = target_date.date()
+
+    start_datetime = datetime.combine(target_date, datetime.min.time()).replace(
+        tzinfo=local_tz
+    )
+    end_datetime = datetime.combine(target_date, datetime.max.time()).replace(
+        tzinfo=local_tz
+    )
+
+    influxdb_config = get_influxdb_config()
+    url = influxdb_config["url"]
+    bucket = influxdb_config["bucket"]
+    username = influxdb_config["username"]
+    password = influxdb_config["password"]
+
+    if not url or not username or not password or not bucket:
+        _LOGGER.error("InfluxDB configuration is incomplete")
+        return {"status": "error", "message": "Incomplete InfluxDB configuration"}
+
+    headers = {
+        "Content-type": "application/vnd.flux",
+        "Accept": "application/csv",
+    }
+
+    start_str = start_datetime.astimezone(ZoneInfo("UTC")).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+    end_str = end_datetime.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    # Build sensor filter for power sensors (W measurement)
+    sensor_conditions = []
+    for sensor in power_sensors:
+        sensor_conditions.append(
+            f'r["_measurement"] == "sensor.{sensor}" or r["entity_id"] == "{sensor}"'
+        )
+    sensor_filter = " or ".join(f"({c})" for c in sensor_conditions)
+
+    flux_query = f"""from(bucket: "{bucket}")
+                    |> range(start: {start_str}, stop: {end_str})
+                    |> filter(fn: (r) => {sensor_filter})
+                    |> filter(fn: (r) => r["_field"] == "value")
+                    |> sort(columns: ["_time"])
+                    """
+
+    try:
+        _LOGGER.info(
+            "Batch fetching power sensor data for %s (%d sensors)",
+            target_date.strftime("%Y-%m-%d"),
+            len(power_sensors),
+        )
+
+        response = requests.post(
+            url=url,
+            auth=(username, password),
+            headers=headers,
+            data=flux_query,
+            timeout=30,
+        )
+
+        if response.status_code == 204:
+            _LOGGER.warning("No power sensor data found for date %s", target_date)
+            return {"status": "error", "message": "No data found"}
+
+        if response.status_code != 200:
+            _LOGGER.error("Error from InfluxDB: %s", response.status_code)
+            return {
+                "status": "error",
+                "message": f"InfluxDB error: {response.status_code}",
+            }
+
+        period_data = _parse_power_batch_response(response.text, target_date, local_tz)
+
+        _LOGGER.info(
+            "Power sensor batch complete: got data for %d periods", len(period_data)
+        )
+
+        return {"status": "success", "data": period_data}
+
+    except requests.RequestException as e:
+        _LOGGER.error("Error connecting to InfluxDB for power sensors: %s", str(e))
+        return {"status": "error", "message": f"Connection error: {e!s}"}
+    except Exception as e:
+        _LOGGER.error("Unexpected error in power sensor batch fetch: %s", str(e))
+        return {"status": "error", "message": f"Unexpected error: {e!s}"}
+
+
+def _parse_power_batch_response(
+    response_text: str, target_date, local_tz
+) -> dict[int, dict[str, float]]:
+    """Parse power sensor response: compute mean W per period, convert to kWh.
+
+    For each 15-minute period, averages all power readings within that period
+    and converts: kWh = mean_watts * (15/60) / 1000
+
+    Args:
+        response_text: CSV response from InfluxDB
+        target_date: The date being queried
+        local_tz: Local timezone
+
+    Returns:
+        dict: {period_num: {"sensor.entity_id": kwh_value, ...}, ...}
+    """
+    lines = response_text.strip().split("\n")
+    data_lines = [line for line in lines if not line.startswith("#")]
+
+    col_map = _build_column_index(data_lines)
+    if col_map is None:
+        _LOGGER.warning("No header row found in power sensor batch response")
+        return {}
+
+    value_idx = col_map["_value"]
+    time_idx = col_map["_time"]
+
+    day_start = datetime.combine(target_date, datetime.min.time()).replace(
+        tzinfo=local_tz
+    )
+
+    # Collect readings per sensor per period: {sensor: {period: [values]}}
+    sensor_period_readings: dict[str, dict[int, list[float]]] = {}
+
+    for line in data_lines:
+        parts = line.split(",")
+        try:
+            if (
+                len(parts) <= max(value_idx, time_idx)
+                or parts[value_idx].strip() == "_value"
+            ):
+                continue
+
+            timestamp_str = parts[time_idx].strip()
+            sensor_name = _extract_sensor_name(parts, col_map)
+            if not sensor_name:
+                continue
+            value = float(parts[value_idx].strip())
+
+            # Skip clearly bogus values (e.g. the output_power 429496663.7 overflow)
+            if abs(value) > 100000:
+                continue
+
+            timestamp = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
+            timestamp_local = timestamp.astimezone(local_tz)
+
+            # Calculate which period this reading belongs to
+            seconds_since_start = (timestamp_local - day_start).total_seconds()
+            if seconds_since_start < 0 or seconds_since_start >= 86400:
+                continue
+            period = int(seconds_since_start // 900)  # 900 seconds = 15 minutes
+
+            if sensor_name not in sensor_period_readings:
+                sensor_period_readings[sensor_name] = {}
+            if period not in sensor_period_readings[sensor_name]:
+                sensor_period_readings[sensor_name][period] = []
+            sensor_period_readings[sensor_name][period].append(value)
+
+        except (IndexError, ValueError, TypeError):
+            continue
+
+    # Convert mean W to kWh per period (15 min = 0.25 hours)
+    period_data: dict[int, dict[str, float]] = {}
+    for sensor_name, periods in sensor_period_readings.items():
+        for period, values in periods.items():
+            mean_watts = sum(values) / len(values)
+            kwh = mean_watts * 0.25 / 1000.0  # W * hours / 1000 = kWh
+
+            if period not in period_data:
+                period_data[period] = {}
+            period_data[period][sensor_name] = kwh
+
+    _LOGGER.debug(
+        "Parsed power data: %d sensors across %d periods",
+        len(sensor_period_readings),
+        len(period_data),
     )
 
     return period_data

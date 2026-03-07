@@ -343,6 +343,7 @@ class BESSController:
                 "voltage",
                 "safety_margin_factor",
                 "phase_count",
+                "consumption_strategy",
             ]
             for key in required_home_keys:
                 if key not in home_config:
@@ -369,6 +370,7 @@ class BESSController:
                     "voltage": home_config["voltage"],
                     "safetyMargin": home_config["safety_margin_factor"],
                     "phaseCount": home_config["phase_count"],
+                    "consumptionStrategy": home_config["consumption_strategy"],
                 },
                 "price": {
                     "area": electricity_price_config["area"],

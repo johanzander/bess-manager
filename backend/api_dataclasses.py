@@ -97,9 +97,12 @@ class APIBatterySettings:
     efficiencyCharge: float  # % - charging efficiency
     efficiencyDischarge: float  # % - discharge efficiency
     estimatedConsumption: float  # kWh - estimated daily consumption
+    consumptionStrategy: str  # consumption forecast strategy
 
     @classmethod
-    def from_internal(cls, battery, estimated_consumption: float) -> APIBatterySettings:
+    def from_internal(
+        cls, battery, estimated_consumption: float, consumption_strategy: str = "sensor"
+    ) -> APIBatterySettings:
         """Convert from internal snake_case to canonical camelCase."""
         return cls(
             totalCapacity=battery.total_capacity,
@@ -115,6 +118,7 @@ class APIBatterySettings:
             efficiencyCharge=battery.efficiency_charge,
             efficiencyDischarge=battery.efficiency_discharge,
             estimatedConsumption=estimated_consumption,
+            consumptionStrategy=consumption_strategy,
         )
 
     def to_internal_update(self) -> dict:

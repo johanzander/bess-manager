@@ -30,6 +30,8 @@ options:
   home:
     consumption: 3.5                # default hourly consumption in kWh
     currency: "SEK"                 # currency for price display and calculations
+    consumption_strategy: "sensor"  # "sensor" (HA 48h avg), "fixed", or "influxdb_7d_avg"
+    timezone: "Europe/Stockholm"    # IANA timezone for schedule calculations
     max_fuse_current: 25            # Maximum fuse current in amperes
     voltage: 230                    # Line voltage in volts
     safety_margin_factor: 1.0       # Safety margin for power calculations (100% - safe with 5min monitoring)
@@ -106,6 +108,8 @@ schema:
   home:
     consumption: float
     currency: str
+    consumption_strategy: str
+    timezone: str
     max_fuse_current: int
     voltage: int
     safety_margin_factor: float

@@ -33,10 +33,11 @@ async def get_battery_settings():
         settings = bess_controller.system.get_settings()
         battery_settings = settings["battery"]
         estimated_consumption = settings["home"].default_hourly
+        consumption_strategy = settings["home"].consumption_strategy
 
         # Create APIBatterySettings using existing method
         api_settings = APIBatterySettings.from_internal(
-            battery_settings, estimated_consumption
+            battery_settings, estimated_consumption, consumption_strategy
         )
         return api_settings.__dict__
 

@@ -756,6 +756,17 @@ class HomeAssistantAPIController:
         # Return 96 quarterly periods (24 hours * 4 quarters per hour)
         return [quarterly_consumption] * 96
 
+    def get_ha_config(self) -> dict:
+        """Fetch Home Assistant configuration (timezone, location, etc.)."""
+        response = self._api_request(
+            "get",
+            "/api/config",
+            operation="Read HA config",
+            category="config",
+        )
+        assert response is not None, "HA /api/config returned no data"
+        return response
+
     def get_battery_soc(self):
         """Get the battery state of charge (SOC)."""
         return self._get_sensor_value("battery_soc")

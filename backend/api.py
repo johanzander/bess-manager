@@ -1832,9 +1832,9 @@ async def get_prediction_comparison(
         # Get current state
         from datetime import datetime
 
-        from core.bess.time_utils import TIMEZONE
+        from core.bess import time_utils
 
-        now = datetime.now(tz=TIMEZONE)
+        now = datetime.now(tz=time_utils.TIMEZONE)
         current_period = now.hour * 4 + now.minute // 15
 
         # Build current daily view

@@ -13,7 +13,14 @@ from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
 
-# Constants - NOT configurable
+
+def set_timezone(tz_name: str) -> None:
+    """Set the global timezone from HA config. Must be called before scheduling."""
+    global TIMEZONE
+    TIMEZONE = ZoneInfo(tz_name)
+
+
+# Timezone — overridden at startup by set_timezone() from HA config
 TIMEZONE = ZoneInfo("Europe/Stockholm")
 INTERVAL_MINUTES = 15  # Quarterly resolution
 PERIODS_PER_HOUR = 4

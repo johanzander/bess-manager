@@ -11,7 +11,7 @@ services:
       - ./frontend/dist:/app/frontend:delegated
       - ./backend/dev-options.json:/data/options.json:ro
     environment:
-      - TZ=Europe/Stockholm
+      - TZ=${TZ:-UTC}
       - FLASK_DEBUG=true
       - HA_URL=${HA_URL}
       - HA_TOKEN=${HA_TOKEN}
@@ -40,7 +40,7 @@ services:
     ports:
       - "5174:5174"
     environment:
-      - TZ=Europe/Stockholm
+      - TZ=${TZ:-UTC}
       - VITE_API_URL=http://bess-dev:8080
     depends_on:
       - bess-dev

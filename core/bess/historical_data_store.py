@@ -7,9 +7,10 @@ Only stores today's data in memory.
 import logging
 from datetime import datetime
 
+from core.bess import time_utils
 from core.bess.models import PeriodData
 from core.bess.settings import BatterySettings
-from core.bess.time_utils import TIMEZONE, get_period_count
+from core.bess.time_utils import get_period_count
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +47,7 @@ class HistoricalDataStore:
             ValueError: If period_index is out of range for today
         """
         # Validate period is within today's range
-        today = datetime.now(tz=TIMEZONE).date()
+        today = datetime.now(tz=time_utils.TIMEZONE).date()
         today_periods = get_period_count(today)
 
         if not 0 <= period_index < today_periods:
@@ -83,7 +84,7 @@ class HistoricalDataStore:
             List of 92-100 PeriodData (or None for missing periods)
             Length depends on DST (92 = spring, 96 = normal, 100 = fall)
         """
-        today = datetime.now(tz=TIMEZONE).date()
+        today = datetime.now(tz=time_utils.TIMEZONE).date()
         num_periods = get_period_count(today)
 
         # Return list with data if available, None otherwise

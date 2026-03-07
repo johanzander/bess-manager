@@ -152,6 +152,8 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
         hourLabel: periodToTimeString(periodNum, resolution),
         batterySocPercent,
         action: batteryAction,
+        charging: batteryAction > 0 ? batteryAction : 0,
+        discharging: batteryAction < 0 ? batteryAction : 0,
         price,
         dataSource,
         isActual: false,
@@ -239,39 +241,23 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
               }}
             />
             
-            <Tooltip 
-              contentStyle={{
-                backgroundColor: colors.tooltip,
-                border: `1px solid ${colors.tooltipBorder}`,
-                borderRadius: '8px',
-                color: colors.text
+            <Tooltip
+              content={({ active, payload }) => {
+                if (!active || !payload?.length) return null;
+                const data = payload[0].payload;
+                if (data.periodNum === -1) return null;
+                const timeRange = periodToTimeRange(data.periodNum, resolution);
+                const label = data.isTomorrow ? `Tomorrow ${timeRange}` : timeRange;
+                return (
+                  <div style={{ backgroundColor: colors.tooltip, border: `1px solid ${colors.tooltipBorder}`, borderRadius: '8px', padding: '10px', color: colors.text }}>
+                    <p style={{ fontWeight: 'bold', marginBottom: 4 }}>{label}</p>
+                    <p style={{ color: '#16a34a' }}>Battery SOC : {data.batterySocEndFormatted?.text ?? `${data.batterySocPercent} %`}</p>
+                    <p style={{ color: '#9CA3AF' }}>Electricity Price : {data.buyPriceFormatted?.text ?? `${data.price}`}</p>
+                    {data.action > 0 && <p style={{ color: '#16a34a' }}>Battery Charging : {data.batteryActionFormatted?.text ?? `${data.action}`}</p>}
+                    {data.action < 0 && <p style={{ color: '#dc2626' }}>Battery Discharging : {data.batteryActionFormatted?.text ?? `${data.action}`}</p>}
+                  </div>
+                );
               }}
-              formatter={(value, name, props) => {
-                const payload = props?.payload;
-                if (name === 'Electricity Price') return [payload?.buyPriceFormatted?.text || 'N/A', 'Electricity Price'];
-                if (name === 'Battery SOC') return [payload?.batterySocEndFormatted?.text || 'N/A', 'Battery SOC'];
-                if (name === 'Battery Action') {
-                  const actionValue = Number(value);
-                  const formattedText = payload?.batteryActionFormatted?.text || 'N/A';
-                  if (actionValue >= 0) {
-                    return [formattedText, 'Battery Charging'];
-                  } else {
-                    return [formattedText, 'Battery Discharging'];
-                  }
-                }
-                return ['N/A', name];
-              }}
-              labelFormatter={(_label, payload) => {
-                // Get period index from the first data point in tooltip
-                if (payload && payload.length > 0) {
-                  const periodNum = payload[0].payload.periodNum;
-                  const isTmrw = payload[0].payload.isTomorrow;
-                  const timeRange = periodToTimeRange(periodNum, resolution);
-                  return isTmrw ? `Tomorrow ${timeRange}` : timeRange;
-                }
-                return '';
-              }}
-              labelStyle={{ color: colors.text }}
             />
             
             <ReferenceLine yAxisId="action" y={0} stroke={colors.grid} strokeDasharray="2 2" />

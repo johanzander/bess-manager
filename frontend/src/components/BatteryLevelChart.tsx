@@ -83,22 +83,20 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
       throw new Error(`MISSING DATA: batteryAction is required but missing at index ${index}`);
     }
     const batteryAction = getValue(hour.batteryAction);
-    const batterySocPercent = getValue(hour.batterySocEnd); // Extract from FormattedValue
-    const price = getValue(hour.buyPrice); // Extract from FormattedValue
+    const batterySocPercent = getValue(hour.batterySocEnd);
+    const price = getValue(hour.buyPrice);
     const periodNum = hour.period ?? index;
     if (hour.dataSource === undefined) {
       throw new Error(`MISSING DATA: dataSource is required but missing at index ${index}`);
     }
     const dataSource = hour.dataSource;
 
-    // Calculate x-axis position (center of period)
+    // Calculate x-axis position (start of period)
     let xPosition: number;
     if (resolution === 'quarter-hourly') {
-      // For quarterly: convert period to hour position (period 4 = hour 1.0)
-      xPosition = periodNum / 4 + 0.125; // Center in 15-min period (0.125 = 1/8 hour)
+      xPosition = periodNum / 4;
     } else {
-      // For hourly: center in hour
-      xPosition = periodNum + 0.5;
+      xPosition = periodNum;
     }
 
     return {
@@ -130,14 +128,17 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
       const batteryAction = getValue(hour.batteryAction);
       const batterySocPercent = getValue(hour.batterySocEnd);
       const price = getValue(hour.buyPrice);
-      const periodNum = hour.period ?? idx;
+      // Normalize period numbers: API may return 96-191 (continuation from today) or 0-95
+      const rawPeriodNum = hour.period ?? idx;
+      const tomorrowPeriodsPerDay = resolution === 'quarter-hourly' ? 96 : 24;
+      const periodNum = rawPeriodNum >= tomorrowPeriodsPerDay ? rawPeriodNum - tomorrowPeriodsPerDay : rawPeriodNum;
       const dataSource = hour.dataSource ?? 'predicted';
 
       let xPosition: number;
       if (resolution === 'quarter-hourly') {
-        xPosition = 24 + periodNum / 4 + 0.125;
+        xPosition = 24 + periodNum / 4;
       } else {
-        xPosition = 24 + periodNum + 0.5;
+        xPosition = 24 + periodNum;
       }
 
       chartData.push({
@@ -158,14 +159,14 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
     }
   }
 
-  // Compute max hour for X-axis
+  // Compute max hour for X-axis (add 1 for stepAfter to render last period)
   const maxHourValue = hasTomorrowData
-    ? Math.ceil(Math.max(...chartData.map(d => d.hour)))
+    ? Math.ceil(Math.max(...chartData.map(d => d.hour))) + 1
     : 24;
   const xAxisTicks = Array.from({ length: maxHourValue + 1 }, (_, i) => i);
 
   const maxAction = Math.max(...chartData.map(d => Math.abs(d.action || 0)), 1);
-  const maxPrice = Math.max(...chartData.map(h => h.price), 1);
+  const maxPrice = Math.max(...chartData.map(h => h.price ?? 0), 1);
 
   return (
     <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
@@ -175,16 +176,13 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
             <CartesianGrid strokeDasharray="5 5" stroke={colors.grid} strokeOpacity={0.3} strokeWidth={0.5} />
             <XAxis
               dataKey="hour"
-              interval="preserveStartEnd"
+              interval={0}
               tick={{ fill: colors.text, fontSize: 12 }}
               axisLine={{ stroke: colors.text }}
               tickLine={{ stroke: colors.text }}
               ticks={xAxisTicks}
               tickFormatter={(value: number) => {
-                if (value >= 24) {
-                  return `+${Math.floor(value - 24).toString().padStart(2, '0')}:00`;
-                }
-                return `${Math.floor(value).toString().padStart(2, '0')}:00`;
+                return `${(Math.floor(value) % 24).toString().padStart(2, '0')}:00`;
               }}
             />
             
@@ -286,18 +284,6 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
               />
             ))}
 
-            {/* Midnight separator when tomorrow data exists */}
-            {hasTomorrowData && (
-              <ReferenceLine
-                x={24}
-                yAxisId="left"
-                stroke={colors.text}
-                strokeDasharray="4 4"
-                strokeWidth={1.5}
-                label={{ value: 'Tomorrow', position: 'top', fill: colors.text, fontSize: 11 }}
-              />
-            )}
-            
             <Area
               yAxisId="left"
               type="monotone"
@@ -311,13 +297,14 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
             
             <Line
               yAxisId="right"
-              type="monotone"
+              type="stepAfter"
               dataKey="price"
               stroke="#9CA3AF"
               strokeWidth={1.5}
               strokeDasharray="3 3"
               name="Electricity Price"
               dot={false}
+              connectNulls={false}
             />
             
             <Bar 

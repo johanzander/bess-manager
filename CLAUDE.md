@@ -520,6 +520,42 @@ else:
 - **docker-compose.yml**: Development environment with HA integration
 - **config.yaml**: Add-on configuration schema and defaults (root directory)
 
+## PR Merge Workflow
+
+This is the standard process for taking in an external PR.
+
+### Steps
+
+1. **Review** — Read the diff, check for correctness, architecture fit, and any minor issues.
+2. **Fix minor issues** — Apply small fixes directly (e.g. UX fallback strings, missing type assertions). For anything substantial, request changes from the author instead.
+3. **Update CHANGELOG** — Add a concise entry under a new version heading. One line per change. Always credit the author: `(thanks [@username](https://github.com/username))`.
+4. **Bump version** — Follow Semantic Versioning:
+   - `PATCH` (x.y.**Z**): bug fixes, comment/doc cleanup, no behavior change
+   - `MINOR` (x.**Y**.0): new features, backwards-compatible
+   - `MAJOR` (**X**.0.0): breaking changes
+   - Update the version in `config.yaml` (the `version:` field).
+5. **Merge** — Use `gh pr merge <number> --squash --repo johanzander/bess-manager`. Wait for explicit user approval before merging.
+6. **Local test** — User tests on real hardware before tagging.
+7. **Tag and push** — After user confirms it works: `git tag vX.Y.Z && git push origin vX.Y.Z`.
+
+### CHANGELOG Format
+
+Follow the existing style — brief, no implementation details:
+
+```markdown
+## [X.Y.Z] - YYYY-MM-DD
+
+### Added
+
+- Short description of what was added. (thanks [@author](https://github.com/author))
+
+### Fixed
+
+- Short description of what was fixed.
+```
+
+Never commit or tag without explicit user instruction.
+
 ## Unit Testing Guidelines
 
 **CRITICAL**: Always write tests that verify **BEHAVIOR**, not **IMPLEMENTATION**.

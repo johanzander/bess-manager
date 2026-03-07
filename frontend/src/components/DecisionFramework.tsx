@@ -497,7 +497,7 @@ const DecisionFramework: React.FC = () => {
   };
 
   const totalNetValueNum = filteredData.reduce((sum, pattern) => sum + getStrategyValue(pattern.netStrategyValue), 0);
-  const currencyUnit = getDisplayUnit(filteredData[0]?.netStrategyValue) || '???';
+  const currencyUnit = getDisplayUnit(filteredData[0]?.netStrategyValue) || '';
   const totalNetValue = { value: totalNetValueNum, display: totalNetValueNum.toFixed(2), unit: currencyUnit, text: `${totalNetValueNum.toFixed(2)} ${currencyUnit}` };
   const bestDecision = filteredData.reduce((best, current) =>
     getStrategyValue(current.netStrategyValue) > getStrategyValue(best.netStrategyValue) ? current : best,

@@ -12,6 +12,8 @@ from zoneinfo import ZoneInfo
 
 import requests
 
+from core.bess import time_utils
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -76,7 +78,7 @@ def get_sensor_data(sensors_list, start_time=None, stop_time=None) -> dict:
         dict: Query results with status and data
     """
     # Set up timezone
-    local_tz = ZoneInfo("Europe/Stockholm")
+    local_tz = time_utils.TIMEZONE
 
     # Determine stop time
     if stop_time is None:
@@ -275,7 +277,7 @@ def get_sensor_data_batch(sensors_list, target_date) -> dict:
             }
         }
     """
-    local_tz = ZoneInfo("Europe/Stockholm")
+    local_tz = time_utils.TIMEZONE
 
     # Convert target_date to datetime if it's a date
     if isinstance(target_date, datetime):

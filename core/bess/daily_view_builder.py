@@ -7,11 +7,12 @@ import logging
 from dataclasses import dataclass
 from datetime import date, datetime
 
+from . import time_utils
 from .historical_data_store import HistoricalDataStore
 from .models import DecisionData, EconomicData, EnergyData, PeriodData
 from .schedule_store import ScheduleStore
 from .settings import BatterySettings
-from .time_utils import TIMEZONE, format_period, get_period_count
+from .time_utils import format_period, get_period_count
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,7 @@ class DailyViewBuilder:
         timestamp = datetime.combine(
             today,
             datetime.min.time().replace(hour=hour, minute=minute),
-            tzinfo=TIMEZONE,
+            tzinfo=time_utils.TIMEZONE,
         )
 
         return PeriodData(
@@ -98,7 +99,7 @@ class DailyViewBuilder:
         Returns:
             DailyView with quarterly periods (92-100 depending on DST)
         """
-        today = datetime.now(tz=TIMEZONE).date()
+        today = datetime.now(tz=time_utils.TIMEZONE).date()
         logger.info(
             f"Building view for {today} at period {current_period} ({format_period(current_period)})"
         )

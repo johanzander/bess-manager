@@ -118,6 +118,17 @@ class BESSController:
         growatt_device_id = growatt_config.get("device_id")
         self.ha_controller = self._init_ha_controller(sensor_config, growatt_device_id)
 
+        # Set timezone from HA config before any BESS modules use it
+        try:
+            ha_config = self.ha_controller.get_ha_config()
+            ha_timezone = ha_config["time_zone"]
+            from core.bess.time_utils import set_timezone
+
+            set_timezone(ha_timezone)
+            logger.info(f"Timezone set from HA: {ha_timezone}")
+        except Exception as e:
+            logger.warning(f"Could not read timezone from HA, using default: {e}")
+
         # Enable test mode based on environment variable (defaults to False for production)
         test_mode = os.environ.get("HA_TEST_MODE", "false").lower() in (
             "true",

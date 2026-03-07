@@ -188,6 +188,15 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
     };
   });
 
+  // Add zero anchor at x=0 so monotone Areas start smoothly from zero
+  chartData.unshift({
+    hour: 0,
+    periodNum: -1,
+    solar: 0, batteryOut: 0, gridIn: 0, home: 0, batteryIn: 0, gridOut: 0,
+    isActual: true, isTomorrow: false,
+    price: chartData.length > 0 ? chartData[0].price : 0,
+  });
+
   // Append tomorrow's data with hour offset 24+
   const hasTomorrowData = tomorrowData && tomorrowData.length > 0;
   if (hasTomorrowData) {
@@ -353,7 +362,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
 
             {/* ENERGY SOURCES - Single series, style by isActual */}
             <Area
-              type="stepBefore"
+              type="monotone"
               dataKey="solar"
               stackId="sources"
               stroke={colors.solar}
@@ -365,7 +374,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
               connectNulls
             />
             <Area
-              type="stepBefore"
+              type="monotone"
               dataKey="batteryOut"
               stackId="sources"
               stroke={colors.battery}
@@ -377,7 +386,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
               connectNulls
             />
             <Area
-              type="stepBefore"
+              type="monotone"
               dataKey="gridIn"
               stackId="sources"
               stroke={colors.grid}
@@ -390,7 +399,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
             />
             {/* ENERGY CONSUMPTION - Single series, style by isActual */}
             <Area
-              type="stepBefore"
+              type="monotone"
               dataKey="home"
               stackId="consumption"
               stroke={colors.home}
@@ -402,7 +411,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
               connectNulls
             />
             <Area
-              type="stepBefore"
+              type="monotone"
               dataKey="batteryIn"
               stackId="consumption"
               stroke={colors.battery}
@@ -414,7 +423,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
               connectNulls
             />
             <Area
-              type="stepBefore"
+              type="monotone"
               dataKey="gridOut"
               stackId="consumption"
               stroke={colors.gridExport}

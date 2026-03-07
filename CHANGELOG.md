@@ -11,6 +11,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Configurable consumption forecast strategy via `home.consumption_strategy` setting. Supports `sensor` (default, HA 48h average), `fixed` (flat rate from config), and `influxdb_7d_avg` (7-day rolling average from InfluxDB power sensor data at 15-minute resolution).
 - `home.timezone` setting for timezone-aware schedule calculations.
+- XGBoost ML energy consumption predictor with `ml_prediction` strategy option. Trains on InfluxDB historical data, uses weather forecasts from HA, and generates 96 quarter-hourly predictions. Includes ML Report dashboard page showing model metrics, feature importance, and forecast comparison.
+
+### Changed
+
+- Docker base image switched from Alpine 3.19 to Debian Bookworm to support xgboost and scikit-learn wheel installation.
+
+### Note
+
+The ML predictor is experimental. In testing so far, predictions are roughly on par with or slightly worse than a simple 7-day average (`influxdb_7d_avg`). It adds significant startup time (model retrain on boot) and heavy dependencies (xgboost, scikit-learn). It is included as an optional feature for experimentation — the `influxdb_7d_avg` strategy is recommended for production use.
 
 ## [7.4.2] - 2026-03-07
 

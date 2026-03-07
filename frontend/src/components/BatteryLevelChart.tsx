@@ -253,8 +253,8 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
                     <p style={{ fontWeight: 'bold', marginBottom: 4 }}>{label}</p>
                     <p style={{ color: '#16a34a' }}>Battery SOC : {data.batterySocEndFormatted?.text ?? `${data.batterySocPercent} %`}</p>
                     <p style={{ color: '#9CA3AF' }}>Electricity Price : {data.buyPriceFormatted?.text ?? `${data.price}`}</p>
-                    {data.action > 0 && <p style={{ color: '#16a34a' }}>Battery Charging : {data.batteryActionFormatted?.text ?? `${data.action}`}</p>}
-                    {data.action < 0 && <p style={{ color: '#dc2626' }}>Battery Discharging : {data.batteryActionFormatted?.text ?? `${data.action}`}</p>}
+                    {data.action > 0 && <p style={{ color: '#16a34a' }}>Battery Charging : {(data.batteryActionFormatted?.text ?? `${data.action}`).replace(/^-0(\b|\.)/, '0$1')}</p>}
+                    {data.action < 0 && <p style={{ color: '#dc2626' }}>Battery Discharging : {(data.batteryActionFormatted?.text ?? `${data.action}`).replace(/^-0(\b|\.)/, '0$1')}</p>}
                   </div>
                 );
               }}

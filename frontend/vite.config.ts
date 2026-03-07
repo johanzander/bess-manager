@@ -10,7 +10,7 @@ export default defineConfig({
     port: 5174,
     proxy: {
       '/api': {
-        target: 'http://bess-dev:8080', // Direct reference to the container name
+        target: process.env.VITE_API_TARGET ?? 'http://bess-dev:8080',
         changeOrigin: true,
         secure: false,
         rewrite: (path) => path

@@ -364,7 +364,6 @@ export default function DashboardPage({
 
           {/* Battery SOC and Actions */}
           <div>
-            <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">Battery SOC and Actions</h2>
             <div className="mb-8">
               <BatteryLevelChart
                 hourlyData={dashboardData.hourlyData as any}

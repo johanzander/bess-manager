@@ -86,14 +86,15 @@ export const BatteryModeTimeline: React.FC<BatteryModeTimelineProps> = ({
   resolution,
 }) => {
   const [isDarkMode, setIsDarkMode] = useState(
-    window.matchMedia('(prefers-color-scheme: dark)').matches
+    document.documentElement.classList.contains('dark')
   );
 
   useEffect(() => {
-    const mq = window.matchMedia('(prefers-color-scheme: dark)');
-    const handler = (e: MediaQueryListEvent) => setIsDarkMode(e.matches);
-    mq.addEventListener('change', handler);
-    return () => mq.removeEventListener('change', handler);
+    const observer = new MutationObserver(() => {
+      setIsDarkMode(document.documentElement.classList.contains('dark'));
+    });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    return () => observer.disconnect();
   }, []);
 
   const segments = buildSegments(hourlyData, tomorrowData, resolution);
@@ -102,9 +103,9 @@ export const BatteryModeTimeline: React.FC<BatteryModeTimelineProps> = ({
 
   const usedIntents = new Set(segments.map(s => s.intent));
 
-  // Tick marks every 2 hours
+  // Tick marks every hour
   const ticks: number[] = [];
-  for (let h = 0; h <= maxHour; h += 2) {
+  for (let h = 0; h <= maxHour; h += 1) {
     ticks.push(h);
   }
 

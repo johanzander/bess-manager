@@ -101,16 +101,17 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
   // Get the actual currency unit for the chart label
   const currencyUnit = getCurrencyUnit();
 
-  // Reactive dark mode detection — uses prefers-color-scheme to match Tailwind's 'media' strategy
+  // Reactive dark mode detection — observes class changes on <html> to match Tailwind's 'class' strategy
   const [isDarkMode, setIsDarkMode] = useState(
-    window.matchMedia('(prefers-color-scheme: dark)').matches
+    document.documentElement.classList.contains('dark')
   );
 
   useEffect(() => {
-    const mq = window.matchMedia('(prefers-color-scheme: dark)');
-    const handler = (e: MediaQueryListEvent) => setIsDarkMode(e.matches);
-    mq.addEventListener('change', handler);
-    return () => mq.removeEventListener('change', handler);
+    const observer = new MutationObserver(() => {
+      setIsDarkMode(document.documentElement.classList.contains('dark'));
+    });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    return () => observer.disconnect();
   }, []);
   
   const colors = {
@@ -119,7 +120,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
     grid: '#3b82f6',         // Blue (for both import and export)
     home: '#ef4444',         // Red
     gridExport: '#3b82f6',   // Same blue as grid import
-    text: isDarkMode ? '#d1d5db' : '#374151',
+    text: isDarkMode ? '#9CA3AF' : '#374151',
     gridLines: isDarkMode ? '#374151' : '#e5e7eb',
   };
 
@@ -238,6 +239,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
 
   return (
     <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
+      <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Energy Flows</h3>
       <div style={{ width: '100%', height: '400px' }}>
         <ResponsiveContainer>
           <ComposedChart
@@ -298,16 +300,18 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
               </linearGradient>
             </defs>
             
-            <CartesianGrid strokeDasharray="5 5" stroke={colors.gridLines} strokeOpacity={isDarkMode ? 0.15 : 0.3} strokeWidth={0.5} />
+            <CartesianGrid stroke={colors.gridLines} strokeOpacity={isDarkMode ? 0.12 : 0.3} strokeWidth={0.5} />
             <XAxis
               dataKey="hour"
               type="number"
               stroke={colors.text}
-              tick={{ fontSize: 12 }}
+              tick={{ fill: colors.text, fontSize: 12 }}
+              axisLine={{ stroke: colors.text }}
+              tickLine={{ stroke: colors.text }}
               domain={[0, maxHour]}
               ticks={xAxisTicks}
               interval={0}
-              label={{ value: 'Hour of Day', position: 'insideBottom', offset: -10 }}
+              label={{ value: 'Hour of Day', position: 'insideBottom', offset: -10, fill: colors.text }}
               tickFormatter={(hour: number) => {
                 return (Math.floor(hour) % 24).toString().padStart(2, '0');
               }}
@@ -315,12 +319,12 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
             <YAxis
               width={60}
               stroke={colors.text}
-              tick={{ fontSize: 12 }}
+              tick={{ fill: colors.text, fontSize: 12 }}
               label={{
                 value: 'Energy (kWh)',
                 angle: -90,
                 position: 'insideLeft',
-                style: { textAnchor: 'middle', dominantBaseline: 'central' }
+                style: { textAnchor: 'middle', dominantBaseline: 'central', fill: colors.text }
               }}
             />
             <YAxis
@@ -328,13 +332,13 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
               orientation="right"
               width={60}
               stroke={colors.text}
-              tick={{ fontSize: 11 }}
+              tick={{ fill: colors.text, fontSize: 11 }}
               tickFormatter={(value) => value.toLocaleString('sv-SE', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
               label={{
                 value: `Electricity Price (${currencyUnit}/kWh)`,
                 angle: 90,
                 position: 'insideRight',
-                style: { textAnchor: 'middle', dominantBaseline: 'central' }
+                style: { textAnchor: 'middle', dominantBaseline: 'central', fill: colors.text }
               }}
             />
             <Tooltip content={<CustomTooltip resolution={resolution} />} />
@@ -440,9 +444,9 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
               <ReferenceLine
                 x={24}
                 stroke="#9CA3AF"
-                strokeWidth={1}
-                strokeDasharray="0"
-                label={{ value: 'Tomorrow', position: 'insideTopRight', fontSize: 11, fill: '#9CA3AF' }}
+                strokeWidth={0.5}
+                strokeOpacity={0.4}
+                label={{ value: 'Tomorrow', position: 'insideTopRight', fontSize: 11, fill: '#9CA3AF', fillOpacity: 0.4 }}
               />
             )}
 
@@ -454,7 +458,6 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
               stroke="#9CA3AF"
               strokeWidth={1.5}
               dot={false}
-              strokeDasharray="3 3"
               name="Electricity Price"
               connectNulls={false}
             />

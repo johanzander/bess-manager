@@ -12,21 +12,22 @@ interface BatteryLevelChartProps {
 }
 
 export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData, tomorrowData, resolution }) => {
-  // Reactive dark mode detection — uses prefers-color-scheme to match Tailwind's 'media' strategy
+  // Reactive dark mode detection — observes class changes on <html> to match Tailwind's 'class' strategy
   const [isDarkMode, setIsDarkMode] = useState(
-    window.matchMedia('(prefers-color-scheme: dark)').matches
+    document.documentElement.classList.contains('dark')
   );
 
   useEffect(() => {
-    const mq = window.matchMedia('(prefers-color-scheme: dark)');
-    const handler = (e: MediaQueryListEvent) => setIsDarkMode(e.matches);
-    mq.addEventListener('change', handler);
-    return () => mq.removeEventListener('change', handler);
+    const observer = new MutationObserver(() => {
+      setIsDarkMode(document.documentElement.classList.contains('dark'));
+    });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    return () => observer.disconnect();
   }, []);
 
   const colors = {
     grid: isDarkMode ? '#374151' : '#e5e7eb',
-    text: isDarkMode ? '#d1d5db' : '#374151',
+    text: isDarkMode ? '#9CA3AF' : '#374151',
     background: isDarkMode ? '#1f2937' : '#ffffff',
     tooltip: isDarkMode ? '#374151' : '#ffffff',
     tooltipBorder: isDarkMode ? '#4b5563' : '#d1d5db'
@@ -175,10 +176,11 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
 
   return (
     <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
+      <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Battery SOC and Actions</h3>
       <div className="h-80">
         <ResponsiveContainer width="100%" height="100%">
           <ComposedChart data={chartData} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
-            <CartesianGrid strokeDasharray="5 5" stroke={colors.grid} strokeOpacity={isDarkMode ? 0.15 : 0.3} strokeWidth={0.5} />
+            <CartesianGrid stroke={colors.grid} strokeOpacity={isDarkMode ? 0.12 : 0.3} strokeWidth={0.5} />
             <XAxis
               dataKey="hour"
               interval={0}
@@ -197,13 +199,13 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
               width={60}
               stroke={colors.text}
               domain={[0, 100]}
-              tick={{ fontSize: 12 }}
+              tick={{ fill: colors.text, fontSize: 12 }}
               tickFormatter={(value) => `${Math.round(value)}%`}
               label={{
                 value: 'Battery SOC (%)',
                 angle: -90,
                 position: 'insideLeft',
-                style: { textAnchor: 'middle', dominantBaseline: 'central' }
+                style: { textAnchor: 'middle', dominantBaseline: 'central', fill: colors.text }
               }}
             />
 
@@ -214,13 +216,13 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
               width={60}
               stroke={colors.text}
               domain={[0, Math.ceil(maxPrice * 1.2 * 10) / 10]}
-              tick={{ fontSize: 11 }}
+              tick={{ fill: colors.text, fontSize: 11 }}
               tickFormatter={(value) => value.toLocaleString('sv-SE', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
               label={{
                 value: `Electricity Price (${currencyUnit}/kWh)`,
                 angle: 90,
                 position: 'insideRight',
-                style: { textAnchor: 'middle', dominantBaseline: 'central' }
+                style: { textAnchor: 'middle', dominantBaseline: 'central', fill: colors.text }
               }}
             />
 
@@ -231,14 +233,14 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
               width={60}
               stroke={colors.text}
               domain={[-maxAction * 1.2, maxAction * 1.2]}
-              tick={{ fontSize: 12 }}
+              tick={{ fill: colors.text, fontSize: 12 }}
               tickFormatter={(value) => value.toLocaleString('sv-SE', {minimumFractionDigits: 1, maximumFractionDigits: 1})}
               label={{
                 value: 'Battery Action (kWh)',
                 angle: 90,
                 position: 'outside',
                 offset: 40,
-                style: { textAnchor: 'middle', dominantBaseline: 'central' }
+                style: { textAnchor: 'middle', dominantBaseline: 'central', fill: colors.text }
               }}
             />
             
@@ -261,7 +263,7 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
               }}
             />
             
-            <ReferenceLine yAxisId="action" y={0} stroke={colors.grid} strokeDasharray="2 2" />
+            <ReferenceLine yAxisId="action" y={0} stroke={colors.grid} />
 
             {/* Hourly vertical grid lines - extend for tomorrow data */}
             {Array.from({ length: maxHourValue + 1 }, (_, i) => (
@@ -270,9 +272,8 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
                 x={i}
                 yAxisId="left"
                 stroke={colors.grid}
-                strokeOpacity={0.3}
+                strokeOpacity={isDarkMode ? 0.12 : 0.3}
                 strokeWidth={0.5}
-                strokeDasharray="5 5"
               />
             ))}
 
@@ -303,9 +304,9 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
                 x={24}
                 yAxisId="left"
                 stroke="#9CA3AF"
-                strokeWidth={1}
-                strokeDasharray="0"
-                label={{ value: 'Tomorrow', position: 'insideTopRight', fontSize: 11, fill: '#9CA3AF' }}
+                strokeWidth={0.5}
+                strokeOpacity={0.4}
+                label={{ value: 'Tomorrow', position: 'insideTopRight', fontSize: 11, fill: '#9CA3AF', fillOpacity: 0.4 }}
               />
             )}
 
@@ -326,7 +327,6 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
               dataKey="price"
               stroke="#9CA3AF"
               strokeWidth={1.5}
-              strokeDasharray="3 3"
               name="Electricity Price"
               dot={false}
               connectNulls={false}

@@ -5,6 +5,17 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.6.1] - 2026-03-07
+
+### Fixed
+
+- Chart dark mode detection now tracks the `dark` CSS class on `<html>` via MutationObserver instead of OS `prefers-color-scheme`, correctly following Tailwind's `class` strategy.
+- Axis tick label colors, grid lines, and price line now render correctly in dark mode.
+
+### Changed
+
+- Vite dev proxy target can be overridden via `VITE_API_TARGET` environment variable.
+
 ## [7.6.0] - 2026-03-07
 
 ### Added

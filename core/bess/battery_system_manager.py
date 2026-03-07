@@ -4,6 +4,7 @@ Complete replacement for battery_system.py that preserves ALL functionality.
 """
 
 import logging
+import statistics
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -1018,8 +1019,10 @@ class BatterySystemManager:
 
         When the horizon already extends past today (i.e. tomorrow's prices are
         included), return 0.0 since the DP has explicit future data. Otherwise,
-        estimate value from today's average buy price adjusted for efficiency
+        estimate value from the median buy price adjusted for efficiency
         and cycle cost.
+
+        Using the median avoids inflating the terminal value with peak prices.
 
         Args:
             buy_prices: Full buy price array (from optimization_period onwards)
@@ -1041,21 +1044,21 @@ class BatterySystemManager:
             )
             return 0.0
 
-        # Estimate terminal value from today's buy prices
+        # Estimate terminal value using median (resistant to peak price outliers)
         if not buy_prices:
             return 0.0
 
-        avg_buy_price = sum(buy_prices) / len(buy_prices)
+        median_price = statistics.median(buy_prices)
         terminal_value = (
-            avg_buy_price * self.battery_settings.efficiency_discharge
+            median_price * self.battery_settings.efficiency_discharge
             - self.battery_settings.cycle_cost_per_kwh
         )
         terminal_value = max(0.0, terminal_value)
 
         logger.info(
-            "Terminal value: %.3f/kWh (avg_buy=%.3f, efficiency=%.2f, cycle_cost=%.3f)",
+            "Terminal value: %.3f/kWh (median_price=%.3f, efficiency=%.2f, cycle_cost=%.3f)",
             terminal_value,
-            avg_buy_price,
+            median_price,
             self.battery_settings.efficiency_discharge,
             self.battery_settings.cycle_cost_per_kwh,
         )
@@ -1270,9 +1273,9 @@ class BatterySystemManager:
             for i, period_data in enumerate(period_data_list):
                 target_period = optimization_period + i
                 if target_period < len(full_day_strategic_intents):
-                    full_day_strategic_intents[target_period] = (
-                        period_data.decision.strategic_intent
-                    )
+                    full_day_strategic_intents[
+                        target_period
+                    ] = period_data.decision.strategic_intent
 
             # Store initial SOC in OptimizationResult for DailyViewBuilder
             if self._initial_soe is not None:

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Bar, ComposedChart, Area, Line } from 'recharts';
+import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, ComposedChart, Area, Line } from 'recharts';
 import { HourlyData } from '../types';
 import { periodToTimeString, periodToTimeRange } from '../utils/timeUtils';
 import { DataResolution } from '../hooks/useUserPreferences';
@@ -105,6 +105,8 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
       hourLabel: periodToTimeString(periodNum, resolution),
       batterySocPercent: batterySocPercent,
       action: batteryAction,
+      charging: batteryAction > 0 ? batteryAction : 0,
+      discharging: batteryAction < 0 ? batteryAction : 0,
       price: price,
       dataSource: dataSource,
       isActual: dataSource === 'actual',
@@ -116,6 +118,9 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
       buyPriceFormatted: hour.buyPrice
     };
   });
+
+  // Zero anchor at x=0: gives stepBefore a left edge so bars render from 0→1 for period 0
+  chartData.unshift({ hour: 0, periodNum: -1, batterySocPercent: chartData[0]?.batterySocPercent ?? 0, action: 0, charging: 0, discharging: 0, price: chartData[0]?.price ?? 0, dataSource: 'actual', isActual: true, isPredicted: false, isTomorrow: false });
 
   // Append tomorrow's data with hour offset 24+
   const hasTomorrowData = tomorrowData && tomorrowData.length > 0;
@@ -307,33 +312,29 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
               connectNulls={false}
             />
             
-            <Bar 
-              yAxisId="action" 
-              dataKey="action" 
-              name="Battery Action" 
-              radius={[2, 2, 2, 2]}
-              shape={(props: any) => {
-                const { payload, x, y, width, height } = props;
-                const action = payload.action || 0;
-                const isActual = payload.isActual;
-                const isTmrw = payload.isTomorrow;
-
-                const fillColor = action >= 0 ? '#16a34a' : '#dc2626';
-                const opacity = isTmrw ? 0.35 : (isActual ? 0.9 : 0.6);
-                
-                return (
-                  <rect 
-                    x={x} 
-                    y={action >= 0 ? y : y + height} 
-                    width={width} 
-                    height={Math.abs(height)} 
-                    fill={fillColor}
-                    fillOpacity={opacity}
-                    rx={2}
-                    ry={2}
-                  />
-                );
-              }}
+            <Area
+              yAxisId="action"
+              type="stepBefore"
+              dataKey="charging"
+              stroke="#16a34a"
+              strokeWidth={1}
+              fill="#16a34a"
+              fillOpacity={0.7}
+              name="Battery Charging"
+              dot={false}
+              connectNulls={false}
+            />
+            <Area
+              yAxisId="action"
+              type="stepBefore"
+              dataKey="discharging"
+              stroke="#dc2626"
+              strokeWidth={1}
+              fill="#dc2626"
+              fillOpacity={0.7}
+              name="Battery Discharging"
+              dot={false}
+              connectNulls={false}
             />
           </ComposedChart>
         </ResponsiveContainer>

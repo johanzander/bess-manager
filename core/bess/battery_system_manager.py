@@ -64,6 +64,7 @@ class BatterySystemManager:
         controller: HomeAssistantAPIController | None = None,
         price_source: PriceSource | None = None,
         energy_provider_config: dict | None = None,
+        addon_options: dict | None = None,
     ):
         """Initialize with same interface as original BatterySystemManager."""
 
@@ -72,6 +73,7 @@ class BatterySystemManager:
         self.home_settings = HomeSettings()
         self.price_settings = PriceSettings()
         self._energy_provider_config = energy_provider_config or {}
+        self._addon_options = addon_options or {}
 
         # Store controller reference
         self._controller = controller
@@ -115,6 +117,10 @@ class BatterySystemManager:
         # Current schedule tracking
         self._current_schedule = None
         self._initial_soe = None
+
+        # Prediction caches (populated by _fetch_predictions)
+        self._consumption_predictions: list[float] | None = None
+        self._solar_predictions: list[float] | None = None
 
         # Critical sensor failure tracking for graceful degradation
         self._critical_sensor_failures = []
@@ -591,7 +597,7 @@ class BatterySystemManager:
                 logger.warning("Cannot fetch predictions: controller is not available")
                 return
 
-            consumption_predictions = self._controller.get_estimated_consumption()
+            consumption_predictions = self._get_consumption_forecast()
             solar_predictions = self._controller.get_solar_forecast()
 
             # Store the predictions (this was missing!)
@@ -617,6 +623,98 @@ class BatterySystemManager:
 
         except Exception as e:
             logger.warning(f"Failed to fetch predictions: {e}")
+
+    def _get_consumption_forecast(self) -> list[float]:
+        """Get consumption forecast based on the configured strategy.
+
+        Dispatches to the appropriate data source based on
+        home_settings.consumption_strategy.
+
+        Returns:
+            List of 96 float values (kWh per 15-minute period).
+        """
+        strategy = self.home_settings.consumption_strategy
+
+        if strategy == "sensor":
+            return self.controller.get_estimated_consumption()
+
+        if strategy == "fixed":
+            quarterly = self.home_settings.default_hourly / 4.0
+            return [quarterly] * 96
+
+        if strategy == "influxdb_7d_avg":
+            return self._get_influxdb_7d_avg_forecast()
+
+        raise ValueError(f"Unknown consumption_strategy: '{strategy}'")
+
+    def _get_influxdb_7d_avg_forecast(self) -> list[float]:
+        """Get consumption forecast from InfluxDB 7-day average profile.
+
+        Queries InfluxDB for the past 7 days of the local_load_power sensor
+        and returns the 96-value weekly average profile (kWh per 15-min period).
+        """
+        from .influxdb_helper import get_power_sensor_data_batch
+
+        sensors_config = self._addon_options.get("sensors", {})
+        target_sensor = sensors_config.get("local_load_power", "")
+        if not target_sensor:
+            raise ValueError(
+                "influxdb_7d_avg strategy requires 'local_load_power' sensor configured"
+            )
+
+        # Strip 'sensor.' prefix if present — get_power_sensor_data_batch adds it
+        if target_sensor.startswith("sensor."):
+            target_sensor = target_sensor[len("sensor.") :]
+
+        today = date.today()
+        day_profiles: list[list[float]] = []
+
+        for days_back in range(1, 8):
+            target_date = today - timedelta(days=days_back)
+            result = get_power_sensor_data_batch([target_sensor], target_date)
+
+            if result["status"] != "success":
+                logger.warning(
+                    "Failed to fetch power data for %s: %s",
+                    target_date,
+                    result.get("message", "unknown error"),
+                )
+                continue
+
+            period_data = result["data"]
+            sensor_key = f"sensor.{target_sensor}"
+            profile = [0.0] * 96
+            periods_found = 0
+            for period in range(96):
+                if period in period_data and sensor_key in period_data[period]:
+                    profile[period] = period_data[period][sensor_key]
+                    periods_found += 1
+
+            if periods_found >= 48:  # At least half a day of data
+                day_profiles.append(profile)
+                logger.debug("Got %d periods for %s", periods_found, target_date)
+
+        if not day_profiles:
+            logger.warning(
+                "No valid historical data for influxdb_7d_avg strategy, "
+                "falling back to fixed consumption"
+            )
+            quarterly = self.home_settings.default_hourly / 4.0
+            return [quarterly] * 96
+
+        # Average across all valid days
+        avg_profile = [
+            sum(p[i] for p in day_profiles) / len(day_profiles) for i in range(96)
+        ]
+
+        total_kwh = sum(avg_profile)
+        logger.info(
+            "InfluxDB 7-day average profile: %.1f kWh/day from %d days of data",
+            total_kwh,
+            len(day_profiles),
+        )
+
+        return avg_profile
 
     def _handle_special_cases(self, period: int, prepare_next_day: bool) -> None:
         """Handle special cases like midnight transition."""
@@ -894,7 +992,7 @@ class BatterySystemManager:
 
         if prepare_next_day:
             # For next day, use predictions only
-            consumption_predictions = self.controller.get_estimated_consumption()
+            consumption_predictions = self._get_consumption_forecast()
             solar_predictions = self.controller.get_solar_forecast()
 
             consumption_data = consumption_predictions
@@ -912,7 +1010,7 @@ class BatterySystemManager:
             completed_periods = [
                 i for i, p in enumerate(today_periods) if p is not None
             ]
-            predictions_consumption = self.controller.get_estimated_consumption()
+            predictions_consumption = self._get_consumption_forecast()
             predictions_solar = self.controller.get_solar_forecast()
 
             # Extend predictions for tomorrow when horizon exceeds today
@@ -2160,8 +2258,10 @@ class BatterySystemManager:
     def _log_battery_system_config(self) -> None:
         """Log the current battery configuration - reproduces original functionality."""
         try:
-            # Get energy data for consumption info (like original)
-            predictions_consumption = self.controller.get_estimated_consumption()
+            # Use already-fetched predictions — avoids triggering a heavy pipeline
+            # (InfluxDB query or ML inference) just for a log message
+            assert self._consumption_predictions is not None
+            predictions_consumption = self._consumption_predictions
 
             # Get current SOC
             if self._controller:

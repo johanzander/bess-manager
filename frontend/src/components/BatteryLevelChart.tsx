@@ -309,7 +309,7 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
                 yAxisId="left"
                 stroke="#9CA3AF"
                 strokeWidth={1}
-                strokeDasharray="4 4"
+                strokeDasharray="0"
                 label={{ value: 'Tomorrow', position: 'insideTopRight', fontSize: 11, fill: '#9CA3AF' }}
               />
             )}

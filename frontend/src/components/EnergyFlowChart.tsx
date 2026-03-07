@@ -453,7 +453,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
                 x={24}
                 stroke="#9CA3AF"
                 strokeWidth={1}
-                strokeDasharray="4 4"
+                strokeDasharray="0"
                 label={{ value: 'Tomorrow', position: 'insideTopRight', fontSize: 11, fill: '#9CA3AF' }}
               />
             )}

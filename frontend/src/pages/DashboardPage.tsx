@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { BatteryLevelChart } from '../components/BatteryLevelChart';
 import { EnergyFlowChart } from '../components/EnergyFlowChart';
+import { BatteryModeTimeline } from '../components/BatteryModeTimeline';
 import { BatterySettings, ElectricitySettings } from '../types';
 import { Clock, AlertCircle } from 'lucide-react';
 import EnergyFlowCards from '../components/EnergyFlowCards';
@@ -48,6 +49,7 @@ export default function DashboardPage({
       isActual?: boolean;
       buyPrice?: number;
       sellPrice?: number;
+      strategicIntent?: string;
     }>;
     tomorrowData?: Array<any> | null;
     currentHour?: number;
@@ -352,6 +354,14 @@ export default function DashboardPage({
             </div>
           </div>
           
+          {/* Battery Mode Timeline */}
+          <BatteryModeTimeline
+            hourlyData={dashboardData.hourlyData as any}
+            tomorrowData={dashboardData.tomorrowData as any}
+            currentHour={currentHour}
+            resolution={dataResolution}
+          />
+
           {/* Battery SOC and Actions */}
           <div>
             <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">Battery SOC and Actions</h2>

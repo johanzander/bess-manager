@@ -286,7 +286,7 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
 
             <Area
               yAxisId="left"
-              type="monotone"
+              type="stepAfter"
               dataKey="batterySocPercent"
               stroke="#16a34a"
               strokeWidth={2}

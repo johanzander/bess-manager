@@ -236,6 +236,14 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
     ? Math.ceil(Math.max(...chartData.map(d => d.hour))) + 1
     : 24;
 
+  // Add terminal sentinel at maxHour so monotone Area charts render the last period segment (23→24)
+  const lastPoint = chartData[chartData.length - 1];
+  chartData.push({
+    ...lastPoint,
+    hour: maxHour,
+    solar: 0, batteryOut: 0, gridIn: 0, home: 0, batteryIn: 0, gridOut: 0,
+  });
+
   // Explicit tick positions at whole hours
   const xAxisTicks = Array.from({ length: Math.ceil(maxHour) + 1 }, (_, i) => i);
 
@@ -351,7 +359,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
 
             {/* ENERGY SOURCES - Single series, style by isActual */}
             <Area
-              type="monotone"
+              type="stepAfter"
               dataKey="solar"
               stackId="sources"
               stroke={colors.solar}
@@ -363,7 +371,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
               connectNulls
             />
             <Area
-              type="monotone"
+              type="stepAfter"
               dataKey="batteryOut"
               stackId="sources"
               stroke={colors.battery}
@@ -375,7 +383,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
               connectNulls
             />
             <Area
-              type="monotone"
+              type="stepAfter"
               dataKey="gridIn"
               stackId="sources"
               stroke={colors.grid}
@@ -388,7 +396,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
             />
             {/* ENERGY CONSUMPTION - Single series, style by isActual */}
             <Area
-              type="monotone"
+              type="stepAfter"
               dataKey="home"
               stackId="consumption"
               stroke={colors.home}
@@ -400,7 +408,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
               connectNulls
             />
             <Area
-              type="monotone"
+              type="stepAfter"
               dataKey="batteryIn"
               stackId="consumption"
               stroke={colors.battery}
@@ -412,7 +420,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
               connectNulls
             />
             <Area
-              type="monotone"
+              type="stepAfter"
               dataKey="gridOut"
               stackId="consumption"
               stroke={colors.gridExport}

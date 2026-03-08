@@ -49,6 +49,7 @@ from .time_utils import (
     get_period_count,
     period_index_to_timestamp,
 )
+from .weather import fetch_temperature_forecast
 
 logger = logging.getLogger(__name__)
 
@@ -1093,58 +1094,52 @@ class BatterySystemManager:
 
         Returns:
             List of max charge power values (kW) per period, or None if derating
-            is disabled or forecast unavailable.
+            is disabled.
+
+        Raises:
+            RuntimeError: If the weather forecast cannot be fetched (propagated
+                from fetch_temperature_forecast).
         """
         if not self.temperature_derating.enabled:
             return None
 
-        try:
-            from .weather import fetch_temperature_forecast
-
-            weather_entity = self.temperature_derating.weather_entity
-            if not weather_entity:
-                logger.warning(
-                    "Temperature derating enabled but weather_entity not configured "
-                    "- skipping derating"
-                )
-                return None
-
-            # Get timezone from time_utils (set at startup from HA config)
-            timezone_str = str(time_utils.TIMEZONE)
-
-            temperatures = fetch_temperature_forecast(
-                ha_url=self.controller.base_url,
-                ha_token=self.controller.token,
-                weather_entity=weather_entity,
-                timezone=timezone_str,
-                num_periods=num_periods,
-            )
-
-            derated_limits = apply_temperature_derating(
-                max_charge_power_kw=self.battery_settings.max_charge_power_kw,
-                temperatures=temperatures,
-                derating_curve=self.temperature_derating.derating_curve,
-            )
-
-            # Log summary for diagnostics
-            min_temp = min(temperatures)
-            max_temp = max(temperatures)
-            min_power = min(derated_limits)
-            max_power = max(derated_limits)
-            logger.info(
-                f"Temperature derating active: temp range {min_temp:.1f}-{max_temp:.1f}°C, "
-                f"charge power range {min_power:.1f}-{max_power:.1f}kW "
-                f"(nominal {self.battery_settings.max_charge_power_kw:.1f}kW)"
-            )
-
-            return derated_limits
-
-        except Exception as e:
-            logger.error(
-                f"Failed to get temperature forecast for derating: {e}. "
-                f"Proceeding without derating."
+        weather_entity = self.temperature_derating.weather_entity
+        if not weather_entity:
+            logger.warning(
+                "Temperature derating enabled but weather_entity not configured "
+                "- skipping derating"
             )
             return None
+
+        # Get timezone from time_utils (set at startup from HA config)
+        timezone_str = str(time_utils.TIMEZONE)
+
+        temperatures = fetch_temperature_forecast(
+            ha_url=self.controller.base_url,
+            ha_token=self.controller.token,
+            weather_entity=weather_entity,
+            timezone=timezone_str,
+            num_periods=num_periods,
+        )
+
+        derated_limits = apply_temperature_derating(
+            max_charge_power_kw=self.battery_settings.max_charge_power_kw,
+            temperatures=temperatures,
+            derating_curve=self.temperature_derating.derating_curve,
+        )
+
+        # Log summary for diagnostics
+        min_temp = min(temperatures)
+        max_temp = max(temperatures)
+        min_power = min(derated_limits)
+        max_power = max(derated_limits)
+        logger.info(
+            f"Temperature derating active: temp range {min_temp:.1f}-{max_temp:.1f}°C, "
+            f"charge power range {min_power:.1f}-{max_power:.1f}kW "
+            f"(nominal {self.battery_settings.max_charge_power_kw:.1f}kW)"
+        )
+
+        return derated_limits
 
     def _run_optimization(
         self,
@@ -1205,20 +1200,11 @@ class BatterySystemManager:
                 buy_prices, optimization_period
             )
 
-            # Get temperature-based charge power limits if derating is enabled
+            # Get temperature-based charge power limits if derating is enabled.
+            # The returned list is already sized for n_periods (the remaining horizon).
             max_charge_power_per_period = self._get_temperature_derated_charge_limits(
-                len(remaining_prices)
+                n_periods
             )
-            if max_charge_power_per_period is not None:
-                # Slice to match optimization horizon (skip already-passed periods)
-                max_charge_power_per_period = max_charge_power_per_period[
-                    optimization_period:
-                ]
-                if len(max_charge_power_per_period) < n_periods:
-                    max_charge_power_per_period.extend(
-                        [self.battery_settings.max_charge_power_kw]
-                        * (n_periods - len(max_charge_power_per_period))
-                    )
 
             # Run DP optimization with strategic intent capture - returns OptimizationResult directly
             result = optimize_battery_schedule(

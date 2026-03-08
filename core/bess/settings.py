@@ -54,7 +54,7 @@ BATTERY_EFFICIENCY_DISCHARGE = 0.95  # DC-AC conversion losses
 # Default LFP temperature derating curve: (temp_celsius, charge_rate_percent)
 # Based on LFP battery characteristics (Battery University, manufacturer data)
 DEFAULT_TEMPERATURE_DERATING_CURVE: list[tuple[float, float]] = [
-    (-1.0, 0.0),  # Below 0°C: BMS blocks charging (lithium plating risk)
+    (-1.0, 20.0),  # Below 0°C: heavily limited (battery heaters may allow some charging)
     (0.0, 20.0),  # At 0°C: heavily limited
     (5.0, 50.0),  # At 5°C: significant derating
     (10.0, 80.0),  # At 10°C: mild derating

@@ -177,7 +177,7 @@ def test_temperature_derating_defaults():
     settings = TemperatureDeratingSettings()
     assert settings.enabled is False
     assert len(settings.derating_curve) == 5
-    assert settings.derating_curve[0] == (-1.0, 0.0)
+    assert settings.derating_curve[0] == (-1.0, 20.0)
     assert settings.derating_curve[-1] == (15.0, 100.0)
 
 

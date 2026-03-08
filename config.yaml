@@ -46,7 +46,7 @@ options:
       # LFP derating curve: [temperature_celsius, charge_rate_percent]
       # Linear interpolation between points. Adjust for your battery chemistry.
       derating_curve:
-        - [-1, 0]    # Below 0°C: no charging (BMS blocks)
+        - [-1, 20]   # Below 0°C: heavily limited (battery heaters may allow some charging)
         - [0, 20]    # At 0°C: 20% charge rate
         - [5, 50]    # At 5°C: 50% charge rate
         - [10, 80]   # At 10°C: 80% charge rate

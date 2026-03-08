@@ -549,6 +549,7 @@ def _run_dynamic_programming(
     initial_cost_basis: float = 0.0,
     terminal_value_per_kwh: float = 0.0,
     currency: str = "SEK",
+    max_charge_power_per_period: list[float] | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict]:
     """
     Enhanced DP that stores the PeriodData objects calculated during optimization.
@@ -589,6 +590,13 @@ def _run_dynamic_programming(
             best_cost_basis = C[t, i]
             best_period_data = None  # Store the PeriodData from best action
 
+            # Per-period charge power limit (from temperature derating or None)
+            period_max_charge = (
+                max_charge_power_per_period[t]
+                if max_charge_power_per_period is not None
+                else None
+            )
+
             # Try all possible actions
             for power in power_levels:
                 # Skip physically impossible actions (same as before)
@@ -603,6 +611,10 @@ def _run_dynamic_programming(
                     if abs(power) > max_discharge_power:
                         continue
                 elif power > power_tolerance:  # Charging
+                    # Apply temperature derating limit if provided
+                    if period_max_charge is not None and power > period_max_charge:
+                        continue
+
                     available_capacity = battery_settings.max_soe_kwh - soe
                     max_charge_power = (
                         available_capacity / dt / battery_settings.efficiency_charge
@@ -714,11 +726,20 @@ def _run_dynamic_programming(
                 C[t + 1, next_i] = best_cost_basis
 
     # Final safety check
-    policy = np.clip(
-        policy,
-        -battery_settings.max_discharge_power_kw,
-        battery_settings.max_charge_power_kw,
-    )
+    if max_charge_power_per_period is not None:
+        # Apply per-period charge limits
+        for t in range(horizon):
+            policy[t] = np.clip(
+                policy[t],
+                -battery_settings.max_discharge_power_kw,
+                max_charge_power_per_period[t],
+            )
+    else:
+        policy = np.clip(
+            policy,
+            -battery_settings.max_discharge_power_kw,
+            battery_settings.max_charge_power_kw,
+        )
 
     return V, policy, C, stored_period_data
 
@@ -819,6 +840,7 @@ def optimize_battery_schedule(
     period_duration_hours: float = 0.25,
     terminal_value_per_kwh: float = 0.0,
     currency: str = "SEK",
+    max_charge_power_per_period: list[float] | None = None,
 ) -> OptimizationResult:
     """
     Battery optimization that eliminates dual cost calculation by using
@@ -836,6 +858,10 @@ def optimize_battery_schedule(
         terminal_value_per_kwh: Value assigned to each kWh of usable energy remaining at
             end of horizon. Used to prevent end-of-day battery dumping when tomorrow's
             prices aren't available yet. Defaults to 0.0 (no terminal value).
+        max_charge_power_per_period: Per-period max charge power limits (kW), typically
+            from temperature derating. When provided, charging actions exceeding the
+            limit for each period are excluded from the optimization. Defaults to None
+            (no per-period limits, uses battery_settings.max_charge_power_kw).
 
     Returns:
         OptimizationResult with optimal battery schedule
@@ -885,6 +911,7 @@ def optimize_battery_schedule(
         dt=dt,
         terminal_value_per_kwh=terminal_value_per_kwh,
         currency=currency,
+        max_charge_power_per_period=max_charge_power_per_period,
     )
 
     # Step 2: Extract optimal path results directly from stored DP data

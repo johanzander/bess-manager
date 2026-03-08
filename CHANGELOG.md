@@ -5,6 +5,13 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.3.0] - 2026-03-08
+
+### Added
+
+- Temperature-based charge power derating for outdoor batteries. The optimizer now uses weather forecast temperatures to reduce max charge power in cold conditions, matching real-world LFP battery BMS behavior. Configurable derating curve with sensible defaults. Disabled by default (opt-in via `battery.temperature_derating.enabled`).
+- Shared weather forecast utility (`core/bess/weather.py`) extracted from ML module for reuse across optimizer and ML prediction.
+
 ## [7.2.0] - 2026-03-07
 
 ### Added

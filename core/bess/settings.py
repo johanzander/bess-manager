@@ -51,6 +51,16 @@ BATTERY_DEFAULT_CHARGING_POWER_RATE = 40  # percentage
 BATTERY_EFFICIENCY_CHARGE = 0.97  # Mix of solar (98%) and grid (95%) charging
 BATTERY_EFFICIENCY_DISCHARGE = 0.95  # DC-AC conversion losses
 
+# Default LFP temperature derating curve: (temp_celsius, charge_rate_percent)
+# Based on LFP battery characteristics (Battery University, manufacturer data)
+DEFAULT_TEMPERATURE_DERATING_CURVE: list[tuple[float, float]] = [
+    (-1.0, 0.0),  # Below 0°C: BMS blocks charging (lithium plating risk)
+    (0.0, 20.0),  # At 0°C: heavily limited
+    (5.0, 50.0),  # At 5°C: significant derating
+    (10.0, 80.0),  # At 10°C: mild derating
+    (15.0, 100.0),  # At 15°C+: full rate
+]
+
 # Consumption settings defaults
 HOME_HOURLY_CONSUMPTION_KWH = 4.6
 MIN_CONSUMPTION = 0.1
@@ -192,3 +202,87 @@ class HomeSettings:
             self.currency = config["home"].get("currency", DEFAULT_CURRENCY)
             self.consumption_strategy = home_config["consumption_strategy"]
         return self
+
+
+@dataclass
+class TemperatureDeratingSettings:
+    """Settings for temperature-based charge power derating.
+
+    When enabled, the optimizer reduces max charge power based on forecasted
+    outdoor temperature. This is important for batteries installed outdoors
+    where cold temperatures reduce LFP charging capacity.
+
+    Disabled by default since most batteries are installed indoors.
+    """
+
+    enabled: bool = False
+    derating_curve: list[tuple[float, float]] = field(
+        default_factory=lambda: list(DEFAULT_TEMPERATURE_DERATING_CURVE)
+    )
+
+    def from_ha_config(self, config: dict) -> "TemperatureDeratingSettings":
+        """Load from add-on config."""
+        battery_config = config.get("battery", {})
+        derating_config = battery_config.get("temperature_derating", {})
+        if derating_config:
+            self.enabled = derating_config.get("enabled", False)
+            raw_curve = derating_config.get("derating_curve")
+            if raw_curve:
+                self.derating_curve = [
+                    (float(point[0]), float(point[1])) for point in raw_curve
+                ]
+                self.derating_curve.sort(key=lambda p: p[0])
+        return self
+
+
+def interpolate_derating(temperature: float, curve: list[tuple[float, float]]) -> float:
+    """Interpolate the derating curve to get charge rate percentage for a temperature.
+
+    Args:
+        temperature: Outdoor temperature in Celsius.
+        curve: Sorted list of (temp_celsius, charge_rate_pct) points.
+
+    Returns:
+        Charge rate as a percentage (0-100).
+    """
+    if not curve:
+        return 100.0
+
+    # Below lowest point: use lowest point's value
+    if temperature <= curve[0][0]:
+        return curve[0][1]
+
+    # Above highest point: use highest point's value
+    if temperature >= curve[-1][0]:
+        return curve[-1][1]
+
+    # Find the two bracketing points and linearly interpolate
+    for i in range(len(curve) - 1):
+        t_low, rate_low = curve[i]
+        t_high, rate_high = curve[i + 1]
+        if t_low <= temperature <= t_high:
+            fraction = (temperature - t_low) / (t_high - t_low)
+            return rate_low + fraction * (rate_high - rate_low)
+
+    return 100.0
+
+
+def apply_temperature_derating(
+    max_charge_power_kw: float,
+    temperatures: list[float],
+    derating_curve: list[tuple[float, float]],
+) -> list[float]:
+    """Calculate per-period max charge power based on temperature forecast.
+
+    Args:
+        max_charge_power_kw: Nominal max charge power in kW.
+        temperatures: List of forecasted temperatures (one per period).
+        derating_curve: Sorted list of (temp_celsius, charge_rate_pct) points.
+
+    Returns:
+        List of effective max charge power values (kW), one per period.
+    """
+    return [
+        max_charge_power_kw * interpolate_derating(temp, derating_curve) / 100.0
+        for temp in temperatures
+    ]

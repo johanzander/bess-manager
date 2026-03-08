@@ -101,31 +101,18 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
   // Get the actual currency unit for the chart label
   const currencyUnit = getCurrencyUnit();
 
-  // Reactive dark mode detection
+  // Reactive dark mode detection — observes class changes on <html> to match Tailwind's 'class' strategy
   const [isDarkMode, setIsDarkMode] = useState(
     document.documentElement.classList.contains('dark')
   );
 
-  // Listen for dark mode changes
   useEffect(() => {
-    const observer = new MutationObserver((mutations) => {
-      mutations.forEach((mutation) => {
-        if (mutation.type === 'attributes' && mutation.attributeName === 'class') {
-          const newIsDarkMode = document.documentElement.classList.contains('dark');
-          if (newIsDarkMode !== isDarkMode) {
-            setIsDarkMode(newIsDarkMode);
-          }
-        }
-      });
+    const observer = new MutationObserver(() => {
+      setIsDarkMode(document.documentElement.classList.contains('dark'));
     });
-
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ['class'],
-    });
-
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
     return () => observer.disconnect();
-  }, [isDarkMode]);
+  }, []);
   
   const colors = {
     solar: '#fbbf24',        // Yellow

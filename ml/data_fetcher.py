@@ -350,8 +350,8 @@ def fetch_recent_data(
 def fetch_weather_forecast(config: dict) -> pd.DataFrame:
     """Fetch hourly weather forecast from Home Assistant and interpolate to 15-min.
 
-    Calls the HA REST API to get weather forecasts, then interpolates
-    hourly values to 15-minute periods.
+    Delegates to the shared weather utility in core.bess.weather and converts
+    the result to a pandas DataFrame for ML feature engineering.
 
     Args:
         config: Resolved ML config dict with ha_api section.
@@ -363,71 +363,21 @@ def fetch_weather_forecast(config: dict) -> pd.DataFrame:
     Raises:
         RuntimeError: If the HA API call fails or returns unexpected data.
     """
+    from core.bess.weather import fetch_hourly_weather_forecast
+
     ha_cfg = config["ha_api"]
-    base_url = ha_cfg["url"].rstrip("/")
-    token = ha_cfg["token"]
-    weather_entity = ha_cfg["weather_entity"]
 
-    url = f"{base_url}/api/services/weather/get_forecasts?return_response"
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "type": "hourly",
-        "entity_id": weather_entity,
-    }
-
-    _LOGGER.info("Fetching weather forecast from HA (%s)...", weather_entity)
-    response = requests.post(url, headers=headers, json=payload, timeout=30)
-
-    if response.status_code != 200:
-        raise RuntimeError(
-            f"HA weather forecast API failed with HTTP {response.status_code}: "
-            f"{response.text[:500]}"
-        )
-
-    data = response.json()
-
-    # Response structure: {"service_response": {"weather.entity": {"forecast": [...]}}}
-    service_response = data.get("service_response", data)
-    entity_data = service_response.get(weather_entity)
-    if entity_data is None:
-        raise RuntimeError(
-            f"No forecast data for entity '{weather_entity}' in HA response. "
-            f"Available keys: {list(service_response.keys())}"
-        )
-
-    forecasts = entity_data["forecast"]
-    if not forecasts:
-        raise RuntimeError("HA returned empty forecast list")
-
-    local_tz = _get_local_tz(config)
-    rows: list[dict] = []
-    for entry in forecasts:
-        dt_str = entry["datetime"]
-        dt = datetime.fromisoformat(dt_str).astimezone(local_tz)
-        rows.append(
-            {
-                "datetime": dt,
-                "temperature": float(entry["temperature"]),
-                "cloud_coverage": float(entry.get("cloud_coverage", 0)),
-                "wind_speed": float(entry.get("wind_speed", 0)),
-                "precipitation": float(entry.get("precipitation", 0)),
-            }
-        )
-
-    hourly_df = pd.DataFrame(rows).set_index("datetime").sort_index()
-
-    _LOGGER.info(
-        "Weather forecast: %d hourly entries from %s to %s",
-        len(hourly_df),
-        hourly_df.index.min(),
-        hourly_df.index.max(),
+    hourly_entries = fetch_hourly_weather_forecast(
+        ha_url=ha_cfg["url"],
+        ha_token=ha_cfg["token"],
+        weather_entity=ha_cfg["weather_entity"],
+        timezone=config["location"]["timezone"],
     )
 
+    # Convert to DataFrame
+    hourly_df = pd.DataFrame(hourly_entries).set_index("datetime").sort_index()
+
     # Interpolate to 15-minute periods
-    # Create 15-min index spanning the forecast range
     freq_15min = pd.Timedelta(minutes=QUARTER_HOUR_MINUTES)
     new_index = pd.date_range(
         start=hourly_df.index.min(),

@@ -148,6 +148,7 @@ class BESSController:
             self.ha_controller,
             price_source=None,  # Let system manager auto-select based on config
             energy_provider_config=energy_provider_config,
+            addon_options=options,
         )
 
         # Create scheduler with increased misfire grace time to avoid unnecessary warnings
@@ -335,7 +336,7 @@ class BESSController:
                     )
 
             # Required home settings
-            required_home_keys = ["consumption", "currency"]
+            required_home_keys = ["consumption", "currency", "consumption_strategy"]
             for key in required_home_keys:
                 if key not in home_config:
                     raise ValueError(
@@ -357,6 +358,7 @@ class BESSController:
                 "home": {
                     "defaultHourly": home_config["consumption"],
                     "currency": home_config["currency"],
+                    "consumptionStrategy": home_config["consumption_strategy"],
                 },
                 "price": {
                     "area": electricity_price_config["area"],

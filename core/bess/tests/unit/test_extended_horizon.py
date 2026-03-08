@@ -270,7 +270,7 @@ class TestScheduleTruncation:
             optimization_period, result, prices, optimization_data, True, False
         )
         assert schedule_result is not None
-        dp_schedule, _growatt_manager, _has_tomorrow = schedule_result
+        dp_schedule, _growatt_manager = schedule_result
 
         # Verify all schedule arrays are bounded to today
         from datetime import datetime

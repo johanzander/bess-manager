@@ -5,6 +5,13 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.6.3] - 2026-03-08
+
+### Fixed
+
+- Battery Mode Schedule tooltip showing incorrect times for sub-hour slot boundaries (e.g. 22:30 displayed as 22:00). The `formatHour` function now extracts minutes from fractional hours.
+- Current-time marker on Battery Mode Schedule positioned at start of hour regardless of minutes elapsed. Now uses fractional hours for accurate placement within the hour.
+
 ## [7.6.2] - 2026-03-07
 
 ### Changed

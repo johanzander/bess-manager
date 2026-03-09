@@ -1,7 +1,7 @@
 name: "BESS Manager"
 description: "Battery Energy Storage System optimization and management"
 
-version: "7.3.1"
+version: "7.4.0"
 
 slug: "bess_manager"
 init: false
@@ -36,6 +36,7 @@ options:
     max_fuse_current: 25            # Maximum fuse current in amperes
     voltage: 230                    # Line voltage in volts
     safety_margin_factor: 1.0       # Safety margin for power calculations (100% - safe with 5min monitoring)
+    phase_count: 3                  # Number of electrical phases (1 for single-phase, 3 for three-phase)
   battery:
     total_capacity: 30.0 # kWh
     min_soc: 15 # Minimum state of charge (%) - synced to inverter on startup
@@ -148,6 +149,7 @@ schema:
     max_fuse_current: int
     voltage: int
     safety_margin_factor: float
+    phase_count: int
   battery:
     total_capacity: float
     min_soc: float

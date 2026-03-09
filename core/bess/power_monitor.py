@@ -3,7 +3,7 @@
 It does this by:
 
 1. Power Monitoring:
-   - Continuously monitors current draw on all three phases
+   - Continuously monitors current draw on electrical phases (single or three-phase)
    - Calculates total power consumption per phase
    - Considers house fuse limits (e.g., 25A per phase)
    - Maintains a safety margin to prevent tripping fuses
@@ -82,12 +82,19 @@ class HomePowerMonitor:
     def check_health(self) -> list:
         """Check the health of the Power Monitor component."""
         # Define what controller methods this component uses
-        power_methods = [
-            "get_l1_current",
-            "get_l2_current",
-            "get_l3_current",
-            "get_charging_power_rate",
-        ]
+        # Single-phase systems only need L1; three-phase needs all three
+        if self.home_settings.phase_count == 1:
+            power_methods = [
+                "get_l1_current",
+                "get_charging_power_rate",
+            ]
+        else:
+            power_methods = [
+                "get_l1_current",
+                "get_l2_current",
+                "get_l3_current",
+                "get_charging_power_rate",
+            ]
 
         # For power monitoring, since the component itself is optional, all methods are optional
         # System can operate without power monitoring - it's an enhancement feature
@@ -104,37 +111,43 @@ class HomePowerMonitor:
 
         return [health_check]
 
-    def get_current_phase_loads_w(self) -> tuple[float, float, float]:
-        """Get current load on each phase in watts."""
+    def get_current_phase_loads_w(self) -> tuple[float, ...]:
+        """Get current load on each phase in watts.
+
+        Returns a tuple with one element per phase (1 for single-phase, 3 for three-phase).
+        """
+        voltage = self.home_settings.voltage
+
+        if self.home_settings.phase_count == 1:
+            l1_current = self.controller.get_l1_current()
+            return (l1_current * voltage,)
+
         l1_current = self.controller.get_l1_current()
         l2_current = self.controller.get_l2_current()
         l3_current = self.controller.get_l3_current()
 
         return (
-            l1_current * self.home_settings.voltage,
-            l2_current * self.home_settings.voltage,
-            l3_current * self.home_settings.voltage,
+            l1_current * voltage,
+            l2_current * voltage,
+            l3_current * voltage,
         )
 
     def calculate_available_charging_power(self) -> float:
         """Calculate safe battery charging power based on most loaded phase and target power."""
-        # Get current loads in watts
-        l1, l2, l3 = self.get_current_phase_loads_w()
+        phase_count = self.home_settings.phase_count
 
-        # Calculate current usage as percentage of max safe current (for logging)
-        l1_pct = (l1 / self.max_power_per_phase) * 100
-        l2_pct = (l2 / self.max_power_per_phase) * 100
-        l3_pct = (l3 / self.max_power_per_phase) * 100
+        # Get current loads in watts (variable-length tuple matching phase count)
+        phase_loads = self.get_current_phase_loads_w()
 
         # Find most loaded phase in watts
-        max_load_w = max(l1, l2, l3)
+        max_load_w = max(phase_loads)
         max_load_pct = (max_load_w / self.max_power_per_phase) * 100
 
         # Calculate available power on most loaded phase
         available_power_w = self.max_power_per_phase - max_load_w
 
-        # Max battery power per phase (assuming equal distribution across 3 phases)
-        max_battery_power_per_phase_w = self.max_charge_power_w / 3
+        # Max battery power per phase (distributed across phases)
+        max_battery_power_per_phase_w = self.max_charge_power_w / phase_count
 
         # Calculate available charging power as percentage of battery's max power
         # This is the correct calculation: available power relative to what the battery needs
@@ -146,10 +159,19 @@ class HomePowerMonitor:
         # Limit by target charging power
         charging_power_pct = min(available_pct, self.target_charging_power_pct)
 
+        # Log phase loads
+        if phase_count == 1:
+            pct = (phase_loads[0] / self.max_power_per_phase) * 100
+            phase_log = f"Phase load: {phase_loads[0]:.0f}W ({pct:.1f}%)"
+        else:
+            phase_parts = []
+            for i, load in enumerate(phase_loads):
+                pct = (load / self.max_power_per_phase) * 100
+                phase_parts.append(f"#{i + 1}: {load:.0f}W ({pct:.1f}%)")
+            phase_log = "Phase loads: " + ", ".join(phase_parts)
+
         log_message = (
-            "Phase loads: #1: %.0fW (%.1f%%), "
-            "#2: %.0fW (%.1f%%), "
-            "#3: %.0fW (%.1f%%)\n"
+            "%s\n"
             "Most loaded phase: %.1f%%\n"
             "Available power: %.0fW (%.1f%% of battery max per phase)\n"
             "Target charging: %.1f%%\n"
@@ -157,12 +179,7 @@ class HomePowerMonitor:
         )
         logger.info(
             log_message,
-            l1,
-            l1_pct,
-            l2,
-            l2_pct,
-            l3,
-            l3_pct,
+            phase_log,
             max_load_pct,
             available_power_w,
             available_pct,

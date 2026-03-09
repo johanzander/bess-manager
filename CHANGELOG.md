@@ -5,11 +5,11 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [7.7.0] - 2026-03-08
+## [7.7.0] - 2026-03-09
 
 ### Added
 
-- Temperature-based charge power derating for outdoor batteries. When enabled, the DP optimizer reduces max charge power per period based on forecasted outdoor temperature using a configurable LFP derating curve. Uses Home Assistant weather forecast for forward-looking per-period constraints, allowing warm afternoon charging at full rate even when nighttime is cold. Opt-in via `battery.temperature_derating.enabled` in config.yaml. (thanks [@pookey](https://github.com/pookey))
+- Temperature-based charge power derating for outdoor batteries, using HA weather forecast to apply per-period charge limits via a configurable LFP derating curve. Opt-in via `battery.temperature_derating.enabled` in config.yaml. (thanks [@pookey](https://github.com/pookey))
 
 ## [7.6.2] - 2026-03-07
 

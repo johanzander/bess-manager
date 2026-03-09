@@ -5,6 +5,18 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.8.0] - 2026-03-09
+
+### Added
+
+- Configurable single/three-phase electricity support via `home.phase_count` setting (1 or 3, default 3). Single-phase systems (common in the UK) no longer incorrectly divide battery power by 3, which was underestimating phase load and reducing fuse protection effectiveness. (thanks [@pookey](https://github.com/pookey))
+- Pass through `max_fuse_current`, `voltage`, and `safety_margin_factor` from config.yaml to the settings system — these were previously defined in config but stayed at defaults.
+
+### Changed
+
+- Power monitor health check adapts to phase count: single-phase systems only require L1 current sensor, not L2/L3.
+- Power monitor logging adapts to show one or three phases depending on configuration.
+
 ## [7.7.0] - 2026-03-09
 
 ### Added

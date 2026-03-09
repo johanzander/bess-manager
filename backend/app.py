@@ -358,6 +358,10 @@ class BESSController:
                 "home": {
                     "defaultHourly": home_config["consumption"],
                     "currency": home_config["currency"],
+                    "maxFuseCurrent": home_config.get("max_fuse_current", 25),
+                    "voltage": home_config.get("voltage", 230),
+                    "safetyMargin": home_config.get("safety_margin_factor", 1.0),
+                    "phaseCount": home_config.get("phase_count", 3),
                 },
                 "price": {
                     "area": electricity_price_config["area"],

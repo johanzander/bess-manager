@@ -1,6 +1,6 @@
 name: "BESS Manager"
 description: "Battery Energy Storage System optimization and management"
-version: "7.6.2"
+version: "7.7.0"
 slug: "bess_manager"
 init: false
 arch:
@@ -40,6 +40,17 @@ options:
     max_charge_discharge_power: 15.0 # kW
     cycle_cost: 0.50                 # Battery wear cost per kWh (excl. VAT) - use your local currency
     min_action_profit_threshold: 8.0 # Minimum profit threshold for any battery action (in your currency)
+    temperature_derating:
+      enabled: false  # Enable for outdoor batteries affected by cold weather
+      weather_entity: ""  # HA weather entity for forecast (e.g. "weather.forecast_home")
+      # LFP derating curve: [temperature_celsius, charge_rate_percent]
+      # Linear interpolation between points. Adjust for your battery chemistry.
+      derating_curve:
+        - [-1, 20]   # Below 0°C: heavily limited (battery heaters may allow some charging)
+        - [0, 20]    # At 0°C: 20% charge rate
+        - [5, 50]    # At 5°C: 50% charge rate
+        - [10, 80]   # At 10°C: 80% charge rate
+        - [15, 100]  # At 15°C+: full charge rate
   electricity_price:
     area: "SE4"                      # Area for Nordpool pricing
     markup_rate: 0.08                # Electricity markup per kWh (in your currency, e.g. 8 öre/kWh for SEK)
@@ -116,6 +127,10 @@ schema:
     max_charge_discharge_power: float
     cycle_cost: float
     min_action_profit_threshold: float
+    temperature_derating:
+      enabled: bool?
+      weather_entity: str?
+      derating_curve: list?
   electricity_price:
     area: str
     markup_rate: float

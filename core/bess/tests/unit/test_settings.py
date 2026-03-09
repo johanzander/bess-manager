@@ -1,6 +1,11 @@
 """Test the new BatterySettings dataclass implementation."""
 
-from core.bess.settings import BatterySettings
+from core.bess.settings import (
+    BatterySettings,
+    TemperatureDeratingSettings,
+    apply_temperature_derating,
+    interpolate_derating,
+)
 
 
 def test_battery_settings_properties():
@@ -165,3 +170,97 @@ def test_battery_settings_independent_charge_discharge_power():
     settings2.update(maxDischargePowerKw=8.0, maxChargePowerKw=10.0)
     assert settings2.max_charge_power_kw == 10.0
     assert settings2.max_discharge_power_kw == 8.0
+
+
+def test_temperature_derating_defaults():
+    """Test TemperatureDeratingSettings defaults."""
+    settings = TemperatureDeratingSettings()
+    assert settings.enabled is False
+    assert len(settings.derating_curve) == 5
+    assert settings.derating_curve[0] == (-1.0, 20.0)
+    assert settings.derating_curve[-1] == (15.0, 100.0)
+
+
+def test_temperature_derating_from_ha_config():
+    """Test loading temperature derating settings from config."""
+    settings = TemperatureDeratingSettings()
+    config = {
+        "battery": {
+            "temperature_derating": {
+                "enabled": True,
+                "weather_entity": "weather.forecast_home",
+                "derating_curve": [
+                    [0, 0],
+                    [10, 50],
+                    [20, 100],
+                ],
+            }
+        }
+    }
+    settings.from_ha_config(config)
+    assert settings.enabled is True
+    assert settings.weather_entity == "weather.forecast_home"
+    assert len(settings.derating_curve) == 3
+    assert settings.derating_curve[0] == (0.0, 0.0)
+    assert settings.derating_curve[1] == (10.0, 50.0)
+    assert settings.derating_curve[2] == (20.0, 100.0)
+
+
+def test_temperature_derating_from_ha_config_disabled():
+    """Test loading with derating disabled."""
+    settings = TemperatureDeratingSettings()
+    config = {"battery": {}}
+    settings.from_ha_config(config)
+    assert settings.enabled is False
+
+
+def test_interpolate_derating_below_range():
+    """Test derating below the curve range returns lowest point value."""
+    curve = [(-1.0, 0.0), (0.0, 20.0), (15.0, 100.0)]
+    assert interpolate_derating(-10.0, curve) == 0.0
+    assert interpolate_derating(-1.0, curve) == 0.0
+
+
+def test_interpolate_derating_above_range():
+    """Test derating above the curve range returns highest point value."""
+    curve = [(-1.0, 0.0), (0.0, 20.0), (15.0, 100.0)]
+    assert interpolate_derating(15.0, curve) == 100.0
+    assert interpolate_derating(30.0, curve) == 100.0
+
+
+def test_interpolate_derating_at_points():
+    """Test derating at exact curve points."""
+    curve = [(-1.0, 0.0), (0.0, 20.0), (5.0, 50.0), (10.0, 80.0), (15.0, 100.0)]
+    assert interpolate_derating(0.0, curve) == 20.0
+    assert interpolate_derating(5.0, curve) == 50.0
+    assert interpolate_derating(10.0, curve) == 80.0
+
+
+def test_interpolate_derating_between_points():
+    """Test linear interpolation between curve points."""
+    curve = [(0.0, 0.0), (10.0, 100.0)]
+    assert interpolate_derating(5.0, curve) == 50.0
+    assert interpolate_derating(2.5, curve) == 25.0
+    assert interpolate_derating(7.5, curve) == 75.0
+
+
+def test_interpolate_derating_empty_curve():
+    """Test empty curve returns 100%."""
+    assert interpolate_derating(10.0, []) == 100.0
+
+
+def test_apply_temperature_derating():
+    """Test applying derating to produce per-period charge power limits."""
+    curve = [(0.0, 0.0), (10.0, 50.0), (20.0, 100.0)]
+    max_power = 5.0
+    temperatures = [0.0, 5.0, 10.0, 15.0, 20.0, 25.0]
+
+    result = apply_temperature_derating(max_power, temperatures, curve)
+
+    assert len(result) == 6
+    assert result[0] == 0.0  # 0°C -> 0% -> 0kW
+    assert result[1] == 1.25  # 5°C -> 25% -> 1.25kW
+    assert result[2] == 2.5  # 10°C -> 50% -> 2.5kW
+    assert result[3] == 3.75  # 15°C -> 75% -> 3.75kW
+    assert result[4] == 5.0  # 20°C -> 100% -> 5kW
+    assert result[5] == 5.0  # 25°C -> 100% -> 5kW

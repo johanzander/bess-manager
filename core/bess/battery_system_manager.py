@@ -19,10 +19,10 @@ from .dp_schedule import DPSchedule
 from .exceptions import (
     SystemConfigurationError,
 )
-from .growatt_schedule import GrowattScheduleManager
 from .ha_api_controller import HomeAssistantAPIController
 from .health_check import run_system_health_checks
 from .historical_data_store import HistoricalDataStore
+from .min_schedule import GrowattScheduleManager
 from .models import (
     DecisionData,
     EconomicData,
@@ -44,6 +44,7 @@ from .settings import (
     TemperatureDeratingSettings,
     apply_temperature_derating,
 )
+from .sph_schedule import SphScheduleManager
 from .time_utils import (
     format_period,
     get_period_count,
@@ -105,9 +106,17 @@ class BatterySystemManager:
         )
 
         # Initialize hardware interface with battery settings
-        self._schedule_manager = GrowattScheduleManager(
-            battery_settings=self.battery_settings
+        _inverter_type = self._addon_options.get("growatt", {}).get(
+            "inverter_type", "MIN"
         )
+        if _inverter_type == "SPH":
+            self._schedule_manager: GrowattScheduleManager | SphScheduleManager = (
+                SphScheduleManager(battery_settings=self.battery_settings)
+            )
+        else:
+            self._schedule_manager = GrowattScheduleManager(
+                battery_settings=self.battery_settings
+            )
 
         # Initialize price manager
         if not price_source:
@@ -480,11 +489,9 @@ class BatterySystemManager:
                 )
                 return
 
-            inverter_segments = self._controller.read_inverter_time_segments()
-
             current_hour = datetime.now().hour
-            self._schedule_manager.initialize_from_tou_segments(
-                inverter_segments, current_hour
+            self._schedule_manager.read_and_initialize_from_hardware(
+                self._controller, current_hour
             )
 
         except Exception as e:
@@ -1357,9 +1364,9 @@ class BatterySystemManager:
             for i, period_data in enumerate(period_data_list):
                 target_period = optimization_period + i
                 if target_period < len(full_day_strategic_intents):
-                    full_day_strategic_intents[target_period] = (
-                        period_data.decision.strategic_intent
-                    )
+                    full_day_strategic_intents[
+                        target_period
+                    ] = period_data.decision.strategic_intent
 
             # Store initial SOC in OptimizationResult for DailyViewBuilder
             if self._initial_soe is not None:
@@ -1477,10 +1484,18 @@ class BatterySystemManager:
             # Override the strategic intents in the schedule with corrected data
             temp_schedule.strategic_intents = full_day_strategic_intents
 
-            # Create Growatt schedule manager
-            temp_growatt = GrowattScheduleManager(
-                battery_settings=self.battery_settings
+            # Create schedule manager matching current inverter type
+            _inverter_type = self._addon_options.get("growatt", {}).get(
+                "inverter_type", "MIN"
             )
+            if _inverter_type == "SPH":
+                temp_growatt: GrowattScheduleManager | SphScheduleManager = (
+                    SphScheduleManager(battery_settings=self.battery_settings)
+                )
+            else:
+                temp_growatt = GrowattScheduleManager(
+                    battery_settings=self.battery_settings
+                )
             temp_growatt.strategic_intents = full_day_strategic_intents
 
             # Copy existing TOU intervals for past periods if not preparing next day
@@ -1514,7 +1529,7 @@ class BatterySystemManager:
         is_first_run: bool,
         period: int,
         prepare_next_day: bool,
-        temp_growatt: GrowattScheduleManager,
+        temp_growatt: GrowattScheduleManager | SphScheduleManager,
         optimization_period: int,
         temp_schedule: DPSchedule,
     ) -> tuple[bool, str]:
@@ -1557,11 +1572,11 @@ class BatterySystemManager:
         self,
         period: int,
         temp_schedule: DPSchedule,
-        temp_growatt: GrowattScheduleManager,
+        temp_growatt: GrowattScheduleManager | SphScheduleManager,
         reason: str,
         prepare_next_day: bool,
     ) -> None:
-        """Apply schedule to hardware - preserves original TOU logic."""
+        """Apply schedule to hardware."""
 
         logger.info("=" * 80)
         logger.info("=== SCHEDULE APPLICATION START ===")
@@ -1578,219 +1593,23 @@ class BatterySystemManager:
         self._current_schedule = temp_schedule
 
         try:
-            # Get TOU settings
             current_tou = getattr(self._schedule_manager, "tou_intervals", [])
-            new_tou = temp_growatt.tou_intervals
-
-            logger.info(
-                "TOU comparison: Current=%d intervals, New=%d intervals",
-                len(current_tou),
-                len(new_tou),
-            )
-
-            # DIAGNOSTIC: Validate intervals before sending to inverter
-            logger.info("Validating TOU intervals before sending to inverter...")
-            temp_growatt.validate_tou_intervals_ordering(
-                new_tou, "before_sending_to_inverter"
-            )
-
             effective_period = 0 if prepare_next_day else period
-            effective_minute = 0 if prepare_next_day else effective_period * 15
 
-            # Helper functions for minute-level time calculations
-            def start_minute(interval: dict) -> int:
-                """Get start time as minutes since midnight."""
-                parts = interval["start_time"].split(":")
-                return int(parts[0]) * 60 + int(parts[1])
-
-            def end_minute(interval: dict) -> int:
-                """Get end time as minutes since midnight."""
-                parts = interval["end_time"].split(":")
-                return int(parts[0]) * 60 + int(parts[1])
-
-            # Find segments to disable and update
-            to_disable = []
-            to_update = []
-
-            logger.info(
-                "Analyzing TOU changes from period %d (%02d:%02d) onwards...",
-                effective_period,
-                effective_period // 4,
-                (effective_period % 4) * 15,
-            )
-
-            # CRITICAL FIX: When new schedule is empty, disable ALL current TOU segments
-            # This prevents stale schedules from persisting across restarts
-            if len(new_tou) == 0 and len(current_tou) > 0:
-                logger.warning("=" * 80)
-                logger.warning(
-                    "Empty TOU schedule detected - CLEARING ALL %d existing TOU segments from inverter",
-                    len(current_tou),
-                )
-                logger.warning(
-                    "This happens when optimization determines NO profitable charging/discharging"
-                )
-                logger.warning("=" * 80)
-
-                # Disable ALL current segments (past and future) to prevent stale schedules
-                for current in current_tou:
-                    if current.get(
-                        "enabled", True
-                    ):  # Only disable if currently enabled
-                        disabled_segment = current.copy()
-                        disabled_segment["enabled"] = False
-                        to_disable.append(disabled_segment)
-                        logger.info(
-                            "Marking ALL segments for clearing: %s-%s %s (segment_id=%s)",
-                            current["start_time"],
-                            current["end_time"],
-                            current["batt_mode"],
-                            current.get("segment_id"),
-                        )
-
-                logger.info("Total segments marked for clearing: %d", len(to_disable))
+            if self._controller is None:
+                logger.error("Cannot apply schedule: controller is not available")
             else:
-                # Normal case: differential update (only update future segments)
-                # Identify segments to disable (segments ending at or after effective_minute)
-                for current in current_tou:
-                    if end_minute(current) >= effective_minute:
-                        has_match = any(
-                            segment["start_time"] == current["start_time"]
-                            and segment["end_time"] == current["end_time"]
-                            and segment["batt_mode"] == current["batt_mode"]
-                            and segment["enabled"] == current["enabled"]
-                            for segment in new_tou
-                        )
-
-                        if not has_match:
-                            disabled_segment = current.copy()
-                            disabled_segment["enabled"] = False
-                            to_disable.append(disabled_segment)
-                            logger.debug(
-                                "Mark for disable: %s-%s %s",
-                                current["start_time"],
-                                current["end_time"],
-                                current["batt_mode"],
-                            )
-
-            # Identify segments to add/update (segments ending at or after effective_minute)
-            for segment in new_tou:
-                if end_minute(segment) >= effective_minute:
-                    existing_match = any(
-                        current["start_time"] == segment["start_time"]
-                        and current["end_time"] == segment["end_time"]
-                        and current["batt_mode"] == segment["batt_mode"]
-                        and current["enabled"] == segment["enabled"]
-                        for current in current_tou
-                    )
-
-                    if not existing_match:
-                        to_update.append(segment)
-                        logger.debug(
-                            "Mark for update: %s-%s %s",
-                            segment["start_time"],
-                            segment["end_time"],
-                            segment["batt_mode"],
-                        )
-
-            # Check for overlaps and add to disable list (using minute-level precision)
-            for update_segment in to_update:
-                update_start = start_minute(update_segment)
-                update_end = end_minute(update_segment)
-
-                for current_segment in current_tou:
-                    if any(
-                        d.get("segment_id") == current_segment.get("segment_id")
-                        for d in to_disable
-                    ):
-                        continue
-                    if not current_segment.get("enabled", True):
-                        continue
-
-                    current_start = start_minute(current_segment)
-                    current_end = end_minute(current_segment)
-
-                    # Check for time overlap
-                    if update_start <= current_end and update_end >= current_start:
-                        if not any(
-                            d.get("segment_id") == current_segment.get("segment_id")
-                            for d in to_disable
-                        ):
-                            disabled_segment = current_segment.copy()
-                            disabled_segment["enabled"] = False
-                            to_disable.append(disabled_segment)
-
-            # Apply updates to hardware
-            if to_disable or to_update:
-                logger.info(
-                    "Updating %d segments, disabling %d segments",
-                    len(to_update),
-                    len(to_disable),
+                temp_growatt.write_schedule_to_hardware(
+                    self._controller, effective_period, current_tou
                 )
-
-                # Check if controller is available
-                if self._controller is None:
-                    logger.error("Cannot apply schedule: controller is not available")
-                else:
-                    # Disable first to avoid overlaps
-                    for segment in to_disable:
-                        try:
-                            logger.info(
-                                "HARDWARE: Disabling TOU segment %s: %s-%s %s",
-                                segment.get("segment_id"),
-                                segment["start_time"],
-                                segment["end_time"],
-                                segment["batt_mode"],
-                            )
-                            # Filter parameters to only include what the method accepts
-                            inverter_params = {
-                                "segment_id": segment["segment_id"],
-                                "batt_mode": segment["batt_mode"],
-                                "start_time": segment["start_time"],
-                                "end_time": segment["end_time"],
-                                "enabled": segment["enabled"],
-                            }
-                            self._controller.set_inverter_time_segment(
-                                **inverter_params
-                            )
-                            logger.debug("SUCCESS: Segment disabled")
-                        except Exception as e:
-                            logger.error("FAILED: Failed to disable TOU segment: %s", e)
-
-                    # Then update/add
-                    for segment in to_update:
-                        try:
-                            logger.info(
-                                "HARDWARE: Setting TOU segment %s: %s-%s %s",
-                                segment.get("segment_id"),
-                                segment["start_time"],
-                                segment["end_time"],
-                                segment["batt_mode"],
-                            )
-                            # Filter parameters to only include what the method accepts
-                            inverter_params = {
-                                "segment_id": segment["segment_id"],
-                                "batt_mode": segment["batt_mode"],
-                                "start_time": segment["start_time"],
-                                "end_time": segment["end_time"],
-                                "enabled": segment["enabled"],
-                            }
-                            self._controller.set_inverter_time_segment(
-                                **inverter_params
-                            )
-                            logger.debug("SUCCESS: Segment updated")
-                        except Exception as e:
-                            logger.error("FAILED: Failed to update TOU segment: %s", e)
-            else:
-                logger.info("No TOU segment changes needed")
 
             # Update schedule manager
             self._schedule_manager = temp_growatt
 
-            # CRITICAL: Clear corruption flag after successful hardware write
+            # Clear corruption flag after successful hardware write
             if temp_growatt.corruption_detected:
                 logger.info(
-                    "✅ Corruption recovery complete - clearing corruption flag after successful hardware write"
+                    "Corruption recovery complete - clearing corruption flag after successful hardware write"
                 )
                 temp_growatt.corruption_detected = False
 

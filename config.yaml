@@ -1,6 +1,6 @@
 name: "BESS Manager"
 description: "Battery Energy Storage System optimization and management"
-version: "7.7.0"
+version: "7.7.1"
 slug: "bess_manager"
 init: false
 arch:
@@ -130,7 +130,6 @@ schema:
     temperature_derating:
       enabled: bool?
       weather_entity: str?
-      derating_curve: list?
   electricity_price:
     area: str
     markup_rate: float

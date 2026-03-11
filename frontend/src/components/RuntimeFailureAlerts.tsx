@@ -9,6 +9,7 @@ interface RuntimeFailure {
   error_message: string;
   error_type: string;
   retry_count: number;
+  context?: Record<string, unknown>;
 }
 
 interface RuntimeFailureAlertsProps {
@@ -45,13 +46,13 @@ export const RuntimeFailureAlerts: React.FC<RuntimeFailureAlertsProps> = ({
   const getCategoryColor = (category: string) => {
     switch (category) {
       case 'battery_control':
-        return 'border-orange-500 bg-orange-50';
+        return 'border-orange-500 bg-orange-50 dark:bg-orange-950/30';
       case 'inverter_control':
-        return 'border-red-500 bg-red-50';
+        return 'border-red-500 bg-red-50 dark:bg-red-950/30';
       case 'sensor_read':
-        return 'border-yellow-500 bg-yellow-50';
+        return 'border-yellow-500 bg-yellow-50 dark:bg-yellow-950/30';
       default:
-        return 'border-gray-500 bg-gray-50';
+        return 'border-gray-500 bg-gray-50 dark:bg-gray-800';
     }
   };
 
@@ -64,14 +65,14 @@ export const RuntimeFailureAlerts: React.FC<RuntimeFailureAlertsProps> = ({
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <AlertTriangle className="h-5 w-5 text-red-500" />
-          <h3 className="text-lg font-semibold text-gray-900">
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
             Runtime Errors ({failures.length})
           </h3>
         </div>
         {failures.length > 1 && (
           <button
             onClick={onDismissAll}
-            className="px-3 py-1 text-sm bg-red-100 hover:bg-red-200 text-red-700 rounded-md transition-colors"
+            className="px-3 py-1 text-sm bg-red-100 hover:bg-red-200 text-red-700 dark:bg-red-900/50 dark:hover:bg-red-900/70 dark:text-red-300 rounded-md transition-colors"
           >
             Dismiss All
           </button>
@@ -88,13 +89,13 @@ export const RuntimeFailureAlerts: React.FC<RuntimeFailureAlertsProps> = ({
               <div className="flex-1">
                 <div className="flex items-center gap-2 mb-2">
                   <AlertTriangle className="h-4 w-4 text-red-500 flex-shrink-0" />
-                  <span className="font-medium text-gray-900">{failure.operation}</span>
-                  <span className="text-xs px-2 py-1 bg-gray-200 text-gray-700 rounded">
+                  <span className="font-medium text-gray-900 dark:text-gray-100">{failure.operation}</span>
+                  <span className="text-xs px-2 py-1 bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-300 rounded">
                     {failure.category.replace('_', ' ')}
                   </span>
                 </div>
 
-                <div className="text-sm text-gray-600 mb-2">
+                <div className="text-sm text-gray-600 dark:text-gray-400 mb-2">
                   <div>Time: {formatTimestamp(failure.timestamp)}</div>
                   <div>Error: {failure.error_type}</div>
                   {failure.retry_count > 0 && (
@@ -103,11 +104,24 @@ export const RuntimeFailureAlerts: React.FC<RuntimeFailureAlertsProps> = ({
                 </div>
 
                 {expandedFailures.has(failure.id) && (
-                  <div className="mt-3 p-3 bg-white rounded border text-sm">
-                    <strong>Details:</strong>
-                    <pre className="mt-1 whitespace-pre-wrap font-mono text-xs">
+                  <div className="mt-3 p-3 bg-white dark:bg-gray-800 rounded border dark:border-gray-700 text-sm">
+                    <strong className="dark:text-gray-200">Details:</strong>
+                    <pre className="mt-1 whitespace-pre-wrap font-mono text-xs dark:text-gray-300">
                       {failure.error_message}
                     </pre>
+                    {failure.context && Object.keys(failure.context).length > 0 && (
+                      <div className="mt-3">
+                        <strong className="dark:text-gray-200">Parameters:</strong>
+                        <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+                          {Object.entries(failure.context).map(([key, value]) => (
+                            <React.Fragment key={key}>
+                              <dt className="font-mono text-gray-500 dark:text-gray-400">{key}</dt>
+                              <dd className="font-mono dark:text-gray-300">{String(value)}</dd>
+                            </React.Fragment>
+                          ))}
+                        </dl>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -115,14 +129,14 @@ export const RuntimeFailureAlerts: React.FC<RuntimeFailureAlertsProps> = ({
               <div className="flex items-center gap-2 ml-4">
                 <button
                   onClick={() => toggleExpanded(failure.id)}
-                  className="text-gray-500 hover:text-gray-700 p-1"
+                  className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 p-1"
                   title={expandedFailures.has(failure.id) ? 'Hide details' : 'Show details'}
                 >
                   {expandedFailures.has(failure.id) ? '−' : '+'}
                 </button>
                 <button
                   onClick={() => onDismiss(failure.id)}
-                  className="text-gray-500 hover:text-red-600 p-1"
+                  className="text-gray-500 hover:text-red-600 dark:text-gray-400 dark:hover:text-red-400 p-1"
                   title="Dismiss this error"
                 >
                   <X className="h-4 w-4" />

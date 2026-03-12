@@ -1707,22 +1707,19 @@ class BatterySystemManager:
             )
             temp_growatt.strategic_intents = full_day_strategic_intents
 
-            # Copy existing TOU intervals for past periods if not preparing next day
-            if not prepare_next_day and hasattr(
-                self._schedule_manager, "tou_intervals"
-            ):
-                for segment in self._schedule_manager.tou_intervals:
-                    start_time_parts = segment["start_time"].split(":")
-                    start_period = (
-                        int(start_time_parts[0]) * 4 + int(start_time_parts[1]) // 15
-                    )
-                    if start_period < optimization_period:
-                        temp_growatt.tou_intervals.append(segment.copy())
-
-            # Create schedule with strategic intents
+            # Create schedule with rolling window — only future periods get TOU segments
             effective_period = 0 if prepare_next_day else optimization_period
+            previous_tou = (
+                []
+                if prepare_next_day
+                else self._schedule_manager.tou_intervals.copy()
+            )
             logger.info(f"Creating Growatt schedule for period={effective_period}")
-            temp_growatt.create_schedule(temp_schedule)
+            temp_growatt.create_schedule(
+                temp_schedule,
+                current_period=effective_period,
+                previous_tou_intervals=previous_tou,
+            )
 
             return temp_schedule, temp_growatt
 
@@ -1958,6 +1955,7 @@ class BatterySystemManager:
                 # Check if controller is available
                 if self._controller is None:
                     logger.error("Cannot apply schedule: controller is not available")
+                    self._schedule_needs_verification = True
                 else:
                     total_writes = len(to_disable) + len(to_update)
                     deployment_failures = 0

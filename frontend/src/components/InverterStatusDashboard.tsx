@@ -45,6 +45,7 @@ interface TOUInterval {
   enabled: boolean;
   isEmpty?: boolean;
   isDefault?: boolean;
+  isExpired?: boolean;
 }
 
 interface ScheduleHour {
@@ -867,6 +868,8 @@ const InverterStatusDashboard: React.FC = () => {
                 <div key={index} className={`flex justify-between items-center p-3 rounded-lg ${
                   interval.isDefault
                     ? 'bg-gray-50 dark:bg-gray-800/30 border border-gray-200 dark:border-gray-700 opacity-50'
+                    : interval.isExpired
+                    ? 'bg-gray-50 dark:bg-gray-800/30 border border-gray-200 dark:border-gray-700 opacity-40'
                     : interval.isEmpty
                     ? 'bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 opacity-60'
                     : interval.enabled
@@ -874,22 +877,24 @@ const InverterStatusDashboard: React.FC = () => {
                     : 'bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800'
                 }`}>
                   <div className="flex items-center space-x-4">
-                    <div className="font-medium text-gray-900 dark:text-white">
+                    <div className={`font-medium ${interval.isExpired ? 'text-gray-400 dark:text-gray-500' : 'text-gray-900 dark:text-white'}`}>
                       {interval.isDefault
                         ? 'Default'
                         : `Segment #${interval.segmentId}`}
                     </div>
-                    <div className="text-sm text-gray-600 dark:text-gray-400">
+                    <div className={`text-sm ${interval.isExpired ? 'text-gray-400 dark:text-gray-500 line-through' : 'text-gray-600 dark:text-gray-400'}`}>
                       {interval.isEmpty
                         ? 'Not configured'
                         : `${interval.startTime} - ${interval.endTime}`}
                     </div>
                   </div>
                   <div className="flex items-center space-x-3">
-                    {!interval.isEmpty && getBatteryModeDisplay(interval.battMode)}
+                    {!interval.isEmpty && !interval.isExpired && getBatteryModeDisplay(interval.battMode)}
                     <span className={`px-2 py-1 rounded text-xs font-medium ${
                       interval.isDefault
                         ? 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
+                        : interval.isExpired
+                        ? 'bg-gray-100 text-gray-400 dark:bg-gray-700 dark:text-gray-500'
                         : interval.isEmpty
                         ? 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
                         : interval.enabled
@@ -898,6 +903,8 @@ const InverterStatusDashboard: React.FC = () => {
                     }`}>
                       {interval.isDefault
                         ? 'Load First'
+                        : interval.isExpired
+                        ? 'Expired'
                         : interval.isEmpty
                         ? 'Empty'
                         : (interval.enabled ? 'Active' : 'Disabled')}

@@ -425,7 +425,6 @@ class GrowattScheduleManager:
             List of TOU intervals ready for Growatt
         """
         intervals = []
-        segment_id = 1
 
         for group in groups:
             # Skip load_first - it's the inverter default
@@ -461,7 +460,6 @@ class GrowattScheduleManager:
             )
 
             interval = {
-                "segment_id": segment_id,
                 "batt_mode": group["mode"],
                 "start_time": f"{start_hour:02d}:{start_minute:02d}",
                 "end_time": f"{end_hour:02d}:{end_minute:02d}",
@@ -469,11 +467,9 @@ class GrowattScheduleManager:
                 "strategic_intent": intent_summary,
             }
             intervals.append(interval)
-            segment_id += 1
 
             logger.info(
-                "TOU segment #%d: %s-%s (%s) from %d periods: %s",
-                interval["segment_id"],
+                "TOU segment: %s-%s (%s) from %d periods: %s",
                 interval["start_time"],
                 interval["end_time"],
                 interval["batt_mode"],
@@ -482,6 +478,77 @@ class GrowattScheduleManager:
             )
 
         return intervals
+
+    def _assign_stable_segment_ids(
+        self,
+        intervals: list[dict],
+        previous_intervals: list[dict] | None,
+    ) -> None:
+        """Assign segment IDs to intervals, reusing IDs from previous run when possible.
+
+        For each new interval, checks if a matching interval exists in previous_intervals
+        (same start_time, end_time, batt_mode). If so, reuses its segment_id. Unmatched
+        intervals get the lowest available free IDs. This minimizes unnecessary inverter
+        writes when the schedule hasn't changed for some slots.
+
+        Falls back to sequential assignment (1, 2, 3...) when no previous intervals
+        are provided (first run or next-day preparation).
+
+        Args:
+            intervals: New intervals to assign IDs to (modified in place)
+            previous_intervals: Previous run's intervals for ID reuse, or None
+        """
+        if not previous_intervals:
+            # Sequential assignment for first run / next-day prep
+            for i, interval in enumerate(intervals, 1):
+                interval["segment_id"] = i
+            return
+
+        # Match new intervals to previous ones by time range and mode
+        used_ids: set[int] = set()
+        matched: list[bool] = [False] * len(intervals)
+
+        for i, new_interval in enumerate(intervals):
+            for prev in previous_intervals:
+                if (
+                    prev["start_time"] == new_interval["start_time"]
+                    and prev["end_time"] == new_interval["end_time"]
+                    and prev["batt_mode"] == new_interval["batt_mode"]
+                    and prev["segment_id"] not in used_ids
+                ):
+                    new_interval["segment_id"] = prev["segment_id"]
+                    used_ids.add(prev["segment_id"])
+                    matched[i] = True
+                    logger.debug(
+                        "Reusing segment_id %d for %s-%s (%s)",
+                        prev["segment_id"],
+                        new_interval["start_time"],
+                        new_interval["end_time"],
+                        new_interval["batt_mode"],
+                    )
+                    break
+
+        # Assign free IDs (lowest first) to unmatched intervals
+        all_ids = set(range(1, 10))
+        free_ids = sorted(all_ids - used_ids)
+        free_idx = 0
+
+        for i, interval in enumerate(intervals):
+            if not matched[i]:
+                assert free_idx < len(free_ids), (
+                    f"No free segment IDs available for interval "
+                    f"{interval['start_time']}-{interval['end_time']}"
+                )
+                interval["segment_id"] = free_ids[free_idx]
+                used_ids.add(free_ids[free_idx])
+                logger.debug(
+                    "Assigned new segment_id %d for %s-%s (%s)",
+                    free_ids[free_idx],
+                    interval["start_time"],
+                    interval["end_time"],
+                    interval["batt_mode"],
+                )
+                free_idx += 1
 
     def _enforce_segment_limit(self, intervals: list[dict]) -> list[dict]:
         """Enforce the 9 TOU segment limit by dropping shortest segments.
@@ -685,7 +752,12 @@ class GrowattScheduleManager:
                 batt_mode,
             )
 
-    def create_schedule(self, schedule: DPSchedule):
+    def create_schedule(
+        self,
+        schedule: DPSchedule,
+        current_period: int = 0,
+        previous_tou_intervals: list[dict] | None = None,
+    ):
         """Process DPSchedule with strategic intents into Growatt format."""
         logger.info(
             "Creating Growatt schedule using strategic intents from DP algorithm"
@@ -709,7 +781,10 @@ class GrowattScheduleManager:
                 )
 
         self.current_schedule = schedule
-        self._consolidate_and_convert_with_strategic_intents()
+        self._consolidate_and_convert_with_strategic_intents(
+            current_period=current_period,
+            previous_tou_intervals=previous_tou_intervals,
+        )
         self._calculate_hourly_settings_with_strategic_intents()
 
         logger.info(
@@ -717,17 +792,23 @@ class GrowattScheduleManager:
             len(self.tou_intervals),
         )
 
-    def _consolidate_and_convert_with_strategic_intents(self):
+    def _consolidate_and_convert_with_strategic_intents(
+        self,
+        current_period: int = 0,
+        previous_tou_intervals: list[dict] | None = None,
+    ):
         """Convert strategic intents to TOU intervals using 15-minute resolution.
 
-        This method works directly with 15-minute periods instead of aggregating
-        to hourly intervals. This eliminates the "gap problem" where majority
-        voting created holes in charging schedules.
+        Uses a rolling window: only generates TOU segments from current_period
+        onwards, freeing up slots that were used for past periods. When
+        previous_tou_intervals is provided, reuses segment IDs from matching
+        intervals to minimize unnecessary inverter writes.
 
         Algorithm:
-        1. Group consecutive 15-min periods by their mapped battery mode
+        1. Group consecutive 15-min periods from current_period by their mapped battery mode
         2. Create TOU intervals for non-default (battery_first, grid_first) groups
-        3. Enforce 9-segment limit if needed
+        3. Assign stable segment IDs (reusing from previous intervals when possible)
+        4. Enforce 9-segment limit if needed
         """
         if not self.strategic_intents:
             logger.warning(
@@ -764,15 +845,16 @@ class GrowattScheduleManager:
                 self.corruption_detected = True
                 logger.warning("CORRUPTION FLAG SET - Hardware write will be FORCED")
 
-        # Start fresh - all periods are processed from 0
+        # Start fresh - only future periods are processed
         self.tou_intervals = []
 
-        # Group all periods by mode from start of day
-        period_groups = self._group_periods_by_mode(0)
+        # Group periods by mode from current_period onwards (rolling window)
+        period_groups = self._group_periods_by_mode(current_period)
 
         logger.info(
-            "Grouped %d periods into %d mode groups",
-            len(self.strategic_intents),
+            "Grouped periods %d-%d into %d mode groups (rolling window)",
+            current_period,
+            len(self.strategic_intents) - 1,
             len(period_groups),
         )
 
@@ -800,9 +882,8 @@ class GrowattScheduleManager:
         # Sort by start time to ensure chronological order
         self.tou_intervals.sort(key=lambda x: x["start_time"])
 
-        # Reassign segment IDs in chronological order
-        for i, interval in enumerate(self.tou_intervals, 1):
-            interval["segment_id"] = i
+        # Assign stable segment IDs (reuse from previous run when possible)
+        self._assign_stable_segment_ids(self.tou_intervals, previous_tou_intervals)
 
         # Enforce segment limit if needed
         if len(self.tou_intervals) > self.max_intervals:

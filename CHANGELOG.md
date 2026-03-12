@@ -5,13 +5,24 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [7.4.0] - 2026-03-12
+## [7.5.0] - 2026-03-12
 
 ### Changed
 
 - TOU schedule generation now uses a rolling window: only future periods (from the current optimization period onwards) are converted to TOU segments. Past segments no longer consume hardware slots, making the 9-segment limit much less likely to be hit during mid-day re-optimizations.
 - TOU segment IDs are now stable across re-optimizations: when a segment's time range and mode haven't changed, its ID is reused from the previous run, minimizing unnecessary inverter writes.
 - Removed past-interval copying loop from schedule creation — the rolling window approach makes it unnecessary.
+## [7.4.0] - 2026-03-09
+
+### Added
+
+- Configurable single/three-phase electricity support via `home.phase_count` setting (1 or 3, default 3). Single-phase systems (common in the UK) no longer incorrectly divide battery power by 3, which was underestimating phase load and reducing fuse protection effectiveness.
+- Pass through `max_fuse_current`, `voltage`, and `safety_margin_factor` from config.yaml to the settings system — these were previously defined in config but stayed at defaults.
+
+### Changed
+
+- Power monitor health check adapts to phase count: single-phase systems only require L1 current sensor, not L2/L3.
+- Power monitor logging adapts to show one or three phases depending on configuration.
 
 ## [7.3.1] - 2026-03-08
 

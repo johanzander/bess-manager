@@ -346,7 +346,15 @@ class BESSController:
                     )
 
             # Required home settings
-            required_home_keys = ["consumption", "consumption_strategy", "currency"]
+            required_home_keys = [
+                "consumption",
+                "consumption_strategy",
+                "currency",
+                "max_fuse_current",
+                "voltage",
+                "safety_margin_factor",
+                "phase_count",
+            ]
             for key in required_home_keys:
                 if key not in home_config:
                     raise ValueError(
@@ -369,6 +377,10 @@ class BESSController:
                     "defaultHourly": home_config["consumption"],
                     "consumptionStrategy": home_config["consumption_strategy"],
                     "currency": home_config["currency"],
+                    "maxFuseCurrent": home_config["max_fuse_current"],
+                    "voltage": home_config["voltage"],
+                    "safetyMargin": home_config["safety_margin_factor"],
+                    "phaseCount": home_config["phase_count"],
                 },
                 "price": {
                     "area": electricity_price_config["area"],

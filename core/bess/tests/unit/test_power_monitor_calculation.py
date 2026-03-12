@@ -55,11 +55,12 @@ class MockController:
 
 @pytest.fixture
 def standard_settings():
-    """Standard settings matching user's configuration."""
+    """Standard settings matching user's configuration (three-phase)."""
     home = HomeSettings(
         max_fuse_current=25,  # 25A fuse
         voltage=230,  # 230V
         safety_margin=0.95,  # 95% safety margin
+        phase_count=3,  # Three-phase system
     )
     battery = BatterySettings(
         max_charge_power_kw=15.0,  # 15kW max charge power
@@ -311,3 +312,137 @@ def test_different_safety_margins():
     assert (
         available_pct_98 > available_pct_90
     ), "Higher safety margin should allow more charging"
+
+
+# === Single-phase tests ===
+
+
+@pytest.fixture
+def single_phase_settings():
+    """Standard settings for a single-phase system (e.g., UK)."""
+    home = HomeSettings(
+        max_fuse_current=25,
+        voltage=230,
+        safety_margin=0.95,
+        phase_count=1,
+    )
+    battery = BatterySettings(
+        max_charge_power_kw=15.0,
+        charging_power_rate=98,
+    )
+    return home, battery
+
+
+def test_single_phase_no_division(single_phase_settings):
+    """Verify battery power is NOT divided by 3 on single-phase systems.
+
+    On single-phase, the full battery charge power flows through one phase,
+    so available power should be calculated against the full battery power.
+    """
+    home, battery = single_phase_settings
+
+    # Light load: 1840W on the single phase
+    controller = MockController(l1_current=1840 / 230)
+
+    monitor = HomePowerMonitor(controller, home, battery)
+    available_pct = monitor.calculate_available_charging_power()
+
+    # Max power per phase: 230 * 25 * 0.95 = 5,462.5W
+    # Available: 5,462.5 - 1,840 = 3,622.5W
+    # Battery max per phase (single): 15,000W / 1 = 15,000W
+    # Available %: (3,622.5 / 15,000) * 100 = 24.15%
+    expected_pct = 24.15
+    assert (
+        abs(available_pct - expected_pct) < 0.1
+    ), f"Expected ~{expected_pct}%, got {available_pct:.2f}%"
+
+
+def test_single_phase_only_reads_l1(single_phase_settings):
+    """Verify L2/L3 are not called on single-phase systems."""
+    home, battery = single_phase_settings
+
+    controller = MockController(l1_current=5.0)
+
+    # Track which methods are called
+    calls = []
+    original_l2 = controller.get_l2_current
+    original_l3 = controller.get_l3_current
+
+    def tracking_l2():
+        calls.append("l2")
+        return original_l2()
+
+    def tracking_l3():
+        calls.append("l3")
+        return original_l3()
+
+    controller.get_l2_current = tracking_l2
+    controller.get_l3_current = tracking_l3
+
+    monitor = HomePowerMonitor(controller, home, battery)
+    monitor.get_current_phase_loads_w()
+
+    assert "l2" not in calls, "L2 should not be read on single-phase"
+    assert "l3" not in calls, "L3 should not be read on single-phase"
+
+
+def test_single_phase_fuse_protection(single_phase_settings):
+    """Verify correct available power calculation on single-phase."""
+    home, battery = single_phase_settings
+
+    # Zero load — full fuse capacity available
+    controller = MockController(l1_current=0.0)
+
+    monitor = HomePowerMonitor(controller, home, battery)
+    available_pct = monitor.calculate_available_charging_power()
+
+    # Available power: 5,462.5W
+    # Battery max (single phase): 15,000W
+    # Available %: (5,462.5 / 15,000) * 100 = 36.42%
+    # Limited by this (less than target 98%)
+    expected_pct = 36.42
+    assert (
+        abs(available_pct - expected_pct) < 0.1
+    ), f"Expected ~{expected_pct}%, got {available_pct:.2f}%"
+
+
+def test_single_phase_high_load(single_phase_settings):
+    """Verify throttling at fuse limit on single-phase."""
+    home, battery = single_phase_settings
+
+    # Load near fuse limit: 5,200W
+    controller = MockController(l1_current=5200 / 230)
+
+    monitor = HomePowerMonitor(controller, home, battery)
+    available_pct = monitor.calculate_available_charging_power()
+
+    # Available power: 5,462.5 - 5,200 = 262.5W
+    # Battery max (single phase): 15,000W
+    # Available %: (262.5 / 15,000) * 100 = 1.75%
+    expected_pct = 1.75
+    assert (
+        abs(available_pct - expected_pct) < 0.1
+    ), f"Expected ~{expected_pct}%, got {available_pct:.2f}%"
+
+
+def test_single_phase_returns_single_element_tuple(single_phase_settings):
+    """Verify get_current_phase_loads_w returns a single-element tuple."""
+    home, battery = single_phase_settings
+
+    controller = MockController(l1_current=10.0)
+    monitor = HomePowerMonitor(controller, home, battery)
+
+    loads = monitor.get_current_phase_loads_w()
+    assert len(loads) == 1, f"Expected 1-element tuple, got {len(loads)}"
+    assert loads[0] == 10.0 * 230, f"Expected {10.0 * 230}W, got {loads[0]}W"
+
+
+def test_three_phase_returns_three_element_tuple(standard_settings):
+    """Verify get_current_phase_loads_w returns a three-element tuple."""
+    home, battery = standard_settings
+
+    controller = MockController(l1_current=5.0, l2_current=6.0, l3_current=7.0)
+    monitor = HomePowerMonitor(controller, home, battery)
+
+    loads = monitor.get_current_phase_loads_w()
+    assert len(loads) == 3, f"Expected 3-element tuple, got {len(loads)}"

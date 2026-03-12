@@ -169,10 +169,17 @@ class HomeSettings:
     max_fuse_current: int = HOUSE_MAX_FUSE_CURRENT_A
     voltage: int = HOUSE_VOLTAGE_V
     safety_margin: float = SAFETY_MARGIN_FACTOR
+    phase_count: int = 3
     default_hourly: float = HOME_HOURLY_CONSUMPTION_KWH
     min_valid: float = MIN_CONSUMPTION
     currency: str = DEFAULT_CURRENCY
     consumption_strategy: str = "sensor"
+
+    def __post_init__(self):
+        assert self.phase_count in (
+            1,
+            3,
+        ), f"phase_count must be 1 or 3, got {self.phase_count}"
 
     def update(self, **kwargs: Any) -> None:
         """Update settings from dict."""
@@ -184,6 +191,7 @@ class HomeSettings:
                     f"HomeSettings has no attribute '{snake_key}' (from key '{key}')"
                 )
             setattr(self, snake_key, value)
+        self.__post_init__()
 
     def from_ha_config(self, config: dict) -> "HomeSettings":
         """Create instance from Home Assistant add-on config."""
@@ -196,11 +204,13 @@ class HomeSettings:
             self.safety_margin = home_config.get(
                 "safety_margin_factor", SAFETY_MARGIN_FACTOR
             )
+            self.phase_count = home_config.get("phase_count", 3)
             self.default_hourly = config["home"].get(
                 "consumption", HOME_HOURLY_CONSUMPTION_KWH
             )
             self.currency = config["home"].get("currency", DEFAULT_CURRENCY)
             self.consumption_strategy = home_config["consumption_strategy"]
+            self.__post_init__()
         return self
 
 

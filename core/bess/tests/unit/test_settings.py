@@ -1,7 +1,10 @@
 """Test the new BatterySettings dataclass implementation."""
 
+import pytest
+
 from core.bess.settings import (
     BatterySettings,
+    HomeSettings,
     TemperatureDeratingSettings,
     apply_temperature_derating,
     interpolate_derating,
@@ -262,3 +265,76 @@ def test_apply_temperature_derating():
     assert result[3] == 3.75  # 15°C -> 75% -> 3.75kW
     assert result[4] == 5.0  # 20°C -> 100% -> 5kW
     assert result[5] == 5.0  # 25°C -> 100% -> 5kW
+
+
+# === HomeSettings phase_count tests ===
+
+
+def test_home_settings_phase_count_default():
+    """Test phase_count defaults to 3."""
+    settings = HomeSettings()
+    assert settings.phase_count == 3
+
+
+def test_home_settings_phase_count_single():
+    """Test phase_count can be set to 1."""
+    settings = HomeSettings(phase_count=1)
+    assert settings.phase_count == 1
+
+
+def test_home_settings_phase_count_invalid():
+    """Test phase_count rejects invalid values."""
+    with pytest.raises(AssertionError, match="phase_count must be 1 or 3"):
+        HomeSettings(phase_count=2)
+
+    with pytest.raises(AssertionError, match="phase_count must be 1 or 3"):
+        HomeSettings(phase_count=0)
+
+
+def test_home_settings_update_phase_count():
+    """Test update() with phaseCount (camelCase conversion)."""
+    settings = HomeSettings()
+    assert settings.phase_count == 3
+
+    settings.update(phaseCount=1)
+    assert settings.phase_count == 1
+
+
+def test_home_settings_update_phase_count_invalid():
+    """Test update() rejects invalid phase_count."""
+    settings = HomeSettings()
+
+    with pytest.raises(AssertionError, match="phase_count must be 1 or 3"):
+        settings.update(phaseCount=2)
+
+
+def test_home_settings_from_ha_config_phase_count():
+    """Test from_ha_config reads phase_count."""
+    settings = HomeSettings()
+    config = {
+        "home": {
+            "max_fuse_current": 25,
+            "voltage": 230,
+            "safety_margin_factor": 1.0,
+            "phase_count": 1,
+            "consumption": 3.5,
+            "currency": "GBP",
+            "consumption_strategy": "sensor",
+        }
+    }
+    settings.from_ha_config(config)
+    assert settings.phase_count == 1
+
+
+def test_home_settings_from_ha_config_phase_count_default():
+    """Test from_ha_config defaults phase_count to 3."""
+    settings = HomeSettings()
+    config = {
+        "home": {
+            "consumption": 3.5,
+            "currency": "SEK",
+            "consumption_strategy": "sensor",
+        }
+    }
+    settings.from_ha_config(config)
+    assert settings.phase_count == 3

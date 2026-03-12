@@ -5,6 +5,14 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.4.0] - 2026-03-12
+
+### Changed
+
+- TOU schedule generation now uses a rolling window: only future periods (from the current optimization period onwards) are converted to TOU segments. Past segments no longer consume hardware slots, making the 9-segment limit much less likely to be hit during mid-day re-optimizations.
+- TOU segment IDs are now stable across re-optimizations: when a segment's time range and mode haven't changed, its ID is reused from the previous run, minimizing unnecessary inverter writes.
+- Removed past-interval copying loop from schedule creation — the rolling window approach makes it unnecessary.
+
 ## [7.3.1] - 2026-03-08
 
 ### Fixed

@@ -1223,7 +1223,14 @@ class GrowattScheduleManager:
         return result
 
     def get_all_tou_segments(self):
-        """Get all TOU segments with default intervals filling gaps for complete 24-hour coverage."""
+        """Get all TOU segments with default intervals filling gaps for complete 24-hour coverage.
+
+        Each active interval includes an ``is_expired`` flag that is ``True``
+        when the interval's end time is before the current time of day.
+        """
+        now = datetime.now()
+        current_minutes = now.hour * 60 + now.minute
+
         if not self.tou_intervals:
             # Return default load_first for entire day if no intervals configured
             return [
@@ -1270,10 +1277,11 @@ class GrowattScheduleManager:
                     }
                 )
 
-            # Add the active interval
+            # Add the active interval with expiry status
             segment = interval.copy()
             if "segment_id" not in segment:
                 segment["segment_id"] = len(result) + 1
+            segment["is_expired"] = interval_end_minutes < current_minutes
             result.append(segment)
             current_time_minutes = interval_end_minutes + 1
 

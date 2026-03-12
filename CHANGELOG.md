@@ -5,6 +5,12 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.5.1] - 2026-03-12
+
+### Fixed
+
+- TOU segments now include `is_expired` flag in the backend so the frontend's expired-slot rendering actually works. Previously the flag was only handled in the UI but never set by the API.
+
 ## [7.5.0] - 2026-03-12
 
 ### Changed

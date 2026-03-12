@@ -425,7 +425,6 @@ class GrowattScheduleManager:
             List of TOU intervals ready for Growatt
         """
         intervals = []
-        segment_id = 1
 
         for group in groups:
             # Skip load_first - it's the inverter default
@@ -461,7 +460,6 @@ class GrowattScheduleManager:
             )
 
             interval = {
-                "segment_id": segment_id,
                 "batt_mode": group["mode"],
                 "start_time": f"{start_hour:02d}:{start_minute:02d}",
                 "end_time": f"{end_hour:02d}:{end_minute:02d}",
@@ -469,11 +467,9 @@ class GrowattScheduleManager:
                 "strategic_intent": intent_summary,
             }
             intervals.append(interval)
-            segment_id += 1
 
             logger.info(
-                "TOU segment #%d: %s-%s (%s) from %d periods: %s",
-                interval["segment_id"],
+                "TOU segment: %s-%s (%s) from %d periods: %s",
                 interval["start_time"],
                 interval["end_time"],
                 interval["batt_mode"],
@@ -482,6 +478,59 @@ class GrowattScheduleManager:
             )
 
         return intervals
+
+    def _assign_stable_segment_ids(
+        self,
+        intervals: list[dict],
+        previous_intervals: list[dict] | None,
+    ) -> None:
+        """Assign segment IDs, reusing IDs from previous intervals when possible.
+
+        When a new interval matches a previous one (same start_time, end_time,
+        and batt_mode), its segment_id is reused so the inverter does not need
+        to rewrite that segment.  Unmatched intervals receive the lowest free
+        IDs from the range 1-9.
+
+        Args:
+            intervals: New TOU intervals (mutated in-place to add segment_id).
+            previous_intervals: TOU intervals from the previous optimisation
+                run, or None on the first run of the day.
+        """
+        if not previous_intervals:
+            for idx, interval in enumerate(intervals, 1):
+                interval["segment_id"] = idx
+            return
+
+        # Build a lookup from (start, end, mode) -> segment_id for previous run
+        prev_lookup: dict[tuple[str, str, str], int] = {}
+        for prev in previous_intervals:
+            key = (prev["start_time"], prev["end_time"], prev["batt_mode"])
+            prev_lookup[key] = prev["segment_id"]
+
+        used_ids: set[int] = set()
+        matched: list[tuple[int, int]] = []  # (interval index, reused id)
+
+        for idx, interval in enumerate(intervals):
+            key = (interval["start_time"], interval["end_time"], interval["batt_mode"])
+            if key in prev_lookup:
+                reused_id = prev_lookup[key]
+                matched.append((idx, reused_id))
+                used_ids.add(reused_id)
+
+        # Apply matched IDs
+        for idx, seg_id in matched:
+            intervals[idx]["segment_id"] = seg_id
+
+        # Assign lowest free IDs to unmatched intervals
+        free_ids = sorted(set(range(1, 10)) - used_ids)
+        free_iter = iter(free_ids)
+        for idx, interval in enumerate(intervals):
+            if "segment_id" not in interval:
+                next_id = next(free_iter, None)
+                assert next_id is not None, (
+                    f"No free segment IDs available for interval {interval}"
+                )
+                interval["segment_id"] = next_id
 
     def _enforce_segment_limit(self, intervals: list[dict]) -> list[dict]:
         """Enforce the 9 TOU segment limit by dropping shortest segments.
@@ -686,7 +735,12 @@ class GrowattScheduleManager:
                 batt_mode,
             )
 
-    def create_schedule(self, schedule: DPSchedule):
+    def create_schedule(
+        self,
+        schedule: DPSchedule,
+        current_period: int = 0,
+        previous_tou_intervals: list[dict] | None = None,
+    ):
         """Process DPSchedule with strategic intents into Growatt format."""
         logger.info(
             "Creating Growatt schedule using strategic intents from DP algorithm"
@@ -710,7 +764,10 @@ class GrowattScheduleManager:
                 )
 
         self.current_schedule = schedule
-        self._consolidate_and_convert_with_strategic_intents()
+        self._consolidate_and_convert_with_strategic_intents(
+            current_period=current_period,
+            previous_tou_intervals=previous_tou_intervals,
+        )
         self._calculate_hourly_settings_with_strategic_intents()
 
         logger.info(
@@ -718,17 +775,26 @@ class GrowattScheduleManager:
             len(self.tou_intervals),
         )
 
-    def _consolidate_and_convert_with_strategic_intents(self):
-        """Convert strategic intents to TOU intervals using 15-minute resolution.
+    def _consolidate_and_convert_with_strategic_intents(
+        self,
+        current_period: int = 0,
+        previous_tou_intervals: list[dict] | None = None,
+    ):
+        """Convert strategic intents to TOU intervals using a rolling window.
 
-        This method works directly with 15-minute periods instead of aggregating
-        to hourly intervals. This eliminates the "gap problem" where majority
-        voting created holes in charging schedules.
+        Only periods from current_period onwards are converted to TOU segments.
+        Past periods are excluded, freeing up hardware slots that would otherwise
+        be wasted on intervals the inverter has already executed.
+
+        When previous_tou_intervals is provided, segment IDs are kept stable:
+        intervals whose time range and mode match a previous interval reuse its
+        segment_id, minimising unnecessary inverter writes.
 
         Algorithm:
-        1. Group consecutive 15-min periods by their mapped battery mode
+        1. Group consecutive 15-min periods (from current_period) by battery mode
         2. Create TOU intervals for non-default (battery_first, grid_first) groups
-        3. Enforce 9-segment limit if needed
+        3. Assign stable segment IDs based on previous intervals
+        4. Enforce 9-segment limit if needed
         """
         if not self.strategic_intents:
             logger.warning(
@@ -765,11 +831,11 @@ class GrowattScheduleManager:
                 self.corruption_detected = True
                 logger.warning("CORRUPTION FLAG SET - Hardware write will be FORCED")
 
-        # Start fresh - all periods are processed from 0
+        # Start fresh - only periods from current_period onwards get TOU segments
         self.tou_intervals = []
 
-        # Group all periods by mode from start of day
-        period_groups = self._group_periods_by_mode(0)
+        # Group periods by mode from current_period (rolling window)
+        period_groups = self._group_periods_by_mode(current_period)
 
         logger.info(
             "Grouped %d periods into %d mode groups",
@@ -801,9 +867,8 @@ class GrowattScheduleManager:
         # Sort by start time to ensure chronological order
         self.tou_intervals.sort(key=lambda x: x["start_time"])
 
-        # Reassign segment IDs in chronological order
-        for i, interval in enumerate(self.tou_intervals, 1):
-            interval["segment_id"] = i
+        # Assign stable segment IDs (reuse from previous run when possible)
+        self._assign_stable_segment_ids(self.tou_intervals, previous_tou_intervals)
 
         # Enforce segment limit if needed
         if len(self.tou_intervals) > self.max_intervals:

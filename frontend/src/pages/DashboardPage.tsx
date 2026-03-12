@@ -195,7 +195,8 @@ export default function DashboardPage({
   // Check if we have valid dashboard data
   const hasValidData = dashboardData && dashboardData.hourlyData && dashboardData.hourlyData.length > 0;
   const hasPartialData = dashboardData && dashboardData.error === 'incomplete_data';
-  const currentHour = new Date().getHours();
+  const now = new Date();
+  const currentHour = now.getHours() + now.getMinutes() / 60;
 
   return (
     <div className="space-y-6">

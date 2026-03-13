@@ -5,6 +5,12 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.5.4] - 2026-03-13
+
+### Fixed
+
+- Fix KeyError on `segment_id` when creating schedules with >9 TOU segments. The previous-interval matching used all intervals (including pending ones without IDs) instead of only the hardware-programmed intervals.
+
 ## [7.5.3] - 2026-03-13
 
 ### Fixed

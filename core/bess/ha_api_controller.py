@@ -111,7 +111,7 @@ class HomeAssistantAPIController:
             "Content-Type": "application/json",
         }
         self.max_attempts = 4
-        self.retry_delay = 4  # seconds
+        self.retry_base_delay = 2  # seconds (exponential backoff: 2, 4, 8)
         self.test_mode = False
 
         # Use provided sensor configuration
@@ -553,15 +553,16 @@ class HomeAssistantAPIController:
                     raise  # Fail immediately on 404
 
                 if attempt < self.max_attempts - 1:  # Not the last attempt
+                    delay = self.retry_base_delay * (2**attempt)
                     logger.warning(
                         "API request to %s failed on attempt %d/%d: %s. Retrying in %d seconds...",
                         url,
                         attempt + 1,
                         self.max_attempts,
                         str(e),
-                        self.retry_delay,
+                        delay,
                     )
-                    time.sleep(self.retry_delay)
+                    time.sleep(delay)
                 else:  # Last attempt failed
                     logger.error(
                         "API request to %s failed on final attempt %d/%d: %s",

@@ -1801,8 +1801,8 @@ class BatterySystemManager:
 
         try:
             # Get TOU settings
-            current_tou = getattr(self._schedule_manager, "tou_intervals", [])
-            new_tou = temp_growatt.tou_intervals
+            current_tou = getattr(self._schedule_manager, "active_tou_intervals", [])
+            new_tou = temp_growatt.active_tou_intervals
 
             logger.info(
                 "TOU comparison: Current=%d intervals, New=%d intervals",

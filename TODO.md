@@ -211,6 +211,14 @@ But at noon every day we get tomorrows schedule. We could use this information t
 
 ## 🟠 **POTENTIAL IMPROVEMENTS**
 
+### Full Arbitrage Cycle Savings Display
+
+**Impact**: Medium | **Effort**: Medium | **Dependencies**: models.py, savings page UI
+
+**Description**: The savings table shows per-hour P&L (`solar_only_cost - hourly_cost`). This is correct and honest, but charging hours show negative savings and discharge savings appear in later hours (or the next day for overnight cycles). The daily total can appear negative when charging happened today but discharge is scheduled for tomorrow.
+
+**Idea**: Add a "full cycle savings" summary somewhere in the savings page or dashboard that aggregates completed charge→discharge cycles and shows the net arbitrage profit per cycle. This would complement the existing per-hour P&L without changing the underlying formula.
+
 ### Optimizer vs Dashboard Savings Baseline Mismatch
 
 **Impact**: Medium | **Effort**: Medium | **Dependencies**: DP algorithm, models.py, daily_view_builder

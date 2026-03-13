@@ -45,6 +45,8 @@ interface TOUInterval {
   enabled: boolean;
   isEmpty?: boolean;
   isDefault?: boolean;
+  isExpired?: boolean;
+  pendingWrite?: boolean;
 }
 
 interface ScheduleHour {
@@ -857,7 +859,9 @@ const InverterStatusDashboard: React.FC = () => {
             <div className="space-y-2">
               {growattSchedule.touIntervals.map((interval, index) => (
                 <div key={index} className={`flex justify-between items-center p-3 rounded-lg ${
-                  interval.isDefault
+                  interval.isExpired
+                    ? 'bg-gray-50 dark:bg-gray-800/30 border border-gray-200 dark:border-gray-700 opacity-40'
+                    : interval.isDefault
                     ? 'bg-gray-50 dark:bg-gray-800/30 border border-gray-200 dark:border-gray-700 opacity-50'
                     : interval.isEmpty
                     ? 'bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 opacity-60'
@@ -866,21 +870,35 @@ const InverterStatusDashboard: React.FC = () => {
                     : 'bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800'
                 }`}>
                   <div className="flex items-center space-x-4">
-                    <div className="font-medium text-gray-900 dark:text-white">
+                    <div className={`font-medium ${
+                      interval.isExpired
+                        ? 'text-gray-400 dark:text-gray-500'
+                        : 'text-gray-900 dark:text-white'
+                    }`}>
                       {interval.isDefault
                         ? 'Default'
                         : `Segment #${interval.segmentId}`}
                     </div>
-                    <div className="text-sm text-gray-600 dark:text-gray-400">
-                      {interval.isEmpty
+                    <div className={`text-sm ${
+                      interval.isExpired
+                        ? 'text-gray-400 dark:text-gray-500 line-through'
+                        : 'text-gray-600 dark:text-gray-400'
+                    }`}>
+                      {interval.isExpired
+                        ? `${interval.startTime} - ${interval.endTime}`
+                        : interval.isEmpty
                         ? 'Not configured'
                         : `${interval.startTime} - ${interval.endTime}`}
                     </div>
                   </div>
                   <div className="flex items-center space-x-3">
-                    {!interval.isEmpty && getBatteryModeDisplay(interval.battMode)}
+                    {!interval.isExpired && !interval.isEmpty && getBatteryModeDisplay(interval.battMode)}
                     <span className={`px-2 py-1 rounded text-xs font-medium ${
-                      interval.isDefault
+                      interval.isExpired
+                        ? 'bg-gray-100 text-gray-400 dark:bg-gray-700 dark:text-gray-500'
+                        : interval.pendingWrite
+                        ? 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-300'
+                        : interval.isDefault
                         ? 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
                         : interval.isEmpty
                         ? 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
@@ -888,7 +906,11 @@ const InverterStatusDashboard: React.FC = () => {
                         ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300'
                         : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300'
                     }`}>
-                      {interval.isDefault
+                      {interval.isExpired
+                        ? 'Expired'
+                        : interval.pendingWrite
+                        ? 'Pending Write'
+                        : interval.isDefault
                         ? 'Load First'
                         : interval.isEmpty
                         ? 'Empty'

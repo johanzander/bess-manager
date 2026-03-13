@@ -701,3 +701,143 @@ class TestScheduleIntegrity:
         assert (
             scheduler.intervals_are_chronologically_ordered()
         ), "Fragmented schedule must be ordered"
+
+
+# 10 alternating strategic hours — enough to exceed the 9-slot hardware limit.
+_OVERCAPACITY_INTENTS = hourly_to_quarterly(
+    {
+        1: "GRID_CHARGING",
+        3: "GRID_CHARGING",
+        5: "GRID_CHARGING",
+        7: "GRID_CHARGING",
+        9: "GRID_CHARGING",
+        11: "EXPORT_ARBITRAGE",
+        13: "EXPORT_ARBITRAGE",
+        15: "EXPORT_ARBITRAGE",
+        17: "EXPORT_ARBITRAGE",
+        19: "EXPORT_ARBITRAGE",
+    }
+)
+
+
+class TestHardwareSlotCascading:
+    """Test that >9 TOU segments cascade gracefully through hardware slots.
+
+    The Growatt inverter supports at most 9 TOU slots.  On price-volatile days the
+    optimiser can produce more than 9 non-load_first segments.  The system must:
+
+    1. Never write more than 9 intervals to hardware.
+    2. Mark overflow intervals as pending, not lost.
+    3. Automatically program pending intervals once earlier ones expire.
+    4. Correctly identify which intervals are pending (mode must be considered,
+       not just time range) — regression for the batt_mode check in pending_write.
+    """
+
+    def test_hardware_slot_limit_is_never_exceeded(self, scheduler):
+        """Active (hardware-programmed) intervals must not exceed 9 even when >9 exist."""
+        scheduler.strategic_intents = _OVERCAPACITY_INTENTS
+        scheduler._consolidate_and_convert_with_strategic_intents(current_period=0)
+
+        assert (
+            len(scheduler.active_tou_intervals) <= 9
+        ), f"Hardware slot limit exceeded: {len(scheduler.active_tou_intervals)} active intervals"
+
+    def test_overflow_intervals_marked_as_pending_not_dropped(self, scheduler):
+        """Intervals beyond the 9-slot limit are flagged pending, not silently discarded."""
+        scheduler.strategic_intents = _OVERCAPACITY_INTENTS
+        scheduler._consolidate_and_convert_with_strategic_intents(current_period=0)
+
+        all_segments = scheduler.get_all_tou_segments()
+        real_segments = [s for s in all_segments if not s.get("is_default")]
+
+        written = [s for s in real_segments if not s.get("pending_write")]
+        pending = [s for s in real_segments if s.get("pending_write")]
+
+        assert len(written) <= 9, "Written segments must fit within hardware limit"
+        assert (
+            len(pending) >= 1
+        ), "Overflow segments must be marked pending, not dropped"
+        # Total recorded segments must equal all 10 strategic time blocks
+        assert (
+            len(real_segments) == 10
+        ), f"All 10 segments must be retained in memory, got {len(real_segments)}"
+
+    def test_all_strategic_hours_remain_accessible_when_cascading(self, scheduler):
+        """All strategic hours are recorded even when some cannot fit on hardware yet."""
+        scheduler.strategic_intents = _OVERCAPACITY_INTENTS
+        scheduler._consolidate_and_convert_with_strategic_intents(current_period=0)
+
+        for hour in [1, 3, 5, 7, 9]:
+            assert scheduler.is_hour_configured_for_charging(
+                hour
+            ), f"Hour {hour} must be retained for charging even if pending write"
+        for hour in [11, 13, 15, 17, 19]:
+            assert scheduler.is_hour_configured_for_export(
+                hour
+            ), f"Hour {hour} must be retained for export even if pending write"
+
+    def test_pending_intervals_become_active_once_slots_free(self, scheduler):
+        """When earlier segments expire, previously-pending segments move to hardware."""
+        scheduler.strategic_intents = _OVERCAPACITY_INTENTS
+
+        # At midnight (period 0): 10 non-expired segments, 9 active + 1 pending.
+        scheduler._consolidate_and_convert_with_strategic_intents(current_period=0)
+        initial_pending = sum(
+            1
+            for s in scheduler.get_all_tou_segments()
+            if not s.get("is_default") and s.get("pending_write")
+        )
+        assert (
+            initial_pending >= 1
+        ), "Should have at least one pending segment at start of day"
+
+        # At 03:00 (period 12): hour-1 segment (01:00-01:59) is now expired.
+        # The fresh rebuild from period 12 yields only 9 non-expired segments,
+        # so all fit within the hardware limit and nothing is pending.
+        scheduler._consolidate_and_convert_with_strategic_intents(current_period=12)
+        later_pending = sum(
+            1
+            for s in scheduler.get_all_tou_segments()
+            if not s.get("is_default") and s.get("pending_write")
+        )
+        assert (
+            later_pending == 0
+        ), "Once a slot freed up, previously-pending segment must now be active"
+
+    def test_pending_write_flag_considers_mode_not_only_time(self, scheduler):
+        """pending_write must be True when mode differs, even if time range matches.
+
+        Regression test: before the batt_mode fix, an interval in tou_intervals whose
+        time range matched an active interval with a *different* mode was incorrectly
+        marked pending_write=False (i.e., "already on hardware").
+        """
+        # Construct the edge-case state directly:
+        #   active hardware has battery_first at 10:00-10:59
+        #   tou_intervals holds grid_first at the same time (different mode)
+        scheduler.active_tou_intervals = [
+            {
+                "segment_id": 1,
+                "start_time": "10:00",
+                "end_time": "10:59",
+                "batt_mode": "battery_first",
+                "enabled": True,
+            }
+        ]
+        scheduler.tou_intervals = [
+            {
+                "segment_id": 2,
+                "start_time": "10:00",
+                "end_time": "10:59",
+                "batt_mode": "grid_first",
+                "enabled": True,
+            }
+        ]
+
+        segments = scheduler.get_all_tou_segments()
+        real_segments = [s for s in segments if not s.get("is_default")]
+
+        assert len(real_segments) == 1
+        assert real_segments[0]["pending_write"] is True, (
+            "An interval with the same time range but a different mode must be "
+            "marked pending_write=True — it has not been written to hardware"
+        )

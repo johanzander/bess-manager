@@ -46,6 +46,7 @@ interface TOUInterval {
   isEmpty?: boolean;
   isDefault?: boolean;
   isExpired?: boolean;
+  pendingWrite?: boolean;
 }
 
 interface ScheduleHour {
@@ -895,6 +896,8 @@ const InverterStatusDashboard: React.FC = () => {
                     <span className={`px-2 py-1 rounded text-xs font-medium ${
                       interval.isExpired
                         ? 'bg-gray-100 text-gray-400 dark:bg-gray-700 dark:text-gray-500'
+                        : interval.pendingWrite
+                        ? 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-300'
                         : interval.isDefault
                         ? 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
                         : interval.isEmpty
@@ -905,6 +908,8 @@ const InverterStatusDashboard: React.FC = () => {
                     }`}>
                       {interval.isExpired
                         ? 'Expired'
+                        : interval.pendingWrite
+                        ? 'Pending Write'
                         : interval.isDefault
                         ? 'Load First'
                         : interval.isEmpty

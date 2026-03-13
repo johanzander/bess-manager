@@ -5,30 +5,23 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [7.9.2] - 2026-03-13
-
-### Fixed
-
-- Keep all TOU segments in memory instead of permanently dropping extras beyond the 9-slot hardware limit. Only the next 9 non-expired segments are written to the inverter; as segments expire, pending ones cascade into freed slots on the next optimization cycle. No battery actions are lost on fragmented price days. (thanks [@pookey](https://github.com/pookey))
-- Fix KeyError on `segment_id` when creating schedules with >9 TOU segments. The previous-interval matching used all intervals (including pending ones without IDs) instead of only the hardware-programmed intervals. (thanks [@pookey](https://github.com/pookey))
+## [7.9.3] - 2026-03-13
 
 ### Added
 
+- Expired TOU intervals shown with reduced opacity, strikethrough times, and an "Expired" badge in the inverter schedule view. (thanks [@pookey](https://github.com/pookey))
 - "Pending Write" amber badge on the inverter page for TOU segments queued but not yet written to hardware. (thanks [@pookey](https://github.com/pookey))
-
-## [7.9.1] - 2026-03-13
-
-### Fixed
-
-- Fix schedule creation crash when optimization produces more than 9 TOU segments. The segment limit enforcement was running after segment ID assignment, causing an assertion error that prevented any schedule from being deployed.
-
-## [7.9.0] - 2026-03-12
 
 ### Changed
 
-- TOU schedule generation now uses a rolling window: only future periods (from the current optimization period onwards) are converted to TOU segments. Past segments no longer consume hardware slots, making the 9-segment limit much less likely to be hit during mid-day re-optimizations.
-- TOU segment IDs are now stable across re-optimizations: when a segment's time range and mode haven't changed, its ID is reused from the previous run, minimizing unnecessary inverter writes.
-- Removed past-interval copying loop from schedule creation — the rolling window approach makes it unnecessary.
+- TOU schedule now uses a rolling window: only future periods generate segments, freeing hardware slots during mid-day re-optimizations. (thanks [@pookey](https://github.com/pookey))
+- TOU segment IDs are stable across re-optimizations, preventing hardware slot divergence and overlap warnings. (thanks [@pookey](https://github.com/pookey))
+- When >9 TOU segments are generated, all are kept in memory and the next 9 non-expired are written to hardware; pending segments cascade into freed slots on the next cycle. (thanks [@pookey](https://github.com/pookey))
+
+### Fixed
+
+- Schedule creation crash when optimization produces more than 9 TOU segments. (thanks [@pookey](https://github.com/pookey))
+- KeyError when building stable segment IDs from intervals that had not yet been written to hardware. (thanks [@pookey](https://github.com/pookey))
 
 ## [7.8.1] - 2026-03-12
 

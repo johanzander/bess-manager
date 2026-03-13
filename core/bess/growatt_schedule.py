@@ -133,9 +133,9 @@ class GrowattScheduleManager:
         self.current_hour = 0  # Track current hour (0-23) for TOU schedule boundaries
         self.hourly_settings = {}  # Pre-calculated settings for each hour (0-23)
         self.strategic_intents = []  # Store strategic intents from DP algorithm
-        self.active_tou_intervals: list[dict] = (
-            []
-        )  # Subset of tou_intervals written to hardware (max 9)
+        self.active_tou_intervals: list[
+            dict
+        ] = []  # Subset of tou_intervals written to hardware (max 9)
         self.corruption_detected = (
             False  # Flag to force hardware write when corruption found
         )
@@ -527,12 +527,12 @@ class GrowattScheduleManager:
         # Assign lowest free IDs to unmatched intervals
         free_ids = sorted(set(range(1, 10)) - used_ids)
         free_iter = iter(free_ids)
-        for idx, interval in enumerate(intervals):
+        for interval in intervals:
             if "segment_id" not in interval:
                 next_id = next(free_iter, None)
-                assert next_id is not None, (
-                    f"No free segment IDs available for interval {interval}"
-                )
+                assert (
+                    next_id is not None
+                ), f"No free segment IDs available for interval {interval}"
                 interval["segment_id"] = next_id
 
     def _select_hardware_intervals(
@@ -1238,6 +1238,7 @@ class GrowattScheduleManager:
             segment["pending_write"] = not any(
                 a["start_time"] == interval["start_time"]
                 and a["end_time"] == interval["end_time"]
+                and a["batt_mode"] == interval["batt_mode"]
                 for a in self.active_tou_intervals
             )
             result.append(segment)

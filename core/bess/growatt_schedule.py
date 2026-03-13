@@ -867,12 +867,12 @@ class GrowattScheduleManager:
         # Sort by start time to ensure chronological order
         self.tou_intervals.sort(key=lambda x: x["start_time"])
 
-        # Assign stable segment IDs (reuse from previous run when possible)
-        self._assign_stable_segment_ids(self.tou_intervals, previous_tou_intervals)
-
-        # Enforce segment limit if needed
+        # Enforce segment limit BEFORE assigning IDs (max 9 TOU segments)
         if len(self.tou_intervals) > self.max_intervals:
             self.tou_intervals = self._enforce_segment_limit(self.tou_intervals)
+
+        # Assign stable segment IDs (reuse from previous run when possible)
+        self._assign_stable_segment_ids(self.tou_intervals, previous_tou_intervals)
 
         logger.info(
             "TOU conversion complete: %d total intervals (15-min resolution)",

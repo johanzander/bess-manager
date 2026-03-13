@@ -46,6 +46,7 @@ interface TOUInterval {
   isEmpty?: boolean;
   isDefault?: boolean;
   isExpired?: boolean;
+  pendingWrite?: boolean;
 }
 
 interface ScheduleHour {
@@ -891,20 +892,24 @@ const InverterStatusDashboard: React.FC = () => {
                   <div className="flex items-center space-x-3">
                     {!interval.isEmpty && !interval.isExpired && getBatteryModeDisplay(interval.battMode)}
                     <span className={`px-2 py-1 rounded text-xs font-medium ${
-                      interval.isDefault
-                        ? 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
-                        : interval.isExpired
+                      interval.isExpired
                         ? 'bg-gray-100 text-gray-400 dark:bg-gray-700 dark:text-gray-500'
+                        : interval.pendingWrite
+                        ? 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-300'
+                        : interval.isDefault
+                        ? 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
                         : interval.isEmpty
                         ? 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
                         : interval.enabled
                         ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300'
                         : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300'
                     }`}>
-                      {interval.isDefault
-                        ? 'Load First'
-                        : interval.isExpired
+                      {interval.isExpired
                         ? 'Expired'
+                        : interval.pendingWrite
+                        ? 'Pending Write'
+                        : interval.isDefault
+                        ? 'Load First'
                         : interval.isEmpty
                         ? 'Empty'
                         : (interval.enabled ? 'Active' : 'Disabled')}

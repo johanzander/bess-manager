@@ -121,6 +121,8 @@ class BatterySettings:
     )
     efficiency_charge: float = BATTERY_EFFICIENCY_CHARGE
     efficiency_discharge: float = BATTERY_EFFICIENCY_DISCHARGE
+    inverter_ac_capacity_kw: float = 0.0
+    solar_panel_dc_capacity_kw: float = 0.0
     reserved_capacity: float = field(init=False)
     min_soe_kwh: float = field(init=False)
     max_soe_kwh: float = field(init=False)
@@ -160,6 +162,12 @@ class BatterySettings:
             )
             self.min_action_profit_threshold = battery_config.get(
                 "min_action_profit_threshold", BATTERY_MIN_ACTION_PROFIT_THRESHOLD
+            )
+            self.inverter_ac_capacity_kw = battery_config.get(
+                "inverter_ac_capacity_kw", 0.0
+            )
+            self.solar_panel_dc_capacity_kw = battery_config.get(
+                "solar_panel_dc_capacity_kw", 0.0
             )
             self.__post_init__()
         return self

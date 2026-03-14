@@ -5,6 +5,30 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.10.0] - 2026-03-14
+
+### Added
+
+- Solar clipping awareness for DC-coupled hybrid inverters. When `battery.inverter_ac_capacity_kw`
+  is set, the optimizer splits the Solcast solar forecast into AC-available solar (capped at the
+  inverter limit) and DC-excess solar (the portion that bypasses AC conversion and flows directly
+  to the battery on the DC bus). The DP algorithm naturally keeps battery headroom open during
+  clipping hours because DC-excess energy has zero grid cost — only cycle cost — making it
+  cheaper to store than grid-charged energy. (thanks [@pookey](https://github.com/pookey))
+- New `EnergyData` fields `dc_excess_to_battery` and `solar_clipped` track captured vs lost DC
+  excess per period for dashboard visibility.
+- New `battery.solar_panel_dc_capacity_kw` config setting (informational, not required).
+- Idle fallback schedule now absorbs DC excess even when AC optimization is rejected by the
+  profitability gate, since DC absorption is a physical process independent of AC decisions.
+
+### Changed
+
+- `EnergyData.solar_production` represents AC solar only (capped at inverter limit) when clipping
+  is enabled; `EnergyData.battery_charged` represents AC-side charging only.
+- Cost basis for DC-excess energy reflects cycle cost only (no grid cost), so the profitability
+  check naturally favours discharging DC-charged energy over grid-charged energy.
+- When `inverter_ac_capacity_kw = 0` (default), behaviour is identical to previous versions.
+
 ## [7.9.5] - 2026-03-14
 
 ### Added

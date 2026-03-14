@@ -14,6 +14,7 @@ from .dp_battery_algorithm import (
     OptimizationResult,
     optimize_battery_schedule,
     print_optimization_results,
+    split_solar_forecast,
 )
 from .dp_schedule import DPSchedule
 from .exceptions import (
@@ -1302,6 +1303,15 @@ class BatterySystemManager:
                 n_periods
             )
 
+            # Split solar into AC-available and DC-excess when inverter limit is configured
+            dc_excess_solar = None
+            if self.battery_settings.inverter_ac_capacity_kw > 0:
+                remaining_solar, dc_excess_solar = split_solar_forecast(
+                    solar_production=remaining_solar,
+                    inverter_ac_capacity_kw=self.battery_settings.inverter_ac_capacity_kw,
+                    period_duration_hours=0.25,
+                )
+
             # Run DP optimization with strategic intent capture - returns OptimizationResult directly
             result = optimize_battery_schedule(
                 buy_price=buy_prices,
@@ -1315,6 +1325,7 @@ class BatterySystemManager:
                 terminal_value_per_kwh=terminal_value,
                 currency=self.home_settings.currency,
                 max_charge_power_per_period=max_charge_power_per_period,
+                dc_excess_solar=dc_excess_solar,
             )
 
             # Add timestamps to period data (algorithm is time-agnostic, operates on relative indices)

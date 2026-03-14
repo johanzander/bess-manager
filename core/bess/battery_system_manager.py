@@ -1590,7 +1590,7 @@ class BatterySystemManager:
         self._current_schedule = temp_schedule
 
         try:
-            current_tou = getattr(self._schedule_manager, "tou_intervals", [])
+            current_tou = getattr(self._schedule_manager, "active_tou_intervals", [])
             effective_period = 0 if prepare_next_day else period
 
             if self._controller is None:

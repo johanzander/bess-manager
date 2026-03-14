@@ -83,6 +83,11 @@ class SphScheduleManager:
         self._charge_periods: list[dict] = []
         self._discharge_periods: list[dict] = []
 
+    @property
+    def active_tou_intervals(self) -> list[dict]:
+        """All TOU intervals are active for SPH (no 9-slot hardware constraint)."""
+        return self.tou_intervals
+
     # ── Period utility ────────────────────────────────────────────────────────
 
     def _period_to_time(self, period: int) -> tuple[int, int]:
@@ -312,7 +317,12 @@ class SphScheduleManager:
                 "battery_action_kw": 0.0,
             }
 
-    def create_schedule(self, schedule: DPSchedule) -> None:
+    def create_schedule(
+        self,
+        schedule: DPSchedule,
+        current_period: int = 0,
+        previous_tou_intervals: list[dict] | None = None,
+    ) -> None:
         """Process DPSchedule with strategic intents into SPH format.
 
         Args:

@@ -130,6 +130,9 @@ class GrowattScheduleManager:
         self.current_schedule = None
         self.detailed_intervals = []  # For overview display
         self.tou_intervals = []  # For actual TOU settings
+        self.active_tou_intervals: list[
+            dict
+        ] = []  # Subset of tou_intervals written to hardware (max 9)
         self.current_hour = 0  # Track current hour (0-23) for TOU schedule boundaries
         self.hourly_settings = {}  # Pre-calculated settings for each hour (0-23)
         self.strategic_intents = []  # Store strategic intents from DP algorithm
@@ -483,105 +486,63 @@ class GrowattScheduleManager:
 
         return intervals
 
-    def _enforce_segment_limit(self, intervals: list[dict]) -> list[dict]:
-        """Enforce the 9 TOU segment limit by dropping shortest segments.
+    def _select_hardware_intervals(
+        self, intervals: list[dict], current_period: int
+    ) -> list[dict]:
+        """Select the next 9 non-expired intervals for hardware programming.
 
-        Growatt inverters support a maximum of 9 TOU segments. When 15-minute
-        resolution creates more segments, we must drop some.
-
-        Strategy: Keep longest segments (duration-based priority)
-        ----------------------------------------------------------
-        Rationale: Longer segments represent more sustained battery actions
-        and typically have greater economic impact. Short segments often
-        arise from transient price fluctuations.
-
-        Alternative strategies considered:
-        - Mode priority (GRID_CHARGING > EXPORT_ARBITRAGE > others): Would
-          preserve arbitrage opportunities but might drop long idle periods
-          that are actually important for battery preservation.
-        - Chronological (keep earliest): Simple but ignores segment importance.
-        - Economic value: Would require price data access at this layer.
-
-        The duration-based approach balances simplicity with effectiveness.
-        In practice, hitting the 9-segment limit is rare with typical price
-        patterns (usually 3-6 mode transitions per day).
+        Instead of dropping segments permanently, this keeps ALL intervals in
+        tou_intervals but selects only the first 9 non-expired ones for writing
+        to the inverter. As time passes and segments expire, slots free up and
+        later segments get programmed on the next optimization cycle.
 
         Args:
-            intervals: List of TOU intervals (may exceed max_intervals)
+            intervals: All TOU intervals (may exceed max_intervals).
+            current_period: Current 15-minute period (0-95).
 
         Returns:
-            List of TOU intervals, capped at max_intervals (9)
+            List of up to 9 non-expired intervals for hardware programming.
         """
-        if len(intervals) <= self.max_intervals:
-            return intervals
+        # Calculate current time in minutes from the period
+        current_hour = current_period // 4
+        current_minute = (current_period % 4) * 15
+        current_minutes = current_hour * 60 + current_minute
 
-        logger.warning(
-            "TOU SEGMENT LIMIT EXCEEDED: %d segments generated, maximum is %d",
-            len(intervals),
-            self.max_intervals,
-        )
+        # Filter to non-expired intervals (end_time >= current time)
+        non_expired = [
+            interval
+            for interval in intervals
+            if self._time_to_minutes(interval["end_time"]) >= current_minutes
+        ]
 
-        def get_duration_minutes(interval: dict) -> int:
-            start_parts = interval["start_time"].split(":")
-            end_parts = interval["end_time"].split(":")
-            start_mins = int(start_parts[0]) * 60 + int(start_parts[1])
-            end_mins = int(end_parts[0]) * 60 + int(end_parts[1])
-            return end_mins - start_mins + 1
+        # Sort chronologically and take first 9
+        non_expired.sort(key=lambda x: x["start_time"])
+        hardware_intervals = non_expired[: self.max_intervals]
 
-        # Calculate durations without mutating input (use separate mapping)
-        durations: dict[int, int] = {}
-        for idx, interval in enumerate(intervals):
-            durations[idx] = get_duration_minutes(interval)
-
-        # Sort indices by duration descending
-        sorted_indices = sorted(
-            range(len(intervals)), key=lambda i: durations[i], reverse=True
-        )
-
-        kept_indices = sorted_indices[: self.max_intervals]
-        dropped_indices = sorted_indices[self.max_intervals :]
-
-        # Log summary
-        total_dropped_minutes = sum(durations[i] for i in dropped_indices)
-        logger.warning(
-            "Dropping %d segments (%d minutes total) using duration-based priority",
-            len(dropped_indices),
-            total_dropped_minutes,
-        )
-
-        # Log each dropped segment with details
-        for idx in dropped_indices:
-            interval = intervals[idx]
-            logger.warning(
-                "  DROPPED: %s-%s (%s) - %d minutes - intents: %s",
-                interval["start_time"],
-                interval["end_time"],
-                interval["batt_mode"],
-                durations[idx],
-                interval.get("strategic_intent", "unknown"),
-            )
-
-        # Log what we're keeping
-        logger.info("Keeping %d segments:", len(kept_indices))
-        for idx in kept_indices:
-            interval = intervals[idx]
+        if len(non_expired) > self.max_intervals:
+            pending_count = len(non_expired) - self.max_intervals
             logger.info(
-                "  KEPT: %s-%s (%s) - %d minutes",
-                interval["start_time"],
-                interval["end_time"],
-                interval["batt_mode"],
-                durations[idx],
+                "TOU CASCADING: %d total non-expired intervals, "
+                "programming %d to hardware, %d pending write",
+                len(non_expired),
+                len(hardware_intervals),
+                pending_count,
+            )
+            for pending in non_expired[self.max_intervals :]:
+                logger.info(
+                    "  PENDING: %s-%s (%s) - will be programmed when a slot frees up",
+                    pending["start_time"],
+                    pending["end_time"],
+                    pending["batt_mode"],
+                )
+        else:
+            logger.info(
+                "TOU hardware: %d intervals selected (all fit within %d-slot limit)",
+                len(hardware_intervals),
+                self.max_intervals,
             )
 
-        # Build result list sorted by start time
-        kept = [intervals[i] for i in kept_indices]
-        kept.sort(key=lambda x: x["start_time"])
-
-        # Reassign segment IDs in chronological order
-        for i, interval in enumerate(kept, 1):
-            interval["segment_id"] = i
-
-        return kept
+        return hardware_intervals
 
     def _calculate_hourly_settings_with_strategic_intents(self):
         """Pre-calculate hourly settings using strategic intents and proper power rates.
@@ -686,7 +647,12 @@ class GrowattScheduleManager:
                 batt_mode,
             )
 
-    def create_schedule(self, schedule: DPSchedule):
+    def create_schedule(
+        self,
+        schedule: DPSchedule,
+        current_period: int = 0,
+        previous_tou_intervals: list[dict] | None = None,
+    ):
         """Process DPSchedule with strategic intents into Growatt format."""
         logger.info(
             "Creating Growatt schedule using strategic intents from DP algorithm"
@@ -710,15 +676,16 @@ class GrowattScheduleManager:
                 )
 
         self.current_schedule = schedule
-        self._consolidate_and_convert_with_strategic_intents()
+        self._consolidate_and_convert_with_strategic_intents(current_period)
         self._calculate_hourly_settings_with_strategic_intents()
 
         logger.info(
-            "New Growatt schedule created with %d TOU intervals based on strategic intents",
+            "New Growatt schedule created with %d TOU intervals (%d active for hardware)",
             len(self.tou_intervals),
+            len(self.active_tou_intervals),
         )
 
-    def _consolidate_and_convert_with_strategic_intents(self):
+    def _consolidate_and_convert_with_strategic_intents(self, current_period: int = 0):
         """Convert strategic intents to TOU intervals using 15-minute resolution.
 
         This method works directly with 15-minute periods instead of aggregating
@@ -728,7 +695,7 @@ class GrowattScheduleManager:
         Algorithm:
         1. Group consecutive 15-min periods by their mapped battery mode
         2. Create TOU intervals for non-default (battery_first, grid_first) groups
-        3. Enforce 9-segment limit if needed
+        3. Select next 9 non-expired intervals for hardware (active_tou_intervals)
         """
         if not self.strategic_intents:
             logger.warning(
@@ -805,13 +772,15 @@ class GrowattScheduleManager:
         for i, interval in enumerate(self.tou_intervals, 1):
             interval["segment_id"] = i
 
-        # Enforce segment limit if needed
-        if len(self.tou_intervals) > self.max_intervals:
-            self.tou_intervals = self._enforce_segment_limit(self.tou_intervals)
+        # Select next 9 non-expired intervals for hardware programming
+        self.active_tou_intervals = self._select_hardware_intervals(
+            self.tou_intervals, current_period
+        )
 
         logger.info(
-            "TOU conversion complete: %d total intervals (15-min resolution)",
+            "TOU conversion complete: %d total intervals, %d selected for hardware",
             len(self.tou_intervals),
+            len(self.active_tou_intervals),
         )
 
     def _get_period_intent_summary(self, start_hour: int, end_hour: int) -> str:
@@ -1117,6 +1086,9 @@ class GrowattScheduleManager:
 
         # NO INTENT INFERENCE - leave hourly_settings empty until we get strategic intents
 
+        # At startup, all intervals from inverter are active hardware intervals
+        self.active_tou_intervals = list(self.tou_intervals)
+
         enabled_intervals = [seg for seg in self.tou_intervals if seg["enabled"]]
         if enabled_intervals:
             self.log_current_TOU_schedule(
@@ -1157,6 +1129,10 @@ class GrowattScheduleManager:
                 }
             ]
 
+        # Calculate current time in minutes for expiry checks
+        now = datetime.now()
+        current_minutes = now.hour * 60 + now.minute
+
         # Get only active/enabled intervals and sort by start time
         active_intervals = [
             interval
@@ -1190,10 +1166,18 @@ class GrowattScheduleManager:
                     }
                 )
 
-            # Add the active interval
+            # Add the active interval with expiry and pending_write status
             segment = interval.copy()
             if "segment_id" not in segment:
                 segment["segment_id"] = len(result) + 1
+            is_expired = interval_end_minutes < current_minutes
+            segment["is_expired"] = is_expired
+            segment["pending_write"] = not is_expired and not any(
+                a["start_time"] == interval["start_time"]
+                and a["end_time"] == interval["end_time"]
+                and a["batt_mode"] == interval["batt_mode"]
+                for a in self.active_tou_intervals
+            )
             result.append(segment)
             current_time_minutes = interval_end_minutes + 1
 

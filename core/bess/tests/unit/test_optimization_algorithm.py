@@ -378,17 +378,16 @@ def test_split_solar_forecast_math():
         assert dc_excess[i] == pytest.approx(0.75)
 
 
-def test_split_solar_forecast_zero_inverter_limit():
-    """split_solar_forecast with 0.0 inverter limit returns all solar as AC (disabled)."""
-    raw_solar = [1.0, 2.0, 3.0]
+def test_split_solar_forecast_preserves_total():
+    """AC + DC excess always equals the raw solar input for every period."""
+    raw_solar = [0.0, 0.5, 1.25, 2.0, 3.5]
     ac_solar, dc_excess = split_solar_forecast(
         solar_production=raw_solar,
-        inverter_ac_capacity_kw=0.0,
+        inverter_ac_capacity_kw=5.0,
         period_duration_hours=0.25,
     )
-    # AC limit = 0 kWh → all solar is capped at 0, all is DC excess
-    assert ac_solar == [0.0, 0.0, 0.0]
-    assert dc_excess == [1.0, 2.0, 3.0]
+    for raw, ac, dc in zip(raw_solar, ac_solar, dc_excess, strict=True):
+        assert ac + dc == pytest.approx(raw)
 
 
 def test_no_clipping_when_disabled():

@@ -132,7 +132,9 @@ def split_solar_forecast(
 
     Args:
         solar_production: Raw solar forecast per period (kWh).
-        inverter_ac_capacity_kw: Inverter AC output limit in kW. 0 = no limit.
+        inverter_ac_capacity_kw: Inverter AC output limit in kW. Must be > 0.
+            Caller is responsible for skipping the split when the feature is
+            disabled (inverter_ac_capacity_kw == 0).
         period_duration_hours: Duration of each period in hours.
 
     Returns:
@@ -221,8 +223,10 @@ def _calculate_reward(
     Calculate reward with proper cycle cost accounting and CORRECTED discharge profitability checks.
 
     CYCLE COST POLICY:
-    - Applied only to charging operations (not discharging)
     - Applied to energy actually stored (after efficiency losses)
+    - For AC charging: cycle cost on energy stored from AC side
+    - For DC excess absorption: cycle cost on DC energy stored (zero grid cost)
+    - DC wear cost is always applied when dc_excess_solar > 0, regardless of AC action
     - Grid costs applied to energy throughput (what you draw from grid)
     - Cost basis includes BOTH grid costs AND cycle costs for profitability analysis
 

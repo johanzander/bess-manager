@@ -14,6 +14,7 @@ from .dp_battery_algorithm import (
     OptimizationResult,
     optimize_battery_schedule,
     print_optimization_results,
+    split_solar_forecast,
 )
 from .dp_schedule import DPSchedule
 from .exceptions import (
@@ -909,7 +910,9 @@ class BatterySystemManager:
                 try:
                     self._generate_ml_predictions()
                 except Exception as e:
-                    logger.warning("Failed to generate ML predictions for next day: %s", e)
+                    logger.warning(
+                        "Failed to generate ML predictions for next day: %s", e
+                    )
 
     def _get_price_data(
         self, prepare_next_day: bool
@@ -1430,6 +1433,15 @@ class BatterySystemManager:
                 len(buy_prices)
             )
 
+            # Split solar into AC-available and DC-excess when inverter limit is configured
+            dc_excess_solar = None
+            if self.battery_settings.inverter_ac_capacity_kw > 0:
+                remaining_solar, dc_excess_solar = split_solar_forecast(
+                    solar_production=remaining_solar,
+                    inverter_ac_capacity_kw=self.battery_settings.inverter_ac_capacity_kw,
+                    period_duration_hours=0.25,
+                )
+
             # Run DP optimization with strategic intent capture - returns OptimizationResult directly
             result = optimize_battery_schedule(
                 buy_price=buy_prices,
@@ -1443,6 +1455,7 @@ class BatterySystemManager:
                 terminal_value_per_kwh=terminal_value,
                 currency=self.home_settings.currency,
                 max_charge_power_per_period=max_charge_power_per_period,
+                dc_excess_solar=dc_excess_solar,
             )
 
             # Add timestamps to period data (algorithm is time-agnostic, operates on relative indices)
@@ -1817,9 +1830,7 @@ class BatterySystemManager:
             )
 
             effective_period = 0 if prepare_next_day else period
-            effective_minute = (
-                0 if prepare_next_day else effective_period * 15
-            )
+            effective_minute = 0 if prepare_next_day else effective_period * 15
 
             # Helper functions for minute-level time calculations
             def start_minute(interval: dict) -> int:

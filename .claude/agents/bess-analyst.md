@@ -84,6 +84,21 @@ You are a BESS (Battery Energy Storage System) analyst. Your role is to analyze 
 3. Trace the cost basis tracking through charge/discharge
 4. Verify price data fed to optimizer
 
+### Debugging DC Clipping / Solar Capture
+
+When `battery.inverter_ac_capacity_kw > 0` in config, the system is clipping-aware:
+
+- `split_solar_forecast()` splits raw solar into `ac_solar` (≤ inverter limit) and `dc_excess`
+- DC excess is fed to `optimize_battery_schedule(dc_excess_solar=...)` and `_run_dynamic_programming`
+- In `_calculate_reward`, DC excess is absorbed into battery **before** the AC optimization decision
+- `EnergyData.dc_excess_to_battery` = DC excess captured; `EnergyData.solar_clipped` = DC excess lost
+- `EnergyData.battery_charged` = AC-side charging only (does NOT include DC excess)
+- `EnergyData.solar_production` = AC solar only (capped at inverter limit), NOT raw DC production
+- DC excess has **zero grid cost**, only cycle cost in cost basis
+- The DP naturally keeps battery headroom for clipping hours because DC energy is cheaper than grid
+- Even the idle fallback schedule (`_create_idle_schedule`) absorbs DC excess automatically
+- When disabled (`inverter_ac_capacity_kw = 0`), behavior is identical to pre-clipping code
+
 ### Debugging Schedule Issues
 
 1. Read `growatt_schedule.py` TOU conversion logic

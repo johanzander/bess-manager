@@ -152,7 +152,17 @@ class EnergyData:
         return self.battery_soe_end - self.battery_soe_start
 
     def validate_energy_balance(self, tolerance: float = 0.2) -> tuple[bool, str]:
-        """Validate energy balance - always warn and continue, never fail."""
+        """Validate energy balance - always warn and continue, never fail.
+
+        This checks AC-side energy conservation only. DC excess solar
+        (dc_excess_to_battery, solar_clipped) bypasses the AC bus entirely
+        and is balanced by definition (dc_excess_to_battery + solar_clipped
+        = total DC excess). The SOE change includes DC absorption but that
+        does not affect AC-side energy accounting.
+
+        Note: battery_charged is AC-side charging only; solar_production is
+        AC solar only (capped at inverter limit) when clipping is enabled.
+        """
         energy_in = self.solar_production + self.grid_imported + self.battery_discharged
         energy_out = self.home_consumption + self.grid_exported + self.battery_charged
         balance_error = abs(energy_in - energy_out)

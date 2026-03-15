@@ -75,6 +75,10 @@ class EnergyData:
     battery_soe_start: float  # kWh (changed from battery_soc_start)
     battery_soe_end: float  # kWh (changed from battery_soc_end)
 
+    # DC clipping flows (set by caller when inverter AC capacity limit is configured)
+    dc_excess_to_battery: float = 0.0  # DC excess absorbed directly by battery (kWh)
+    solar_clipped: float = 0.0  # DC excess lost because battery was full (kWh)
+
     # Detailed flows (calculated automatically in __post_init__)
     solar_to_home: float = field(default=0.0, init=False)
     solar_to_battery: float = field(default=0.0, init=False)
@@ -148,7 +152,17 @@ class EnergyData:
         return self.battery_soe_end - self.battery_soe_start
 
     def validate_energy_balance(self, tolerance: float = 0.2) -> tuple[bool, str]:
-        """Validate energy balance - always warn and continue, never fail."""
+        """Validate energy balance - always warn and continue, never fail.
+
+        This checks AC-side energy conservation only. DC excess solar
+        (dc_excess_to_battery, solar_clipped) bypasses the AC bus entirely
+        and is balanced by definition (dc_excess_to_battery + solar_clipped
+        = total DC excess). The SOE change includes DC absorption but that
+        does not affect AC-side energy accounting.
+
+        Note: battery_charged is AC-side charging only; solar_production is
+        AC solar only (capped at inverter limit) when clipping is enabled.
+        """
         energy_in = self.solar_production + self.grid_imported + self.battery_discharged
         energy_out = self.home_consumption + self.grid_exported + self.battery_charged
         balance_error = abs(energy_in - energy_out)
@@ -180,9 +194,7 @@ class EconomicData:
         0.0  # cost with solar only (no battery - algorithm baseline)
     )
     hourly_savings: float = 0.0  # savings vs baseline scenario
-    solar_savings: float = field(
-        default=0.0, init=False
-    )  # calculated automatically
+    solar_savings: float = field(default=0.0, init=False)  # calculated automatically
 
     def __post_init__(self):
         """Calculate derived economic fields."""
@@ -261,9 +273,7 @@ class EconomicSummary:
     solar_only_cost: float
     battery_solar_cost: float
     grid_to_solar_savings: float  # savings from solar vs grid-only
-    grid_to_battery_solar_savings: (
-        float  # savings from battery+solar vs grid-only
-    )
+    grid_to_battery_solar_savings: float  # savings from battery+solar vs grid-only
     solar_to_battery_solar_savings: float
     grid_to_battery_solar_savings_pct: float  # % - percentage savings vs grid-only
     total_charged: float

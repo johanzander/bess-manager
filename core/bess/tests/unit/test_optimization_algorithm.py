@@ -7,7 +7,12 @@ core functions produce outputs with the expected structure and reasonable values
 but don't test specific optimization results.
 """
 
-from core.bess.dp_battery_algorithm import optimize_battery_schedule
+import pytest  # type: ignore
+
+from core.bess.dp_battery_algorithm import (
+    optimize_battery_schedule,
+    split_solar_forecast,
+)
 from core.bess.models import EconomicSummary, PeriodData
 from core.bess.settings import BatterySettings
 
@@ -338,3 +343,199 @@ def test_strategy_data_structure():
         assert hour_data.decision.strategic_intent is not None
         assert hour_data.decision.battery_action is not None
         assert hour_data.decision.cost_basis >= 0
+
+
+# =============================================================================
+# Solar Clipping Tests
+# =============================================================================
+
+
+def test_split_solar_forecast_math():
+    """split_solar_forecast correctly separates AC and DC-excess components."""
+    # 96 periods of 15min each (0.25h), inverter limited to 5kW → 1.25 kWh/period
+    raw_solar = [0.0] * 32 + [0.5] * 16 + [1.5] * 16 + [2.0] * 16 + [0.0] * 16
+    ac_solar, dc_excess = split_solar_forecast(
+        solar_production=raw_solar,
+        inverter_ac_capacity_kw=5.0,
+        period_duration_hours=0.25,
+    )
+    ac_limit = 5.0 * 0.25  # 1.25 kWh per period
+
+    assert len(ac_solar) == len(raw_solar)
+    assert len(dc_excess) == len(raw_solar)
+
+    for raw, ac, dc in zip(raw_solar, ac_solar, dc_excess, strict=True):
+        assert ac == min(raw, ac_limit)
+        assert dc == max(0.0, raw - ac_limit)
+        assert abs(ac + dc - raw) < 1e-9
+
+    # Periods below the limit have no DC excess
+    for i in range(48):  # first 48 periods: 0.0 or 0.5 kWh (both < 1.25 kWh)
+        assert dc_excess[i] == 0.0
+
+    # Periods above the limit have DC excess
+    for i in range(64, 80):  # 2.0 kWh/period > 1.25 kWh limit
+        assert dc_excess[i] == pytest.approx(0.75)
+
+
+def test_split_solar_forecast_preserves_total():
+    """AC + DC excess always equals the raw solar input for every period."""
+    raw_solar = [0.0, 0.5, 1.25, 2.0, 3.5]
+    ac_solar, dc_excess = split_solar_forecast(
+        solar_production=raw_solar,
+        inverter_ac_capacity_kw=5.0,
+        period_duration_hours=0.25,
+    )
+    for raw, ac, dc in zip(raw_solar, ac_solar, dc_excess, strict=True):
+        assert ac + dc == pytest.approx(raw)
+
+
+def test_no_clipping_when_disabled():
+    """Optimizer behavior is identical when inverter_ac_capacity_kw is 0 (disabled)."""
+    buy_price = [0.3] * 8 + [1.5] * 8 + [0.3] * 8
+    sell_price = [0.2] * 24
+    home_consumption = [0.5] * 24
+    solar = [0.0] * 8 + [3.0] * 8 + [0.0] * 8
+
+    settings = BatterySettings(
+        total_capacity=10.0,
+        min_soc=10.0,
+        max_soc=100.0,
+        max_charge_power_kw=5.0,
+        max_discharge_power_kw=5.0,
+        cycle_cost_per_kwh=0.10,
+        min_action_profit_threshold=0.0,
+    )
+
+    # Without DC excess (no clipping)
+    result_no_clip = optimize_battery_schedule(
+        buy_price=buy_price,
+        sell_price=sell_price,
+        home_consumption=home_consumption,
+        solar_production=solar,
+        initial_soe=settings.min_soe_kwh,
+        battery_settings=settings,
+        dc_excess_solar=None,
+    )
+
+    # With dc_excess_solar of all zeros (equivalent to disabled)
+    result_zeros = optimize_battery_schedule(
+        buy_price=buy_price,
+        sell_price=sell_price,
+        home_consumption=home_consumption,
+        solar_production=solar,
+        initial_soe=settings.min_soe_kwh,
+        battery_settings=settings,
+        dc_excess_solar=[0.0] * 24,
+    )
+
+    # Both results should have identical economic outcomes
+    assert result_no_clip.economic_summary is not None
+    assert result_zeros.economic_summary is not None
+    assert (
+        result_no_clip.economic_summary.grid_to_battery_solar_savings
+        == pytest.approx(
+            result_zeros.economic_summary.grid_to_battery_solar_savings, abs=0.01
+        )
+    )
+    assert result_no_clip.economic_summary.battery_solar_cost == pytest.approx(
+        result_zeros.economic_summary.battery_solar_cost, abs=0.01
+    )
+
+
+def test_dc_excess_has_zero_grid_cost():
+    """DC excess stored in battery has cost basis reflecting only cycle cost (no grid cost).
+
+    Even when the profitability gate rejects AC optimization (falls back to idle schedule),
+    DC excess is still physically absorbed into the battery — it is tracked in the result.
+    """
+    settings = BatterySettings(
+        total_capacity=10.0,
+        min_soc=0.0,
+        max_soc=100.0,
+        max_charge_power_kw=5.0,
+        max_discharge_power_kw=5.0,
+        cycle_cost_per_kwh=0.40,
+        min_action_profit_threshold=0.0,
+    )
+
+    # 4 periods: DC excess midday, high-price consumption in the evening.
+    # Period 0-1: DC excess available, battery absorbs it (free solar, cycle cost only)
+    # Period 2-3: expensive grid, discharge stored DC energy for home consumption
+    buy_price = [0.3, 0.3, 2.0, 2.0]
+    sell_price = [0.1, 0.1, 0.1, 0.1]
+    home_consumption = [0.0, 0.0, 1.5, 1.5]
+    ac_solar = [0.0, 0.0, 0.0, 0.0]
+    dc_excess = [2.0, 2.0, 0.0, 0.0]
+
+    result = optimize_battery_schedule(
+        buy_price=buy_price,
+        sell_price=sell_price,
+        home_consumption=home_consumption,
+        solar_production=ac_solar,
+        initial_soe=0.0,
+        battery_settings=settings,
+        dc_excess_solar=dc_excess,
+    )
+
+    assert len(result.period_data) == 4
+
+    # DC excess periods should show absorption with no grid import
+    dc_periods = [p for p in result.period_data if p.energy.dc_excess_to_battery > 0]
+    assert len(dc_periods) > 0, "Expected at least one period with DC excess absorption"
+
+    for period in dc_periods:
+        # DC excess is absorbed without any grid import (it's free solar on DC bus)
+        assert period.energy.grid_imported == pytest.approx(
+            0.0, abs=0.01
+        ), "DC excess absorption should not require grid import"
+        # DC excess tracked separately (not as AC solar)
+        assert period.energy.solar_production == pytest.approx(0.0, abs=0.01)
+
+
+def test_clipping_capture_preferred_over_grid_charge():
+    """Optimizer keeps battery headroom for free clipped solar rather than grid-charging early."""
+    settings = BatterySettings(
+        total_capacity=10.0,
+        min_soc=0.0,
+        max_soc=100.0,
+        max_charge_power_kw=5.0,
+        max_discharge_power_kw=5.0,
+        cycle_cost_per_kwh=0.10,
+        min_action_profit_threshold=0.0,
+    )
+
+    # Scenario: cheap grid at night (periods 0-7), DC clipping midday (periods 8-15),
+    # expensive grid evening (periods 16-23).
+    # A clipping-unaware optimizer would grid-charge at night, filling battery before clipping.
+    # A clipping-aware optimizer should leave headroom for free clipped solar.
+    buy_price = [0.2] * 8 + [1.0] * 8 + [2.0] * 8
+    sell_price = [0.1] * 24
+    home_consumption = [0.2] * 24
+    ac_solar = [0.0] * 8 + [1.0] * 8 + [0.0] * 8  # AC solar (capped at inverter limit)
+    dc_excess = [0.0] * 8 + [1.5] * 8 + [0.0] * 8  # DC excess above inverter limit
+
+    result_with_clipping = optimize_battery_schedule(
+        buy_price=buy_price,
+        sell_price=sell_price,
+        home_consumption=home_consumption,
+        solar_production=ac_solar,
+        initial_soe=0.0,
+        battery_settings=settings,
+        dc_excess_solar=dc_excess,
+    )
+
+    # Calculate total solar clipped in the clipping-aware result
+    total_clipped = sum(
+        p.energy.solar_clipped for p in result_with_clipping.period_data
+    )
+
+    # The optimizer should capture most of the available DC excess (not clip it due to full battery)
+    total_dc_available = sum(dc_excess)
+    capture_rate = (
+        1.0 - (total_clipped / total_dc_available) if total_dc_available > 0 else 1.0
+    )
+    assert capture_rate > 0.5, (
+        f"Expected optimizer to capture >50% of DC excess, got {capture_rate:.1%} "
+        f"(clipped={total_clipped:.2f} of {total_dc_available:.2f} kWh)"
+    )

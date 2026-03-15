@@ -273,6 +273,16 @@ def _aggregate_quarterly_to_hourly(
             solarSavings=create_formatted_value(
                 sum(p.solarSavings.value for p in quarter_periods), "currency", currency
             ),
+            dcExcessToBattery=create_formatted_value(
+                sum(p.dcExcessToBattery.value for p in quarter_periods),
+                "energy_kwh_only",
+                currency,
+            ),
+            solarClipped=create_formatted_value(
+                sum(p.solarClipped.value for p in quarter_periods),
+                "energy_kwh_only",
+                currency,
+            ),
             # Use dominant strategic intent with tie-breaking (same logic as Growatt schedule)
             strategicIntent=dominant_intent,
             directSolar=sum(p.directSolar for p in quarter_periods),

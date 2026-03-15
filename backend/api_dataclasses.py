@@ -99,6 +99,10 @@ class APIBatterySettings:
     estimatedConsumption: float  # kWh - estimated daily consumption
     consumptionStrategy: str  # consumption forecast strategy
 
+    # DC clipping settings
+    inverterAcCapacityKw: float  # kW - inverter AC output limit (0 = clipping disabled)
+    solarPanelDcCapacityKw: float  # kW - DC panel capacity (informational)
+
     @classmethod
     def from_internal(
         cls, battery, estimated_consumption: float, consumption_strategy: str = "sensor"
@@ -119,6 +123,8 @@ class APIBatterySettings:
             efficiencyDischarge=battery.efficiency_discharge,
             estimatedConsumption=estimated_consumption,
             consumptionStrategy=consumption_strategy,
+            inverterAcCapacityKw=battery.inverter_ac_capacity_kw,
+            solarPanelDcCapacityKw=battery.solar_panel_dc_capacity_kw,
         )
 
     def to_internal_update(self) -> dict:
@@ -373,6 +379,10 @@ class APIDashboardHourlyData:
     solarExcess: FormattedValue  # How much solar excess in solar-only scenario
     solarSavings: FormattedValue  # Savings from solar vs grid-only
 
+    # DC clipping flows (zero when clipping is disabled or no clipping occurs)
+    dcExcessToBattery: FormattedValue  # DC excess captured by battery (kWh)
+    solarClipped: FormattedValue  # DC excess lost because battery was full (kWh)
+
     # Raw values for logic only
     strategicIntent: str
     directSolar: float
@@ -495,6 +505,14 @@ class APIDashboardHourlyData:
             solarSavings=safe_format(
                 hourly.economic.solar_savings,
                 "currency",
+            ),
+            dcExcessToBattery=safe_format(
+                hourly.energy.dc_excess_to_battery,
+                "energy_kwh_only",
+            ),
+            solarClipped=safe_format(
+                hourly.energy.solar_clipped,
+                "energy_kwh_only",
             ),
             # Raw values for logic
             strategicIntent=hourly.decision.strategic_intent,

@@ -95,9 +95,26 @@ When `battery.inverter_ac_capacity_kw > 0` in config, the system is clipping-awa
 - `EnergyData.battery_charged` = AC-side charging only (does NOT include DC excess)
 - `EnergyData.solar_production` = AC solar only (capped at inverter limit), NOT raw DC production
 - DC excess has **zero grid cost**, only cycle cost in cost basis
+- DC wear cost applies regardless of AC action (idle, charge, or discharge) — it's a physical process
 - The DP naturally keeps battery headroom for clipping hours because DC energy is cheaper than grid
 - Even the idle fallback schedule (`_create_idle_schedule`) absorbs DC excess automatically
 - When disabled (`inverter_ac_capacity_kw = 0`), behavior is identical to pre-clipping code
+- `validate_energy_balance()` checks AC-side only; DC excess is self-balancing by definition (dc_excess_to_battery + solar_clipped = total DC excess)
+
+#### API Visibility
+
+- `/api/dashboard` exposes `dcExcessToBattery` and `solarClipped` as `FormattedValue` fields per period
+- `/api/settings/battery` exposes `inverterAcCapacityKw` and `solarPanelDcCapacityKw`
+- Both fields appear in today's data (actual and predicted) and tomorrow's data
+- Values are zero when clipping is disabled or solar doesn't exceed inverter AC limit
+- Quarter-hourly values are summed when aggregating to hourly resolution
+
+#### Common Clipping Debugging Steps
+
+1. Check `inverterAcCapacityKw` is set > 0 in `/api/settings/battery` response
+2. Check solar forecast — clipping only occurs when per-period solar > `inverter_ac_capacity_kw * period_duration_hours`
+3. If `dcExcessToBattery` is always 0 but clipping should occur, check that `split_solar_forecast` is being called in `battery_system_manager.py._run_optimization`
+4. If `solarClipped` is high, battery may be reaching max SOE before peak clipping hours — check if the optimizer is keeping enough headroom
 
 ### Debugging Schedule Issues
 

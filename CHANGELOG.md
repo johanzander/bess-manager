@@ -239,6 +239,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - New `battery.solar_panel_dc_capacity_kw` config setting (informational, not required).
 - Idle fallback schedule now absorbs DC excess even when AC optimization is rejected by the
   profitability gate, since DC absorption is a physical process independent of AC decisions.
+- `dcExcessToBattery` and `solarClipped` exposed in `/api/dashboard` per-period response.
+- `inverterAcCapacityKw` and `solarPanelDcCapacityKw` exposed in `/api/settings/battery` response.
 
 ### Changed
 

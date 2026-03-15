@@ -72,6 +72,7 @@ options:
       export_today_entity: ""       # HA entity for today's Octopus export rates
       export_tomorrow_entity: ""    # HA entity for tomorrow's Octopus export rates
   growatt:
+    inverter_type: "MIN"  # Growatt inverter model: "MIN" (9-segment TOU) or "SPH" (separate charge/discharge periods)
     device_id: "fbafceb07a1cc74c351ef4310fa430a0"  # Growatt device ID for TOU segment operations
   sensors:
     # === Battery Control & Status ===
@@ -153,6 +154,7 @@ schema:
       export_today_entity: str
       export_tomorrow_entity: str
   growatt:
+    inverter_type: str
     device_id: str
   sensors:
     battery_soc: str

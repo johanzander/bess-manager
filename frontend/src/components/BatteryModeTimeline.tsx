@@ -116,22 +116,11 @@ export const BatteryModeTimeline: React.FC<BatteryModeTimelineProps> = ({
 
   const [tooltipData, setTooltipData] = useState<{ segment: Segment; x: number; y: number } | null>(null);
 
-  const textColor = isDarkMode ? '#d1d5db' : '#374151';
   const tickColor = isDarkMode ? '#6b7280' : '#9ca3af';
 
   return (
     <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
-      <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Battery Mode Schedule</h3>
-
       <div className="relative" style={{ paddingLeft: CHART_LEFT_OFFSET, paddingRight: CHART_RIGHT_OFFSET }}>
-        {/* "Battery" label in left gutter — mirrors a Y-axis label */}
-        <div
-          className="absolute top-0 flex items-center justify-end"
-          style={{ left: 0, width: CHART_LEFT_OFFSET, height: barHeight, paddingRight: 8 }}
-        >
-          <span style={{ fontSize: 13, color: textColor }}>Battery</span>
-        </div>
-
         {/* Bar SVG — fills the padded area, aligning with chart plot areas */}
         <svg
           width="100%"

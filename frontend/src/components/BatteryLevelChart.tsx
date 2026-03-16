@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, ReferenceArea, ComposedChart, Area, Line } from 'recharts';
+import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, ReferenceArea, ComposedChart, Area } from 'recharts';
 import { HourlyData } from '../types';
 import { periodToTimeString, periodToTimeRange } from '../utils/timeUtils';
 import { DataResolution } from '../hooks/useUserPreferences';
@@ -42,15 +42,6 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
   };
 
   // Transform daily view data to chart format
-  // Helper function to get currency unit from price data
-  const getCurrencyUnit = () => {
-    const firstPriceData = hourlyData.find(hour => hour.buyPrice?.unit);
-    return firstPriceData?.buyPrice?.unit || '???';
-  };
-
-  // Get the actual currency unit for the chart label
-  const currencyUnit = getCurrencyUnit();
-
   const chartData = hourlyData.map((hour, index) => {
     // Check for missing keys and provide warnings
     if (hour.batteryAction === undefined) {
@@ -172,11 +163,9 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
   const lastTodayHour = lastTodayIdx > -1 ? chartData[lastTodayIdx - 1]?.hour : maxHourValue;
 
   const maxAction = Math.max(...chartData.map(d => Math.abs(d.action || 0)), 1);
-  const maxPrice = Math.max(...chartData.map(h => h.price ?? 0), 1);
 
   return (
     <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
-      <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Battery SOC and Actions</h3>
       <div className="h-80">
         <ResponsiveContainer width="100%" height="100%">
           <ComposedChart data={chartData} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
@@ -209,24 +198,7 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
               }}
             />
 
-            {/* Right Y-axis for Electricity Price */}
-            <YAxis
-              yAxisId="right"
-              orientation="right"
-              width={60}
-              stroke={colors.text}
-              domain={[0, Math.ceil(maxPrice * 1.2 * 10) / 10]}
-              tick={{ fill: colors.text, fontSize: 11 }}
-              tickFormatter={(value) => value.toLocaleString('sv-SE', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
-              label={{
-                value: `Electricity Price (${currencyUnit}/kWh)`,
-                angle: 90,
-                position: 'insideRight',
-                style: { textAnchor: 'middle', dominantBaseline: 'central', fill: colors.text }
-              }}
-            />
-
-            {/* Third Y-axis for Battery Actions (kWh) */}
+            {/* Right Y-axis for Battery Actions (kWh) */}
             <YAxis
               yAxisId="action"
               orientation="right"
@@ -321,17 +293,6 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
               name="Battery SOC"
             />
             
-            <Line
-              yAxisId="right"
-              type="stepAfter"
-              dataKey="price"
-              stroke="#9CA3AF"
-              strokeWidth={1.5}
-              name="Electricity Price"
-              dot={false}
-              connectNulls={false}
-            />
-            
             <Area
               yAxisId="action"
               type="stepBefore"
@@ -373,20 +334,6 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
         <div className="flex items-center">
           <div className="w-4 h-3 rounded mr-2" style={{ backgroundColor: '#dc2626' }}></div>
           <span className="text-gray-700 dark:text-gray-300">Battery Discharging</span>
-        </div>
-        <div className="flex items-center">
-          <div className="w-4 h-1" style={{ backgroundColor: '#9CA3AF', borderStyle: 'dashed', borderWidth: '1px 0' }}></div>
-          <span className="text-gray-700 dark:text-gray-300 ml-2">Electricity Price</span>
-        </div>
-        <div className="flex items-center text-xs text-gray-600 dark:text-gray-400 ml-4">
-          <div className="flex items-center mr-3">
-            <div className="w-4 h-3 rounded mr-1 border border-gray-400" style={{ backgroundColor: 'transparent' }}></div>
-            <span>Actual hours</span>
-          </div>
-          <div className="flex items-center mr-3">
-            <div className="w-4 h-3 rounded mr-1" style={{ background: isDarkMode ? 'rgba(120,120,120,0.25)' : 'rgba(120,120,120,0.15)' }}></div>
-            <span>Predicted hours</span>
-          </div>
         </div>
       </div>
     </div>

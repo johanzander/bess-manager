@@ -341,31 +341,32 @@ export default function DashboardPage({
           </div>
           
           {/* Charts Section */}
-          <div className="space-y-8">
+          <div className="space-y-6">
+            {/* Schedule */}
             <div>
-              {/* Energy Flow Chart */}
-              <div className="mb-8">
-                <EnergyFlowChart
-                  dailyViewData={dashboardData.hourlyData as any}
-                  tomorrowData={dashboardData.tomorrowData as any}
-                  currentHour={currentHour}
-                  resolution={dataResolution}
-                />
-              </div>
+              <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">Schedule</h2>
+              <BatteryModeTimeline
+                hourlyData={dashboardData.hourlyData as any}
+                tomorrowData={dashboardData.tomorrowData as any}
+                currentHour={currentHour}
+                resolution={dataResolution}
+              />
             </div>
-          </div>
-          
-          {/* Battery Mode Timeline */}
-          <BatteryModeTimeline
-            hourlyData={dashboardData.hourlyData as any}
-            tomorrowData={dashboardData.tomorrowData as any}
-            currentHour={currentHour}
-            resolution={dataResolution}
-          />
 
-          {/* Battery SOC and Actions */}
-          <div>
-            <div className="mb-8">
+            {/* Energy Flow Chart */}
+            <div>
+              <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">Energy Flow</h2>
+              <EnergyFlowChart
+                dailyViewData={dashboardData.hourlyData as any}
+                tomorrowData={dashboardData.tomorrowData as any}
+                currentHour={currentHour}
+                resolution={dataResolution}
+              />
+            </div>
+
+            {/* Battery SOC and Energy Flow */}
+            <div>
+              <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">Battery SOC and Energy Flow</h2>
               <BatteryLevelChart
                 hourlyData={dashboardData.hourlyData as any}
                 tomorrowData={dashboardData.tomorrowData as any}

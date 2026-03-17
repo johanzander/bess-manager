@@ -1960,14 +1960,14 @@ class BatterySystemManager:
 
         elif strategic_intent == "IDLE":
             grid_charge = False
-            discharge_rate = 0
+            discharge_rate = 100
 
         else:
             logger.warning(
                 "Unknown strategic intent: %s, using IDLE defaults", strategic_intent
             )
             grid_charge = False
-            discharge_rate = 0
+            discharge_rate = 100
 
         hour = period // 4
         logger.info(

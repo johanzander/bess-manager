@@ -118,7 +118,7 @@ class GrowattScheduleManager:
             "charge_rate": 0,
             "discharge_rate": 100,
         },
-        "IDLE": {"grid_charge": False, "charge_rate": 100, "discharge_rate": 0},
+        "IDLE": {"grid_charge": False, "charge_rate": 100, "discharge_rate": 100},
     }
 
     def __init__(self, battery_settings: BatterySettings) -> None:
@@ -319,7 +319,7 @@ class GrowattScheduleManager:
             intent = effective_intents[period]
             mode = self.INTENT_TO_MODE.get(intent, "load_first")
             control = self.INTENT_TO_CONTROL.get(
-                intent, {"grid_charge": False, "charge_rate": 100, "discharge_rate": 0}
+                intent, {"grid_charge": False, "charge_rate": 100, "discharge_rate": 100}
             )
 
             period_settings.append(

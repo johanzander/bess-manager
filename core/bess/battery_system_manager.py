@@ -213,49 +213,21 @@ class BatterySystemManager:
         )
 
     def _sync_soc_limits(self) -> None:
-        """
-        Sync SOC limits from config to inverter hardware.
+        """Sync SOC limits from config to inverter hardware.
 
-        Config values are the single source of truth. This method ensures
-        the inverter hardware matches the configured min/max SOC limits.
-        Called during system startup.
+        Delegates to the schedule manager which handles the inverter-specific
+        mechanism (entity writes for MIN, service calls for SPH).
+        Config values are the single source of truth.
         """
         logger.info("Syncing SOC limits from config to inverter...")
-
-        configured_min_soc = self.battery_settings.min_soc
-        configured_max_soc = self.battery_settings.max_soc
-
         try:
-            # Sync minimum SOC (discharge stop)
-            self.controller.set_discharge_stop_soc(configured_min_soc)
-            logger.info(f"Set discharge_stop_soc to {configured_min_soc}%")
-
-            # Sync maximum SOC (charge stop)
-            self.controller.set_charge_stop_soc(configured_max_soc)
-            logger.info(f"Set charge_stop_soc to {configured_max_soc}%")
-
-            # Verify sync by reading back values
-            actual_min_soc = self.controller.get_discharge_stop_soc()
-            actual_max_soc = self.controller.get_charge_stop_soc()
-
-            # Log verification results
-            if (
-                actual_min_soc == configured_min_soc
-                and actual_max_soc == configured_max_soc
-            ):
-                logger.info(
-                    f"SOC limits verified: min={actual_min_soc}%, max={actual_max_soc}%"
-                )
-            else:
-                logger.warning(
-                    f"SOC limit mismatch detected! "
-                    f"Configured: min={configured_min_soc}%, max={configured_max_soc}% | "
-                    f"Actual: min={actual_min_soc}%, max={actual_max_soc}%"
-                )
+            self._schedule_manager.sync_soc_limits(self.controller)
         except Exception as e:
             logger.warning(
-                f"Could not sync SOC limits to inverter at startup (inverter may be temporarily unreachable): {e}. "
-                f"Inverter will retain its current limits. System startup will continue."
+                "Could not sync SOC limits to inverter at startup "
+                "(inverter may be temporarily unreachable): %s. "
+                "Inverter will retain its current limits. System startup will continue.",
+                e,
             )
 
     def start(self) -> None:
@@ -272,11 +244,12 @@ class BatterySystemManager:
                 # Run health check before we start using sensors
                 self._run_health_check()
 
+                # Initialize schedule from inverter before SOC sync so cached
+                # periods are available (required for SPH write-back)
+                self._initialize_tou_schedule_from_inverter()
+
                 # Sync SOC limits from config to inverter (config as master)
                 self._sync_soc_limits()
-
-                # Initialize schedule from inverter - preserves original logic
-                self._initialize_tou_schedule_from_inverter()
 
                 # Initialize historical data - using improved sensor collector
                 self._fetch_and_initialize_historical_data()

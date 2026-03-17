@@ -1612,6 +1612,38 @@ class GrowattScheduleManager:
 
         return writes, disables
 
+    def sync_soc_limits(self, controller) -> None:
+        """Sync SOC limits from config to inverter hardware via entity writes."""
+        configured_min_soc = self.battery_settings.min_soc
+        configured_max_soc = self.battery_settings.max_soc
+
+        controller.set_discharge_stop_soc(configured_min_soc)
+        logger.info("Set discharge_stop_soc to %d%%", configured_min_soc)
+
+        controller.set_charge_stop_soc(configured_max_soc)
+        logger.info("Set charge_stop_soc to %d%%", configured_max_soc)
+
+        actual_min_soc = controller.get_discharge_stop_soc()
+        actual_max_soc = controller.get_charge_stop_soc()
+
+        if (
+            actual_min_soc == configured_min_soc
+            and actual_max_soc == configured_max_soc
+        ):
+            logger.info(
+                "SOC limits verified: min=%d%%, max=%d%%",
+                actual_min_soc,
+                actual_max_soc,
+            )
+        else:
+            logger.warning(
+                "SOC limit mismatch detected! Configured: min=%d%%, max=%d%% | Actual: min=%s%%, max=%s%%",
+                configured_min_soc,
+                configured_max_soc,
+                actual_min_soc,
+                actual_max_soc,
+            )
+
     def read_and_initialize_from_hardware(self, controller, current_hour: int) -> None:
         """Read current TOU schedule from inverter and initialize this manager.
 

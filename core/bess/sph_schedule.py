@@ -17,7 +17,6 @@ from datetime import datetime
 from typing import ClassVar
 
 from .dp_schedule import DPSchedule
-from .health_check import perform_health_check
 from .settings import BatterySettings
 
 logger = logging.getLogger(__name__)
@@ -376,30 +375,8 @@ class SphScheduleManager:
         charge_stop_soc = int(self.battery_settings.max_soc)
         discharge_stop_soc = int(self.battery_settings.min_soc)
 
-        # Build flat period params for charge
-        charge_params: dict[str, object] = {}
-        for i in range(self.MAX_CHARGE_PERIODS):
-            n = i + 1
-            if i < len(self._charge_periods):
-                p = self._charge_periods[i]
-                charge_params[f"period_{n}_start"] = p["start_time"]
-                charge_params[f"period_{n}_end"] = p["end_time"]
-                charge_params[f"period_{n}_enabled"] = True
-            else:
-                charge_params[f"period_{n}_enabled"] = False
-
-        # Build flat period params for discharge
-        discharge_params: dict[str, object] = {}
-        for i in range(self.MAX_DISCHARGE_PERIODS):
-            n = i + 1
-            if i < len(self._discharge_periods):
-                p = self._discharge_periods[i]
-                discharge_params[f"period_{n}_start"] = p["start_time"]
-                discharge_params[f"period_{n}_end"] = p["end_time"]
-                discharge_params[f"period_{n}_enabled"] = True
-            else:
-                discharge_params[f"period_{n}_enabled"] = False
-
+        charge_params = self._build_charge_params()
+        discharge_params = self._build_discharge_params()
         mains_enabled = len(self._charge_periods) > 0
 
         logger.info(
@@ -429,6 +406,92 @@ class SphScheduleManager:
         )
 
         return 2, 0
+
+    def _build_charge_params(self) -> dict[str, object]:
+        """Build flat charge period params for write_ac_charge_times."""
+        params: dict[str, object] = {}
+        for i in range(self.MAX_CHARGE_PERIODS):
+            n = i + 1
+            if i < len(self._charge_periods):
+                p = self._charge_periods[i]
+                params[f"period_{n}_start"] = p["start_time"]
+                params[f"period_{n}_end"] = p["end_time"]
+                params[f"period_{n}_enabled"] = True
+            else:
+                params[f"period_{n}_enabled"] = False
+        return params
+
+    def _build_discharge_params(self) -> dict[str, object]:
+        """Build flat discharge period params for write_ac_discharge_times."""
+        params: dict[str, object] = {}
+        for i in range(self.MAX_DISCHARGE_PERIODS):
+            n = i + 1
+            if i < len(self._discharge_periods):
+                p = self._discharge_periods[i]
+                params[f"period_{n}_start"] = p["start_time"]
+                params[f"period_{n}_end"] = p["end_time"]
+                params[f"period_{n}_enabled"] = True
+            else:
+                params[f"period_{n}_enabled"] = False
+        return params
+
+    def sync_soc_limits(self, controller) -> None:
+        """Sync SOC limits from config to inverter hardware.
+
+        Reads current charge/discharge stop SOC from the inverter and writes
+        back only if they differ from the configured max_soc / min_soc.
+        Requires read_and_initialize_from_hardware() to have been called first
+        so that cached periods are available for the write.
+        """
+        configured_max_soc = int(self.battery_settings.max_soc)
+        configured_min_soc = int(self.battery_settings.min_soc)
+
+        charge_result = controller.read_ac_charge_times()
+        discharge_result = controller.read_ac_discharge_times()
+
+        actual_charge_soc = (
+            charge_result.get("charge_stop_soc") if charge_result else None
+        )
+        actual_discharge_soc = (
+            discharge_result.get("discharge_stop_soc") if discharge_result else None
+        )
+
+        charge_mismatch = actual_charge_soc != configured_max_soc
+        discharge_mismatch = actual_discharge_soc != configured_min_soc
+
+        if not charge_mismatch and not discharge_mismatch:
+            logger.info(
+                "SOC limits verified: charge_stop=%d%%, discharge_stop=%d%%",
+                configured_max_soc,
+                configured_min_soc,
+            )
+            return
+
+        logger.info(
+            "SOC limit mismatch — config: charge_stop=%d%%, discharge_stop=%d%% | "
+            "inverter: charge_stop=%s%%, discharge_stop=%s%% — syncing",
+            configured_max_soc,
+            configured_min_soc,
+            actual_charge_soc,
+            actual_discharge_soc,
+        )
+
+        if charge_mismatch:
+            controller.write_ac_charge_times(
+                charge_power=100,
+                charge_stop_soc=configured_max_soc,
+                mains_enabled=len(self._charge_periods) > 0,
+                **self._build_charge_params(),
+            )
+            logger.info("Set charge_stop_soc to %d%%", configured_max_soc)
+
+        if discharge_mismatch:
+            controller.write_ac_discharge_times(
+                discharge_power=100,
+                discharge_stop_soc=configured_min_soc,
+                **self._build_discharge_params(),
+            )
+            logger.info("Set discharge_stop_soc to %d%%", configured_min_soc)
 
     def read_and_initialize_from_hardware(self, controller, current_hour: int) -> None:
         """Read current SPH schedule from inverter and initialize this manager.
@@ -659,22 +722,42 @@ class SphScheduleManager:
     # ── Health check ──────────────────────────────────────────────────────────
 
     def check_health(self, controller) -> list:
-        """Check SPH battery control capabilities."""
-        battery_control_methods = [
-            "get_charging_power_rate",
-            "get_discharging_power_rate",
-            "grid_charge_enabled",
-            "get_charge_stop_soc",
-            "get_discharge_stop_soc",
-        ]
+        """Check SPH battery control capabilities.
 
-        health_check = perform_health_check(
-            component_name="Battery Control (SPH)",
-            description="Controls SPH battery charging and discharging schedule",
-            is_required=True,
-            controller=controller,
-            all_methods=battery_control_methods,
-            required_methods=battery_control_methods,
-        )
+        SPH inverters use Growatt service calls rather than individual HA entity
+        reads, so we verify connectivity by calling read_ac_charge_times.
+        """
+        try:
+            result = controller.read_ac_charge_times()
+            if result and "periods" in result:
+                check = {
+                    "component": "Growatt Service (read_ac_charge_times)",
+                    "status": "OK",
+                    "message": f"Connected — charge_power={result.get('charge_power')}%, stop_soc={result.get('charge_stop_soc')}%",
+                }
+                overall_status = "OK"
+            else:
+                check = {
+                    "component": "Growatt Service (read_ac_charge_times)",
+                    "status": "ERROR",
+                    "message": "Service call returned no data — check Growatt integration and device_id in config",
+                }
+                overall_status = "ERROR"
+        except Exception as e:
+            check = {
+                "component": "Growatt Service (read_ac_charge_times)",
+                "status": "ERROR",
+                "message": f"Service call failed: {e}",
+            }
+            overall_status = "ERROR"
+
+        health_check = {
+            "name": "Battery Control (SPH)",
+            "description": "Controls SPH battery charging and discharging schedule",
+            "required": True,
+            "status": overall_status,
+            "checks": [check],
+            "last_run": datetime.now().isoformat(),
+        }
 
         return [health_check]

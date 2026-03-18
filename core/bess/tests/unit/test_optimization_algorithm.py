@@ -10,6 +10,7 @@ but don't test specific optimization results.
 import pytest  # type: ignore
 
 from core.bess.dp_battery_algorithm import (
+    _state_transition,
     optimize_battery_schedule,
     split_solar_forecast,
 )
@@ -538,4 +539,135 @@ def test_clipping_capture_preferred_over_grid_charge():
     assert capture_rate > 0.5, (
         f"Expected optimizer to capture >50% of DC excess, got {capture_rate:.1%} "
         f"(clipped={total_clipped:.2f} of {total_dc_available:.2f} kWh)"
+    )
+
+
+def test_idle_models_solar_auto_charging():
+    """In IDLE (load_first) mode, excess solar auto-charges the battery.
+
+    When power=0, _state_transition must increase SOE when solar exceeds consumption.
+    """
+    settings = BatterySettings(
+        total_capacity=10.0,
+        min_soc=0.0,
+        max_soc=100.0,
+        max_charge_power_kw=5.0,
+        efficiency_charge=0.95,
+        cycle_cost_per_kwh=0.10,
+    )
+    soe_start = 2.0
+    dt = 0.25  # 15-minute period
+    solar_excess_kw = 3.0  # 3 kW excess solar after meeting home load
+
+    next_soe = _state_transition(
+        soe_start, 0.0, settings, dt, solar_excess_ac=solar_excess_kw
+    )
+
+    # Battery should have charged from solar excess
+    assert next_soe > soe_start, "IDLE with solar excess must increase battery SOE"
+    expected_stored = (
+        min(solar_excess_kw, settings.max_charge_power_kw)
+        * dt
+        * settings.efficiency_charge
+    )
+    assert next_soe == pytest.approx(soe_start + expected_stored, abs=0.001)
+
+
+def test_idle_auto_charge_capped_at_capacity():
+    """Auto-charging in IDLE mode stops at max_soe — cannot overflow the battery."""
+    settings = BatterySettings(
+        total_capacity=10.0,
+        min_soc=0.0,
+        max_soc=100.0,
+        max_charge_power_kw=5.0,
+        efficiency_charge=0.95,
+        cycle_cost_per_kwh=0.10,
+    )
+    # Start near full — only 0.1 kWh of headroom
+    soe_start = 9.9
+    dt = 0.25
+    solar_excess_kw = 5.0  # More solar than capacity allows
+
+    next_soe = _state_transition(
+        soe_start, 0.0, settings, dt, solar_excess_ac=solar_excess_kw
+    )
+
+    assert next_soe <= settings.max_soe_kwh, "SOE must not exceed max_soe"
+    assert next_soe == pytest.approx(settings.max_soe_kwh, abs=0.001)
+
+
+def test_idle_no_auto_charge_without_solar_excess():
+    """Without solar excess, IDLE holds battery flat (original behavior preserved)."""
+    settings = BatterySettings(
+        total_capacity=10.0,
+        min_soc=0.0,
+        max_soc=100.0,
+        max_charge_power_kw=5.0,
+        cycle_cost_per_kwh=0.10,
+    )
+    soe_start = 5.0
+    dt = 0.25
+
+    next_soe = _state_transition(soe_start, 0.0, settings, dt, solar_excess_ac=0.0)
+
+    assert next_soe == pytest.approx(
+        soe_start, abs=0.001
+    ), "No excess solar → SOE unchanged"
+
+
+def test_dp_keeps_headroom_for_dc_excess_over_morning_solar():
+    """With DC clipping enabled, DP should prefer keeping battery headroom for free DC excess
+    over filling the battery from morning AC solar auto-charging.
+
+    Setup: morning solar excess in IDLE → fills battery without fix.
+    Afternoon DC excess clipped if battery is full.
+    Fix: DP models morning auto-charging, sees headroom lost → schedules discharge or EXPORT_ARBITRAGE.
+    """
+    settings = BatterySettings(
+        total_capacity=10.0,
+        min_soc=0.0,
+        max_soc=100.0,
+        max_charge_power_kw=5.0,
+        max_discharge_power_kw=5.0,
+        cycle_cost_per_kwh=0.10,
+        min_action_profit_threshold=0.0,
+    )
+
+    # 8 periods (2h at 15-min resolution):
+    # Periods 0-3: morning — solar > consumption (auto-charges battery in IDLE)
+    # Periods 4-7: afternoon — DC excess available (free solar, but only fits if battery not full)
+    buy_price = [0.5] * 4 + [0.5] * 4
+    sell_price = [0.1] * 8
+    # Morning: 2 kWh solar, 0.5 kWh consumption → 1.5 kWh excess per period
+    home_consumption = [0.5] * 4 + [0.5] * 4
+    ac_solar = [2.0] * 4 + [0.0] * 4
+    # Afternoon: 1.5 kWh DC excess per period (8 periods = 6 kWh total)
+    dc_excess = [0.0] * 4 + [1.5] * 4
+
+    # Battery starts empty — morning solar would fill it to ~5.7 kWh in IDLE (4x1.5x0.95)
+    result = optimize_battery_schedule(
+        buy_price=buy_price,
+        sell_price=sell_price,
+        home_consumption=home_consumption,
+        solar_production=ac_solar,
+        initial_soe=0.0,
+        battery_settings=settings,
+        dc_excess_solar=dc_excess,
+        period_duration_hours=0.25,
+    )
+
+    # Total DC excess available
+    total_dc_available = sum(dc_excess)
+
+    # Total DC excess absorbed (not clipped)
+    total_dc_absorbed = sum(p.energy.dc_excess_to_battery for p in result.period_data)
+    total_clipped = sum(p.energy.solar_clipped for p in result.period_data)
+
+    # The optimizer should capture most of the DC excess by managing morning SOE
+    capture_rate = (
+        total_dc_absorbed / total_dc_available if total_dc_available > 0 else 1.0
+    )
+    assert capture_rate > 0.5, (
+        f"Expected DP to capture >50% of DC excess by managing morning battery SOE, "
+        f"got {capture_rate:.1%} (absorbed={total_dc_absorbed:.2f}, clipped={total_clipped:.2f})"
     )

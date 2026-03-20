@@ -176,6 +176,7 @@ class HomeSettings:
     default_hourly: float = HOME_HOURLY_CONSUMPTION_KWH
     min_valid: float = MIN_CONSUMPTION
     currency: str = DEFAULT_CURRENCY
+    power_monitoring_enabled: bool = False
 
     def __post_init__(self):
         assert self.phase_count in (
@@ -211,6 +212,9 @@ class HomeSettings:
                 "consumption", HOME_HOURLY_CONSUMPTION_KWH
             )
             self.currency = config["home"].get("currency", DEFAULT_CURRENCY)
+            self.power_monitoring_enabled = home_config.get(
+                "power_monitoring_enabled", False
+            )
             self.__post_init__()
         return self
 

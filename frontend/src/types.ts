@@ -143,6 +143,7 @@ export interface HealthCheckResult {
   rawValue: any; // Original sensor value for logic/comparisons
   displayValue: string; // Human-readable with units (required, no fallbacks)
   error: string | null;
+  message?: string | null;
 }
 
 export interface ComponentHealthStatus {

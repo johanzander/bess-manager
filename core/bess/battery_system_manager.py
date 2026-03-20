@@ -233,13 +233,14 @@ class BatterySystemManager:
     def start(self) -> None:
         """Start the system - preserves original functionality."""
         try:
-            # Initialize monitors if controller available
             if self._controller:
-                self._power_monitor = HomePowerMonitor(
-                    self._controller,
-                    home_settings=self.home_settings,
-                    battery_settings=self.battery_settings,
-                )
+                # Initialize power monitor only when feature is enabled
+                if self.home_settings.power_monitoring_enabled:
+                    self._power_monitor = HomePowerMonitor(
+                        self._controller,
+                        home_settings=self.home_settings,
+                        battery_settings=self.battery_settings,
+                    )
 
                 # Run health check before we start using sensors
                 self._run_health_check()

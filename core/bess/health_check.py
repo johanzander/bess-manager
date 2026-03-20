@@ -292,7 +292,25 @@ def run_system_health_checks(system_manager):
     all_component_checks.extend(sensor_collector_health)
 
     # 5. Power Monitor (Power Monitoring) - real-time power flow tracking
-    power_checks = system_manager._power_monitor.check_health()
+    if system_manager._power_monitor is not None:
+        power_checks = system_manager._power_monitor.check_health()
+    else:
+        power_checks = [
+            {
+                "name": "Power Monitoring",
+                "description": "Monitors home power consumption and adapts battery charging",
+                "required": False,
+                "status": "WARNING",
+                "checks": [
+                    {
+                        "component": "Power Monitoring",
+                        "status": "WARNING",
+                        "message": "Disabled — set power_monitoring_enabled: true in config to enable",
+                    }
+                ],
+                "last_run": datetime.now().isoformat(),
+            }
+        ]
     all_component_checks.extend(power_checks)
 
     # 6. Historic data access
@@ -391,9 +409,9 @@ def check_historical_data_access():
                 data_check["formatted_value"] = "InfluxDB connection successful"
             else:
                 data_check["status"] = "WARNING"
-                data_check["error"] = (
-                    f"InfluxDB connectivity issue: {response.get('message', 'Unknown error')}"
-                )
+                data_check[
+                    "error"
+                ] = f"InfluxDB connectivity issue: {response.get('message', 'Unknown error')}"
         except Exception as e:
             data_check["status"] = "ERROR"
             data_check["error"] = f"Failed to connect to InfluxDB: {e}"

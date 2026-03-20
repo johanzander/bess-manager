@@ -82,42 +82,32 @@ class HomePowerMonitor:
 
     def check_health(self) -> list:
         """Check the health of the Power Monitor component."""
-        if self.home_settings.phase_count == 1:
-            candidate_methods = ["get_l1_current", "get_charging_power_rate"]
-        else:
-            candidate_methods = [
-                "get_l1_current",
-                "get_l2_current",
-                "get_l3_current",
-                "get_charging_power_rate",
-            ]
-
-        # Only check methods that have a non-empty entity ID configured.
-        # Users without current sensors simply leave these blank in config.
-        configured_methods = [
-            m
-            for m in candidate_methods
-            if self.controller.sensors.get(
-                self.controller.get_method_sensor_key(m) or "", ""
-            )
-        ]
-
-        if not configured_methods:
+        if not self.home_settings.power_monitoring_enabled:
             return [
                 {
                     "name": "Power Monitoring",
                     "description": "Monitors home power consumption and adapts battery charging",
                     "required": False,
-                    "status": "OK",
+                    "status": "WARNING",
                     "checks": [
                         {
                             "component": "Power Monitoring",
-                            "status": "OK",
-                            "message": "Not configured — no current sensors set up (optional feature)",
+                            "status": "WARNING",
+                            "message": "Disabled — set power_monitoring_enabled: true in config to enable",
                         }
                     ],
                     "last_run": datetime.now().isoformat(),
                 }
+            ]
+
+        if self.home_settings.phase_count == 1:
+            all_methods = ["get_l1_current", "get_charging_power_rate"]
+        else:
+            all_methods = [
+                "get_l1_current",
+                "get_l2_current",
+                "get_l3_current",
+                "get_charging_power_rate",
             ]
 
         health_check = perform_health_check(
@@ -125,8 +115,8 @@ class HomePowerMonitor:
             description="Monitors home power consumption and adapts battery charging",
             is_required=False,
             controller=self.controller,
-            all_methods=configured_methods,
-            required_methods=[],
+            all_methods=all_methods,
+            required_methods=all_methods,
         )
 
         return [health_check]

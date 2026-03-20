@@ -19,6 +19,7 @@ This module is designed to work with the Home Assistant controller and to be run
 """
 
 import logging
+from datetime import datetime
 
 from .ha_api_controller import HomeAssistantAPIController
 from .health_check import perform_health_check
@@ -81,32 +82,51 @@ class HomePowerMonitor:
 
     def check_health(self) -> list:
         """Check the health of the Power Monitor component."""
-        # Define what controller methods this component uses
-        # Single-phase systems only need L1; three-phase needs all three
         if self.home_settings.phase_count == 1:
-            power_methods = [
-                "get_l1_current",
-                "get_charging_power_rate",
-            ]
+            candidate_methods = ["get_l1_current", "get_charging_power_rate"]
         else:
-            power_methods = [
+            candidate_methods = [
                 "get_l1_current",
                 "get_l2_current",
                 "get_l3_current",
                 "get_charging_power_rate",
             ]
 
-        # For power monitoring, since the component itself is optional, all methods are optional
-        # System can operate without power monitoring - it's an enhancement feature
-        required_power_methods = []
+        # Only check methods that have a non-empty entity ID configured.
+        # Users without current sensors simply leave these blank in config.
+        configured_methods = [
+            m
+            for m in candidate_methods
+            if self.controller.sensors.get(
+                self.controller.get_method_sensor_key(m) or "", ""
+            )
+        ]
+
+        if not configured_methods:
+            return [
+                {
+                    "name": "Power Monitoring",
+                    "description": "Monitors home power consumption and adapts battery charging",
+                    "required": False,
+                    "status": "OK",
+                    "checks": [
+                        {
+                            "component": "Power Monitoring",
+                            "status": "OK",
+                            "message": "Not configured — no current sensors set up (optional feature)",
+                        }
+                    ],
+                    "last_run": datetime.now().isoformat(),
+                }
+            ]
 
         health_check = perform_health_check(
             component_name="Power Monitoring",
             description="Monitors home power consumption and adapts battery charging",
             is_required=False,
             controller=self.controller,
-            all_methods=power_methods,
-            required_methods=required_power_methods,
+            all_methods=configured_methods,
+            required_methods=[],
         )
 
         return [health_check]

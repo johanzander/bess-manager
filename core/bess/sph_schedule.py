@@ -44,6 +44,14 @@ class SphScheduleManager:
         {"LOAD_SUPPORT", "EXPORT_ARBITRAGE"}
     )
 
+    INTENT_TO_MODE: ClassVar[dict[str, str]] = {
+        "GRID_CHARGING": "battery_first",
+        "SOLAR_STORAGE": "battery_first",
+        "LOAD_SUPPORT": "load_first",
+        "EXPORT_ARBITRAGE": "grid_first",
+        "IDLE": "load_first",
+    }
+
     # Map strategic intents to inverter control settings (used for hourly_settings)
     INTENT_TO_CONTROL: ClassVar[dict[str, dict[str, bool | int]]] = {
         "GRID_CHARGING": {"grid_charge": True, "charge_rate": 100, "discharge_rate": 0},
@@ -718,6 +726,143 @@ class SphScheduleManager:
         lines.append("* indicates current period")
 
         logger.info("\n".join(lines))
+
+    # ── API / display methods ─────────────────────────────────────────────────
+
+    def get_all_tou_segments(self) -> list[dict]:
+        """Return TOU intervals for API/display consumption."""
+        if not self.tou_intervals:
+            return [
+                {
+                    "segment_id": 0,
+                    "start_time": "00:00",
+                    "end_time": "23:59",
+                    "batt_mode": "load_first",
+                    "enabled": False,
+                    "is_default": True,
+                }
+            ]
+        return list(self.tou_intervals)
+
+    def get_strategic_intent_summary(self) -> dict:
+        """Get a summary of strategic intents for the day (aggregated from quarterly periods)."""
+        if not self.strategic_intents:
+            return {}
+
+        num_periods = len(self.strategic_intents)
+        num_hours = (num_periods + 3) // 4
+
+        intent_hours: dict[str, list[int]] = {}
+        for hour in range(num_hours):
+            start_p = hour * 4
+            end_p = min(start_p + 4, num_periods)
+            period_intents = [self.strategic_intents[p] for p in range(start_p, end_p)]
+
+            intent_counts: dict[str, int] = {}
+            for intent in period_intents:
+                intent_counts[intent] = intent_counts.get(intent, 0) + 1
+            max_count = max(intent_counts.values())
+            dominant = min(i for i, c in intent_counts.items() if c == max_count)
+
+            if dominant not in intent_hours:
+                intent_hours[dominant] = []
+            intent_hours[dominant].append(hour)
+
+        descriptions = {
+            "GRID_CHARGING": "Storing cheap grid energy for later use",
+            "SOLAR_STORAGE": "Storing excess solar energy for evening/night",
+            "LOAD_SUPPORT": "Using battery to support home consumption",
+            "EXPORT_ARBITRAGE": "Selling stored energy to grid for profit",
+            "IDLE": "No significant battery activity",
+        }
+        return {
+            intent: {
+                "hours": hours,
+                "count": len(hours),
+                "description": descriptions.get(intent, "Unknown intent"),
+            }
+            for intent, hours in intent_hours.items()
+        }
+
+    def get_detailed_period_groups(
+        self, intents: list[str] | None = None
+    ) -> list[dict]:
+        """Get period groups with full control parameters for display/API."""
+        effective_intents = intents if intents is not None else self.strategic_intents
+        if not effective_intents:
+            return []
+
+        num_periods = len(effective_intents)
+        period_settings = []
+        for period in range(num_periods):
+            intent = effective_intents[period]
+            mode = self.INTENT_TO_MODE.get(intent, "load_first")
+            control = self.INTENT_TO_CONTROL.get(
+                intent, {"grid_charge": False, "charge_rate": 100, "discharge_rate": 0}
+            )
+            period_settings.append(
+                {
+                    "period": period,
+                    "intent": intent,
+                    "mode": mode,
+                    "grid_charge": control["grid_charge"],
+                    "charge_rate": control["charge_rate"],
+                    "discharge_rate": control["discharge_rate"],
+                }
+            )
+
+        groups = []
+        current_group: dict | None = None
+        for ps in period_settings:
+            if current_group is not None and (
+                ps["intent"] == current_group["intent"]
+                and ps["mode"] == current_group["mode"]
+                and ps["grid_charge"] == current_group["grid_charge"]
+                and ps["charge_rate"] == current_group["charge_rate"]
+                and ps["discharge_rate"] == current_group["discharge_rate"]
+            ):
+                current_group["end_period"] = ps["period"]
+                current_group["count"] += 1
+            else:
+                if current_group is not None:
+                    groups.append(current_group)
+                current_group = {
+                    "start_period": ps["period"],
+                    "end_period": ps["period"],
+                    "intent": ps["intent"],
+                    "mode": ps["mode"],
+                    "grid_charge": ps["grid_charge"],
+                    "charge_rate": ps["charge_rate"],
+                    "discharge_rate": ps["discharge_rate"],
+                    "count": 1,
+                }
+        if current_group is not None:
+            groups.append(current_group)
+
+        result = []
+        for group in groups:
+            start_h, start_m = self._period_to_time(group["start_period"])
+            end_h, end_m = self._period_to_time(group["end_period"])
+            end_m += 14
+            if end_h >= 24:
+                end_h = 23
+                end_m = 59
+            result.append(
+                {
+                    "start_time": f"{start_h:02d}:{start_m:02d}",
+                    "end_time": f"{end_h:02d}:{end_m:02d}",
+                    "start_period": group["start_period"],
+                    "end_period": group["end_period"],
+                    "intent": group["intent"],
+                    "mode": group["mode"],
+                    "grid_charge": group["grid_charge"],
+                    "charge_rate": group["charge_rate"],
+                    "discharge_rate": group["discharge_rate"],
+                    "period_count": group["count"],
+                    "duration_minutes": group["count"] * 15,
+                }
+            )
+        return result
 
     # ── Health check ──────────────────────────────────────────────────────────
 

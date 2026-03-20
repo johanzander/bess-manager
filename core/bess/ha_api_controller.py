@@ -111,7 +111,7 @@ class HomeAssistantAPIController:
             "Content-Type": "application/json",
         }
         self.max_attempts = 4
-        self.retry_delay = 4  # seconds
+        self.retry_base_delay = 2  # seconds (exponential backoff: 2, 4, 8)
         self.test_mode = False
 
         # Use provided sensor configuration
@@ -481,7 +481,15 @@ class HomeAssistantAPIController:
         """Validate sensors for multiple methods at once."""
         return [self.get_method_sensor_info(method) for method in method_list]
 
-    def _api_request(self, method, path, operation=None, category=None, **kwargs):
+    def _api_request(
+        self,
+        method,
+        path,
+        operation=None,
+        category=None,
+        context: dict | None = None,
+        **kwargs,
+    ):
         """Make an API request to Home Assistant with retry logic.
 
         Args:
@@ -489,6 +497,7 @@ class HomeAssistantAPIController:
             path: API path (without base URL)
             operation: Optional human-readable operation description for failure tracking
             category: Optional operation category for failure tracking
+            context: Optional dict of contextual parameters for failure diagnostics
             **kwargs: Additional arguments for requests
 
         Returns:
@@ -553,15 +562,16 @@ class HomeAssistantAPIController:
                     raise  # Fail immediately on 404
 
                 if attempt < self.max_attempts - 1:  # Not the last attempt
+                    delay = self.retry_base_delay * (2**attempt)
                     logger.warning(
                         "API request to %s failed on attempt %d/%d: %s. Retrying in %d seconds...",
                         url,
                         attempt + 1,
                         self.max_attempts,
                         str(e),
-                        self.retry_delay,
+                        delay,
                     )
-                    time.sleep(self.retry_delay)
+                    time.sleep(delay)
                 else:  # Last attempt failed
                     logger.error(
                         "API request to %s failed on final attempt %d/%d: %s",
@@ -577,20 +587,31 @@ class HomeAssistantAPIController:
                         operation_description = operation or f"{method.upper()} {path}"
                         operation_category = category or "other"
 
+                        # Enrich context with HTTP response body for diagnostics
+                        enriched_context = dict(context) if context else {}
+                        if isinstance(e, requests.HTTPError) and e.response is not None:
+                            response_body = e.response.text[:500]
+                            if response_body:
+                                enriched_context["response_body"] = response_body
+
                         self.failure_tracker.record_failure(
                             operation=operation_description,
                             category=operation_category,
                             error=e,
+                            context=enriched_context if enriched_context else None,
                         )
 
                     raise  # Re-raise the last exception
 
-    def _service_call_with_retry(self, service_domain, service_name, **kwargs):
+    def _service_call_with_retry(
+        self, service_domain, service_name, operation: str | None = None, **kwargs
+    ):
         """Call Home Assistant service with retry logic.
 
         Args:
             service_domain: Service domain (e.g., 'switch', 'number')
             service_name: Service name (e.g., 'turn_on', 'set_value')
+            operation: Optional human-readable operation description for failure tracking
             **kwargs: Service parameters
 
         Returns:
@@ -636,11 +657,16 @@ class HomeAssistantAPIController:
 
             path += "?" + urllib.parse.urlencode(query_params)
 
+        # Build context from service call kwargs for failure tracking
+        context = {
+            k: v for k, v in kwargs.items() if k not in ("return_response", "blocking")
+        }
+
         # Make API call
         return self._api_request(
             "post",
             path,
-            operation=f"Call {service_domain}.{service_name}",
+            operation=operation or f"Call {service_domain}.{service_name}",
             category=(
                 "battery_control"
                 if service_domain in ["number", "switch"]
@@ -650,11 +676,17 @@ class HomeAssistantAPIController:
                     else "other"
                 )
             ),
+            context=context,
             json=json_data,
         )
 
-    def _get_sensor_value(self, sensor_name):
-        """Get value from any sensor by name using unified entity resolution."""
+    def _get_sensor_value(self, sensor_name) -> float | None:
+        """Get value from any sensor by name using unified entity resolution.
+
+        Returns:
+            float: The sensor value, or None if the sensor is unavailable,
+            unknown, or could not be read.
+        """
         try:
             entity_id, resolution_method = self._resolve_entity_id(sensor_name)
             logger.debug(
@@ -670,18 +702,27 @@ class HomeAssistantAPIController:
             )
 
             if response and "state" in response:
-                return float(response["state"])
+                state = response["state"]
+                if isinstance(state, str) and state in ("unavailable", "unknown"):
+                    logger.warning(
+                        "Sensor %s (entity_id: %s) is %s",
+                        sensor_name,
+                        entity_id,
+                        state,
+                    )
+                    return None
+                return float(state)
             else:
                 logger.warning(
                     "Sensor %s (entity_id: %s) returned invalid response or no state",
                     sensor_name,
                     entity_id,
                 )
-                return 0.0
+                return None
 
         except (ValueError, TypeError):
             logger.warning("Could not get value for %s", sensor_name)
-            return 0.0
+            return None
         except requests.RequestException as e:
             logger.error("Error fetching sensor %s: %s", sensor_name, str(e))
 
@@ -693,7 +734,7 @@ class HomeAssistantAPIController:
                     error=e,
                 )
 
-            return 0.0
+            return None
 
     def get_estimated_consumption(self):
         """Get estimated consumption in quarterly resolution (96 periods).
@@ -863,15 +904,19 @@ class HomeAssistantAPIController:
                 "Please add growatt.device_id to config.yaml"
             )
 
+        enabled_str = "enabled" if enabled else "disabled"
         self._service_call_with_retry(
-            "growatt_server", "update_time_segment", **service_params
+            "growatt_server",
+            "update_time_segment",
+            operation=f"Write TOU segment {segment_id}: {batt_mode} {start_time}-{end_time} ({enabled_str})",
+            **service_params,
         )
 
     def read_inverter_time_segments(self):
         """Read all time segments from the inverter with retry logic."""
         try:
             # Prepare service call parameters
-            service_params: dict[str, object] = {"return_response": True}
+            service_params: dict[str, str | bool] = {"return_response": True}
 
             # Add device_id if configured
             if self.growatt_device_id:
@@ -884,7 +929,10 @@ class HomeAssistantAPIController:
 
             # Call the service and get the response
             result = self._service_call_with_retry(
-                "growatt_server", "read_time_segments", **service_params
+                "growatt_server",
+                "read_time_segments",
+                operation=None,
+                **service_params,
             )
 
             # Check if the result contains 'service_response' with 'time_segments'

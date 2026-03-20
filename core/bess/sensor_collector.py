@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 
 from .energy_flow_calculator import EnergyFlowCalculator
 from .health_check import perform_health_check
-from .influxdb_helper import get_sensor_data_batch
+from .influxdb_helper import get_power_sensor_data_batch, get_sensor_data_batch
 from .models import EnergyData
 from .settings import BatterySettings
 
@@ -57,6 +57,20 @@ class SensorCollector:
         # Resolve to actual entity IDs for InfluxDB queries
         self.cumulative_sensors = self._resolve_sensor_entity_ids()
 
+        # Power sensors (W) for high-resolution gap-filling
+        # Maps power sensor keys to the same flow names used by energy_flow_calculator
+        self.power_sensor_flow_map: dict[str, str] = {
+            "pv_power": "solar_production",
+            "local_load_power": "load_consumption",
+            "import_power": "import_from_grid",
+            "export_power": "export_to_grid",
+            "battery_charge_power": "battery_charged",
+            "battery_discharge_power": "battery_discharged",
+        }
+        self.power_sensors = self._resolve_power_sensor_ids()
+        self._power_batch_cache: dict = {}  # {date: {period: {sensor: kwh_value}}}
+        self._power_batch_cache_loaded_on: dict = {}
+
     def _resolve_sensor_entity_ids(self) -> list[str]:
         """Resolve sensor keys to entity IDs using the controller's abstraction layer.
 
@@ -74,6 +88,26 @@ class SensorCollector:
                 continue
         logger.info(
             f"Resolved {len(resolved_ids)} sensor entity IDs for InfluxDB queries"
+        )
+        return resolved_ids
+
+    def _resolve_power_sensor_ids(self) -> list[str]:
+        """Resolve power sensor keys to entity IDs for InfluxDB.
+
+        Returns list of entity IDs (without 'sensor.' prefix).
+        """
+        resolved_ids = []
+        for sensor_key in self.power_sensor_flow_map:
+            entity_id = self.ha_controller.resolve_sensor_for_influxdb(sensor_key)
+            if entity_id:
+                resolved_ids.append(entity_id)
+                logger.debug(
+                    f"Resolved power sensor key '{sensor_key}' to '{entity_id}'"
+                )
+            else:
+                logger.debug(f"Power sensor key '{sensor_key}' not configured")
+        logger.info(
+            f"Resolved {len(resolved_ids)} power sensor entity IDs for gap-filling"
         )
         return resolved_ids
 
@@ -182,6 +216,32 @@ class SensorCollector:
         )
         if not flow_dict:
             raise RuntimeError(f"Energy flow calculation failed for period {period}")
+
+        # Gap-filling: when cumulative sensors show zero energy (due to 0.1 kWh resolution),
+        # use power (W) sensors which report every ~5 minutes for much higher resolution
+        energy_flow_keys = [
+            "solar_production",
+            "load_consumption",
+            "import_from_grid",
+            "export_to_grid",
+            "battery_charged",
+            "battery_discharged",
+        ]
+        all_energy_zero = all(
+            abs(flow_dict.get(key, 0.0)) < 0.001 for key in energy_flow_keys
+        )
+        if all_energy_zero and is_historical_backfill:
+            target_date = datetime.now().date()
+            power_flows = self._get_power_based_flows(period, target_date)
+            if power_flows:
+                for key in energy_flow_keys:
+                    if key in power_flows and power_flows[key] > 0.001:
+                        flow_dict[key] = power_flows[key]
+                logger.info(
+                    "Period %d: Gap-filled from power sensors: %s",
+                    period,
+                    {k: f"{v:.4f}" for k, v in power_flows.items() if v > 0.001},
+                )
 
         # Extract BOTH SOC readings from sensors - NO DEFAULTS
         # Use abstraction layer to resolve battery SOC sensor entity ID (without 'sensor.' prefix)
@@ -364,6 +424,106 @@ class SensorCollector:
             )
             return False
 
+    def _ensure_power_batch_loaded(self, target_date) -> bool:
+        """Load power sensor batch data for a date (lazy, cached like cumulative batch).
+
+        Returns:
+            True if data was loaded successfully, False otherwise
+        """
+        today = datetime.now().date()
+
+        if target_date in self._power_batch_cache:
+            if target_date < today:
+                loaded_on = self._power_batch_cache_loaded_on.get(target_date)
+                if loaded_on != today:
+                    del self._power_batch_cache[target_date]
+                    if target_date in self._power_batch_cache_loaded_on:
+                        del self._power_batch_cache_loaded_on[target_date]
+                else:
+                    return True
+            else:
+                return True
+
+        if not self.power_sensors:
+            logger.debug("No power sensors configured, skipping power batch load")
+            return False
+
+        logger.info(
+            "Loading power sensor batch for %s (%d sensors)",
+            target_date.strftime("%Y-%m-%d"),
+            len(self.power_sensors),
+        )
+
+        result = get_power_sensor_data_batch(self.power_sensors, target_date)
+
+        if result.get("status") == "success":
+            data = result.get("data", {})
+            if not data:
+                logger.warning(
+                    "Power sensor batch for %s returned no periods", target_date
+                )
+                return False
+            self._power_batch_cache[target_date] = data
+            self._power_batch_cache_loaded_on[target_date] = today
+            logger.info(
+                "Power sensor batch loaded: %d periods for %s",
+                len(data),
+                target_date.strftime("%Y-%m-%d"),
+            )
+            return True
+        else:
+            logger.warning(
+                "Failed to load power sensor batch for %s: %s",
+                target_date.strftime("%Y-%m-%d"),
+                result.get("message", "Unknown error"),
+            )
+            return False
+
+    def _build_power_entity_to_flow_map(self) -> dict[str, str]:
+        """Build mapping from power sensor entity IDs (with sensor. prefix) to flow names.
+
+        Returns:
+            Dict mapping "sensor.entity_id" -> flow_name
+        """
+        entity_to_flow = {}
+        for sensor_key, flow_name in self.power_sensor_flow_map.items():
+            entity_id = self.ha_controller.resolve_sensor_for_influxdb(sensor_key)
+            if entity_id:
+                entity_to_flow[f"sensor.{entity_id}"] = flow_name
+        return entity_to_flow
+
+    def _get_power_based_flows(
+        self, period: int, target_date
+    ) -> dict[str, float] | None:
+        """Get energy flows for a period computed from power (W) sensors.
+
+        Returns flow dict compatible with energy_flow_calculator output, or None if unavailable.
+        """
+        if not self._ensure_power_batch_loaded(target_date):
+            return None
+
+        period_data = self._power_batch_cache.get(target_date, {}).get(period)
+        if not period_data:
+            return None
+
+        entity_to_flow = self._build_power_entity_to_flow_map()
+
+        flows = {}
+        for entity_key, kwh_value in period_data.items():
+            flow_name = entity_to_flow.get(entity_key)
+            if flow_name:
+                flows[flow_name] = kwh_value
+
+        if not flows:
+            return None
+
+        logger.debug(
+            "Period %d: Power-based flows: %s",
+            period,
+            {k: f"{v:.4f}" for k, v in flows.items()},
+        )
+        return flows
+
     def _get_period_readings(
         self, period: int, date_offset: int = 0
     ) -> dict[str, float] | None:
@@ -480,15 +640,11 @@ class SensorCollector:
                     readings[key[7:]] = float(value)
             except (ValueError, TypeError):
                 logger.warning(
-                    "Invalid value for sensor %s: %s (type: %s)",
+                    "Skipping sensor %s with invalid value: %s (type: %s)",
                     key,
                     value,
                     type(value).__name__,
                 )
-                # Store as 0.0 for numeric sensors to prevent calculation errors
-                readings[key] = 0.0
-                if key.startswith("sensor."):
-                    readings[key[7:]] = 0.0
 
         # Validate that we have the minimum required sensors
         # Check for required sensors using resolved entity IDs

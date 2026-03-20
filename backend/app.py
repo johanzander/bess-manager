@@ -343,6 +343,7 @@ class BESSController:
                 "voltage",
                 "safety_margin_factor",
                 "phase_count",
+                "consumption_strategy",
                 "power_monitoring_enabled",
             ]
             for key in required_home_keys:
@@ -370,6 +371,7 @@ class BESSController:
                     "voltage": home_config["voltage"],
                     "safetyMargin": home_config["safety_margin_factor"],
                     "phaseCount": home_config["phase_count"],
+                    "consumptionStrategy": home_config["consumption_strategy"],
                     "powerMonitoringEnabled": home_config["power_monitoring_enabled"],
                 },
                 "price": {

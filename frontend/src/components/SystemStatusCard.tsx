@@ -9,7 +9,6 @@ import {
   TrendingUp,
   TrendingDown,
   AlertTriangle,
-  CheckCircle,
   Zap,
   Home
 } from 'lucide-react';
@@ -22,17 +21,13 @@ interface StatusCardProps {
   keyMetric: string;
   keyValue: number | string;
   keyUnit: string;
-  status: {
-    icon: React.ComponentType<{ className?: string }>;
-    text: string;
-    color: 'green' | 'red' | 'yellow' | 'blue';
-  };
   metrics: Array<{
     label: string;
     value: number | string;
     unit: string;
     icon?: React.ComponentType<{ className?: string }>;
     color?: 'green' | 'red' | 'yellow' | 'blue';
+    pill?: boolean;
   }>;
   color: 'blue' | 'green' | 'yellow' | 'red' | 'purple';
   icon: React.ComponentType<{ className?: string }>;
@@ -47,7 +42,6 @@ const StatusCard: React.FC<StatusCardProps> = ({
   keyValue,
   keyUnit,
   metrics,
-  status,
   className = ""
 }) => {
   const colorClasses = {
@@ -73,25 +67,19 @@ const StatusCard: React.FC<StatusCardProps> = ({
     blue: 'text-blue-600 dark:text-blue-400'
   };
 
+  const pillColorClasses: Record<string, string> = {
+    green: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400',
+    red: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
+    yellow: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400',
+    blue: 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300'
+  };
+
   return (
     <div className={`border rounded-lg p-6 ${colorClasses[color]} ${className}`}>
       {/* Header */}
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center">
-          <Icon className={`h-6 w-6 ${iconColorClasses[color]} mr-3`} />
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{title}</h3>
-        </div>
-        {status && (
-          <div className={`flex items-center text-sm px-2 py-1 rounded-md ${
-            status.color === 'green' ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' :
-            status.color === 'red' ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400' :
-            status.color === 'yellow' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' :
-            'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400'
-          }`}>
-            <status.icon className="h-4 w-4 mr-1" />
-            <span className="font-medium">{status.text}</span>
-          </div>
-        )}
+      <div className="flex items-center mb-4">
+        <Icon className={`h-6 w-6 ${iconColorClasses[color]} mr-3`} />
+        <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{title}</h3>
       </div>
 
       {/* Key Metric */}
@@ -111,12 +99,18 @@ const StatusCard: React.FC<StatusCardProps> = ({
               {metric.icon && <metric.icon className="h-4 w-4 mr-2 text-gray-500 dark:text-gray-400" />}
               <span className="text-sm text-gray-700 dark:text-gray-300">{metric.label}</span>
             </div>
-            <span className={`text-sm font-semibold ${
-              metric.color ? metricColorClasses[metric.color] : 'text-gray-900 dark:text-gray-100'
-            }`}>
-              {metric.value}
-              {metric.unit && <span className="opacity-70 ml-1">{metric.unit}</span>}
-            </span>
+            {metric.pill && metric.color ? (
+              <span className={`text-sm font-semibold px-2 py-0.5 rounded-md ${pillColorClasses[metric.color]}`}>
+                {metric.value}{metric.unit && <span className="opacity-70 ml-1">{metric.unit}</span>}
+              </span>
+            ) : (
+              <span className={`text-sm font-semibold ${
+                metric.color ? metricColorClasses[metric.color] : 'text-gray-900 dark:text-gray-100'
+              }`}>
+                {metric.value}
+                {metric.unit && <span className="opacity-70 ml-1">{metric.unit}</span>}
+              </span>
+            )}
           </div>
         ))}
       </div>
@@ -225,7 +219,18 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "" }) =
     const batteryStatus = currentHourData.batteryAction > 0.1 ? 'charging' :
                         currentHourData.batteryAction < -0.1 ? 'discharging' : 'idle';
 
+    const intentDisplayNames: Record<string, string> = {
+      GRID_CHARGING: 'Grid Charging',
+      SOLAR_STORAGE: 'Solar Storage',
+      LOAD_SUPPORT: 'Load Support',
+      EXPORT_ARBITRAGE: 'Export Arbitrage',
+      IDLE: 'Idle',
+    };
+    const rawIntent = currentHourData.strategicIntent?.toUpperCase().replace(/ /g, '_') ?? 'IDLE';
+    const strategicIntent = intentDisplayNames[rawIntent] ?? rawIntent;
+
     return {
+      strategicIntent,
       costAndSavings: {
         todaysCost: (() => {
           if (!dashboardData.summary?.optimizedCost) {
@@ -317,35 +322,28 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "" }) =
 
   const cards = [
     {
-      title: "Power Flow",
+      title: "Home Power",
       icon: Zap,
       color: "blue" as const,
-      keyMetric: "Solar Production",
+      keyMetric: "Solar Generation",
       keyValue: statusData.realTimePower?.solarPower?.text || '0 W',
       keyUnit: "",
-      status: {
-        icon: (statusData.realTimePower?.gridExportPower?.value || 0) > 0.1 ? TrendingUp :
-              (statusData.realTimePower?.gridImportPower?.value || 0) > 0.1 ? TrendingDown : CheckCircle,
-        text: (statusData.realTimePower?.gridExportPower?.value || 0) > 0.1 ? `${statusData.realTimePower?.gridExportPower?.text} exporting` :
-              (statusData.realTimePower?.gridImportPower?.value || 0) > 0.1 ? `${statusData.realTimePower?.gridImportPower?.text} importing` : 'Grid balanced',
-        color: (statusData.realTimePower?.gridExportPower?.value || 0) > 0.1 ? 'green' as const :
-               (statusData.realTimePower?.gridImportPower?.value || 0) > 0.1 ? 'red' as const : 'green' as const
-      },
       metrics: [
         {
-          label: "Home Load",
+          label: "Home Usage",
           value: statusData.realTimePower?.homeLoadPower?.text || '0 W',
           unit: "",
           icon: Home
         },
         {
-          label: "Grid Flow",
+          label: "Grid",
           value: (statusData.realTimePower?.gridExportPower?.value || 0) > 0.1 ? `${statusData.realTimePower?.gridExportPower?.text} Export ↑` :
-                 (statusData.realTimePower?.gridImportPower?.value || 0) > 0.1 ? `${statusData.realTimePower?.gridImportPower?.text} Import ↓` : '0 W',
+                 (statusData.realTimePower?.gridImportPower?.value || 0) > 0.1 ? `${statusData.realTimePower?.gridImportPower?.text} Import ↓` : 'Balanced',
           unit: "",
           icon: Zap,
           color: (statusData.realTimePower?.gridExportPower?.value || 0) > 0.1 ? 'green' as const :
-                 (statusData.realTimePower?.gridImportPower?.value || 0) > 0.1 ? 'red' as const : undefined
+                 (statusData.realTimePower?.gridImportPower?.value || 0) > 0.1 ? 'red' as const : 'blue' as const,
+          pill: true
         },
         {
           label: "Battery",
@@ -354,32 +352,18 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "" }) =
           unit: "",
           icon: Battery,
           color: (statusData.realTimePower?.netBatteryPower?.value || 0) > 0.1 ? 'green' as const :
-                 (statusData.realTimePower?.netBatteryPower?.value || 0) < -0.1 ? 'yellow' as const : undefined
+                 (statusData.realTimePower?.netBatteryPower?.value || 0) < -0.1 ? 'yellow' as const : 'blue' as const,
+          pill: true
         }
       ]
     },
     {
-      title: "Energy & Power",
+      title: "Battery",
       icon: Battery,
       color: "blue" as const,
-      keyMetric: (statusData.realTimePower?.netBatteryPower?.value || 0) > 0.1 ?
-        `Charging ${statusData.realTimePower?.batteryChargePower?.display}kW` :
-        (statusData.realTimePower?.netBatteryPower?.value || 0) < -0.1 ?
-        `Discharging ${statusData.realTimePower?.batteryDischargePower?.display}kW` :
-        'Idle',
-      keyValue: "",
+      keyMetric: "Strategic Intent",
+      keyValue: statusData.strategicIntent ?? 'Idle',
       keyUnit: "",
-      status: {
-        icon: (statusData.realTimePower?.netBatteryPower?.value || 0) > 0.1 ? TrendingUp :
-              (statusData.realTimePower?.netBatteryPower?.value || 0) < -0.1 ? TrendingDown : CheckCircle,
-        text: (statusData.realTimePower?.netBatteryPower?.value || 0) > 0.1 ?
-          `Charging ${statusData.realTimePower?.batteryChargePower?.text}` :
-          (statusData.realTimePower?.netBatteryPower?.value || 0) < -0.1 ?
-          `Discharging ${statusData.realTimePower?.batteryDischargePower?.text}` :
-          'Idle',
-        color: (statusData.realTimePower?.netBatteryPower?.value || 0) > 0.1 ? 'green' as const :
-               (statusData.realTimePower?.netBatteryPower?.value || 0) < -0.1 ? 'yellow' as const : 'blue' as const
-      },
       metrics: [
         {
           label: "State of Charge",
@@ -407,22 +391,15 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "" }) =
           icon: Zap
         },
         {
-          label: (statusData.realTimePower?.netBatteryPower?.value || 0) > 0.1 ? 'Charging Power' :
-                 (statusData.realTimePower?.netBatteryPower?.value || 0) < -0.1 ? 'Discharging Power' : 'Battery Power',
-          value: (statusData.realTimePower?.netBatteryPower?.value || 0) > 0.1 ? statusData.realTimePower?.batteryChargePower?.display :
-                 (statusData.realTimePower?.netBatteryPower?.value || 0) < -0.1 ? statusData.realTimePower?.batteryDischargePower?.display :
-                 statusData.realTimePower?.netBatteryPower?.display,
-          unit: "kW",
+          label: "Battery Mode",
+          value: (statusData.realTimePower?.netBatteryPower?.value || 0) > 0.1 ? 'Charging' :
+                 (statusData.realTimePower?.netBatteryPower?.value || 0) < -0.1 ? 'Discharging' : 'Idle',
+          unit: "",
           icon: (statusData.realTimePower?.netBatteryPower?.value || 0) > 0.1 ? TrendingUp :
                 (statusData.realTimePower?.netBatteryPower?.value || 0) < -0.1 ? TrendingDown : Zap,
           color: (statusData.realTimePower?.netBatteryPower?.value || 0) > 0.1 ? 'green' as const :
-                 (statusData.realTimePower?.netBatteryPower?.value || 0) < -0.1 ? 'yellow' as const : 'blue' as const
-        },
-        {
-          label: "Solar Production",
-          value: statusData.realTimePower?.solarPower?.display || "0.0",
-          unit: "kW",
-          icon: Zap
+                 (statusData.realTimePower?.netBatteryPower?.value || 0) < -0.1 ? 'yellow' as const : 'blue' as const,
+          pill: true
         }
       ]
     },
@@ -433,11 +410,6 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "" }) =
       keyMetric: "Today's Costs",
       keyValue: statusData.costAndSavings?.todaysCost?.text,
       keyUnit: "",
-      status: {
-        icon: (statusData.costAndSavings?.todaysSavings?.value || 0) >= 0 ? TrendingUp : TrendingDown,
-        text: `${statusData.costAndSavings?.percentageSaved?.text} saved`,
-        color: (statusData.costAndSavings?.todaysSavings?.value || 0) >= 0 ? 'green' as const : 'red' as const
-      },
       metrics: [
         {
           label: "Grid-Only Cost",
@@ -454,10 +426,11 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "" }) =
         },
         {
           label: "Percentage Saved",
-          value: statusData.costAndSavings?.percentageSaved?.text,
+          value: `${statusData.costAndSavings?.percentageSaved?.text} saved`,
           unit: "",
           icon: TrendingUp,
-          color: (statusData.costAndSavings?.percentageSaved?.value || 0) >= 0 ? 'green' as const : 'red' as const
+          color: (statusData.costAndSavings?.percentageSaved?.value || 0) >= 0 ? 'green' as const : 'red' as const,
+          pill: true
         }
       ]
     }
@@ -475,7 +448,6 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "" }) =
           keyValue={card.keyValue}
           keyUnit={card.keyUnit}
           metrics={card.metrics}
-          status={card.status}
         />
       ))}
     </div>

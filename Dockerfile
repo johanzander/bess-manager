@@ -42,7 +42,10 @@ COPY backend/app.py backend/api.py backend/api_conversion.py backend/api_datacla
 COPY core/ /app/core/
 
 # Build and copy frontend
+# BUILD_VERSION is used here so every new version busts the Docker layer cache,
+# forcing npm run build to re-run with the latest source files.
 WORKDIR /tmp/frontend
+RUN echo "Building frontend for version ${BUILD_VERSION}"
 COPY frontend/package*.json ./
 RUN npm ci
 

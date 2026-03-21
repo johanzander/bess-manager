@@ -220,11 +220,11 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "" }) =
                         currentHourData.batteryAction < -0.1 ? 'discharging' : 'idle';
 
     const intentDisplayNames: Record<string, string> = {
-      GRID_CHARGING: 'Grid Charging',
-      SOLAR_STORAGE: 'Solar Storage',
-      LOAD_SUPPORT: 'Load Support',
-      EXPORT_ARBITRAGE: 'Export Arbitrage',
-      IDLE: 'Idle',
+      GRID_CHARGING: 'Charging from Grid',
+      SOLAR_STORAGE: 'Storing Solar',
+      LOAD_SUPPORT: 'Powering Home',
+      EXPORT_ARBITRAGE: 'Selling to Grid',
+      IDLE: 'Standby',
     };
     const rawIntent = currentHourData.strategicIntent?.toUpperCase().replace(/ /g, '_') ?? 'IDLE';
     const strategicIntent = intentDisplayNames[rawIntent] ?? rawIntent;

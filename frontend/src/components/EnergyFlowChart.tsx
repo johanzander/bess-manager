@@ -148,9 +148,9 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
     const gridImported = getValue(dailyViewHour?.gridImported) || 0;
     const gridExported = getValue(dailyViewHour?.gridExported) || 0;
 
-    // Period END positioning: period 0 (00:00-01:00) placed at x=1
-    // stepBefore renders bar from x-1 to x, so hovering tick "01" shows 00:00-01:00
-    const hourPosition = resolution === 'quarter-hourly' ? (periodNum + 1) / 4 : periodNum + 1;
+    // Midpoint positioning: period 0 (00:00-01:00) placed at x=0.5
+    // Line passes through the middle of each period, tooltip snaps to nearest point
+    const hourPosition = resolution === 'quarter-hourly' ? (periodNum + 0.5) / 4 : periodNum + 0.5;
 
     return {
       hour: hourPosition,
@@ -175,8 +175,6 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
     };
   });
 
-  // Zero anchor at x=0: gives stepBefore a left edge so bars render from 0→1 for period 0
-  chartData.unshift({ hour: 0, periodNum: -1, solar: 0, batteryOut: 0, gridIn: 0, home: 0, batteryIn: 0, gridOut: 0, isActual: true, isTomorrow: false, price: chartData[0]?.price ?? 0 });
 
   // Append tomorrow's data with hour offset 24+
   const hasTomorrowData = tomorrowData && tomorrowData.length > 0;
@@ -187,8 +185,8 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
       const tomorrowPeriodsPerDay = resolution === 'quarter-hourly' ? 96 : 24;
       const periodNum = rawPeriodNum >= tomorrowPeriodsPerDay ? rawPeriodNum - tomorrowPeriodsPerDay : rawPeriodNum;
       const hourPosition = resolution === 'quarter-hourly'
-        ? 24 + (periodNum + 1) / 4
-        : 24 + periodNum + 1;
+        ? 24 + (periodNum + 0.5) / 4
+        : 24 + periodNum + 0.5;
 
       const solarProduction = getValue(hourData?.solarProduction);
       const homeConsumption = getValue(hourData?.homeConsumption);
@@ -232,10 +230,12 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
   const xAxisTicks = Array.from({ length: Math.ceil(maxHour) + 1 }, (_, i) => i);
 
   // Find predicted hours range for shading
+  // Subtract half-period to get period START boundary (data points are at midpoints)
+  const halfPeriod = resolution === 'quarter-hourly' ? 1 / 8 : 0.5;
   const firstPredictedIdx = chartData.findIndex(d => !d.isActual && !d.isTomorrow);
   const lastTodayIdx = chartData.findIndex(d => d.isTomorrow);
-  const firstPredictedHour = firstPredictedIdx > -1 ? chartData[firstPredictedIdx].hour : null;
-  const lastTodayHour = lastTodayIdx > -1 ? chartData[lastTodayIdx - 1]?.hour : maxHour;
+  const firstPredictedHour = firstPredictedIdx > -1 ? chartData[firstPredictedIdx].hour - halfPeriod : null;
+  const lastTodayHour = lastTodayIdx > -1 ? chartData[lastTodayIdx - 1]?.hour + halfPeriod : maxHour;
 
   return (
     <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
@@ -243,7 +243,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
         <ResponsiveContainer>
           <ComposedChart
             data={chartData}
-            margin={{ top: 20, right: 65, left: 5, bottom: 60 }}
+            margin={{ top: 20, right: 5, left: 5, bottom: 60 }}
           >
             <defs>
               {/* Solid colors for actual data */}
@@ -347,7 +347,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
 
             {/* ENERGY SOURCES - Single series, style by isActual */}
             <Area
-              type="stepBefore"
+              type="monotone"
               dataKey="solar"
               stackId="sources"
               stroke={colors.solar}
@@ -359,7 +359,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
               connectNulls
             />
             <Area
-              type="stepBefore"
+              type="monotone"
               dataKey="batteryOut"
               stackId="sources"
               stroke={colors.battery}
@@ -371,7 +371,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
               connectNulls
             />
             <Area
-              type="stepBefore"
+              type="monotone"
               dataKey="gridIn"
               stackId="sources"
               stroke={colors.grid}
@@ -384,7 +384,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
             />
             {/* ENERGY CONSUMPTION - Single series, style by isActual */}
             <Area
-              type="stepBefore"
+              type="monotone"
               dataKey="home"
               stackId="consumption"
               stroke={colors.home}
@@ -396,7 +396,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
               connectNulls
             />
             <Area
-              type="stepBefore"
+              type="monotone"
               dataKey="batteryIn"
               stackId="consumption"
               stroke={colors.battery}
@@ -408,7 +408,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
               connectNulls
             />
             <Area
-              type="stepBefore"
+              type="monotone"
               dataKey="gridOut"
               stackId="consumption"
               stroke={colors.gridExport}
@@ -451,7 +451,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
 
             {/* Price line on secondary Y-axis */}
             <Line
-              type="stepBefore"
+              type="monotone"
               dataKey="price"
               yAxisId="price"
               stroke="#9CA3AF"

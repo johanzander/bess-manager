@@ -5,18 +5,18 @@ import { DataResolution } from '../hooks/useUserPreferences';
 // Must match the YAxis width and ComposedChart margin used in EnergyFlowChart and BatteryLevelChart
 // so the timeline bar aligns horizontally with the chart plot areas.
 // Both charts: margin.left=5 + YAxis.width=60 → plot starts at 65px
-// BatteryLevelChart: 2 right YAxes (60px each) + margin.right=5 → plot ends at W-125px
+// Both charts: margin.right=5 + YAxis.width=60 → plot ends at W-65px
 const CHART_LEFT_OFFSET = 65;
-const CHART_RIGHT_OFFSET = 125;
+const CHART_RIGHT_OFFSET = 65;
 
 type StrategicIntent = 'GRID_CHARGING' | 'SOLAR_STORAGE' | 'LOAD_SUPPORT' | 'EXPORT_ARBITRAGE' | 'IDLE';
 
 const INTENT_CONFIG: Record<StrategicIntent, { label: string; color: string; darkColor: string }> = {
-  GRID_CHARGING: { label: 'Grid Charging', color: '#a855f7', darkColor: '#a855f7' },
-  SOLAR_STORAGE: { label: 'Solar Storage', color: '#eab308', darkColor: '#facc15' },
-  LOAD_SUPPORT: { label: 'Load Support', color: '#3b82f6', darkColor: '#60a5fa' },
-  EXPORT_ARBITRAGE: { label: 'Export Arbitrage', color: '#22c55e', darkColor: '#4ade80' },
-  IDLE: { label: 'Idle', color: '#9ca3af', darkColor: '#6b7280' },
+  GRID_CHARGING: { label: 'Charging from Grid', color: '#a855f7', darkColor: '#a855f7' },
+  SOLAR_STORAGE: { label: 'Storing Solar', color: '#eab308', darkColor: '#facc15' },
+  LOAD_SUPPORT: { label: 'Powering Home', color: '#3b82f6', darkColor: '#60a5fa' },
+  EXPORT_ARBITRAGE: { label: 'Selling to Grid', color: '#22c55e', darkColor: '#4ade80' },
+  IDLE: { label: 'Standby', color: '#9ca3af', darkColor: '#6b7280' },
 };
 
 const INTENT_ORDER: StrategicIntent[] = ['GRID_CHARGING', 'SOLAR_STORAGE', 'LOAD_SUPPORT', 'EXPORT_ARBITRAGE', 'IDLE'];

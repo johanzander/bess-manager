@@ -5,6 +5,17 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.11.0] - 2026-03-21
+
+### Changed
+
+- Dashboard status cards redesigned: removed duplicate status badges, added inline colored pills for Grid/Battery direction and Strategic Intent.
+- Battery card now shows Strategic Intent as the main KPI and Battery Mode as a sub-KPI.
+- Status card labels renamed for clarity: "Power Flow"→"Home Power", "Solar Production"→"Solar Generation", "Home Load"→"Home Usage", "Grid Flow"→"Grid", "Energy & Power"→"Battery".
+- Energy Flow chart switched from step bars to smooth monotone lines with midpoint positioning for clearer period visualisation.
+- Battery Mode Schedule and Energy Flow chart horizontal axes now align exactly.
+- Schedule intent labels updated to plain-language names: "Charging from Grid", "Storing Solar", "Powering Home", "Selling to Grid", "Standby".
+
 ## [7.10.0] - 2026-03-16
 
 ### Changed

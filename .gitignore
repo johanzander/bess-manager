@@ -31,9 +31,11 @@ yarn-error.log*
 backend/dev-options.json
 
 # Build output
-dist/
+/dist/
+/build/
 build/
 .vite/
+# frontend/dist is committed so HA add-on builds include the production bundle
 
 # Editor/IDE files
 .vscode/

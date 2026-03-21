@@ -30,9 +30,8 @@ yarn-error.log*
 # Development options (contains sensitive settings)
 backend/dev-options.json
 
-# Build output (frontend/dist is committed for HA add-on deployment)
-/dist/
-/build/
+# Build output
+dist/
 build/
 .vite/
 

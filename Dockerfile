@@ -28,9 +28,7 @@ RUN apk add --no-cache \
     python3-dev \
     gcc \
     musl-dev \
-    bash \
-    nodejs \
-    npm
+    bash
 
 # Set working directory
 WORKDIR /app
@@ -41,19 +39,8 @@ COPY backend/app.py backend/api.py backend/api_conversion.py backend/api_datacla
 # Copy core directory
 COPY core/ /app/core/
 
-# Build and copy frontend
-WORKDIR /tmp/frontend
-COPY frontend/package*.json ./
-RUN npm ci
-
-COPY frontend/ ./
-RUN npm run build
-
-# Move built frontend to app directory
-RUN mkdir -p /app/frontend && mv dist/* /app/frontend/
-
-# Back to app directory
-WORKDIR /app
+# Copy pre-built frontend (built locally and committed to the repository)
+COPY frontend/dist/ /app/frontend/
 
 # Copy run script
 COPY backend/run.sh ./

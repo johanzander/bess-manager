@@ -5,6 +5,12 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.11.1] - 2026-03-21
+
+### Fixed
+
+- Force version bump so Home Assistant add-on store picks up 7.11.0 changes.
+
 ## [7.11.0] - 2026-03-21
 
 ### Changed

@@ -38,7 +38,7 @@ class DebugReportFormatter:
             ]
             return "\n\n".join(sections)
         except Exception as e:
-            logger.error(f"Failed to format debug report: {e}", exc_info=True)
+            logger.exception(f"Failed to format debug report: {e}")
             return self._format_error_report(export, e)
 
     def _format_header(self, export: DebugDataExport) -> str:
@@ -128,6 +128,7 @@ class DebugReportFormatter:
         battery = self._format_json(export.battery_settings)
         price = self._format_json(export.price_settings)
         home = self._format_json(export.home_settings)
+        energy_provider = self._format_json(export.energy_provider_config)
 
         return f"""## Settings
 
@@ -147,6 +148,12 @@ class DebugReportFormatter:
 
 ```json
 {home}
+```
+
+### Energy Provider Configuration
+
+```json
+{energy_provider}
 ```"""
 
     def _format_historical_data(self, export: DebugDataExport) -> str:

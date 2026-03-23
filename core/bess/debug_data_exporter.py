@@ -28,6 +28,7 @@ class DebugDataExport:
     battery_settings: dict
     price_settings: dict
     home_settings: dict
+    energy_provider_config: dict
     historical_periods: list[dict]
     historical_summary: dict
     schedules: list[dict]
@@ -71,6 +72,7 @@ class DebugDataAggregator:
             battery_settings=self._serialize_battery_settings(),
             price_settings=self._serialize_price_settings(),
             home_settings=self._serialize_home_settings(),
+            energy_provider_config=self._serialize_energy_provider_config(),
             historical_periods=self._serialize_historical_data(),
             historical_summary=self._summarize_historical_data(),
             schedules=self._serialize_schedules(compact=compact),
@@ -124,6 +126,14 @@ class DebugDataAggregator:
                 "error": str(e),
                 "message": "Health checks failed during export",
             }
+
+    def _serialize_energy_provider_config(self) -> dict:
+        """Serialize energy provider configuration to dictionary.
+
+        Returns:
+            Energy provider config as dictionary
+        """
+        return self.system._energy_provider_config
 
     def _serialize_battery_settings(self) -> dict:
         """Serialize battery settings to dictionary.

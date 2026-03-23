@@ -355,10 +355,27 @@ def check_historical_data_access():
     try:
         config = get_influxdb_config()
 
-        if config["url"] and config["username"] and config["password"]:
+        placeholder_values = {"your_db_username_here", "your_db_password_here"}
+        has_placeholders = (
+            config["username"] in placeholder_values
+            or config["password"] in placeholder_values
+        )
+
+        if has_placeholders:
+            config_check["status"] = "WARNING"
+            config_check["value"] = f"URL: {config['url']}"
+            config_check["formatted_value"] = f"URL: {config['url']}"
+            config_check[
+                "error"
+            ] = "InfluxDB credentials are still set to placeholder values — InfluxDB is not configured"
+            logger.warning(
+                "InfluxDB credentials are still set to placeholder values — InfluxDB is not configured"
+            )
+        elif config["url"] and config["username"] and config["password"]:
             config_check["status"] = "OK"
             config_check["value"] = f"URL: {config['url']}"
             config_check["formatted_value"] = f"URL: {config['url']}"
+            logger.info("InfluxDB credentials configured")
         else:
             config_check["status"] = "ERROR"
             missing = []

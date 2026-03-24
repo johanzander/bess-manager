@@ -70,30 +70,6 @@ Tested with MIN/TLX inverters
 
 > 📸 **Screenshot placeholders** - Add actual screenshots to `docs/images/` directory
 
-## Claude Code Integration
-
-BESS Manager includes an MCP (Model Context Protocol) server for integration with Claude Code, enabling AI-assisted debugging and log analysis.
-
-To enable, add to `.claude/mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "bess": {
-      "command": "python3",
-      "args": ["scripts/bess-mcp-server.py"]
-    }
-  }
-}
-```
-
-Configure connection in `.env`:
-
-```bash
-HA_URL=https://your-homeassistant-url
-HA_TOKEN=your-long-lived-access-token
-```
-
 ## Documentation
 
 - 🔧 **[Installation Guide](docs/INSTALLATION.md)** - Complete setup instructions

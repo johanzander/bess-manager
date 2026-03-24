@@ -41,7 +41,98 @@ Complete guide for installing and configuring BESS Battery Manager for Home Assi
    - Find "BESS Battery Manager" in Local add-ons
    - Click "Install"
 
-## Step 2: Create Home Consumption Sensor
+## Step 2: Set Up InfluxDB (Optional but Recommended)
+
+BESS uses InfluxDB to store and retrieve historical energy sensor data. Without it, the system loses
+all historical context when restarted and cannot backfill the energy balance chart after startup.
+It is not required for optimization to work, but strongly recommended.
+
+### 2a: Install InfluxDB
+
+1. Go to **Settings → Add-ons → Add-on Store**
+2. Search for **InfluxDB** and install it
+3. Start the add-on and open the web UI
+
+### 2b: Create an InfluxDB Write User for Home Assistant
+
+Home Assistant needs its own user with **WRITE** access to push sensor data into InfluxDB.
+
+1. Open the **InfluxDB web UI** (from the add-on page, click **Open Web UI**)
+2. Go to **Settings → Users**
+3. Create a user, for example `homeassistant`, with a password
+4. Grant it **WRITE** access to the `homeassistant` database
+
+> **Note:** This is a separate user from the BESS read-only user created in step 2d below.
+> HA writes data; BESS reads it. Keep them separate so BESS cannot accidentally modify data.
+
+### 2c: Configure Home Assistant to Write to InfluxDB
+
+Add the following to your `configuration.yaml`:
+
+```yaml
+influxdb:
+  host: localhost
+  port: 8086
+  database: !secret influxdb_database
+  username: !secret influxdb_username
+  password: !secret influxdb_password
+  max_retries: 3
+  include:
+    domains:
+      - sensor
+```
+
+And add the corresponding entries to `secrets.yaml`:
+
+```yaml
+influxdb_database: homeassistant
+influxdb_username: homeassistant
+influxdb_password: your_ha_writer_password
+```
+
+After restarting Home Assistant, sensor states will start being written to InfluxDB.
+
+> **Note:** In the InfluxDB UI under **Configuration**, you should see the connection listed as
+> `http://localhost:8086` — **CONNECTED**. The database `homeassistant` appears under **Explore**.
+
+### 2d: Create a Read-Only InfluxDB User for BESS
+
+BESS only needs read access to InfluxDB. Create a dedicated user:
+
+1. Open the **InfluxDB web UI** (from the add-on page, click **Open Web UI**)
+2. Go to **Settings → Users** (InfluxDB 1.x admin UI at `http://homeassistant.local:8086`)
+3. Create a new user, for example `bess`, with a password
+4. Grant it **READ** access to the `homeassistant` database
+
+### 2e: Configure BESS to Connect to InfluxDB
+
+Add the following to your BESS add-on configuration:
+
+```yaml
+influxdb:
+  url: "http://homeassistant.local:8086/api/v2/query"
+  bucket: "homeassistant/autogen"
+  username: "bess"
+  password: "your_password_here"
+```
+
+> **⚠️ The bucket name is not just the database name.**
+> InfluxDB 1.x organises data as `<database>/<retention_policy>`. The default retention policy is
+> `autogen`, so the bucket must be set to `homeassistant/autogen` — not just `homeassistant`.
+> This is the most common misconfiguration.
+
+> **URL note:** Use `http://homeassistant.local:8086/api/v2/query` if BESS runs on the same machine
+> as Home Assistant. If InfluxDB is on a separate host, replace the hostname with the IP address,
+> e.g. `http://192.168.1.100:8086/api/v2/query`.
+
+### 2f: Verify the Connection
+
+After starting BESS, go to the **System Health** page in the web interface. The
+**Historical Data Access** component should show **OK**. If it shows a warning like
+*"returned no valid data"*, the most likely cause is an incorrect bucket name — double-check
+that you have used `homeassistant/autogen` and not just `homeassistant`.
+
+## Step 3: Create Home Consumption Sensor
 
 BESS needs a consumption sensor. How to predict home energy consumption is outside the scope of this AddOn.
 Here is an example of a template sensor that predicts the future consumption based on last 48h consumption average. This approach is sufficient for good optimization perfomrance.
@@ -80,7 +171,7 @@ sensor:
 
 **EV charging:** Exclude if managed separately. Include if you want BESS to optimize around it.
 
-## Step 3: Configure BESS Manager
+## Step 4: Configure BESS Manager
 
 Edit the add-on configuration:
 
@@ -110,7 +201,7 @@ electricity_price:
   markup_rate: 0.08                 # Markup (per kWh, in your currency)
   vat_multiplier: 1.25              # VAT (1.25 = 25%)
   additional_costs: 1.03            # Additional costs (per kWh)
-  tax_reduction: 0.6518             # Tax reduction for sold energy (per kWh)
+  tax_reduction: 0.0                # Tax reduction for sold energy (per kWh)
 
 # Energy provider configuration
 energy_provider:
@@ -144,7 +235,7 @@ sensors:
   export_power: "sensor.your_grid_export"
 
   # Consumption forecast (required)
-  48h_avg_grid_import: "sensor.48h_average_grid_import_power"  # From Step 2
+  48h_avg_grid_import: "sensor.48h_average_grid_import_power"  # From Step 3
 
   # Solar forecast (required)
   solar_forecast_today: "sensor.solcast_pv_forecast_forecast_today"
@@ -166,6 +257,54 @@ sensors:
   # lifetime_export_to_grid: "sensor.your_lifetime_export_to_grid"
   # ev_energy_meter: "sensor.your_ev_energy_meter"
 ```
+
+### Nordpool Electricity Price Setup
+
+Nordpool prices are **VAT-exclusive** spot prices. The buy price is calculated as:
+
+```
+buy_price = (spot_price + markup_rate) × vat_multiplier + additional_costs
+```
+
+Set `vat_multiplier` to your country's VAT rate and `additional_costs` to your fixed per-kWh
+charges (grid fee, energy tax, etc.) already including VAT:
+
+| Country | VAT | `vat_multiplier` |
+|---------|-----|-----------------|
+| Sweden, Norway, Denmark, Finland | 25% | `1.25` |
+| Netherlands | 21% | `1.21` |
+| Germany | 19% | `1.19` |
+
+**Example for Sweden:**
+
+```yaml
+electricity_price:
+  area: "SE3"
+  markup_rate: 0.08        # Supplier markup in SEK/kWh (ex-VAT) — e.g. Tibber charges 8 öre/kWh
+  vat_multiplier: 1.25     # 25% VAT applied to spot + markup
+  additional_costs: 1.03   # Grid fee + energy tax in SEK/kWh (VAT-inclusive total)
+  tax_reduction: 0.0       # Swedish skattereduktion removed as of Jan 1 2026
+```
+
+> **`additional_costs`** covers fixed per-kWh charges such as grid tariff and energy tax.
+> These are added **after** VAT is applied to the spot price, so specify them as the
+> final consumer amount (VAT already included where applicable).
+>
+> **Typical Swedish breakdown (SEK/kWh):**
+>
+> | Component | Swedish term | Amount |
+> |-----------|-------------|--------|
+> | Grid transfer fee (ex. VAT) | Överföringsavgift | ~0.45 |
+> | VAT on grid fee (25%) | Moms på nätavgift | ~0.11 |
+> | Energy tax | Energiskatt | ~0.46 |
+> | **Total `additional_costs`** | | **~1.02** |
+>
+> The grid transfer fee (överföringsavgift) varies by network operator and region.
+> Check your electricity bill for the exact amounts.
+
+> **`tax_reduction`** is the per-kWh credit you receive when selling energy back to the grid.
+> The Swedish *skattereduktion* was removed as of Jan 1 2026, so Swedish users should set this to `0.0`.
+> Users in other markets should check whether their tariff includes a sell-back credit.
 
 ### Octopus Energy Setup
 
@@ -262,7 +401,7 @@ This setting controls when the battery should be used. The optimization algorith
 - **Too low:** Battery cycles frequently for minimal benefit, increases wear
 - **Too high:** Battery rarely used, missing optimization opportunities
 
-## Step 4: Start the Add-on
+## Step 5: Start the Add-on
 
 1. Save configuration
 2. Start BESS Manager
@@ -277,11 +416,75 @@ This setting controls when the battery should be used. The optimization algorith
 
 **Problem:** Missing consumption data
 
-**Solution:** Check 48h average sensor is working (Step 2)
+**Solution:** Check 48h average sensor is working (Step 3)
 
 **Problem:** Battery charges during expensive hours, discharges during cheap hours
 
-**Solution:** Check `cycle_cost` is in correct currency (see Step 3)
+**Solution:** Check `cycle_cost` is in correct currency (see Step 4)
+
+### Troubleshooting InfluxDB
+
+If the **Historical Data Access** health check shows WARNING or the energy balance chart is empty,
+follow these steps in order.
+
+#### Step 1: Verify HA is writing data to InfluxDB
+
+Open the **InfluxDB web UI** and go to **Explore**. Navigate as follows:
+
+1. Set the database to **homeassistant/autogen**
+2. In the **Measurement** dropdown you should see entries like `%`, `W`, `kWh` (sensor units)
+3. Select one, then pick a **Field** — you should see sensor names and recent values
+
+If you can browse sensors here, HA is writing correctly and the data is ready for BESS to read.
+
+Alternatively, check the **Home Assistant logs** for any InfluxDB write errors:
+
+1. Go to **Settings → System → Logs**
+2. Search for `influxdb`
+3. Errors here mean HA cannot reach InfluxDB or the writer credentials are wrong
+
+If no data appears in InfluxDB at all, check:
+
+- The `influxdb:` block is present in `configuration.yaml` and HA has been restarted
+- The writer username and password in `secrets.yaml` are correct
+- The writer user has **WRITE** access to the `homeassistant` database
+
+#### Step 2: Verify the BESS user can read data
+
+Run the following `curl` command from the machine running Home Assistant (or any machine that can
+reach InfluxDB). Replace `<password>` with the BESS user's password:
+
+```bash
+curl -G "http://homeassistant.local:8086/query" \
+  --data-urlencode "db=homeassistant" \
+  --data-urlencode "q=SELECT last(value) FROM /sensor.*/ LIMIT 5" \
+  -u "bess:<password>"
+```
+
+A working response looks like:
+
+```json
+{"results":[{"statement_id":0,"series":[{"name":"sensor.growatt_...","columns":["time","last"],...}]}]}
+```
+
+If you get `{"results":[{"statement_id":0}]}` (empty series), no sensor data exists yet — wait
+a few minutes for HA to write some, then retry.
+
+If you get a `401 Unauthorized` error, the username or password is wrong, or the user does not
+have read access to the `homeassistant` database.
+
+If you get a connection error, replace `homeassistant.local` with the IP address of your Home
+Assistant instance (e.g. `192.168.1.100`).
+
+#### Step 3: Verify the bucket name in the BESS config
+
+The most common misconfiguration is the bucket name. In the BESS add-on configuration, it must be:
+
+```yaml
+bucket: "homeassistant/autogen"
+```
+
+Not `homeassistant`, not `home_assistant` — it must include `/autogen`.
 
 ### Check Sensor Health
 

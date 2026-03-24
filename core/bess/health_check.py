@@ -1,7 +1,10 @@
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 
-from .influxdb_helper import get_influxdb_config, get_sensor_data
+from .influxdb_helper import (
+    get_influxdb_config,
+    test_influxdb_connection,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -375,25 +378,18 @@ def check_historical_data_access():
         }
 
         try:
-            # Try to get data from one hour ago
-            one_hour_ago = datetime.now() - timedelta(hours=1)
-            # Test with any available sensor - InfluxDB connectivity is what matters
-            # The actual sensor data availability will be tested by the sensor collector
-            test_sensors = [
-                "battery_soc"
-            ]  # Use generic key, let the system handle mapping
+            connection_result = test_influxdb_connection()
 
-            response = get_sensor_data(test_sensors, stop_time=one_hour_ago)
-
-            if response["status"] == "success":
+            if connection_result["status"] == "ok":
                 data_check["status"] = "OK"
-                data_check["value"] = "InfluxDB connection successful"
-                data_check["formatted_value"] = "InfluxDB connection successful"
+                data_check["value"] = connection_result["message"]
+                data_check["formatted_value"] = connection_result["message"]
+            elif connection_result["status"] == "misconfigured":
+                data_check["status"] = "WARNING"
+                data_check["error"] = connection_result["message"]
             else:
                 data_check["status"] = "WARNING"
-                data_check["error"] = (
-                    f"InfluxDB connectivity issue: {response.get('message', 'Unknown error')}"
-                )
+                data_check["error"] = connection_result["message"]
         except Exception as e:
             data_check["status"] = "ERROR"
             data_check["error"] = f"Failed to connect to InfluxDB: {e}"

@@ -34,7 +34,7 @@ DEFAULT_AREA = "SE4"
 MARKUP_RATE = 0.08  # per kWh in configured currency
 VAT_MULTIPLIER = 1.25  # 25% VAT
 ADDITIONAL_COSTS = 1.03  # additional costs per kWh (grid fees, energy tax, etc.)
-TAX_REDUCTION = 0.0518  # tax reduction for sold energy per kWh
+TAX_REDUCTION = 0.0  # tax reduction for sold energy per kWh (Swedish skattereduktion removed Jan 1 2026)
 MIN_PROFIT = 0.2  # Minimum profit per kWh to consider a charge/discharge cycle
 USE_ACTUAL_PRICE = False  # Use raw Nordpool spot prices or include markup, VAT, etc.
 

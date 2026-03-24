@@ -66,6 +66,64 @@ def get_influxdb_config():
     }
 
 
+def test_influxdb_connection() -> dict:
+    """Test InfluxDB connectivity and bucket configuration.
+
+    Fetches a single row from the bucket without filtering by sensor name,
+    so the result is independent of which sensors are configured.
+
+    Returns:
+        dict: {"status": "ok" | "misconfigured" | "error", "message": str}
+    """
+    config = get_influxdb_config()
+    url = config["url"]
+    bucket = config["bucket"]
+    username = config["username"]
+    password = config["password"]
+
+    if not url or not username or not password or not bucket:
+        return {"status": "error", "message": "Incomplete InfluxDB configuration"}
+
+    flux_query = f"""from(bucket: "{bucket}")
+  |> range(start: -24h)
+  |> limit(n: 1)
+"""
+    headers = {"Content-type": "application/vnd.flux", "Accept": "application/csv"}
+
+    try:
+        response = requests.post(
+            url=url,
+            auth=(username, password),
+            headers=headers,
+            data=flux_query,
+            timeout=10,
+        )
+
+        if response.status_code != 200:
+            return {
+                "status": "error",
+                "message": f"InfluxDB returned HTTP {response.status_code}",
+            }
+
+        has_valid_csv = "_value" in response.text and "_time" in response.text
+        if has_valid_csv:
+            return {"status": "ok", "message": "InfluxDB connection successful"}
+
+        return {
+            "status": "misconfigured",
+            "message": (
+                f"InfluxDB responded (HTTP 200) but returned no valid data. "
+                f"Current bucket: '{bucket}'. "
+                f"For InfluxDB 1.x, the bucket must be set to '<database>/autogen' "
+                f"(e.g. 'homeassistant/autogen'). "
+                f"Also verify the username has read access to the database."
+            ),
+        }
+
+    except requests.RequestException as e:
+        return {"status": "error", "message": f"Connection error: {e!s}"}
+
+
 def get_sensor_data(sensors_list, start_time=None, stop_time=None) -> dict:
     """Get sensor data with configurable time range.
 
@@ -159,7 +217,12 @@ def get_sensor_data(sensors_list, start_time=None, stop_time=None) -> dict:
             }
 
         sensor_readings = parse_influxdb_response(response.text)
-        return {"status": "success", "data": sensor_readings}
+        has_valid_csv = "_value" in response.text and "_time" in response.text
+        return {
+            "status": "success",
+            "data": sensor_readings,
+            "has_valid_csv": has_valid_csv,
+        }
 
     except requests.RequestException as e:
         _LOGGER.error("Error connecting to InfluxDB: %s", str(e))

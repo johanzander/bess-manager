@@ -5,6 +5,23 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.11.3] - 2026-03-24
+
+### Fixed
+
+- InfluxDB health check no longer reports OK when the bucket is misconfigured — it now tests connectivity with a sensor-agnostic query and reports a clear warning with the current bucket name and correct format.
+- Fixed a variable name collision in the health check that caused a spurious "Critical System Issues Detected" error on startup.
+
+### Changed
+
+- `tax_reduction` default set to `0.0` — Swedish skattereduktion was removed as of Jan 1 2026.
+
+### Documentation
+
+- Added complete InfluxDB setup guide (Steps 2a–2f): two-user setup, `configuration.yaml` snippet, bucket naming (`homeassistant/autogen`), and connection verification.
+- Added Nordpool electricity price section explaining VAT-exclusive pricing, the buy price formula, per-country VAT table, and Swedish cost breakdown (överföringsavgift, energiskatt, moms).
+- Added InfluxDB troubleshooting section with InfluxDB UI navigation steps and a `curl` command to verify BESS read access.
+
 ## [7.11.2] - 2026-03-21
 
 ### Fixed

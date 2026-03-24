@@ -5,6 +5,16 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.11.4] - 2026-03-24
+
+### Changed
+
+- Refactored DP optimizer hot path to eliminate per-action dataclass allocation, reducing memory pressure during optimization.
+
+### Fixed
+
+- Fixed weather test helper generating invalid `hour=24` datetime strings when forecast spans midnight.
+
 ## [7.11.3] - 2026-03-24
 
 ### Fixed

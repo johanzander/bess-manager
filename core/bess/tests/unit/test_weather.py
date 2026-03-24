@@ -1,5 +1,6 @@
 """Tests for core.bess.weather module."""
 
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -20,12 +21,13 @@ def _make_ha_forecast_response(temps: list[float], start_hour: int = 0):
     Returns:
         Dict matching HA service_response structure.
     """
+    base = datetime(2026, 3, 8, start_hour, 0, 0, tzinfo=timezone(timedelta(hours=1)))
     forecasts = []
     for i, temp in enumerate(temps):
-        hour = start_hour + i
+        dt = base + timedelta(hours=i)
         forecasts.append(
             {
-                "datetime": f"2026-03-08T{hour:02d}:00:00+01:00",
+                "datetime": dt.isoformat(),
                 "temperature": temp,
                 "cloud_coverage": 50,
                 "wind_speed": 3.0,

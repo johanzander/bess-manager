@@ -5,6 +5,17 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.12.0] - 2026-03-25
+
+### Added
+
+- Mock HA development environment (`./mock-run.sh`) — runs the full BESS stack against a local FastAPI mock server. Scenarios are generated from debug logs; no real HA or inverter needed.
+- Debug export now includes raw electricity prices, full addon options (entity IDs, inverter config), and active inverter TOU segments for exact scenario replay.
+
+### Fixed
+
+- Fixed `initial_soe` in debug log export being recorded as a percentage instead of kWh when the midnight SOC snapshot was used.
+
 ## [7.11.5] - 2026-03-25
 
 ### Fixed

@@ -31,6 +31,8 @@ class DebugReportFormatter:
                 self._format_system_info(export),
                 self._format_health_status(export),
                 self._format_settings(export),
+                self._format_addon_options(export),
+                self._format_inverter_tou(export),
                 self._format_historical_data(export),
                 self._format_schedules(export),
                 self._format_snapshots(export),
@@ -38,7 +40,7 @@ class DebugReportFormatter:
             ]
             return "\n\n".join(sections)
         except Exception as e:
-            logger.error(f"Failed to format debug report: {e}", exc_info=True)
+            logger.exception(f"Failed to format debug report: {e}")
             return self._format_error_report(export, e)
 
     def _format_header(self, export: DebugDataExport) -> str:
@@ -127,6 +129,7 @@ class DebugReportFormatter:
         """
         battery = self._format_json(export.battery_settings)
         price = self._format_json(export.price_settings)
+        price_data = self._format_json(export.price_data)
         home = self._format_json(export.home_settings)
 
         return f"""## Settings
@@ -143,11 +146,44 @@ class DebugReportFormatter:
 {price}
 ```
 
+### Price Data
+
+```json
+{price_data}
+```
+
 ### Home Settings
 
 ```json
 {home}
 ```"""
+
+    def _format_addon_options(self, export: DebugDataExport) -> str:
+        return f"""## BESS Configuration
+
+```json
+{self._format_json(export.addon_options)}
+```"""
+
+    def _format_inverter_tou(self, export: DebugDataExport) -> str:
+        segments = export.inverter_tou_segments
+        count = len(segments)
+
+        summary = f"""## Inverter TOU Segments
+
+**Segments in Hardware**: {count}"""
+
+        if count == 0:
+            return summary + "\n\n*No TOU segments available*"
+
+        return (
+            summary
+            + f"""
+
+```json
+{self._format_json(segments)}
+```"""
+        )
 
     def _format_historical_data(self, export: DebugDataExport) -> str:
         """Format historical data section with summary.

@@ -47,3 +47,4 @@ build/
 *.log
 .bess-logs/
 docs/private/
+docs/bess-debug-*.md

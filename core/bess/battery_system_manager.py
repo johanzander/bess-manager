@@ -127,7 +127,7 @@ class BatterySystemManager:
 
         # Current schedule tracking
         self._current_schedule = None
-        self._initial_soe = None
+        self._initial_soc_pct = None  # SOC at midnight (%), set at period 0
 
         # Prediction caches (populated by _fetch_predictions)
         self._consumption_predictions: list[float] | None = None
@@ -733,8 +733,10 @@ class BatterySystemManager:
             try:
                 if self._controller is not None:
                     current_soc = self._controller.get_battery_soc()
-                    self._initial_soe = current_soc
-                    logger.info(f"Setting initial SOC for day: {self._initial_soe}%")
+                    self._initial_soc_pct = current_soc
+                    logger.info(
+                        f"Setting initial SOC for day: {self._initial_soc_pct}%"
+                    )
                 else:
                     logger.warning(
                         "Cannot get initial SOC: controller is not available"
@@ -1457,13 +1459,18 @@ class BatterySystemManager:
                         target_period
                     ] = period_data.decision.strategic_intent
 
-            # Store initial SOC in OptimizationResult for DailyViewBuilder
-            if self._initial_soe is not None:
-                result.input_data["initial_soe"] = self._initial_soe
+            # Store initial SOE (kWh) in OptimizationResult for DailyViewBuilder.
+            # _initial_soc_pct and _get_current_battery_soc() return SOC percent (0-100);
+            # convert to kWh before storing so input_data["initial_soe"] is always kWh.
+            total_cap = self.battery_settings.total_capacity
+            if self._initial_soc_pct is not None:
+                result.input_data["initial_soe"] = (
+                    self._initial_soc_pct / 100.0 * total_cap
+                )
             elif not prepare_next_day:
                 current_soc = self._get_current_battery_soc()
                 if current_soc is not None:
-                    result.input_data["initial_soe"] = current_soc
+                    result.input_data["initial_soe"] = current_soc / 100.0 * total_cap
 
             # Store in schedule store - now using OptimizationResult directly
             self.schedule_store.store_schedule(

@@ -27,9 +27,12 @@ class DebugDataExport:
     health_check_results: dict
     battery_settings: dict
     price_settings: dict
+    price_data: dict
     home_settings: dict
+    addon_options: dict
     historical_periods: list[dict]
     historical_summary: dict
+    inverter_tou_segments: list[dict]
     schedules: list[dict]
     schedules_summary: dict
     snapshots: list[dict]
@@ -70,7 +73,10 @@ class DebugDataAggregator:
             health_check_results=self._get_health_checks(),
             battery_settings=self._serialize_battery_settings(),
             price_settings=self._serialize_price_settings(),
+            price_data=self._serialize_price_data(),
             home_settings=self._serialize_home_settings(),
+            addon_options=self._serialize_addon_options(),
+            inverter_tou_segments=self._serialize_inverter_tou(),
             historical_periods=self._serialize_historical_data(),
             historical_summary=self._summarize_historical_data(),
             schedules=self._serialize_schedules(compact=compact),
@@ -141,6 +147,23 @@ class DebugDataAggregator:
         """
         return asdict(self.system.price_settings)
 
+    def _serialize_price_data(self) -> dict:
+        """Serialize full-day raw prices for today and tomorrow.
+
+        Returns raw (pre-markup) quarterly prices so debug log replays can
+        reconstruct the exact sensor values that were seen on that day.
+        """
+        try:
+            today_entries = self.system.price_manager.get_today_prices()
+            tomorrow_entries = self.system.price_manager.get_tomorrow_prices()
+            return {
+                "today": [round(e["price"], 6) for e in today_entries],
+                "tomorrow": [round(e["price"], 6) for e in tomorrow_entries],
+            }
+        except Exception as e:
+            logger.warning("Failed to serialize price data: %s", e)
+            return {"today": [], "tomorrow": []}
+
     def _serialize_home_settings(self) -> dict:
         """Serialize home settings to dictionary.
 
@@ -148,6 +171,37 @@ class DebugDataAggregator:
             Home settings as dictionary
         """
         return asdict(self.system.home_settings)
+
+    def _serialize_addon_options(self) -> dict:
+        """Serialize the full addon options (entity ID mappings, inverter config).
+
+        This is the complete options.json loaded at startup — includes sensor entity
+        IDs, battery settings, price config, and inverter device ID. Used by
+        from_debug_log.py to auto-generate bess_config for mock HA replay.
+
+        Returns:
+            Addon options dict as loaded from options.json
+        """
+        try:
+            return dict(self.system._addon_options)
+        except Exception as e:
+            logger.warning("Failed to serialize addon options: %s", e)
+            return {}
+
+    def _serialize_inverter_tou(self) -> list[dict]:
+        """Serialize the current inverter TOU segments from memory.
+
+        Returns the segments that were last read from / written to the inverter,
+        so debug log replays can seed the mock with the real inverter state.
+
+        Returns:
+            List of TOU segment dicts as held in active_tou_intervals
+        """
+        try:
+            return list(self.system._schedule_manager.active_tou_intervals)
+        except Exception as e:
+            logger.warning("Failed to serialize inverter TOU segments: %s", e)
+            return []
 
     def _serialize_historical_data(self) -> list[dict]:
         """Serialize historical data from today's periods.

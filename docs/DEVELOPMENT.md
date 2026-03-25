@@ -289,6 +289,100 @@ The build output will be in:
 
 For installation instructions, see [INSTALLATION.md](INSTALLATION.md).
 
+## Mock HA Development Environment
+
+The mock HA environment lets you run the full BESS stack (backend + frontend) without a
+real Home Assistant instance or inverter. BESS runs unmodified — only `HA_URL` is pointed
+at a local mock server that serves synthetic sensor data and records service calls.
+
+### Quick Start
+
+Generate a scenario from a debug log, then run it:
+
+```bash
+python scripts/mock_ha/scenarios/from_debug_log.py bess-debug-2026-03-24-225535.md
+./mock-run.sh 2026-03-24-225535
+```
+
+- BESS UI: <http://localhost:8080>
+- Service call log (inverter writes): <http://localhost:8123/mock/service_log>
+- Sensor states: <http://localhost:8123/mock/sensors>
+
+### How It Works
+
+```
+BESS container (unmodified)
+    ↓ HA_URL=http://mock-ha:8123
+mock-ha container (FastAPI)
+  → GET  /api/states/{entity_id}      → sensor state from scenario JSON
+  → POST /api/services/{domain}/{svc} → record call, return canned response
+  → GET  /mock/service_log            → inspect what was written to inverter
+```
+
+The mock server loads a scenario JSON at startup. BESS reads sensors and writes
+schedules exactly as it would against real HA — the mock records every service call
+so you can verify what the optimizer decided to send to the inverter.
+
+### Scenarios
+
+Scenarios live in `scripts/mock_ha/scenarios/` and are named after the debug log
+timestamp they were generated from (e.g. `2026-03-24-225535.json`). Each scenario
+contains:
+
+- `sensors` — all HA entity states BESS will read
+- `inverter_type` — `"min"` or `"sph"`, determines which inverter service calls BESS uses
+- `mock_time` — frozen wall-clock time (e.g. `"@2026-03-24 22:55:35"`); BESS
+  believes it is running at this time via `libfaketime`
+- `time_segments` — inverter TOU state at time of capture (active segments only;
+  disabled slots are not reconstructable from debug logs)
+
+### BESS Config
+
+The entire scenario — sensor states, inverter type, and BESS config (entity ID
+mappings, battery settings, inverter config) — is generated from the debug log.
+`mock-run.sh` mounts `bess_config` as `/data/options.json` in the BESS container.
+
+### Generating a Debug Log
+
+**Option A — System Health page:** Open the BESS UI, go to System Health, and click
+the **Export Debug Data** button. Save the downloaded `.md` file anywhere accessible.
+
+**Option B — Via Claude Code (MCP):** With a running BESS instance and the MCP server
+configured, ask Claude to fetch and generate a scenario in one step:
+
+> "Fetch the current BESS debug log and generate a mock scenario from it"
+
+Claude will use `fetch_live_debug` (saves to `.bess-logs/`) then run
+`from_debug_log.py` automatically. No manual download needed.
+
+### Replay from Debug Log
+
+The `from_debug_log.py` script extracts everything needed for a faithful replay:
+
+- Battery SOC (converted from `initial_soe` / `total_capacity`)
+- Nordpool prices — from `### Price Data` in new-style logs (exact quarterly values),
+  or reverse-calculated from marked-up `buy_price` in old logs
+- Solar forecast from `full_solar_production`
+- Inverter TOU segments from `## Inverter TOU Segments` (new-style logs)
+- Frozen timestamp from the debug log filename
+
+```bash
+# Generate scenario from a saved debug log
+python scripts/mock_ha/scenarios/from_debug_log.py bess-debug-YYYY-MM-DD-HHMMSS.md
+
+# Run replay — BESS runs as if it is that exact moment in time
+./mock-run.sh YYYY-MM-DD-HHMMSS
+```
+
+### Debug Log Export
+
+The debug log includes:
+
+- `### Price Data` — full raw Nordpool quarterly prices for both days, enabling
+  exact replay without reverse-calculating through the markup formula
+- `## Inverter TOU Segments` — active TOU slots held in memory, mirroring the
+  current hardware state
+
 ## Claude Code Integration
 
 BESS Manager includes an MCP (Model Context Protocol) server for integration with Claude Code,

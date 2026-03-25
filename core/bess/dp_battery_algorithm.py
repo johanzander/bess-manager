@@ -680,10 +680,16 @@ def _run_dynamic_programming(
                     decision=idle_decision,
                 )
                 stored_period_data[(t, i)] = idle_period_data
-                # Also update V[t, i] to the actual IDLE cost (not -inf)
-                V[t, i] = -(
-                    idle_grid_imported * buy_price[t]
-                    - idle_grid_exported * sell_price[t]
+                # Also update V[t, i] to the actual IDLE cost (not -inf),
+                # including future value to preserve backward propagation.
+                # Without V[t+1, i], export profits beyond this state are lost
+                # and the optimizer cannot distinguish cheap vs expensive charging paths.
+                V[t, i] = (
+                    -(
+                        idle_grid_imported * buy_price[t]
+                        - idle_grid_exported * sell_price[t]
+                    )
+                    + V[t + 1, i]
                 )
 
             # Update cost basis for next time step

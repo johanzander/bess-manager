@@ -313,6 +313,85 @@ def test_economic_data_structure():
         assert abs(hour_data.economic.hourly_savings - expected_savings) < 0.01
 
 
+def test_defers_charging_to_cheaper_overnight_window():
+    """
+    Regression test for 2026-03-24 bug: optimizer charged at 1.20 SEK tonight
+    instead of deferring to 1.13 SEK tomorrow overnight.
+
+    Root cause: V[t, max_soe_state] in the backward pass was not propagating
+    future value when no valid action was found (discharge unprofitable at low
+    overnight sell prices, charge impossible when battery is full). This caused
+    the export profit at tomorrow evening to be invisible from tonight's charging
+    decision, making "charge now at 1.20" look equivalent to "charge later at 1.13".
+
+    The optimizer should always prefer the cheapest available charging window when
+    the battery can reach full capacity before the discharge opportunity regardless
+    of when the charging happens.
+    """
+    # Battery settings matching the 2026-03-24 debug log
+    settings = BatterySettings(
+        total_capacity=30.0,
+        min_soc=15.0,  # 4.5 kWh min — gives state 240 = 28.5 kWh = max
+        max_soc=95.0,  # 28.5 kWh max
+        max_charge_power_kw=14.7,
+        max_discharge_power_kw=14.7,
+        efficiency_charge=0.97,
+        efficiency_discharge=0.95,
+        cycle_cost_per_kwh=0.40,
+    )
+
+    # 104-period horizon (15-min periods) starting at 22:00 tonight
+    # Periods 0-7   (22:00-23:45 tonight):      buy=1.20 — more expensive
+    # Periods 8-27  (00:00-04:45 tomorrow):      buy=1.13 — cheaper overnight window
+    # Periods 28-76 (05:00-17:00 tomorrow):      buy=1.20 — normal daytime
+    # Periods 77-83 (17:15-18:45 tomorrow):      buy=2.10 — expensive; discharge avoids this cost
+    # Periods 84-103 (19:00-23:45 tomorrow):     buy=1.20 — normal evening
+    buy_price = (
+        [1.20] * 8  # tonight
+        + [1.13] * 20  # cheap overnight
+        + [1.20] * 49  # daytime
+        + [2.10] * 7  # discharge window
+        + [1.20] * 20  # evening
+    )
+    sell_price = [0.71] * 8 + [0.65] * 20 + [0.71] * 49 + [1.44] * 7 + [0.71] * 20
+    home_consumption = [0.8] * 104  # 3.2 kWh/hour, no solar
+    solar_production = [0.0] * 104
+
+    results = optimize_battery_schedule(
+        buy_price=buy_price,
+        sell_price=sell_price,
+        home_consumption=home_consumption,
+        solar_production=solar_production,
+        initial_soe=10.8,  # 36% SOC at 22:00 (from debug log)
+        initial_cost_basis=1.644,  # from debug log
+        battery_settings=settings,
+        period_duration_hours=0.25,
+    )
+
+    # Before the fix the optimizer filled the battery to max SOE during the
+    # expensive tonight window (1.20 SEK) because V[t, max_soe_state] did not
+    # propagate future export value — making "charge now" look equivalent to
+    # "charge later cheaper" plus extra idle costs.  After the fix the export
+    # profit is correctly visible and the optimizer does NOT over-charge during
+    # the expensive window.
+    max_soe_during_tonight = max(
+        p.energy.battery_soe_end for p in results.period_data[:8]
+    )
+    assert max_soe_during_tonight < battery_settings.max_soe_kwh, (
+        f"Battery reached max SOE ({max_soe_during_tonight:.1f} kWh) during expensive "
+        f"tonight window (buy=1.20 SEK). Optimizer should not over-charge when a cheaper "
+        f"overnight window (1.13 SEK) is available — bug: V[t, max_soe_state] was not "
+        f"propagating future export value in the backward pass."
+    )
+
+    # Export arbitrage must still be executed at the high-price window
+    export_intents = [p.decision.strategic_intent for p in results.period_data[77:84]]
+    assert any(i == "EXPORT_ARBITRAGE" for i in export_intents), (
+        f"Expected EXPORT_ARBITRAGE at periods 77-83 (buy=2.10 SEK). "
+        f"Got: {export_intents}"
+    )
+
+
 def test_strategy_data_structure():
     """
     Test that strategy data structure is properly populated in PeriodData.

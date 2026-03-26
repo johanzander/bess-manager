@@ -292,7 +292,7 @@ def parse_influxdb_response(response_text) -> dict:
 
     col_map = _build_column_index(data_lines)
     if col_map is None:
-        _LOGGER.warning("No header row found in InfluxDB response")
+        _LOGGER.debug("No header row found in InfluxDB response")
         return readings
 
     value_idx = col_map["_value"]

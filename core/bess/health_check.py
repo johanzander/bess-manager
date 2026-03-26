@@ -295,7 +295,25 @@ def run_system_health_checks(system_manager):
     all_component_checks.extend(sensor_collector_health)
 
     # 5. Power Monitor (Power Monitoring) - real-time power flow tracking
-    power_checks = system_manager._power_monitor.check_health()
+    if system_manager._power_monitor is not None:
+        power_checks = system_manager._power_monitor.check_health()
+    else:
+        power_checks = [
+            {
+                "name": "Power Monitoring",
+                "description": "Monitors home power consumption and adapts battery charging",
+                "required": False,
+                "status": "WARNING",
+                "checks": [
+                    {
+                        "component": "Power Monitoring",
+                        "status": "WARNING",
+                        "message": "Disabled — set power_monitoring_enabled: true in config to enable",
+                    }
+                ],
+                "last_run": datetime.now().isoformat(),
+            }
+        ]
     all_component_checks.extend(power_checks)
 
     # 6. Historic data access
@@ -340,10 +358,27 @@ def check_historical_data_access():
     try:
         config = get_influxdb_config()
 
-        if config["url"] and config["username"] and config["password"]:
+        placeholder_values = {"your_db_username_here", "your_db_password_here"}
+        has_placeholders = (
+            config["username"] in placeholder_values
+            or config["password"] in placeholder_values
+        )
+
+        if has_placeholders:
+            config_check["status"] = "WARNING"
+            config_check["value"] = f"URL: {config['url']}"
+            config_check["formatted_value"] = f"URL: {config['url']}"
+            config_check[
+                "error"
+            ] = "InfluxDB credentials are still set to placeholder values — InfluxDB is not configured"
+            logger.warning(
+                "InfluxDB credentials are still set to placeholder values — InfluxDB is not configured"
+            )
+        elif config["url"] and config["username"] and config["password"]:
             config_check["status"] = "OK"
             config_check["value"] = f"URL: {config['url']}"
             config_check["formatted_value"] = f"URL: {config['url']}"
+            logger.info("InfluxDB credentials configured")
         else:
             config_check["status"] = "ERROR"
             missing = []

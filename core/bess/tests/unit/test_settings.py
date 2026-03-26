@@ -321,6 +321,7 @@ def test_home_settings_from_ha_config_phase_count():
             "phase_count": 1,
             "consumption": 3.5,
             "currency": "GBP",
+            "power_monitoring_enabled": False,
         }
     }
     settings.from_ha_config(config)
@@ -334,6 +335,7 @@ def test_home_settings_from_ha_config_phase_count_default():
         "home": {
             "consumption": 3.5,
             "currency": "SEK",
+            "power_monitoring_enabled": False,
         }
     }
     settings.from_ha_config(config)

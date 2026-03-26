@@ -131,6 +131,7 @@ class DebugReportFormatter:
         price = self._format_json(export.price_settings)
         price_data = self._format_json(export.price_data)
         home = self._format_json(export.home_settings)
+        energy_provider = self._format_json(export.energy_provider_config)
 
         return f"""## Settings
 
@@ -156,6 +157,12 @@ class DebugReportFormatter:
 
 ```json
 {home}
+```
+
+### Energy Provider Configuration
+
+```json
+{energy_provider}
 ```"""
 
     def _format_addon_options(self, export: DebugDataExport) -> str:

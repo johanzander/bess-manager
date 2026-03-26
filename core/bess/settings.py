@@ -177,6 +177,7 @@ class HomeSettings:
     min_valid: float = MIN_CONSUMPTION
     currency: str = DEFAULT_CURRENCY
     consumption_strategy: str = "sensor"
+    power_monitoring_enabled: bool = False
 
     def __post_init__(self):
         assert self.phase_count in (
@@ -215,6 +216,7 @@ class HomeSettings:
             self.consumption_strategy = home_config.get(
                 "consumption_strategy", "sensor"
             )
+            self.power_monitoring_enabled = home_config["power_monitoring_enabled"]
             self.__post_init__()
         return self
 

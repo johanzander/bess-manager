@@ -482,7 +482,13 @@ class HomeAssistantAPIController:
         return [self.get_method_sensor_info(method) for method in method_list]
 
     def _api_request(
-        self, method, path, operation=None, category=None, context: dict | None = None, **kwargs
+        self,
+        method,
+        path,
+        operation=None,
+        category=None,
+        context: dict | None = None,
+        **kwargs,
     ):
         """Make an API request to Home Assistant with retry logic.
 
@@ -616,6 +622,8 @@ class HomeAssistantAPIController:
         # In test mode, we block ALL operations EXCEPT these safe reads
         safe_read_operations = [
             ("growatt_server", "read_time_segments"),
+            ("growatt_server", "read_ac_charge_times"),
+            ("growatt_server", "read_ac_discharge_times"),
             ("nordpool", "get_prices_for_date"),
         ]
 
@@ -940,6 +948,135 @@ class HomeAssistantAPIController:
         except Exception as e:
             logger.warning("Failed to read time segments: %s", str(e))
             return []  # Return empty list instead of failing
+
+    def write_ac_charge_times(
+        self,
+        charge_power: int,
+        charge_stop_soc: int,
+        mains_enabled: bool,
+        **period_params: object,
+    ) -> None:
+        """Write AC charge time periods to an SPH inverter.
+
+        Args:
+            charge_power: Charge power as a percentage (0-100)
+            charge_stop_soc: SOC percentage at which to stop charging
+            mains_enabled: Whether AC (mains) charging is enabled
+            **period_params: Flat period parameters, e.g. period_1_start, period_1_end,
+                period_1_enabled, period_2_start, ... (up to period_3_*)
+        """
+        service_params: dict[str, object] = {
+            "charge_power": charge_power,
+            "charge_stop_soc": charge_stop_soc,
+            "mains_enabled": mains_enabled,
+        }
+        service_params.update(period_params)
+
+        if self.growatt_device_id:
+            service_params["device_id"] = self.growatt_device_id
+        else:
+            logger.warning(
+                "No Growatt device_id configured. write_ac_charge_times may fail. "
+                "Please add growatt.device_id to config.yaml"
+            )
+
+        self._service_call_with_retry(
+            "growatt_server", "write_ac_charge_times", **service_params
+        )
+
+    def read_ac_charge_times(self) -> dict:
+        """Read current AC charge time periods from an SPH inverter.
+
+        Returns:
+            Dict with keys: charge_power, charge_stop_soc, mains_enabled, periods (list)
+        """
+        try:
+            service_params: dict[str, object] = {"return_response": True}
+
+            if self.growatt_device_id:
+                service_params["device_id"] = self.growatt_device_id
+            else:
+                logger.warning(
+                    "No Growatt device_id configured. read_ac_charge_times may fail. "
+                    "Please add growatt.device_id to config.yaml"
+                )
+
+            result = self._service_call_with_retry(
+                "growatt_server", "read_ac_charge_times", **service_params
+            )
+
+            if result and "service_response" in result:
+                return result["service_response"]
+
+            logger.warning("Unexpected response format from read_ac_charge_times")
+            return {}
+
+        except Exception as e:
+            logger.warning("Failed to read AC charge times: %s", str(e))
+            return {}
+
+    def write_ac_discharge_times(
+        self,
+        discharge_power: int,
+        discharge_stop_soc: int,
+        **period_params: object,
+    ) -> None:
+        """Write AC discharge time periods to an SPH inverter.
+
+        Args:
+            discharge_power: Discharge power as a percentage (0-100)
+            discharge_stop_soc: SOC percentage at which to stop discharging
+            **period_params: Flat period parameters, e.g. period_1_start, period_1_end,
+                period_1_enabled, period_2_start, ... (up to period_3_*)
+        """
+        service_params: dict[str, object] = {
+            "discharge_power": discharge_power,
+            "discharge_stop_soc": discharge_stop_soc,
+        }
+        service_params.update(period_params)
+
+        if self.growatt_device_id:
+            service_params["device_id"] = self.growatt_device_id
+        else:
+            logger.warning(
+                "No Growatt device_id configured. write_ac_discharge_times may fail. "
+                "Please add growatt.device_id to config.yaml"
+            )
+
+        self._service_call_with_retry(
+            "growatt_server", "write_ac_discharge_times", **service_params
+        )
+
+    def read_ac_discharge_times(self) -> dict:
+        """Read current AC discharge time periods from an SPH inverter.
+
+        Returns:
+            Dict with keys: discharge_power, discharge_stop_soc, periods (list)
+        """
+        try:
+            service_params: dict[str, object] = {"return_response": True}
+
+            if self.growatt_device_id:
+                service_params["device_id"] = self.growatt_device_id
+            else:
+                logger.warning(
+                    "No Growatt device_id configured. read_ac_discharge_times may fail. "
+                    "Please add growatt.device_id to config.yaml"
+                )
+
+            result = self._service_call_with_retry(
+                "growatt_server", "read_ac_discharge_times", **service_params
+            )
+
+            if result and "service_response" in result:
+                return result["service_response"]
+
+            logger.warning("Unexpected response format from read_ac_discharge_times")
+            return {}
+
+        except Exception as e:
+            logger.warning("Failed to read AC discharge times: %s", str(e))
+            return {}
 
     def set_test_mode(self, enabled):
         """Enable or disable test mode."""

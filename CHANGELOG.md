@@ -5,6 +5,13 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.13.0] - 2026-03-25
+
+### Added
+
+- Experimental SPH inverter support (`inverter_type: "SPH"` in config). MIN remains the default; SPH is opt-in. (thanks [@GraemeDBlue](https://github.com/GraemeDBlue))
+- `power_monitoring_enabled` config option to disable phase current monitoring when current sensors are unavailable.
+
 ## [7.12.0] - 2026-03-25
 
 ### Added

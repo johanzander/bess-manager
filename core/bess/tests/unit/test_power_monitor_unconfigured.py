@@ -40,7 +40,9 @@ def unconfigured_controller():
 
 def test_check_health_unconfigured_sensors(unconfigured_controller):
     monitor = HomePowerMonitor(
-        unconfigured_controller, HomeSettings(), BatterySettings()
+        unconfigured_controller,
+        HomeSettings(power_monitoring_enabled=True),
+        BatterySettings(),
     )
     health = monitor.check_health()
     assert isinstance(health, list)

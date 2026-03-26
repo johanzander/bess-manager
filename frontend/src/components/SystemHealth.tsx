@@ -179,7 +179,7 @@ const SystemHealthComponent: React.FC = () => {
                         <StatusIcon status={check.status} />
                         <div className="flex-1">
                           <p className="text-sm font-medium text-gray-900 dark:text-white">{check.name}</p>
-                          <p className="text-sm text-gray-600 dark:text-gray-300">{check.error || 'OK'}</p>
+                          <p className="text-sm text-gray-600 dark:text-gray-300">{check.message || check.error || 'OK'}</p>
                           {check.entity_id && (
                             <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                               Entity ID: <code className="bg-gray-100 dark:bg-gray-600 px-1 rounded text-xs">{check.entity_id}</code>

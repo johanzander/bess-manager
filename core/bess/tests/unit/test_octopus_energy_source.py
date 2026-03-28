@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from core.bess import time_utils
 from core.bess.exceptions import PriceDataUnavailableError, SystemConfigurationError
 from core.bess.octopus_energy_source import OctopusEnergySource
 from core.bess.price_manager import MockSource, PriceManager
@@ -111,13 +112,15 @@ class TestImportRateFetching:
 
     def test_fetch_tomorrow_import_rates(self):
         tomorrow = datetime.now().date() + timedelta(days=1)
-        rates = _make_rates(tomorrow)
+        expected_quarterly = time_utils.get_period_count(tomorrow)
+        expected_raw = expected_quarterly // 2
+        rates = _make_rates(tomorrow, count=expected_raw)
         controller = _make_ha_controller(rates)
         source = _make_source(controller)
 
         prices = source.get_prices_for_date(tomorrow)
 
-        assert len(prices) == 96
+        assert len(prices) == expected_quarterly
 
     def test_rejects_date_beyond_tomorrow(self):
         day_after = datetime.now().date() + timedelta(days=2)

@@ -42,10 +42,14 @@ def get_period_count(target_date: date) -> int:
         Number of quarterly periods in this day
     """
     start = datetime.combine(target_date, time(0, 0), tzinfo=TIMEZONE)
-    next_day = start + timedelta(days=1)
+    next_midnight = datetime.combine(
+        target_date + timedelta(days=1), time(0, 0), tzinfo=TIMEZONE
+    )
 
-    # Calculate actual hours (DST-aware)
-    elapsed_hours = (next_day - start).total_seconds() / 3600
+    # Use epoch timestamps for correct DST-aware elapsed time.
+    # Direct datetime subtraction with ZoneInfo gives wall-clock difference
+    # (always 24h), not actual elapsed time.
+    elapsed_hours = (next_midnight.timestamp() - start.timestamp()) / 3600
 
     return int(elapsed_hours * PERIODS_PER_HOUR)
 

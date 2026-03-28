@@ -10,13 +10,16 @@ to match the system-wide period model.
 import logging
 from datetime import date, datetime, timedelta
 
+from . import time_utils
 from .exceptions import PriceDataUnavailableError, SystemConfigurationError
 from .price_manager import PriceSource
 
 logger = logging.getLogger(__name__)
 
-EXPECTED_RAW_PERIODS = 48  # Octopus provides 48 half-hourly slots
-MIN_RAW_PERIODS = 46  # Allow slightly fewer during incremental publishing
+# Tolerance below the expected half-hourly count for a given day.
+# Accounts for incremental publishing and DST boundary timestamp edge cases
+# where rates at the settlement boundary may have the previous day's date.
+_RAW_PERIOD_TOLERANCE = 2
 
 
 class OctopusEnergySource(PriceSource):
@@ -121,8 +124,9 @@ class OctopusEnergySource(PriceSource):
     ) -> list[float]:
         """Fetch rates from a Home Assistant event entity.
 
-        Octopus provides 48 half-hourly rates. Each rate is duplicated to produce
-        96 quarterly (15-minute) periods matching the system-wide resolution.
+        Octopus provides half-hourly rates (normally 48 per day, fewer on DST
+        spring-forward, more on DST fall-back). Each rate is duplicated to
+        produce quarterly (15-minute) periods matching the system-wide resolution.
 
         Args:
             entity_id: HA entity ID to fetch from
@@ -130,7 +134,7 @@ class OctopusEnergySource(PriceSource):
             rate_type: "import" or "export" (for logging)
 
         Returns:
-            List of 96 quarterly rate values (value_inc_vat) sorted chronologically
+            List of quarterly rate values (value_inc_vat) sorted chronologically
 
         Raises:
             PriceDataUnavailableError: If rates cannot be fetched or validated
@@ -163,20 +167,27 @@ class OctopusEnergySource(PriceSource):
         # Filter rates for the target date and sort chronologically
         filtered_rates = self._filter_rates_for_date(rates, target_date)
 
-        if len(filtered_rates) < MIN_RAW_PERIODS:
+        # Compute expected half-hourly count from the actual day length
+        # (DST-aware via time_utils). Allow a tolerance for settlement-boundary
+        # timestamps that may carry the previous day's date.
+        quarterly_period_count = time_utils.get_period_count(target_date)
+        expected_raw = quarterly_period_count // 2
+        min_raw = expected_raw - _RAW_PERIOD_TOLERANCE
+
+        if len(filtered_rates) < min_raw:
             raise PriceDataUnavailableError(
                 date=target_date,
                 message=(
-                    f"Expected at least {MIN_RAW_PERIODS} {rate_type} rates for {target_date}, "
+                    f"Expected at least {min_raw} {rate_type} rates for {target_date}, "
                     f"got {len(filtered_rates)} from {entity_id}"
                 ),
             )
-        if len(filtered_rates) > EXPECTED_RAW_PERIODS:
+        if len(filtered_rates) > expected_raw:
             raise PriceDataUnavailableError(
                 date=target_date,
                 message=(
                     f"Too many {rate_type} rates for {target_date}: "
-                    f"expected at most {EXPECTED_RAW_PERIODS}, "
+                    f"expected at most {expected_raw}, "
                     f"got {len(filtered_rates)} from {entity_id}"
                 ),
             )
@@ -184,7 +195,7 @@ class OctopusEnergySource(PriceSource):
         # Extract value_inc_vat from each half-hourly rate entry
         half_hourly_prices = [float(rate["value_inc_vat"]) for rate in filtered_rates]
 
-        # Expand 48 half-hourly prices → 96 quarterly prices (duplicate each)
+        # Expand half-hourly prices → quarterly prices (duplicate each)
         quarterly_prices = [p for p in half_hourly_prices for _ in range(2)]
 
         logger.info(

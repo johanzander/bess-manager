@@ -3,7 +3,10 @@ Complete replacement for battery_system.py that preserves ALL functionality.
 
 """
 
+import dataclasses
+import json
 import logging
+import os
 import statistics
 from datetime import date, datetime, timedelta
 from typing import Any
@@ -27,6 +30,7 @@ from .models import (
     DecisionData,
     EconomicData,
     EconomicSummary,
+    EnergyData,
     PeriodData,
     infer_intent_from_flows,
 )
@@ -476,6 +480,61 @@ class BatterySystemManager:
         except Exception as e:
             logger.error(f"Failed to read current inverter schedule: {e}")
 
+    @staticmethod
+    def _period_data_from_dict(d: dict) -> PeriodData:
+        """Deserialize a PeriodData from a dict produced by dataclasses.asdict()."""
+        energy_init_fields = {f.name for f in dataclasses.fields(EnergyData) if f.init}
+        energy = EnergyData(**{k: v for k, v in d["energy"].items() if k in energy_init_fields})
+
+        economic_fields = {f.name for f in dataclasses.fields(EconomicData) if f.init}
+        economic = EconomicData(**{k: v for k, v in d["economic"].items() if k in economic_fields})
+
+        decision_fields = {f.name for f in dataclasses.fields(DecisionData) if f.init}
+        decision = DecisionData(**{k: v for k, v in d["decision"].items() if k in decision_fields})
+
+        ts_raw = d["timestamp"]
+        ts = datetime.fromisoformat(ts_raw) if ts_raw else None
+
+        return PeriodData(
+            period=d["period"],
+            energy=energy,
+            timestamp=ts,
+            data_source=d["data_source"],
+            economic=economic,
+            decision=decision,
+        )
+
+    def _load_historical_seed(self, current_period: int) -> bool:
+        """Seed the historical store from BESS_HISTORICAL_SEED_FILE if set.
+
+        Returns True if seeding succeeded and InfluxDB backfill should be skipped.
+        """
+        seed_file = os.environ.get("BESS_HISTORICAL_SEED_FILE", "")
+        if not seed_file:
+            return False
+
+        try:
+            with open(seed_file, encoding="utf-8") as f:
+                periods: list = json.load(f)
+        except Exception as e:
+            logger.warning("Failed to load historical seed file '%s': %s", seed_file, e)
+            return False
+
+        loaded = 0
+        for entry in periods:
+            if entry is None:
+                continue
+            try:
+                period_data = self._period_data_from_dict(entry)
+                if period_data.period < current_period:
+                    self.historical_store.record_period(period_data.period, period_data)
+                    loaded += 1
+            except Exception as e:
+                logger.warning("Skipping malformed seed period: %s", e)
+
+        logger.info("Historical seed loaded: %d periods from '%s'", loaded, seed_file)
+        return loaded > 0
+
     def _fetch_and_initialize_historical_data(self) -> None:
         """Fetch and initialize historical data using quarterly resolution."""
         try:
@@ -485,6 +544,10 @@ class BatterySystemManager:
             logger.info(
                 f"Fetching historical data - current period: {current_period} ({format_period(current_period)})"
             )
+
+            if current_period > 0 and self._load_historical_seed(current_period):
+                self.sensor_collector.warm_readings_cache()
+                return
 
             if current_period > 0:
                 # Get prices once for all periods (fetch outside loop to avoid repeated API calls)

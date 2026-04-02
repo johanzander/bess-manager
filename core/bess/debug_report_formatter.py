@@ -32,6 +32,7 @@ class DebugReportFormatter:
                 self._format_health_status(export),
                 self._format_settings(export),
                 self._format_addon_options(export),
+                self._format_entity_snapshot(export),
                 self._format_inverter_tou(export),
                 self._format_historical_data(export),
                 self._format_schedules(export),
@@ -72,6 +73,7 @@ class DebugReportFormatter:
             "python_version": export.python_version,
             "system_uptime_hours": round(export.system_uptime_hours, 2),
             "export_timestamp": export.export_timestamp,
+            "timezone": export.timezone,
         }
 
         return f"""## System Information
@@ -171,6 +173,30 @@ class DebugReportFormatter:
 ```json
 {self._format_json(export.addon_options)}
 ```"""
+
+    def _format_entity_snapshot(self, export: DebugDataExport) -> str:
+        count = len(export.entity_snapshot)
+
+        summary = f"""## Entity Snapshot
+
+**Entities captured**: {count}"""
+
+        if count == 0:
+            return summary + "\n\n*No entity states available*"
+
+        return (
+            summary
+            + f"""
+
+<details>
+<summary>Raw HA entity states ({count} entities — click to expand)</summary>
+
+```json
+{self._format_json(export.entity_snapshot)}
+```
+
+</details>"""
+        )
 
     def _format_inverter_tou(self, export: DebugDataExport) -> str:
         segments = export.inverter_tou_segments

@@ -286,7 +286,7 @@ def _aggregate_quarterly_to_hourly(
 @router.get("/api/dashboard")
 async def get_dashboard_data(
     date: str = Query(None),
-    resolution: str = Query("quarter-hourly", regex="^(hourly|quarter-hourly)$"),
+    resolution: str = Query("quarter-hourly", pattern="^(hourly|quarter-hourly)$"),
 ):
     """Unified dashboard endpoint using dataclass-based implementation for type safety.
 

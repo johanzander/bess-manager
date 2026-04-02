@@ -66,6 +66,9 @@ else
   echo "Warning: config.yaml not found in root directory"
 fi
 
+# Pass host timezone to containers so log timestamps use local time
+export TZ=${TZ:-Europe/Stockholm}
+
 echo "Stopping any existing containers..."
 docker-compose down --remove-orphans
 

@@ -19,28 +19,42 @@ from dataclasses import dataclass, field
 logger = logging.getLogger(__name__)
 
 # Section header strings as they appear in the debug log markdown
+_SECTION_SYSTEM_INFO = "## System Information"
+_SECTION_HEALTH_STATUS = "## System Health Status"
+_SECTION_SETTINGS = "## Settings"
 _SECTION_BATTERY = "### Battery Settings"
 _SECTION_PRICE = "### Price Settings"
 _SECTION_PRICE_DATA = "### Price Data"
 _SECTION_HOME = "### Home Settings"
+_SECTION_ENERGY_PROVIDER = "### Energy Provider Configuration"
 _SECTION_BESS_CONFIG = "## BESS Configuration"
+_SECTION_ENTITY_SNAPSHOT = "## Entity Snapshot"
 _SECTION_INVERTER_TOU = "## Inverter TOU Segments"
 _SECTION_HISTORICAL = "## Historical Sensor Data"
 _SECTION_SCHEDULES = "## Optimization Schedules"
+_SECTION_PREDICTION_SNAPSHOTS = "## Prediction Snapshots"
+_SECTION_SYSTEM_LOGS = "## System Logs (Today)"
 
 
 @dataclass
 class DebugLogData:
     """Structured data extracted from a BESS debug log file."""
 
+    system_info: dict = field(default_factory=dict)
     battery_settings: dict = field(default_factory=dict)
     price_settings: dict = field(default_factory=dict)
     price_data: dict = field(default_factory=dict)
     home_settings: dict = field(default_factory=dict)
     addon_options: dict = field(default_factory=dict)
+    entity_snapshot: dict = field(default_factory=dict)
     inverter_tou_segments: list[dict] = field(default_factory=list)
     historical_periods: list[dict] = field(default_factory=list)
     last_schedule: dict = field(default_factory=dict)
+
+    @property
+    def timezone(self) -> str:
+        """IANA timezone name from the debug log, e.g. 'Europe/Stockholm'. Empty if absent."""
+        return self.system_info.get("timezone", "")
 
     @property
     def input_data(self) -> dict:
@@ -90,7 +104,10 @@ def parse_debug_log(path: str) -> DebugLogData:
             logger.debug("JSON parse error in section '%s': %s", section, exc)
             return
 
-        if section == _SECTION_BATTERY:
+        if section == _SECTION_SYSTEM_INFO:
+            if isinstance(parsed, dict):
+                result.system_info = parsed
+        elif section == _SECTION_BATTERY:
             result.battery_settings = parsed
         elif section == _SECTION_PRICE:
             result.price_settings = parsed
@@ -101,6 +118,9 @@ def parse_debug_log(path: str) -> DebugLogData:
         elif section == _SECTION_BESS_CONFIG:
             if isinstance(parsed, dict):
                 result.addon_options = parsed
+        elif section == _SECTION_ENTITY_SNAPSHOT:
+            if isinstance(parsed, dict):
+                result.entity_snapshot = parsed
         elif section == _SECTION_INVERTER_TOU:
             if isinstance(parsed, list):
                 result.inverter_tou_segments = parsed
@@ -121,14 +141,21 @@ def parse_debug_log(path: str) -> DebugLogData:
 
         # Detect section header transitions
         for header in (
+            _SECTION_SYSTEM_INFO,
+            _SECTION_HEALTH_STATUS,
+            _SECTION_SETTINGS,
             _SECTION_BATTERY,
             _SECTION_PRICE,
             _SECTION_PRICE_DATA,
             _SECTION_HOME,
+            _SECTION_ENERGY_PROVIDER,
             _SECTION_BESS_CONFIG,
+            _SECTION_ENTITY_SNAPSHOT,
             _SECTION_INVERTER_TOU,
             _SECTION_HISTORICAL,
             _SECTION_SCHEDULES,
+            _SECTION_PREDICTION_SNAPSHOTS,
+            _SECTION_SYSTEM_LOGS,
         ):
             if stripped == header:
                 current_section = header

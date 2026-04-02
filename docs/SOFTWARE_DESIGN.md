@@ -507,4 +507,41 @@ The system operates on **quarterly resolution (15-minute periods)** throughout t
 - **Performance**: Optimization runtime and memory usage monitoring
 - **Period Validation**: No hardcoded 24/96 checks, DST-aware throughout
 
+### Mock HA Environment
+
+The mock HA environment lets any user-reported issue be reproduced and debugged
+locally, without access to the user's Home Assistant installation.
+
+**Invariant**: `mock(debug_export)` must be indistinguishable from the real HA
+installation at the moment the debug export was taken.
+
+#### Workflow
+
+```
+/api/export-debug-data      ← debug export (markdown file)
+from_debug_log.py           ← generates scenario JSON
+mock-run.sh                 ← starts Docker Compose
+  ├── mock-ha               (FastAPI, serves scenario data as HA REST API)
+  └── bess-dev              (BESS backend, TZ + FAKETIME pinned to export time)
+```
+
+#### What the Debug Export Provides
+
+| Field | Used for |
+|---|---|
+| `entity_snapshot` | Verbatim `/api/states/{entity_id}` responses for every sensor BESS reads |
+| `historical_periods` | Actual measured energy flows — seeded directly into the historical store, no InfluxDB needed |
+| `price_data` | Raw quarterly prices for `nordpool_official` service call responses |
+| `addon_options` | Complete sensor entity IDs, inverter device ID, price provider config |
+| `inverter_tou_segments` | Current inverter memory state for `read_time_segments` responses |
+| `export_timestamp` + `timezone` | Pins `mock_time` so BESS computes the same optimization period |
+
+#### Historical Seeding
+
+At startup, `BatterySystemManager` checks for `BESS_HISTORICAL_SEED_FILE`. If
+set, it loads `historical_periods` directly into the historical store and skips
+InfluxDB backfill entirely. The sensor collector cache is then warmed from live
+mock-HA values so runtime collections work correctly. The mock is fully
+self-contained — no external database access required.
+
 This design reflects the current quarterly-native implementation as of the latest refactoring, focusing on simplicity and correctness across all time-based operations.

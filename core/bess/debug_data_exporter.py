@@ -21,6 +21,7 @@ class DebugDataExport:
     """Complete debug data export containing all system state and history."""
 
     export_timestamp: str
+    timezone: str
     bess_version: str
     python_version: str
     system_uptime_hours: float
@@ -31,6 +32,7 @@ class DebugDataExport:
     home_settings: dict
     energy_provider_config: dict
     addon_options: dict
+    entity_snapshot: dict
     historical_periods: list[dict]
     historical_summary: dict
     inverter_tou_segments: list[dict]
@@ -67,7 +69,8 @@ class DebugDataAggregator:
         logger.info("Starting debug data aggregation (compact=%s)", compact)
 
         return DebugDataExport(
-            export_timestamp=datetime.now().isoformat(),
+            export_timestamp=datetime.now().astimezone().isoformat(),
+            timezone=self._get_timezone(),
             bess_version=self._get_version(),
             python_version=sys.version,
             system_uptime_hours=self._get_uptime_hours(),
@@ -78,6 +81,7 @@ class DebugDataAggregator:
             home_settings=self._serialize_home_settings(),
             energy_provider_config=self._serialize_energy_provider_config(),
             addon_options=self._serialize_addon_options(),
+            entity_snapshot=self._serialize_entity_snapshot(),
             inverter_tou_segments=self._serialize_inverter_tou(),
             historical_periods=self._serialize_historical_data(),
             historical_summary=self._summarize_historical_data(),
@@ -108,6 +112,12 @@ class DebugDataAggregator:
         except Exception as e:
             logger.warning(f"Failed to read version from config.yaml: {e}")
             return "unknown"
+
+    def _get_timezone(self) -> str:
+        """Return the IANA timezone name currently used by BESS (e.g. 'Europe/Stockholm')."""
+        from . import time_utils
+
+        return str(time_utils.TIMEZONE)
 
     def _get_uptime_hours(self) -> float:
         """Calculate system uptime since initialization.
@@ -197,6 +207,79 @@ class DebugDataAggregator:
         except Exception as e:
             logger.warning("Failed to serialize addon options: %s", e)
             return {}
+
+    def _serialize_entity_snapshot(self) -> dict:
+        """Fetch raw HA entity state for every entity BESS reads.
+
+        Returns a dict of {entity_id: state_response} that can be used verbatim
+        as the 'sensors' dict in a mock HA scenario — no reconstruction needed.
+        Captures all sensor-map entities plus price-provider-specific entities.
+        """
+        controller = self.system._controller
+        if controller is None:
+            logger.warning("No HA controller available — skipping entity snapshot")
+            return {}
+        snapshot: dict = {}
+
+        # All entities registered in the sensor map — use the public info API to resolve
+        # entity IDs so resolution goes through the same path as normal sensor reads.
+        seen_entities: set[str] = set()
+        for method_name in controller.METHOD_SENSOR_MAP:
+            info = controller.get_method_sensor_info(method_name)
+            entity_id = info.get("entity_id")
+            if (
+                not entity_id
+                or info.get("status") == "not_configured"
+                or entity_id in seen_entities
+            ):
+                continue
+            seen_entities.add(entity_id)
+            try:
+                state = controller.get_entity_state_raw(entity_id)
+                if state:
+                    snapshot[entity_id] = state
+            except Exception as e:
+                logger.warning("Failed to fetch entity %s: %s", entity_id, e)
+
+        # Price provider entities (not in METHOD_SENSOR_MAP)
+        config = self.system._energy_provider_config
+        provider = config["provider"]
+
+        if provider == "nordpool":
+            nordpool_cfg = config["nordpool"]
+            for key in ("today_entity", "tomorrow_entity"):
+                entity_id = nordpool_cfg.get(key)
+                if entity_id:
+                    try:
+                        state = controller.get_entity_state_raw(entity_id)
+                        if state:
+                            snapshot[entity_id] = state
+                    except Exception as e:
+                        logger.warning("Failed to fetch nordpool entity %s: %s", entity_id, e)
+
+        elif provider == "octopus":
+            octopus_cfg = config["octopus"]
+            for key in (
+                "import_today_entity",
+                "import_tomorrow_entity",
+                "export_today_entity",
+                "export_tomorrow_entity",
+            ):
+                entity_id = octopus_cfg.get(key)
+                if entity_id:
+                    try:
+                        state = controller.get_entity_state_raw(entity_id)
+                        if state:
+                            snapshot[entity_id] = state
+                    except Exception as e:
+                        logger.warning("Failed to fetch octopus entity %s: %s", entity_id, e)
+
+        elif provider != "nordpool_official":
+            # nordpool_official uses service calls — no entity state to capture
+            logger.warning("Unknown energy provider '%s' — skipping provider entity snapshot", provider)
+
+        logger.info("Entity snapshot captured: %d entities", len(snapshot))
+        return snapshot
 
     def _serialize_inverter_tou(self) -> list[dict]:
         """Serialize the current inverter TOU segments from memory.

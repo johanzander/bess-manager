@@ -14,16 +14,9 @@ This guide helps you set up a development environment for the BESS Battery Manag
 
 ### Prerequisites
 
-- Docker and Docker Compose installed
-
-- VS Code with Remote-Containers extension (recommended)
-
-- Home Assistant instance (local or network-accessible)
-
-- Python 3.11 or higher
-
+- Docker and Docker Compose
 - Node.js 18 or higher
-
+- Home Assistant instance (local or network-accessible)
 - A long-lived access token from Home Assistant
 
 ### HomeAssistant Environment Options
@@ -92,47 +85,32 @@ HA_TOKEN=your_long_lived_access_token_here
    HA_DB_PASSWORD=your_db_password
 ```text
 
-3. Install Dependencies:
+3. Install frontend dependencies:
 
    ```bash
-   pip install -r backend/requirements.txt
    cd frontend && npm install && cd ..
-```text
+   ```
 
-### Running the Development Environment
-
-#### Option 1: Docker Development
-
-1. Start the containers:
-
-   ```bash
-   docker-compose up -d
-```text
-
-2. Access the services:
-
-   - API: [http://localhost:8080](http://localhost:8080)
-   - Frontend: [http://localhost:8080](http://localhost:8080)
-
-#### Option 2: Local Development
-
-1. Start the backend:
+4. Start the development environment:
 
    ```bash
    ./dev-run.sh
-```text
+   ```
 
-2. Start the frontend (in a separate terminal):
+   This will build the frontend, then build and start the backend container via Docker Compose.
 
-   ```bash
-   cd frontend
-   npm run dev
-```text
+### Running the Development Environment
 
-3. Access the services:
+Start all services with:
 
-   - API: [http://localhost:8080](http://localhost:8080)
-   - Frontend: [http://localhost:5173](http://localhost:5173)
+```bash
+./dev-run.sh
+```
+
+Access the services:
+
+- BESS backend + UI: [http://localhost:8080](http://localhost:8080)
+- Vite dev server (hot-reload): [http://localhost:5174](http://localhost:5174)
 
 ### VS Code Integration
 
@@ -267,27 +245,30 @@ pre-commit run --all-files
 
    - Check access token permissions
 
-## Building for Production
+## Deploying to a Local Home Assistant Instance
 
-1. Make the package script executable:
+This is the developer workflow for testing a built add-on on real hardware before publishing.
+Normal users should install from the GitHub repository — see [INSTALLATION.md](INSTALLATION.md).
+
+**Prerequisites:** Node.js 18 or higher (required to build the frontend).
+
+1. Build the add-on package:
 
    ```bash
    chmod +x package-addon.sh
-```text
-
-2. Build the add-on:
-
-   ```bash
    ./package-addon.sh
-```text
+   ```
 
-The build output will be in:
+   This runs `npm ci && npm run build` locally, then assembles the add-on into `build/bess_manager/`.
 
-- `build/bess_manager/` - For local installation
+2. Transfer files to Home Assistant:
+   - Copy `build/bess_manager/` contents to `/addons/bess_manager/` on the HA host
+   - Via SSH, Samba, or the File Editor add-on
 
-- `build/repository/` - For custom repository distribution
-
-For installation instructions, see [INSTALLATION.md](INSTALLATION.md).
+3. Install the local add-on:
+   - Settings → Add-ons → Reload
+   - Find "BESS Battery Manager" under Local add-ons
+   - Click "Install"
 
 ## Mock HA Development Environment
 

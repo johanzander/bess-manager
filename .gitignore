@@ -29,6 +29,7 @@ yarn-error.log*
 
 # Development options (contains sensitive settings)
 backend/dev-options.json
+backend/dev-historical-seed.json
 
 # Build output
 dist/

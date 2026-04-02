@@ -4,13 +4,33 @@ Complete guide for installing and configuring BESS Battery Manager for Home Assi
 
 ## Prerequisites
 
+### Home Assistant
+
 - Home Assistant OS, Container, or Supervised
-- Growatt battery system with Home Assistant integration
-- Electricity price integration: **Nordpool** (Nordic markets) or **Octopus Energy** (UK market)
+
+### Growatt Inverter (Required)
+
+- A Growatt inverter with battery storage
+  - **MIN inverter**: fully supported
+  - **SPH inverter**: experimental support
+- The [Growatt Server integration](https://www.home-assistant.io/integrations/growatt_server/) installed in Home Assistant
+- **⚠️ Token authentication is required.** The integration supports both username/password and token-based auth, but BESS needs the `number.*` and `switch.*` entities and service calls that are only available with token auth. Username/password auth will not expose these, and BESS will not work correctly without them.
+
+### Electricity Price Integration (Required)
+
+One of:
+
+- **Nordpool** integration — for Nordic and European spot price markets
+- **Octopus Energy** integration — for UK market (via HACS)
+
+### Solar Forecast (Optional)
+
+BESS works without solar panels or a solar forecast. If you have PV and want solar-aware optimization:
+
+- Only **Solcast** (available via HACS) is supported
+- The built-in Home Assistant solar forecast integration is **not supported** — it does not provide hourly predictions for today and tomorrow, which BESS requires
 
 ## Step 1: Install the Add-on
-
-### Method 1: From Repository (Recommended)
 
 1. Add the repository to Home Assistant:
    - Go to Settings → Add-ons → Add-on Store
@@ -19,26 +39,6 @@ Complete guide for installing and configuring BESS Battery Manager for Home Assi
 
 2. Install BESS Manager:
    - Find "BESS Battery Manager" in the add-on store
-   - Click "Install"
-
-### Method 2: Local Installation
-
-1. Build the add-on:
-
-   ```bash
-   git clone https://github.com/johanzander/bess-manager.git
-   cd bess-manager
-   chmod +x package-addon.sh
-   ./package-addon.sh
-   ```
-
-2. Transfer files to Home Assistant:
-   - Copy `build/bess_manager` contents to `/addons/bess_manager`
-   - Via SSH, Samba, or File Editor add-on
-
-3. Install:
-   - Configuration → Add-ons → Reload
-   - Find "BESS Battery Manager" in Local add-ons
    - Click "Install"
 
 ## Step 2: Set Up InfluxDB (Optional but Recommended)

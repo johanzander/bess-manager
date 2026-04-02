@@ -481,6 +481,26 @@ class HomeAssistantAPIController:
         """Validate sensors for multiple methods at once."""
         return [self.get_method_sensor_info(method) for method in method_list]
 
+    def get_entity_state_raw(self, entity_id: str) -> dict | None:
+        """Fetch raw HA state dict for a known entity ID.
+
+        Intended for debug/export use where the caller already has a resolved
+        entity ID and wants the full state response without going through the
+        sensor-key lookup path.
+
+        Args:
+            entity_id: Fully-qualified HA entity ID (e.g. "sensor.battery_soc")
+
+        Returns:
+            Full HA state dict, or None if the entity does not exist
+        """
+        return self._api_request(
+            "get",
+            f"/api/states/{entity_id}",
+            operation=f"Fetch raw state for '{entity_id}'",
+            category="sensor_read",
+        )
+
     def _api_request(
         self,
         method,

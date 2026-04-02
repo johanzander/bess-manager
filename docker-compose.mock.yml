@@ -5,12 +5,12 @@ services:
       - ./backend:/app:delegated
       - ./core:/app/core:delegated
       - ./frontend/dist:/app/frontend:delegated
-      - ${OPTIONS_FILE}:/data/options.json:ro
       - ./scripts/mock_ha/mock-entrypoint.sh:/mock-entrypoint.sh:ro
     environment:
       - HA_URL=http://mock-ha:8123
       - HA_TOKEN=mock_token
       - HA_TEST_MODE=false
+      - BESS_HISTORICAL_SEED_FILE=${BESS_HISTORICAL_SEED_FILE:-}
       - HA_DB_URL=${HA_DB_URL:-http://nonexistent-influxdb:8086/api/v2/query}
       - HA_DB_BUCKET=${HA_DB_BUCKET:-homeassistant/autogen}
       - HA_DB_USER_NAME=${HA_DB_USER_NAME:-mock}

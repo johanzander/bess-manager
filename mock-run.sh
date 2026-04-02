@@ -27,7 +27,7 @@ if [ $# -eq 0 ]; then
   exit 1
 fi
 
-SCENARIO=$1
+export SCENARIO=$1
 
 # Verify scenario file exists
 SCENARIO_FILE="scripts/mock_ha/scenarios/${SCENARIO}.json"
@@ -36,9 +36,10 @@ if [ ! -f "$SCENARIO_FILE" ]; then
   exit 1
 fi
 
-# Extract bess_config from scenario JSON into a temp file for Docker volume mount
+# Extract bess_config from scenario JSON into backend/dev-options.json.
+# The base docker-compose.yml already mounts that file to /data/options.json,
+# so no extra volume entry is needed in the mock override.
 INVERTER_TYPE=$(python3 -c "import json; print(json.load(open('$SCENARIO_FILE')).get('inverter_type', 'min'))")
-OPTIONS_FILE=$(mktemp /tmp/bess-options-XXXXXX)
 python3 -c "
 import json, sys
 d = json.load(open('$SCENARIO_FILE'))
@@ -46,11 +47,8 @@ cfg = d.get('bess_config')
 if not cfg:
     print('Error: No bess_config in scenario — regenerate with from_debug_log.py', file=sys.stderr)
     sys.exit(1)
-json.dump(cfg, open('$OPTIONS_FILE', 'w'), indent=2)
+json.dump(cfg, open('backend/dev-options.json', 'w'), indent=2)
 " || exit 1
-export OPTIONS_FILE
-# Clean up temp file when the script exits
-trap 'rm -f "$OPTIONS_FILE"' EXIT
 
 # Load real InfluxDB credentials from .env if present — enables historical data
 # collection when combined with a mock_time scenario (e.g. 2026-03-24-225535).
@@ -64,6 +62,21 @@ fi
 export HA_URL=http://mock-ha:8123
 export HA_TOKEN=mock_token
 
+# Extract historical periods from scenario into a seed file so BESS can replay
+# exact energy flows without needing InfluxDB access.
+python3 -c "
+import json, sys
+d = json.load(open('$SCENARIO_FILE'))
+periods = d.get('historical_periods')
+if periods:
+    json.dump(periods, open('backend/dev-historical-seed.json', 'w'), indent=2)
+    print('Historical seed: %d periods extracted' % len([p for p in periods if p is not None]))
+else:
+    import os; os.remove('backend/dev-historical-seed.json') if os.path.exists('backend/dev-historical-seed.json') else None
+    print('Historical seed: none in scenario')
+"
+export BESS_HISTORICAL_SEED_FILE=/app/dev-historical-seed.json
+
 echo "==== BESS Mock Development Environment ===="
 echo "Scenario:      $SCENARIO"
 echo "Inverter type: $INVERTER_TYPE  (bess_config extracted from scenario)"
@@ -74,8 +87,10 @@ if ! docker info > /dev/null 2>&1; then
   exit 1
 fi
 
-# Extract mock_time from scenario (empty string = real wall-clock time)
+# Extract mock_time and timezone from scenario
 MOCK_TIME=$(python3 -c "import json; d=json.load(open('$SCENARIO_FILE')); print(d.get('mock_time',''))")
+TZ=$(python3 -c "import json; d=json.load(open('$SCENARIO_FILE')); print(d.get('timezone','Europe/Stockholm'))")
+export TZ
 export MOCK_TIME
 if [ -n "$MOCK_TIME" ]; then
   echo "Mock time:     $MOCK_TIME  (BESS will run as if it is this time)"
@@ -86,8 +101,6 @@ echo "Building frontend..."
 (cd frontend && npm run build) || {
   echo "Warning: Frontend build failed — using existing dist if present"
 }
-
-export SCENARIO
 
 echo "Stopping any existing containers..."
 docker-compose \

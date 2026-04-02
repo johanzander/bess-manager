@@ -628,6 +628,20 @@ class SensorCollector:
         logger.debug(f"Read {len(readings)} live sensors from HA API")
         return self._normalize_sensor_readings(readings)
 
+    def warm_readings_cache(self) -> None:
+        """Seed _last_readings from live HA sensors.
+
+        Call this after pre-seeding the historical store (e.g. from a debug log
+        replay) so that the first runtime collection has a valid baseline to
+        compute deltas against, instead of falling back to InfluxDB.
+        """
+        readings = self._get_period_readings_from_live_sensors()
+        if readings:
+            self._last_readings = readings
+            logger.info("Sensor readings cache warmed from live sensors (%d sensors)", len(readings))
+        else:
+            logger.warning("warm_readings_cache: no live sensor readings available — runtime collection will fall back to InfluxDB")
+
     def _normalize_sensor_readings(self, data: dict) -> dict[str, float]:
         """Normalize sensor readings and handle data type conversion."""
         readings = {}

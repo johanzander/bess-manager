@@ -12,7 +12,8 @@ Usage:
 import json
 import logging
 import os
-from datetime import datetime
+import re
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -48,6 +49,10 @@ _time_segments: list[dict] = []
 _ac_charge_times: list[dict] = []
 _ac_discharge_times: list[dict] = []
 _service_log: list[dict] = []
+# Nordpool prices keyed by date string "YYYY-MM-DD" → list of quarterly prices (SEK/kWh)
+_nordpool_prices: dict[str, list[float]] = {}
+# IANA timezone name for this scenario (e.g. "Europe/Stockholm")
+_timezone: str = "UTC"
 
 
 def _load_scenario() -> None:
@@ -68,10 +73,45 @@ def _load_scenario() -> None:
     with scenario_path.open() as f:
         scenario = json.load(f)
 
+    global _timezone
     _sensors.update(scenario.get("sensors", {}))
     _time_segments.extend(scenario.get("time_segments", []))
     _ac_charge_times.extend(scenario.get("ac_charge_times", []))
     _ac_discharge_times.extend(scenario.get("ac_discharge_times", []))
+    _timezone = scenario.get("timezone", "UTC")
+
+    # Build nordpool prices lookup for the mock get_prices_for_date service call.
+    # Prices can come from two sources:
+    #   1. Nordpool sensor attributes (today/tomorrow) — for nordpool/nordpool_official when sensor exists
+    #   2. price_data field — explicit fallback for nordpool_official (no sensor state to capture)
+    # mock_time format: "@YYYY-MM-DD HH:MM:SS" — extract the date as the reference "today".
+    # Note: only ref_date and ref_date+1 are populated; requests for any other date return {}.
+    mock_time_str = scenario.get("mock_time", "")
+    m = re.search(r"@(\d{4}-\d{2}-\d{2})", mock_time_str)
+    if m:
+        ref_date = date.fromisoformat(m.group(1))
+        nordpool_sensor = next(
+            (v for k, v in _sensors.items() if "nordpool" in k and isinstance(v, dict)),
+            None,
+        )
+        if nordpool_sensor:
+            attrs = nordpool_sensor.get("attributes", {})
+            today_prices = attrs.get("today", [])
+            tomorrow_prices = attrs.get("tomorrow", [])
+        else:
+            # nordpool_official uses service calls — no sensor state. Fall back to price_data.
+            price_data = scenario.get("price_data", {})
+            today_prices = price_data.get("today", [])
+            tomorrow_prices = price_data.get("tomorrow", [])
+        if today_prices:
+            _nordpool_prices[ref_date.isoformat()] = today_prices
+        if tomorrow_prices:
+            _nordpool_prices[(ref_date + timedelta(days=1)).isoformat()] = tomorrow_prices
+        if _nordpool_prices:
+            summary = ", ".join(f"{d} ({len(p)} periods)" for d, p in _nordpool_prices.items())
+            logger.info("Nordpool prices loaded: %s", summary)
+        else:
+            logger.warning("No nordpool prices found in scenario — price fetches will return empty")
 
     logger.info(
         "Loaded scenario '%s' — %d sensors, %d TOU segments",
@@ -102,6 +142,12 @@ def _make_state_response(entity_id: str, value: Any) -> dict:
         "state": str(value),
         "attributes": {},
     }
+
+
+@app.get("/api/config")
+async def get_config() -> JSONResponse:
+    """Return HA configuration including the scenario timezone."""
+    return JSONResponse({"time_zone": _timezone})
 
 
 @app.get("/api/states/{entity_id:path}")
@@ -143,6 +189,27 @@ async def call_service(domain: str, service: str, request: Request) -> JSONRespo
     logger.info("Service call: %s.%s %s", domain, service, body)
 
     # Return service-specific responses for read operations
+    if domain == "nordpool" and service == "get_prices_for_date":
+        requested_date = body.get("date", "")
+        prices_kwh = _nordpool_prices.get(requested_date, [])
+        if prices_kwh:
+            # OfficialNordpoolSource expects prices in MWh (it divides by 1000 to get kWh).
+            # Use area code extracted from the nordpool sensor key (e.g. "SE4" from
+            # sensor.nordpool_kwh_se4_sek_...). OfficialNordpoolSource ignores the key
+            # name, but using the real area keeps the response consistent.
+            area = next(
+                (
+                    _match.group(1).upper()
+                    for k in _sensors
+                    if (_match := re.search(r"nordpool_kwh_(\w+?)_", k))
+                ),
+                "prices",
+            )
+            entries = [{"price": round(p * 1000, 4)} for p in prices_kwh]
+            return JSONResponse({"service_response": {area: entries}})
+        logger.warning("No nordpool prices for date: %s", requested_date)
+        return JSONResponse({})
+
     if domain == "growatt_server":
         if service == "read_time_segments":
             return JSONResponse({"service_response": {"time_segments": _time_segments}})

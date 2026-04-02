@@ -1114,8 +1114,13 @@ class GrowattScheduleManager:
 
         return result
 
-    def get_all_tou_segments(self):
-        """Get all TOU segments with default intervals filling gaps for complete 24-hour coverage."""
+    def get_all_tou_segments(self, current_period: int | None = None):
+        """Get all TOU segments with default intervals filling gaps for complete 24-hour coverage.
+
+        Args:
+            current_period: Quarterly period index (0-95) to use for expiry calculations.
+                            Defaults to the current wall-clock time when not provided.
+        """
         if not self.tou_intervals:
             # Return default load_first for entire day if no intervals configured
             return [
@@ -1130,8 +1135,11 @@ class GrowattScheduleManager:
             ]
 
         # Calculate current time in minutes for expiry checks
-        now = datetime.now()
-        current_minutes = now.hour * 60 + now.minute
+        if current_period is not None:
+            current_minutes = (current_period // 4) * 60 + (current_period % 4) * 15
+        else:
+            now = datetime.now()
+            current_minutes = now.hour * 60 + now.minute
 
         # Get only active/enabled intervals and sort by start time
         active_intervals = [

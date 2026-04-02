@@ -747,7 +747,7 @@ class TestHardwareSlotCascading:
         scheduler.strategic_intents = _OVERCAPACITY_INTENTS
         scheduler._consolidate_and_convert_with_strategic_intents(current_period=0)
 
-        all_segments = scheduler.get_all_tou_segments()
+        all_segments = scheduler.get_all_tou_segments(current_period=0)
         real_segments = [s for s in all_segments if not s.get("is_default")]
 
         written = [s for s in real_segments if not s.get("pending_write")]
@@ -784,7 +784,7 @@ class TestHardwareSlotCascading:
         scheduler._consolidate_and_convert_with_strategic_intents(current_period=0)
         initial_pending = sum(
             1
-            for s in scheduler.get_all_tou_segments()
+            for s in scheduler.get_all_tou_segments(current_period=0)
             if not s.get("is_default") and s.get("pending_write")
         )
         assert (
@@ -797,7 +797,7 @@ class TestHardwareSlotCascading:
         scheduler._consolidate_and_convert_with_strategic_intents(current_period=12)
         later_pending = sum(
             1
-            for s in scheduler.get_all_tou_segments()
+            for s in scheduler.get_all_tou_segments(current_period=12)
             if not s.get("is_default") and s.get("pending_write")
         )
         assert (
@@ -833,7 +833,7 @@ class TestHardwareSlotCascading:
             }
         ]
 
-        segments = scheduler.get_all_tou_segments()
+        segments = scheduler.get_all_tou_segments(current_period=0)
         real_segments = [s for s in segments if not s.get("is_default")]
 
         assert len(real_segments) == 1

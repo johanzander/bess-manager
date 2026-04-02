@@ -193,17 +193,26 @@ class DebugDataAggregator:
         return asdict(self.system.home_settings)
 
     def _serialize_addon_options(self) -> dict:
-        """Serialize the full addon options (entity ID mappings, inverter config).
+        """Serialize addon options (entity ID mappings, inverter config).
 
         This is the complete options.json loaded at startup — includes sensor entity
         IDs, battery settings, price config, and inverter device ID. Used by
         from_debug_log.py to auto-generate bess_config for mock HA replay.
 
+        InfluxDB username and password are stripped — URL is retained for diagnosing
+        connection issues.
+
         Returns:
-            Addon options dict as loaded from options.json
+            Addon options dict as loaded from options.json, with credentials redacted
         """
         try:
-            return dict(self.system._addon_options)
+            options = dict(self.system._addon_options)
+            if "influxdb" in options:
+                influxdb = dict(options["influxdb"])
+                influxdb.pop("username", None)
+                influxdb.pop("password", None)
+                options["influxdb"] = influxdb
+            return options
         except Exception as e:
             logger.warning("Failed to serialize addon options: %s", e)
             return {}

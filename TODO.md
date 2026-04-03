@@ -167,6 +167,54 @@ But at noon every day we get tomorrows schedule. We could use this information t
 
 **Resolution**: The DP optimizer now considers up to 192 periods (2 days) when tomorrow's prices are available (PR #21). Dashboard charts (PR #22) and inverter schedule overview (PR #23) display the extended horizon. TOU deployment remains today-only due to Growatt hardware limitations.
 
+## 🔵 **ROBUSTNESS IMPROVEMENTS** (System Observability)
+
+### **Improve InfluxDB Health Check to Verify Sensor Coverage**
+
+**Impact**: Medium | **Effort**: Low-Medium | **Dependencies**: `health_check.py`, `influxdb_helper.py`
+
+**Problem**: The "Historical Data Access" health check reports OK as long as InfluxDB is reachable and the bucket contains *any* row. It uses a `limit(n: 1)` probe — equivalent to pinging the database. It does not verify that the specific sensors the BESS system needs are actually present. As a result, it reported OK on 2026-04-03 even though 4 of 10 required sensors had no data in InfluxDB.
+
+**Note**: A sensor showing value 0 (e.g. `battery_input_energy` at day start) is valid — cumulative sensors legitimately start at 0. The check must verify **existence** (any data point in past 7 days), not recent non-zero values.
+
+**Current behavior** (`influxdb_helper.py:test_influxdb_connection()`):
+
+```flux
+from(bucket: "...")
+  |> range(start: -24h)
+  |> limit(n: 1)
+```
+
+Passes if *any* measurement returns a row. No knowledge of which sensors were found.
+
+**Desired behavior**:
+
+For each sensor configured in the BESS system (from `METHOD_SENSOR_MAP`), run a targeted query:
+
+```flux
+from(bucket: "...")
+  |> range(start: -7d)
+  |> filter(fn: (r) => r["entity_id"] == "sensor.battery_input_energy")
+  |> limit(n: 1)
+```
+
+Report:
+
+- **OK**: all core sensors found in InfluxDB
+- **WARNING**: optional sensors missing (configured but no InfluxDB data)
+- **ERROR**: core energy sensors missing (battery, grid, consumption)
+
+**Technical Tasks**:
+
+- Extend `test_influxdb_connection()` to accept a list of entity IDs to probe
+- Pass the configured sensor entity IDs from `METHOD_SENSOR_MAP` (or a defined "core" subset)
+- Return per-sensor results so `check_historical_data_access()` can report which sensors are missing
+- Distinguish core sensors (battery_input_energy, battery_output_energy, grid_import, grid_export, load_energy) from optional (ev_energy_meter, solar forecasts)
+- Surface missing optional sensors as WARNING, missing core sensors as ERROR
+- This will make "Historical Data Access" reflect actual data availability, not just connectivity
+
+---
+
 ## 🔄 **ARCHITECTURAL IMPROVEMENTS** (From Historical Design Analysis)
 
 ### 10. **Machine Learning Predictions**

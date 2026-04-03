@@ -1595,6 +1595,13 @@ class GrowattScheduleManager:
                     logger.debug("SUCCESS: Segment disabled")
                 except Exception as e:
                     logger.error("FAILED: Failed to disable TOU segment: %s", e)
+                    if controller.failure_tracker:
+                        controller.failure_tracker.record_failure(
+                            category="inverter_control",
+                            operation=f"Disable TOU segment {segment.get('segment_id')} ({segment['start_time']}-{segment['end_time']})",
+                            error=e,
+                            context={"segment_id": segment.get("segment_id"), "batt_mode": segment["batt_mode"]},
+                        )
 
             # Then update/add
             for segment in to_update:
@@ -1617,6 +1624,13 @@ class GrowattScheduleManager:
                     logger.debug("SUCCESS: Segment updated")
                 except Exception as e:
                     logger.error("FAILED: Failed to update TOU segment: %s", e)
+                    if controller.failure_tracker:
+                        controller.failure_tracker.record_failure(
+                            category="inverter_control",
+                            operation=f"Write TOU segment {segment.get('segment_id')} ({segment['start_time']}-{segment['end_time']} {segment['batt_mode']})",
+                            error=e,
+                            context={"segment_id": segment.get("segment_id"), "batt_mode": segment["batt_mode"]},
+                        )
         else:
             logger.info("No TOU segment changes needed")
 

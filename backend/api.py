@@ -1627,6 +1627,7 @@ async def get_dashboard_health_summary():
 
             summary = {
                 "has_critical_errors": True,
+                "has_warnings": False,
                 "critical_issues": critical_issues,
                 "total_critical_issues": len(critical_issues),
                 "timestamp": datetime.now().isoformat(),
@@ -1643,6 +1644,7 @@ async def get_dashboard_health_summary():
                 )
                 return {
                     "has_critical_errors": False,
+                    "has_warnings": False,
                     "critical_issues": [],
                     "total_critical_issues": 0,
                     "timestamp": datetime.now().isoformat(),
@@ -1677,8 +1679,12 @@ async def get_dashboard_health_summary():
                         }
                     )
 
+            has_warnings = any(
+                issue["status"] == "WARNING" for issue in critical_issues
+            )
             summary = {
                 "has_critical_errors": has_critical_error,
+                "has_warnings": has_warnings,
                 "critical_issues": critical_issues,
                 "total_critical_issues": len(critical_issues),
                 "timestamp": datetime.now().isoformat(),
@@ -1693,6 +1699,7 @@ async def get_dashboard_health_summary():
         # Return safe error state
         error_summary = {
             "has_critical_errors": True,
+            "has_warnings": False,
             "critical_issues": [
                 {
                     "component": "System Health Check",

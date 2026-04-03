@@ -78,6 +78,10 @@ def determine_health_status(
     optional_total = 0
 
     for check_result in health_check_results:
+        # Intentionally unconfigured sensors don't count toward health
+        if check_result.get("status") == "SKIPPED":
+            continue
+
         method_name = check_result.get("method_name", "unknown")
         # A sensor is working if it has status "OK" after method call testing
         is_working = check_result.get("status") == "OK"
@@ -147,6 +151,18 @@ def perform_health_check(
             "displayValue": "N/A",
             "error": None,
         }
+
+        if method_info["status"] == "not_configured":
+            # Sensor intentionally not configured by user — skip silently
+            check_result.update(
+                {
+                    "status": "SKIPPED",
+                    "error": "Not configured",
+                    "displayValue": "Not configured",
+                }
+            )
+            health_check["checks"].append(check_result)
+            continue
 
         if method_info["status"] == "ok":
             # Test the actual method

@@ -82,6 +82,7 @@ export default function DashboardPage({
   // Health summary state for alert banner
   interface HealthSummary {
     hasCriticalErrors: boolean;
+    hasWarnings: boolean;
     criticalIssues: Array<{
       component: string;
       description: string;
@@ -159,8 +160,8 @@ export default function DashboardPage({
       // Process health summary data
       if (healthResponse?.data) {
         setHealthSummary(healthResponse.data);
-        // Reset dismissed banner if there are new critical issues
-        if (healthResponse.data.hasCriticalErrors) {
+        // Reset dismissed banner if there are new critical issues or warnings
+        if (healthResponse.data.hasCriticalErrors || healthResponse.data.hasWarnings) {
           setDismissedBanner(false);
         }
       }
@@ -217,9 +218,10 @@ export default function DashboardPage({
       )}
 
       {/* Critical Sensor Alert Banner */}
-      {healthSummary && healthSummary.hasCriticalErrors && !dismissedBanner && (
+      {healthSummary && (healthSummary.hasCriticalErrors || healthSummary.hasWarnings) && !dismissedBanner && (
         <AlertBanner
           hasCriticalErrors={healthSummary.hasCriticalErrors}
+          hasWarnings={healthSummary.hasWarnings}
           criticalIssues={healthSummary.criticalIssues}
           totalCriticalIssues={healthSummary.totalCriticalIssues}
           onDismiss={handleDismissBanner}

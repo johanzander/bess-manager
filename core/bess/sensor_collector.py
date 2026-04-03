@@ -720,9 +720,8 @@ class SensorCollector:
         ]
 
         # Define optional methods (nice-to-have but not critical)
-        optional_energy_methods = [
-            # "get_ev_energy",  # Optional - EV data not critical for basic operation
-        ]
+        # ev_energy_meter excluded: feature not complete (aux_load is computed but unused)
+        optional_energy_methods: list[str] = []
 
         # Combine all methods for health check
         all_energy_methods = required_energy_methods + optional_energy_methods

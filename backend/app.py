@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from loguru import logger
 
 # Import BESS system modules
+from core.bess import time_utils
 from core.bess.battery_system_manager import BatterySystemManager
 from core.bess.ha_api_controller import HomeAssistantAPIController
 
@@ -242,7 +243,7 @@ class BESSController:
 
         # Quarterly schedule update (every 15 minutes: 0, 15, 30, 45)
         def update_schedule_quarterly():
-            now = datetime.now()
+            now = time_utils.now()
             current_period = now.hour * 4 + now.minute // 15
             self.system.update_battery_schedule(current_period=current_period)
 
@@ -254,7 +255,7 @@ class BESSController:
 
         # Next day preparation (daily at 23:55)
         def prepare_next_day():
-            now = datetime.now()
+            now = time_utils.now()
             current_period = now.hour * 4 + now.minute // 15
             self.system.update_battery_schedule(
                 current_period=current_period, prepare_next_day=True
@@ -400,7 +401,7 @@ class BESSController:
     def start(self):
         """Start the scheduler."""
         self.system.start()
-        now = datetime.now()
+        now = time_utils.now()
         current_period = now.hour * 4 + now.minute // 15
         self.system.update_battery_schedule(current_period=current_period)
         self._init_scheduler_jobs()

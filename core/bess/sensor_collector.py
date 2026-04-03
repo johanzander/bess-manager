@@ -5,6 +5,7 @@ Robust SensorCollector - Clean sensor data collection from InfluxDB with strateg
 import logging
 from datetime import datetime, timedelta
 
+from . import time_utils
 from .energy_flow_calculator import EnergyFlowCalculator
 from .health_check import perform_health_check
 from .influxdb_helper import get_power_sensor_data_batch, get_sensor_data_batch
@@ -127,7 +128,7 @@ class SensorCollector:
             raise ValueError(f"Invalid period: {period}. Must be non-negative.")
 
         # Check if this period is complete
-        now = datetime.now()
+        now = time_utils.now()
         current_period = now.hour * 4 + now.minute // 15
         if period >= current_period:
             raise ValueError(
@@ -231,7 +232,7 @@ class SensorCollector:
             abs(flow_dict.get(key, 0.0)) < 0.001 for key in energy_flow_keys
         )
         if all_energy_zero and is_historical_backfill:
-            target_date = datetime.now().date()
+            target_date = time_utils.today()
             power_flows = self._get_power_based_flows(period, target_date)
             if power_flows:
                 for key in energy_flow_keys:
@@ -365,7 +366,7 @@ class SensorCollector:
         Returns:
             True if data was loaded successfully, False otherwise
         """
-        today = datetime.now().date()
+        today = time_utils.today()
 
         # Check if already cached
         if target_date in self._batch_cache:
@@ -430,7 +431,7 @@ class SensorCollector:
         Returns:
             True if data was loaded successfully, False otherwise
         """
-        today = datetime.now().date()
+        today = time_utils.today()
 
         if target_date in self._power_batch_cache:
             if target_date < today:
@@ -541,7 +542,7 @@ class SensorCollector:
             return None
 
         # Use InfluxDB batch mode
-        now = datetime.now()
+        now = time_utils.now()
         target_date = now.date() + timedelta(days=date_offset)
 
         # Ensure batch data is loaded for this date

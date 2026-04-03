@@ -47,7 +47,7 @@ class HistoricalDataStore:
             ValueError: If period_index is out of range for today
         """
         # Validate period is within today's range
-        today = datetime.now(tz=time_utils.TIMEZONE).date()
+        today = time_utils.today()
         today_periods = get_period_count(today)
 
         if not 0 <= period_index < today_periods:
@@ -84,7 +84,7 @@ class HistoricalDataStore:
             List of 92-100 PeriodData (or None for missing periods)
             Length depends on DST (92 = spring, 96 = normal, 100 = fall)
         """
-        today = datetime.now(tz=time_utils.TIMEZONE).date()
+        today = time_utils.today()
         num_periods = get_period_count(today)
 
         # Return list with data if available, None otherwise

@@ -14,6 +14,8 @@ SPH Intent Mapping:
 
 import logging
 from datetime import datetime
+
+from . import time_utils
 from typing import ClassVar
 
 from .dp_schedule import DPSchedule
@@ -684,7 +686,7 @@ class SphScheduleManager:
             logger.info("SPH: No schedule data available")
             return
 
-        now = datetime.now()
+        now = time_utils.now()
         current_period = now.hour * 4 + now.minute // 15
 
         lines = [

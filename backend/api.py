@@ -18,6 +18,7 @@ from api_dataclasses import (
 from fastapi import APIRouter, HTTPException, Query
 from loguru import logger
 
+from core.bess import time_utils
 from core.bess.health_check import run_system_health_checks
 from core.bess.time_utils import get_period_count
 
@@ -338,9 +339,9 @@ async def get_dashboard_data(
             if stored_schedule:
                 opt_result = stored_schedule.optimization_result
                 opt_period = stored_schedule.optimization_period
-                today_period_count = get_period_count(datetime.now().date())
+                today_period_count = get_period_count(time_utils.today())
                 tomorrow_period_count = get_period_count(
-                    datetime.now().date() + timedelta(days=1)
+                    time_utils.today() + timedelta(days=1)
                 )
                 tomorrow_periods = []
                 for period_idx in range(
@@ -637,7 +638,7 @@ async def get_decision_intelligence():
         currency = bess_controller.system.home_settings.currency
 
         # Calculate current period index (for quarterly resolution)
-        now = datetime.now()
+        now = time_utils.now()
         current_period = now.hour * 4 + now.minute // 15
 
         # Convert real PeriodData to mock format
@@ -681,7 +682,7 @@ async def get_decision_intelligence_mock():
     - Multi-hour strategy explanations
     """
     try:
-        current_hour = datetime.now().hour
+        current_hour = time_utils.now().hour
         patterns = []
 
         # Real historical prices from 2024-08-16 (extreme volatility day)
@@ -1119,7 +1120,7 @@ async def get_inverter_status():
         # Get current battery mode from schedule for current hour
         current_battery_mode = "load_first"  # Default
         try:
-            current_hour = datetime.now().hour
+            current_hour = time_utils.now().hour
             schedule_manager = bess_controller.system._schedule_manager
             hourly_settings = schedule_manager.get_hourly_settings(current_hour)
             current_battery_mode = hourly_settings.get("batt_mode", "load_first")
@@ -1173,7 +1174,7 @@ async def get_growatt_detailed_schedule():
 
     try:
         schedule_manager = bess_controller.system._schedule_manager
-        current_hour = datetime.now().hour
+        current_hour = time_utils.now().hour
 
         # Get TOU intervals directly from schedule manager
         try:
@@ -1369,9 +1370,9 @@ async def get_growatt_detailed_schedule():
             if stored_schedule:
                 opt_result = stored_schedule.optimization_result
                 opt_period = stored_schedule.optimization_period
-                today_period_count = get_period_count(datetime.now().date())
+                today_period_count = get_period_count(time_utils.today())
                 tomorrow_period_count = get_period_count(
-                    datetime.now().date() + timedelta(days=1)
+                    time_utils.today() + timedelta(days=1)
                 )
                 tomorrow_intents = []
                 for period_idx in range(
@@ -1455,7 +1456,7 @@ async def get_tou_settings():
 
         schedule_manager = bess_controller.system._schedule_manager
         tou_intervals = schedule_manager.get_all_tou_segments()
-        current_hour = datetime.now().hour
+        current_hour = time_utils.now().hour
 
         # Enhanced TOU intervals with hourly settings and strategic intents
         enhanced_tou_intervals = []
@@ -1544,7 +1545,7 @@ async def get_strategic_intents():
                         "battery_action": settings.get("battery_action", 0.0),
                         "grid_charge": settings.get("grid_charge", False),
                         "discharge_rate": settings.get("discharge_rate", 100),
-                        "is_current": hour == datetime.now().hour,
+                        "is_current": hour == time_utils.now().hour,
                     }
                 )
             except Exception as e:
@@ -1719,7 +1720,7 @@ async def get_historical_data_status():
     try:
         # Get today's periods (quarterly resolution)
         periods = bess_controller.system.historical_store.get_today_periods()
-        current_hour = datetime.now().hour
+        current_hour = time_utils.now().hour
 
         # Find missing periods up to current hour (periods = hour * 4)
         current_period = current_hour * 4
@@ -1839,7 +1840,7 @@ async def get_prediction_comparison(
 
         from core.bess import time_utils
 
-        now = datetime.now(tz=time_utils.TIMEZONE)
+        now = time_utils.now()
         current_period = now.hour * 4 + now.minute // 15
 
         # Build current daily view

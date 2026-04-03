@@ -27,6 +27,16 @@ PERIODS_PER_HOUR = 4
 PERIODS_PER_DAY_NORMAL = 96
 
 
+def now() -> datetime:
+    """Current datetime in the user's configured timezone."""
+    return datetime.now(tz=TIMEZONE)
+
+
+def today() -> date:
+    """Today's date in the user's configured timezone."""
+    return now().date()
+
+
 def get_period_count(target_date: date) -> int:
     """Get number of quarterly periods in a day.
 

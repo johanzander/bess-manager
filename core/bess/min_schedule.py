@@ -66,6 +66,8 @@ ROBUST RECOVERY: When TOU corruption detected (overlaps, wrong order, duplicates
 
 import logging
 from datetime import datetime
+
+from . import time_utils
 from typing import ClassVar
 
 from .dp_schedule import DPSchedule
@@ -1138,7 +1140,7 @@ class GrowattScheduleManager:
         if current_period is not None:
             current_minutes = (current_period // 4) * 60 + (current_period % 4) * 15
         else:
-            now = datetime.now()
+            now = time_utils.now()
             current_minutes = now.hour * 60 + now.minute
 
         # Get only active/enabled intervals and sort by start time
@@ -1379,7 +1381,7 @@ class GrowattScheduleManager:
             logger.info("No schedule data available")
             return
 
-        now = datetime.now()
+        now = time_utils.now()
         current_period = now.hour * 4 + now.minute // 15
 
         lines = [

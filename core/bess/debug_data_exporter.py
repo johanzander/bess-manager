@@ -10,6 +10,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 
+from . import time_utils
 from .battery_system_manager import BatterySystemManager
 from .health_check import run_system_health_checks
 
@@ -454,7 +455,7 @@ class DebugDataAggregator:
         """
         try:
             log_dir = Path("/data/logs")
-            today_str = datetime.now().strftime("%Y-%m-%d")
+            today_str = time_utils.now().strftime("%Y-%m-%d")
             log_file = log_dir / f"bess-{today_str}.log"
 
             if not log_file.exists():
@@ -484,7 +485,7 @@ class DebugDataAggregator:
         """
         try:
             log_dir = Path("/data/logs")
-            today_str = datetime.now().strftime("%Y-%m-%d")
+            today_str = time_utils.now().strftime("%Y-%m-%d")
             log_file = log_dir / f"bess-{today_str}.log"
 
             if not log_file.exists():

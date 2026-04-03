@@ -7,6 +7,7 @@ inversion.
 import logging
 from datetime import date, datetime, timedelta
 
+from . import time_utils
 from .exceptions import PriceDataUnavailableError, SystemConfigurationError
 
 logger = logging.getLogger(__name__)
@@ -145,7 +146,7 @@ class HomeAssistantSource(PriceSource):
         """
         logger = logging.getLogger(__name__)
 
-        current_date = datetime.now().date()
+        current_date = time_utils.today()
         tomorrow_date = current_date + timedelta(days=1)
 
         # Only support today and tomorrow
@@ -221,7 +222,7 @@ class HomeAssistantSource(PriceSource):
                         return prices
 
             # Fallback to regular arrays (simple date matching)
-            current_date = datetime.now().date()
+            current_date = time_utils.today()
             tomorrow_date = current_date + timedelta(days=1)
 
             if target_date == current_date:
@@ -450,7 +451,7 @@ class PriceManager:
             ValueError: If prices are not available
         """
         if target_date is None:
-            target_date = datetime.now().date()
+            target_date = time_utils.today()
 
         # Use cached values for today if available
         if self._today_date == target_date and self._today_prices is not None:
@@ -489,7 +490,7 @@ class PriceManager:
                 price_data.append(price_entry)
 
             # Cache today's prices
-            today = datetime.now().date()
+            today = time_utils.today()
             tomorrow = today + timedelta(days=1)
 
             if target_date == today:
@@ -514,7 +515,7 @@ class PriceManager:
         Returns:
             List of price entries for today
         """
-        return self.get_price_data(datetime.now().date())
+        return self.get_price_data(time_utils.today())
 
     def get_tomorrow_prices(self) -> list:
         """Get prices for the next day.
@@ -522,7 +523,7 @@ class PriceManager:
         Returns:
             List of price entries for tomorrow, or empty list if not yet available
         """
-        tomorrow = datetime.now().date() + timedelta(days=1)
+        tomorrow = time_utils.today() + timedelta(days=1)
         try:
             return self.get_price_data(tomorrow)
         except (ValueError, PriceDataUnavailableError):
@@ -596,7 +597,7 @@ class PriceManager:
             - Index 0 = today 00:00
             - Length: 96 (today only) or 192 (today + tomorrow)
         """
-        today = datetime.now().date()
+        today = time_utils.today()
         tomorrow = today + timedelta(days=1)
 
         # Get today's quarterly prices (already quarterly resolution from Nordpool)

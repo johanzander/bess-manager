@@ -99,7 +99,7 @@ class DailyViewBuilder:
         Returns:
             DailyView with quarterly periods (92-100 depending on DST)
         """
-        today = datetime.now(tz=time_utils.TIMEZONE).date()
+        today = time_utils.today()
         logger.info(
             f"Building view for {today} at period {current_period} ({format_period(current_period)})"
         )

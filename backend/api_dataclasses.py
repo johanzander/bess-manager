@@ -6,6 +6,8 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime
 
+from core.bess import time_utils
+
 logger = logging.getLogger(__name__)
 
 
@@ -833,7 +835,7 @@ class APIDashboardResponse:
         real_time_power = APIRealTimePower.from_controller(controller)
 
         # Calculate current index based on resolution
-        now = datetime.now()
+        now = time_utils.now()
         if resolution == "hourly":
             # For hourly resolution, use hour number (0-23)
             current_index = now.hour

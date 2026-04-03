@@ -71,7 +71,7 @@ class OctopusEnergySource(PriceSource):
             PriceDataUnavailableError: If rates cannot be fetched
             SystemConfigurationError: If date is not today or tomorrow
         """
-        current_date = datetime.now().date()
+        current_date = time_utils.today()
         tomorrow_date = current_date + timedelta(days=1)
 
         if target_date not in (current_date, tomorrow_date):
@@ -99,7 +99,7 @@ class OctopusEnergySource(PriceSource):
         if not self.export_today_entity and not self.export_tomorrow_entity:
             return None
 
-        current_date = datetime.now().date()
+        current_date = time_utils.today()
         tomorrow_date = current_date + timedelta(days=1)
 
         if target_date not in (current_date, tomorrow_date):
@@ -244,7 +244,7 @@ class OctopusEnergySource(PriceSource):
         """
         checks = []
         overall_status = "OK"
-        today = datetime.now().date()
+        today = time_utils.today()
 
         # Test import rates
         import_check = {

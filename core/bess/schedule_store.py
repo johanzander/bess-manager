@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 
+from . import time_utils
+
 from core.bess.models import OptimizationResult
 
 logger = logging.getLogger(__name__)
@@ -112,7 +114,7 @@ class ScheduleStore:
         Returns:
             list[StoredSchedule]: All schedules for today, ordered by timestamp
         """
-        today = datetime.now().date()
+        today = time_utils.today()
         today_schedules = [s for s in self._schedules if s.timestamp.date() == today]
 
         return sorted(today_schedules, key=lambda s: s.timestamp)
@@ -163,7 +165,7 @@ class ScheduleStore:
 
         # Store with date for validation on load
         data = {
-            "date": datetime.now().date().isoformat(),
+            "date": time_utils.today().isoformat(),
             "period_intents": {str(k): v for k, v in period_intents.items()},
         }
 
@@ -195,7 +197,7 @@ class ScheduleStore:
 
             # Validate date - only use if from today
             stored_date = data.get("date")
-            today = datetime.now().date().isoformat()
+            today = time_utils.today().isoformat()
             if stored_date != today:
                 logger.info(
                     f"Persisted intents from {stored_date} (not today {today}), discarding"

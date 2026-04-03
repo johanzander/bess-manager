@@ -8,6 +8,7 @@ instead of sensor attributes, providing compatibility with the core integration.
 import logging
 from datetime import date, datetime, timedelta
 
+from . import time_utils
 from .price_manager import PriceSource
 
 logger = logging.getLogger(__name__)
@@ -53,7 +54,9 @@ class OfficialNordpoolSource(PriceSource):
         )
 
         # Only support today and tomorrow (official integration limitation)
-        current_date = datetime.now().date()
+        from . import time_utils
+
+        current_date = time_utils.today()
         tomorrow_date = current_date + timedelta(days=1)
 
         if target_date not in (current_date, tomorrow_date):
@@ -139,9 +142,7 @@ class OfficialNordpoolSource(PriceSource):
         }
 
         # Test the service call with today's date
-        from datetime import datetime
-
-        today = datetime.now().date()
+        today = time_utils.today()
 
         service_check = {
             "name": "Nordpool Service Call",

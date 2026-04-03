@@ -453,7 +453,7 @@ def create_decision_data(
         else:
             strategic_intent = "LOAD_SUPPORT"
     elif power > 0.1:  # Charging
-        if energy_data.grid_to_battery > 0.1:
+        if energy_data.grid_to_battery >= 0.1:
             strategic_intent = "GRID_CHARGING"
         else:
             strategic_intent = "SOLAR_STORAGE"

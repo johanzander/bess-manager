@@ -213,9 +213,13 @@ def _compute_reward(
     current_buy_price = buy_price[period]
     current_sell_price = sell_price[period]
 
+    # Use same tolerance as main DP loop to handle floating-point imprecision from np.arange
+    # (e.g., intended 0.0 may be -5.33e-14, which must be treated as IDLE, not discharge)
+    _power_tolerance = 0.001  # kW
+
     # Battery flows
-    battery_charged = max(0, power * dt) if power > 0 else 0.0
-    battery_discharged = max(0, -power * dt) if power < 0 else 0.0
+    battery_charged = max(0, power * dt) if power > _power_tolerance else 0.0
+    battery_discharged = max(0, -power * dt) if power < -_power_tolerance else 0.0
 
     # Grid flows from energy balance
     energy_balance = (
@@ -229,7 +233,7 @@ def _compute_reward(
     # ============================================================================
     new_cost_basis = cost_basis
 
-    if power > 0:  # Charging
+    if power > _power_tolerance:  # Charging
         energy_stored = power * dt * battery_settings.efficiency_charge
         battery_wear_cost = energy_stored * battery_settings.cycle_cost_per_kwh
 
@@ -247,7 +251,7 @@ def _compute_reward(
                 (total_new_cost / energy_stored) if energy_stored > 0 else cost_basis
             )
 
-    elif power < 0:  # Discharging
+    elif power < -_power_tolerance:  # Discharging
         battery_wear_cost = 0.0
 
         # Profitability check: only discharge if value exceeds cost basis

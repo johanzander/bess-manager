@@ -5,10 +5,18 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [7.14.1] - 2026-04-03
+## [7.15.0] - 2026-04-03
+
+### Added
+
+- Dashboard alert banner now has two tiers: red (critical) for required sensor failures and amber (warning) for optional sensors that are configured but not responding.
+- TOU segment write failures are now recorded in the runtime failure tracker and shown in the dashboard instead of being silently swallowed.
+- Health checks treat `not_configured` sensors as SKIPPED rather than ERROR, preventing false warnings for optional sensors the user has not set up.
 
 ### Fixed
 
+- Fixed timezone bug where `datetime.now()` returned UTC in the HA add-on container, causing off-by-one hour errors in period and date calculations for users in non-UTC timezones during the window around local midnight.
+- Fixed spurious +0.1 kWh battery charge appearing in all predicted evening hours due to floating-point accumulation in `np.arange()` producing near-zero IDLE power that bypassed direction checks in `_compute_reward()`.
 - Fixed Octopus Energy price source rejecting rates on DST spring-forward days (23-hour days now correctly require 46 periods instead of 48). (thanks [@pookey](https://github.com/pookey))
 
 ## [7.14.0] - 2026-04-02

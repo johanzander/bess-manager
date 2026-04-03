@@ -75,16 +75,17 @@ class TestGetPriceDataExtended:
         assert len(_price_entries) == 192
 
     def test_graceful_fallback_when_tomorrow_unavailable(self, quarterly_prices_24h):
-        """When tomorrow's prices aren't available, returns only today's 96 entries."""
+        """When tomorrow's prices aren't available, returns only today's entries."""
         source = TodayOnlyMockSource(quarterly_prices_24h)
         system = _make_system(source)
 
         prices, _price_entries = system._get_price_data(prepare_next_day=False)
 
+        expected = get_period_count(datetime.now().date())
         assert prices is not None
         assert _price_entries is not None
-        assert len(prices) == 96
-        assert len(_price_entries) == 96
+        assert len(prices) == expected
+        assert len(_price_entries) == expected
 
     def test_prepare_next_day_unaffected(self, quarterly_prices_24h):
         """prepare_next_day=True flow is completely unaffected by extended horizon."""

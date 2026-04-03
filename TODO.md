@@ -169,6 +169,26 @@ But at noon every day we get tomorrows schedule. We could use this information t
 
 ## 🔵 **ROBUSTNESS IMPROVEMENTS** (System Observability)
 
+### **Complete or Remove EV Energy Meter Integration**
+
+**Impact**: Low | **Effort**: Low-Medium | **Dependencies**: `energy_flow_calculator.py`, `sensor_collector.py`, `ha_api_controller.py`
+
+**Current state**: The EV charger energy meter (`ev_energy_meter`) is partially wired in but the feature is incomplete:
+
+- `sensor_collector.py`: `ev_energy_meter` is in `cumulative_sensor_keys` and `sensor_method_map` (→ `get_ev_energy`)
+- `energy_flow_calculator.py`: maps to `aux_load` and calculates the delta per period
+- `ha_api_controller.py`: has `get_ev_energy_meter` in `METHOD_SENSOR_MAP` but no corresponding `def get_ev_energy_meter()` method
+- `aux_load` is computed but **never consumed** — nothing in the API, savings calculations, or dashboard uses it
+
+The sensor is intentionally excluded from health checks to avoid spurious warnings.
+
+**Options**:
+
+1. **Finish it**: Implement `def get_ev_energy_meter(self)` in `ha_api_controller.py`, fix the method name mismatch (`get_ev_energy` vs `get_ev_energy_meter` in sensor_collector), surface `aux_load` in the dashboard and savings breakdown, add to optional health checks
+2. **Remove it**: Delete the dead `ev_energy_meter` entries from `cumulative_sensor_keys`, `sensor_method_map`, `METHOD_SENSOR_MAP`, and `energy_flow_calculator.py`
+
+---
+
 ### **Improve InfluxDB Health Check to Verify Sensor Coverage**
 
 **Impact**: Medium | **Effort**: Low-Medium | **Dependencies**: `health_check.py`, `influxdb_helper.py`

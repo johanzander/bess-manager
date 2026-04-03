@@ -153,10 +153,11 @@ class TestImportRateFetching:
             assert len(prices) == count * 2
 
     def test_too_many_rates_raises_error(self):
-        """More than 48 rates for a single date should fail validation."""
+        """More rates than expected for a single date should fail validation."""
         today = datetime.now().date()
-        rates = _make_rates(today, count=48)
-        # Add duplicate rates that also fall on today to exceed 48
+        expected_raw = time_utils.get_period_count(today) // 2
+        rates = _make_rates(today, count=expected_raw)
+        # Add duplicate rates that also fall on today to exceed expected_raw
         extra = _make_rates(today, count=2, base_value=0.50)
         # Adjust extra start times to be within the same day but unique
         for i, rate in enumerate(extra):

@@ -1,6 +1,6 @@
 """Tests for extended DP optimization horizon with tomorrow's price data."""
 
-from datetime import date
+from datetime import date, datetime, timedelta
 from unittest.mock import patch
 
 import pytest
@@ -9,19 +9,25 @@ from core.bess.battery_system_manager import BatterySystemManager
 from core.bess.exceptions import PriceDataUnavailableError
 from core.bess.price_manager import MockSource
 from core.bess.tests.conftest import MockHomeAssistantController, MockSensorCollector
+from core.bess.time_utils import get_period_count
 
 
 class TodayOnlyMockSource(MockSource):
     """Mock source that only returns prices for today, raises for tomorrow."""
 
     def get_prices_for_date(self, target_date: date) -> list:
-        from datetime import datetime
-
         if target_date > datetime.now().date():
             raise PriceDataUnavailableError(
                 message="Tomorrow's prices not yet available"
             )
-        return self.test_prices
+        return self.test_prices[: get_period_count(target_date)]
+
+
+class DSTAwareMockSource(MockSource):
+    """Mock source that returns the correct period count per date (DST-aware)."""
+
+    def get_prices_for_date(self, target_date: date) -> list:
+        return self.test_prices[: get_period_count(target_date)]
 
 
 def _make_system(
@@ -37,15 +43,19 @@ def _make_system(
 
 @pytest.fixture
 def quarterly_prices_24h():
-    """96 quarterly prices with clear day/evening split."""
+    """Up to 100 quarterly prices with clear day/evening split.
+
+    Sized for the longest possible day (DST fall-back = 100 periods).
+    Tests should use DSTAwareMockSource to trim to the actual day length.
+    """
     # Moderate day prices (0.8), low evening (0.2)
-    return [0.8] * 64 + [0.2] * 32
+    return [0.8] * 68 + [0.2] * 32
 
 
 @pytest.fixture
 def quarterly_prices_tomorrow():
-    """96 quarterly prices for tomorrow - morning peak."""
-    return [0.3] * 32 + [1.5] * 32 + [0.5] * 32
+    """Up to 100 quarterly prices for tomorrow - morning peak."""
+    return [0.3] * 34 + [1.5] * 32 + [0.5] * 34
 
 
 class TestGetPriceDataExtended:
@@ -78,14 +88,16 @@ class TestGetPriceDataExtended:
 
     def test_prepare_next_day_unaffected(self, quarterly_prices_24h):
         """prepare_next_day=True flow is completely unaffected by extended horizon."""
-        source = MockSource(quarterly_prices_24h)
+        source = DSTAwareMockSource(quarterly_prices_24h)
         system = _make_system(source)
 
         prices, _price_entries = system._get_price_data(prepare_next_day=True)
 
+        tomorrow = datetime.now().date() + timedelta(days=1)
+        expected = get_period_count(tomorrow)
         assert prices is not None
         # prepare_next_day fetches only tomorrow's prices, no extension
-        assert len(prices) == 96
+        assert len(prices) == expected
 
     def test_192_period_cap_enforced(self):
         """Even with very long price arrays, cap at 192 periods."""
@@ -240,7 +252,7 @@ class TestScheduleTruncation:
     @patch("core.bess.battery_system_manager.SensorCollector", MockSensorCollector)
     def test_schedule_arrays_truncated_to_today(self, quarterly_prices_24h):
         """DPSchedule arrays should never exceed today's period count."""
-        source = MockSource(quarterly_prices_24h)
+        source = DSTAwareMockSource(quarterly_prices_24h)
         controller = MockHomeAssistantController()
         controller.settings["battery_soc"] = 50
         system = _make_system(source, controller)
@@ -273,9 +285,7 @@ class TestScheduleTruncation:
         dp_schedule, _growatt_manager = schedule_result
 
         # Verify all schedule arrays are bounded to today
-        from datetime import datetime
-
-        from core.bess.time_utils import TIMEZONE, get_period_count
+        from core.bess.time_utils import TIMEZONE
 
         today_count = get_period_count(datetime.now(tz=TIMEZONE).date())
         assert len(dp_schedule.actions) <= today_count

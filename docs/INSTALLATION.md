@@ -250,6 +250,20 @@ sensors:
   # current_l2: "sensor.your_current_l2"
   # current_l3: "sensor.your_current_l3"
 
+  # Optional: Discharge inhibit — binary sensor that prevents BESS discharge when active.
+  # Leave empty (discharge_inhibit: "") to disable this feature.
+  # Discharge resumes automatically within ~1 minute once the sensor turns off.
+  #
+  # Ready-made binary sensors (created automatically by their HA integrations):
+  #   Tibber: binary_sensor.<id>_charging   (e.g. binary_sensor.ex90_charging)
+  #   Zaptec: binary_sensor.<id>_charging (e.g. binary_sensor.zap123456_charging)
+  #
+  # If neither integration provides a suitable sensor, create a Helper → Toggle in HA and
+  # automate it via your own rules (e.g. turn on when charger current > 0 A).
+  #
+  # discharge_inhibit: ""                              # disabled
+  # discharge_inhibit: "binary_sensor.ex90_charging"  # enabled
+
   # Optional: Lifetime energy statistics
   # lifetime_solar_energy: "sensor.your_lifetime_solar_energy"
   # lifetime_load_consumption: "sensor.your_lifetime_load_consumption"

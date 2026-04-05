@@ -151,6 +151,10 @@ class MockHomeAssistantController(HomeAssistantAPIController):
         """Check if test mode is enabled."""
         return self.settings["test_mode"]
 
+    def get_discharge_inhibit_active(self) -> bool:
+        """Mock discharge inhibit — always inactive in tests."""
+        return False
+
     def get_tou_settings(self):
         """Get TOU settings."""
         return self.settings["tou_settings"]

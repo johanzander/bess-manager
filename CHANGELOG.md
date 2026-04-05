@@ -5,6 +5,12 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.16.0] - 2026-04-05
+
+### Added
+
+- Discharge inhibit: optional binary sensor (`discharge_inhibit`) that suppresses BESS discharge when active (e.g. EV charger on, Tibber grid award). Discharge resumes automatically within ~1 minute once the sensor clears. Leave the field empty to disable.
+
 ## [7.15.0] - 2026-04-03
 
 ### Added

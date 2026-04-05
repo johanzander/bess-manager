@@ -274,6 +274,13 @@ class BESSController:
             misfire_grace_time=30,  # Allow 30 seconds of misfire before warning
         )
 
+        # Discharge inhibit monitoring (every minute)
+        self.scheduler.add_job(
+            self.system.apply_discharge_inhibit,
+            CronTrigger(minute="*"),
+            misfire_grace_time=30,  # Allow 30 seconds of misfire before warning
+        )
+
         self.scheduler.start()
 
     def _apply_settings(self, options):

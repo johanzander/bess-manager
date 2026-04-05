@@ -134,6 +134,10 @@ class BatterySystemManager:
         self._current_schedule = None
         self._initial_soc_pct = None  # SOC at midnight (%), set at period 0
 
+        # Discharge inhibit tracking
+        self._desired_discharge_rate: int = 0   # Rate from schedule before inhibit
+        self._last_applied_discharge_rate: int = 0  # Last rate written to inverter
+
         # Prediction caches (populated by _fetch_predictions)
         self._consumption_predictions: list[float] | None = None
         self._solar_predictions: list[float] | None = None
@@ -1825,6 +1829,19 @@ class BatterySystemManager:
             grid_charge = False
             discharge_rate = 0
 
+        # Store the schedule's desired discharge rate before inhibit check so that
+        # apply_discharge_inhibit() can restore it when the inhibit sensor clears.
+        self._desired_discharge_rate = discharge_rate
+
+        # Check discharge inhibit (e.g. EV actively charging during Tibber grid award)
+        if discharge_rate > 0:
+            if self.controller.get_discharge_inhibit_active():
+                logger.info(
+                    "Period %d: Discharge inhibited by external sensor — setting discharge rate to 0%%",
+                    period,
+                )
+                discharge_rate = 0
+
         hour = period // 4
         logger.info(
             "Period %d (%02d:%02d): Intent=%s, Action=%.2f kWh (%.2f kW), DischargeRate=%d%%",
@@ -1855,6 +1872,7 @@ class BatterySystemManager:
             period,
         )
         self.controller.set_discharging_power_rate(discharge_rate)
+        self._last_applied_discharge_rate = discharge_rate
 
     def _calculate_initial_cost_basis(self, current_period: int) -> float:
         """Calculate marginal cost of battery energy using historical data.
@@ -2151,6 +2169,33 @@ class BatterySystemManager:
 
         except (AttributeError, ValueError, KeyError) as e:
             logger.error("Failed to adjust charging power: %s", str(e))
+
+    def apply_discharge_inhibit(self) -> None:
+        """React to discharge inhibit sensor changes within ~1 minute.
+
+        Called every minute by the scheduler. Compares the current inhibit sensor
+        state against the last applied discharge rate and writes to the inverter
+        only when the state has actually changed, avoiding unnecessary Modbus writes.
+        """
+        inhibit_active = self.controller.get_discharge_inhibit_active()
+        target_rate = 0 if inhibit_active else self._desired_discharge_rate
+
+        if target_rate == self._last_applied_discharge_rate:
+            return
+
+        if inhibit_active:
+            logger.info(
+                "Discharge inhibit became active — suppressing discharge (was %d%%)",
+                self._last_applied_discharge_rate,
+            )
+        else:
+            logger.info(
+                "Discharge inhibit released — restoring discharge rate to %d%%",
+                self._desired_discharge_rate,
+            )
+
+        self.controller.set_discharging_power_rate(target_rate)
+        self._last_applied_discharge_rate = target_rate
 
     def get_settings(self):
         """Get settings - return dataclasses directly for API layer conversion."""

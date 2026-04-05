@@ -363,6 +363,13 @@ class HomeAssistantAPIController:
             "precision": 1,
             "conversion_threshold": None,
         },
+        "get_discharge_inhibit_active": {
+            "sensor_key": "discharge_inhibit",
+            "name": "Discharge Inhibit",
+            "unit": "binary",
+            "precision": 0,
+            "conversion_threshold": None,
+        },
     }
 
     def resolve_sensor_for_influxdb(self, sensor_key: str) -> str | None:
@@ -700,27 +707,27 @@ class HomeAssistantAPIController:
             json=json_data,
         )
 
-    def _get_sensor_value(self, sensor_name) -> float | None:
-        """Get value from any sensor by name using unified entity resolution.
-
-        Returns:
-            float: The sensor value, or None if the sensor is unavailable,
-            unknown, or could not be read.
-        """
+    def _get_raw_state(self, sensor_name: str) -> str | None:
+        """Get raw state string from HA. Returns None if not configured or unavailable."""
         try:
             entity_id, resolution_method = self._resolve_entity_id(sensor_name)
             logger.debug(
-                f"Resolving sensor '{sensor_name}' to entity '{entity_id}' (method: {resolution_method})"
+                "Resolving sensor '%s' to entity '%s' (method: %s)",
+                sensor_name,
+                entity_id,
+                resolution_method,
             )
+        except ValueError:
+            logger.warning("Could not get value for %s: sensor not configured", sensor_name)
+            return None
 
-            # Make API call to get state
+        try:
             response = self._api_request(
                 "get",
                 f"/api/states/{entity_id}",
                 operation=f"Read sensor '{sensor_name}'",
                 category="sensor_read",
             )
-
             if response and "state" in response:
                 state = response["state"]
                 if isinstance(state, str) and state in ("unavailable", "unknown"):
@@ -731,30 +738,52 @@ class HomeAssistantAPIController:
                         state,
                     )
                     return None
-                return float(state)
-            else:
-                logger.warning(
-                    "Sensor %s (entity_id: %s) returned invalid response or no state",
-                    sensor_name,
-                    entity_id,
-                )
-                return None
-
-        except (ValueError, TypeError):
-            logger.warning("Could not get value for %s", sensor_name)
+                return str(state)
+            logger.warning(
+                "Sensor %s (entity_id: %s) returned invalid response or no state",
+                sensor_name,
+                entity_id,
+            )
             return None
         except requests.RequestException as e:
             logger.error("Error fetching sensor %s: %s", sensor_name, str(e))
-
-            # Record runtime failure if failure tracker is available
             if self.failure_tracker:
                 self.failure_tracker.record_failure(
                     operation=f"Read sensor '{sensor_name}'",
                     category="sensor_read",
                     error=e,
                 )
-
             return None
+
+    def _get_sensor_value(self, sensor_name) -> float | None:
+        """Get value from any sensor by name using unified entity resolution.
+
+        Returns:
+            float: The sensor value, or None if the sensor is unavailable,
+            unknown, or could not be read.
+        """
+        raw = self._get_raw_state(sensor_name)
+        if raw is None:
+            return None
+        try:
+            return float(raw)
+        except (ValueError, TypeError):
+            logger.warning("Could not convert value for %s: %s", sensor_name, raw)
+            return None
+
+    def _get_binary_state(self, sensor_name: str) -> bool | None:
+        """Get binary sensor state. Returns None if not configured or unavailable."""
+        raw = self._get_raw_state(sensor_name)
+        if raw is None:
+            return None
+        return raw == "on"
+
+    def get_discharge_inhibit_active(self) -> bool:
+        """Check if discharge inhibit is active. Returns False when not configured or unavailable."""
+        if not self.sensors.get("discharge_inhibit"):
+            return False
+        result = self._get_binary_state("discharge_inhibit")
+        return result is True
 
     def get_estimated_consumption(self):
         """Get estimated consumption in quarterly resolution (96 periods).

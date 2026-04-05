@@ -1862,7 +1862,7 @@ class BatterySystemManager:
         )
         self.controller.set_grid_charge(grid_charge)
 
-        # Apply charging power rate (when grid charging is enabled)
+        # Apply charging power rate
         self.adjust_charging_power()
 
         # Apply discharge power rate

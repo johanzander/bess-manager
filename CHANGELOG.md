@@ -5,6 +5,12 @@ All notable changes to BESS Battery Manager will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.16.1] - 2026-04-05
+
+### Fixed
+
+- Fixed solar-only charging not applying the configured charging power rate. The power monitor was returning early when grid charging was disabled, leaving the inverter at whatever rate was previously set. It now correctly applies 100% charging power for solar scenarios (no fuse risk).
+
 ## [7.16.0] - 2026-04-05
 
 ### Added

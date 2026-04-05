@@ -10,9 +10,9 @@ It does this by:
 
 2. Battery Charge Management:
    - Adjusts battery charging power based on available power
-   - Ensures total power draw (including battery) stays within fuse limits
+   - When grid charging: ensures total power draw stays within fuse limits
+   - When solar charging: allows full target charging power (no fuse risk)
    - Respects maximum charging rate configuration
-   - Only activates when grid charging is enabled
 
 This module is designed to work with the Home Assistant controller and to be run periodically
 
@@ -201,9 +201,12 @@ class HomePowerMonitor:
 
     def adjust_battery_charging(self) -> None:
         if not self.controller.grid_charge_enabled():
-            return
+            # Solar-only charging: no fuse risk, allow full target charging power
+            target_power = self.target_charging_power_pct
+        else:
+            # Grid charging: limit by available fuse headroom
+            target_power = self.calculate_available_charging_power()
 
-        target_power = self.calculate_available_charging_power()
         current_power = self.controller.get_charging_power_rate()
 
         # Skip if no change needed (within 1% tolerance)

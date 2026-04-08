@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
-import { Download } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Download, Zap } from 'lucide-react';
 import SystemHealthComponent from '../components/SystemHealth';
 import api from '../lib/api';
 
 const SystemHealthPage: React.FC = () => {
+  const navigate = useNavigate();
   const [isExporting, setIsExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
 
@@ -55,15 +57,26 @@ const SystemHealthPage: React.FC = () => {
           </p>
         </div>
 
-        <button
-          onClick={handleExportDebugData}
-          disabled={isExporting}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-medium transition-colors"
-          title="Export all system data, logs, and settings for debugging"
-        >
-          <Download className="w-4 h-4" />
-          {isExporting ? 'Exporting...' : 'Export Debug Data'}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => navigate('/setup')}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white font-medium transition-colors"
+            title="Run auto-configuration to detect sensors and integrations"
+          >
+            <Zap className="w-4 h-4" />
+            Auto-Configure
+          </button>
+
+          <button
+            onClick={handleExportDebugData}
+            disabled={isExporting}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-medium transition-colors"
+            title="Export all system data, logs, and settings for debugging"
+          >
+            <Download className="w-4 h-4" />
+            {isExporting ? 'Exporting...' : 'Export Debug Data'}
+          </button>
+        </div>
       </div>
 
       {exportError && (

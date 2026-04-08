@@ -905,8 +905,6 @@ class APIRealTimePower:
     batteryChargePower: FormattedValue
     batteryDischargePower: FormattedValue
     netBatteryPower: FormattedValue
-    netGridPower: FormattedValue
-    selfPower: FormattedValue
 
     @classmethod
     def from_controller(cls, controller) -> APIRealTimePower:
@@ -920,11 +918,11 @@ class APIRealTimePower:
         battery_charge_power = controller.get_battery_charge_power()
         battery_discharge_power = controller.get_battery_discharge_power()
         net_battery_power = controller.get_net_battery_power()
-        net_grid_power = controller.get_net_grid_power()
-        self_power = controller.get_self_power()
 
         def create_formatted_power(value):
             """Create formatted power value structure with thousands separators"""
+            if value is None:
+                value = 0
             if abs(value) >= 1000:
                 return FormattedValue(
                     value=value,
@@ -949,6 +947,4 @@ class APIRealTimePower:
             batteryChargePower=create_formatted_power(battery_charge_power),
             batteryDischargePower=create_formatted_power(battery_discharge_power),
             netBatteryPower=create_formatted_power(net_battery_power),
-            netGridPower=create_formatted_power(net_grid_power),
-            selfPower=create_formatted_power(self_power),
         )

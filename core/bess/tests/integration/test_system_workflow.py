@@ -8,8 +8,9 @@ to hardware control using the new PeriodData structures throughout.
 UPDATED: All tests now pass explicit current_hour parameter for deterministic testing.
 """
 
-import pytest
 from datetime import datetime, timedelta
+
+import pytest
 
 from core.bess.models import DecisionData, EconomicData, EnergyData, PeriodData
 
@@ -368,7 +369,9 @@ class TestSystemResilience:
 class TestPerformanceWorkflows:
     """Test performance-critical workflows."""
 
-    @pytest.mark.skip(reason="Performance limit is hardware-dependent; skipped on slower machines")
+    @pytest.mark.skip(
+        reason="Performance limit is hardware-dependent; skipped on slower machines"
+    )
     def test_optimization_performance(self, quarterly_battery_system):
         """Test that optimization completes in reasonable time."""
         import time

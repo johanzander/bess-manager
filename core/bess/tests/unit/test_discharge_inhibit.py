@@ -5,15 +5,9 @@ Covers two mechanisms:
 - apply_discharge_inhibit: reacts to inhibit changes within ~1 minute
 """
 
-import sys
-import os
 from types import SimpleNamespace
 
 import pytest
-
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
 
 from core.bess.battery_system_manager import BatterySystemManager
 from core.bess.price_manager import MockSource
@@ -33,9 +27,13 @@ class InhibitableController(MockHomeAssistantController):
         return self.inhibit_active
 
 
-def _make_bsm(inhibit_active: bool = False) -> tuple[BatterySystemManager, InhibitableController]:
+def _make_bsm(
+    inhibit_active: bool = False,
+) -> tuple[BatterySystemManager, InhibitableController]:
     controller = InhibitableController(inhibit_active=inhibit_active)
-    bsm = BatterySystemManager(controller=controller, price_source=MockSource([1.0] * 96))
+    bsm = BatterySystemManager(
+        controller=controller, price_source=MockSource([1.0] * 96)
+    )
     return bsm, controller
 
 

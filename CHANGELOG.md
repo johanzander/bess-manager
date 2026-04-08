@@ -3,6 +3,26 @@
 All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+
+## [7.17.0] - 2026-04-08
+
+### Added
+
+- Auto-configuration setup wizard: first-time users are automatically redirected to a wizard that scans Home Assistant for Growatt and Nordpool integrations and maps all sensor entity IDs without manual configuration.
+- Discovery uses HA REST API (`/api/states`) for entity scanning and the WebSocket API for config entry and device registry lookups (Nordpool `config_entry_id`, Growatt `device_id`).
+- New API endpoints: `GET /api/setup/status`, `POST /api/setup/discover`, `POST /api/setup/confirm`.
+- Discovered configuration is persisted to `/data/bess_discovered_config.json` using atomic writes and applied to the running system immediately without restart.
+- "Auto-Configure" button added to the System Health page for re-running discovery at any time.
+- Optional sensor discovery: Solcast solar forecast, weather entity, EV energy meter (Zaptec/Easee), 48h avg grid import, and discharge inhibit binary sensor.
+
+### Removed
+
+- Removed unused diagnostic sensors: `output_power`, `self_power`, `system_power`, `net_grid_power` (not available on Growatt MIN series; removed from sensor map, API dataclasses, and config schema).
+
+### Fixed
+
+- `docker-compose.yml` volume mount and working directory corrected for updated project layout.
+- `PYTHONPATH` in Docker dev environment updated to include both `/app/backend` and `/app`.
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [7.16.1] - 2026-04-05

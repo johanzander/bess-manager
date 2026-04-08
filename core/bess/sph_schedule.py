@@ -14,10 +14,9 @@ SPH Intent Mapping:
 
 import logging
 from datetime import datetime
-
-from . import time_utils
 from typing import ClassVar
 
+from . import time_utils
 from .dp_schedule import DPSchedule
 from .settings import BatterySettings
 

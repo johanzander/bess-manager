@@ -5,7 +5,6 @@ Only stores today's data in memory.
 """
 
 import logging
-from datetime import datetime
 
 from core.bess import time_utils
 from core.bess.models import PeriodData

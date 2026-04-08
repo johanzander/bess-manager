@@ -5,7 +5,7 @@ services:
       dockerfile: backend/Dockerfile.dev
     container_name: bess-dev
     volumes:
-      - ./backend:/app:delegated
+      - ./backend:/app/backend:delegated
       - ./core:/app/core:delegated
       - ./frontend/dist:/app/frontend:delegated
       - ./backend/dev-options.json:/data/options.json:ro
@@ -18,13 +18,13 @@ services:
       - HA_DB_USER_NAME=${HA_DB_USER_NAME}
       - HA_DB_PASSWORD=${HA_DB_PASSWORD}
       - HA_TEST_MODE=${HA_TEST_MODE}
-      - PYTHONPATH=/workspaces/batterymanager
+      - PYTHONPATH=/app/backend:/app
       - WATCHFILES_FORCE_POLLING=true
     ports:
       - "8080:8080"
     env_file:
       - .env
-    command: python3 /app/watch.py
+    command: sh -c "cd /app/backend && python3 watch.py"
     restart: unless-stopped
     networks:
       - bess-network

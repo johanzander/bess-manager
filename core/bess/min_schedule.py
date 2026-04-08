@@ -65,11 +65,9 @@ ROBUST RECOVERY: When TOU corruption detected (overlaps, wrong order, duplicates
 """
 
 import logging
-from datetime import datetime
-
-from . import time_utils
 from typing import ClassVar
 
+from . import time_utils
 from .dp_schedule import DPSchedule
 from .health_check import perform_health_check
 from .settings import BatterySettings
@@ -1600,7 +1598,10 @@ class GrowattScheduleManager:
                             category="inverter_control",
                             operation=f"Disable TOU segment {segment.get('segment_id')} ({segment['start_time']}-{segment['end_time']})",
                             error=e,
-                            context={"segment_id": segment.get("segment_id"), "batt_mode": segment["batt_mode"]},
+                            context={
+                                "segment_id": segment.get("segment_id"),
+                                "batt_mode": segment["batt_mode"],
+                            },
                         )
 
             # Then update/add
@@ -1629,7 +1630,10 @@ class GrowattScheduleManager:
                             category="inverter_control",
                             operation=f"Write TOU segment {segment.get('segment_id')} ({segment['start_time']}-{segment['end_time']} {segment['batt_mode']})",
                             error=e,
-                            context={"segment_id": segment.get("segment_id"), "batt_mode": segment["batt_mode"]},
+                            context={
+                                "segment_id": segment.get("segment_id"),
+                                "batt_mode": segment["batt_mode"],
+                            },
                         )
         else:
             logger.info("No TOU segment changes needed")

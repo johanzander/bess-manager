@@ -3,6 +3,7 @@ API endpoints for battery and electricity settings, dashboard data, and decision
 
 """
 
+import re
 from datetime import datetime, timedelta
 
 from api_conversion import convert_keys_to_camel_case
@@ -17,6 +18,7 @@ from api_dataclasses import (
 )
 from fastapi import APIRouter, HTTPException, Query
 from loguru import logger
+from pydantic import BaseModel, field_validator
 
 from core.bess import time_utils
 from core.bess.health_check import run_system_health_checks
@@ -1843,9 +1845,6 @@ async def get_prediction_comparison(
             )
 
         # Get current state
-        from datetime import datetime
-
-        from core.bess import time_utils
 
         now = time_utils.now()
         current_period = now.hour * 4 + now.minute // 15
@@ -2257,4 +2256,142 @@ async def dismiss_all_runtime_failures():
         return {"success": True, "message": f"Dismissed {count} runtime failures"}
     except Exception as e:
         logger.error(f"Error dismissing all runtime failures: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.get("/api/setup/status")
+async def get_setup_status():
+    """Return whether the setup wizard is needed.
+
+    A wizard is needed when no sensor entity IDs are configured. Existing users
+    with a full sensor configuration are unaffected and will receive wizard_needed=false.
+
+    Returns:
+        dict: wizard_needed, configured_sensors count, total_sensors count
+    """
+    from app import bess_controller
+
+    sensors = bess_controller.ha_controller.sensors
+    total = len(sensors)
+    configured = sum(1 for v in sensors.values() if v)
+    return convert_keys_to_camel_case(
+        {
+            "wizard_needed": configured == 0,
+            "configured_sensors": configured,
+            "total_sensors": total,
+        }
+    )
+
+
+@router.post("/api/setup/discover")
+async def run_setup_discovery():
+    """Run auto-discovery of Growatt and Nordpool integrations.
+
+    Queries the HA entity registry and config entries to deterministically map
+    all Growatt MIN sensor entity IDs to BESS sensor keys. Also detects the
+    Nordpool Official config entry ID and price area.
+
+    Returns:
+        dict: Discovery results including found sensors, missing sensors, and
+              integration metadata (device_sn, nordpool_area)
+    """
+    from app import bess_controller
+
+    try:
+        ha = bess_controller.ha_controller
+
+        integrations, states = ha.discover_integrations()
+
+        sensors: dict[str, str] = {}
+        missing_sensors: list[str] = []
+
+        if integrations["growatt_found"] and integrations["device_sn"]:
+            sensors = ha.discover_growatt_sensors(integrations["device_sn"], states)
+            # Identify which BESS sensor keys were not discovered
+            all_bess_keys = list(ha.ENTITY_SUFFIX_MAP.values())
+            missing_sensors = [k for k in all_bess_keys if k not in sensors]
+        else:
+            logger.warning("Growatt integration not found during setup discovery")
+
+        current_sensors = ha.discover_current_sensors(states)
+        for phase_key, entity_id in current_sensors.items():
+            if phase_key not in sensors:
+                sensors[phase_key] = entity_id
+
+        # Discover optional integration sensors (Solcast, Weather, EV, etc.)
+        optional_sensors = ha.discover_optional_sensors(states)
+        for key, entity_id in optional_sensors.items():
+            if key not in sensors:
+                sensors[key] = entity_id
+
+        # Convert top-level keys to camelCase but preserve sensor keys as
+        # snake_case since they are BESS config keys, not API field names.
+        result = convert_keys_to_camel_case(
+            {
+                "growatt_found": integrations["growatt_found"],
+                "device_sn": integrations["device_sn"],
+                "growatt_device_id": integrations["growatt_device_id"],
+                "nordpool_found": integrations["nordpool_found"],
+                "nordpool_area": integrations["nordpool_area"],
+                "nordpool_config_entry_id": integrations["nordpool_config_entry_id"],
+                "missing_sensors": missing_sensors,
+            }
+        )
+        # Attach sensors dict without key conversion
+        result["sensors"] = sensors
+        return result
+    except Exception as e:
+        logger.error(f"Error during setup discovery: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+_ENTITY_ID_RE = re.compile(r"^[a-z][a-z0-9_]*\.[a-z0-9_-]+$")
+
+
+class ConfirmSetupPayload(BaseModel):
+    """Request body for POST /api/setup/confirm."""
+
+    sensors: dict[str, str] = {}
+    nordpool_area: str | None = None
+    nordpool_config_entry_id: str | None = None
+    growatt_device_id: str | None = None
+
+    @field_validator("sensors")
+    @classmethod
+    def validate_entity_ids(cls, sensors: dict[str, str]) -> dict[str, str]:
+        for value in sensors.values():
+            if value and not _ENTITY_ID_RE.match(value):
+                raise ValueError(f"Invalid entity ID format: {value}")
+        return sensors
+
+
+@router.post("/api/setup/confirm")
+async def confirm_setup(payload: ConfirmSetupPayload):
+    """Persist and apply discovered sensor configuration.
+
+    Saves the confirmed sensor mapping to /data/bess_discovered_config.json and
+    applies the configuration to the running ha_controller so BESS operations
+    can start immediately without a restart.
+
+    Args:
+        payload: ConfirmSetupPayload with sensors (bess_key → entity_id) and
+                 optional nordpool_area, nordpool_config_entry_id, growatt_device_id
+
+    Returns:
+        dict: success confirmation
+    """
+    from app import bess_controller
+
+    try:
+        bess_controller.apply_discovered_config(
+            sensor_map=payload.sensors,
+            nordpool_area=payload.nordpool_area,
+            nordpool_config_entry_id=payload.nordpool_config_entry_id,
+            growatt_device_id=payload.growatt_device_id,
+        )
+
+        logger.info(f"Setup confirmed: applied {len(payload.sensors)} sensor mappings")
+        return {"success": True, "applied_sensors": len(payload.sensors)}
+    except Exception as e:
+        logger.error(f"Error confirming setup: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e

@@ -6,7 +6,7 @@ instead of sensor attributes, providing compatibility with the core integration.
 """
 
 import logging
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 
 from . import time_utils
 from .price_manager import PriceSource

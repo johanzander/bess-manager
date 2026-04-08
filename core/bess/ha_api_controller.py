@@ -4,11 +4,16 @@ This controller provides the same interface as HomeAssistantController
 but uses the REST API instead of direct pyscript access.
 """
 
+import json
 import logging
+import re
+import ssl
 import time
+import urllib.parse
 from typing import ClassVar
 
 import requests
+import websocket
 
 from .exceptions import SystemConfigurationError
 from .runtime_failure_tracker import RuntimeFailureTracker
@@ -128,7 +133,8 @@ class HomeAssistantAPIController:
         self.session.headers.update(self.headers)
 
         logger.info(
-            f"Initialized HomeAssistantAPIController with {len(self.sensors)} sensor mappings"
+            "Initialized HomeAssistantAPIController with %d sensor mappings",
+            len(self.sensors),
         )
 
     # Class-level sensor mapping - immutable mapping
@@ -205,27 +211,6 @@ class HomeAssistantAPIController:
             "precision": 0,
             "conversion_threshold": 1000,
         },
-        "get_output_power": {
-            "sensor_key": "output_power",
-            "name": "Output Power",
-            "unit": "W",
-            "precision": 0,
-            "conversion_threshold": 1000,
-        },
-        "get_self_power": {
-            "sensor_key": "self_power",
-            "name": "Self Power",
-            "unit": "W",
-            "precision": 0,
-            "conversion_threshold": 1000,
-        },
-        "get_system_power": {
-            "sensor_key": "system_power",
-            "name": "System Power",
-            "unit": "W",
-            "precision": 0,
-            "conversion_threshold": 1000,
-        },
         "get_battery_charge_power": {
             "sensor_key": "battery_charge_power",
             "name": "Battery Charging Power",
@@ -236,20 +221,6 @@ class HomeAssistantAPIController:
         "get_battery_discharge_power": {
             "sensor_key": "battery_discharge_power",
             "name": "Battery Discharging Power",
-            "unit": "W",
-            "precision": 0,
-            "conversion_threshold": 1000,
-        },
-        "get_net_battery_power": {
-            "sensor_key": "net_battery_power",
-            "name": "Net Battery Power",
-            "unit": "W",
-            "precision": 0,
-            "conversion_threshold": 1000,
-        },
-        "get_net_grid_power": {
-            "sensor_key": "net_grid_power",
-            "name": "Net Grid Power",
             "unit": "W",
             "precision": 0,
             "conversion_threshold": 1000,
@@ -372,6 +343,32 @@ class HomeAssistantAPIController:
         },
     }
 
+    # Maps entity ID suffix (after device_sn_) → BESS sensor key.
+    # Used by discover_growatt_sensors() to map entity IDs from GET /api/states.
+    # Entity IDs follow the pattern: <domain>.<device_sn>_<suffix>
+    ENTITY_SUFFIX_MAP: ClassVar[dict[str, str]] = {
+        "statement_of_charge_soc": "battery_soc",
+        "battery_1_charging_w": "battery_charge_power",
+        "battery_1_discharging_w": "battery_discharge_power",
+        "import_power": "import_power",
+        "export_power": "export_power",
+        "local_load_power": "local_load_power",
+        "internal_wattage": "pv_power",
+        "lifetime_total_all_batteries_charged": "lifetime_battery_charged",
+        "lifetime_total_all_batteries_discharged": "lifetime_battery_discharged",
+        "lifetime_total_solar_energy": "lifetime_solar_energy",
+        "lifetime_total_export_to_grid": "lifetime_export_to_grid",
+        "lifetime_import_from_grid": "lifetime_import_from_grid",
+        "lifetime_total_load_consumption": "lifetime_load_consumption",
+        "lifetime_system_production": "lifetime_system_production",
+        "lifetime_self_consumption": "lifetime_self_consumption",
+        "battery_charge_power_limit": "battery_charging_power_rate",
+        "battery_discharge_power_limit": "battery_discharging_power_rate",
+        "battery_charge_soc_limit": "battery_charge_stop_soc",
+        "battery_discharge_soc_limit": "battery_discharge_stop_soc",
+        "ac_charge": "grid_charge",
+    }
+
     def resolve_sensor_for_influxdb(self, sensor_key: str) -> str | None:
         """Resolve sensor key to entity ID formatted for InfluxDB (without 'sensor.' prefix).
 
@@ -475,7 +472,7 @@ class HomeAssistantAPIController:
                 )
             else:
                 result.update({"status": "ok", "current_value": response.get("state")})
-        except Exception as e:
+        except (requests.RequestException, ValueError, KeyError) as e:
             result.update(
                 {
                     "status": "error",
@@ -680,8 +677,6 @@ class HomeAssistantAPIController:
 
         # Modify URL to include query parameters if needed
         if query_params:
-            import urllib.parse
-
             path += "?" + urllib.parse.urlencode(query_params)
 
         # Build context from service call kwargs for failure tracking
@@ -718,7 +713,9 @@ class HomeAssistantAPIController:
                 resolution_method,
             )
         except ValueError:
-            logger.warning("Could not get value for %s: sensor not configured", sensor_name)
+            logger.warning(
+                "Could not get value for %s: sensor not configured", sensor_name
+            )
             return None
 
         try:
@@ -797,7 +794,9 @@ class HomeAssistantAPIController:
         Raises:
             SystemConfigurationError: If sensor data is unavailable
         """
-        avg_hourly_consumption = self._get_sensor_value("48h_avg_grid_import") / 1000
+        raw_value = self._get_sensor_value("48h_avg_grid_import")
+        assert raw_value is not None, "48h_avg_grid_import sensor not available"
+        avg_hourly_consumption = raw_value / 1000
 
         # Convert hourly average to quarterly by dividing by 4
         # E.g., 4.0 kWh/hour = 1.0 kWh per 15-minute period
@@ -994,16 +993,16 @@ class HomeAssistantAPIController:
             logger.warning("Unexpected response format from read_time_segments")
             return []
 
-        except Exception as e:
+        except (requests.RequestException, ValueError, KeyError) as e:
             logger.warning("Failed to read time segments: %s", str(e))
-            return []  # Return empty list instead of failing
+            return []
 
     def write_ac_charge_times(
         self,
         charge_power: int,
         charge_stop_soc: int,
         mains_enabled: bool,
-        **period_params: object,
+        **period_params: str | bool,
     ) -> None:
         """Write AC charge time periods to an SPH inverter.
 
@@ -1014,7 +1013,7 @@ class HomeAssistantAPIController:
             **period_params: Flat period parameters, e.g. period_1_start, period_1_end,
                 period_1_enabled, period_2_start, ... (up to period_3_*)
         """
-        service_params: dict[str, object] = {
+        service_params: dict[str, str | int | bool] = {
             "charge_power": charge_power,
             "charge_stop_soc": charge_stop_soc,
             "mains_enabled": mains_enabled,
@@ -1030,7 +1029,7 @@ class HomeAssistantAPIController:
             )
 
         self._service_call_with_retry(
-            "growatt_server", "write_ac_charge_times", **service_params
+            "growatt_server", "write_ac_charge_times", None, **service_params
         )
 
     def read_ac_charge_times(self) -> dict:
@@ -1040,7 +1039,7 @@ class HomeAssistantAPIController:
             Dict with keys: charge_power, charge_stop_soc, mains_enabled, periods (list)
         """
         try:
-            service_params: dict[str, object] = {"return_response": True}
+            service_params: dict[str, str | bool] = {"return_response": True}
 
             if self.growatt_device_id:
                 service_params["device_id"] = self.growatt_device_id
@@ -1051,7 +1050,7 @@ class HomeAssistantAPIController:
                 )
 
             result = self._service_call_with_retry(
-                "growatt_server", "read_ac_charge_times", **service_params
+                "growatt_server", "read_ac_charge_times", None, **service_params
             )
 
             if result and "service_response" in result:
@@ -1060,7 +1059,7 @@ class HomeAssistantAPIController:
             logger.warning("Unexpected response format from read_ac_charge_times")
             return {}
 
-        except Exception as e:
+        except (requests.RequestException, ValueError, KeyError) as e:
             logger.warning("Failed to read AC charge times: %s", str(e))
             return {}
 
@@ -1068,7 +1067,7 @@ class HomeAssistantAPIController:
         self,
         discharge_power: int,
         discharge_stop_soc: int,
-        **period_params: object,
+        **period_params: str | bool,
     ) -> None:
         """Write AC discharge time periods to an SPH inverter.
 
@@ -1078,7 +1077,7 @@ class HomeAssistantAPIController:
             **period_params: Flat period parameters, e.g. period_1_start, period_1_end,
                 period_1_enabled, period_2_start, ... (up to period_3_*)
         """
-        service_params: dict[str, object] = {
+        service_params: dict[str, str | int | bool] = {
             "discharge_power": discharge_power,
             "discharge_stop_soc": discharge_stop_soc,
         }
@@ -1093,7 +1092,7 @@ class HomeAssistantAPIController:
             )
 
         self._service_call_with_retry(
-            "growatt_server", "write_ac_discharge_times", **service_params
+            "growatt_server", "write_ac_discharge_times", None, **service_params
         )
 
     def read_ac_discharge_times(self) -> dict:
@@ -1103,7 +1102,7 @@ class HomeAssistantAPIController:
             Dict with keys: discharge_power, discharge_stop_soc, periods (list)
         """
         try:
-            service_params: dict[str, object] = {"return_response": True}
+            service_params: dict[str, str | bool] = {"return_response": True}
 
             if self.growatt_device_id:
                 service_params["device_id"] = self.growatt_device_id
@@ -1114,7 +1113,7 @@ class HomeAssistantAPIController:
                 )
 
             result = self._service_call_with_retry(
-                "growatt_server", "read_ac_discharge_times", **service_params
+                "growatt_server", "read_ac_discharge_times", None, **service_params
             )
 
             if result and "service_response" in result:
@@ -1123,7 +1122,7 @@ class HomeAssistantAPIController:
             logger.warning("Unexpected response format from read_ac_discharge_times")
             return {}
 
-        except Exception as e:
+        except (requests.RequestException, ValueError, KeyError) as e:
             logger.warning("Failed to read AC discharge times: %s", str(e))
             return {}
 
@@ -1285,7 +1284,7 @@ class HomeAssistantAPIController:
 
             return result
 
-        except Exception as e:
+        except (requests.RequestException, ValueError, KeyError) as e:
             logger.error("Error fetching sensor data: %s", str(e))
             return {"status": "error", "message": str(e)}
 
@@ -1305,29 +1304,13 @@ class HomeAssistantAPIController:
         """Get current home load power in watts."""
         return self._get_sensor_value("local_load_power")
 
-    def get_output_power(self):
-        """Get current output power in watts."""
-        return self._get_sensor_value("output_power")
-
-    def get_self_power(self):
-        """Get current self power in watts."""
-        return self._get_sensor_value("self_power")
-
-    def get_system_power(self):
-        """Get current system power in watts."""
-        return self._get_sensor_value("system_power")
-
     def get_net_battery_power(self):
         """Get net battery power (positive = charging, negative = discharging) in watts."""
-        charge_power = self.get_battery_charge_power()
-        discharge_power = self.get_battery_discharge_power()
-        return charge_power - discharge_power
-
-    def get_net_grid_power(self):
-        """Get net grid power (positive = importing, negative = exporting) in watts."""
-        import_power = self.get_import_power()
-        export_power = self.get_export_power()
-        return import_power - export_power
+        charge = self.get_battery_charge_power()
+        discharge = self.get_battery_discharge_power()
+        if charge is None or discharge is None:
+            return None
+        return charge - discharge
 
     # Lifetime energy sensors (used by energy monitoring health checks)
     def get_battery_charged_lifetime(self):
@@ -1361,3 +1344,366 @@ class HomeAssistantAPIController:
     def get_self_consumption_lifetime(self):
         """Get lifetime total self consumption energy in kWh."""
         return self._get_sensor_value("lifetime_self_consumption")
+
+    def _ws_query(self, commands: list[dict]) -> list[dict]:
+        """Execute WebSocket API commands against Home Assistant.
+
+        Connects to the HA WebSocket API, authenticates, sends each command
+        sequentially, and returns the corresponding results.
+
+        The WebSocket API provides access to registries (entity, device, config
+        entries) that are not available through the REST API.
+
+        Args:
+            commands: List of WebSocket command dicts (each must have 'type').
+                      The 'id' field is added automatically.
+
+        Returns:
+            List of result dicts, one per command, in the same order.
+        """
+        ws_url = self.base_url.replace("https://", "wss://").replace("http://", "ws://")
+        ws_url = ws_url.rstrip("/") + "/api/websocket"
+
+        sslopt = {}
+        if ws_url.startswith("wss://"):
+            sslopt = {"cert_reqs": ssl.CERT_REQUIRED}
+
+        ws = websocket.create_connection(ws_url, sslopt=sslopt, timeout=15)
+        try:
+            # Phase 1: Authentication
+            auth_required = json.loads(ws.recv())
+            if auth_required.get("type") != "auth_required":
+                raise RuntimeError(
+                    f"Expected auth_required, got {auth_required.get('type')}"
+                )
+
+            ws.send(json.dumps({"type": "auth", "access_token": self.token}))
+            auth_result = json.loads(ws.recv())
+            if auth_result.get("type") != "auth_ok":
+                raise RuntimeError(f"WebSocket authentication failed: {auth_result}")
+
+            # Phase 2: Send commands and collect results
+            results: list[dict] = []
+            for idx, cmd in enumerate(commands, start=1):
+                msg = dict(cmd)
+                msg["id"] = idx
+                ws.send(json.dumps(msg))
+                response = json.loads(ws.recv())
+                if not response.get("success"):
+                    raise RuntimeError(
+                        f"WS command {cmd['type']} failed: {response.get('error')}"
+                    )
+                results.append(response["result"])
+
+            return results
+        finally:
+            ws.close()
+
+    def discover_ha_metadata(self, device_sn: str | None) -> dict:
+        """Discover HA-internal IDs via the WebSocket API.
+
+        Queries the config entry and device registries to find:
+        - Nordpool config_entry_id (required for nordpool.get_prices_for_date)
+        - Growatt device_id (HA device registry ID for service calls)
+
+        Args:
+            device_sn: Growatt device serial number to match, or None
+
+        Returns:
+            dict with keys: growatt_device_id, nordpool_config_entry_id
+        """
+        commands = [
+            {"type": "config_entries/get"},
+            {"type": "config/device_registry/list"},
+        ]
+
+        results = self._ws_query(commands)
+        config_entries_result = results[0]
+        devices_result = results[1]
+
+        # Find nordpool config_entry_id
+        nordpool_config_entry_id: str | None = None
+        for entry in config_entries_result:
+            if entry.get("domain") == "nordpool" and entry.get("state") == "loaded":
+                nordpool_config_entry_id = entry["entry_id"]
+                break
+
+        # Find growatt device_id by matching device name to device_sn
+        growatt_device_id: str | None = None
+        if device_sn:
+            sn_upper = device_sn.upper()
+            for device in devices_result:
+                name = str(device.get("name", "")).upper()
+                if name == sn_upper:
+                    growatt_device_id = device["id"]
+                    break
+
+        logger.info(
+            "WS discovery: nordpool_config_entry_id=%s, growatt_device_id=%s",
+            nordpool_config_entry_id,
+            growatt_device_id,
+        )
+        return {
+            "growatt_device_id": growatt_device_id,
+            "nordpool_config_entry_id": nordpool_config_entry_id,
+        }
+
+    def _fetch_all_states(self) -> list[dict]:
+        """Fetch all entity states from HA using the official REST API.
+
+        GET /api/states is the only officially supported REST endpoint for
+        entity discovery. This method is used by all discovery methods.
+
+        Returns:
+            List of state dicts from HA
+        """
+        states = self._api_request(
+            "get",
+            "/api/states",
+            operation="Fetch all entity states",
+            category="config",
+        )
+        assert states is not None, "HA /api/states returned no data"
+        return states
+
+    def discover_integrations(self) -> tuple[dict, list[dict]]:
+        """Discover installed HA integrations relevant to BESS configuration.
+
+        Combines two official HA APIs:
+        - REST GET /api/states: entity IDs, attributes (device_sn, area, sensors)
+        - WebSocket: config entries and device registry (config_entry_id, device_id)
+
+        Returns:
+            Tuple of (result_dict, states) where result_dict has keys:
+            growatt_found, device_sn, growatt_device_id,
+            nordpool_found, nordpool_area, nordpool_config_entry_id.
+            states is the raw list from /api/states for reuse by callers.
+        """
+        result: dict = {
+            "growatt_found": False,
+            "device_sn": None,
+            "growatt_device_id": None,
+            "nordpool_found": False,
+            "nordpool_area": None,
+            "nordpool_config_entry_id": None,
+        }
+
+        states = self._fetch_all_states()
+
+        device_sn = self._extract_growatt_device_sn(states)
+        if device_sn:
+            result["growatt_found"] = True
+            result["device_sn"] = device_sn
+
+        for state in states:
+            entity_id = str(state.get("entity_id", "")).lower()
+            if entity_id.startswith("sensor.nordpool"):
+                result["nordpool_found"] = True
+                if not result["nordpool_area"]:
+                    attrs = state.get("attributes", {})
+                    area = (
+                        attrs.get("price_area")
+                        or attrs.get("area")
+                        or attrs.get("deliveryArea")
+                        or attrs.get("delivery_area")
+                    )
+                    if area:
+                        result["nordpool_area"] = str(area)
+                    else:
+                        parsed_area = self._parse_nordpool_area_from_entity_id(
+                            entity_id
+                        )
+                        if parsed_area:
+                            result["nordpool_area"] = parsed_area
+
+        # Fetch HA-internal IDs via WebSocket
+        try:
+            metadata = self.discover_ha_metadata(device_sn)
+            result["growatt_device_id"] = metadata["growatt_device_id"]
+            result["nordpool_config_entry_id"] = metadata["nordpool_config_entry_id"]
+        except Exception:
+            logger.warning(
+                "WebSocket discovery failed; growatt_device_id and "
+                "nordpool_config_entry_id unavailable (self-signed cert or HA unreachable)"
+            )
+
+        return result, states
+
+    def _parse_nordpool_area_from_entity_id(self, entity_id: str) -> str | None:
+        """Parse Nordpool area code from an entity_id.
+
+        Examples:
+        - sensor.nordpool_kwh_se4_sek_2_10_025 -> SE4
+        - sensor.nordpool_kwh_no1_nok_3_10_025 -> NO1
+        """
+        match = re.search(
+            r"(?:^|_)(se[1-4]|no[1-5]|dk[12]|fi|ee|lt|lv)(?:_|$)", entity_id
+        )
+        if match:
+            return match.group(1).upper()
+        return None
+
+    def _extract_growatt_device_sn(self, states: list[dict]) -> str | None:
+        """Extract Growatt device serial number from entity IDs.
+
+        Growatt entities follow the naming pattern:
+        sensor.<device_sn>_statement_of_charge_soc
+
+        The device serial number is the prefix before the first known suffix.
+        Assumes the serial number does not contain underscores (consistent with
+        Growatt alphanumeric SN format, e.g. "rkm0d7n04x").
+
+        Args:
+            states: List of state dicts from /api/states
+
+        Returns:
+            Device serial number string, or None if no Growatt entities found
+        """
+        for state in states:
+            entity_id = str(state.get("entity_id", ""))
+            if not entity_id.startswith(("sensor.", "number.", "switch.")):
+                continue
+            if "_statement_of_charge" in entity_id:
+                object_id = entity_id.split(".", 1)[1]
+                return object_id.split("_", 1)[0]
+
+        return None
+
+    def discover_growatt_sensors(
+        self, device_sn: str, states: list[dict]
+    ) -> dict[str, str]:
+        """Discover Growatt sensor entity IDs for a given device serial number.
+
+        Maps entities matching the device serial number to BESS sensor keys
+        using known Growatt entity naming conventions.
+
+        Growatt entities follow the pattern: <domain>.<device_sn>_<suffix>
+        The suffix is mapped to a BESS sensor key via ENTITY_SUFFIX_MAP.
+
+        Args:
+            device_sn: Growatt device serial number (e.g. "rkm0d7n04x")
+            states: List of state dicts from /api/states
+
+        Returns:
+            dict mapping bess_sensor_key -> entity_id for all discovered sensors
+        """
+        result: dict[str, str] = {}
+        prefix = f"{device_sn}_"
+        for state in states:
+            entity_id = str(state.get("entity_id", ""))
+            if not entity_id.startswith(("sensor.", "number.", "switch.")):
+                continue
+            object_id = entity_id.split(".", 1)[1]
+            if not object_id.startswith(prefix):
+                continue
+            suffix = object_id[len(prefix) :]
+            if suffix in self.ENTITY_SUFFIX_MAP:
+                result[self.ENTITY_SUFFIX_MAP[suffix]] = entity_id
+
+        logger.info(
+            "Discovered %d Growatt sensors for device %s",
+            len(result),
+            device_sn,
+        )
+        return result
+
+    def discover_current_sensors(self, states: list[dict]) -> dict[str, str]:
+        """Discover phase current sensor entity IDs.
+
+        Scans entity states for sensors with device_class 'current' that
+        match household phase current naming (L1/L2/L3).
+
+        Args:
+            states: List of state dicts from /api/states
+
+        Returns:
+            dict mapping phase key ('current_l1', 'current_l2', 'current_l3') ->
+            entity_id for detected sensors. Empty dict if none found.
+        """
+        result: dict[str, str] = {}
+        for state in states:
+            entity_id = str(state.get("entity_id", ""))
+            if not entity_id.startswith("sensor."):
+                continue
+            attrs = state.get("attributes", {})
+            if attrs.get("device_class") != "current":
+                continue
+            lower_id = entity_id.lower()
+            if "current_l1" in lower_id and "current_l1" not in result:
+                result["current_l1"] = entity_id
+            elif "current_l2" in lower_id and "current_l2" not in result:
+                result["current_l2"] = entity_id
+            elif "current_l3" in lower_id and "current_l3" not in result:
+                result["current_l3"] = entity_id
+
+        logger.info("Discovered %d phase current sensor(s)", len(result))
+        return result
+
+    def _match_optional_sensor(
+        self, entity_id: str, lower_id: str
+    ) -> tuple[str, str] | None:
+        """Match a single entity to an optional sensor key.
+
+        Returns (sensor_key, entity_id) if matched, None otherwise.
+        """
+        if "solcast" in lower_id:
+            if "forecast_today" in lower_id:
+                return "solar_forecast_today", entity_id
+            if "forecast_tomorrow" in lower_id:
+                return "solar_forecast_tomorrow", entity_id
+
+        if entity_id.startswith("weather."):
+            return "weather_entity", entity_id
+
+        if ("zaptec" in lower_id or "easee" in lower_id) and "energy_meter" in lower_id:
+            return "ev_energy_meter", entity_id
+
+        if "48h" in lower_id and "grid_import" in lower_id:
+            return "48h_avg_grid_import", entity_id
+
+        if entity_id.startswith("binary_sensor."):
+            if "discharge_inhibit" in lower_id:
+                return "discharge_inhibit", entity_id
+            if "_is_charging" in lower_id and (
+                "tibber" in lower_id or "zaptec" in lower_id
+            ):
+                return "discharge_inhibit", entity_id
+
+        return None
+
+    def discover_optional_sensors(self, states: list[dict]) -> dict[str, str]:
+        """Discover optional integration sensors from entity states.
+
+        Scans all entity states for sensors belonging to optional integrations:
+        - Solcast solar forecast (forecast_today / forecast_tomorrow)
+        - Weather entity for temperature derating
+        - EV energy metering (Zaptec/Easee energy meters)
+        - 48h average grid import (consumption forecast)
+        - Discharge inhibit binary sensor
+
+        Args:
+            states: List of state dicts from /api/states
+
+        Returns:
+            dict mapping sensor_key -> entity_id for detected optional sensors
+        """
+        result: dict[str, str] = {}
+
+        for state in states:
+            entity_id = str(state.get("entity_id", ""))
+            lower_id = entity_id.lower()
+
+            match = self._match_optional_sensor(entity_id, lower_id)
+            if match is None:
+                continue
+            key, matched_id = match
+
+            # Weather: prefer "weather.home" over arbitrary matches
+            if key == "weather_entity":
+                if key not in result or matched_id == "weather.home":
+                    result[key] = matched_id
+            elif key not in result:
+                result[key] = matched_id
+
+        logger.info("Discovered %d optional sensor(s)", len(result))
+        return result

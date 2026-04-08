@@ -1,12 +1,14 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Link, useLocation, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Link, useLocation, Navigate, useNavigate } from 'react-router-dom';
 import DashboardPage from './pages/DashboardPage';
 import SavingsAnalysisPage from './pages/SavingsPage';
 import InverterPage from './pages/InverterPage';
 import InsightsPage from './pages/InsightsPage';
 import SystemHealthPage from './pages/SystemHealthPage';
+import SetupWizardPage from './pages/SetupWizardPage';
 import { useSettings } from './hooks/useSettings';
 import { Home, Activity, TrendingUp, Brain, Zap, Sun, Moon } from 'lucide-react';
+import api from './lib/api';
 
 // An ErrorBoundary component to catch rendering errors
 class ErrorBoundary extends React.Component<
@@ -47,6 +49,28 @@ class ErrorBoundary extends React.Component<
     return this.props.children;
   }
 }
+
+// Setup guard: redirects to wizard when no sensors are configured
+const SetupGuard = ({ children }: { children: React.ReactNode }) => {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const checkedRef = React.useRef(false);
+
+  useEffect(() => {
+    // Only check once on initial app load, not on every navigation
+    if (checkedRef.current || location.pathname === '/setup') return;
+    checkedRef.current = true;
+    api.get('/api/setup/status').then(res => {
+      if (res.data.wizardNeeded) {
+        navigate('/setup', { replace: true });
+      }
+    }).catch(() => {
+      // If status check fails, don't block app startup
+    });
+  }, [navigate, location.pathname]);
+
+  return <>{children}</>;
+};
 
 // Navigation component with new 4-tab structure
 const Navigation = () => {
@@ -258,21 +282,24 @@ function App() {
             )}
             
             <ErrorBoundary>
-              <Routes>
-                <Route path="/" element={
-                  <DashboardPage 
-                    onLoadingChange={(loading: boolean) => {}}
-                    settings={mergedSettings}
-                  />
-                } />
-                <Route path="/dashboard" element={<Navigate to="/" replace />} />
-                <Route path="/insights" element={<InsightsPage />} />
-                <Route path="/savings" element={<SavingsAnalysisPage />} />
-                <Route path="/inverter" element={<InverterPage />} />
-                <Route path="/system-health" element={<SystemHealthPage />} />
-                {/* Catch-all route: redirect any unmatched paths to dashboard */}
-                <Route path="*" element={<Navigate to="/" replace />} />
-              </Routes>
+              <SetupGuard>
+                <Routes>
+                  <Route path="/setup" element={<SetupWizardPage />} />
+                  <Route path="/" element={
+                    <DashboardPage 
+                      onLoadingChange={(loading: boolean) => {}}
+                      settings={mergedSettings}
+                    />
+                  } />
+                  <Route path="/dashboard" element={<Navigate to="/" replace />} />
+                  <Route path="/insights" element={<InsightsPage />} />
+                  <Route path="/savings" element={<SavingsAnalysisPage />} />
+                  <Route path="/inverter" element={<InverterPage />} />
+                  <Route path="/system-health" element={<SystemHealthPage />} />
+                  {/* Catch-all route: redirect any unmatched paths to dashboard */}
+                  <Route path="*" element={<Navigate to="/" replace />} />
+                </Routes>
+              </SetupGuard>
             </ErrorBoundary>
           </main>
         </div>

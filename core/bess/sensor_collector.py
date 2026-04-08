@@ -3,7 +3,7 @@ Robust SensorCollector - Clean sensor data collection from InfluxDB with strateg
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from . import time_utils
 from .energy_flow_calculator import EnergyFlowCalculator
@@ -639,9 +639,14 @@ class SensorCollector:
         readings = self._get_period_readings_from_live_sensors()
         if readings:
             self._last_readings = readings
-            logger.info("Sensor readings cache warmed from live sensors (%d sensors)", len(readings))
+            logger.info(
+                "Sensor readings cache warmed from live sensors (%d sensors)",
+                len(readings),
+            )
         else:
-            logger.warning("warm_readings_cache: no live sensor readings available — runtime collection will fall back to InfluxDB")
+            logger.warning(
+                "warm_readings_cache: no live sensor readings available — runtime collection will fall back to InfluxDB"
+            )
 
     def _normalize_sensor_readings(self, data: dict) -> dict[str, float]:
         """Normalize sensor readings and handle data type conversion."""

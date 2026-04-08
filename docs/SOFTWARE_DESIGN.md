@@ -359,8 +359,7 @@ discovery flow via the setup wizard UI.
 
 **Limitations**: Discovery is designed for Growatt MIN/SPH inverters with
 standard HA integration entity naming. Non-standard entity names may require
-manual correction in the wizard. WebSocket discovery gracefully degrades if
-the HA instance uses a self-signed TLS certificate.
+manual correction in the wizard.
 
 ## Health Monitoring
 

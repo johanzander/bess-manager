@@ -340,6 +340,28 @@ sensors:
 
 ```text
 
+### Auto-Configuration (Experimental)
+
+On first startup with no sensors configured, the system offers an automated
+discovery flow via the setup wizard UI.
+
+**Discovery process**:
+
+1. `GET /api/states` scans all HA entity states to identify Growatt entities
+   (matched by serial number prefix) and Nordpool sensor attributes.
+2. HA WebSocket API queries the config entry and device registries to resolve
+   the Nordpool `config_entry_id` and Growatt `device_id`.
+3. Optional integrations are detected by entity naming conventions (Solcast,
+   Zaptec/Easee EV meters, phase current sensors, weather entity, discharge inhibit).
+4. The user reviews and can correct the discovered mapping before applying.
+5. Confirmed configuration is persisted to `/data/bess_discovered_config.json`
+   and applied to the running system immediately without restart.
+
+**Limitations**: Discovery is designed for Growatt MIN/SPH inverters with
+standard HA integration entity naming. Non-standard entity names may require
+manual correction in the wizard. WebSocket discovery gracefully degrades if
+the HA instance uses a self-signed TLS certificate.
+
 ## Health Monitoring
 
 The system includes comprehensive health checking:

@@ -51,7 +51,6 @@ class SensorCollector:
             "lifetime_export_to_grid",
             "lifetime_system_production",
             "lifetime_self_consumption",
-            "ev_energy_meter",
             "battery_soc",
         ]
 
@@ -590,7 +589,6 @@ class SensorCollector:
             "lifetime_export_to_grid": "get_grid_export_lifetime",
             "lifetime_system_production": "get_system_production_lifetime",
             "lifetime_self_consumption": "get_self_consumption_lifetime",
-            "ev_energy_meter": "get_ev_energy",
             "battery_soc": "get_battery_soc",
         }
 
@@ -725,7 +723,6 @@ class SensorCollector:
         ]
 
         # Define optional methods (nice-to-have but not critical)
-        # ev_energy_meter excluded: feature not complete (aux_load is computed but unused)
         optional_energy_methods: list[str] = []
 
         # Combine all methods for health check

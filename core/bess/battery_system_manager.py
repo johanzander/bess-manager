@@ -135,7 +135,7 @@ class BatterySystemManager:
         self._initial_soc_pct = None  # SOC at midnight (%), set at period 0
 
         # Discharge inhibit tracking
-        self._desired_discharge_rate: int = 0   # Rate from schedule before inhibit
+        self._desired_discharge_rate: int = 0  # Rate from schedule before inhibit
         self._last_applied_discharge_rate: int = 0  # Last rate written to inverter
 
         # Prediction caches (populated by _fetch_predictions)
@@ -488,13 +488,19 @@ class BatterySystemManager:
     def _period_data_from_dict(d: dict) -> PeriodData:
         """Deserialize a PeriodData from a dict produced by dataclasses.asdict()."""
         energy_init_fields = {f.name for f in dataclasses.fields(EnergyData) if f.init}
-        energy = EnergyData(**{k: v for k, v in d["energy"].items() if k in energy_init_fields})
+        energy = EnergyData(
+            **{k: v for k, v in d["energy"].items() if k in energy_init_fields}
+        )
 
         economic_fields = {f.name for f in dataclasses.fields(EconomicData) if f.init}
-        economic = EconomicData(**{k: v for k, v in d["economic"].items() if k in economic_fields})
+        economic = EconomicData(
+            **{k: v for k, v in d["economic"].items() if k in economic_fields}
+        )
 
         decision_fields = {f.name for f in dataclasses.fields(DecisionData) if f.init}
-        decision = DecisionData(**{k: v for k, v in d["decision"].items() if k in decision_fields})
+        decision = DecisionData(
+            **{k: v for k, v in d["decision"].items() if k in decision_fields}
+        )
 
         ts_raw = d["timestamp"]
         ts = datetime.fromisoformat(ts_raw) if ts_raw else None
@@ -755,12 +761,11 @@ class BatterySystemManager:
                 logger.debug("Got %d periods for %s", periods_found, target_date)
 
         if not day_profiles:
-            logger.warning(
-                "No valid historical data for influxdb_7d_avg strategy, "
-                "falling back to fixed consumption"
+            raise ValueError(
+                "influxdb_7d_avg strategy: no valid historical data found in InfluxDB "
+                "for the past 7 days of sensor '%s'"
+                % sensors_config.get("local_load_power", "")
             )
-            quarterly = self.home_settings.default_hourly / 4.0
-            return [quarterly] * 96
 
         # Average across all valid days
         avg_profile = [
@@ -843,9 +848,7 @@ class BatterySystemManager:
             prices = [entry["price"] for entry in price_entries]
 
             # Validate quarterly period count (handles DST: 92, 96, or 100)
-            today_period_count = get_period_count(
-                time_utils.today()
-            )
+            today_period_count = get_period_count(time_utils.today())
             if not prepare_next_day and len(prices) > today_period_count:
                 logger.info(
                     "Extended horizon: %d periods (%d today + %d tomorrow)",
@@ -1193,9 +1196,7 @@ class BatterySystemManager:
         Returns:
             Terminal value per kWh (floored at 0.0)
         """
-        today_period_count = get_period_count(
-            time_utils.today()
-        )
+        today_period_count = get_period_count(time_utils.today())
         remaining_today = today_period_count - optimization_period
         total_horizon = len(buy_prices)
 
@@ -1532,9 +1533,7 @@ class BatterySystemManager:
             # better decisions for today, but DPSchedule and GrowattScheduleManager are
             # day-centric and the Growatt inverter has no date awareness in TOU segments.
             if not prepare_next_day:
-                today_period_count = get_period_count(
-                    time_utils.today()
-                )
+                today_period_count = get_period_count(time_utils.today())
                 if len(combined_soe) > today_period_count:
                     logger.info(
                         "Truncating schedule arrays from %d to %d periods (today only)",
@@ -1556,9 +1555,7 @@ class BatterySystemManager:
             # The DP algorithm computes economic_summary over the full extended horizon
             # (up to 192 periods), which inflates profitability gate and prediction snapshots.
             if not prepare_next_day:
-                today_period_count = get_period_count(
-                    time_utils.today()
-                )
+                today_period_count = get_period_count(time_utils.today())
                 today_result_count = today_period_count - optimization_period
                 today_result_periods = period_data_list[:today_result_count]
                 today_base_cost = sum(

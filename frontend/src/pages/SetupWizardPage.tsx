@@ -2,6 +2,44 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CheckCircle, AlertCircle, ChevronRight, ChevronLeft, ChevronDown, Zap } from 'lucide-react';
 import api from '../lib/api';
+import { INTEGRATIONS } from '../lib/sensorDefinitions';
+import type { IntegrationDef } from '../lib/sensorDefinitions';
+
+/** Parse a numeric input value, returning `fallback` instead of NaN. */
+const num = (v: string, fallback: number) => { const n = parseFloat(v); return Number.isNaN(n) ? fallback : n; };
+const int = (v: string, fallback: number) => { const n = parseInt(v, 10); return Number.isNaN(n) ? fallback : n; };
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+interface BatteryForm {
+  totalCapacity: number;
+  minSoc: number;
+  maxSoc: number;
+  maxChargeDischargePower: number;
+  cycleCost: number;
+  minActionProfitThreshold: number;
+}
+
+interface HomeForm {
+  currency: string;
+  consumption: number;
+  consumptionStrategy: string;
+  maxFuseCurrent: number;
+  voltage: number;
+  safetyMarginFactor: number;
+  phaseCount: number;
+  powerMonitoringEnabled: boolean;
+}
+
+interface ElectricityForm {
+  provider: string;
+  markupRate: number;
+  vatMultiplier: number;
+  additionalCosts: number;
+  taxReduction: number;
+}
 
 interface DiscoveryResult {
   growattFound: boolean;
@@ -12,168 +50,16 @@ interface DiscoveryResult {
   nordpoolConfigEntryId: string | null;
   sensors: Record<string, string>;
   missingSensors: string[];
+  // Auto-detected hints
+  inverterType: string | null;
+  detectedPhaseCount: number | null;
+  currency: string | null;
+  vatMultiplier: number | null;
 }
 
-interface SensorDef {
-  key: string;
-  label: string;
-  required: boolean;
-}
 
-interface SensorGroup {
-  name: string;
-  sensors: SensorDef[];
-}
 
-interface IntegrationDef {
-  id: string;
-  name: string;
-  required: boolean;
-  description: string;
-  sensorGroups: SensorGroup[];
-}
-
-const INTEGRATIONS: IntegrationDef[] = [
-  {
-    id: 'growatt',
-    name: 'Growatt Server',
-    required: true,
-    description: 'Battery inverter control and monitoring',
-    sensorGroups: [
-      {
-        name: 'Battery Control',
-        sensors: [
-          { key: 'battery_soc', label: 'State of Charge (SOC)', required: true },
-          { key: 'battery_charge_power', label: 'Charging Power', required: true },
-          { key: 'battery_discharge_power', label: 'Discharging Power', required: true },
-          { key: 'battery_charge_stop_soc', label: 'Charge Stop SOC', required: false },
-          { key: 'battery_discharge_stop_soc', label: 'Discharge Stop SOC', required: false },
-          { key: 'battery_charging_power_rate', label: 'Charging Power Rate', required: false },
-          { key: 'battery_discharging_power_rate', label: 'Discharging Power Rate', required: false },
-          { key: 'grid_charge', label: 'Grid Charge Enable', required: false },
-        ],
-      },
-      {
-        name: 'Power Monitoring',
-        sensors: [
-          { key: 'pv_power', label: 'Solar PV Power', required: true },
-          { key: 'local_load_power', label: 'Local Load Power', required: true },
-          { key: 'import_power', label: 'Grid Import Power', required: true },
-          { key: 'export_power', label: 'Grid Export Power', required: true },
-        ],
-      },
-      {
-        name: 'Lifetime Energy Totals',
-        sensors: [
-          { key: 'lifetime_battery_charged', label: 'Total Battery Charged', required: false },
-          { key: 'lifetime_battery_discharged', label: 'Total Battery Discharged', required: false },
-          { key: 'lifetime_solar_energy', label: 'Total Solar Energy', required: false },
-          { key: 'lifetime_export_to_grid', label: 'Total Export to Grid', required: false },
-          { key: 'lifetime_import_from_grid', label: 'Total Import from Grid', required: false },
-          { key: 'lifetime_load_consumption', label: 'Total Load Consumption', required: false },
-          { key: 'lifetime_system_production', label: 'Total System Production', required: false },
-          { key: 'lifetime_self_consumption', label: 'Total Self Consumption', required: false },
-        ],
-      },
-    ],
-  },
-  {
-    id: 'nordpool',
-    name: 'Nord Pool Official',
-    required: true,
-    description: 'Electricity spot price data for optimization',
-    sensorGroups: [],
-  },
-  {
-    id: 'solar_forecast',
-    name: 'Solar Forecast (Solcast)',
-    required: false,
-    description: 'PV production forecast for planning charge/discharge strategy',
-    sensorGroups: [
-      {
-        name: 'Daily Forecasts',
-        sensors: [
-          { key: 'solar_forecast_today', label: 'Forecast Today (kWh)', required: false },
-          { key: 'solar_forecast_tomorrow', label: 'Forecast Tomorrow (kWh)', required: false },
-        ],
-      },
-    ],
-  },
-  {
-    id: 'consumption_forecast',
-    name: 'Consumption Forecast',
-    required: false,
-    description: '48-hour average grid import for load prediction',
-    sensorGroups: [
-      {
-        name: 'Consumption',
-        sensors: [
-          { key: '48h_avg_grid_import', label: '48h Avg Grid Import', required: false },
-        ],
-      },
-    ],
-  },
-  {
-    id: 'phase_current',
-    name: 'Phase Current Monitoring',
-    required: false,
-    description: 'Three-phase current sensors for grid fuse protection',
-    sensorGroups: [
-      {
-        name: 'Phase Currents',
-        sensors: [
-          { key: 'current_l1', label: 'Phase L1 Current', required: false },
-          { key: 'current_l2', label: 'Phase L2 Current', required: false },
-          { key: 'current_l3', label: 'Phase L3 Current', required: false },
-        ],
-      },
-    ],
-  },
-  {
-    id: 'ev_metering',
-    name: 'EV Energy Metering',
-    required: false,
-    description: 'EV charger energy sensor for consumption analytics',
-    sensorGroups: [
-      {
-        name: 'EV Charger',
-        sensors: [
-          { key: 'ev_energy_meter', label: 'Lifetime EV Energy (kWh)', required: false },
-        ],
-      },
-    ],
-  },
-  {
-    id: 'discharge_inhibit',
-    name: 'Discharge Inhibit',
-    required: false,
-    description: 'Binary sensor to prevent battery discharge (e.g. Tibber/Zaptec EV charging)',
-    sensorGroups: [
-      {
-        name: 'Constraint',
-        sensors: [
-          { key: 'discharge_inhibit', label: 'Discharge Inhibit Sensor', required: false },
-        ],
-      },
-    ],
-  },
-  {
-    id: 'weather',
-    name: 'Weather Integration',
-    required: false,
-    description: 'Temperature forecast for LFP battery cold weather derating',
-    sensorGroups: [
-      {
-        name: 'Weather Entity',
-        sensors: [
-          { key: 'weather_entity', label: 'HA Weather Entity', required: false },
-        ],
-      },
-    ],
-  },
-];
-
-const STEPS = ['Scan', 'Review Configuration', 'Done'];
+const STEPS = ['Scan', 'Review Sensors', 'Battery Setup', 'Home & Grid', 'Pricing', 'Done'];
 
 /** Count configured/total sensors for an integration */
 function integrationSensorCounts(
@@ -209,9 +95,6 @@ function isIntegrationFound(id: string, discovery: DiscoveryResult, sensors: Rec
   if (id === 'weather') {
     return !!sensors['weather_entity'];
   }
-  if (id === 'ev_metering') {
-    return !!sensors['ev_energy_meter'];
-  }
   if (id === 'consumption_forecast') {
     return !!sensors['48h_avg_grid_import'];
   }
@@ -230,7 +113,38 @@ const SetupWizardPage: React.FC = () => {
   const [editedSensors, setEditedSensors] = useState<Record<string, string>>({});
   const [confirming, setConfirming] = useState(false);
   const [confirmError, setConfirmError] = useState<string | null>(null);
+  const [completing, setCompleting] = useState(false);
+  const [completeError, setCompleteError] = useState<string | null>(null);
   const [expandedIntegrations, setExpandedIntegrations] = useState<Set<string>>(new Set());
+  const [inverterType, setInverterType] = useState<string>('MIN');
+
+  const [batteryForm, setBatteryForm] = useState<BatteryForm>({
+    totalCapacity: 30.0,
+    minSoc: 15,
+    maxSoc: 95,
+    maxChargeDischargePower: 15.0,
+    cycleCost: 0.50,
+    minActionProfitThreshold: 8.0,
+  });
+
+  const [homeForm, setHomeForm] = useState<HomeForm>({
+    currency: 'SEK',
+    consumption: 3.5,
+    consumptionStrategy: 'sensor',
+    maxFuseCurrent: 25,
+    voltage: 230,
+    safetyMarginFactor: 1.0,
+    phaseCount: 3,
+    powerMonitoringEnabled: true,
+  });
+
+  const [electricityForm, setElectricityForm] = useState<ElectricityForm>({
+    provider: 'nordpool_official',
+    markupRate: 0.08,
+    vatMultiplier: 1.25,
+    additionalCosts: 1.03,
+    taxReduction: 0.0,
+  });
 
   useEffect(() => {
     handleScan();
@@ -242,13 +156,31 @@ const SetupWizardPage: React.FC = () => {
     setDiscovery(null);
     try {
       const res = await api.post('/api/setup/discover');
-      setDiscovery(res.data);
+      const d: DiscoveryResult = res.data;
+      setDiscovery(d);
+
+      // Seed form defaults from auto-detected hints
+      if (d.currency || d.vatMultiplier || d.detectedPhaseCount) {
+        setHomeForm(f => ({
+          ...f,
+          ...(d.currency ? { currency: d.currency } : {}),
+          ...(d.detectedPhaseCount ? { phaseCount: d.detectedPhaseCount } : {}),
+        }));
+        setElectricityForm(f => ({
+          ...f,
+          ...(d.vatMultiplier ? { vatMultiplier: d.vatMultiplier } : {}),
+        }));
+      }
+      if (d.inverterType) {
+        setInverterType(d.inverterType);
+      }
+
       // Merge discovered sensors with empty entries for all known sensor keys
       const allSensors: Record<string, string> = {};
       for (const integration of INTEGRATIONS) {
         for (const group of integration.sensorGroups) {
           for (const s of group.sensors) {
-            allSensors[s.key] = res.data.sensors[s.key] ?? '';
+            allSensors[s.key] = d.sensors[s.key] ?? '';
           }
         }
       }
@@ -274,12 +206,56 @@ const SetupWizardPage: React.FC = () => {
         nordpool_config_entry_id: discovery.nordpoolConfigEntryId,
         growatt_device_id: discovery.growattDeviceId,
       });
-      setStep(2);
+      setStep(2); // → Battery Setup
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Configuration failed';
       setConfirmError(message);
     } finally {
       setConfirming(false);
+    }
+  };
+
+  const handleComplete = async () => {
+    if (!discovery) return;
+    setCompleting(true);
+    setCompleteError(null);
+    try {
+      await api.post('/api/setup/complete', {
+        sensors: editedSensors,
+        nordpoolArea: discovery.nordpoolArea,
+        nordpoolConfigEntryId: discovery.nordpoolConfigEntryId,
+        growattDeviceId: discovery.growattDeviceId,
+        // Battery
+        totalCapacity: batteryForm.totalCapacity,
+        minSoc: batteryForm.minSoc,
+        maxSoc: batteryForm.maxSoc,
+        maxChargeDischargePower: batteryForm.maxChargeDischargePower,
+        cycleCost: batteryForm.cycleCost,
+        minActionProfitThreshold: batteryForm.minActionProfitThreshold,
+        // Home
+        currency: homeForm.currency,
+        consumption: homeForm.consumption,
+        consumptionStrategy: homeForm.consumptionStrategy,
+        maxFuseCurrent: homeForm.maxFuseCurrent,
+        voltage: homeForm.voltage,
+        safetyMarginFactor: homeForm.safetyMarginFactor,
+        phaseCount: homeForm.phaseCount,
+        powerMonitoringEnabled: homeForm.powerMonitoringEnabled,
+        // Electricity
+        provider: electricityForm.provider,
+        markupRate: electricityForm.markupRate,
+        vatMultiplier: electricityForm.vatMultiplier,
+        additionalCosts: electricityForm.additionalCosts,
+        taxReduction: electricityForm.taxReduction,
+        // Inverter
+        inverterType,
+      });
+      setStep(5); // → Done
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Setup failed';
+      setCompleteError(message);
+    } finally {
+      setCompleting(false);
     }
   };
 
@@ -330,6 +306,11 @@ const SetupWizardPage: React.FC = () => {
     }
     return null;
   };
+
+  const detectedBadge = (detected: boolean) =>
+    detected ? (
+      <span className="ml-1.5 text-xs font-medium text-green-600 dark:text-green-400">(auto-detected)</span>
+    ) : null;
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col items-center justify-center p-6">
@@ -535,7 +516,7 @@ const SetupWizardPage: React.FC = () => {
                 className="flex items-center space-x-2 px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 font-medium disabled:opacity-60"
               >
                 {confirming ? <div className="h-4 w-4 border-2 border-white rounded-full border-t-transparent animate-spin" /> : null}
-                <span>Apply Configuration</span>
+                <span>Next: Battery Setup</span>
                 <ChevronRight className="h-4 w-4" />
               </button>
             </div>
@@ -547,27 +528,411 @@ const SetupWizardPage: React.FC = () => {
         )}
 
         {/* Step 2: Success */}
+        {/* ── Step 2: Battery Setup ── */}
         {step === 2 && (
-          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
-            <div className="text-center py-8">
-              <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4" />
-              <h2 className="text-xl font-bold text-gray-900 dark:text-white">Configuration Applied!</h2>
-              <p className="text-gray-600 dark:text-gray-400 mt-2">
-                BESS Manager has been configured with your discovered sensors.
-                The system will begin operating immediately.
-              </p>
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 space-y-5">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Battery Setup</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Configure your battery hardware specifications.</p>
+            </div>
+
+            {/* Inverter type */}
+            <div className="space-y-1">
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                Inverter type
+                {detectedBadge(discovery?.inverterType != null)}
+              </span>
+              <div className="flex space-x-4 pt-1">
+                {(['MIN', 'SPH'] as const).map(t => (
+                  <label key={t} className="flex items-center space-x-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="inverterType"
+                      value={t}
+                      checked={inverterType === t}
+                      onChange={() => setInverterType(t)}
+                      className="text-blue-500"
+                    />
+                    <span className="text-sm text-gray-700 dark:text-gray-300">{t}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <label className="block">
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Total Capacity (kWh)</span>
+                <input
+                  type="number" min="1" step="0.1"
+                  value={batteryForm.totalCapacity}
+                  onChange={e => setBatteryForm(f => ({ ...f, totalCapacity: num(e.target.value, f.totalCapacity) }))}
+                  className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </label>
+
+              <label className="block">
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Max Charge / Discharge Power (kW)</span>
+                <input
+                  type="number" min="0.1" step="0.1"
+                  value={batteryForm.maxChargeDischargePower}
+                  onChange={e => setBatteryForm(f => ({ ...f, maxChargeDischargePower: num(e.target.value, f.maxChargeDischargePower) }))}
+                  className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </label>
+
+              <label className="block">
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Min State of Charge (%)</span>
+                <input
+                  type="number" min="0" max="100" step="1"
+                  value={batteryForm.minSoc}
+                  onChange={e => setBatteryForm(f => ({ ...f, minSoc: int(e.target.value, f.minSoc) }))}
+                  className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </label>
+
+              <label className="block">
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Max State of Charge (%)</span>
+                <input
+                  type="number" min="0" max="100" step="1"
+                  value={batteryForm.maxSoc}
+                  onChange={e => setBatteryForm(f => ({ ...f, maxSoc: int(e.target.value, f.maxSoc) }))}
+                  className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </label>
+
+              <label className="block">
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Cycle Cost (per kWh cycled)</span>
+                <input
+                  type="number" min="0" step="0.01"
+                  value={batteryForm.cycleCost}
+                  onChange={e => setBatteryForm(f => ({ ...f, cycleCost: num(e.target.value, f.cycleCost) }))}
+                  className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </label>
+
+              <label className="block">
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Min Action Profit Threshold</span>
+                <input
+                  type="number" min="0" step="0.1"
+                  value={batteryForm.minActionProfitThreshold}
+                  onChange={e => setBatteryForm(f => ({ ...f, minActionProfitThreshold: num(e.target.value, f.minActionProfitThreshold) }))}
+                  className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </label>
+            </div>
+
+            <div className="flex justify-between pt-2">
               <button
-                onClick={() => navigate('/', { replace: true })}
-                className="mt-6 px-8 py-3 bg-green-500 text-white rounded-lg hover:bg-green-600 font-semibold text-lg"
+                onClick={() => setStep(1)}
+                className="flex items-center space-x-1 px-4 py-2 text-gray-600 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700"
               >
-                Go to Dashboard
+                <ChevronLeft className="h-4 w-4" />
+                <span>Back</span>
+              </button>
+              <button
+                onClick={() => setStep(3)}
+                className="flex items-center space-x-2 px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 font-medium"
+              >
+                <span>Next: Home &amp; Grid</span>
+                <ChevronRight className="h-4 w-4" />
               </button>
             </div>
           </div>
         )}
 
+        {/* ── Step 3: Home & Grid ── */}
+        {step === 3 && (
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 space-y-5">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Home &amp; Grid</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Configure your home electrical setup.</p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <label className="block">
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Currency
+                  {detectedBadge(discovery?.currency != null)}
+                </span>
+                <select
+                  value={homeForm.currency}
+                  onChange={e => setHomeForm(f => ({ ...f, currency: e.target.value }))}
+                  className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  {['SEK', 'NOK', 'DKK', 'EUR', 'GBP'].map(c => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="block">
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Default Hourly Consumption (kWh)</span>
+                <input
+                  type="number" min="0" step="0.1"
+                  value={homeForm.consumption}
+                  onChange={e => setHomeForm(f => ({ ...f, consumption: num(e.target.value, f.consumption) }))}
+                  className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </label>
+
+              <label className="block">
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Fuse Current (A)</span>
+                <input
+                  type="number" min="1" step="1"
+                  value={homeForm.maxFuseCurrent}
+                  onChange={e => setHomeForm(f => ({ ...f, maxFuseCurrent: int(e.target.value, f.maxFuseCurrent) }))}
+                  className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </label>
+
+              <label className="block">
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Voltage (V)</span>
+                <input
+                  type="number" min="100" step="1"
+                  value={homeForm.voltage}
+                  onChange={e => setHomeForm(f => ({ ...f, voltage: int(e.target.value, f.voltage) }))}
+                  className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </label>
+
+              <label className="block">
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Safety Margin Factor (0–1)</span>
+                <input
+                  type="number" min="0" max="1" step="0.01"
+                  value={homeForm.safetyMarginFactor}
+                  onChange={e => setHomeForm(f => ({ ...f, safetyMarginFactor: num(e.target.value, f.safetyMarginFactor) }))}
+                  className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </label>
+            </div>
+
+            <div className="space-y-3">
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                Phases
+                {detectedBadge(discovery?.detectedPhaseCount != null)}
+              </span>
+              <div className="flex space-x-4">
+                {[1, 3].map(n => (
+                  <label key={n} className="flex items-center space-x-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="phaseCount"
+                      value={n}
+                      checked={homeForm.phaseCount === n}
+                      onChange={() => setHomeForm(f => ({ ...f, phaseCount: n }))}
+                      className="text-blue-500"
+                    />
+                    <span className="text-sm text-gray-700 dark:text-gray-300">{n}-phase</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Consumption Strategy</span>
+              <div className="flex flex-col space-y-2">
+                {(['sensor', 'fixed', 'influxdb_7d_avg'] as const).map(s => (
+                  <label key={s} className="flex items-center space-x-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="consumptionStrategy"
+                      value={s}
+                      checked={homeForm.consumptionStrategy === s}
+                      onChange={() => setHomeForm(f => ({ ...f, consumptionStrategy: s }))}
+                      className="text-blue-500"
+                    />
+                    <span className="text-sm text-gray-700 dark:text-gray-300">{s}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Power Monitoring Enabled</span>
+              <button
+                type="button"
+                onClick={() => setHomeForm(f => ({ ...f, powerMonitoringEnabled: !f.powerMonitoringEnabled }))}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 ${homeForm.powerMonitoringEnabled ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+              >
+                <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${homeForm.powerMonitoringEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+              </button>
+            </div>
+
+            <div className="flex justify-between pt-2">
+              <button
+                onClick={() => setStep(2)}
+                className="flex items-center space-x-1 px-4 py-2 text-gray-600 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700"
+              >
+                <ChevronLeft className="h-4 w-4" />
+                <span>Back</span>
+              </button>
+              <button
+                onClick={() => setStep(4)}
+                className="flex items-center space-x-2 px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 font-medium"
+              >
+                <span>Next: Pricing</span>
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Step 4: Electricity Pricing ── */}
+        {step === 4 && (
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 space-y-5">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Electricity Pricing</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Configure your electricity price source and cost parameters.</p>
+            </div>
+
+            {discovery?.vatMultiplier != null && (
+              <div className="rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 px-4 py-2 text-xs text-green-800 dark:text-green-300">
+                VAT multiplier pre-filled from detected Nordpool area ({discovery.nordpoolArea}).
+              </div>
+            )}
+
+            <div className="space-y-3">
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Price Provider</span>
+              <div className="flex flex-col space-y-2">
+                {([
+                  { value: 'nordpool_official', label: 'Nordpool (official integration)' },
+                  { value: 'nordpool', label: 'Nordpool (custom integration)' },
+                  { value: 'octopus', label: 'Octopus Energy' },
+                ] as const).map(opt => (
+                  <label key={opt.value} className="flex items-center space-x-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="provider"
+                      value={opt.value}
+                      checked={electricityForm.provider === opt.value}
+                      onChange={() => setElectricityForm(f => ({ ...f, provider: opt.value }))}
+                      className="text-blue-500"
+                    />
+                    <span className="text-sm text-gray-700 dark:text-gray-300">{opt.label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <label className="block">
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Markup Rate (per kWh)</span>
+                <input
+                  type="number" min="0" step="0.001"
+                  value={electricityForm.markupRate}
+                  onChange={e => setElectricityForm(f => ({ ...f, markupRate: num(e.target.value, f.markupRate) }))}
+                  className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </label>
+
+              <label className="block">
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">VAT Multiplier (e.g. 1.25 = 25%)</span>
+                <input
+                  type="number" min="1" step="0.01"
+                  value={electricityForm.vatMultiplier}
+                  onChange={e => setElectricityForm(f => ({ ...f, vatMultiplier: num(e.target.value, f.vatMultiplier) }))}
+                  className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </label>
+
+              <label className="block">
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Additional Costs (per kWh)</span>
+                <input
+                  type="number" min="0" step="0.001"
+                  value={electricityForm.additionalCosts}
+                  onChange={e => setElectricityForm(f => ({ ...f, additionalCosts: num(e.target.value, f.additionalCosts) }))}
+                  className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </label>
+
+              <label className="block">
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Tax Reduction (per kWh)</span>
+                <input
+                  type="number" min="0" step="0.001"
+                  value={electricityForm.taxReduction}
+                  onChange={e => setElectricityForm(f => ({ ...f, taxReduction: num(e.target.value, f.taxReduction) }))}
+                  className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </label>
+            </div>
+
+            {completeError && (
+              <p className="text-sm text-red-600 dark:text-red-400">{completeError}</p>
+            )}
+            <div className="flex justify-between pt-2">
+              <button
+                onClick={() => setStep(3)}
+                className="flex items-center space-x-1 px-4 py-2 text-gray-600 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700"
+              >
+                <ChevronLeft className="h-4 w-4" />
+                <span>Back</span>
+              </button>
+              <button
+                onClick={handleComplete}
+                disabled={completing}
+                className="flex items-center space-x-2 px-6 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 font-medium disabled:opacity-60"
+              >
+                {completing ? <div className="h-4 w-4 border-2 border-white rounded-full border-t-transparent animate-spin" /> : null}
+                <span>Finish Setup</span>
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Step 5: Done ── */}
+        {step === 5 && (
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
+            <div className="text-center py-6">
+              <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4" />
+              <h2 className="text-xl font-bold text-gray-900 dark:text-white">Setup Complete!</h2>
+              <p className="text-gray-600 dark:text-gray-400 mt-2">
+                BESS Manager is configured and ready to optimize your battery.
+              </p>
+            </div>
+
+            <div className="mt-2 rounded-lg bg-gray-50 dark:bg-gray-700 p-4 space-y-2 text-sm">
+              <div className="flex justify-between">
+                <span className="text-gray-500 dark:text-gray-400">Battery capacity</span>
+                <span className="font-medium text-gray-900 dark:text-white">{batteryForm.totalCapacity} kWh</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500 dark:text-gray-400">SOC range</span>
+                <span className="font-medium text-gray-900 dark:text-white">{batteryForm.minSoc}% – {batteryForm.maxSoc}%</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500 dark:text-gray-400">Max power</span>
+                <span className="font-medium text-gray-900 dark:text-white">{batteryForm.maxChargeDischargePower} kW</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500 dark:text-gray-400">Inverter type</span>
+                <span className="font-medium text-gray-900 dark:text-white">{inverterType}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500 dark:text-gray-400">Currency</span>
+                <span className="font-medium text-gray-900 dark:text-white">{homeForm.currency}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500 dark:text-gray-400">Price provider</span>
+                <span className="font-medium text-gray-900 dark:text-white">{electricityForm.provider}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500 dark:text-gray-400">VAT multiplier</span>
+                <span className="font-medium text-gray-900 dark:text-white">{electricityForm.vatMultiplier}</span>
+              </div>
+            </div>
+
+            <button
+              onClick={() => navigate('/', { replace: true })}
+              className="mt-6 w-full px-8 py-3 bg-green-500 text-white rounded-lg hover:bg-green-600 font-semibold text-base"
+            >
+              Go to Dashboard
+            </button>
+          </div>
+        )}
+
         <p className="text-center mt-4 text-xs text-gray-400 dark:text-gray-500">
-          Sensors can be reconfigured at any time via Auto-Configure on the System Health page.
+          Settings can be updated at any time via the Settings page or Auto-Configure on the System Health page.
         </p>
       </div>
     </div>

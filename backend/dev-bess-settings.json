@@ -1,0 +1,88 @@
+{
+  "home": {
+    "consumption": 3.5,
+    "currency": "SEK",
+    "consumption_strategy": "sensor",
+    "max_fuse_current": 25,
+    "voltage": 230,
+    "safety_margin_factor": 1.0,
+    "phase_count": 3,
+    "power_monitoring_enabled": true
+  },
+  "battery": {
+    "total_capacity": 30.0,
+    "min_soc": 15,
+    "max_soc": 95,
+    "max_charge_discharge_power": 15.0,
+    "cycle_cost": 0.5,
+    "min_action_profit_threshold": 8.0,
+    "temperature_derating": {
+      "enabled": false,
+      "weather_entity": "",
+      "derating_curve": [
+        [-1, 20],
+        [0, 20],
+        [5, 50],
+        [10, 80],
+        [15, 100]
+      ]
+    }
+  },
+  "electricity_price": {
+    "area": "SE4",
+    "markup_rate": 0.08,
+    "vat_multiplier": 1.25,
+    "additional_costs": 1.03,
+    "tax_reduction": 0.0
+  },
+  "energy_provider": {
+    "provider": "nordpool_official",
+    "nordpool": {
+      "today_entity": "sensor.nordpool_kwh_se4_sek_2_10_025",
+      "tomorrow_entity": "sensor.nordpool_kwh_se4_sek_2_10_025"
+    },
+    "nordpool_official": {
+      "config_entry_id": "01K3Y99FD3MDZYVFX2XSWR4888"
+    },
+    "octopus": {
+      "import_today_entity": "",
+      "import_tomorrow_entity": "",
+      "export_today_entity": "",
+      "export_tomorrow_entity": ""
+    }
+  },
+  "growatt": {
+    "inverter_type": "MIN",
+    "device_id": "fbafceb07a1cc74c351ef4310fa430a0"
+  },
+  "sensors": {
+    "battery_soc": "sensor.rkm0d7n04x_statement_of_charge_soc",
+    "battery_charge_stop_soc": "number.rkm0d7n04x_battery_charge_soc_limit",
+    "battery_discharge_stop_soc": "number.rkm0d7n04x_battery_discharge_soc_limit",
+    "battery_charging_power_rate": "number.rkm0d7n04x_battery_charge_power_limit",
+    "battery_discharging_power_rate": "number.rkm0d7n04x_battery_discharge_power_limit",
+    "grid_charge": "switch.rkm0d7n04x_ac_charge",
+    "pv_power": "sensor.rkm0d7n04x_internal_wattage",
+    "local_load_power": "sensor.rkm0d7n04x_local_load_power",
+    "import_power": "sensor.rkm0d7n04x_import_power",
+    "export_power": "sensor.rkm0d7n04x_export_power",
+    "battery_charge_power": "sensor.rkm0d7n04x_battery_1_charging_w",
+    "battery_discharge_power": "sensor.rkm0d7n04x_battery_1_discharging_w",
+    "current_l1": "sensor.current_l1_gustavsgatan_32a",
+    "current_l2": "sensor.current_l2_gustavsgatan_32a",
+    "current_l3": "sensor.current_l3_gustavsgatan_32a",
+    "lifetime_solar_energy": "sensor.rkm0d7n04x_lifetime_total_solar_energy",
+    "lifetime_load_consumption": "sensor.rkm0d7n04x_lifetime_total_load_consumption",
+    "lifetime_self_consumption": "sensor.rkm0d7n04x_lifetime_self_consumption",
+    "lifetime_import_from_grid": "sensor.rkm0d7n04x_lifetime_import_from_grid",
+    "lifetime_export_to_grid": "sensor.rkm0d7n04x_lifetime_total_export_to_grid",
+    "lifetime_battery_charged": "sensor.rkm0d7n04x_lifetime_total_all_batteries_charged",
+    "lifetime_battery_discharged": "sensor.rkm0d7n04x_lifetime_total_all_batteries_discharged",
+    "lifetime_system_production": "sensor.rkm0d7n04x_lifetime_system_production",
+    "ev_energy_meter": "sensor.zap263668_energy_meter",
+    "discharge_inhibit": "",
+    "48h_avg_grid_import": "sensor.48h_average_grid_import_power",
+    "solar_forecast_today": "sensor.solcast_pv_forecast_forecast_today",
+    "solar_forecast_tomorrow": "sensor.solcast_pv_forecast_forecast_tomorrow"
+  }
+}

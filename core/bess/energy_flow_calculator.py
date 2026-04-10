@@ -41,7 +41,6 @@ class EnergyFlowCalculator:
             "lifetime_load_consumption": "load_consumption",
             "lifetime_system_production": "system_production",
             "lifetime_self_consumption": "self_consumption",
-            "ev_energy_meter": "aux_load",
         }
         # Resolve to actual entity IDs
         resolved_mapping = {}

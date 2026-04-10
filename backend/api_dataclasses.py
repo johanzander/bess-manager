@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime
+
+from pydantic import BaseModel, field_validator
 
 from core.bess import time_utils
 
@@ -100,12 +103,21 @@ class APIBatterySettings:
     efficiencyDischarge: float  # % - discharge efficiency
     estimatedConsumption: float  # kWh - estimated daily consumption
     consumptionStrategy: str  # consumption forecast strategy
+    # Temperature derating (fields with defaults must be last in dataclass)
+    temperatureDeratingEnabled: bool = False
+    temperatureDeratingWeatherEntity: str = ""
 
     @classmethod
     def from_internal(
-        cls, battery, estimated_consumption: float, consumption_strategy: str = "sensor"
+        cls,
+        battery,
+        estimated_consumption: float,
+        consumption_strategy: str = "sensor",
+        temperature_derating=None,
     ) -> APIBatterySettings:
         """Convert from internal snake_case to canonical camelCase."""
+        td_enabled = temperature_derating.enabled if temperature_derating else False
+        td_entity = temperature_derating.weather_entity if temperature_derating else ""
         return cls(
             totalCapacity=battery.total_capacity,
             reservedCapacity=battery.reserved_capacity,
@@ -121,6 +133,8 @@ class APIBatterySettings:
             efficiencyDischarge=battery.efficiency_discharge,
             estimatedConsumption=estimated_consumption,
             consumptionStrategy=consumption_strategy,
+            temperatureDeratingEnabled=td_enabled,
+            temperatureDeratingWeatherEntity=td_entity,
         )
 
     def to_internal_update(self) -> dict:
@@ -162,6 +176,18 @@ class APIPriceSettings:
             minProfit=price.min_profit,
             useActualPrice=price.use_actual_price,
         )
+
+    def to_internal_update(self) -> dict:
+        """Convert API updates back to internal snake_case."""
+        return {
+            "area": self.area,
+            "markup_rate": self.markupRate,
+            "vat_multiplier": self.vatMultiplier,
+            "additional_costs": self.additionalCosts,
+            "tax_reduction": self.taxReduction,
+            "min_profit": self.minProfit,
+            "use_actual_price": self.useActualPrice,
+        }
 
 
 @dataclass
@@ -317,18 +343,6 @@ class APISnapshotComparison:
             predictedGrowattSchedule=snapshot_comparison.predicted_growatt_schedule,
             currentGrowattSchedule=snapshot_comparison.current_growatt_schedule,
         )
-
-    def to_internal_update(self) -> dict:
-        """Convert API updates back to internal snake_case."""
-        return {
-            "area": self.area,
-            "markup_rate": self.markupRate,
-            "vat_multiplier": self.vatMultiplier,
-            "additional_costs": self.additionalCosts,
-            "tax_reduction": self.taxReduction,
-            "min_profit": self.minProfit,
-            "use_actual_price": self.useActualPrice,
-        }
 
 
 @dataclass
@@ -840,13 +854,18 @@ class APIDashboardResponse:
             # For hourly resolution, use hour number (0-23)
             current_index = now.hour
             logger.debug(
-                f"Hourly mode: currentPeriod={current_index} (hour={now.hour})"
+                "Hourly mode: currentPeriod=%s (hour=%s)",
+                current_index,
+                now.hour,
             )
         else:
             # For quarterly resolution, use period index (0-95)
             current_index = now.hour * 4 + now.minute // 15
             logger.debug(
-                f"Quarterly mode: currentPeriod={current_index} (hour={now.hour}, minute={now.minute})"
+                "Quarterly mode: currentPeriod=%s (hour=%s, minute=%s)",
+                current_index,
+                now.hour,
+                now.minute,
             )
 
         actual_data = [h for h in hourly_data if h.dataSource == "actual"]
@@ -948,3 +967,102 @@ class APIRealTimePower:
             batteryDischargePower=create_formatted_power(battery_discharge_power),
             netBatteryPower=create_formatted_power(net_battery_power),
         )
+
+
+# ---------------------------------------------------------------------------
+# Settings API models (Pydantic — used for PUT /api/settings/* endpoints)
+# ---------------------------------------------------------------------------
+
+_ENTITY_ID_RE_DC = re.compile(r"^[a-z][a-z0-9_]*\.[a-z0-9_-]+$")
+
+
+class APIHomeSettingsPayload(BaseModel):
+    """Request/response body for home & grid settings."""
+
+    currency: str
+    consumption: float  # kWh hourly default
+    consumptionStrategy: str  # "sensor" | "fixed" | "influxdb_7d_avg"
+    maxFuseCurrent: int
+    voltage: int
+    safetyMarginFactor: float
+    phaseCount: int
+    powerMonitoringEnabled: bool
+
+
+class APIEnergyProviderPayload(BaseModel):
+    """Request/response body for energy provider settings."""
+
+    provider: str  # "nordpool_official" | "nordpool" | "octopus"
+    # Nordpool Official
+    nordpoolConfigEntryId: str | None = None
+    # Nordpool legacy sensor
+    nordpoolTodayEntity: str | None = None
+    nordpoolTomorrowEntity: str | None = None
+    # Octopus
+    octopusImportTodayEntity: str | None = None
+    octopusImportTomorrowEntity: str | None = None
+    octopusExportTodayEntity: str | None = None
+    octopusExportTomorrowEntity: str | None = None
+
+
+class APIInverterSettingsPayload(BaseModel):
+    """Request/response body for Growatt inverter settings."""
+
+    inverterType: str  # "MIN" | "SPH"
+    deviceId: str | None = None
+
+
+class APISensorsPayload(BaseModel):
+    """Request/response body for sensor entity ID mappings."""
+
+    sensors: dict[str, str] = {}
+
+    @field_validator("sensors")
+    @classmethod
+    def validate_entity_ids(cls, sensors: dict[str, str]) -> dict[str, str]:
+        for value in sensors.values():
+            if value and not _ENTITY_ID_RE_DC.match(value):
+                raise ValueError(f"Invalid entity ID format: {value}")
+        return sensors
+
+
+class APISetupCompletePayload(BaseModel):
+    """Request body for POST /api/setup/complete — full wizard output."""
+
+    sensors: dict[str, str] = {}
+    nordpoolArea: str | None = None
+    nordpoolConfigEntryId: str | None = None
+    growattDeviceId: str | None = None
+    # Battery settings
+    totalCapacity: float | None = None
+    minSoc: float | None = None
+    maxSoc: float | None = None
+    maxChargeDischargePower: float | None = None
+    cycleCost: float | None = None
+    minActionProfitThreshold: float | None = None
+    # Home settings
+    currency: str | None = None
+    consumption: float | None = None
+    consumptionStrategy: str | None = None
+    maxFuseCurrent: int | None = None
+    voltage: int | None = None
+    safetyMarginFactor: float | None = None
+    phaseCount: int | None = None
+    powerMonitoringEnabled: bool | None = None
+    # Electricity price settings
+    markupRate: float | None = None
+    vatMultiplier: float | None = None
+    additionalCosts: float | None = None
+    taxReduction: float | None = None
+    # Energy provider
+    provider: str | None = None
+    # Inverter
+    inverterType: str | None = None
+
+    @field_validator("sensors")
+    @classmethod
+    def validate_sensor_entity_ids(cls, sensors: dict[str, str]) -> dict[str, str]:
+        for value in sensors.values():
+            if value and not _ENTITY_ID_RE_DC.match(value):
+                raise ValueError(f"Invalid entity ID format: {value}")
+        return sensors

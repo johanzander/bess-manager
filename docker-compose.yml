@@ -9,6 +9,7 @@ services:
       - ./core:/app/core:delegated
       - ./frontend/dist:/app/frontend:delegated
       - ./backend/dev-options.json:/data/options.json:ro
+      - ./backend/dev-bess-settings.json:/data/bess_settings.json
     environment:
       - TZ=${TZ:-UTC}
       - FLASK_DEBUG=true

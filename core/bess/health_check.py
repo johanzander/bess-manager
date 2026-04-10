@@ -263,14 +263,25 @@ def perform_health_check(
                     }
                 )
         else:
-            check_result.update(
-                {
-                    "status": "ERROR",
-                    "error": method_info.get("error", "Unknown error"),
-                    "rawValue": None,
-                    "displayValue": "N/A",
-                }
-            )
+            # Distinguish between temporarily unavailable and truly broken
+            if method_info["status"] in ("entity_unavailable",):
+                check_result.update(
+                    {
+                        "status": "WARNING",
+                        "error": method_info.get("error", "Entity unavailable"),
+                        "rawValue": None,
+                        "displayValue": "Unavailable",
+                    }
+                )
+            else:
+                check_result.update(
+                    {
+                        "status": "ERROR",
+                        "error": method_info.get("error", "Unknown error"),
+                        "rawValue": None,
+                        "displayValue": "N/A",
+                    }
+                )
         health_check["checks"].append(check_result)
 
     # Determine overall status using the generic method

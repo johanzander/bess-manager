@@ -4,34 +4,32 @@ Main application entry point for the BESS management system.
 
 import json
 import os
-import tempfile
 from contextlib import asynccontextmanager
 
-import log_config  # noqa: F401
+import log_config as _  # noqa: F401
 
 # Import endpoints router
 from api import router as endpoints_router
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
+from settings_store import SettingsStore
 
 # Import BESS system modules
 from core.bess import time_utils
 from core.bess.battery_system_manager import BatterySystemManager
 from core.bess.ha_api_controller import HomeAssistantAPIController
 
-# from core.bess.health_check import run_system_health_checks # TODO ADD health check
-
 # Get ingress prefix from environment variable
 INGRESS_PREFIX = os.environ.get("INGRESS_PREFIX", "")
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(_app: FastAPI):
     """Lifespan manager for FastAPI app."""
     # Startup
     routes = []
@@ -47,7 +45,6 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown (if needed in the future)
-    pass
 
 
 # Create FastAPI app with correct root_path
@@ -117,9 +114,19 @@ class BESSController:
             logger.warning("No configuration options found, using defaults")
             options = {}
 
+        # Unified settings store — BESS-managed persistent settings
+        self.settings_store = SettingsStore()
+        self.settings_store.load(options)
+
+        # Build a merged options view: InfluxDB from options.json, everything
+        # else from bess_settings.json (the store takes precedence).
+        merged = dict(options)
+        for section, value in self.settings_store.data.items():
+            merged[section] = value
+
         # Initialize Home Assistant API Controller with sensor config from options
-        sensor_config = options.get("sensors", {})
-        growatt_config = options.get("growatt", {})
+        sensor_config = merged.get("sensors", {})
+        growatt_config = merged.get("growatt", {})
         growatt_device_id = growatt_config.get("device_id")
         self.ha_controller = self._init_ha_controller(sensor_config, growatt_device_id)
 
@@ -145,7 +152,7 @@ class BESSController:
         self.ha_controller.set_test_mode(test_mode)
 
         # Extract energy provider configuration
-        energy_provider_config = options.get("energy_provider", {})
+        energy_provider_config = merged.get("energy_provider", {})
 
         # Create Battery System Manager with price provider configuration
         # Let the system manager choose the appropriate price source
@@ -153,7 +160,7 @@ class BESSController:
             self.ha_controller,
             price_source=None,  # Let system manager auto-select based on config
             energy_provider_config=energy_provider_config,
-            addon_options=options,
+            addon_options=merged,
         )
 
         # Create scheduler with increased misfire grace time to avoid unnecessary warnings
@@ -170,7 +177,7 @@ class BESSController:
         )
 
         # Apply all settings to the system immediately
-        self._apply_settings(options)
+        self._apply_settings(merged)
 
         logger.info("BESS Controller initialized with early settings loading")
 
@@ -218,19 +225,17 @@ class BESSController:
             logger.error(f"Error reloading settings: {e}", exc_info=True)
 
     def _load_options(self):
-        """Load options from Home Assistant add-on standard location.
+        """Load InfluxDB options from /data/options.json.
 
-        In production: /data/options.json provided by Home Assistant add-on system
-        In development: /data/options.json mounted from backend/dev-options.json (extracted by dev-run.sh)
-
-        If the sensor configuration is empty (first-time setup), an overlay from
-        /data/bess_discovered_config.json is applied when available.
+        In production: /data/options.json provided by Home Assistant add-on system.
+        Contains only the influxdb section — all operational settings live in
+        /data/bess_settings.json managed by SettingsStore.
         """
         options_json = "/data/options.json"
 
         if os.path.exists(options_json):
             try:
-                with open(options_json) as f:
+                with open(options_json, encoding="utf-8") as f:
                     options = json.load(f)
                     logger.info(f"Loaded options from {options_json}")
             except Exception as e:
@@ -244,77 +249,15 @@ class BESSController:
                 f"In development, ensure dev-run.sh has extracted options from config.yaml."
             )
 
-        # If sensors are not configured, try to load from previously discovered config
-        sensors = options.get("sensors", {})
-        configured_count = sum(1 for v in sensors.values() if v)
-        if configured_count == 0:
-            discovered = self._load_discovered_config()
-            if discovered:
-                logger.info(
-                    "No sensors configured in options.json, applying discovered config "
-                    f"({len(discovered.get('sensors', {}))} sensors)"
-                )
-                options = self._merge_discovered_config(options, discovered)
-
         return options
 
     def _load_discovered_config(self) -> dict | None:
-        """Load previously discovered sensor config from /data/bess_discovered_config.json."""
-        discovered_config_path = "/data/bess_discovered_config.json"
-        if not os.path.exists(discovered_config_path):
-            return None
-        try:
-            with open(discovered_config_path, encoding="utf-8") as f:
-                config = json.load(f)
-                logger.info(f"Loaded discovered config from {discovered_config_path}")
-                return config
-        except Exception as e:
-            logger.warning(f"Could not load discovered config: {e!s}")
-            return None
+        """Deprecated — discovery is now handled by SettingsStore."""
+        return None
 
-    def _merge_discovered_config(self, options: dict, discovered: dict) -> dict:
-        """Merge discovered sensor config into options dict.
-
-        Copies sensor entity IDs, electricity_price area, nordpool config_entry_id,
-        and growatt device_id from the discovered config into the options dict.
-        Existing non-empty values are not overwritten.
-        """
-        merged = dict(options)
-
-        # Merge sensors
-        if "sensors" in discovered:
-            merged_sensors = dict(merged.get("sensors", {}))
-            for key, entity_id in discovered["sensors"].items():
-                if entity_id and not merged_sensors.get(key):
-                    merged_sensors[key] = entity_id
-            merged["sensors"] = merged_sensors
-
-        # Merge nordpool area
-        if "nordpool_area" in discovered:
-            price_config = dict(merged.get("electricity_price", {}))
-            if not price_config.get("area"):
-                price_config["area"] = discovered["nordpool_area"]
-                merged["electricity_price"] = price_config
-
-        # Merge nordpool config_entry_id
-        if "nordpool_config_entry_id" in discovered:
-            provider_config = dict(merged.get("energy_provider", {}))
-            nordpool_official = dict(provider_config.get("nordpool_official", {}))
-            if not nordpool_official.get("config_entry_id"):
-                nordpool_official["config_entry_id"] = discovered[
-                    "nordpool_config_entry_id"
-                ]
-                provider_config["nordpool_official"] = nordpool_official
-                merged["energy_provider"] = provider_config
-
-        # Merge growatt device_id
-        if "growatt_device_id" in discovered:
-            growatt_config = dict(merged.get("growatt", {}))
-            if not growatt_config.get("device_id"):
-                growatt_config["device_id"] = discovered["growatt_device_id"]
-                merged["growatt"] = growatt_config
-
-        return merged
+    def _merge_discovered_config(self, options: dict, _discovered: dict) -> dict:
+        """Deprecated — discovery is now handled by SettingsStore."""
+        return options
 
     def apply_discovered_config(
         self,
@@ -331,7 +274,7 @@ class BESSController:
             nordpool_config_entry_id: HA config entry ID for Nordpool integration
             growatt_device_id: HA device registry ID for Growatt device
         """
-        self._save_discovered_config(
+        self.settings_store.apply_discovered(
             sensor_map=sensor_map,
             nordpool_area=nordpool_area,
             nordpool_config_entry_id=nordpool_config_entry_id,
@@ -352,34 +295,13 @@ class BESSController:
         nordpool_config_entry_id: str | None = None,
         growatt_device_id: str | None = None,
     ) -> None:
-        """Persist discovered config to /data/bess_discovered_config.json.
-
-        Uses atomic write (write to temp file, then rename) to prevent
-        corruption if the process crashes mid-write.
-
-        Args:
-            sensor_map: dict mapping bess_sensor_key → entity_id
-            nordpool_area: Nordpool price area (e.g. "SE4")
-            nordpool_config_entry_id: HA config entry ID for Nordpool integration
-            growatt_device_id: HA device registry ID for Growatt device
-        """
-        discovered_config_path = "/data/bess_discovered_config.json"
-        payload: dict = {"sensors": sensor_map}
-        if nordpool_area:
-            payload["nordpool_area"] = nordpool_area
-        if nordpool_config_entry_id:
-            payload["nordpool_config_entry_id"] = nordpool_config_entry_id
-        if growatt_device_id:
-            payload["growatt_device_id"] = growatt_device_id
-        try:
-            fd, tmp_path = tempfile.mkstemp(dir="/data", suffix=".json")
-            with os.fdopen(fd, "w") as tmp_f:
-                json.dump(payload, tmp_f, indent=2)
-            os.replace(tmp_path, discovered_config_path)
-            logger.info(f"Saved discovered config to {discovered_config_path}")
-        except Exception as e:
-            logger.error(f"Failed to save discovered config: {e!s}")
-            raise
+        """Deprecated — persistence is now handled by SettingsStore.apply_discovered."""
+        self.settings_store.apply_discovered(
+            sensor_map=sensor_map,
+            nordpool_area=nordpool_area,
+            nordpool_config_entry_id=nordpool_config_entry_id,
+            growatt_device_id=growatt_device_id,
+        )
 
     def _init_scheduler_jobs(self):
         """Configure scheduler jobs."""
@@ -579,5 +501,5 @@ async def root_index():
 
 # SPA catch-all: serve index.html for any path not matched by API or asset routes
 @app.get("/{full_path:path}")
-async def spa_fallback(full_path: str, request: Request):
+async def spa_fallback(full_path: str):
     return FileResponse("/app/frontend/index.html")

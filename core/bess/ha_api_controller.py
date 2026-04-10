@@ -327,13 +327,6 @@ class HomeAssistantAPIController:
             "precision": 1,
             "conversion_threshold": None,
         },
-        "get_ev_energy_meter": {
-            "sensor_key": "ev_energy_meter",
-            "name": "EV Energy Meter",
-            "unit": "kWh",
-            "precision": 1,
-            "conversion_threshold": None,
-        },
         "get_discharge_inhibit_active": {
             "sensor_key": "discharge_inhibit",
             "name": "Discharge Inhibit",
@@ -1415,11 +1408,13 @@ class HomeAssistantAPIController:
         commands = [
             {"type": "config_entries/get"},
             {"type": "config/device_registry/list"},
+            {"type": "get_services"},
         ]
 
         results = self._ws_query(commands)
         config_entries_result = results[0]
         devices_result = results[1]
+        services_result: dict = results[2]
 
         # Find nordpool config_entry_id
         nordpool_config_entry_id: str | None = None
@@ -1438,14 +1433,26 @@ class HomeAssistantAPIController:
                     growatt_device_id = device["id"]
                     break
 
+        # Determine inverter type from registered growatt_server services:
+        # MIN registers update_time_segment / read_time_segments
+        # SPH registers write_ac_charge_times / read_ac_charge_times
+        growatt_inverter_type: str | None = None
+        growatt_services = services_result.get("growatt_server", {})
+        if "update_time_segment" in growatt_services:
+            growatt_inverter_type = "MIN"
+        elif "write_ac_charge_times" in growatt_services:
+            growatt_inverter_type = "SPH"
+
         logger.info(
-            "WS discovery: nordpool_config_entry_id=%s, growatt_device_id=%s",
+            "WS discovery: nordpool_config_entry_id=%s, growatt_device_id=%s, inverter_type=%s",
             nordpool_config_entry_id,
             growatt_device_id,
+            growatt_inverter_type,
         )
         return {
             "growatt_device_id": growatt_device_id,
             "nordpool_config_entry_id": nordpool_config_entry_id,
+            "growatt_inverter_type": growatt_inverter_type,
         }
 
     def _fetch_all_states(self) -> list[dict]:
@@ -1466,6 +1473,31 @@ class HomeAssistantAPIController:
         assert states is not None, "HA /api/states returned no data"
         return states
 
+    # Maps Nordpool area code prefix → (currency, vat_multiplier).
+    # These are approximate defaults used to pre-fill the setup wizard;
+    # users should verify and adjust for their actual tax situation.
+    _AREA_HINTS: ClassVar[dict[str, tuple[str, float]]] = {
+        "SE": ("SEK", 1.25),
+        "NO": ("NOK", 1.25),
+        "DK": ("DKK", 1.25),
+        "FI": ("EUR", 1.24),
+        "EE": ("EUR", 1.22),
+        "LT": ("EUR", 1.21),
+        "LV": ("EUR", 1.21),
+        "GB": ("GBP", 1.0),
+    }
+
+    def _hints_from_nordpool_area(self, area: str | None) -> dict:
+        """Return currency and VAT hints derived from the Nordpool price area."""
+        if not area:
+            return {}
+        prefix = area[:2].upper()
+        pair = self._AREA_HINTS.get(prefix)
+        if pair is None:
+            return {}
+        currency, vat = pair
+        return {"currency": currency, "vat_multiplier": vat}
+
     def discover_integrations(self) -> tuple[dict, list[dict]]:
         """Discover installed HA integrations relevant to BESS configuration.
 
@@ -1476,7 +1508,8 @@ class HomeAssistantAPIController:
         Returns:
             Tuple of (result_dict, states) where result_dict has keys:
             growatt_found, device_sn, growatt_device_id,
-            nordpool_found, nordpool_area, nordpool_config_entry_id.
+            nordpool_found, nordpool_area, nordpool_config_entry_id,
+            inverter_type, detected_phase_count, currency, vat_multiplier.
             states is the raw list from /api/states for reuse by callers.
         """
         result: dict = {
@@ -1486,6 +1519,11 @@ class HomeAssistantAPIController:
             "nordpool_found": False,
             "nordpool_area": None,
             "nordpool_config_entry_id": None,
+            # Auto-detected hints (None = could not determine)
+            "inverter_type": None,
+            "detected_phase_count": None,
+            "currency": None,
+            "vat_multiplier": None,
         }
 
         states = self._fetch_all_states()
@@ -1517,15 +1555,28 @@ class HomeAssistantAPIController:
                             result["nordpool_area"] = parsed_area
 
         # Fetch HA-internal IDs via WebSocket
+        metadata: dict = {}
         try:
             metadata = self.discover_ha_metadata(device_sn)
             result["growatt_device_id"] = metadata["growatt_device_id"]
             result["nordpool_config_entry_id"] = metadata["nordpool_config_entry_id"]
         except Exception:
             logger.warning(
-                "WebSocket discovery failed; growatt_device_id and "
-                "nordpool_config_entry_id unavailable (self-signed cert or HA unreachable)"
+                "WebSocket discovery failed; growatt_device_id, "
+                "nordpool_config_entry_id and inverter_type unavailable"
             )
+
+        # ── Auto-detected hints ───────────────────────────────────────────
+        # Inverter type: determined from registered growatt_server services
+        # (MIN: update_time_segment, SPH: write_ac_charge_times).
+        # Only set when WebSocket succeeded; None means undetermined.
+        if result["growatt_found"]:
+            result["inverter_type"] = metadata.get("growatt_inverter_type")
+
+        # Currency & VAT from Nordpool area
+        area_hints = self._hints_from_nordpool_area(result.get("nordpool_area"))
+        result["currency"] = area_hints.get("currency")
+        result["vat_multiplier"] = area_hints.get("vat_multiplier")
 
         return result, states
 
@@ -1655,18 +1706,18 @@ class HomeAssistantAPIController:
         if entity_id.startswith("weather."):
             return "weather_entity", entity_id
 
-        if ("zaptec" in lower_id or "easee" in lower_id) and "energy_meter" in lower_id:
-            return "ev_energy_meter", entity_id
-
         if "48h" in lower_id and "grid_import" in lower_id:
             return "48h_avg_grid_import", entity_id
 
         if entity_id.startswith("binary_sensor."):
             if "discharge_inhibit" in lower_id:
                 return "discharge_inhibit", entity_id
-            if "_is_charging" in lower_id and (
-                "tibber" in lower_id or "zaptec" in lower_id
-            ):
+            # Any binary_sensor ending with _charging or _is_charging is treated
+            # as a discharge inhibit (EV charger active indicator).
+            # Guarded by binary_sensor. prefix so power sensors like
+            # sensor.battery_is_charging_w won't match.
+            # Examples: zap263668_charging, ex90_charging, tibber_home_is_charging
+            if lower_id.endswith("_charging") or lower_id.endswith("_is_charging"):
                 return "discharge_inhibit", entity_id
 
         return None
@@ -1677,7 +1728,6 @@ class HomeAssistantAPIController:
         Scans all entity states for sensors belonging to optional integrations:
         - Solcast solar forecast (forecast_today / forecast_tomorrow)
         - Weather entity for temperature derating
-        - EV energy metering (Zaptec/Easee energy meters)
         - 48h average grid import (consumption forecast)
         - Discharge inhibit binary sensor
 

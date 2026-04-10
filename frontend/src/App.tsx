@@ -6,8 +6,9 @@ import InverterPage from './pages/InverterPage';
 import InsightsPage from './pages/InsightsPage';
 import SystemHealthPage from './pages/SystemHealthPage';
 import SetupWizardPage from './pages/SetupWizardPage';
+import SettingsPage from './pages/SettingsPage';
 import { useSettings } from './hooks/useSettings';
-import { Home, Activity, TrendingUp, Brain, Zap, Sun, Moon } from 'lucide-react';
+import { Home, Activity, TrendingUp, Brain, Zap, Sun, Moon, Settings } from 'lucide-react';
 import api from './lib/api';
 
 // An ErrorBoundary component to catch rendering errors
@@ -80,7 +81,7 @@ const Navigation = () => {
     // FIXED: Dashboard should be active for both "/" and when no specific page is selected
     if (path === '/') {
       // Dashboard is active for root path OR if we're not on any of the other specific pages
-      const otherPages = ['/insights', '/savings', '/inverter', '/system-health'];
+      const otherPages = ['/insights', '/savings', '/inverter', '/settings', '/system-health'];
       const isOnOtherPage = otherPages.some(page => location.pathname.startsWith(page));
       const isDashboardActive = location.pathname === '/' || !isOnOtherPage;
       
@@ -125,6 +126,14 @@ const Navigation = () => {
       >
         <Brain className="h-5 w-5" />
         <span className="hidden sm:inline">Insights</span>
+      </Link>
+      <Link
+        to="/settings"
+        className={`p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center space-x-1 ${isActive('/settings')}`}
+        title="Battery, grid, pricing and sensor settings"
+      >
+        <Settings className="h-5 w-5" />
+        <span className="hidden sm:inline">Settings</span>
       </Link>
       <Link
         to="/system-health"
@@ -295,6 +304,7 @@ function App() {
                   <Route path="/insights" element={<InsightsPage />} />
                   <Route path="/savings" element={<SavingsAnalysisPage />} />
                   <Route path="/inverter" element={<InverterPage />} />
+                  <Route path="/settings" element={<SettingsPage />} />
                   <Route path="/system-health" element={<SystemHealthPage />} />
                   {/* Catch-all route: redirect any unmatched paths to dashboard */}
                   <Route path="*" element={<Navigate to="/" replace />} />

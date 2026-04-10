@@ -184,12 +184,44 @@ class DebugReportFormatter:
         if count == 0:
             return summary + "\n\n*No entity states available*"
 
+        if not export.compact:
+            return (
+                summary
+                + f"""
+
+<details>
+<summary>Raw HA entity states ({count} entities — click to expand)</summary>
+
+```json
+{self._format_json(export.entity_snapshot)}
+```
+
+</details>"""
+            )
+
+        # Compact: flattened key:value table for quick reading,
+        # full JSON in collapsible for mock HA replay.
+        rows = ["| Entity ID | State | Unit |", "|---|---|---|"]
+        for entity_id, state in sorted(export.entity_snapshot.items()):
+            if isinstance(state, dict):
+                val = state.get("state", "")
+                attrs = state.get("attributes", {})
+                unit = attrs.get("unit_of_measurement", "")
+            else:
+                val = str(state)
+                unit = ""
+            rows.append(f"| `{entity_id}` | {val} | {unit} |")
+
+        flat_table = "\n".join(rows)
+
         return (
             summary
             + f"""
 
+{flat_table}
+
 <details>
-<summary>Raw HA entity states ({count} entities — click to expand)</summary>
+<summary>Full HA entity states (JSON — needed for mock HA replay)</summary>
 
 ```json
 {self._format_json(export.entity_snapshot)}
@@ -240,7 +272,8 @@ class DebugReportFormatter:
         if with_data == 0:
             return summary_text + "\n\n*No historical data available*"
 
-        details = f"""
+        if not export.compact:
+            details = f"""
 <details>
 <summary>Full Historical Data ({with_data} periods - click to expand)</summary>
 
@@ -249,8 +282,49 @@ class DebugReportFormatter:
 ```
 
 </details>"""
+            return summary_text + details
 
-        return summary_text + details
+        # Compact: markdown table for quick analysis + full JSON collapsible for replay.
+        rows = [
+            "| Per | Time  | Src    | Intent           | Observed         |"
+            " SOE kWh | Solar | Import | Savings |",
+            "|-----|-------|--------|------------------|------------------|"
+            "---------|-------|--------|---------|",
+        ]
+        for p in export.historical_periods:
+            if p is None:
+                continue
+            ts = str(p.get("timestamp", ""))[:16]
+            src = p.get("data_source", "")[:6]
+            dec = p.get("decision", {})
+            intent = dec.get("strategic_intent", "")[:16]
+            observed = (dec.get("observed_intent") or "")[:16]
+            en = p.get("energy", {})
+            soe_s = en.get("battery_soe_start", 0)
+            soe_e = en.get("battery_soe_end", 0)
+            solar = en.get("solar_production", 0)
+            imp = en.get("grid_imported", 0)
+            econ = p.get("economic", {})
+            savings = econ.get("hourly_savings", 0)
+            rows.append(
+                f"| {p.get('period', ''):>3} | {ts[11:16]:5} | {src:<6} |"
+                f" {intent:<16} | {observed:<16} |"
+                f" {soe_s:>4.1f}→{soe_e:<4.1f} | {solar:>5.2f} | {imp:>6.2f} | {savings:>7.4f} |"
+            )
+
+        table = "\n".join(rows)
+
+        details = f"""
+<details>
+<summary>Full Historical Data JSON (needed for mock HA replay)</summary>
+
+```json
+{self._format_json(export.historical_periods)}
+```
+
+</details>"""
+
+        return summary_text + f"\n\n{table}" + details
 
     def _format_schedules(self, export: DebugDataExport) -> str:
         """Format optimization schedules section with summary.
@@ -280,7 +354,8 @@ class DebugReportFormatter:
 
 **Last Optimization**: {last}"""
 
-        details = f"""
+        if not export.compact or not export.schedules:
+            details = f"""
 <details>
 <summary>Full Schedule Data ({total} schedules - click to expand)</summary>
 
@@ -289,8 +364,77 @@ class DebugReportFormatter:
 ```
 
 </details>"""
+            return summary_text + details
 
-        return summary_text + details
+        # Compact: render the latest schedule as a markdown table.
+        # The full JSON still lives in the collapsible for deeper digs.
+        schedule = export.schedules[0]
+        opt_period = schedule.get("optimization_period", "?")
+        opt_result = schedule.get("optimization_result", {})
+        econ_summary = opt_result.get("economic_summary", {})
+        input_data = opt_result.get("input_data", {})
+        period_data = opt_result.get("period_data", [])
+
+        # Economic summary JSON (small — always show)
+        econ_block = f"""### Economic Summary (period {opt_period})
+
+```json
+{self._format_json(econ_summary)}
+```"""
+
+        # Input metadata (scalars only, skip large arrays)
+        input_meta = {
+            k: v
+            for k, v in input_data.items()
+            if not isinstance(v, list)
+        }
+        if input_meta:
+            econ_block += f"""
+
+```json
+{self._format_json(input_meta)}
+```"""
+
+        # Period decisions table
+        rows = [
+            "| Per | Time  | Intent           | Observed         |"
+            " BattAct | SOE kWh | BuyPrice | Savings |",
+            "|-----|-------|------------------|------------------|"
+            "---------|---------|----------|---------|",
+        ]
+        for p in period_data:
+            dec = p.get("decision", {})
+            intent = (dec.get("strategic_intent") or "")[:16]
+            observed = (dec.get("observed_intent") or "")[:16]
+            batt_act = dec.get("battery_action", 0) or 0
+            en = p.get("energy", {})
+            soe_s = en.get("battery_soe_start", 0)
+            soe_e = en.get("battery_soe_end", 0)
+            econ = p.get("economic", {})
+            buy = econ.get("buy_price", 0)
+            savings = econ.get("hourly_savings", 0)
+            ts = str(p.get("timestamp", ""))
+            time_str = ts[11:16] if len(ts) >= 16 else ""
+            rows.append(
+                f"| {p.get('period', ''):>3} | {time_str:5} |"
+                f" {intent:<16} | {observed:<16} |"
+                f" {batt_act:>+7.3f} | {soe_s:>4.1f}→{soe_e:<4.1f} |"
+                f" {buy:>8.4f} | {savings:>7.4f} |"
+            )
+
+        table = "\n".join(rows)
+
+        details = f"""
+<details>
+<summary>Full Schedule JSON (for deep debugging)</summary>
+
+```json
+{self._format_json(export.schedules)}
+```
+
+</details>"""
+
+        return summary_text + f"\n\n{econ_block}\n\n### Period Decisions\n\n{table}" + details
 
     def _format_snapshots(self, export: DebugDataExport) -> str:
         """Format prediction snapshots section with summary.
@@ -320,7 +464,8 @@ class DebugReportFormatter:
 
 **Last Snapshot**: {last}"""
 
-        details = f"""
+        if not export.compact or not export.snapshots:
+            details = f"""
 <details>
 <summary>Full Snapshot Data ({total} snapshots - click to expand)</summary>
 
@@ -329,8 +474,28 @@ class DebugReportFormatter:
 ```
 
 </details>"""
+            return summary_text + details
 
-        return summary_text + details
+        # Compact: evolution table — all snapshots as summary rows.
+        # This is the primary tool for use case 3 (morning prediction vs evening actual).
+        # Each row shows: when, which period, what total savings looked like at that moment.
+        rows = [
+            "| Timestamp        | Per | Total Savings | Actual | Predicted |",
+            "|------------------|-----|---------------|--------|-----------|",
+        ]
+        for sn in export.snapshots:
+            ts = str(sn.get("snapshot_timestamp", ""))[:16]
+            per = sn.get("optimization_period", "")
+            savings = sn.get("total_savings", 0) or 0
+            actual = sn.get("actual_count", 0)
+            predicted = sn.get("predicted_count", 0)
+            rows.append(
+                f"| {ts:<16} | {per:>3} | {savings:>13.4f} | {actual:>6} | {predicted:>9} |"
+            )
+
+        table = "\n".join(rows)
+
+        return summary_text + f"\n\n{table}"
 
     def _format_logs(self, export: DebugDataExport) -> str:
         """Format logs section with file info.
@@ -364,7 +529,7 @@ class DebugReportFormatter:
         # Check if log content is available
         if (
             "not found" in export.todays_log_content.lower()
-            or "error" in export.todays_log_content.lower()
+            or "error reading" in export.todays_log_content.lower()
         ):
             return summary + f"\n\n*{export.todays_log_content}*"
 

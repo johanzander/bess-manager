@@ -2124,8 +2124,12 @@ async def export_debug_data(compact: bool = True):
     predictions, schedules, and settings for debugging purposes.
 
     Args:
-        compact: If True (default), include only the latest schedule/snapshot
-            and last 2000 lines of logs. Set to False for the full export.
+        compact: If True (default), serves all three debug use cases —
+            scenario replay, AI behaviour analysis, and prediction drift analysis.
+            Logs are filtered to key events + last 50 lines (not the full log).
+            Snapshots are rendered as a 5-field evolution table (not full JSON).
+            Set to False only when a raw field not present in compact mode is needed
+            (full log, all schedules, all snapshots as JSON). Expect 30–80 MB.
 
     Security:
     - Via HA ingress (browser): HA handles authentication

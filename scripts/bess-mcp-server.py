@@ -101,7 +101,7 @@ def fetch_live_debug(compact: bool = True) -> dict:
     """
     if not BESS_URL:
         return {
-            "error": "BESS_URL not configured. Set BESS_URL environment variable in .claude/mcp.json",
+            "error": "BESS_URL not configured. Set BESS_URL in the project .env file.",
             "example": "http://homeassistant.local:8099",
         }
 

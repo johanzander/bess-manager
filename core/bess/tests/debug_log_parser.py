@@ -131,9 +131,12 @@ def parse_debug_log(path: str) -> DebugLogData:
                 # Some versions wrap the list in a dict
                 result.historical_periods = list(parsed.values())
         elif section == _SECTION_SCHEDULES and not result.last_schedule:
-            if isinstance(parsed, list) and parsed:
+            # The compact format emits economic_summary and input_meta JSON blocks
+            # before the full schedule JSON (in a collapsible). Only accept a block
+            # that has the "optimization_period" key, which identifies a real schedule.
+            if isinstance(parsed, list) and parsed and "optimization_period" in parsed[0]:
                 result.last_schedule = parsed[0]
-            elif isinstance(parsed, dict):
+            elif isinstance(parsed, dict) and "optimization_period" in parsed:
                 result.last_schedule = parsed
 
     for line in lines:

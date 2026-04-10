@@ -48,11 +48,18 @@ def _quarterly_to_hourly_detail(quarterly: list[float], date_str: str) -> list[d
 def generate_scenario(log_path: str) -> None:
     """Parse a debug log and write a scenario JSON file named after its timestamp."""
     log = parse_debug_log(log_path)
-    d = log.input_data
 
-    if not d:
-        print(f"Error: No input_data found in {log_path}")
+    if not log.input_data and not log.entity_snapshot:
+        print(f"Error: No input_data and no entity_snapshot found in {log_path}")
         sys.exit(1)
+
+    if not log.input_data:
+        print(
+            "Note: No input_data in log (compact format without full schedule JSON). "
+            "Entity snapshot present — replay will use verbatim entity states."
+        )
+
+    d = log.input_data or {}
 
     # Derive output name from filename: bess-debug-YYYY-MM-DD-HHMMSS.md
     m = re.search(r"(\d{4}-\d{2}-\d{2})-(\d{2})(\d{2})(\d{2})", Path(log_path).name)
@@ -87,11 +94,17 @@ def generate_scenario(log_path: str) -> None:
         output_name = Path(log_path).stem
         mock_time = ""
 
-    buy_prices = d["buy_price"]
-    horizon = d["horizon"]
-    initial_soe = d["initial_soe"]
-    total_capacity = log.battery_settings["total_capacity"]
-    initial_soc_pct = round(initial_soe / total_capacity * 100, 1)
+    if d:
+        buy_prices = d["buy_price"]
+        horizon = d["horizon"]
+        initial_soe = d["initial_soe"]
+        total_capacity = log.battery_settings["total_capacity"]
+        initial_soc_pct = round(initial_soe / total_capacity * 100, 1)
+    else:
+        buy_prices = []
+        horizon = 0
+        initial_soe = 0.0
+        initial_soc_pct = 0
 
     # Use the inverter TOU segments captured from hardware memory (active_tou_intervals).
     # Only enabled segments are exported — disabled slots are not captured because their

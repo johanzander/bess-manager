@@ -405,6 +405,8 @@ class HomeAssistantAPIController:
         # First check our sensor configuration
         if sensor_key in self.sensors:
             entity_id = self.sensors[sensor_key]
+            if not entity_id or not entity_id.strip():
+                raise ValueError(f"Empty entity ID configured for sensor '{sensor_key}'")
             return entity_id, "configured"
 
         # Require explicit configuration for all operations

@@ -24,6 +24,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 - Docker dev environment volume mounts and `PYTHONPATH` corrected for updated project layout.
 
+## [7.17.2] - 2026-04-11
+
+### Added
+
+- Compact debug export now serves three distinct use cases from a single endpoint: exact scenario replay, AI behaviour analysis via bess-analyst + MCP server, and prediction drift analysis throughout the day.
+- Log filtering in compact mode: key events (errors, hardware commands, decisions, intent transitions) from the full day plus the last 50 lines, replacing the previous 2000-line tail that only covered ~2 hours.
+- Entity snapshot rendered as a flat table in compact mode (state + unit per entity) with the full JSON in a collapsible for mock HA replay.
+- Historical periods rendered as a compact markdown table (intent, observed intent, SOE, solar, import, savings) with full JSON collapsible for replay.
+- Schedule section now includes economic summary and a period-decisions table in compact mode.
+- Snapshot section now shows a full-day evolution table (all hourly optimization runs with total savings, actual count, predicted count) for drift analysis, instead of only the latest snapshot.
+- `BESS_VERSION` environment variable set at Docker image build time; `_get_version()` reads it first before falling back to `config.yaml` (local dev).
+- HA metadata fields (`last_changed`, `last_updated`, `last_reported`, `context`) stripped from entity snapshots — not used in any of the three debug use cases.
+- `BESS_URL` added to `.env.example` for MCP server direct port access.
+
+### Fixed
+
+- Log formatter no longer suppresses log content when log lines contain the word "error" — now correctly checks for "error reading" to detect actual read failures.
+- Debug log parser correctly identifies schedule JSON blocks in compact format by requiring the `optimization_period` key, ignoring the economic summary and input metadata blocks that precede the full schedule collapsible.
+- `from_debug_log.py` scenario generator handles compact logs without `input_data` gracefully.
+- Empty entity ID configured in sensor map now raises an explicit `ValueError` immediately instead of producing a confusing downstream failure.
+
 ## [7.16.1] - 2026-04-05
 
 ### Fixed

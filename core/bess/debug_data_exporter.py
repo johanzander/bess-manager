@@ -1,10 +1,52 @@
 """Debug data export functionality for comprehensive troubleshooting.
 
-This module provides tools to aggregate all relevant system data, logs, decisions,
-and snapshots into a structured export for debugging purposes.
+This module produces a single markdown file (compact=True by default) that serves
+three distinct debugging use cases, all via the same export endpoint.
+
+## Use Case 1 — Exact scenario replay
+
+Reproduce any user's real-world scenario on a local development machine.
+Required data: entity_snapshot (full raw HA state, verbatim mock-HA input),
+addon_options (entity ID mappings and inverter config), inverter_tou_segments
+(current hardware TOU state), historical_periods full JSON (seeds the in-memory
+historical store), and price_data (raw pre-markup prices).
+
+This is why the compact export embeds full JSON inside <details> collapsibles for
+entity_snapshot, historical_periods, and schedules — the tables are for human
+reading, the JSON is machine input for from_debug_log.py.
+
+## Use Case 2 — AI behaviour analysis via bess-analyst + MCP server
+
+Fetch the export from a production system and ask: "Why did we have a series of
+small discharges between 07:00 and 08:45 — is this financially optimal?"
+
+The AI needs: compact key-event logs (not the raw 200+ KB full log), the latest
+schedule rendered as a period-decisions table, historical_periods as an observation
+table (planned intent vs observed intent vs actual energy flows), and settings.
+The full JSON collapsibles are present but the AI works from the tables.
+
+## Use Case 3 — Prediction drift analysis throughout the day
+
+The 00:00 optimization predicted 100 SEK savings; by 18:00 only 60 SEK was
+realised. Was this a bug, a bad battery action, or just external environmental
+change (less sun, higher consumption than predicted)?
+
+Required data: ALL prediction snapshots as an evolution table (one compact row
+per hourly optimization run, showing total_savings, actual_count, predicted_count)
+combined with the historical_periods observation table. Together these let the
+analyst trace whether the gap appeared early (environmental) or late (control
+error). No full snapshot JSON is needed — the 5-field evolution table is enough.
+
+## compact=True vs compact=False
+
+compact=True  — default; serves all three use cases; targets ~200–500 KB.
+compact=False — raw full dump; complete log, all schedules, all snapshots as JSON;
+                use when a specific field not present in compact mode is needed.
 """
 
 import logging
+import os
+import re
 import sys
 from dataclasses import asdict, dataclass
 from datetime import datetime
@@ -15,6 +57,24 @@ from .battery_system_manager import BatterySystemManager
 from .health_check import run_system_health_checks
 
 logger = logging.getLogger(__name__)
+
+# Patterns that identify actionable log lines worth including in compact exports.
+# These cover: errors/warnings, hardware commands, key decisions, feature-specific
+# events (discharge inhibit, charge power), and intent transitions.
+_LOG_KEY_PATTERNS = re.compile(
+    r"WARNING|ERROR|CRITICAL"
+    r"|HARDWARE:"
+    r"|Discharge inhibit|charge power|charging power|discharge rate"
+    r"|Intent transition|DECISION:"
+    r"|Starting optimization|Optimization complete"
+    r"|Applying period|Apply schedule"
+    r"|LOAD_SUPPORT|EXPORT_ARBITRAGE|GRID_CHARGING"
+    r"|TOU hardware|TOU conversion|schedule created"
+    r"|Setting.*power rate|power rate.*set",
+    re.IGNORECASE,
+)
+
+_COMPACT_LOG_TAIL = 50  # Always include this many trailing lines for recent context
 
 
 @dataclass
@@ -43,6 +103,7 @@ class DebugDataExport:
     snapshots_summary: dict
     todays_log_content: str
     log_file_info: dict
+    compact: bool = True
 
 
 class DebugDataAggregator:
@@ -60,9 +121,35 @@ class DebugDataAggregator:
     def aggregate_all_data(self, compact: bool = True) -> DebugDataExport:
         """Collect all system data into structured export.
 
+        Field-to-use-case mapping:
+
+        UC1 (replay):
+            entity_snapshot     — full raw HA state; verbatim mock-HA sensor input
+            addon_options       — entity ID mappings + inverter device config
+            inverter_tou_segments — seeds mock inverter with real hardware state
+            historical_periods  — full JSON seeds the in-memory historical store
+            price_data          — raw pre-markup prices for the optimization replay
+
+        UC2 (AI behaviour analysis):
+            todays_log_content  — compact key-event filter (not the full log)
+            schedules           — latest schedule as period-decisions table
+            historical_periods  — planned vs observed intent + actual energy flows
+            battery/price/home settings — context for decision reasoning
+            health_check_results — surface sensor/component failures
+
+        UC3 (prediction drift):
+            snapshots           — ALL snapshots as 5-field evolution table
+                                  (total_savings, actual_count, predicted_count
+                                   per hourly optimization run)
+            historical_periods  — actuals to cross-reference against the evolution
+
         Args:
-            compact: If True (default), include only the latest schedule/snapshot
-                and last 2000 lines of logs. If False, include everything.
+            compact: If True (default), serves all three use cases:
+                - Logs: key events from the full day + last 50 lines (not 200+ KB full log)
+                - Snapshots: all snapshots as 5-field evolution rows (not full JSON)
+                - Schedules: latest schedule only, rendered as tables + full JSON collapsible
+                - entity_snapshot/historical: tables for reading + full JSON for replay
+                If False, raw full dump — complete log, all schedules/snapshots as JSON.
 
         Returns:
             DebugDataExport containing all system state and history
@@ -92,23 +179,28 @@ class DebugDataAggregator:
             snapshots_summary=self._summarize_snapshots(),
             todays_log_content=self._read_todays_log(compact=compact),
             log_file_info=self._get_log_file_info(),
+            compact=compact,
         )
 
     def _get_version(self) -> str:
-        """Get BESS Manager version from config.yaml.
+        """Get BESS Manager version.
+
+        Reads from BESS_VERSION environment variable (set at image build time),
+        falling back to config.yaml for local development.
 
         Returns:
-            Version string (e.g., "5.0.1")
+            Version string (e.g., "7.16.1")
         """
+        version = os.environ.get("BESS_VERSION", "")
+        if version:
+            return version
         try:
             config_path = Path(__file__).parent.parent.parent / "config.yaml"
             if config_path.exists():
                 with open(config_path) as f:
                     for line in f:
                         if line.startswith("version:"):
-                            # Extract version string, removing quotes
-                            version = line.split(":", 1)[1].strip().strip('"')
-                            return version
+                            return line.split(":", 1)[1].strip().strip('"')
             return "unknown"
         except Exception as e:
             logger.warning(f"Failed to read version from config.yaml: {e}")
@@ -218,12 +310,27 @@ class DebugDataAggregator:
             logger.warning("Failed to serialize addon options: %s", e)
             return {}
 
+    # HA state response fields that carry no value for any of the three debug
+    # use cases (replay, AI analysis, drift analysis).  Stripping them reduces
+    # entity_snapshot size without affecting mock-HA replay: from_debug_log.py
+    # only reads 'state' and 'attributes' from each entry.
+    _HA_METADATA_KEYS = frozenset(
+        {"last_changed", "last_updated", "last_reported", "context"}
+    )
+
+    def _strip_ha_metadata(self, state: dict) -> dict:
+        """Return a copy of a HA state dict with HA-internal metadata removed."""
+        return {k: v for k, v in state.items() if k not in self._HA_METADATA_KEYS}
+
     def _serialize_entity_snapshot(self) -> dict:
         """Fetch raw HA entity state for every entity BESS reads.
 
         Returns a dict of {entity_id: state_response} that can be used verbatim
         as the 'sensors' dict in a mock HA scenario — no reconstruction needed.
         Captures all sensor-map entities plus price-provider-specific entities.
+
+        HA metadata fields (last_changed, last_updated, last_reported, context)
+        are stripped — they are never read during replay or AI analysis.
         """
         controller = self.system._controller
         if controller is None:
@@ -247,7 +354,7 @@ class DebugDataAggregator:
             try:
                 state = controller.get_entity_state_raw(entity_id)
                 if state:
-                    snapshot[entity_id] = state
+                    snapshot[entity_id] = self._strip_ha_metadata(state)
             except Exception as e:
                 logger.warning("Failed to fetch entity %s: %s", entity_id, e)
 
@@ -263,7 +370,7 @@ class DebugDataAggregator:
                     try:
                         state = controller.get_entity_state_raw(entity_id)
                         if state:
-                            snapshot[entity_id] = state
+                            snapshot[entity_id] = self._strip_ha_metadata(state)
                     except Exception as e:
                         logger.warning("Failed to fetch nordpool entity %s: %s", entity_id, e)
 
@@ -280,7 +387,7 @@ class DebugDataAggregator:
                     try:
                         state = controller.get_entity_state_raw(entity_id)
                         if state:
-                            snapshot[entity_id] = state
+                            snapshot[entity_id] = self._strip_ha_metadata(state)
                     except Exception as e:
                         logger.warning("Failed to fetch octopus entity %s: %s", entity_id, e)
 
@@ -308,6 +415,10 @@ class DebugDataAggregator:
 
     def _serialize_historical_data(self) -> list[dict]:
         """Serialize historical data from today's periods.
+
+        Always returns full period data — the formatter decides how to render
+        (table in compact mode, raw JSON in full mode). The full JSON is needed
+        for mock HA replay to seed the in-memory historical store.
 
         Returns:
             List of period data dictionaries
@@ -359,7 +470,7 @@ class DebugDataAggregator:
             compact: If True, only include the latest schedule.
 
         Returns:
-            List of schedule dictionaries
+            List of schedule dictionaries (formatter table-ifies period_data in compact mode)
         """
         try:
             if compact:
@@ -402,7 +513,12 @@ class DebugDataAggregator:
         """Serialize prediction snapshots from today.
 
         Args:
-            compact: If True, only include the latest snapshot.
+            compact: If True, return ALL snapshots as 5-field summary rows
+                (timestamp, period, predicted_savings, actual_count, predicted_count).
+                This enables the full-day prediction evolution table for use case 3
+                (morning prediction vs evening actual analysis) at ~6 KB instead
+                of 166 KB for the complete JSON.
+                If False, return full snapshot data for all snapshots.
 
         Returns:
             List of snapshot dictionaries
@@ -411,9 +527,21 @@ class DebugDataAggregator:
             snapshots = self.system.prediction_snapshot_store.get_all_snapshots_today()
             if not snapshots:
                 return []
-            if compact:
-                return [asdict(snapshots[-1])]
-            return [asdict(snapshot) for snapshot in snapshots]
+            if not compact:
+                return [asdict(snapshot) for snapshot in snapshots]
+            # Compact: all snapshots as summary rows for the evolution table.
+            # daily_view.total_savings is the running total (actuals + predictions)
+            # at the time of each optimization — this is what tracks prediction drift.
+            return [
+                {
+                    "snapshot_timestamp": snapshot.snapshot_timestamp.isoformat(),
+                    "optimization_period": snapshot.optimization_period,
+                    "total_savings": snapshot.daily_view.total_savings,
+                    "actual_count": snapshot.daily_view.actual_count,
+                    "predicted_count": snapshot.daily_view.predicted_count,
+                }
+                for snapshot in snapshots
+            ]
         except Exception as e:
             logger.exception(f"Failed to serialize snapshots: {e}")
             return []
@@ -442,13 +570,16 @@ class DebugDataAggregator:
             logger.exception(f"Failed to summarize snapshots: {e}")
             return {"error": str(e)}
 
-    _COMPACT_LOG_LINES = 2000
-
     def _read_todays_log(self, compact: bool = True) -> str:
         """Read today's log file content.
 
         Args:
-            compact: If True, only include the last 2000 lines.
+            compact: If True, return key event lines from the full day plus the
+                last 50 lines for recent context. This gives full-day visibility
+                into actionable events (errors, hardware commands, decisions,
+                feature-specific lines) at ~35 KB instead of 208 KB for a
+                2000-line tail that only covers ~2 hours.
+                If False, return the complete log.
 
         Returns:
             Log file content as string, or error message if not available
@@ -465,14 +596,32 @@ class DebugDataAggregator:
                 if not compact:
                     return f.read()
                 lines = f.readlines()
-                total = len(lines)
-                if total <= self._COMPACT_LOG_LINES:
-                    return "".join(lines)
-                truncated = lines[-self._COMPACT_LOG_LINES :]
-                return (
-                    f"[Truncated: showing last {self._COMPACT_LOG_LINES} of {total} lines. "
-                    f"Use compact=false for full log.]\n" + "".join(truncated)
-                )
+
+            total = len(lines)
+
+            # Key event indices: any line matching the filter patterns
+            key_indices = {
+                i for i, line in enumerate(lines) if _LOG_KEY_PATTERNS.search(line)
+            }
+            # Always include the last N lines for recent context
+            tail_start = max(0, total - _COMPACT_LOG_TAIL)
+            included = sorted(key_indices | set(range(tail_start, total)))
+
+            result: list[str] = []
+            prev = -1
+            for i in included:
+                if prev >= 0 and i > prev + 1:
+                    skipped = i - prev - 1
+                    result.append(f"[... {skipped} lines skipped ...]\n")
+                result.append(lines[i])
+                prev = i
+
+            header = (
+                f"[Compact log: {len(key_indices)} key events from {total} total lines"
+                f" + last {_COMPACT_LOG_TAIL} lines. Use compact=false for full log.]\n"
+            )
+            return header + "".join(result)
+
         except Exception as e:
             logger.exception(f"Failed to read today's log file: {e}")
             return f"Error reading log file: {e!s}"

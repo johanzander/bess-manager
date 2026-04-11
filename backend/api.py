@@ -19,6 +19,7 @@ from api_dataclasses import (
     APISensorsPayload,
     APISetupCompletePayload,
     APISnapshotComparison,
+    _ENTITY_ID_RE,
     create_formatted_value,
 )
 from fastapi import APIRouter, HTTPException, Query
@@ -66,6 +67,24 @@ async def update_battery_settings(settings: dict):
         api_settings = APIBatterySettings(**settings)
         internal_updates = api_settings.to_internal_update()
         bess_controller.system.update_settings({"battery": internal_updates})
+        # Persist to bess_settings.json. Preserve existing fields not managed by
+        # this endpoint (e.g. min_action_profit_threshold) via read-modify-write.
+        section = bess_controller.settings_store.get_section("battery")
+        section.update(
+            {
+                "total_capacity": api_settings.totalCapacity,
+                "min_soc": api_settings.minSoc,
+                "max_soc": api_settings.maxSoc,
+                "max_charge_discharge_power": api_settings.maxChargePowerKw,
+                "cycle_cost": api_settings.cycleCostPerKwh,
+                "min_action_profit_threshold": api_settings.minActionProfitThreshold,
+                "temperature_derating": {
+                    "enabled": api_settings.temperatureDeratingEnabled,
+                    "weather_entity": api_settings.temperatureDeratingWeatherEntity,
+                },
+            }
+        )
+        bess_controller.settings_store.save_section("battery", section)
         td = bess_controller.system.temperature_derating
         td.enabled = api_settings.temperatureDeratingEnabled
         td.weather_entity = api_settings.temperatureDeratingWeatherEntity
@@ -102,6 +121,19 @@ async def update_electricity_price_settings(settings: dict):
         api_settings = APIPriceSettings(**settings)
         internal_updates = api_settings.to_internal_update()
         bess_controller.system.update_settings({"price": internal_updates})
+        # Persist to bess_settings.json. Preserve existing fields (e.g. area)
+        # not always included in partial updates via read-modify-write.
+        section = bess_controller.settings_store.get_section("electricity_price")
+        section.update(
+            {
+                "area": api_settings.area,
+                "markup_rate": api_settings.markupRate,
+                "vat_multiplier": api_settings.vatMultiplier,
+                "additional_costs": api_settings.additionalCosts,
+                "tax_reduction": api_settings.taxReduction,
+            }
+        )
+        bess_controller.settings_store.save_section("electricity_price", section)
         return {"message": "Electricity settings updated successfully"}
 
     except Exception as e:
@@ -2541,9 +2573,6 @@ async def run_setup_discovery():
     except Exception as e:
         logger.error(f"Error during setup discovery: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
-
-
-_ENTITY_ID_RE = re.compile(r"^[a-z][a-z0-9_]*\.[a-z0-9_-]+$")
 
 
 class ConfirmSetupPayload(BaseModel):

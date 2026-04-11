@@ -1,14 +1,16 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertCircle, Battery, CheckCircle, ChevronDown, ChevronUp, Home, Settings, Sun, Zap } from 'lucide-react';
+import { Activity, AlertCircle, Battery, CheckCircle, ChevronDown, ChevronUp, Download, Home, RefreshCw, Settings, Sun, Zap } from 'lucide-react';
 import api from '../lib/api';
 import { INTEGRATIONS } from '../lib/sensorDefinitions';
+import type { IntegrationDef } from '../lib/sensorDefinitions';
+import SystemHealthComponent from '../components/SystemHealth';
 import type { HealthStatus } from '../types';
 
 // ---------------------------------------------------------------------------
 // Local types
 // ---------------------------------------------------------------------------
 
-type Tab = 'home' | 'pricing' | 'solar' | 'growatt';
+type Tab = 'home' | 'pricing' | 'battery' | 'sensors' | 'health';
 
 interface BatteryForm {
   totalCapacity: number;
@@ -21,7 +23,7 @@ interface BatteryForm {
   efficiencyCharge: number;
   efficiencyDischarge: number;
   temperatureDeratingEnabled: boolean;
-  temperatureDeratingWeatherEntity: string;
+  minActionProfit: number;
 }
 
 interface HomeForm {
@@ -36,7 +38,6 @@ interface HomeForm {
 
 interface PricingForm {
   currency: string;
-  // Energy provider
   provider: string;
   nordpoolConfigEntryId: string;
   nordpoolTodayEntity: string;
@@ -45,13 +46,11 @@ interface PricingForm {
   octopusImportTomorrowEntity: string;
   octopusExportTodayEntity: string;
   octopusExportTomorrowEntity: string;
-  // Price calculation
   area: string;
   markupRate: number;
   vatMultiplier: number;
   additionalCosts: number;
   taxReduction: number;
-  minProfit: number;
 }
 
 interface InverterForm {
@@ -71,7 +70,7 @@ interface Toast {
 function numField(
   label: string,
   value: number,
-  onChange: (v: number) => void,
+  onChange: (_: number) => void,
   opts: { min?: number; max?: number; step?: number; unit?: string; readOnly?: boolean } = {},
 ) {
   return (
@@ -120,8 +119,23 @@ function SectionCard({
 
 function sensorIcon(status: HealthStatus | null, haValue: boolean) {
   if (!haValue) return <AlertCircle className="h-3.5 w-3.5 text-gray-400 flex-shrink-0" />;
-  if (status === 'ERROR' || status === 'WARNING') return <AlertCircle className="h-3.5 w-3.5 text-amber-500 flex-shrink-0" />;
+  if (status === 'ERROR') return <AlertCircle className="h-3.5 w-3.5 text-amber-500 flex-shrink-0" />;
   return <CheckCircle className="h-3.5 w-3.5 text-green-500 flex-shrink-0" />;
+}
+
+function integrationHealthDot(
+  intg: IntegrationDef,
+  sensors: Record<string, string>,
+  sensorStatus: Record<string, HealthStatus>,
+) {
+  const allSensors = intg.sensorGroups.flatMap(g => g.sensors);
+  if (allSensors.length === 0) return null;
+  const configured = allSensors.filter(s => sensors[s.key]);
+  if (configured.length === 0) return <span className="h-2 w-2 rounded-full bg-gray-300 dark:bg-gray-600 flex-shrink-0" />;
+  const statuses = configured.map(s => sensorStatus[s.key] ?? null);
+  if (statuses.some(s => s === 'ERROR')) return <span className="h-2 w-2 rounded-full bg-red-500 flex-shrink-0" />;
+  if (statuses.some(s => s === 'WARNING')) return <span className="h-2 w-2 rounded-full bg-amber-500 flex-shrink-0" />;
+  return <span className="h-2 w-2 rounded-full bg-green-500 flex-shrink-0" />;
 }
 
 const EMPTY_BATTERY: BatteryForm = {
@@ -129,7 +143,7 @@ const EMPTY_BATTERY: BatteryForm = {
   maxChargePowerKw: 0, maxDischargePowerKw: 0,
   cycleCostPerKwh: 0, chargingPowerRate: 100,
   efficiencyCharge: 97, efficiencyDischarge: 97,
-  temperatureDeratingEnabled: false, temperatureDeratingWeatherEntity: '',
+  temperatureDeratingEnabled: false, minActionProfit: 0,
 };
 const EMPTY_HOME: HomeForm = {
   consumption: 3.5, consumptionStrategy: 'sensor',
@@ -143,15 +157,9 @@ const EMPTY_PRICING: PricingForm = {
   octopusImportTodayEntity: '', octopusImportTomorrowEntity: '',
   octopusExportTodayEntity: '', octopusExportTomorrowEntity: '',
   area: '', markupRate: 0, vatMultiplier: 1.25, additionalCosts: 0,
-  taxReduction: 0, minProfit: 0,
+  taxReduction: 0,
 };
 const EMPTY_INVERTER: InverterForm = { inverterType: 'MIN', deviceId: '' };
-
-// Sensor keys shown inline in other tabs — hidden from the Inverter sensor list to avoid duplication
-const HOME_SENSOR_KEYS = ['current_l1', 'current_l2', 'current_l3', 'discharge_inhibit', '48h_avg_grid_import'];
-const SOLAR_SENSOR_KEYS = ['solar_forecast_today', 'solar_forecast_tomorrow'];
-const BATTERY_SENSOR_KEYS = ['weather_entity'];
-const ALL_INLINE_SENSOR_KEYS = new Set([...HOME_SENSOR_KEYS, ...SOLAR_SENSOR_KEYS, ...BATTERY_SENSOR_KEYS]);
 
 // ---------------------------------------------------------------------------
 // Component
@@ -177,11 +185,13 @@ const SettingsPage: React.FC = () => {
   const savedSensors = useRef<string>('');
 
   const isDirty: Record<Tab, boolean> = {
-    home: JSON.stringify(homeForm) !== savedHome.current || JSON.stringify(sensors) !== savedSensors.current,
+    home: JSON.stringify(homeForm) !== savedHome.current,
     pricing: JSON.stringify(pricingForm) !== savedPricing.current,
-    solar: JSON.stringify(sensors) !== savedSensors.current,
-    growatt: JSON.stringify(batteryForm) !== savedBattery.current || JSON.stringify(inverterForm) !== savedInverter.current || JSON.stringify(sensors) !== savedSensors.current,
+    battery: JSON.stringify(batteryForm) !== savedBattery.current || JSON.stringify(inverterForm) !== savedInverter.current,
+    sensors: JSON.stringify(sensors) !== savedSensors.current,
+    health: false,
   };
+
   // ── loading / saving / error state ────────────────────────────────────
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -191,11 +201,22 @@ const SettingsPage: React.FC = () => {
   // ── health status map (sensor_key → status) ────────────────────────────
   const [sensorStatus, setSensorStatus] = useState<Record<string, HealthStatus>>({});
 
-  // ── battery efficiency collapsible ────────────────────────────────────
+  // ── health tab state ──────────────────────────────────────────────────
+  const [healthKey, setHealthKey] = useState(0);
+
+  // ── export debug data ─────────────────────────────────────────────────
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+
+  // ── battery advanced settings collapsible ─────────────────────────────
   const [effOpen, setEffOpen] = useState(false);
 
   // ── sensor group expand state ─────────────────────────────────────────
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+
+  // ── auto-configure ────────────────────────────────────────────────────
+  const [discovering, setDiscovering] = useState(false);
+  const [lastDiscoveredAt, setLastDiscoveredAt] = useState<string | null>(null);
 
   // ── auto-dismiss toast ────────────────────────────────────────────────
   useEffect(() => {
@@ -230,7 +251,7 @@ const SettingsPage: React.FC = () => {
         efficiencyCharge: batRes.data.efficiencyCharge ?? 97,
         efficiencyDischarge: batRes.data.efficiencyDischarge ?? 97,
         temperatureDeratingEnabled: batRes.data.temperatureDeratingEnabled ?? false,
-        temperatureDeratingWeatherEntity: batRes.data.temperatureDeratingWeatherEntity ?? '',
+        minActionProfit: batRes.data.minActionProfitThreshold ?? 0,
       };
       setBatteryForm(bat);
       savedBattery.current = JSON.stringify(bat);
@@ -266,7 +287,6 @@ const SettingsPage: React.FC = () => {
         vatMultiplier: elecRes.data.vatMultiplier ?? 1.25,
         additionalCosts: elecRes.data.additionalCosts ?? 0,
         taxReduction: elecRes.data.taxReduction ?? 0,
-        minProfit: elecRes.data.minProfit ?? 0,
       };
       setPricingForm(p);
       savedPricing.current = JSON.stringify(p);
@@ -301,9 +321,7 @@ const SettingsPage: React.FC = () => {
 
   useEffect(() => { loadAll(); }, [loadAll]);
 
-  // ── auto-configure (in-place discovery) ──────────────────────────
-  const [discovering, setDiscovering] = useState(false);
-
+  // ── auto-configure (in-place discovery) ──────────────────────────────
   const runAutoDiscover = async () => {
     setDiscovering(true);
     try {
@@ -313,8 +331,8 @@ const SettingsPage: React.FC = () => {
       // Merge discovered sensors (only fill blanks, don't overwrite user edits)
       if (d.sensors && typeof d.sensors === 'object') {
         setSensors(prev => ({
-          ...d.sensors,   // discovered values as base
-          ...Object.fromEntries(Object.entries(prev).filter(([, v]) => v)), // keep user-entered non-empty values
+          ...d.sensors,
+          ...Object.fromEntries(Object.entries(prev).filter(([, v]) => v)),
         }));
       }
 
@@ -341,8 +359,21 @@ const SettingsPage: React.FC = () => {
         setHomeForm(f => ({ ...f, phaseCount: d.detectedPhaseCount }));
       }
 
+      setLastDiscoveredAt(new Date().toLocaleTimeString());
       const sensorCount = d.sensors ? Object.keys(d.sensors).filter(k => d.sensors[k]).length : 0;
-      setToast({ type: 'success', message: `Auto-configure found ${sensorCount} sensors${d.inverterType ? `, ${d.inverterType} inverter` : ''}${d.nordpoolArea ? `, area ${d.nordpoolArea}` : ''}. Review and save each tab.` });
+      setToast({ type: 'success', message: `Auto-configure found ${sensorCount} sensors${d.inverterType ? `, ${d.inverterType} inverter` : ''}${d.nordpoolArea ? `, area ${d.nordpoolArea}` : ''}. Review and save.` });
+
+      // Refresh health status after discovery
+      const healthRes = await api.get('/api/system-health').catch(() => ({ data: null }));
+      if (healthRes.data?.checks) {
+        const map: Record<string, HealthStatus> = {};
+        for (const component of healthRes.data.checks) {
+          for (const check of component.checks ?? []) {
+            if (check.key) map[check.key] = check.status;
+          }
+        }
+        setSensorStatus(map);
+      }
     } catch (err) {
       setToast({ type: 'error', message: err instanceof Error ? err.message : 'Auto-configure failed' });
     } finally {
@@ -350,8 +381,7 @@ const SettingsPage: React.FC = () => {
     }
   };
 
-  // ── save handlers ─────────────────────────────────────────────────────
-
+  // ── health check refresh ──────────────────────────────────────────────
   const checkAndUpdateSensorHealth = async (currentSensors: Record<string, string>): Promise<string[]> => {
     try {
       const res = await api.get('/api/system-health').catch(() => ({ data: null }));
@@ -371,21 +401,42 @@ const SettingsPage: React.FC = () => {
     return [];
   };
 
+  // ── export debug data ─────────────────────────────────────────────────
+  const handleExportDebugData = async () => {
+    setIsExporting(true);
+    setExportError(null);
+    try {
+      const response = await api.get('/api/export-debug-data', { responseType: 'blob' });
+      const contentDisposition = response.headers['content-disposition'];
+      let filename = 'bess-debug.md';
+      if (contentDisposition) {
+        const m = contentDisposition.match(/filename=(.+)/);
+        if (m) filename = m[1].replace(/"/g, '');
+      }
+      const blob = new Blob([response.data], { type: 'text/markdown' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch {
+      setExportError('Failed to export debug data. Please check the logs.');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  // ── save handlers ─────────────────────────────────────────────────────
+
   const saveHome = async () => {
     setSaving(true);
     try {
-      await Promise.all([
-        api.put('/api/settings/home', homeForm),
-        api.put('/api/settings/sensors', { sensors }),
-      ]);
+      await api.put('/api/settings/home', homeForm);
       savedHome.current = JSON.stringify(homeForm);
-      savedSensors.current = JSON.stringify(sensors);
-      const homeFailed = await checkAndUpdateSensorHealth(sensors);
-      if (homeFailed.length > 0) {
-        setToast({ type: 'error', message: `Saved — but ${homeFailed.length} sensor(s) not found in HA: ${homeFailed.slice(0, 2).join(', ')}${homeFailed.length > 2 ? ` (+${homeFailed.length - 2} more)` : ''}` });
-      } else {
-        setToast({ type: 'success', message: 'Home settings saved.' });
-      }
+      setToast({ type: 'success', message: 'Home settings saved.' });
     } catch (err) {
       setToast({ type: 'error', message: err instanceof Error ? err.message : 'Save failed.' });
     } finally {
@@ -403,7 +454,6 @@ const SettingsPage: React.FC = () => {
           vatMultiplier: pricingForm.vatMultiplier,
           additionalCosts: pricingForm.additionalCosts,
           taxReduction: pricingForm.taxReduction,
-          minProfit: pricingForm.minProfit,
           useActualPrice: false,
         }),
         api.put('/api/settings/energy-provider', {
@@ -428,7 +478,7 @@ const SettingsPage: React.FC = () => {
     }
   };
 
-  const saveGrowatt = async () => {
+  const saveBattery = async () => {
     setSaving(true);
     try {
       await Promise.all([
@@ -442,28 +492,40 @@ const SettingsPage: React.FC = () => {
           maxChargePowerKw: batteryForm.maxChargePowerKw,
           maxDischargePowerKw: batteryForm.maxDischargePowerKw,
           cycleCostPerKwh: batteryForm.cycleCostPerKwh,
+          minActionProfitThreshold: batteryForm.minActionProfit,
           chargingPowerRate: batteryForm.chargingPowerRate,
           efficiencyCharge: batteryForm.efficiencyCharge,
           efficiencyDischarge: batteryForm.efficiencyDischarge,
           estimatedConsumption: 0,
           consumptionStrategy: 'sensor',
           temperatureDeratingEnabled: batteryForm.temperatureDeratingEnabled,
-          temperatureDeratingWeatherEntity: batteryForm.temperatureDeratingWeatherEntity,
+          temperatureDeratingWeatherEntity: sensors['weather_entity'] ?? '',
         }),
         api.put('/api/settings/inverter', {
           inverterType: inverterForm.inverterType,
           deviceId: inverterForm.deviceId || null,
         }),
-        api.put('/api/settings/sensors', { sensors }),
       ]);
       savedBattery.current = JSON.stringify(batteryForm);
       savedInverter.current = JSON.stringify(inverterForm);
+      setToast({ type: 'success', message: 'Battery settings saved.' });
+    } catch (err) {
+      setToast({ type: 'error', message: err instanceof Error ? err.message : 'Save failed.' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveSensors = async () => {
+    setSaving(true);
+    try {
+      await api.put('/api/settings/sensors', { sensors });
       savedSensors.current = JSON.stringify(sensors);
       const failed = await checkAndUpdateSensorHealth(sensors);
       if (failed.length > 0) {
         setToast({ type: 'error', message: `Saved — but ${failed.length} sensor(s) not found in HA: ${failed.slice(0, 2).join(', ')}${failed.length > 2 ? ` (+${failed.length - 2} more)` : ''}` });
       } else {
-        setToast({ type: 'success', message: 'Growatt settings saved.' });
+        setToast({ type: 'success', message: 'Sensor settings saved.' });
       }
     } catch (err) {
       setToast({ type: 'error', message: err instanceof Error ? err.message : 'Save failed.' });
@@ -472,29 +534,12 @@ const SettingsPage: React.FC = () => {
     }
   };
 
-  const saveSolar = async () => {
-    setSaving(true);
-    try {
-      await api.put('/api/settings/sensors', { sensors });
-      savedSensors.current = JSON.stringify(sensors);
-      const solarFailed = await checkAndUpdateSensorHealth(sensors);
-      if (solarFailed.length > 0) {
-        setToast({ type: 'error', message: `Saved — but ${solarFailed.length} sensor(s) not found in HA: ${solarFailed.slice(0, 2).join(', ')}${solarFailed.length > 2 ? ` (+${solarFailed.length - 2} more)` : ''}` });
-      } else {
-        setToast({ type: 'success', message: 'Solar forecast settings saved.' });
-      }
-    } catch (err) {
-      setToast({ type: 'error', message: err instanceof Error ? err.message : 'Save failed.' });
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const saveHandlers: Record<Tab, () => Promise<void>> = {
+  const saveHandlers: Record<Tab, (() => Promise<void>) | null> = {
     home: saveHome,
     pricing: savePricing,
-    solar: saveSolar,
-    growatt: saveGrowatt,
+    battery: saveBattery,
+    sensors: saveSensors,
+    health: null,
   };
 
   // ── price preview (at a sample 1.00 spot price) ───────────────────────
@@ -504,23 +549,20 @@ const SettingsPage: React.FC = () => {
   );
   const previewSell = Number((previewSpot + pricingForm.taxReduction).toFixed(4));
 
-  // ── SOE derived values ────────────────────────────────────────────────
-  const minSoeKwh = (batteryForm.totalCapacity * batteryForm.minSoc) / 100;
-  const maxSoeKwh = (batteryForm.totalCapacity * batteryForm.maxSoc) / 100;
-
   // ── tab definitions ───────────────────────────────────────────────────
   const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
     { id: 'home', label: 'Home', icon: <Home className="h-4 w-4" /> },
     { id: 'pricing', label: 'Electricity Pricing', icon: <Zap className="h-4 w-4" /> },
-    { id: 'solar', label: 'Solar Forecast', icon: <Sun className="h-4 w-4" /> },
-    { id: 'growatt', label: 'Growatt', icon: <Battery className="h-4 w-4" /> },
+    { id: 'battery', label: 'Battery', icon: <Battery className="h-4 w-4" /> },
+    { id: 'sensors', label: 'Sensors', icon: <Sun className="h-4 w-4" /> },
+    { id: 'health', label: 'Health', icon: <Activity className="h-4 w-4" /> },
   ];
 
   // ── helpers ───────────────────────────────────────────────────────────
   const txtInput = (
     label: string,
     value: string,
-    onChange: (v: string) => void,
+    onChange: (_: string) => void,
     placeholder = '',
   ) => (
     <label className="block">
@@ -539,7 +581,7 @@ const SettingsPage: React.FC = () => {
     label: string,
     options: { value: T; label: string }[],
     value: T,
-    onChange: (v: T) => void,
+    onChange: (_: T) => void,
   ) => (
     <div className="space-y-1">
       <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{label}</span>
@@ -561,7 +603,7 @@ const SettingsPage: React.FC = () => {
     </div>
   );
 
-  const toggle = (label: string, value: boolean, onChange: (v: boolean) => void) => (
+  const toggle = (label: string, value: boolean, onChange: (_: boolean) => void) => (
     <div className="flex items-center justify-between">
       <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{label}</span>
       <button
@@ -573,27 +615,6 @@ const SettingsPage: React.FC = () => {
       </button>
     </div>
   );
-
-  const inlineSensor = (sKey: string, label: string) => {
-    const val = sensors[sKey] ?? '';
-    const isMissing = !val;
-    const status = sensorStatus[sKey] ?? null;
-    return (
-      <div key={sKey} className={`flex flex-col sm:flex-row sm:items-center gap-1 p-2 rounded-lg ${isMissing ? 'bg-gray-50 dark:bg-gray-700/30' : 'bg-gray-50 dark:bg-gray-700/50'}`}>
-        <div className="flex items-center gap-1.5 sm:w-52 flex-shrink-0">
-          {sensorIcon(status, !isMissing)}
-          <span className="text-xs font-medium text-gray-600 dark:text-gray-300">{label}</span>
-        </div>
-        <input
-          type="text"
-          value={val}
-          placeholder={isMissing ? 'Not detected — enter entity ID' : ''}
-          onChange={e => setSensors(prev => ({ ...prev, [sKey]: e.target.value }))}
-          className="flex-1 text-xs px-2 py-1 rounded border font-mono border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
-        />
-      </div>
-    );
-  };
 
   // ── render ────────────────────────────────────────────────────────────
   return (
@@ -639,7 +660,12 @@ const SettingsPage: React.FC = () => {
               {tabs.map(t => (
                 <button
                   key={t.id}
-                  onClick={() => setTab(t.id)}
+                  onClick={() => {
+                    setTab(t.id);
+                    if (t.id === 'sensors' && Object.keys(sensorStatus).length === 0) {
+                      checkAndUpdateSensorHealth(sensors);
+                    }
+                  }}
                   className={`flex items-center space-x-2 px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
                     tab === t.id
                       ? 'border-blue-500 text-blue-600 dark:text-blue-400'
@@ -656,52 +682,44 @@ const SettingsPage: React.FC = () => {
             </div>
             <div className="px-4 py-2 bg-gray-50 dark:bg-gray-800/60 flex items-center justify-between gap-3">
               <p className="text-xs text-gray-500 dark:text-gray-400 flex-1 min-w-0 truncate">
-                {tab === 'home' && 'Home electrical setup and energy consumption.'}
+                {tab === 'home' && 'Home electrical setup and consumption prediction for the optimizer.'}
                 {tab === 'pricing' && 'Fetch and convert electricity spot prices to buy/sell prices.'}
-                {tab === 'solar' && 'Solcast forecast for charge/discharge planning around expected solar.'}
-                {tab === 'growatt' && 'Growatt inverter type, battery parameters and sensor entity IDs.'}
+                {tab === 'battery' && 'Growatt inverter type and battery parameters.'}
+                {tab === 'sensors' && 'All sensor entity IDs, grouped by integration.'}
+                {tab === 'health' && 'System component health and diagnostics.'}
               </p>
-              <div className="flex items-center gap-2 flex-shrink-0">
+              {saveHandlers[tab] && (
                 <button
-                  onClick={runAutoDiscover}
-                  disabled={discovering}
-                  className="px-3 py-1 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 text-xs font-medium hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors whitespace-nowrap disabled:opacity-50 flex items-center gap-1.5"
-                >
-                  {discovering && <div className="h-3 w-3 border-2 border-gray-500 rounded-full border-t-transparent animate-spin" />}
-                  Auto-Configure
-                </button>
-                <button
-                  onClick={saveHandlers[tab]}
+                  onClick={() => saveHandlers[tab]?.()}
                   disabled={saving || !isDirty[tab]}
-                  className="px-4 py-1 bg-blue-500 text-white rounded-lg hover:bg-blue-600 font-medium text-xs disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+                  className="px-4 py-1 bg-blue-500 text-white rounded-lg hover:bg-blue-600 font-medium text-xs disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 flex-shrink-0"
                 >
                   {saving && <div className="h-3 w-3 border-2 border-white rounded-full border-t-transparent animate-spin" />}
                   <span>Save</span>
                 </button>
-              </div>
+              )}
             </div>
           </div>
 
-          {/* ── Home & Grid ──────────────────────────────────────────────── */}          {tab === 'home' && (
+          {/* ── Home & Grid ──────────────────────────────────────────────── */}
+          {tab === 'home' && (
             <div className="space-y-3">
-              <SectionCard
-                title="Home Consumption"
-              >
+              <SectionCard title="Home Consumption Prediction" description="How the optimizer estimates hourly home consumption when planning charge/discharge schedules.">
                 {radioGroup(
-                  'Consumption strategy',
+                  'Data source',
                   [
-                    { value: 'sensor', label: '48h average grid import sensor' },
+                    { value: 'sensor', label: 'Home Assistant sensor' },
                     { value: 'fixed', label: 'Fixed value' },
-                    { value: 'influxdb_7d_avg', label: 'InfluxDB 7-day rolling average' },
+                    { value: 'influxdb_7d_avg', label: 'InfluxDB (requires InfluxDB integration)' },
                   ],
                   homeForm.consumptionStrategy,
                   v => setHomeForm(f => ({ ...f, consumptionStrategy: v })),
                 )}
                 {homeForm.consumptionStrategy === 'sensor' && (
-                  <div className="space-y-2 pt-1">
-                    <p className="text-xs text-gray-500 dark:text-gray-400">Uses the rolling 48-hour average grid import sensor as the hourly consumption estimate.</p>
-                    {inlineSensor('48h_avg_grid_import', '48h Avg Grid Import sensor')}
-                  </div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 pt-1">
+                    Reads any HA sensor that provides an hourly consumption estimate — for example a custom helper that computes a 48h rolling average of grid import.
+                    Configure the sensor entity ID in the <strong>Sensors</strong> tab under Consumption Forecast.
+                  </p>
                 )}
                 {homeForm.consumptionStrategy === 'fixed' && (
                   <div className="pt-1">
@@ -711,16 +729,16 @@ const SettingsPage: React.FC = () => {
                   </div>
                 )}
                 {homeForm.consumptionStrategy === 'influxdb_7d_avg' && (
-                  <div className="space-y-2 pt-1">
-                    <p className="text-xs text-gray-500 dark:text-gray-400">Queries InfluxDB for the past 7 days of the local load power sensor and uses the hourly average profile. If no data is found, optimization will fail explicitly.</p>
-                    {inlineSensor('local_load_power', 'Local Load Power sensor')}
-                  </div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 pt-1">
+                    Queries InfluxDB directly for the past 7 days of local load power and uses the hourly average profile. Requires the InfluxDB integration to be configured.
+                    Configure the local load power sensor entity ID in the <strong>Sensors</strong> tab under Growatt Server.
+                  </p>
                 )}
               </SectionCard>
 
               <SectionCard
                 title="Power Monitoring"
-                description="Prevents the optimizer from scheduling charges or discharges that would blow your main fuse. Enable to configure."
+                description="Monitors real-time load and limits battery charge power to prevent blowing the main fuse. Enable to configure."
               >
                 {toggle('Enable grid overload protection', homeForm.powerMonitoringEnabled,
                   v => setHomeForm(f => ({ ...f, powerMonitoringEnabled: v })))}
@@ -742,35 +760,11 @@ const SettingsPage: React.FC = () => {
                         v => setHomeForm(f => ({ ...f, phaseCount: parseInt(v, 10) })),
                       )}
                     </div>
-                    <div className="space-y-2 pt-1">
-                      <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">Phase current sensors</p>
-                      {inlineSensor('current_l1', 'Phase L1 Current')}
-                      {homeForm.phaseCount === 3 && inlineSensor('current_l2', 'Phase L2 Current')}
-                      {homeForm.phaseCount === 3 && inlineSensor('current_l3', 'Phase L3 Current')}
-                    </div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 pt-1">
+                      Configure per-phase current sensor entity IDs in the <strong>Sensors</strong> tab under Phase Current Monitoring.
+                    </p>
                   </>
                 )}
-              </SectionCard>
-
-              <SectionCard
-                title="EV Charging"
-                description="When configured, BESS will not discharge the battery while your EV is charging. Auto-detected from Zaptec (zap*_is_charging), Tibber, Easee or Wallbox binary sensors."
-              >
-                {inlineSensor('discharge_inhibit', 'Discharge Inhibit sensor')}
-              </SectionCard>
-
-            </div>
-          )}
-
-          {/* ── Solar Forecast ───────────────────────────────────────────── */}
-          {tab === 'solar' && (
-            <div className="space-y-3">
-              <SectionCard
-                title="Solar Forecast"
-                description="Optional — PV production forecast from Solcast for Home Assistant. Used to plan charge/discharge strategy around expected solar generation."
-              >
-                {inlineSensor('solar_forecast_today', 'Forecast Today (kWh)')}
-                {inlineSensor('solar_forecast_tomorrow', 'Forecast Tomorrow (kWh)')}
               </SectionCard>
             </div>
           )}
@@ -796,6 +790,7 @@ const SettingsPage: React.FC = () => {
                   <div className="pt-1">
                     {txtInput('Config Entry ID', pricingForm.nordpoolConfigEntryId,
                       v => setPricingForm(f => ({ ...f, nordpoolConfigEntryId: v })), 'e.g. abc123…')}
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Auto-detected during setup. Run Auto-Configure in the Sensors tab if missing.</p>
                   </div>
                 )}
                 {pricingForm.provider === 'nordpool' && (
@@ -853,6 +848,8 @@ const SettingsPage: React.FC = () => {
                         v => setPricingForm(f => ({ ...f, vatMultiplier: v })), { unit: '1.25 = 25% VAT', min: 1, step: 0.01 })}
                       {numField('Additional Costs', pricingForm.additionalCosts,
                         v => setPricingForm(f => ({ ...f, additionalCosts: v })), { unit: `${pricingForm.currency}/kWh (grid fee + energy tax, VAT-inclusive)`, min: 0, step: 0.001 })}
+                      {numField('Tax Reduction', pricingForm.taxReduction,
+                        v => setPricingForm(f => ({ ...f, taxReduction: v })), { unit: `${pricingForm.currency}/kWh credit on sold energy`, min: 0, step: 0.001 })}
                     </div>
                     <div className="rounded-lg bg-gray-50 dark:bg-gray-700/50 px-4 py-3 text-sm space-y-1.5">
                       <p className="text-xs text-gray-500 dark:text-gray-400">Preview at spot = 1.00 — formula: (spot + markup) × VAT + additional</p>
@@ -867,18 +864,12 @@ const SettingsPage: React.FC = () => {
                     </div>
                   </>
                 )}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {numField('Tax Reduction', pricingForm.taxReduction,
-                    v => setPricingForm(f => ({ ...f, taxReduction: v })), { unit: `${pricingForm.currency}/kWh credit on sold energy`, min: 0, step: 0.001 })}
-                  {numField('Min Action Profit', pricingForm.minProfit,
-                    v => setPricingForm(f => ({ ...f, minProfit: v })), { unit: `${pricingForm.currency} — skip cycles below this gain`, min: 0, step: 0.1 })}
-                </div>
               </SectionCard>
             </div>
           )}
 
-          {/* ── Growatt ─────────────────────────────────────────────────── */}
-          {tab === 'growatt' && (
+          {/* ── Battery ──────────────────────────────────────────────────── */}
+          {tab === 'battery' && (
             <div className="space-y-3">
               <SectionCard
                 title="Inverter Type"
@@ -900,7 +891,7 @@ const SettingsPage: React.FC = () => {
 
               <SectionCard
                 title="Capacity & SOC Limits"
-                description="Total battery capacity in kWh — set this to match your actual battery exactly. Min/Max SOC are read from your Growatt inverter settings and displayed here for reference; BESS does not write these limits."
+                description="Total battery capacity in kWh — set this to match your actual battery exactly. Min/Max SOC are the master values synced to the Growatt inverter and define the operating range the optimizer will stay within."
               >
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   {numField('Total Capacity', batteryForm.totalCapacity,
@@ -921,107 +912,11 @@ const SettingsPage: React.FC = () => {
                     v => setBatteryForm(f => ({ ...f, maxChargePowerKw: v })), { unit: 'kW', min: 0, step: 0.1 })}
                   {numField('Max Discharge Power', batteryForm.maxDischargePowerKw,
                     v => setBatteryForm(f => ({ ...f, maxDischargePowerKw: v })), { unit: 'kW', min: 0, step: 0.1 })}
+                  {numField('Charging Power Rate', batteryForm.chargingPowerRate,
+                    v => setBatteryForm(f => ({ ...f, chargingPowerRate: v })), { unit: '%', min: 0, max: 100, step: 1 })}
                 </div>
+                <p className="text-xs text-gray-500 dark:text-gray-400">Charging Power Rate is the AC charge current cap sent to the Growatt inverter (100% = full rated power). The power monitor may reduce this dynamically when phase current sensors detect the fuse limit is being approached.</p>
               </SectionCard>
-
-              {/* Sensor entity IDs – flat card with integrated collapsibles */}
-              <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
-                <div className="px-5 py-4 border-b border-gray-100 dark:border-gray-700/60">
-                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Sensor Entity IDs</h3>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                    Entity IDs for each data source. Expand a category to view and edit.
-                  </p>
-                </div>
-                <div className="divide-y divide-gray-100 dark:divide-gray-700/50">
-                  {INTEGRATIONS.filter(intg => intg.sensorGroups.length > 0 && !intg.sensorGroups.flatMap(g => g.sensors).some(s => ALL_INLINE_SENSOR_KEYS.has(s.key))).map(intg => {
-                    const allSensorKeys = intg.sensorGroups.flatMap(g => g.sensors.map(s => s.key));
-                    const configuredCount = allSensorKeys.filter(k => sensors[k]).length;
-                    const totalCount = allSensorKeys.length;
-                    const missingRequired = intg.sensorGroups.flatMap(g => g.sensors).filter(s => s.required && !sensors[s.key]).length;
-                    const isFullyConfigured = configuredCount === totalCount;
-                    return (
-                    <div key={intg.id}>
-                      <button
-                        type="button"
-                        onClick={() => setExpandedGroups(prev => {
-                          const next = new Set(prev);
-                          if (next.has(intg.id)) next.delete(intg.id); else next.add(intg.id);
-                          return next;
-                        })}
-                        className="w-full flex items-center justify-between px-5 py-3.5 hover:bg-gray-50 dark:hover:bg-gray-700/40 transition-colors text-left"
-                      >
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-sm font-medium text-gray-900 dark:text-white">{intg.name}</span>
-                            {intg.required && (
-                              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300">REQUIRED</span>
-                            )}
-                            {missingRequired > 0 ? (
-                              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400">{missingRequired} missing</span>
-                            ) : isFullyConfigured ? (
-                              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">{configuredCount}/{totalCount} configured</span>
-                            ) : (
-                              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400">{configuredCount}/{totalCount} configured</span>
-                            )}
-                          </div>
-                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{intg.description}</p>
-                        </div>
-                        {expandedGroups.has(intg.id)
-                          ? <ChevronUp className="h-4 w-4 text-gray-400 flex-shrink-0" />
-                          : <ChevronDown className="h-4 w-4 text-gray-400 flex-shrink-0" />}
-                      </button>
-                      {expandedGroups.has(intg.id) && (
-                        <div className="border-t border-gray-100 dark:border-gray-700/50 divide-y divide-gray-100 dark:divide-gray-700/30">
-                          {intg.sensorGroups.map(group => (
-                            <div key={group.name} className="px-5 py-3 space-y-2">
-                              <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">{group.name}</p>
-                              {group.sensors.map(s => {
-                                const val = sensors[s.key] ?? '';
-                                const isMissing = !val;
-                                const status = sensorStatus[s.key] ?? null;
-                                return (
-                                  <div
-                                    key={s.key}
-                                    className={`flex flex-col sm:flex-row sm:items-center gap-1 p-2 rounded-lg ${
-                                      isMissing && s.required
-                                        ? 'bg-orange-50 dark:bg-orange-900/10'
-                                        : isMissing
-                                          ? 'bg-gray-50 dark:bg-gray-700/30'
-                                          : 'bg-gray-50 dark:bg-gray-700/50'
-                                    }`}
-                                  >
-                                    <div className="flex items-center gap-1.5 sm:w-52 flex-shrink-0">
-                                      {sensorIcon(status, !isMissing)}
-                                      <span className="text-xs font-medium text-gray-600 dark:text-gray-300">
-                                        {s.label}
-                                      </span>
-                                      {s.required && (
-                                        <span className="text-[9px] text-orange-500 dark:text-orange-400 font-medium">*</span>
-                                      )}
-                                    </div>
-                                    <input
-                                      type="text"
-                                      value={val}
-                                      placeholder={isMissing ? 'Not detected — enter entity ID' : ''}
-                                      onChange={e => setSensors(prev => ({ ...prev, [s.key]: e.target.value }))}
-                                      className={`flex-1 text-xs px-2 py-1 rounded border font-mono ${
-                                        isMissing && s.required
-                                          ? 'border-orange-300 dark:border-orange-600 bg-white dark:bg-gray-800 text-orange-700 dark:text-orange-300 placeholder-orange-400'
-                                          : 'border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200'
-                                      } focus:outline-none focus:ring-1 focus:ring-blue-400`}
-                                    />
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                    );
-                  })}
-                </div>
-              </div>
 
               {/* Advanced settings collapsible */}
               <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
@@ -1032,7 +927,7 @@ const SettingsPage: React.FC = () => {
                 >
                   <div>
                     <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Advanced settings</h3>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Cycle cost, charging rate, efficiency factors and temperature derating</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Cycle cost, profit threshold, efficiency factors and temperature derating</p>
                   </div>
                   {effOpen ? <ChevronUp className="h-4 w-4 text-gray-400 flex-shrink-0" /> : <ChevronDown className="h-4 w-4 text-gray-400 flex-shrink-0" />}
                 </button>
@@ -1041,9 +936,9 @@ const SettingsPage: React.FC = () => {
                     {numField('Cycle Cost', batteryForm.cycleCostPerKwh,
                       v => setBatteryForm(f => ({ ...f, cycleCostPerKwh: v })), { unit: `${pricingForm.currency}/kWh`, min: 0, step: 0.001 })}
                     <p className="text-xs text-gray-500 dark:text-gray-400 -mt-2">Represents battery wear — a small cost added to every kWh cycled. Used by the optimizer to decide whether a charge/discharge cycle is worth doing given the price spread. A higher value makes cycles less attractive and reduces unnecessary wear.</p>
-                    {numField('Charging Power Rate', batteryForm.chargingPowerRate,
-                      v => setBatteryForm(f => ({ ...f, chargingPowerRate: v })), { unit: '%', min: 0, max: 100, step: 1 })}
-                    <p className="text-xs text-gray-500 dark:text-gray-400 -mt-2">AC charge current cap sent directly to the Growatt inverter. 100% means the inverter uses its full rated charge power. The power monitor may reduce this dynamically when current sensors detect the fuse limit is being approached.</p>
+                    {numField('Min Action Profit', batteryForm.minActionProfit,
+                      v => setBatteryForm(f => ({ ...f, minActionProfit: v })), { unit: `${pricingForm.currency} — skip cycles below this gain`, min: 0, step: 0.1 })}
+                    <p className="text-xs text-gray-500 dark:text-gray-400 -mt-2">Minimum profit threshold for a charge/discharge action. The optimizer skips cycles where the expected gain is below this value, reducing unnecessary wear from marginal trades.</p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       {numField('Charge Efficiency', batteryForm.efficiencyCharge,
                         v => setBatteryForm(f => ({ ...f, efficiencyCharge: v })), { unit: '%', min: 0, max: 100, step: 0.1 })}
@@ -1054,16 +949,13 @@ const SettingsPage: React.FC = () => {
                       v => setBatteryForm(f => ({ ...f, temperatureDeratingEnabled: v })))}
                     {batteryForm.temperatureDeratingEnabled && (
                       <>
-                        <label className="block">
-                          <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Weather entity</span>
-                          <input
-                            type="text"
-                            value={batteryForm.temperatureDeratingWeatherEntity}
-                            onChange={e => setBatteryForm(f => ({ ...f, temperatureDeratingWeatherEntity: e.target.value }))}
-                            placeholder="weather.home"
-                            className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          />
-                        </label>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                          Uses the weather entity to derate charging power in cold temperatures (LFP protection).
+                          Configure the weather entity in the <strong>Sensors</strong> tab under Weather Integration.
+                          {sensors['weather_entity'] && (
+                            <span className="ml-1 text-green-600 dark:text-green-400">Current: {sensors['weather_entity']}</span>
+                          )}
+                        </p>
                         <div>
                           <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">Derating curve (LFP default, read-only)</p>
                           <div className="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
@@ -1089,6 +981,196 @@ const SettingsPage: React.FC = () => {
                     )}
                   </div>
                 )}
+              </div>
+            </div>
+          )}
+
+          {/* ── Sensors ──────────────────────────────────────────────────── */}
+          {tab === 'sensors' && (
+            <div className="space-y-3">
+              {/* Auto-Configure card */}
+              <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
+                <div className="px-5 py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Auto-Configure</h3>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                      Scan Home Assistant for Growatt, Nord Pool, Solcast, and other integrations and fill in entity IDs automatically.
+                    </p>
+                    {lastDiscoveredAt && (
+                      <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Last scanned: {lastDiscoveredAt}</p>
+                    )}
+                  </div>
+                  <button
+                    onClick={runAutoDiscover}
+                    disabled={discovering}
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-sm font-medium transition-colors whitespace-nowrap self-start sm:self-auto"
+                  >
+                    {discovering
+                      ? <div className="h-4 w-4 border-2 border-white rounded-full border-t-transparent animate-spin" />
+                      : <Zap className="h-4 w-4" />}
+                    {discovering ? 'Scanning…' : 'Auto-Configure'}
+                  </button>
+                </div>
+              </div>
+
+              {/* All integrations */}
+              <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
+                <div className="px-5 py-4 border-b border-gray-100 dark:border-gray-700/60">
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Sensor Entity IDs</h3>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    Entity IDs for each integration. Expand a category to view and edit.
+                  </p>
+                </div>
+                <div className="divide-y divide-gray-100 dark:divide-gray-700/50">
+                  {INTEGRATIONS.map(intg => {
+                    const allSensorKeys = intg.sensorGroups.flatMap(g => g.sensors.map(s => s.key));
+                    const configuredCount = allSensorKeys.filter(k => sensors[k]).length;
+                    const totalCount = allSensorKeys.length;
+                    const missingRequired = intg.sensorGroups.flatMap(g => g.sensors).filter(s => s.required && !sensors[s.key]).length;
+                    const isFullyConfigured = totalCount > 0 && configuredCount === totalCount;
+                    const healthDot = integrationHealthDot(intg, sensors, sensorStatus);
+
+                    return (
+                      <div key={intg.id}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (totalCount === 0) return; // nordpool: no sensor inputs to expand
+                            setExpandedGroups(prev => {
+                              const next = new Set(prev);
+                              if (next.has(intg.id)) next.delete(intg.id); else next.add(intg.id);
+                              return next;
+                            });
+                          }}
+                          className={`w-full flex items-center justify-between px-5 py-3.5 transition-colors text-left ${totalCount > 0 ? 'hover:bg-gray-50 dark:hover:bg-gray-700/40' : 'cursor-default'}`}
+                        >
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              {healthDot}
+                              <span className="text-sm font-medium text-gray-900 dark:text-white">{intg.name}</span>
+                              {intg.required && (
+                                <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300">REQUIRED</span>
+                              )}
+                              {totalCount === 0 ? (
+                                <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${pricingForm.nordpoolConfigEntryId ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400'}`}>
+                                  {pricingForm.nordpoolConfigEntryId ? 'configured' : 'not configured'}
+                                </span>
+                              ) : missingRequired > 0 ? (
+                                <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400">{missingRequired} required missing</span>
+                              ) : isFullyConfigured ? (
+                                <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">{configuredCount}/{totalCount} configured</span>
+                              ) : (
+                                <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400">{configuredCount}/{totalCount} configured</span>
+                              )}
+                            </div>
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{intg.description}</p>
+                          </div>
+                          {totalCount > 0 && (
+                            expandedGroups.has(intg.id)
+                              ? <ChevronUp className="h-4 w-4 text-gray-400 flex-shrink-0" />
+                              : <ChevronDown className="h-4 w-4 text-gray-400 flex-shrink-0" />
+                          )}
+                        </button>
+                        {expandedGroups.has(intg.id) && totalCount > 0 && (
+                          <div className="border-t border-gray-100 dark:border-gray-700/50 divide-y divide-gray-100 dark:divide-gray-700/30">
+                            {intg.sensorGroups.map(group => (
+                              <div key={group.name} className="px-5 py-3 space-y-2">
+                                <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">{group.name}</p>
+                                {group.sensors.map(s => {
+                                  const val = sensors[s.key] ?? '';
+                                  const isMissing = !val;
+                                  const status = sensorStatus[s.key] ?? null;
+                                  return (
+                                    <div
+                                      key={s.key}
+                                      className={`flex flex-col sm:flex-row sm:items-center gap-1 p-2 rounded-lg ${
+                                        isMissing && s.required
+                                          ? 'bg-orange-50 dark:bg-orange-900/10'
+                                          : isMissing
+                                            ? 'bg-gray-50 dark:bg-gray-700/30'
+                                            : 'bg-gray-50 dark:bg-gray-700/50'
+                                      }`}
+                                    >
+                                      <div className="flex items-center gap-1.5 sm:w-52 flex-shrink-0">
+                                        {sensorIcon(status, !isMissing)}
+                                        <span className="text-xs font-medium text-gray-600 dark:text-gray-300">
+                                          {s.label}
+                                        </span>
+                                        {s.required && isMissing && (
+                                          <span className="text-[9px] text-orange-500 dark:text-orange-400 font-medium">*</span>
+                                        )}
+                                      </div>
+                                      <input
+                                        type="text"
+                                        value={val}
+                                        placeholder={isMissing ? 'Not detected — enter entity ID' : ''}
+                                        onChange={e => setSensors(prev => ({ ...prev, [s.key]: e.target.value }))}
+                                        className={`flex-1 text-xs px-2 py-1 rounded border font-mono ${
+                                          isMissing && s.required
+                                            ? 'border-orange-300 dark:border-orange-600 bg-white dark:bg-gray-800 text-orange-700 dark:text-orange-300 placeholder-orange-400'
+                                            : 'border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200'
+                                        } focus:outline-none focus:ring-1 focus:ring-blue-400`}
+                                      />
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── Health ───────────────────────────────────────────────────── */}
+          {tab === 'health' && (
+            <div className="space-y-4">
+              {/* Toolbar */}
+              <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 px-5 py-4 flex flex-wrap items-center gap-3">
+                <button
+                  onClick={() => setHealthKey(k => k + 1)}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                >
+                  <RefreshCw className="h-4 w-4" />
+                  Refresh
+                </button>
+                <button
+                  onClick={handleExportDebugData}
+                  disabled={isExporting}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
+                >
+                  <Download className="h-4 w-4" />
+                  {isExporting ? 'Exporting…' : 'Export Debug Data'}
+                </button>
+              </div>
+
+              {exportError && (
+                <div className="px-4 py-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-800 dark:text-red-200">
+                  {exportError}
+                </div>
+              )}
+
+              {/* Health component — key forces remount on refresh */}
+              <SystemHealthComponent key={healthKey} />
+
+              {/* Legend */}
+              <div className="bg-gray-100 dark:bg-gray-800/50 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
+                <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Status Indicators</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                  <ul className="space-y-1 text-gray-600 dark:text-gray-400">
+                    <li><span className="text-green-600 dark:text-green-400 font-medium">OK</span>: Component is fully functional with all required sensors.</li>
+                    <li><span className="text-amber-600 dark:text-amber-400 font-medium">WARNING</span>: Component has minor issues but can operate with limitations.</li>
+                    <li><span className="text-red-600 dark:text-red-400 font-medium">ERROR</span>: Component has critical issues and may not function correctly.</li>
+                  </ul>
+                  <ul className="space-y-1 text-gray-600 dark:text-gray-400">
+                    <li><span className="font-medium">Required</span>: Essential for basic system operation.</li>
+                    <li><span className="font-medium">Optional</span>: Enhances functionality but not essential for basic operation.</li>
+                  </ul>
+                </div>
               </div>
             </div>
           )}

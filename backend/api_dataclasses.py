@@ -98,6 +98,7 @@ class APIBatterySettings:
 
     # Economic settings
     cycleCostPerKwh: float  # cost per kWh per cycle
+    minActionProfitThreshold: float  # SEK - minimum profit to act on an arbitrage opportunity
     chargingPowerRate: float  # % - charging power rate
     efficiencyCharge: float  # % - charging efficiency
     efficiencyDischarge: float  # % - discharge efficiency
@@ -128,6 +129,7 @@ class APIBatterySettings:
             maxChargePowerKw=battery.max_charge_power_kw,
             maxDischargePowerKw=battery.max_discharge_power_kw,
             cycleCostPerKwh=battery.cycle_cost_per_kwh,
+            minActionProfitThreshold=battery.min_action_profit_threshold,
             chargingPowerRate=battery.charging_power_rate,
             efficiencyCharge=battery.efficiency_charge,
             efficiencyDischarge=battery.efficiency_discharge,
@@ -146,6 +148,7 @@ class APIBatterySettings:
             "max_charge_power_kw": self.maxChargePowerKw,
             "max_discharge_power_kw": self.maxDischargePowerKw,
             "cycle_cost_per_kwh": self.cycleCostPerKwh,
+            "min_action_profit_threshold": self.minActionProfitThreshold,
             "charging_power_rate": self.chargingPowerRate,
             "efficiency_charge": self.efficiencyCharge,
             "efficiency_discharge": self.efficiencyDischarge,
@@ -161,8 +164,8 @@ class APIPriceSettings:
     vatMultiplier: float
     additionalCosts: float
     taxReduction: float
-    minProfit: float
     useActualPrice: bool
+    minProfit: float = 0.0
 
     @classmethod
     def from_internal(cls, price) -> APIPriceSettings:
@@ -973,7 +976,9 @@ class APIRealTimePower:
 # Settings API models (Pydantic — used for PUT /api/settings/* endpoints)
 # ---------------------------------------------------------------------------
 
-_ENTITY_ID_RE_DC = re.compile(r"^[a-z][a-z0-9_]*\.[a-z0-9_-]+$")
+# Matches valid HA entity IDs: domain.object_id (case-insensitive to handle
+# user-defined entity IDs with uppercase letters in the object_id part).
+_ENTITY_ID_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_]*\.[a-zA-Z0-9_-]+$")
 
 
 class APIHomeSettingsPayload(BaseModel):
@@ -1021,7 +1026,7 @@ class APISensorsPayload(BaseModel):
     @classmethod
     def validate_entity_ids(cls, sensors: dict[str, str]) -> dict[str, str]:
         for value in sensors.values():
-            if value and not _ENTITY_ID_RE_DC.match(value):
+            if value and not _ENTITY_ID_RE.match(value):
                 raise ValueError(f"Invalid entity ID format: {value}")
         return sensors
 
@@ -1063,6 +1068,6 @@ class APISetupCompletePayload(BaseModel):
     @classmethod
     def validate_sensor_entity_ids(cls, sensors: dict[str, str]) -> dict[str, str]:
         for value in sensors.values():
-            if value and not _ENTITY_ID_RE_DC.match(value):
+            if value and not _ENTITY_ID_RE.match(value):
                 raise ValueError(f"Invalid entity ID format: {value}")
         return sensors

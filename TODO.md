@@ -1,59 +1,5 @@
 # Energy Management System Improvements - Prioritized Implementation Plan
 
-## � **ACTIVE FEATURE** — Frontend-Owned Settings + Setup Wizard Expansion
-
-Move all operational settings out of `config.yaml` into BESS-owned `/data/bess_settings.json`.
-`config.yaml` shrinks to InfluxDB only. Setup Wizard expands from 3 → 6 steps. New Settings tab in nav.
-
-### Phase 1 — Backend: Unified Settings Store
-
-- [x] Create `backend/settings_store.py` with `load()`, `save(section, data)`, `get_section()`, `migrate_from_options()`
-- [x] Update `BESSController._load_options()` to use `SettingsStore` (replaces `_load_discovered_config` / `_merge_discovered_config`)
-- [x] `apply_discovered_config()` writes sensors into `bess_settings.json` via `SettingsStore`
-- [x] Add `GET /api/settings/all` endpoint
-- [x] Replace POST with `PUT /api/settings/battery`, `/home`, `/electricity`, `/energy-provider`, `/inverter`, `/sensors`
-- [x] Add `POST /api/setup/complete` — atomic save of full wizard output
-- [x] Add `APIHomeSettings`, `APIInverterSettings`, `APIEnergyProviderSettings` Pydantic models to `api_dataclasses.py`
-
-### Phase 2 — `config.yaml` Simplification
-
-- [x] Remove `home`, `battery`, `electricity_price`, `energy_provider`, `growatt`, `sensors` from options + schema
-- [x] Keep only `influxdb` in `config.yaml`
-- [x] Update `app.py` to read only `influxdb` from `options.json`
-
-### Phase 3 — Expand Setup Wizard (3 → 6 steps)
-
-- [ ] Step 0: Scan (keep existing)
-- [ ] Step 1: Review Sensors (keep existing)
-- [ ] Step 2: Battery Setup — capacity, power limits, SOC bounds, cycle cost, profit threshold (defaults pre-filled)
-- [ ] Step 3: Home & Grid — phase count, fuse current, voltage, currency, consumption strategy
-- [ ] Step 4: Electricity Pricing — provider picker, area, VAT, markup, additional costs
-- [ ] Step 5: Done — calls `POST /api/setup/complete`, shows summary card, → Dashboard
-
-### Phase 4 — New Settings Page (`/settings`)
-
-- [ ] Create `frontend/src/pages/SettingsPage.tsx` with 4 tabs:
-  - [ ] **Battery** — capacity, SOC bounds, SOE derived (read-only), cycle cost, profit threshold, temperature derating collapsible
-  - [ ] **Home & Grid** — currency, phase count radio, fuse current, voltage, consumption strategy (conditional fixed kWh input)
-  - [ ] **Electricity Pricing** — provider selector, adaptive fields per provider, live buy/sell price preview
-  - [ ] **Inverter & Sensors** — inverter type radio, device ID, sensor table with status dots, Re-run Auto-Configure button
-- [ ] Unsaved-changes dot per tab + top banner
-- [ ] Per-tab Save button + success/error toast
-- [ ] Inline blur validation (range checks, entity ID format)
-
-### Phase 5 — Navigation
-
-- [ ] Add Settings tab to `App.tsx` nav (`/settings`, Lucide `Settings` icon)
-- [ ] Tab order: Dashboard | Insights | Savings | Inverter | **Settings** | System Health
-
-### Verification
-
-- [ ] Existing user migration: populated `config.yaml` → `bess_settings.json` created, system behaves identically
-- [ ] New user flow: wizard 6 steps → dashboard → system runs
-- [ ] Settings change → save → restart → value persists from `bess_settings.json`
-- [ ] `pytest core/bess/tests` passes, `ruff + black` clean, `npm run build` succeeds
-
----
 
 ## �🔴 **CRITICAL PRIORITY** (System Reliability)
 
@@ -398,6 +344,24 @@ This would make the profitability gate compare apples-to-apples with the dashboa
 **Benefits**: Type safety, extensibility for locale/timezone/precision without signature changes, future-proof for internationalization
 
 **Files**: `backend/api_dataclasses.py`, `backend/api.py`
+
+### Hardcoded Fallback Values Violating CLAUDE.md
+
+**Impact**: Medium | **Effort**: Low | **Dependencies**: None
+
+**Description**: Several places in `backend/api.py` use hardcoded fallback values and `hasattr` guards that violate the CLAUDE.md principle "Never use hasattr, fallbacks or default values — use error/assert instead". These mask real sensor failures with fabricated data.
+
+**Locations to fix**:
+
+- `battery_soe_kwh = 25.0` — hardcoded default SOE (line ~1465)
+- `battery_capacity = 50.0` — hardcoded default capacity (line ~1466)
+- `hasattr(bess_controller.system, "controller")` guard (line ~1470)
+- `hasattr(bess_controller.system, "battery_settings")` guard (line ~1476)
+- `except Exception: pass  # Silently continue with default` (line ~1487)
+
+**Fix**: Remove the entire try/except wrapper and default assignments. Access `bess_controller.system.controller` and `bess_controller.system.battery_settings` directly — if they are absent the system is misconfigured and should fail explicitly.
+
+**Files**: `backend/api.py`
 
 ### Other Technical Debt
 

@@ -228,25 +228,51 @@ electricity_price:
   tax_reduction: 0.0       # Swedish skattereduktion removed as of Jan 1 2026
 ```
 
-> **`additional_costs`** covers fixed per-kWh charges such as grid tariff and energy tax.
-> These are added **after** VAT is applied to the spot price, so specify them as the
-> final consumer amount (VAT already included where applicable).
->
-> **Typical Swedish breakdown (SEK/kWh):**
->
-> | Component | Swedish term | Amount |
-> |-----------|-------------|--------|
-> | Grid transfer fee (ex. VAT) | Överföringsavgift | ~0.45 |
-> | VAT on grid fee (25%) | Moms på nätavgift | ~0.11 |
-> | Energy tax | Energiskatt | ~0.46 |
-> | **Total `additional_costs`** | | **~1.02** |
->
-> The grid transfer fee (överföringsavgift) varies by network operator and region.
-> Check your electricity bill for the exact amounts.
+**How the raw spot price is converted to your buy and sell prices:**
 
-> **`tax_reduction`** is the per-kWh credit you receive when selling energy back to the grid.
-> The Swedish *skattereduktion* was removed as of Jan 1 2026, so Swedish users should set this to `0.0`.
-> Users in other markets should check whether their tariff includes a sell-back credit.
+```
+Buy price  = (raw spot + markup) × VAT multiplier + additional costs
+Sell price = raw spot + tax reduction
+```
+
+**Note:** The markup is applied *before* VAT (it's ex-VAT), but the additional costs are already VAT-inclusive.
+
+**Explaining each field:**
+
+> **`markup_rate`** — Energy provider's margin/management fee charged per kWh (ex-VAT before VAT is applied).
+> Example: Tibber 0.08 (8 öre/kWh), Ellevio ~0.15.
+
+> **`vat_multiplier`** — The VAT tax factor. Set to 1.25 for 25% VAT (Sweden, Norway, Denmark, Finland), 1.20 for 20% (UK, some EU), etc.
+
+> **`additional_costs`** covers fixed per-kWh charges such as grid tariff and energy tax.
+> The code adds this value directly to the buy price, so you must configure it as your **final total additional cost per kWh** (VAT included).
+>
+> **How to calculate `additional_costs` from your E.ON bill (or similar Swedish invoice):**
+>
+> Your invoice shows charges ex-VAT, then applies 25% VAT to the total. Calculate as follows:
+>
+> | Component | From your bill | Amount per kWh |
+> |-----------|-----------------|---|
+> | Grid transfer fee (Elöverföring) | ex-VAT | 0.2584 |
+> | Energy tax (Energiskatt) | ex-VAT | 0.3600 |
+> | **Subtotal ex-VAT** | | **0.6184** |
+> | **VAT 25%** | 25% of 0.6184 | **0.1546** |
+> | **Total `additional_costs` (inc. VAT)** | | **0.7730** |
+>
+> Then configure `additional_costs: 0.77` in your settings (round as needed).
+>
+> Your grid transfer fee and energy tax amounts vary by network operator and region.
+> Find these values on your electricity bill and recalculate as shown above.
+
+> **`tax_reduction`** (labeled as "Export Compensation" in the UI) is the per-kWh payment you receive from the grid operator when selling energy back to the grid.
+> The Swedish *skattereduktion* (tax reduction) was removed Jan 1 2026. What remains is **Nätnytta** (grid export benefit).
+>
+> Check your E.ON or other network operator invoice under "Producent/Självfaktura" (Producer/Self-invoice).
+> The section shows what you're paid for exported electricity (typically ex-VAT, no tax on exports).
+>
+> **Example from E.ON invoice:**
+> - Nätnytta (Grid export benefit): -19.88 öre/kWh → set `tax_reduction: 0.1988`
+> - This is the per-kWh payment E.ON provides for exporting surplus solar/battery electricity to the grid.
 
 ### Octopus Energy Setup
 

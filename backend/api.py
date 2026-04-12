@@ -70,6 +70,15 @@ async def update_battery_settings(settings: dict):
         # Persist to bess_settings.json. Preserve existing fields not managed by
         # this endpoint (e.g. min_action_profit_threshold) via read-modify-write.
         section = bess_controller.settings_store.get_section("battery")
+        # Preserve any existing temperature_derating fields not managed by this
+        # endpoint (e.g. a user-configured derating_curve) by merging rather than
+        # replacing the nested dict.
+        existing_td = section.get("temperature_derating", {})
+        updated_td = {
+            **existing_td,
+            "enabled": api_settings.temperatureDeratingEnabled,
+            "weather_entity": api_settings.temperatureDeratingWeatherEntity,
+        }
         section.update(
             {
                 "total_capacity": api_settings.totalCapacity,
@@ -78,10 +87,7 @@ async def update_battery_settings(settings: dict):
                 "max_charge_discharge_power": api_settings.maxChargePowerKw,
                 "cycle_cost": api_settings.cycleCostPerKwh,
                 "min_action_profit_threshold": api_settings.minActionProfitThreshold,
-                "temperature_derating": {
-                    "enabled": api_settings.temperatureDeratingEnabled,
-                    "weather_entity": api_settings.temperatureDeratingWeatherEntity,
-                },
+                "temperature_derating": updated_td,
             }
         )
         bess_controller.settings_store.save_section("battery", section)
@@ -272,8 +278,9 @@ async def update_inverter_settings(payload: APIInverterSettingsPayload):
     from app import bess_controller
 
     try:
-        section = {"inverter_type": payload.inverterType}
-        if payload.deviceId:
+        section = bess_controller.settings_store.get_section("growatt")
+        section["inverter_type"] = payload.inverterType
+        if payload.deviceId is not None:
             section["device_id"] = payload.deviceId
             bess_controller.ha_controller.growatt_device_id = payload.deviceId
         bess_controller.settings_store.save_section("growatt", section)
@@ -641,8 +648,7 @@ async def get_dashboard_data(
             "optimized": total_optimized_cost,
         }
 
-        # Get battery state — default to 0.0 if sensor unavailable
-        battery_soc: float = controller.get_battery_soc() or 0.0
+        battery_soc: float = controller.get_battery_soc()
 
         # Strategic intent summary from actual schedule data
         try:
@@ -1355,24 +1361,12 @@ async def get_inverter_status():
         except Exception as e:
             logger.warning(f"Failed to get current battery mode: {e}")
 
-        # Default values in case of errors
-        battery_soc = 50.0
-        battery_soe = 0.0
-        grid_charge_enabled = False
-        discharge_power_rate = 100.0
-        battery_charge_power = 0.0
-        battery_discharge_power = 0.0
-
-        # Get battery data with error handling
-        try:
-            battery_soc = controller.get_battery_soc() or 50.0
-            battery_soe = (battery_soc / 100.0) * battery_settings.total_capacity
-            grid_charge_enabled = controller.grid_charge_enabled()
-            discharge_power_rate = controller.get_discharging_power_rate()
-            battery_charge_power = controller.get_battery_charge_power()
-            battery_discharge_power = controller.get_battery_discharge_power()
-        except Exception as e:
-            logger.error(f"Error getting battery status: {e}")
+        battery_soc = controller.get_battery_soc()
+        battery_soe = (battery_soc / 100.0) * battery_settings.total_capacity
+        grid_charge_enabled = controller.grid_charge_enabled()
+        discharge_power_rate = controller.get_discharging_power_rate()
+        battery_charge_power = controller.get_battery_charge_power()
+        battery_discharge_power = controller.get_battery_discharge_power()
 
         response = {
             "battery_soc": battery_soc,
@@ -1482,9 +1476,7 @@ async def get_growatt_detailed_schedule():
                     if hour == current_hour and hasattr(
                         bess_controller.system, "controller"
                     ):
-                        battery_soc_percent = (
-                            bess_controller.system.controller.get_battery_soc() or 0.0
-                        )
+                        battery_soc_percent = bess_controller.system.controller.get_battery_soc()
                         # Convert SOC percent to SOE kWh
                         if hasattr(bess_controller.system, "battery_settings"):
                             battery_capacity = (

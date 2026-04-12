@@ -193,7 +193,8 @@ const SetupWizardPage: React.FC = () => {
 
   useEffect(() => {
     // Load existing settings first so re-running the wizard preserves user config,
-    // then run the sensor scan in parallel.
+    // then run the sensor scan. Sequencing via .finally() ensures the scan never
+    // overwrites the loaded values (scan seeds only auto-detected hints).
     api.get('/api/settings/all').then(res => {
       const s = res.data;
       const bat = s.battery ?? {};
@@ -239,8 +240,9 @@ const SetupWizardPage: React.FC = () => {
       if (status !== 404) {
         console.error('Failed to load existing settings:', err);
       }
+    }).finally(() => {
+      handleScan();
     });
-    handleScan();
   }, [handleScan]);
 
   const handleConfirm = async () => {

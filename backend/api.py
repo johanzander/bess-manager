@@ -2655,9 +2655,13 @@ async def setup_complete(payload: APISetupCompletePayload):
                 growatt_device_id=payload.growattDeviceId,
             )
 
+        # All sections use read-modify-write so that keys not managed by the wizard
+        # (e.g. temperature_derating in battery, config_entry_id in energy_provider)
+        # are preserved when save_all replaces the section.
+
         # --- battery ---
         if payload.totalCapacity is not None:
-            battery: dict = {}
+            battery = bess_controller.settings_store.get_section("battery")
             battery["total_capacity"] = payload.totalCapacity
             if payload.minSoc is not None:
                 battery["min_soc"] = payload.minSoc
@@ -2668,14 +2672,12 @@ async def setup_complete(payload: APISetupCompletePayload):
             if payload.cycleCost is not None:
                 battery["cycle_cost"] = payload.cycleCost
             if payload.minActionProfitThreshold is not None:
-                battery[
-                    "min_action_profit_threshold"
-                ] = payload.minActionProfitThreshold
+                battery["min_action_profit_threshold"] = payload.minActionProfitThreshold
             sections["battery"] = battery
 
         # --- home ---
         if payload.currency is not None or payload.consumption is not None:
-            home: dict = {}
+            home = bess_controller.settings_store.get_section("home")
             if payload.consumption is not None:
                 home["consumption"] = payload.consumption
             if payload.currency is not None:
@@ -2696,9 +2698,10 @@ async def setup_complete(payload: APISetupCompletePayload):
 
         # --- electricity price ---
         if payload.markupRate is not None or payload.vatMultiplier is not None:
-            elec: dict = {}
-            if payload.area is not None:
-                elec["area"] = payload.area
+            elec = bess_controller.settings_store.get_section("electricity_price")
+            area = payload.area or payload.nordpoolArea
+            if area:
+                elec["area"] = area
             if payload.markupRate is not None:
                 elec["markup_rate"] = payload.markupRate
             if payload.vatMultiplier is not None:
@@ -2710,8 +2713,6 @@ async def setup_complete(payload: APISetupCompletePayload):
             sections["electricity_price"] = elec
 
         # --- energy provider ---
-        # Read-modify-write so config_entry_id saved by apply_discovered_config above
-        # is not overwritten by save_all.
         if payload.provider is not None:
             ep = bess_controller.settings_store.get_section("energy_provider")
             ep["provider"] = payload.provider
@@ -2719,7 +2720,8 @@ async def setup_complete(payload: APISetupCompletePayload):
 
         # --- inverter ---
         if payload.inverterType is not None:
-            inv: dict = {"inverter_type": payload.inverterType}
+            inv = bess_controller.settings_store.get_section("growatt")
+            inv["inverter_type"] = payload.inverterType
             if payload.growattDeviceId:
                 inv["device_id"] = payload.growattDeviceId
             sections["growatt"] = inv
@@ -2760,6 +2762,7 @@ async def setup_complete(payload: APISetupCompletePayload):
             }
         if "electricity_price" in sections:
             live_updates["price"] = {
+                "area": sections["electricity_price"].get("area"),
                 "markupRate": payload.markupRate,
                 "vatMultiplier": payload.vatMultiplier,
                 "additionalCosts": payload.additionalCosts,
@@ -2767,6 +2770,20 @@ async def setup_complete(payload: APISetupCompletePayload):
             }
         if live_updates:
             bess_controller.system.update_settings(live_updates)
+
+        # Trigger initial schedule build now that the system is configured.
+        # Without this the dashboard returns 500 ("No optimization schedule available")
+        # until the next scheduled run at :00/:15/:30/:45.
+        try:
+            now = time_utils.now()
+            current_period = now.hour * 4 + now.minute // 15
+            bess_controller.system.update_battery_schedule(
+                current_period=current_period
+            )
+            logger.info("Initial schedule built after wizard completion")
+        except Exception as sched_err:
+            # Non-fatal: log and continue — dashboard will recover on next scheduler tick.
+            logger.warning("Could not build initial schedule after setup: %s", sched_err)
 
         logger.info(f"Setup complete: saved sections {list(sections.keys())}")
         return {"success": True, "saved_sections": list(sections.keys())}

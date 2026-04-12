@@ -773,7 +773,7 @@ const SettingsPage: React.FC = () => {
                       {numField('Voltage', homeForm.voltage,
                         v => setHomeForm(f => ({ ...f, voltage: Math.round(v) })), { unit: 'V', min: 100, step: 1 })}
                       {numField('Safety Margin Factor', homeForm.safetyMarginFactor,
-                        v => setHomeForm(f => ({ ...f, safetyMarginFactor: v })), { unit: 'fraction of fuse rating, e.g. 0.9', min: 0, max: 1, step: 0.01 })}
+                        v => setHomeForm(f => ({ ...f, safetyMarginFactor: v })), { min: 0, max: 2, step: 0.05 })}
                     </div>
                     <div className="pt-1">
                       {radioGroup(

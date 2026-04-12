@@ -959,14 +959,13 @@ class HomeAssistantAPIController:
             # Prepare service call parameters
             service_params: dict[str, str | bool] = {"return_response": True}
 
-            # Add device_id if configured
-            if self.growatt_device_id:
-                service_params["device_id"] = self.growatt_device_id
-            else:
-                logger.warning(
-                    "No Growatt device_id configured. TOU segment read may fail. "
-                    "Please add growatt.device_id to config.yaml"
+            # Require device_id before attempting the API call
+            if not self.growatt_device_id:
+                raise SystemConfigurationError(
+                    "Growatt device_id not configured. Run the setup wizard to configure the inverter."
                 )
+
+            service_params["device_id"] = self.growatt_device_id
 
             # Call the service and get the response
             result = self._service_call_with_retry(
@@ -1697,7 +1696,7 @@ class HomeAssistantAPIController:
 
         Returns (sensor_key, entity_id) if matched, None otherwise.
         """
-        if "solcast" in lower_id:
+        if "solcast" in lower_id and "peak" not in lower_id:
             if "forecast_today" in lower_id:
                 return "solar_forecast_today", entity_id
             if "forecast_tomorrow" in lower_id:

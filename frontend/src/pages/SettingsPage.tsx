@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Activity, AlertCircle, Battery, CheckCircle, ChevronDown, ChevronUp, Download, Home, RefreshCw, Settings, Sun, Zap } from 'lucide-react';
 import api from '../lib/api';
 import { INTEGRATIONS } from '../lib/sensorDefinitions';
@@ -16,10 +17,8 @@ interface BatteryForm {
   totalCapacity: number;
   minSoc: number;
   maxSoc: number;
-  maxChargePowerKw: number;
-  maxDischargePowerKw: number;
+  maxChargeDischargePowerKw: number;
   cycleCostPerKwh: number;
-  chargingPowerRate: number;
   efficiencyCharge: number;
   efficiencyDischarge: number;
   temperatureDeratingEnabled: boolean;
@@ -140,8 +139,8 @@ function integrationHealthDot(
 
 const EMPTY_BATTERY: BatteryForm = {
   totalCapacity: 0, minSoc: 0, maxSoc: 100,
-  maxChargePowerKw: 0, maxDischargePowerKw: 0,
-  cycleCostPerKwh: 0, chargingPowerRate: 100,
+  maxChargeDischargePowerKw: 0,
+  cycleCostPerKwh: 0,
   efficiencyCharge: 97, efficiencyDischarge: 97,
   temperatureDeratingEnabled: false, minActionProfit: 0,
 };
@@ -166,6 +165,7 @@ const EMPTY_INVERTER: InverterForm = { inverterType: 'MIN', deviceId: '' };
 // ---------------------------------------------------------------------------
 
 const SettingsPage: React.FC = () => {
+  const navigate = useNavigate();
 
   // ── active tab ─────────────────────────────────────────────────────────
   const [tab, setTab] = useState<Tab>('home');
@@ -244,10 +244,8 @@ const SettingsPage: React.FC = () => {
         totalCapacity: batRes.data.totalCapacity ?? 0,
         minSoc: batRes.data.minSoc ?? 0,
         maxSoc: batRes.data.maxSoc ?? 100,
-        maxChargePowerKw: batRes.data.maxChargePowerKw ?? 0,
-        maxDischargePowerKw: batRes.data.maxDischargePowerKw ?? 0,
+        maxChargeDischargePowerKw: batRes.data.maxChargePowerKw ?? 0,
         cycleCostPerKwh: batRes.data.cycleCostPerKwh ?? 0,
-        chargingPowerRate: batRes.data.chargingPowerRate ?? 100,
         efficiencyCharge: batRes.data.efficiencyCharge ?? 97,
         efficiencyDischarge: batRes.data.efficiencyDischarge ?? 97,
         temperatureDeratingEnabled: batRes.data.temperatureDeratingEnabled ?? false,
@@ -273,7 +271,7 @@ const SettingsPage: React.FC = () => {
       const octopus = provRes.data.octopus ?? {};
 
       const p: PricingForm = {
-        currency: homeRes.data.currency ?? 'SEK',
+        currency: homeRes.data.currency ?? '',
         provider: provRes.data.provider ?? 'nordpool_official',
         nordpoolConfigEntryId: nordpool.configEntryId ?? nordpool.config_entry_id ?? '',
         nordpoolTodayEntity: nordpoolCustom.todayEntity ?? nordpoolCustom.today_entity ?? '',
@@ -489,11 +487,10 @@ const SettingsPage: React.FC = () => {
           maxSoc: batteryForm.maxSoc,
           minSoeKwh: (batteryForm.totalCapacity * batteryForm.minSoc) / 100,
           maxSoeKwh: (batteryForm.totalCapacity * batteryForm.maxSoc) / 100,
-          maxChargePowerKw: batteryForm.maxChargePowerKw,
-          maxDischargePowerKw: batteryForm.maxDischargePowerKw,
+          maxChargePowerKw: batteryForm.maxChargeDischargePowerKw,
+          maxDischargePowerKw: batteryForm.maxChargeDischargePowerKw,
           cycleCostPerKwh: batteryForm.cycleCostPerKwh,
           minActionProfitThreshold: batteryForm.minActionProfit,
-          chargingPowerRate: batteryForm.chargingPowerRate,
           efficiencyCharge: batteryForm.efficiencyCharge,
           efficiencyDischarge: batteryForm.efficiencyDischarge,
           estimatedConsumption: 0,
@@ -519,8 +516,24 @@ const SettingsPage: React.FC = () => {
   const saveSensors = async () => {
     setSaving(true);
     try {
-      await api.put('/api/settings/sensors', { sensors });
+      await Promise.all([
+        api.put('/api/settings/sensors', { sensors }),
+        // Also persist energy-provider config — Auto-Configure fills in
+        // configEntryId / HACS entities alongside sensors, so they must be
+        // saved together from this tab.
+        api.put('/api/settings/energy-provider', {
+          provider: pricingForm.provider,
+          nordpoolConfigEntryId: pricingForm.nordpoolConfigEntryId || null,
+          nordpoolTodayEntity: pricingForm.nordpoolTodayEntity || null,
+          nordpoolTomorrowEntity: pricingForm.nordpoolTomorrowEntity || null,
+          octopusImportTodayEntity: pricingForm.octopusImportTodayEntity || null,
+          octopusImportTomorrowEntity: pricingForm.octopusImportTomorrowEntity || null,
+          octopusExportTodayEntity: pricingForm.octopusExportTodayEntity || null,
+          octopusExportTomorrowEntity: pricingForm.octopusExportTomorrowEntity || null,
+        }),
+      ]);
       savedSensors.current = JSON.stringify(sensors);
+      savedPricing.current = JSON.stringify(pricingForm);
       const failed = await checkAndUpdateSensorHealth(sensors);
       if (failed.length > 0) {
         setToast({ type: 'error', message: `Saved — but ${failed.length} sensor(s) not found in HA: ${failed.slice(0, 2).join(', ')}${failed.length > 2 ? ` (+${failed.length - 2} more)` : ''}` });
@@ -683,28 +696,38 @@ const SettingsPage: React.FC = () => {
             <div className="px-4 py-2 bg-gray-50 dark:bg-gray-800/60 flex items-center justify-between gap-3">
               <p className="text-xs text-gray-500 dark:text-gray-400 flex-1 min-w-0 truncate">
                 {tab === 'home' && 'Home electrical setup and consumption prediction for the optimizer.'}
-                {tab === 'pricing' && 'Fetch and convert electricity spot prices to buy/sell prices.'}
+                {tab === 'pricing' && 'Electricity price source and cost calculation (markup, VAT, tax reduction).'}
                 {tab === 'battery' && 'Growatt inverter type and battery parameters.'}
                 {tab === 'sensors' && 'All sensor entity IDs, grouped by integration.'}
                 {tab === 'health' && 'System component health and diagnostics.'}
               </p>
-              {saveHandlers[tab] && (
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <button
+                  onClick={runAutoDiscover}
+                  disabled={discovering}
+                  className="px-4 py-1 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium text-xs disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+                >
+                  {discovering
+                    ? <div className="h-3 w-3 border-2 border-white rounded-full border-t-transparent animate-spin" />
+                    : <Zap className="h-3 w-3" />}
+                  <span>{discovering ? 'Scanning…' : 'Auto-Configure'}</span>
+                </button>
                 <button
                   onClick={() => saveHandlers[tab]?.()}
-                  disabled={saving || !isDirty[tab]}
-                  className="px-4 py-1 bg-blue-500 text-white rounded-lg hover:bg-blue-600 font-medium text-xs disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 flex-shrink-0"
+                  disabled={saving || !isDirty[tab] || !saveHandlers[tab]}
+                  className="px-4 py-1 bg-blue-500 text-white rounded-lg hover:bg-blue-600 font-medium text-xs disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
                 >
                   {saving && <div className="h-3 w-3 border-2 border-white rounded-full border-t-transparent animate-spin" />}
                   <span>Save</span>
                 </button>
-              )}
+              </div>
             </div>
           </div>
 
           {/* ── Home & Grid ──────────────────────────────────────────────── */}
           {tab === 'home' && (
             <div className="space-y-3">
-              <SectionCard title="Home Consumption Prediction" description="How the optimizer estimates hourly home consumption when planning charge/discharge schedules.">
+              <SectionCard title="Home Consumption Prediction" description="The data source the optimizer uses for expected home load each hour. A sensor gives the most accurate forecast; use a fixed value if no consumption sensor is available.">
                 {radioGroup(
                   'Data source',
                   [
@@ -740,7 +763,7 @@ const SettingsPage: React.FC = () => {
                 title="Power Monitoring"
                 description="Monitors real-time load and limits battery charge power to prevent blowing the main fuse. Enable to configure."
               >
-                {toggle('Enable grid overload protection', homeForm.powerMonitoringEnabled,
+                {toggle('Enable fuse protection', homeForm.powerMonitoringEnabled,
                   v => setHomeForm(f => ({ ...f, powerMonitoringEnabled: v })))}
                 {homeForm.powerMonitoringEnabled && (
                   <>
@@ -750,7 +773,7 @@ const SettingsPage: React.FC = () => {
                       {numField('Voltage', homeForm.voltage,
                         v => setHomeForm(f => ({ ...f, voltage: Math.round(v) })), { unit: 'V', min: 100, step: 1 })}
                       {numField('Safety Margin Factor', homeForm.safetyMarginFactor,
-                        v => setHomeForm(f => ({ ...f, safetyMarginFactor: v })), { unit: '0.0–1.0', min: 0, max: 1, step: 0.01 })}
+                        v => setHomeForm(f => ({ ...f, safetyMarginFactor: v })), { unit: 'fraction of fuse rating, e.g. 0.9', min: 0, max: 1, step: 0.01 })}
                     </div>
                     <div className="pt-1">
                       {radioGroup(
@@ -790,7 +813,7 @@ const SettingsPage: React.FC = () => {
                   <div className="pt-1">
                     {txtInput('Config Entry ID', pricingForm.nordpoolConfigEntryId,
                       v => setPricingForm(f => ({ ...f, nordpoolConfigEntryId: v })), 'e.g. abc123…')}
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Auto-detected during setup. Run Auto-Configure in the Sensors tab if missing.</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Auto-detected by Auto-Configure.</p>
                   </div>
                 )}
                 {pricingForm.provider === 'nordpool' && (
@@ -826,6 +849,7 @@ const SettingsPage: React.FC = () => {
                     onChange={e => setPricingForm(f => ({ ...f, currency: e.target.value }))}
                     className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
+                    <option value="">Select currency</option>
                     {['SEK', 'NOK', 'DKK', 'EUR', 'GBP'].map(c => (
                       <option key={c} value={c}>{c}</option>
                     ))}
@@ -891,7 +915,7 @@ const SettingsPage: React.FC = () => {
 
               <SectionCard
                 title="Capacity & SOC Limits"
-                description="Total battery capacity in kWh — set this to match your actual battery exactly. Min/Max SOC are the master values synced to the Growatt inverter and define the operating range the optimizer will stay within."
+                description="Total battery capacity in kWh — set this to match your actual battery exactly. Min/Max SOC values are synced to the Growatt inverter and define the operating range the optimizer will stay within."
               >
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   {numField('Total Capacity', batteryForm.totalCapacity,
@@ -905,17 +929,12 @@ const SettingsPage: React.FC = () => {
 
               <SectionCard
                 title="Power"
-                description="Caps the maximum power the optimizer can request from or to the battery. Set these to match your inverter and battery hardware limits."
+                description="Maximum charge and discharge power available to the optimizer. Calculate from your battery's C-rate: e.g. 30 kWh × 0.5C = 15 kW."
               >
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {numField('Max Charge Power', batteryForm.maxChargePowerKw,
-                    v => setBatteryForm(f => ({ ...f, maxChargePowerKw: v })), { unit: 'kW', min: 0, step: 0.1 })}
-                  {numField('Max Discharge Power', batteryForm.maxDischargePowerKw,
-                    v => setBatteryForm(f => ({ ...f, maxDischargePowerKw: v })), { unit: 'kW', min: 0, step: 0.1 })}
-                  {numField('Charging Power Rate', batteryForm.chargingPowerRate,
-                    v => setBatteryForm(f => ({ ...f, chargingPowerRate: v })), { unit: '%', min: 0, max: 100, step: 1 })}
+                  {numField('Max Charge / Discharge Power', batteryForm.maxChargeDischargePowerKw,
+                    v => setBatteryForm(f => ({ ...f, maxChargeDischargePowerKw: v })), { unit: 'kW', min: 0, step: 0.1 })}
                 </div>
-                <p className="text-xs text-gray-500 dark:text-gray-400">Charging Power Rate is the AC charge current cap sent to the Growatt inverter (100% = full rated power). The power monitor may reduce this dynamically when phase current sensors detect the fuse limit is being approached.</p>
               </SectionCard>
 
               {/* Advanced settings collapsible */}
@@ -988,30 +1007,9 @@ const SettingsPage: React.FC = () => {
           {/* ── Sensors ──────────────────────────────────────────────────── */}
           {tab === 'sensors' && (
             <div className="space-y-3">
-              {/* Auto-Configure card */}
-              <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
-                <div className="px-5 py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                  <div>
-                    <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Auto-Configure</h3>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                      Scan Home Assistant for Growatt, Nord Pool, Solcast, and other integrations and fill in entity IDs automatically.
-                    </p>
-                    {lastDiscoveredAt && (
-                      <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Last scanned: {lastDiscoveredAt}</p>
-                    )}
-                  </div>
-                  <button
-                    onClick={runAutoDiscover}
-                    disabled={discovering}
-                    className="flex items-center gap-2 px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-sm font-medium transition-colors whitespace-nowrap self-start sm:self-auto"
-                  >
-                    {discovering
-                      ? <div className="h-4 w-4 border-2 border-white rounded-full border-t-transparent animate-spin" />
-                      : <Zap className="h-4 w-4" />}
-                    {discovering ? 'Scanning…' : 'Auto-Configure'}
-                  </button>
-                </div>
-              </div>
+              {lastDiscoveredAt && (
+                <p className="text-xs text-gray-400 dark:text-gray-500 px-1">Last scanned: {lastDiscoveredAt}</p>
+              )}
 
               {/* All integrations */}
               <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
@@ -1022,7 +1020,7 @@ const SettingsPage: React.FC = () => {
                   </p>
                 </div>
                 <div className="divide-y divide-gray-100 dark:divide-gray-700/50">
-                  {INTEGRATIONS.map(intg => {
+                  {INTEGRATIONS.filter(intg => intg.sensorGroups.length > 0).map(intg => {
                     const allSensorKeys = intg.sensorGroups.flatMap(g => g.sensors.map(s => s.key));
                     const configuredCount = allSensorKeys.filter(k => sensors[k]).length;
                     const totalCount = allSensorKeys.length;
@@ -1035,14 +1033,13 @@ const SettingsPage: React.FC = () => {
                         <button
                           type="button"
                           onClick={() => {
-                            if (totalCount === 0) return; // nordpool: no sensor inputs to expand
                             setExpandedGroups(prev => {
                               const next = new Set(prev);
                               if (next.has(intg.id)) next.delete(intg.id); else next.add(intg.id);
                               return next;
                             });
                           }}
-                          className={`w-full flex items-center justify-between px-5 py-3.5 transition-colors text-left ${totalCount > 0 ? 'hover:bg-gray-50 dark:hover:bg-gray-700/40' : 'cursor-default'}`}
+                          className="w-full flex items-center justify-between px-5 py-3.5 transition-colors text-left hover:bg-gray-50 dark:hover:bg-gray-700/40"
                         >
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
@@ -1051,11 +1048,7 @@ const SettingsPage: React.FC = () => {
                               {intg.required && (
                                 <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300">REQUIRED</span>
                               )}
-                              {totalCount === 0 ? (
-                                <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${pricingForm.nordpoolConfigEntryId ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400'}`}>
-                                  {pricingForm.nordpoolConfigEntryId ? 'configured' : 'not configured'}
-                                </span>
-                              ) : missingRequired > 0 ? (
+                              {missingRequired > 0 ? (
                                 <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400">{missingRequired} required missing</span>
                               ) : isFullyConfigured ? (
                                 <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">{configuredCount}/{totalCount} configured</span>
@@ -1065,13 +1058,12 @@ const SettingsPage: React.FC = () => {
                             </div>
                             <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{intg.description}</p>
                           </div>
-                          {totalCount > 0 && (
-                            expandedGroups.has(intg.id)
-                              ? <ChevronUp className="h-4 w-4 text-gray-400 flex-shrink-0" />
-                              : <ChevronDown className="h-4 w-4 text-gray-400 flex-shrink-0" />
-                          )}
+                          {expandedGroups.has(intg.id)
+                            ? <ChevronUp className="h-4 w-4 text-gray-400 flex-shrink-0" />
+                            : <ChevronDown className="h-4 w-4 text-gray-400 flex-shrink-0" />
+                          }
                         </button>
-                        {expandedGroups.has(intg.id) && totalCount > 0 && (
+                        {expandedGroups.has(intg.id) && (
                           <div className="border-t border-gray-100 dark:border-gray-700/50 divide-y divide-gray-100 dark:divide-gray-700/30">
                             {intg.sensorGroups.map(group => (
                               <div key={group.name} className="px-5 py-3 space-y-2">
@@ -1176,6 +1168,16 @@ const SettingsPage: React.FC = () => {
           )}
         </>
       )}
+
+      {/* Setup wizard re-entry */}
+      <div className="mt-8 pt-6 border-t border-gray-200 dark:border-gray-700 text-center">
+        <button
+          onClick={() => navigate('/setup')}
+          className="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 underline transition-colors"
+        >
+          Re-run setup wizard
+        </button>
+      </div>
     </div>
   );
 };

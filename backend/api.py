@@ -2697,6 +2697,8 @@ async def setup_complete(payload: APISetupCompletePayload):
         # --- electricity price ---
         if payload.markupRate is not None or payload.vatMultiplier is not None:
             elec: dict = {}
+            if payload.area is not None:
+                elec["area"] = payload.area
             if payload.markupRate is not None:
                 elec["markup_rate"] = payload.markupRate
             if payload.vatMultiplier is not None:
@@ -2708,8 +2710,12 @@ async def setup_complete(payload: APISetupCompletePayload):
             sections["electricity_price"] = elec
 
         # --- energy provider ---
+        # Read-modify-write so config_entry_id saved by apply_discovered_config above
+        # is not overwritten by save_all.
         if payload.provider is not None:
-            sections["energy_provider"] = {"provider": payload.provider}
+            ep = bess_controller.settings_store.get_section("energy_provider")
+            ep["provider"] = payload.provider
+            sections["energy_provider"] = ep
 
         # --- inverter ---
         if payload.inverterType is not None:

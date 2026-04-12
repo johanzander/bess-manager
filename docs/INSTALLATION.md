@@ -127,7 +127,7 @@ influxdb:
 
 ### 2f: Verify the Connection
 
-After starting BESS, go to the **System Health** page in the web interface. The
+After starting BESS, go to **Settings → Health** in the web interface. The
 **Historical Data Access** component should show **OK**. If it shows a warning like
 *"returned no valid data"*, the most likely cause is an incorrect bucket name — double-check
 that you have used `homeassistant/autogen` and not just `homeassistant`.
@@ -173,104 +173,32 @@ sensor:
 
 ## Step 4: Configure BESS Manager
 
-Edit the add-on configuration:
+Battery, pricing, home, and sensor settings are all configured through the **web interface**.
+The only add-on configuration setting is `influxdb` (see Step 2).
 
-```yaml
-battery:
-  total_capacity: 30.0              # Battery capacity in kWh
-  max_charge_discharge_power: 15.0  # Max power in kW
-  cycle_cost: 0.08                  # Battery wear cost per kWh charged (excl. VAT)
-                                    # Use your local currency
-                                    # Typical range: EUR: 0.05-0.09, SEK: 0.50-0.90, NOK: 0.45-0.85
-                                    # Start with calculated value (~0.08 EUR) and adjust
-  min_action_profit_threshold: 1.5  # Minimum profit threshold (in your currency)
-                                    # The algorithm will NOT charge/discharge the battery
-                                    # if the expected profit is below this value
-                                    # Prevents unnecessary battery cycles for small gains
-                                    # Recommended: 1.0-2.0 for SEK/NOK, 0.10-0.20 for EUR
+### 4a: First-Time Setup Wizard
 
-home:
-  consumption: 3.5                  # Default hourly consumption (kWh)
-  currency: "EUR"                   # Your currency (SEK, EUR, NOK)
-  max_fuse_current: 25              # Maximum fuse current (A)
-  voltage: 230                      # Line voltage (V)
-  safety_margin_factor: 0.95        # Safety margin (95%)
+When you open the web interface for the first time, a **Setup Wizard** will launch automatically.
+It scans Home Assistant for connected integrations and fills in sensor entity IDs automatically.
+Walk through the wizard to:
 
-electricity_price:
-  area: "SE4"                       # Nordpool area (or "UK" for Octopus)
-  markup_rate: 0.08                 # Markup (per kWh, in your currency)
-  vat_multiplier: 1.25              # VAT (1.25 = 25%)
-  additional_costs: 1.03            # Additional costs (per kWh)
-  tax_reduction: 0.0                # Tax reduction for sold energy (per kWh)
+1. Auto-discover Growatt, Nordpool, Solcast and other integrations
+2. Review and adjust any detected sensor entity IDs
+3. Confirm the configuration — BESS applies it immediately without a restart
 
-# Energy provider configuration
-energy_provider:
-  provider: "nordpool"              # "nordpool", "nordpool_official", or "octopus"
-  nordpool:
-    today_entity: "sensor.nordpool_kwh_your_area"
-    tomorrow_entity: "sensor.nordpool_kwh_your_area"
-  nordpool_official:
-    config_entry_id: ""             # Required when provider is "nordpool_official"
-  octopus:                          # Only needed when provider is "octopus"
-    import_today_entity: ""         # See "Octopus Energy Setup" section below
-    import_tomorrow_entity: ""
-    export_today_entity: ""
-    export_tomorrow_entity: ""
+If you need to re-run the wizard later, click **Auto-Configure** on the **Settings → Sensors** tab.
 
-sensors:
-  # Battery sensors (required)
-  battery_soc: "sensor.your_battery_soc"
-  battery_charge_stop_soc: "number.your_battery_charge_stop_soc"
-  battery_discharge_stop_soc: "number.your_battery_discharge_stop_soc"
-  battery_charge_power: "sensor.your_battery_charge_w"
-  battery_discharge_power: "sensor.your_battery_discharge_w"
-  battery_charging_power_rate: "number.your_charge_power_rate"
-  battery_discharging_power_rate: "number.your_discharge_power_rate"
-  grid_charge: "switch.your_grid_charge_switch"
+### 4b: Configure Settings
 
-  # Power sensors (required)
-  pv_power: "sensor.your_solar_power"
-  local_load_power: "sensor.your_home_consumption"
-  import_power: "sensor.your_grid_import"
-  export_power: "sensor.your_grid_export"
+All settings are available under the **Settings** page in the top navigation. There are five tabs:
 
-  # Consumption forecast (required)
-  48h_avg_grid_import: "sensor.48h_average_grid_import_power"  # From Step 3
+- **Home** — Consumption, currency, fuse size, voltage, phase count, safety margin
+- **Pricing** — Nordpool/Octopus provider, price area, VAT, markup, additional costs, tax reduction
+- **Battery** — Capacity, power limits, SOC range, cycle cost, min action profit threshold
+- **Sensors** — All sensor entity IDs grouped by integration (Growatt, Nordpool, Solcast, etc.)
+- **Health** — Live component health check and debug export
 
-  # Solar forecast (required)
-  solar_forecast_today: "sensor.solcast_pv_forecast_forecast_today"
-
-  # Optional: Advanced power monitoring
-  # output_power: "sensor.your_output_power"
-  # self_power: "sensor.your_self_power"
-  # system_power: "sensor.your_system_power"
-
-  # Optional: Grid current monitoring (for multi-phase systems)
-  # current_l1: "sensor.your_current_l1"
-  # current_l2: "sensor.your_current_l2"
-  # current_l3: "sensor.your_current_l3"
-
-  # Optional: Discharge inhibit — binary sensor that prevents BESS discharge when active.
-  # Leave empty (discharge_inhibit: "") to disable this feature.
-  # Discharge resumes automatically within ~1 minute once the sensor turns off.
-  #
-  # Ready-made binary sensors (created automatically by their HA integrations):
-  #   Tibber: binary_sensor.<id>_charging   (e.g. binary_sensor.ex90_charging)
-  #   Zaptec: binary_sensor.<id>_charging (e.g. binary_sensor.zap123456_charging)
-  #
-  # If neither integration provides a suitable sensor, create a Helper → Toggle in HA and
-  # automate it via your own rules (e.g. turn on when charger current > 0 A).
-  #
-  # discharge_inhibit: ""                              # disabled
-  # discharge_inhibit: "binary_sensor.ex90_charging"  # enabled
-
-  # Optional: Lifetime energy statistics
-  # lifetime_solar_energy: "sensor.your_lifetime_solar_energy"
-  # lifetime_load_consumption: "sensor.your_lifetime_load_consumption"
-  # lifetime_import_from_grid: "sensor.your_lifetime_import_from_grid"
-  # lifetime_export_to_grid: "sensor.your_lifetime_export_to_grid"
-  # ev_energy_meter: "sensor.your_ev_energy_meter"
-```
+The sections below describe the key values you need to fill in.
 
 ### Nordpool Electricity Price Setup
 
@@ -396,11 +324,12 @@ The calculated value (0.083 EUR/kWh) is a good starting point, but you may want 
 
 **About Depth of Discharge (DoD):**
 
-BESS reads your SOC limits from the Growatt inverter but **does NOT modify them**. You configure these limits directly on your inverter (default: 10% min, 100% max = 90% DoD).
+The Min/Max SOC limits you set in **Settings → Battery** are the master values. BESS syncs them
+to the Growatt inverter on startup and the optimizer stays within this range.
 
-- **You configure on inverter**: Set min/max SOC limits (e.g., 10-100% = 90% usable capacity)
-- **BESS reads and respects**: Optimization works within your configured SOC range
-- **Optional adjustment**: Set more conservative limits on inverter if desired (e.g., 20-90% = 70% DoD)
+- **You configure in Settings → Battery**: Set min/max SOC (e.g. 10–100% = 90% usable capacity)
+- **BESS syncs to inverter**: Limits are written to the inverter automatically
+- **Optional adjustment**: Use more conservative limits if you want to reduce battery wear (e.g. 15–90% = 75% DoD)
 
 The DoD is already factored into the warranty cycle count, so you don't need to manually adjust the `cycle_cost` calculation based on DoD.
 
@@ -417,10 +346,10 @@ This setting controls when the battery should be used. The optimization algorith
 
 ## Step 5: Start the Add-on
 
-1. Save configuration
-2. Start BESS Manager
-3. Check logs for any errors
-4. Access web interface via Ingress or `http://homeassistant.local:8080`
+1. Start BESS Manager
+2. Open the web interface via Ingress (Settings → Add-ons → BESS Manager → Open Web UI)
+3. The Setup Wizard launches automatically on first boot — follow it to configure sensors
+4. Check add-on logs for any errors if the wizard does not appear
 
 ## Troubleshooting
 
@@ -502,7 +431,8 @@ Not `homeassistant`, not `home_assistant` — it must include `/autogen`.
 
 ### Check Sensor Health
 
-Go to System Health page in BESS web interface to verify all sensors are working.
+Go to **Settings → Health** in the BESS web interface to verify all sensors are working correctly.
+The health tab shows OK / WARNING / ERROR for each integration and lets you export debug data.
 
 ### View Add-on Logs
 

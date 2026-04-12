@@ -9,6 +9,7 @@ On first boot the store migrates existing settings from options.json so existing
 users are not affected by the transition.
 """
 
+import errno
 import json
 import logging
 import os
@@ -38,6 +39,7 @@ class SettingsStore:
 
     def __init__(self) -> None:
         self.data: dict = {}
+        self._use_direct_write: bool = False  # set after first EBUSY
 
     # ------------------------------------------------------------------
     # Public API
@@ -60,6 +62,7 @@ class SettingsStore:
                     SETTINGS_PATH,
                     len(self.data),
                 )
+                self._migrate_schema()
                 # Always overlay sensors/discovery from options if bess_settings
                 # has empty sensors (handles wizard flow after fresh migration).
                 self._overlay_discovered(options)
@@ -126,10 +129,11 @@ class SettingsStore:
             nordpool_config_entry_id: HA config entry UUID for Nordpool.
             growatt_device_id: HA device registry ID for the Growatt device.
         """
-        # Sensors
+        # Sensors — always overwrite with newly discovered values so that
+        # a corrected auto-discover run fixes previously wrong entity IDs.
         sensors = dict(self.data.get("sensors", {}))
         for key, entity_id in sensor_map.items():
-            if entity_id and not sensors.get(key):
+            if entity_id:
                 sensors[key] = entity_id
         self.data["sensors"] = sensors
 
@@ -173,20 +177,57 @@ class SettingsStore:
             return {}
 
     def _write(self, data: dict) -> None:
-        """Atomically write data to bess_settings.json."""
+        """Write data to bess_settings.json via a temp file.
+
+        Attempts an atomic rename first.  Some container filesystems (overlayfs,
+        CIFS) return EBUSY on rename — in that case fall back to a direct
+        overwrite.  Once EBUSY is seen the fallback is used for all subsequent
+        writes so the failing syscall is not retried every time.
+        """
         data_dir = os.path.dirname(SETTINGS_PATH)
+        tmp_path: str | None = None
         try:
             fd, tmp_path = tempfile.mkstemp(dir=data_dir, suffix=".json")
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
-            os.replace(tmp_path, SETTINGS_PATH)
+            if self._use_direct_write:
+                self._copy_and_remove(tmp_path)
+            else:
+                try:
+                    os.replace(tmp_path, SETTINGS_PATH)
+                except OSError as e:
+                    if e.errno != errno.EBUSY:
+                        raise
+                    logger.warning(
+                        "os.replace EBUSY on %s — switching to direct write for all future saves",
+                        SETTINGS_PATH,
+                    )
+                    self._use_direct_write = True
+                    self._copy_and_remove(tmp_path)
         except OSError as e:
             logger.error("Failed to write %s: %s", SETTINGS_PATH, e)
+            if tmp_path is not None:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
             raise
+
+    def _copy_and_remove(self, tmp_path: str) -> None:
+        """Overwrite SETTINGS_PATH with tmp_path content, then delete tmp_path."""
+        with open(tmp_path, encoding="utf-8") as src:
+            content = src.read()
+        with open(SETTINGS_PATH, "w", encoding="utf-8") as dst:
+            dst.write(content)
+        os.unlink(tmp_path)
 
     @staticmethod
     def _migrate_from_options(options: dict) -> dict:
         """Extract owned sections from options.json into a settings dict.
+
+        Falls back to bootstrap defaults (from core constants) when options
+        contains no operational sections — i.e. on a fresh installation before
+        the setup wizard has run.
 
         Args:
             options: Full /data/options.json contents.
@@ -198,7 +239,105 @@ class SettingsStore:
         for section in OWNED_SECTIONS:
             if section in options:
                 result[section] = dict(options[section])
+
+        if not result:
+            result = SettingsStore._bootstrap_defaults()
+            logger.info("No operational settings found — applying bootstrap defaults")
+
         return result
+
+    @staticmethod
+    def _bootstrap_defaults() -> dict:
+        """Minimal default settings for first boot before the setup wizard runs.
+
+        Values are sourced from core/bess/settings.py constants so there is a
+        single source of truth.  The wizard overwrites these with the user's
+        actual values.
+        """
+        from core.bess.settings import (
+            ADDITIONAL_COSTS,
+            BATTERY_CHARGE_CYCLE_COST,
+            BATTERY_MAX_CHARGE_DISCHARGE_POWER_KW,
+            BATTERY_MAX_SOC,
+            BATTERY_MIN_ACTION_PROFIT_THRESHOLD,
+            BATTERY_MIN_SOC,
+            BATTERY_STORAGE_SIZE_KWH,
+            DEFAULT_AREA,
+            DEFAULT_CURRENCY,
+            HOME_HOURLY_CONSUMPTION_KWH,
+            HOUSE_MAX_FUSE_CURRENT_A,
+            HOUSE_VOLTAGE_V,
+            MARKUP_RATE,
+            SAFETY_MARGIN_FACTOR,
+            TAX_REDUCTION,
+            VAT_MULTIPLIER,
+        )
+
+        return {
+            "battery": {
+                "total_capacity": BATTERY_STORAGE_SIZE_KWH,
+                "min_soc": BATTERY_MIN_SOC,
+                "max_soc": BATTERY_MAX_SOC,
+                "max_charge_discharge_power": BATTERY_MAX_CHARGE_DISCHARGE_POWER_KW,
+                "cycle_cost": BATTERY_CHARGE_CYCLE_COST,
+                "min_action_profit_threshold": BATTERY_MIN_ACTION_PROFIT_THRESHOLD,
+            },
+            "home": {
+                "consumption": HOME_HOURLY_CONSUMPTION_KWH,
+                "currency": DEFAULT_CURRENCY,
+                "consumption_strategy": "fixed",
+                "max_fuse_current": HOUSE_MAX_FUSE_CURRENT_A,
+                "voltage": HOUSE_VOLTAGE_V,
+                "safety_margin_factor": SAFETY_MARGIN_FACTOR,
+                "phase_count": 1,
+                "power_monitoring_enabled": False,
+            },
+            "electricity_price": {
+                "markup_rate": MARKUP_RATE,
+                "vat_multiplier": VAT_MULTIPLIER,
+                "additional_costs": ADDITIONAL_COSTS,
+                "tax_reduction": TAX_REDUCTION,
+                "area": DEFAULT_AREA,
+            },
+            "energy_provider": {
+                "provider": "nordpool_official",
+                "nordpool_official": {"config_entry_id": ""},
+                "nordpool": {},
+                "octopus": {},
+            },
+            "growatt": {"inverter_type": "", "device_id": ""},
+            "sensors": {},
+        }
+
+    def _migrate_schema(self) -> None:
+        """Add missing keys introduced in newer versions of the schema.
+
+        Called after loading bess_settings.json so that old files written
+        before a field was added are silently upgraded in place.  Values are
+        sourced from core constants so there is a single source of truth.
+        """
+        from core.bess.settings import (
+            BATTERY_CHARGE_CYCLE_COST,
+            BATTERY_MIN_ACTION_PROFIT_THRESHOLD,
+        )
+
+        changed = False
+
+        battery = self.data.get("battery")
+        if isinstance(battery, dict):
+            for key, default in (
+                ("cycle_cost", BATTERY_CHARGE_CYCLE_COST),
+                ("min_action_profit_threshold", BATTERY_MIN_ACTION_PROFIT_THRESHOLD),
+            ):
+                if key not in battery:
+                    battery[key] = default
+                    logger.info("Schema migration: added battery.%s = %s", key, default)
+                    changed = True
+            if changed:
+                self.data["battery"] = battery
+
+        if changed:
+            self._write(self.data)
 
     def _overlay_discovered(self, options: dict) -> None:
         """Apply legacy bess_discovered_config.json values if present.

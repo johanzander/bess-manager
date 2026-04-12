@@ -1055,6 +1055,7 @@ class APISetupCompletePayload(BaseModel):
     phaseCount: int | None = None
     powerMonitoringEnabled: bool | None = None
     # Electricity price settings
+    area: str | None = None
     markupRate: float | None = None
     vatMultiplier: float | None = None
     additionalCosts: float | None = None

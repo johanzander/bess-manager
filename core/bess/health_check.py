@@ -333,9 +333,10 @@ def run_system_health_checks(system_manager):
                 "status": "WARNING",
                 "checks": [
                     {
-                        "component": "Power Monitoring",
+                        "name": "Power Monitor Status",
+                        "entity_id": None,
                         "status": "WARNING",
-                        "message": "Disabled — set power_monitoring_enabled: true in config to enable",
+                        "error": "Disabled — set power_monitoring_enabled: true in config to enable",
                     }
                 ],
                 "last_run": datetime.now().isoformat(),
@@ -343,7 +344,19 @@ def run_system_health_checks(system_manager):
         ]
     all_component_checks.extend(power_checks)
 
-    # 6. Historic data access
+    # 6. Discharge Control (EV charger integration) — optional, only checked when configured
+    if system_manager._controller.sensors.get("discharge_inhibit"):
+        discharge_check = perform_health_check(
+            component_name="Discharge Control",
+            description="Prevents battery discharge while EV is charging",
+            is_required=False,
+            controller=system_manager._controller,
+            all_methods=["get_discharge_inhibit_active"],
+            required_methods=[],
+        )
+        all_component_checks.append(discharge_check)
+
+    # 7. Historic data access
     history_checks = check_historical_data_access()
     all_component_checks.extend(history_checks)
 

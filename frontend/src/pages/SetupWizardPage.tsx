@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CheckCircle, AlertCircle, ChevronRight, ChevronLeft, ChevronDown, Zap } from 'lucide-react';
 import api from '../lib/api';
@@ -23,7 +23,6 @@ interface BatteryForm {
 }
 
 interface HomeForm {
-  currency: string;
   consumption: number;
   consumptionStrategy: string;
   maxFuseCurrent: number;
@@ -35,6 +34,8 @@ interface HomeForm {
 
 interface ElectricityForm {
   provider: string;
+  currency: string;
+  area: string;
   markupRate: number;
   vatMultiplier: number;
   additionalCosts: number;
@@ -59,7 +60,7 @@ interface DiscoveryResult {
 
 
 
-const STEPS = ['Scan', 'Review Sensors', 'Battery Setup', 'Home & Grid', 'Pricing', 'Done'];
+const STEPS = ['Scan', 'Review Sensors', 'Electricity Pricing', 'Battery', 'Home', 'Done'];
 
 /** Count configured/total sensors for an integration */
 function integrationSensorCounts(
@@ -128,7 +129,6 @@ const SetupWizardPage: React.FC = () => {
   });
 
   const [homeForm, setHomeForm] = useState<HomeForm>({
-    currency: 'SEK',
     consumption: 3.5,
     consumptionStrategy: 'sensor',
     maxFuseCurrent: 25,
@@ -140,17 +140,15 @@ const SetupWizardPage: React.FC = () => {
 
   const [electricityForm, setElectricityForm] = useState<ElectricityForm>({
     provider: 'nordpool_official',
+    currency: 'SEK',
+    area: '',
     markupRate: 0.08,
     vatMultiplier: 1.25,
     additionalCosts: 1.03,
     taxReduction: 0.0,
   });
 
-  useEffect(() => {
-    handleScan();
-  }, []);
-
-  const handleScan = async () => {
+  const handleScan = useCallback(async () => {
     setScanning(true);
     setScanError(null);
     setDiscovery(null);
@@ -160,17 +158,15 @@ const SetupWizardPage: React.FC = () => {
       setDiscovery(d);
 
       // Seed form defaults from auto-detected hints
-      if (d.currency || d.vatMultiplier || d.detectedPhaseCount) {
-        setHomeForm(f => ({
-          ...f,
-          ...(d.currency ? { currency: d.currency } : {}),
-          ...(d.detectedPhaseCount ? { phaseCount: d.detectedPhaseCount } : {}),
-        }));
-        setElectricityForm(f => ({
-          ...f,
-          ...(d.vatMultiplier ? { vatMultiplier: d.vatMultiplier } : {}),
-        }));
+      if (d.detectedPhaseCount) {
+        setHomeForm(f => ({ ...f, phaseCount: d.detectedPhaseCount! }));
       }
+      setElectricityForm(f => ({
+        ...f,
+        ...(d.currency ? { currency: d.currency } : {}),
+        ...(d.nordpoolArea ? { area: d.nordpoolArea } : {}),
+        ...(d.vatMultiplier ? { vatMultiplier: d.vatMultiplier } : {}),
+      }));
       if (d.inverterType) {
         setInverterType(d.inverterType);
       }
@@ -193,7 +189,59 @@ const SetupWizardPage: React.FC = () => {
     } finally {
       setScanning(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    // Load existing settings first so re-running the wizard preserves user config,
+    // then run the sensor scan in parallel.
+    api.get('/api/settings/all').then(res => {
+      const s = res.data;
+      const bat = s.battery ?? {};
+      const home = s.home ?? {};
+      const elec = s.electricityPrice ?? {};
+      const ep = s.energyProvider ?? {};
+      const inv = s.growatt ?? {};
+
+      setBatteryForm(f => ({
+        ...f,
+        totalCapacity:            bat.totalCapacity            ?? f.totalCapacity,
+        minSoc:                   bat.minSoc                   ?? f.minSoc,
+        maxSoc:                   bat.maxSoc                   ?? f.maxSoc,
+        maxChargeDischargePower:  bat.maxChargePowerKw         ?? f.maxChargeDischargePower,
+        cycleCost:                bat.cycleCostPerKwh          ?? f.cycleCost,
+        minActionProfitThreshold: bat.minActionProfitThreshold ?? f.minActionProfitThreshold,
+      }));
+      setHomeForm(f => ({
+        ...f,
+        consumption:           home.defaultHourly          ?? f.consumption,
+        consumptionStrategy:   home.consumptionStrategy    ?? f.consumptionStrategy,
+        maxFuseCurrent:        home.maxFuseCurrent         ?? f.maxFuseCurrent,
+        voltage:               home.voltage                ?? f.voltage,
+        safetyMarginFactor:    home.safetyMargin           ?? f.safetyMarginFactor,
+        phaseCount:            home.phaseCount             ?? f.phaseCount,
+        powerMonitoringEnabled: home.powerMonitoringEnabled ?? f.powerMonitoringEnabled,
+      }));
+      setElectricityForm(f => ({
+        ...f,
+        provider:        ep.provider          ?? f.provider,
+        currency:        home.currency        ?? f.currency,
+        area:            elec.area            ?? f.area,
+        markupRate:      elec.markupRate      ?? f.markupRate,
+        vatMultiplier:   elec.vatMultiplier   ?? f.vatMultiplier,
+        additionalCosts: elec.additionalCosts ?? f.additionalCosts,
+        taxReduction:    elec.taxReduction    ?? f.taxReduction,
+      }));
+      if (inv.inverterType) setInverterType(inv.inverterType);
+    }).catch((err: unknown) => {
+      // A 404 means first-time setup with no existing settings — defaults are fine.
+      // Any other error is unexpected and should be surfaced for debugging.
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      if (status !== 404) {
+        console.error('Failed to load existing settings:', err);
+      }
+    });
+    handleScan();
+  }, [handleScan]);
 
   const handleConfirm = async () => {
     if (!discovery) return;
@@ -222,7 +270,7 @@ const SetupWizardPage: React.FC = () => {
     try {
       await api.post('/api/setup/complete', {
         sensors: editedSensors,
-        nordpoolArea: discovery.nordpoolArea,
+        nordpoolArea: electricityForm.area || discovery.nordpoolArea,
         nordpoolConfigEntryId: discovery.nordpoolConfigEntryId,
         growattDeviceId: discovery.growattDeviceId,
         // Battery
@@ -233,7 +281,7 @@ const SetupWizardPage: React.FC = () => {
         cycleCost: batteryForm.cycleCost,
         minActionProfitThreshold: batteryForm.minActionProfitThreshold,
         // Home
-        currency: homeForm.currency,
+        currency: electricityForm.currency,
         consumption: homeForm.consumption,
         consumptionStrategy: homeForm.consumptionStrategy,
         maxFuseCurrent: homeForm.maxFuseCurrent,
@@ -242,6 +290,7 @@ const SetupWizardPage: React.FC = () => {
         phaseCount: homeForm.phaseCount,
         powerMonitoringEnabled: homeForm.powerMonitoringEnabled,
         // Electricity
+        area: electricityForm.area || discovery.nordpoolArea,
         provider: electricityForm.provider,
         markupRate: electricityForm.markupRate,
         vatMultiplier: electricityForm.vatMultiplier,
@@ -516,7 +565,7 @@ const SetupWizardPage: React.FC = () => {
                 className="flex items-center space-x-2 px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 font-medium disabled:opacity-60"
               >
                 {confirming ? <div className="h-4 w-4 border-2 border-white rounded-full border-t-transparent animate-spin" /> : null}
-                <span>Next: Battery Setup</span>
+                <span>Next: Electricity Pricing</span>
                 <ChevronRight className="h-4 w-4" />
               </button>
             </div>
@@ -527,333 +576,189 @@ const SetupWizardPage: React.FC = () => {
           </div>
         )}
 
-        {/* Step 2: Success */}
-        {/* ── Step 2: Battery Setup ── */}
-        {step === 2 && (
+        {/* ── Step 3: Battery ── */}
+        {step === 3 && (
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 space-y-5">
             <div>
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Battery Setup</h2>
-              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Configure your battery hardware specifications.</p>
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Battery</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Your inverter model and battery hardware specifications. These values are used by the optimizer to plan charge and discharge schedules.</p>
             </div>
 
             {/* Inverter type */}
             <div className="space-y-1">
               <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                Inverter type
-                {detectedBadge(discovery?.inverterType != null)}
+                Inverter type {detectedBadge(discovery?.inverterType != null)}
               </span>
               <div className="flex space-x-4 pt-1">
-                {(['MIN', 'SPH'] as const).map(t => (
-                  <label key={t} className="flex items-center space-x-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="inverterType"
-                      value={t}
-                      checked={inverterType === t}
-                      onChange={() => setInverterType(t)}
-                      className="text-blue-500"
-                    />
-                    <span className="text-sm text-gray-700 dark:text-gray-300">{t}</span>
+                {([
+                  { value: 'MIN', label: 'MIN (AC-coupled)' },
+                  { value: 'SPH', label: 'SPH (DC-coupled)' },
+                ] as const).map(t => (
+                  <label key={t.value} className="flex items-center space-x-2 cursor-pointer">
+                    <input type="radio" name="inverterType" value={t.value}
+                      checked={inverterType === t.value}
+                      onChange={() => setInverterType(t.value)}
+                      className="text-blue-500" />
+                    <span className="text-sm text-gray-700 dark:text-gray-300">{t.label}</span>
                   </label>
                 ))}
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* Capacity */}
+            <div className="space-y-1">
               <label className="block">
                 <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Total Capacity (kWh)</span>
-                <input
-                  type="number" min="1" step="0.1"
-                  value={batteryForm.totalCapacity}
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">The total usable energy storage of your battery. Set this to the nameplate capacity of your battery system.</p>
+                <input type="number" min="1" step="0.1" value={batteryForm.totalCapacity}
                   onChange={e => setBatteryForm(f => ({ ...f, totalCapacity: num(e.target.value, f.totalCapacity) }))}
-                  className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
+                  className="block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
               </label>
+            </div>
 
+            {/* Power */}
+            <div className="space-y-1">
               <label className="block">
                 <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Max Charge / Discharge Power (kW)</span>
-                <input
-                  type="number" min="0.1" step="0.1"
-                  value={batteryForm.maxChargeDischargePower}
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Maximum power the optimizer may use. Calculate from your battery's C-rate — e.g. 30 kWh × 0.5C = 15 kW.</p>
+                <input type="number" min="0.1" step="0.1" value={batteryForm.maxChargeDischargePower}
                   onChange={e => setBatteryForm(f => ({ ...f, maxChargeDischargePower: num(e.target.value, f.maxChargeDischargePower) }))}
-                  className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </label>
-
-              <label className="block">
-                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Min State of Charge (%)</span>
-                <input
-                  type="number" min="0" max="100" step="1"
-                  value={batteryForm.minSoc}
-                  onChange={e => setBatteryForm(f => ({ ...f, minSoc: int(e.target.value, f.minSoc) }))}
-                  className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </label>
-
-              <label className="block">
-                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Max State of Charge (%)</span>
-                <input
-                  type="number" min="0" max="100" step="1"
-                  value={batteryForm.maxSoc}
-                  onChange={e => setBatteryForm(f => ({ ...f, maxSoc: int(e.target.value, f.maxSoc) }))}
-                  className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </label>
-
-              <label className="block">
-                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Cycle Cost (per kWh cycled)</span>
-                <input
-                  type="number" min="0" step="0.01"
-                  value={batteryForm.cycleCost}
-                  onChange={e => setBatteryForm(f => ({ ...f, cycleCost: num(e.target.value, f.cycleCost) }))}
-                  className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </label>
-
-              <label className="block">
-                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Min Action Profit Threshold</span>
-                <input
-                  type="number" min="0" step="0.1"
-                  value={batteryForm.minActionProfitThreshold}
-                  onChange={e => setBatteryForm(f => ({ ...f, minActionProfitThreshold: num(e.target.value, f.minActionProfitThreshold) }))}
-                  className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
+                  className="block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
               </label>
             </div>
 
+            {/* SOC limits */}
+            <div className="space-y-1">
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">SOC Limits (%)</span>
+              <p className="text-xs text-gray-500 dark:text-gray-400">The operating range the optimizer will stay within. These values are synced to the Growatt inverter. Typical values: Min 15%, Max 95%.</p>
+              <div className="grid grid-cols-2 gap-4 pt-1">
+                <label className="block">
+                  <span className="text-xs font-medium text-gray-600 dark:text-gray-400">Min SOC</span>
+                  <input type="number" min="0" max="100" step="1" value={batteryForm.minSoc}
+                    onChange={e => setBatteryForm(f => ({ ...f, minSoc: int(e.target.value, f.minSoc) }))}
+                    className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </label>
+                <label className="block">
+                  <span className="text-xs font-medium text-gray-600 dark:text-gray-400">Max SOC</span>
+                  <input type="number" min="0" max="100" step="1" value={batteryForm.maxSoc}
+                    onChange={e => setBatteryForm(f => ({ ...f, maxSoc: int(e.target.value, f.maxSoc) }))}
+                    className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </label>
+              </div>
+            </div>
+
             <div className="flex justify-between pt-2">
-              <button
-                onClick={() => setStep(1)}
-                className="flex items-center space-x-1 px-4 py-2 text-gray-600 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700"
-              >
-                <ChevronLeft className="h-4 w-4" />
-                <span>Back</span>
+              <button onClick={() => setStep(2)}
+                className="flex items-center space-x-1 px-4 py-2 text-gray-600 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700">
+                <ChevronLeft className="h-4 w-4" /><span>Back</span>
               </button>
-              <button
-                onClick={() => setStep(3)}
-                className="flex items-center space-x-2 px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 font-medium"
-              >
-                <span>Next: Home &amp; Grid</span>
-                <ChevronRight className="h-4 w-4" />
+              <button onClick={() => setStep(4)}
+                className="flex items-center space-x-2 px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 font-medium">
+                <span>Next: Home</span><ChevronRight className="h-4 w-4" />
               </button>
             </div>
           </div>
         )}
 
-        {/* ── Step 3: Home & Grid ── */}
-        {step === 3 && (
-          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 space-y-5">
-            <div>
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Home &amp; Grid</h2>
-              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Configure your home electrical setup.</p>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <label className="block">
-                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Currency
-                  {detectedBadge(discovery?.currency != null)}
-                </span>
-                <select
-                  value={homeForm.currency}
-                  onChange={e => setHomeForm(f => ({ ...f, currency: e.target.value }))}
-                  className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  {['SEK', 'NOK', 'DKK', 'EUR', 'GBP'].map(c => (
-                    <option key={c} value={c}>{c}</option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="block">
-                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Default Hourly Consumption (kWh)</span>
-                <input
-                  type="number" min="0" step="0.1"
-                  value={homeForm.consumption}
-                  onChange={e => setHomeForm(f => ({ ...f, consumption: num(e.target.value, f.consumption) }))}
-                  className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </label>
-
-              <label className="block">
-                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Fuse Current (A)</span>
-                <input
-                  type="number" min="1" step="1"
-                  value={homeForm.maxFuseCurrent}
-                  onChange={e => setHomeForm(f => ({ ...f, maxFuseCurrent: int(e.target.value, f.maxFuseCurrent) }))}
-                  className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </label>
-
-              <label className="block">
-                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Voltage (V)</span>
-                <input
-                  type="number" min="100" step="1"
-                  value={homeForm.voltage}
-                  onChange={e => setHomeForm(f => ({ ...f, voltage: int(e.target.value, f.voltage) }))}
-                  className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </label>
-
-              <label className="block">
-                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Safety Margin Factor (0–1)</span>
-                <input
-                  type="number" min="0" max="1" step="0.01"
-                  value={homeForm.safetyMarginFactor}
-                  onChange={e => setHomeForm(f => ({ ...f, safetyMarginFactor: num(e.target.value, f.safetyMarginFactor) }))}
-                  className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </label>
-            </div>
-
-            <div className="space-y-3">
-              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                Phases
-                {detectedBadge(discovery?.detectedPhaseCount != null)}
-              </span>
-              <div className="flex space-x-4">
-                {[1, 3].map(n => (
-                  <label key={n} className="flex items-center space-x-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="phaseCount"
-                      value={n}
-                      checked={homeForm.phaseCount === n}
-                      onChange={() => setHomeForm(f => ({ ...f, phaseCount: n }))}
-                      className="text-blue-500"
-                    />
-                    <span className="text-sm text-gray-700 dark:text-gray-300">{n}-phase</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-
-            <div className="space-y-3">
-              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Consumption Strategy</span>
-              <div className="flex flex-col space-y-2">
-                {(['sensor', 'fixed', 'influxdb_7d_avg'] as const).map(s => (
-                  <label key={s} className="flex items-center space-x-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="consumptionStrategy"
-                      value={s}
-                      checked={homeForm.consumptionStrategy === s}
-                      onChange={() => setHomeForm(f => ({ ...f, consumptionStrategy: s }))}
-                      className="text-blue-500"
-                    />
-                    <span className="text-sm text-gray-700 dark:text-gray-300">{s}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Power Monitoring Enabled</span>
-              <button
-                type="button"
-                onClick={() => setHomeForm(f => ({ ...f, powerMonitoringEnabled: !f.powerMonitoringEnabled }))}
-                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 ${homeForm.powerMonitoringEnabled ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}
-              >
-                <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${homeForm.powerMonitoringEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
-              </button>
-            </div>
-
-            <div className="flex justify-between pt-2">
-              <button
-                onClick={() => setStep(2)}
-                className="flex items-center space-x-1 px-4 py-2 text-gray-600 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700"
-              >
-                <ChevronLeft className="h-4 w-4" />
-                <span>Back</span>
-              </button>
-              <button
-                onClick={() => setStep(4)}
-                className="flex items-center space-x-2 px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 font-medium"
-              >
-                <span>Next: Pricing</span>
-                <ChevronRight className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* ── Step 4: Electricity Pricing ── */}
+        {/* ── Step 4: Home ── */}
         {step === 4 && (
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 space-y-5">
             <div>
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Electricity Pricing</h2>
-              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Configure your electricity price source and cost parameters.</p>
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Home</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Fuse protection prevents the main fuse from blowing when the battery charges at the same time as other high loads. Recommended if your home does not have hardware power limiting.</p>
             </div>
 
-            {discovery?.vatMultiplier != null && (
-              <div className="rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 px-4 py-2 text-xs text-green-800 dark:text-green-300">
-                VAT multiplier pre-filled from detected Nordpool area ({discovery.nordpoolArea}).
+            {/* Fuse protection — top, controls visibility of grid fields */}
+            <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Enable Fuse Protection</span>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Monitors real-time load and limits battery charge power to prevent blowing the main fuse.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setHomeForm(f => ({ ...f, powerMonitoringEnabled: !f.powerMonitoringEnabled }))}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 ${homeForm.powerMonitoringEnabled ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+                >
+                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${homeForm.powerMonitoringEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+                </button>
               </div>
-            )}
 
+              {homeForm.powerMonitoringEnabled && (
+                <>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <label className="block">
+                      <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Fuse Current (A)</span>
+                      <input type="number" min="1" step="1" value={homeForm.maxFuseCurrent}
+                        onChange={e => setHomeForm(f => ({ ...f, maxFuseCurrent: int(e.target.value, f.maxFuseCurrent) }))}
+                        className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    </label>
+                    <label className="block">
+                      <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Voltage (V)</span>
+                      <input type="number" min="100" step="1" value={homeForm.voltage}
+                        onChange={e => setHomeForm(f => ({ ...f, voltage: int(e.target.value, f.voltage) }))}
+                        className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    </label>
+                    <label className="block">
+                      <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Safety Margin</span>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Fraction of the fuse rating to use as the limit. E.g. 0.9 leaves 10% headroom. Default 1.0 uses the full fuse rating.</p>
+                      <input type="number" min="0" max="1" step="0.01" value={homeForm.safetyMarginFactor}
+                        onChange={e => setHomeForm(f => ({ ...f, safetyMarginFactor: num(e.target.value, f.safetyMarginFactor) }))}
+                        className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    </label>
+                  </div>
+                  <div className="space-y-2">
+                    <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Phases {detectedBadge(discovery?.detectedPhaseCount != null)}
+                    </span>
+                    <div className="flex space-x-4">
+                      {[1, 3].map(n => (
+                        <label key={n} className="flex items-center space-x-2 cursor-pointer">
+                          <input type="radio" name="phaseCount" value={n}
+                            checked={homeForm.phaseCount === n}
+                            onChange={() => setHomeForm(f => ({ ...f, phaseCount: n }))}
+                            className="text-blue-500" />
+                          <span className="text-sm text-gray-700 dark:text-gray-300">{n}-phase</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Consumption strategy */}
             <div className="space-y-3">
-              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Price Provider</span>
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Consumption Strategy</span>
+              <p className="text-xs text-gray-500 dark:text-gray-400">The data source the optimizer uses for expected home load each hour. A sensor gives the most accurate forecast; use a fixed value if no consumption sensor is available.</p>
               <div className="flex flex-col space-y-2">
                 {([
-                  { value: 'nordpool_official', label: 'Nordpool (official integration)' },
-                  { value: 'nordpool', label: 'Nordpool (custom integration)' },
-                  { value: 'octopus', label: 'Octopus Energy' },
-                ] as const).map(opt => (
-                  <label key={opt.value} className="flex items-center space-x-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="provider"
-                      value={opt.value}
-                      checked={electricityForm.provider === opt.value}
-                      onChange={() => setElectricityForm(f => ({ ...f, provider: opt.value }))}
-                      className="text-blue-500"
-                    />
-                    <span className="text-sm text-gray-700 dark:text-gray-300">{opt.label}</span>
+                  { value: 'sensor', label: 'Home Assistant sensor', hint: 'Reads a HA sensor that provides an hourly consumption estimate, e.g. a 48h rolling average of grid import. Configure the entity ID in Settings → Sensors.' },
+                  { value: 'fixed', label: 'Fixed value', hint: 'Always uses the value below — no sensor required. Good starting point if you have no consumption sensor.' },
+                  { value: 'influxdb_7d_avg', label: 'InfluxDB 7-day average', hint: 'Queries InfluxDB for the past 7 days of local load power. Requires the InfluxDB integration.' },
+                ] as const).map(s => (
+                  <label key={s.value} className="flex items-start space-x-2 cursor-pointer">
+                    <input type="radio" name="consumptionStrategy" value={s.value}
+                      checked={homeForm.consumptionStrategy === s.value}
+                      onChange={() => setHomeForm(f => ({ ...f, consumptionStrategy: s.value }))}
+                      className="text-blue-500 mt-0.5" />
+                    <div>
+                      <span className="text-sm text-gray-700 dark:text-gray-300">{s.label}</span>
+                      {homeForm.consumptionStrategy === s.value && (
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{s.hint}</p>
+                      )}
+                    </div>
                   </label>
                 ))}
               </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <label className="block">
-                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Markup Rate (per kWh)</span>
-                <input
-                  type="number" min="0" step="0.001"
-                  value={electricityForm.markupRate}
-                  onChange={e => setElectricityForm(f => ({ ...f, markupRate: num(e.target.value, f.markupRate) }))}
-                  className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </label>
-
-              <label className="block">
-                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">VAT Multiplier (e.g. 1.25 = 25%)</span>
-                <input
-                  type="number" min="1" step="0.01"
-                  value={electricityForm.vatMultiplier}
-                  onChange={e => setElectricityForm(f => ({ ...f, vatMultiplier: num(e.target.value, f.vatMultiplier) }))}
-                  className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </label>
-
-              <label className="block">
-                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Additional Costs (per kWh)</span>
-                <input
-                  type="number" min="0" step="0.001"
-                  value={electricityForm.additionalCosts}
-                  onChange={e => setElectricityForm(f => ({ ...f, additionalCosts: num(e.target.value, f.additionalCosts) }))}
-                  className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </label>
-
-              <label className="block">
-                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Tax Reduction (per kWh)</span>
-                <input
-                  type="number" min="0" step="0.001"
-                  value={electricityForm.taxReduction}
-                  onChange={e => setElectricityForm(f => ({ ...f, taxReduction: num(e.target.value, f.taxReduction) }))}
-                  className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </label>
+              {homeForm.consumptionStrategy === 'fixed' && (
+                <label className="block">
+                  <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Default Hourly Consumption (kWh)</span>
+                  <input type="number" min="0" step="0.1" value={homeForm.consumption}
+                    onChange={e => setHomeForm(f => ({ ...f, consumption: num(e.target.value, f.consumption) }))}
+                    className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </label>
+              )}
             </div>
 
             {completeError && (
@@ -864,8 +769,7 @@ const SetupWizardPage: React.FC = () => {
                 onClick={() => setStep(3)}
                 className="flex items-center space-x-1 px-4 py-2 text-gray-600 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700"
               >
-                <ChevronLeft className="h-4 w-4" />
-                <span>Back</span>
+                <ChevronLeft className="h-4 w-4" /><span>Back</span>
               </button>
               <button
                 onClick={handleComplete}
@@ -873,8 +777,124 @@ const SetupWizardPage: React.FC = () => {
                 className="flex items-center space-x-2 px-6 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 font-medium disabled:opacity-60"
               >
                 {completing ? <div className="h-4 w-4 border-2 border-white rounded-full border-t-transparent animate-spin" /> : null}
-                <span>Finish Setup</span>
-                <ChevronRight className="h-4 w-4" />
+                <span>Finish Setup</span><ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Step 2: Electricity Pricing ── */}
+        {step === 2 && (
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 space-y-5">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Electricity Pricing</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">How the optimizer calculates the real cost of buying and selling electricity. Getting this right is essential for accurate savings calculations.</p>
+            </div>
+
+            {discovery?.vatMultiplier != null && (
+              <div className="rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 px-4 py-2 text-xs text-green-800 dark:text-green-300">
+                Currency, VAT multiplier and price area pre-filled from detected Nord Pool integration.
+              </div>
+            )}
+
+            {/* Provider */}
+            <div className="space-y-2">
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Price Source</span>
+              <p className="text-xs text-gray-500 dark:text-gray-400">Where spot prices come from. Use the official Nord Pool integration if installed via HACS or the HA store. Use the custom sensor option if you have your own Nord Pool sensor entities.</p>
+              <div className="flex flex-col space-y-2 pt-1">
+                {([
+                  { value: 'nordpool_official', label: 'Nord Pool (official HA integration)' },
+                  { value: 'nordpool', label: 'Nord Pool (custom sensor)' },
+                  { value: 'octopus', label: 'Octopus Energy' },
+                ] as const).map(opt => (
+                  <label key={opt.value} className="flex items-center space-x-2 cursor-pointer">
+                    <input type="radio" name="provider" value={opt.value}
+                      checked={electricityForm.provider === opt.value}
+                      onChange={() => setElectricityForm(f => ({ ...f, provider: opt.value }))}
+                      className="text-blue-500" />
+                    <span className="text-sm text-gray-700 dark:text-gray-300">{opt.label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* Currency + Area */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <label className="block">
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Currency {detectedBadge(discovery?.currency != null)}
+                </span>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Used for all savings calculations and price display throughout the app.</p>
+                <select value={electricityForm.currency ?? ''}
+                  onChange={e => setElectricityForm(f => ({ ...f, currency: e.target.value }))}
+                  className="block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                  <option value="">Select currency</option>
+                  {['SEK', 'NOK', 'DKK', 'EUR', 'GBP'].map(c => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </label>
+
+              {electricityForm.provider !== 'octopus' && (
+                <label className="block">
+                  <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Price Area {detectedBadge(discovery?.nordpoolArea != null)}
+                  </span>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Your Nord Pool bidding zone. Examples: SE4, NO1, DK1, FI, GB.</p>
+                  <input type="text" value={electricityForm.area ?? ''}
+                    onChange={e => setElectricityForm(f => ({ ...f, area: e.target.value }))}
+                    placeholder="e.g. SE4, NO1, DK1"
+                    className="block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </label>
+              )}
+            </div>
+
+            {/* Price calculation */}
+            {electricityForm.provider !== 'octopus' && (
+              <div className="space-y-3">
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Price Calculation</span>
+                <p className="text-xs text-gray-500 dark:text-gray-400">How the raw spot price is turned into your actual buy price. Formula: buy = (spot + markup) × VAT + additional costs.</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <label className="block">
+                    <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Markup Rate</span>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Fixed surcharge added to the spot price before VAT. Covers your supplier's margin.</p>
+                    <input type="number" min="0" step="0.001" value={electricityForm.markupRate}
+                      onChange={e => setElectricityForm(f => ({ ...f, markupRate: num(e.target.value, f.markupRate) }))}
+                      className="block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </label>
+                  <label className="block">
+                    <span className="text-sm font-medium text-gray-700 dark:text-gray-300">VAT Multiplier</span>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Applied to spot + markup. E.g. 1.25 = 25% VAT. {detectedBadge(discovery?.vatMultiplier != null)}</p>
+                    <input type="number" min="1" step="0.01" value={electricityForm.vatMultiplier}
+                      onChange={e => setElectricityForm(f => ({ ...f, vatMultiplier: num(e.target.value, f.vatMultiplier) }))}
+                      className="block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </label>
+                  <label className="block">
+                    <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Additional Costs</span>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Grid fee + energy tax per kWh, VAT-inclusive. Added after VAT.</p>
+                    <input type="number" min="0" step="0.001" value={electricityForm.additionalCosts}
+                      onChange={e => setElectricityForm(f => ({ ...f, additionalCosts: num(e.target.value, f.additionalCosts) }))}
+                      className="block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </label>
+                  <label className="block">
+                    <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Tax Reduction</span>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Credit per kWh on energy sold back to the grid (e.g. ROT/skattereduktion). Enter 0 if not applicable.</p>
+                    <input type="number" min="0" step="0.001" value={electricityForm.taxReduction}
+                      onChange={e => setElectricityForm(f => ({ ...f, taxReduction: num(e.target.value, f.taxReduction) }))}
+                      className="block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </label>
+                </div>
+              </div>
+            )}
+
+            <div className="flex justify-between pt-2">
+              <button onClick={() => setStep(1)}
+                className="flex items-center space-x-1 px-4 py-2 text-gray-600 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700">
+                <ChevronLeft className="h-4 w-4" /><span>Back</span>
+              </button>
+              <button onClick={() => setStep(3)}
+                className="flex items-center space-x-2 px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 font-medium">
+                <span>Next: Battery</span><ChevronRight className="h-4 w-4" />
               </button>
             </div>
           </div>
@@ -910,7 +930,7 @@ const SetupWizardPage: React.FC = () => {
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-500 dark:text-gray-400">Currency</span>
-                <span className="font-medium text-gray-900 dark:text-white">{homeForm.currency}</span>
+                <span className="font-medium text-gray-900 dark:text-white">{electricityForm.currency}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-500 dark:text-gray-400">Price provider</span>

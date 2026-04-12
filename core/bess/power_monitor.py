@@ -91,9 +91,10 @@ class HomePowerMonitor:
                     "status": "WARNING",
                     "checks": [
                         {
-                            "component": "Power Monitoring",
+                            "name": "Power Monitor Status",
+                            "entity_id": None,
                             "status": "WARNING",
-                            "message": "Disabled — set power_monitoring_enabled: true in config to enable",
+                            "error": "Disabled — set power_monitoring_enabled: true in config to enable",
                         }
                     ],
                     "last_run": datetime.now().isoformat(),

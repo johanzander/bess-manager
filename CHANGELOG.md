@@ -4,6 +4,15 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [8.0.4] - 2026-04-12
+
+### Fixed
+
+- Nordpool `config_entry_id` discovered by the setup wizard was saved to disk but not applied to the running price source, causing the health check to report "No config entry ID configured" until restart.
+- Power monitoring remained disabled after the setup wizard enabled it: `HomePowerMonitor` was only created at startup, so enabling it via the wizard had no effect until restart.
+- Setup wizard completion could corrupt numeric settings with `None` values for fields not included in the payload; live updates now only overwrite fields that were explicitly provided.
+- `settings_store.py` added to `package-addon.sh` build context (missing from local installation packaging).
+
 ## [8.0.1] - 2026-04-12
 
 ### Fixed

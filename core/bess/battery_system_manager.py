@@ -2210,6 +2210,19 @@ class BatterySystemManager:
 
             if "home" in settings:
                 self.home_settings.update(**settings["home"])
+                # If power monitoring was just enabled and the monitor hasn't been
+                # created yet (disabled at startup), instantiate it now so it takes
+                # effect without requiring a restart.
+                if (
+                    self.home_settings.power_monitoring_enabled
+                    and self._power_monitor is None
+                    and self._controller is not None
+                ):
+                    self._power_monitor = HomePowerMonitor(
+                        self._controller,
+                        home_settings=self.home_settings,
+                        battery_settings=self.battery_settings,
+                    )
 
             if "price" in settings:
                 self.price_settings.update(**settings["price"])

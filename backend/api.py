@@ -2743,9 +2743,13 @@ async def setup_complete(payload: APISetupCompletePayload):
         if payload.growattDeviceId:
             bess_controller.ha_controller.growatt_device_id = payload.growattDeviceId
 
+        def _nn(d: dict) -> dict:
+            """Strip None values so update() only overwrites explicitly provided fields."""
+            return {k: v for k, v in d.items() if v is not None}
+
         live_updates: dict = {}
         if "battery" in sections:
-            live_updates["battery"] = {
+            live_updates["battery"] = _nn({
                 "totalCapacity": payload.totalCapacity,
                 "minSoc": payload.minSoc,
                 "maxSoc": payload.maxSoc,
@@ -2753,9 +2757,9 @@ async def setup_complete(payload: APISetupCompletePayload):
                 "maxDischargePowerKw": payload.maxChargeDischargePower,
                 "cycleCostPerKwh": payload.cycleCost,
                 "minActionProfitThreshold": payload.minActionProfitThreshold,
-            }
+            })
         if "home" in sections:
-            live_updates["home"] = {
+            live_updates["home"] = _nn({
                 "defaultHourly": payload.consumption,
                 "currency": payload.currency,
                 "consumptionStrategy": payload.consumptionStrategy,
@@ -2764,15 +2768,15 @@ async def setup_complete(payload: APISetupCompletePayload):
                 "safetyMargin": payload.safetyMarginFactor,
                 "phaseCount": payload.phaseCount,
                 "powerMonitoringEnabled": payload.powerMonitoringEnabled,
-            }
+            })
         if "electricity_price" in sections:
-            live_updates["price"] = {
+            live_updates["price"] = _nn({
                 "area": sections["electricity_price"].get("area"),
                 "markupRate": payload.markupRate,
                 "vatMultiplier": payload.vatMultiplier,
                 "additionalCosts": payload.additionalCosts,
                 "taxReduction": payload.taxReduction,
-            }
+            })
         if live_updates:
             bess_controller.system.update_settings(live_updates)
 

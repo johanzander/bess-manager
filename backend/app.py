@@ -287,6 +287,12 @@ class BESSController:
             self.ha_controller.growatt_device_id = growatt_device_id
         if nordpool_area:
             self.system.price_manager.area = nordpool_area
+        if nordpool_config_entry_id:
+            from core.bess.official_nordpool_source import OfficialNordpoolSource
+
+            price_source = self.system.price_manager.price_source
+            if isinstance(price_source, OfficialNordpoolSource):
+                price_source.config_entry_id = nordpool_config_entry_id
 
     def _save_discovered_config(
         self,

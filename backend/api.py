@@ -2794,6 +2794,13 @@ async def setup_complete(payload: APISetupCompletePayload):
             # Non-fatal: log and continue — dashboard will recover on next scheduler tick.
             logger.warning("Could not build initial schedule after setup: %s", sched_err)
 
+        # Re-run health check so the dashboard banner reflects the new configuration
+        # instead of the stale failures recorded at startup (before sensors were set).
+        try:
+            bess_controller.system._run_health_check()
+        except Exception as health_err:
+            logger.warning("Could not re-run health check after setup: %s", health_err)
+
         logger.info(f"Setup complete: saved sections {list(sections.keys())}")
         return {"success": True, "saved_sections": list(sections.keys())}
     except Exception as e:

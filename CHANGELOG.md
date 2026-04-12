@@ -4,6 +4,13 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [8.0.6] - 2026-04-12
+
+### Fixed
+
+- Dashboard banner showed stale "Electricity Price Data: Critical sensor configuration issue" after wizard completion because `_critical_sensor_failures` was only populated at startup and never cleared. Health check now re-runs at the end of wizard completion.
+- Saving Home settings from the Settings page returned 422 because `currency` (stored in the Pricing form) was not included in the request payload.
+
 ## [8.0.5] - 2026-04-12
 
 ### Fixed

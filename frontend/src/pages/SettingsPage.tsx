@@ -323,7 +323,7 @@ const SettingsPage: React.FC = () => {
   const saveHome = async () => {
     setSaving(true);
     try {
-      await api.put('/api/settings/home', homeForm);
+      await api.put('/api/settings/home', { ...homeForm, currency: pricingForm.currency });
       savedHome.current = JSON.stringify(homeForm);
       setToast({ type: 'success', message: 'Home settings saved.' });
     } catch (err) {

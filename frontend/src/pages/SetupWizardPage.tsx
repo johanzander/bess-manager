@@ -509,7 +509,7 @@ const SetupWizardPage: React.FC = () => {
         )}
 
         <p className="text-center mt-4 text-xs text-gray-400 dark:text-gray-500">
-          Settings can be updated at any time via the Settings page or Auto-Configure on the System Health page.
+          Settings can be updated at any time via the Settings page.
         </p>
       </div>
     </div>

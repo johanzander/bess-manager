@@ -3,11 +3,12 @@ API endpoints for battery and electricity settings, dashboard data, and decision
 
 """
 
-import re
+import dataclasses
 from datetime import datetime, timedelta
 
 from api_conversion import convert_keys_to_camel_case
 from api_dataclasses import (
+    _ENTITY_ID_RE,
     APIBatterySettings,
     APIDashboardHourlyData,
     APIDashboardResponse,
@@ -19,7 +20,6 @@ from api_dataclasses import (
     APISensorsPayload,
     APISetupCompletePayload,
     APISnapshotComparison,
-    _ENTITY_ID_RE,
     create_formatted_value,
 )
 from fastapi import APIRouter, HTTPException, Query
@@ -599,6 +599,15 @@ async def get_dashboard_data(
                         tomorrow_data = _aggregate_quarterly_to_hourly(
                             tomorrow_data, battery_capacity, currency
                         )
+                    else:
+                        # Tomorrow's periods are indexed relative to the start of the
+                        # optimization window (e.g. 96..191 for a 96-period day).
+                        # The frontend maps period index to wall-clock time, so period 0
+                        # must represent 00:00 of the displayed day.
+                        tomorrow_data = [
+                            dataclasses.replace(p, period=i)
+                            for i, p in enumerate(tomorrow_data)
+                        ]
         except (AttributeError, KeyError, ValueError) as e:
             logger.warning(f"Failed to get tomorrow's optimization data: {e}")
             tomorrow_data = None

@@ -58,7 +58,7 @@ const SettingsPage: React.FC = () => {
   const navigate = useNavigate();
 
   // ── active tab ─────────────────────────────────────────────────────────
-  const [tab, setTab] = useState<Tab>('home');
+  const [tab, setTab] = useState<Tab>('sensors');
 
   // ── form state ─────────────────────────────────────────────────────────
   const [batteryForm, setBatteryForm] = useState<BatteryForm>(EMPTY_BATTERY);
@@ -214,10 +214,16 @@ const SettingsPage: React.FC = () => {
       const d = res.data;
 
       if (d.sensors && typeof d.sensors === 'object') {
-        setSensors(prev => ({
-          ...d.sensors,
-          ...Object.fromEntries(Object.entries(prev).filter(([, v]) => v)),
-        }));
+        setSensors(prev => {
+          const merged = {
+            ...d.sensors,
+            ...Object.fromEntries(Object.entries(prev).filter(([, v]) => v)),
+          };
+          // Drop empty-string entries so the result has the same shape as the
+          // persisted sensor map. Without this, discovered empty keys trigger a
+          // false dirty state even when nothing actually changed.
+          return Object.fromEntries(Object.entries(merged).filter(([, v]) => v));
+        });
       }
 
       if (d.inverterType || d.growattDeviceId) {
@@ -442,10 +448,10 @@ const SettingsPage: React.FC = () => {
 
   // ── tab definitions ───────────────────────────────────────────────────
   const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
-    { id: 'home', label: 'Home', icon: <Home className="h-4 w-4" /> },
+    { id: 'sensors', label: 'Sensors', icon: <Sun className="h-4 w-4" /> },
     { id: 'pricing', label: 'Electricity Pricing', icon: <Zap className="h-4 w-4" /> },
     { id: 'battery', label: 'Battery', icon: <Battery className="h-4 w-4" /> },
-    { id: 'sensors', label: 'Sensors', icon: <Sun className="h-4 w-4" /> },
+    { id: 'home', label: 'Home', icon: <Home className="h-4 w-4" /> },
     { id: 'health', label: 'Health', icon: <Activity className="h-4 w-4" /> },
   ];
 

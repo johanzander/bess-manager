@@ -36,7 +36,7 @@ RUN apk add --no-cache \
 WORKDIR /app
 
 # Copy Python application files from backend directory
-COPY backend/app.py backend/api.py backend/api_conversion.py backend/api_dataclasses.py backend/log_config.py backend/requirements.txt ./
+COPY backend/app.py backend/api.py backend/api_conversion.py backend/api_dataclasses.py backend/log_config.py backend/settings_store.py backend/requirements.txt ./
 
 # Copy core directory
 COPY core/ /app/core/

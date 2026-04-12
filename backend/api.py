@@ -33,6 +33,19 @@ from core.bess.time_utils import get_period_count
 router = APIRouter()
 
 
+def _refresh_health(bess_controller) -> None:
+    """Re-run the health check so the dashboard banner reflects the latest state.
+
+    Called after any settings mutation that could affect sensor or component
+    health (home, sensors, energy-provider, inverter, battery, electricity).
+    Failures are non-fatal — the banner will self-correct on the next poll.
+    """
+    try:
+        bess_controller.system._run_health_check()
+    except Exception as exc:
+        logger.warning("Could not refresh health state after settings update: %s", exc)
+
+
 @router.get("/api/settings/battery")
 async def get_battery_settings():
     """Get current battery settings using unified conversion."""
@@ -94,6 +107,7 @@ async def update_battery_settings(settings: dict):
         td = bess_controller.system.temperature_derating
         td.enabled = api_settings.temperatureDeratingEnabled
         td.weather_entity = api_settings.temperatureDeratingWeatherEntity
+        _refresh_health(bess_controller)
         return {"message": "Battery settings updated successfully"}
 
     except Exception as e:
@@ -140,6 +154,7 @@ async def update_electricity_price_settings(settings: dict):
             }
         )
         bess_controller.settings_store.save_section("electricity_price", section)
+        _refresh_health(bess_controller)
         return {"message": "Electricity settings updated successfully"}
 
     except Exception as e:
@@ -195,6 +210,7 @@ async def update_home_settings(payload: APIHomeSettingsPayload):
                 }
             }
         )
+        _refresh_health(bess_controller)
         return {"message": "Home settings updated successfully"}
     except Exception as e:
         logger.error(f"Error updating home settings: {e}")
@@ -249,6 +265,7 @@ async def update_energy_provider_settings(payload: APIEnergyProviderPayload):
         section["octopus"] = octopus
 
         bess_controller.settings_store.save_section("energy_provider", section)
+        _refresh_health(bess_controller)
         return {"message": "Energy provider settings updated successfully"}
     except Exception as e:
         logger.error(f"Error updating energy provider settings: {e}")
@@ -284,6 +301,7 @@ async def update_inverter_settings(payload: APIInverterSettingsPayload):
             section["device_id"] = payload.deviceId
             bess_controller.ha_controller.growatt_device_id = payload.deviceId
         bess_controller.settings_store.save_section("growatt", section)
+        _refresh_health(bess_controller)
         return {"message": "Inverter settings updated successfully"}
     except Exception as e:
         logger.error(f"Error updating inverter settings: {e}")
@@ -313,6 +331,7 @@ async def update_sensor_settings(payload: APISensorsPayload):
         bess_controller.ha_controller.sensors.update(
             {k: v for k, v in payload.sensors.items() if v}
         )
+        _refresh_health(bess_controller)
         return {"message": f"Sensor settings updated ({len(payload.sensors)} sensors)"}
     except Exception as e:
         logger.error(f"Error updating sensor settings: {e}")

@@ -4,25 +4,20 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [7.17.1] - 2026-04-08
+## [8.0.0] - 2026-04-12
 
-### Fixed
+### Changed
 
-- Updated `vite` from 6.3.5 to 6.4.2 to address two security advisories: arbitrary file read via dev server WebSocket (high) and path traversal in optimised deps `.map` handling (medium).
-
-## [7.17.0] - 2026-04-08
+- **Settings storage moved out of `config.yaml`** — all operational settings (battery, home, electricity price, energy provider, Growatt, sensors) are now stored in `/data/bess_settings.json`, owned and managed by the add-on. On first boot, existing settings are automatically migrated from `options.json` — no manual action required. `config.yaml` now only holds InfluxDB credentials.
 
 ### Added
 
-- **Experimental:** Auto-configuration setup wizard. On first use (no sensors configured), the UI redirects to a wizard that scans Home Assistant for Growatt and Nordpool integrations and maps sensor entity IDs automatically — no manual `config.yaml` editing required. Optional integrations (Solcast, EV metering, phase currents, etc.) are also detected. The "Auto-Configure" button on the System Health page allows re-running discovery at any time.
+- Full-featured Settings page: all configuration (battery parameters, home settings, pricing, sensor entity IDs) is now editable directly in the UI — no more manual `config.yaml` editing for day-to-day configuration.
+- First-time setup wizard with automatic detection of Home Assistant integrations (Growatt, Nordpool, Solcast, phase current sensors) — maps sensor entity IDs automatically so most users need zero manual configuration.
 
 ### Removed
 
-- Removed unused diagnostic sensors `output_power`, `self_power`, `system_power`, and `net_grid_power` (not available on Growatt MIN series).
-
-### Fixed
-
-- Docker dev environment volume mounts and `PYTHONPATH` corrected for updated project layout.
+- EV charging energy meter support removed (the feature was never wired up to the optimizer and had no effect on battery scheduling).
 
 ## [7.17.2] - 2026-04-11
 

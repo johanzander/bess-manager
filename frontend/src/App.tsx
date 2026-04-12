@@ -4,10 +4,10 @@ import DashboardPage from './pages/DashboardPage';
 import SavingsAnalysisPage from './pages/SavingsPage';
 import InverterPage from './pages/InverterPage';
 import InsightsPage from './pages/InsightsPage';
-import SystemHealthPage from './pages/SystemHealthPage';
 import SetupWizardPage from './pages/SetupWizardPage';
+import SettingsPage from './pages/SettingsPage';
 import { useSettings } from './hooks/useSettings';
-import { Home, Activity, TrendingUp, Brain, Zap, Sun, Moon } from 'lucide-react';
+import { Home, TrendingUp, Brain, Zap, Sun, Moon, Settings } from 'lucide-react';
 import api from './lib/api';
 
 // An ErrorBoundary component to catch rendering errors
@@ -80,7 +80,7 @@ const Navigation = () => {
     // FIXED: Dashboard should be active for both "/" and when no specific page is selected
     if (path === '/') {
       // Dashboard is active for root path OR if we're not on any of the other specific pages
-      const otherPages = ['/insights', '/savings', '/inverter', '/system-health'];
+      const otherPages = ['/insights', '/savings', '/inverter', '/settings'];
       const isOnOtherPage = otherPages.some(page => location.pathname.startsWith(page));
       const isDashboardActive = location.pathname === '/' || !isOnOtherPage;
       
@@ -127,12 +127,12 @@ const Navigation = () => {
         <span className="hidden sm:inline">Insights</span>
       </Link>
       <Link
-        to="/system-health"
-        className={`p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center space-x-1 ${isActive('/system-health')}`}
-        title="System status & component health"
+        to="/settings"
+        className={`p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center space-x-1 ${isActive('/settings')}`}
+        title="Battery, grid, pricing, sensors and health"
       >
-        <Activity className="h-5 w-5" />
-        <span className="hidden sm:inline">System Health</span>
+        <Settings className="h-5 w-5" />
+        <span className="hidden sm:inline">Settings</span>
       </Link>
     </div>
   );
@@ -243,7 +243,7 @@ function App() {
             <div className="max-w-7xl mx-auto py-2 px-4 sm:px-6 lg:px-8">
               <div className="flex justify-between items-center">
                 <div className="flex items-center space-x-4">
-                  <h1 className="text-2xl font-bold text-gray-900 dark:text-white">ChargeIQ</h1>
+                  <h1 className="text-2xl font-bold text-gray-900 dark:text-white">BESS</h1>
                 </div>
                 <div className="flex items-center space-x-4">                  
                   {/* Navigation Menu */}
@@ -287,7 +287,7 @@ function App() {
                   <Route path="/setup" element={<SetupWizardPage />} />
                   <Route path="/" element={
                     <DashboardPage 
-                      onLoadingChange={(loading: boolean) => {}}
+                      onLoadingChange={(_: boolean) => {}}
                       settings={mergedSettings}
                     />
                   } />
@@ -295,7 +295,8 @@ function App() {
                   <Route path="/insights" element={<InsightsPage />} />
                   <Route path="/savings" element={<SavingsAnalysisPage />} />
                   <Route path="/inverter" element={<InverterPage />} />
-                  <Route path="/system-health" element={<SystemHealthPage />} />
+                  <Route path="/settings" element={<SettingsPage />} />
+                  <Route path="/system-health" element={<Navigate to="/settings" replace />} />
                   {/* Catch-all route: redirect any unmatched paths to dashboard */}
                   <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>

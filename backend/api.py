@@ -3,16 +3,22 @@ API endpoints for battery and electricity settings, dashboard data, and decision
 
 """
 
-import re
+import dataclasses
 from datetime import datetime, timedelta
 
 from api_conversion import convert_keys_to_camel_case
 from api_dataclasses import (
+    _ENTITY_ID_RE,
     APIBatterySettings,
     APIDashboardHourlyData,
     APIDashboardResponse,
+    APIEnergyProviderPayload,
+    APIHomeSettingsPayload,
+    APIInverterSettingsPayload,
     APIPredictionSnapshot,
     APIPriceSettings,
+    APISensorsPayload,
+    APISetupCompletePayload,
     APISnapshotComparison,
     create_formatted_value,
 )
@@ -40,7 +46,10 @@ async def get_battery_settings():
 
         # Create APIBatterySettings using existing method
         api_settings = APIBatterySettings.from_internal(
-            battery_settings, estimated_consumption, consumption_strategy
+            battery_settings,
+            estimated_consumption,
+            consumption_strategy,
+            bess_controller.system.temperature_derating,
         )
         return api_settings.__dict__
 
@@ -58,6 +67,33 @@ async def update_battery_settings(settings: dict):
         api_settings = APIBatterySettings(**settings)
         internal_updates = api_settings.to_internal_update()
         bess_controller.system.update_settings({"battery": internal_updates})
+        # Persist to bess_settings.json. Preserve existing fields not managed by
+        # this endpoint (e.g. min_action_profit_threshold) via read-modify-write.
+        section = bess_controller.settings_store.get_section("battery")
+        # Preserve any existing temperature_derating fields not managed by this
+        # endpoint (e.g. a user-configured derating_curve) by merging rather than
+        # replacing the nested dict.
+        existing_td = section.get("temperature_derating", {})
+        updated_td = {
+            **existing_td,
+            "enabled": api_settings.temperatureDeratingEnabled,
+            "weather_entity": api_settings.temperatureDeratingWeatherEntity,
+        }
+        section.update(
+            {
+                "total_capacity": api_settings.totalCapacity,
+                "min_soc": api_settings.minSoc,
+                "max_soc": api_settings.maxSoc,
+                "max_charge_discharge_power": api_settings.maxChargePowerKw,
+                "cycle_cost": api_settings.cycleCostPerKwh,
+                "min_action_profit_threshold": api_settings.minActionProfitThreshold,
+                "temperature_derating": updated_td,
+            }
+        )
+        bess_controller.settings_store.save_section("battery", section)
+        td = bess_controller.system.temperature_derating
+        td.enabled = api_settings.temperatureDeratingEnabled
+        td.weather_entity = api_settings.temperatureDeratingWeatherEntity
         return {"message": "Battery settings updated successfully"}
 
     except Exception as e:
@@ -91,6 +127,19 @@ async def update_electricity_price_settings(settings: dict):
         api_settings = APIPriceSettings(**settings)
         internal_updates = api_settings.to_internal_update()
         bess_controller.system.update_settings({"price": internal_updates})
+        # Persist to bess_settings.json. Preserve existing fields (e.g. area)
+        # not always included in partial updates via read-modify-write.
+        section = bess_controller.settings_store.get_section("electricity_price")
+        section.update(
+            {
+                "area": api_settings.area,
+                "markup_rate": api_settings.markupRate,
+                "vat_multiplier": api_settings.vatMultiplier,
+                "additional_costs": api_settings.additionalCosts,
+                "tax_reduction": api_settings.taxReduction,
+            }
+        )
+        bess_controller.settings_store.save_section("electricity_price", section)
         return {"message": "Electricity settings updated successfully"}
 
     except Exception as e:
@@ -98,9 +147,197 @@ async def update_electricity_price_settings(settings: dict):
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+# ---------------------------------------------------------------------------
+# New settings endpoints — backed by SettingsStore / bess_settings.json
+# ---------------------------------------------------------------------------
+
+
+@router.get("/api/settings/all")
+async def get_all_settings():
+    """Return all BESS-owned settings from bess_settings.json."""
+    from app import bess_controller
+
+    try:
+        return convert_keys_to_camel_case(bess_controller.settings_store.data)
+    except Exception as e:
+        logger.error(f"Error getting all settings: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.put("/api/settings/home")
+async def update_home_settings(payload: APIHomeSettingsPayload):
+    """Persist and apply home & grid settings."""
+    from app import bess_controller
+
+    try:
+        section = {
+            "consumption": payload.consumption,
+            "currency": payload.currency,
+            "consumption_strategy": payload.consumptionStrategy,
+            "max_fuse_current": payload.maxFuseCurrent,
+            "voltage": payload.voltage,
+            "safety_margin_factor": payload.safetyMarginFactor,
+            "phase_count": payload.phaseCount,
+            "power_monitoring_enabled": payload.powerMonitoringEnabled,
+        }
+        bess_controller.settings_store.save_section("home", section)
+        bess_controller.system.update_settings(
+            {
+                "home": {
+                    "defaultHourly": payload.consumption,
+                    "currency": payload.currency,
+                    "consumptionStrategy": payload.consumptionStrategy,
+                    "maxFuseCurrent": payload.maxFuseCurrent,
+                    "voltage": payload.voltage,
+                    "safetyMargin": payload.safetyMarginFactor,
+                    "phaseCount": payload.phaseCount,
+                    "powerMonitoringEnabled": payload.powerMonitoringEnabled,
+                }
+            }
+        )
+        return {"message": "Home settings updated successfully"}
+    except Exception as e:
+        logger.error(f"Error updating home settings: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.get("/api/settings/home")
+async def get_home_settings():
+    """Return current home & grid settings."""
+    from app import bess_controller
+
+    try:
+        section = bess_controller.settings_store.get_section("home")
+        return convert_keys_to_camel_case(section)
+    except Exception as e:
+        logger.error(f"Error getting home settings: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.put("/api/settings/energy-provider")
+async def update_energy_provider_settings(payload: APIEnergyProviderPayload):
+    """Persist and apply energy provider settings."""
+    from app import bess_controller
+
+    try:
+        # Start from the existing stored section so a partial update
+        # (e.g. only changing the provider) preserves existing entity IDs.
+        section = bess_controller.settings_store.get_section("energy_provider")
+        section["provider"] = payload.provider
+
+        nordpool_official = dict(section.get("nordpool_official", {}))
+        if payload.nordpoolConfigEntryId is not None:
+            nordpool_official["config_entry_id"] = payload.nordpoolConfigEntryId
+        section["nordpool_official"] = nordpool_official
+
+        nordpool = dict(section.get("nordpool", {}))
+        if payload.nordpoolTodayEntity is not None:
+            nordpool["today_entity"] = payload.nordpoolTodayEntity
+        if payload.nordpoolTomorrowEntity is not None:
+            nordpool["tomorrow_entity"] = payload.nordpoolTomorrowEntity
+        section["nordpool"] = nordpool
+
+        octopus = dict(section.get("octopus", {}))
+        if payload.octopusImportTodayEntity is not None:
+            octopus["import_today_entity"] = payload.octopusImportTodayEntity
+        if payload.octopusImportTomorrowEntity is not None:
+            octopus["import_tomorrow_entity"] = payload.octopusImportTomorrowEntity
+        if payload.octopusExportTodayEntity is not None:
+            octopus["export_today_entity"] = payload.octopusExportTodayEntity
+        if payload.octopusExportTomorrowEntity is not None:
+            octopus["export_tomorrow_entity"] = payload.octopusExportTomorrowEntity
+        section["octopus"] = octopus
+
+        bess_controller.settings_store.save_section("energy_provider", section)
+        return {"message": "Energy provider settings updated successfully"}
+    except Exception as e:
+        logger.error(f"Error updating energy provider settings: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.get("/api/settings/energy-provider")
+async def get_energy_provider_settings():
+    """Return current energy provider settings."""
+    from app import bess_controller
+
+    try:
+        section = bess_controller.settings_store.get_section("energy_provider")
+        return convert_keys_to_camel_case(section)
+    except Exception as e:
+        logger.error(f"Error getting energy provider settings: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.put("/api/settings/inverter")
+async def update_inverter_settings(payload: APIInverterSettingsPayload):
+    """Persist Growatt inverter type and device ID.
+
+    Note: inverterType changes are persisted but only take effect after a
+    restart because the schedule manager is instantiated once at startup.
+    """
+    from app import bess_controller
+
+    try:
+        section = bess_controller.settings_store.get_section("growatt")
+        section["inverter_type"] = payload.inverterType
+        if payload.deviceId is not None:
+            section["device_id"] = payload.deviceId
+            bess_controller.ha_controller.growatt_device_id = payload.deviceId
+        bess_controller.settings_store.save_section("growatt", section)
+        return {"message": "Inverter settings updated successfully"}
+    except Exception as e:
+        logger.error(f"Error updating inverter settings: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.get("/api/settings/inverter")
+async def get_inverter_settings():
+    """Return current inverter settings."""
+    from app import bess_controller
+
+    try:
+        section = bess_controller.settings_store.get_section("growatt")
+        return convert_keys_to_camel_case(section)
+    except Exception as e:
+        logger.error(f"Error getting inverter settings: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.put("/api/settings/sensors")
+async def update_sensor_settings(payload: APISensorsPayload):
+    """Persist full sensor entity ID mapping and apply to running controller."""
+    from app import bess_controller
+
+    try:
+        bess_controller.settings_store.save_section("sensors", payload.sensors)
+        bess_controller.ha_controller.sensors.update(
+            {k: v for k, v in payload.sensors.items() if v}
+        )
+        return {"message": f"Sensor settings updated ({len(payload.sensors)} sensors)"}
+    except Exception as e:
+        logger.error(f"Error updating sensor settings: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.get("/api/settings/sensors")
+async def get_sensor_settings():
+    """Return current sensor entity ID mapping."""
+    from app import bess_controller
+
+    try:
+        # Return the live sensor config from ha_controller — this is the merged
+        # view (options.json + settings_store) that the system actually uses.
+        # Returning only the settings_store would miss sensors that are configured
+        # via options.json / config.yaml and not yet saved through the UI.
+        return dict(bess_controller.ha_controller.sensors)
+    except Exception as e:
+        logger.error(f"Error getting sensor settings: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
 def _aggregate_quarterly_to_hourly(
     quarterly_periods: list[APIDashboardHourlyData],
-    battery_capacity: float,
+    _battery_capacity: float,
     currency: str,
 ) -> list[APIDashboardHourlyData]:
     """Aggregate quarterly (15-min) periods into hourly periods.
@@ -288,13 +525,11 @@ def _aggregate_quarterly_to_hourly(
 
 @router.get("/api/dashboard")
 async def get_dashboard_data(
-    date: str = Query(None),
     resolution: str = Query("quarter-hourly", pattern="^(hourly|quarter-hourly)$"),
 ):
     """Unified dashboard endpoint using dataclass-based implementation for type safety.
 
     Args:
-        date: Optional date filter (not currently used)
         resolution: Data resolution - 'hourly' (24 periods) or 'quarter-hourly' (96 periods)
     """
     from app import bess_controller
@@ -364,6 +599,15 @@ async def get_dashboard_data(
                         tomorrow_data = _aggregate_quarterly_to_hourly(
                             tomorrow_data, battery_capacity, currency
                         )
+                    else:
+                        # Tomorrow's periods are indexed relative to the start of the
+                        # optimization window (e.g. 96..191 for a 96-period day).
+                        # The frontend maps period index to wall-clock time, so period 0
+                        # must represent 00:00 of the displayed day.
+                        tomorrow_data = [
+                            dataclasses.replace(p, period=i)
+                            for i, p in enumerate(tomorrow_data)
+                        ]
         except (AttributeError, KeyError, ValueError) as e:
             logger.warning(f"Failed to get tomorrow's optimization data: {e}")
             tomorrow_data = None
@@ -413,8 +657,7 @@ async def get_dashboard_data(
             "optimized": total_optimized_cost,
         }
 
-        # Get battery state
-        battery_soc = controller.get_battery_soc()
+        battery_soc: float = controller.get_battery_soc()
 
         # Strategic intent summary from actual schedule data
         try:
@@ -473,8 +716,6 @@ def convert_real_data_to_mock_format(period_data_list, current_period, currency)
     Returns:
         Dictionary with FormattedValue objects for proper frontend display
     """
-    from api_dataclasses import create_formatted_value
-
     patterns = []
 
     for period_data in period_data_list:
@@ -521,8 +762,8 @@ def convert_real_data_to_mock_format(period_data_list, current_period, currency)
         # Enhanced decision intelligence should always provide detailed flow values
         # For historical data, detailed_flow_values might not be populated yet
         if not decision.detailed_flow_values:
-            # For now, use empty dict - this allows historical data to work
-            # TODO: Populate detailed_flow_values for historical periods
+            # Detailed flow values are only available for predicted periods;
+            # historical periods use an empty dict for now.
             decision.detailed_flow_values = {}
 
         # Use the advanced flow value calculations from decision intelligence
@@ -1129,24 +1370,12 @@ async def get_inverter_status():
         except Exception as e:
             logger.warning(f"Failed to get current battery mode: {e}")
 
-        # Default values in case of errors
-        battery_soc = 50.0
-        battery_soe = 0.0
-        grid_charge_enabled = False
-        discharge_power_rate = 100.0
-        battery_charge_power = 0.0
-        battery_discharge_power = 0.0
-
-        # Get battery data with error handling
-        try:
-            battery_soc = controller.get_battery_soc()
-            battery_soe = (battery_soc / 100.0) * battery_settings.total_capacity
-            grid_charge_enabled = controller.grid_charge_enabled()
-            discharge_power_rate = controller.get_discharging_power_rate()
-            battery_charge_power = controller.get_battery_charge_power()
-            battery_discharge_power = controller.get_battery_discharge_power()
-        except Exception as e:
-            logger.error(f"Error getting battery status: {e}")
+        battery_soc = controller.get_battery_soc()
+        battery_soe = (battery_soc / 100.0) * battery_settings.total_capacity
+        grid_charge_enabled = controller.grid_charge_enabled()
+        discharge_power_rate = controller.get_discharging_power_rate()
+        battery_charge_power = controller.get_battery_charge_power()
+        battery_discharge_power = controller.get_battery_discharge_power()
 
         response = {
             "battery_soc": battery_soc,
@@ -1256,9 +1485,7 @@ async def get_growatt_detailed_schedule():
                     if hour == current_hour and hasattr(
                         bess_controller.system, "controller"
                     ):
-                        battery_soc_percent = (
-                            bess_controller.system.controller.get_battery_soc()
-                        )
+                        battery_soc_percent = bess_controller.system.controller.get_battery_soc()
                         # Convert SOC percent to SOE kWh
                         if hasattr(bess_controller.system, "battery_settings"):
                             battery_capacity = (
@@ -2138,8 +2365,6 @@ async def export_debug_data(compact: bool = True):
     Returns:
         PlainTextResponse: Markdown file with complete debug data
     """
-    from datetime import datetime
-
     from fastapi.responses import PlainTextResponse
 
     from app import bess_controller
@@ -2229,15 +2454,12 @@ async def dismiss_runtime_failure(failure_id: str):
     from app import bess_controller
 
     try:
-        success = bess_controller.system.dismiss_runtime_failure(failure_id)
-        if not success:
-            raise HTTPException(
-                status_code=404, detail=f"Failure with id {failure_id} not found"
-            )
-
+        bess_controller.system.dismiss_runtime_failure(failure_id)
         return {"success": True, "message": f"Failure {failure_id} dismissed"}
-    except HTTPException:
-        raise
+    except ValueError:
+        raise HTTPException(
+            status_code=404, detail=f"Failure with id {failure_id} not found"
+        ) from None
     except Exception as e:
         logger.error(f"Error dismissing runtime failure {failure_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -2330,6 +2552,10 @@ async def run_setup_discovery():
 
         # Convert top-level keys to camelCase but preserve sensor keys as
         # snake_case since they are BESS config keys, not API field names.
+        detected_phase_count = (
+            sum(1 for k in ("current_l1", "current_l2", "current_l3") if k in sensors)
+            or None
+        )
         result = convert_keys_to_camel_case(
             {
                 "growatt_found": integrations["growatt_found"],
@@ -2339,6 +2565,11 @@ async def run_setup_discovery():
                 "nordpool_area": integrations["nordpool_area"],
                 "nordpool_config_entry_id": integrations["nordpool_config_entry_id"],
                 "missing_sensors": missing_sensors,
+                # Auto-detected hints
+                "inverter_type": integrations["inverter_type"],
+                "detected_phase_count": detected_phase_count,
+                "currency": integrations["currency"],
+                "vat_multiplier": integrations["vat_multiplier"],
             }
         )
         # Attach sensors dict without key conversion
@@ -2347,9 +2578,6 @@ async def run_setup_discovery():
     except Exception as e:
         logger.error(f"Error during setup discovery: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
-
-
-_ENTITY_ID_RE = re.compile(r"^[a-z][a-z0-9_]*\.[a-z0-9_-]+$")
 
 
 class ConfirmSetupPayload(BaseModel):
@@ -2398,4 +2626,172 @@ async def confirm_setup(payload: ConfirmSetupPayload):
         return {"success": True, "applied_sensors": len(payload.sensors)}
     except Exception as e:
         logger.error(f"Error confirming setup: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.post("/api/setup/complete")
+async def setup_complete(payload: APISetupCompletePayload):
+    """Atomic wizard completion: persist all sections and apply live.
+
+    Called when the user finishes the 6-step setup wizard. Saves all
+    sections to bess_settings.json atomically and then applies changes to the
+    running system so BESS can start without a restart.
+    """
+    from app import bess_controller
+
+    try:
+        sections: dict = {}
+
+        # --- sensors & discovery ---
+        # Sensors go directly into sections; discovery fields (nordpool area,
+        # config_entry_id, growatt device_id) are merged additively via
+        # apply_discovered_config which handles its own persistence.
+        if payload.sensors:
+            sections["sensors"] = payload.sensors
+        if (
+            payload.nordpoolArea
+            or payload.nordpoolConfigEntryId
+            or payload.growattDeviceId
+        ):
+            bess_controller.apply_discovered_config(
+                sensor_map={},  # sensors already in sections — avoid double-write
+                nordpool_area=payload.nordpoolArea,
+                nordpool_config_entry_id=payload.nordpoolConfigEntryId,
+                growatt_device_id=payload.growattDeviceId,
+            )
+
+        # All sections use read-modify-write so that keys not managed by the wizard
+        # (e.g. temperature_derating in battery, config_entry_id in energy_provider)
+        # are preserved when save_all replaces the section.
+
+        # --- battery ---
+        if payload.totalCapacity is not None:
+            battery = bess_controller.settings_store.get_section("battery")
+            battery["total_capacity"] = payload.totalCapacity
+            if payload.minSoc is not None:
+                battery["min_soc"] = payload.minSoc
+            if payload.maxSoc is not None:
+                battery["max_soc"] = payload.maxSoc
+            if payload.maxChargeDischargePower is not None:
+                battery["max_charge_discharge_power"] = payload.maxChargeDischargePower
+            if payload.cycleCost is not None:
+                battery["cycle_cost"] = payload.cycleCost
+            if payload.minActionProfitThreshold is not None:
+                battery["min_action_profit_threshold"] = payload.minActionProfitThreshold
+            sections["battery"] = battery
+
+        # --- home ---
+        if payload.currency is not None or payload.consumption is not None:
+            home = bess_controller.settings_store.get_section("home")
+            if payload.consumption is not None:
+                home["consumption"] = payload.consumption
+            if payload.currency is not None:
+                home["currency"] = payload.currency
+            if payload.consumptionStrategy is not None:
+                home["consumption_strategy"] = payload.consumptionStrategy
+            if payload.maxFuseCurrent is not None:
+                home["max_fuse_current"] = payload.maxFuseCurrent
+            if payload.voltage is not None:
+                home["voltage"] = payload.voltage
+            if payload.safetyMarginFactor is not None:
+                home["safety_margin_factor"] = payload.safetyMarginFactor
+            if payload.phaseCount is not None:
+                home["phase_count"] = payload.phaseCount
+            if payload.powerMonitoringEnabled is not None:
+                home["power_monitoring_enabled"] = payload.powerMonitoringEnabled
+            sections["home"] = home
+
+        # --- electricity price ---
+        if payload.markupRate is not None or payload.vatMultiplier is not None:
+            elec = bess_controller.settings_store.get_section("electricity_price")
+            area = payload.area or payload.nordpoolArea
+            if area:
+                elec["area"] = area
+            if payload.markupRate is not None:
+                elec["markup_rate"] = payload.markupRate
+            if payload.vatMultiplier is not None:
+                elec["vat_multiplier"] = payload.vatMultiplier
+            if payload.additionalCosts is not None:
+                elec["additional_costs"] = payload.additionalCosts
+            if payload.taxReduction is not None:
+                elec["tax_reduction"] = payload.taxReduction
+            sections["electricity_price"] = elec
+
+        # --- energy provider ---
+        if payload.provider is not None:
+            ep = bess_controller.settings_store.get_section("energy_provider")
+            ep["provider"] = payload.provider
+            sections["energy_provider"] = ep
+
+        # --- inverter ---
+        if payload.inverterType is not None:
+            inv = bess_controller.settings_store.get_section("growatt")
+            inv["inverter_type"] = payload.inverterType
+            if payload.growattDeviceId:
+                inv["device_id"] = payload.growattDeviceId
+            sections["growatt"] = inv
+
+        # Persist all sections atomically
+        bess_controller.settings_store.save_all(sections)
+
+        # Apply settings to live system so BESS starts immediately
+        # without requiring a restart.
+        if payload.sensors:
+            bess_controller.ha_controller.sensors.update(
+                {k: v for k, v in payload.sensors.items() if v}
+            )
+        if payload.growattDeviceId:
+            bess_controller.ha_controller.growatt_device_id = payload.growattDeviceId
+
+        live_updates: dict = {}
+        if "battery" in sections:
+            live_updates["battery"] = {
+                "totalCapacity": payload.totalCapacity,
+                "minSoc": payload.minSoc,
+                "maxSoc": payload.maxSoc,
+                "maxChargePowerKw": payload.maxChargeDischargePower,
+                "maxDischargePowerKw": payload.maxChargeDischargePower,
+                "cycleCostPerKwh": payload.cycleCost,
+                "minActionProfitThreshold": payload.minActionProfitThreshold,
+            }
+        if "home" in sections:
+            live_updates["home"] = {
+                "defaultHourly": payload.consumption,
+                "currency": payload.currency,
+                "consumptionStrategy": payload.consumptionStrategy,
+                "maxFuseCurrent": payload.maxFuseCurrent,
+                "voltage": payload.voltage,
+                "safetyMargin": payload.safetyMarginFactor,
+                "phaseCount": payload.phaseCount,
+                "powerMonitoringEnabled": payload.powerMonitoringEnabled,
+            }
+        if "electricity_price" in sections:
+            live_updates["price"] = {
+                "area": sections["electricity_price"].get("area"),
+                "markupRate": payload.markupRate,
+                "vatMultiplier": payload.vatMultiplier,
+                "additionalCosts": payload.additionalCosts,
+                "taxReduction": payload.taxReduction,
+            }
+        if live_updates:
+            bess_controller.system.update_settings(live_updates)
+
+        # Trigger initial schedule build now that the system is configured.
+        # Without this the dashboard returns 500 ("No optimization schedule available")
+        # until the next scheduled run at :00/:15/:30/:45.
+        try:
+            now = time_utils.now()
+            current_period = now.hour * 4 + now.minute // 15
+            bess_controller.system.update_battery_schedule(
+                current_period=current_period
+            )
+            logger.info("Initial schedule built after wizard completion")
+        except Exception as sched_err:
+            # Non-fatal: log and continue — dashboard will recover on next scheduler tick.
+            logger.warning("Could not build initial schedule after setup: %s", sched_err)
+
+        logger.info(f"Setup complete: saved sections {list(sections.keys())}")
+        return {"success": True, "saved_sections": list(sections.keys())}
+    except Exception as e:
+        logger.error(f"Error completing setup: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e

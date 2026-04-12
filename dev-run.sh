@@ -66,6 +66,12 @@ else
   echo "Warning: config.yaml not found in root directory"
 fi
 
+# Create dev settings from example template if missing (file is gitignored)
+if [ ! -f backend/dev-bess-settings.json ]; then
+  cp backend/dev-bess-settings.json.example backend/dev-bess-settings.json
+  echo "✓ Created backend/dev-bess-settings.json from example template"
+fi
+
 # Pass host timezone to containers so log timestamps use local time
 export TZ=${TZ:-Europe/Stockholm}
 

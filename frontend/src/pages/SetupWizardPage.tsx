@@ -1,225 +1,26 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CheckCircle, AlertCircle, ChevronRight, ChevronLeft, ChevronDown, Zap } from 'lucide-react';
+import { CheckCircle, ChevronRight, ChevronLeft, Zap } from 'lucide-react';
 import api from '../lib/api';
+import { INTEGRATIONS } from '../lib/sensorDefinitions';
+import { HomeFormSection } from '../components/settings/HomeFormSection';
+import type { HomeForm } from '../components/settings/HomeFormSection';
+import { PricingFormSection } from '../components/settings/PricingFormSection';
+import type { PricingForm } from '../components/settings/PricingFormSection';
+import { BatteryFormSection } from '../components/settings/BatteryFormSection';
+import type { BatteryForm, InverterForm } from '../components/settings/BatteryFormSection';
+import { SensorConfigSection } from '../components/settings/SensorConfigSection';
+import type { DiscoveryResult } from '../components/settings/SensorConfigSection';
 
-interface DiscoveryResult {
-  growattFound: boolean;
-  deviceSn: string | null;
-  growattDeviceId: string | null;
-  nordpoolFound: boolean;
-  nordpoolArea: string | null;
-  nordpoolConfigEntryId: string | null;
-  sensors: Record<string, string>;
-  missingSensors: string[];
-}
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
 
-interface SensorDef {
-  key: string;
-  label: string;
-  required: boolean;
-}
+const STEPS = ['Scan', 'Review Sensors', 'Electricity Pricing', 'Battery', 'Home', 'Done'];
 
-interface SensorGroup {
-  name: string;
-  sensors: SensorDef[];
-}
-
-interface IntegrationDef {
-  id: string;
-  name: string;
-  required: boolean;
-  description: string;
-  sensorGroups: SensorGroup[];
-}
-
-const INTEGRATIONS: IntegrationDef[] = [
-  {
-    id: 'growatt',
-    name: 'Growatt Server',
-    required: true,
-    description: 'Battery inverter control and monitoring',
-    sensorGroups: [
-      {
-        name: 'Battery Control',
-        sensors: [
-          { key: 'battery_soc', label: 'State of Charge (SOC)', required: true },
-          { key: 'battery_charge_power', label: 'Charging Power', required: true },
-          { key: 'battery_discharge_power', label: 'Discharging Power', required: true },
-          { key: 'battery_charge_stop_soc', label: 'Charge Stop SOC', required: false },
-          { key: 'battery_discharge_stop_soc', label: 'Discharge Stop SOC', required: false },
-          { key: 'battery_charging_power_rate', label: 'Charging Power Rate', required: false },
-          { key: 'battery_discharging_power_rate', label: 'Discharging Power Rate', required: false },
-          { key: 'grid_charge', label: 'Grid Charge Enable', required: false },
-        ],
-      },
-      {
-        name: 'Power Monitoring',
-        sensors: [
-          { key: 'pv_power', label: 'Solar PV Power', required: true },
-          { key: 'local_load_power', label: 'Local Load Power', required: true },
-          { key: 'import_power', label: 'Grid Import Power', required: true },
-          { key: 'export_power', label: 'Grid Export Power', required: true },
-        ],
-      },
-      {
-        name: 'Lifetime Energy Totals',
-        sensors: [
-          { key: 'lifetime_battery_charged', label: 'Total Battery Charged', required: false },
-          { key: 'lifetime_battery_discharged', label: 'Total Battery Discharged', required: false },
-          { key: 'lifetime_solar_energy', label: 'Total Solar Energy', required: false },
-          { key: 'lifetime_export_to_grid', label: 'Total Export to Grid', required: false },
-          { key: 'lifetime_import_from_grid', label: 'Total Import from Grid', required: false },
-          { key: 'lifetime_load_consumption', label: 'Total Load Consumption', required: false },
-          { key: 'lifetime_system_production', label: 'Total System Production', required: false },
-          { key: 'lifetime_self_consumption', label: 'Total Self Consumption', required: false },
-        ],
-      },
-    ],
-  },
-  {
-    id: 'nordpool',
-    name: 'Nord Pool Official',
-    required: true,
-    description: 'Electricity spot price data for optimization',
-    sensorGroups: [],
-  },
-  {
-    id: 'solar_forecast',
-    name: 'Solar Forecast (Solcast)',
-    required: false,
-    description: 'PV production forecast for planning charge/discharge strategy',
-    sensorGroups: [
-      {
-        name: 'Daily Forecasts',
-        sensors: [
-          { key: 'solar_forecast_today', label: 'Forecast Today (kWh)', required: false },
-          { key: 'solar_forecast_tomorrow', label: 'Forecast Tomorrow (kWh)', required: false },
-        ],
-      },
-    ],
-  },
-  {
-    id: 'consumption_forecast',
-    name: 'Consumption Forecast',
-    required: false,
-    description: '48-hour average grid import for load prediction',
-    sensorGroups: [
-      {
-        name: 'Consumption',
-        sensors: [
-          { key: '48h_avg_grid_import', label: '48h Avg Grid Import', required: false },
-        ],
-      },
-    ],
-  },
-  {
-    id: 'phase_current',
-    name: 'Phase Current Monitoring',
-    required: false,
-    description: 'Three-phase current sensors for grid fuse protection',
-    sensorGroups: [
-      {
-        name: 'Phase Currents',
-        sensors: [
-          { key: 'current_l1', label: 'Phase L1 Current', required: false },
-          { key: 'current_l2', label: 'Phase L2 Current', required: false },
-          { key: 'current_l3', label: 'Phase L3 Current', required: false },
-        ],
-      },
-    ],
-  },
-  {
-    id: 'ev_metering',
-    name: 'EV Energy Metering',
-    required: false,
-    description: 'EV charger energy sensor for consumption analytics',
-    sensorGroups: [
-      {
-        name: 'EV Charger',
-        sensors: [
-          { key: 'ev_energy_meter', label: 'Lifetime EV Energy (kWh)', required: false },
-        ],
-      },
-    ],
-  },
-  {
-    id: 'discharge_inhibit',
-    name: 'Discharge Inhibit',
-    required: false,
-    description: 'Binary sensor to prevent battery discharge (e.g. Tibber/Zaptec EV charging)',
-    sensorGroups: [
-      {
-        name: 'Constraint',
-        sensors: [
-          { key: 'discharge_inhibit', label: 'Discharge Inhibit Sensor', required: false },
-        ],
-      },
-    ],
-  },
-  {
-    id: 'weather',
-    name: 'Weather Integration',
-    required: false,
-    description: 'Temperature forecast for LFP battery cold weather derating',
-    sensorGroups: [
-      {
-        name: 'Weather Entity',
-        sensors: [
-          { key: 'weather_entity', label: 'HA Weather Entity', required: false },
-        ],
-      },
-    ],
-  },
-];
-
-const STEPS = ['Scan', 'Review Configuration', 'Done'];
-
-/** Count configured/total sensors for an integration */
-function integrationSensorCounts(
-  integration: IntegrationDef,
-  sensors: Record<string, string>,
-): { configured: number; total: number; missingRequired: number } {
-  let configured = 0;
-  let total = 0;
-  let missingRequired = 0;
-  for (const group of integration.sensorGroups) {
-    for (const s of group.sensors) {
-      total++;
-      if (sensors[s.key]) {
-        configured++;
-      } else if (s.required) {
-        missingRequired++;
-      }
-    }
-  }
-  return { configured, total, missingRequired };
-}
-
-/** Check if an integration was detected */
-function isIntegrationFound(id: string, discovery: DiscoveryResult, sensors: Record<string, string>): boolean {
-  if (id === 'growatt') return discovery.growattFound;
-  if (id === 'nordpool') return discovery.nordpoolFound;
-  if (id === 'phase_current') {
-    return !!(sensors['current_l1'] || sensors['current_l2'] || sensors['current_l3']);
-  }
-  if (id === 'solar_forecast') {
-    return !!(sensors['solar_forecast_today'] || sensors['solar_forecast_tomorrow']);
-  }
-  if (id === 'weather') {
-    return !!sensors['weather_entity'];
-  }
-  if (id === 'ev_metering') {
-    return !!sensors['ev_energy_meter'];
-  }
-  if (id === 'consumption_forecast') {
-    return !!sensors['48h_avg_grid_import'];
-  }
-  if (id === 'discharge_inhibit') {
-    return !!sensors['discharge_inhibit'];
-  }
-  return false;
-}
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
 
 const SetupWizardPage: React.FC = () => {
   const navigate = useNavigate();
@@ -227,33 +28,93 @@ const SetupWizardPage: React.FC = () => {
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
   const [discovery, setDiscovery] = useState<DiscoveryResult | null>(null);
-  const [editedSensors, setEditedSensors] = useState<Record<string, string>>({});
+  const [sensors, setSensors] = useState<Record<string, string>>({});
   const [confirming, setConfirming] = useState(false);
   const [confirmError, setConfirmError] = useState<string | null>(null);
-  const [expandedIntegrations, setExpandedIntegrations] = useState<Set<string>>(new Set());
+  const [completing, setCompleting] = useState(false);
+  const [completeError, setCompleteError] = useState<string | null>(null);
 
-  useEffect(() => {
-    handleScan();
-  }, []);
+  const [batteryForm, setBatteryForm] = useState<BatteryForm>({
+    totalCapacity: 30.0,
+    minSoc: 15,
+    maxSoc: 95,
+    maxChargeDischargePowerKw: 15.0,
+    cycleCostPerKwh: 0.50,
+    efficiencyCharge: 97,
+    efficiencyDischarge: 97,
+    temperatureDeratingEnabled: false,
+    minActionProfit: 8.0,
+  });
 
-  const handleScan = async () => {
+  const [inverterForm, setInverterForm] = useState<InverterForm>({
+    inverterType: 'MIN',
+    deviceId: '',
+  });
+
+  const [homeForm, setHomeForm] = useState<HomeForm>({
+    consumption: 3.5,
+    consumptionStrategy: 'sensor',
+    maxFuseCurrent: 25,
+    voltage: 230,
+    safetyMarginFactor: 1.0,
+    phaseCount: 3,
+    powerMonitoringEnabled: true,
+  });
+
+  const [pricingForm, setPricingForm] = useState<PricingForm>({
+    provider: 'nordpool_official',
+    currency: 'SEK',
+    area: '',
+    nordpoolConfigEntryId: '',
+    nordpoolTodayEntity: '',
+    nordpoolTomorrowEntity: '',
+    octopusImportTodayEntity: '',
+    octopusImportTomorrowEntity: '',
+    octopusExportTodayEntity: '',
+    octopusExportTomorrowEntity: '',
+    markupRate: 0.08,
+    vatMultiplier: 1.25,
+    additionalCosts: 1.03,
+    taxReduction: 0.0,
+  });
+
+  const handleScan = useCallback(async () => {
     setScanning(true);
     setScanError(null);
     setDiscovery(null);
     try {
       const res = await api.post('/api/setup/discover');
-      setDiscovery(res.data);
+      const d: DiscoveryResult = res.data;
+      setDiscovery(d);
+
+      // Seed form defaults from auto-detected hints
+      if (d.detectedPhaseCount) {
+        setHomeForm(f => ({ ...f, phaseCount: d.detectedPhaseCount! }));
+      }
+      setPricingForm(f => ({
+        ...f,
+        ...(d.currency ? { currency: d.currency } : {}),
+        ...(d.nordpoolArea ? { area: d.nordpoolArea } : {}),
+        ...(d.vatMultiplier ? { vatMultiplier: d.vatMultiplier } : {}),
+        ...(d.nordpoolConfigEntryId ? { nordpoolConfigEntryId: d.nordpoolConfigEntryId } : {}),
+      }));
+      if (d.inverterType) {
+        setInverterForm(f => ({ ...f, inverterType: d.inverterType! }));
+      }
+      if (d.growattDeviceId) {
+        setInverterForm(f => ({ ...f, deviceId: d.growattDeviceId! }));
+      }
+
       // Merge discovered sensors with empty entries for all known sensor keys
       const allSensors: Record<string, string> = {};
       for (const integration of INTEGRATIONS) {
         for (const group of integration.sensorGroups) {
           for (const s of group.sensors) {
-            allSensors[s.key] = res.data.sensors[s.key] ?? '';
+            allSensors[s.key] = d.sensors[s.key] ?? '';
           }
         }
       }
-      setEditedSensors(allSensors);
-      setExpandedIntegrations(new Set());
+      setSensors(allSensors);
       setStep(1);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Discovery failed';
@@ -261,7 +122,63 @@ const SetupWizardPage: React.FC = () => {
     } finally {
       setScanning(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    // Load existing settings so re-running the wizard preserves user config,
+    // then run the sensor scan. Sequencing via .finally() ensures the scan
+    // never overwrites the loaded values (scan seeds only auto-detected hints).
+    api.get('/api/settings/all').then(res => {
+      const s = res.data;
+      const bat = s.battery ?? {};
+      const home = s.home ?? {};
+      const elec = s.electricityPrice ?? {};
+      const ep = s.energyProvider ?? {};
+      const inv = s.growatt ?? {};
+
+      setBatteryForm(f => ({
+        ...f,
+        totalCapacity:            bat.totalCapacity            ?? f.totalCapacity,
+        minSoc:                   bat.minSoc                   ?? f.minSoc,
+        maxSoc:                   bat.maxSoc                   ?? f.maxSoc,
+        maxChargeDischargePowerKw: bat.maxChargePowerKw        ?? f.maxChargeDischargePowerKw,
+        cycleCostPerKwh:          bat.cycleCostPerKwh          ?? f.cycleCostPerKwh,
+        minActionProfit:          bat.minActionProfitThreshold ?? f.minActionProfit,
+        efficiencyCharge:         bat.efficiencyCharge         ?? f.efficiencyCharge,
+        efficiencyDischarge:      bat.efficiencyDischarge      ?? f.efficiencyDischarge,
+        temperatureDeratingEnabled: bat.temperatureDeratingEnabled ?? f.temperatureDeratingEnabled,
+      }));
+      setHomeForm(f => ({
+        ...f,
+        consumption:            home.defaultHourly          ?? f.consumption,
+        consumptionStrategy:    home.consumptionStrategy    ?? f.consumptionStrategy,
+        maxFuseCurrent:         home.maxFuseCurrent         ?? f.maxFuseCurrent,
+        voltage:                home.voltage                ?? f.voltage,
+        safetyMarginFactor:     home.safetyMargin           ?? f.safetyMarginFactor,
+        phaseCount:             home.phaseCount             ?? f.phaseCount,
+        powerMonitoringEnabled: home.powerMonitoringEnabled ?? f.powerMonitoringEnabled,
+      }));
+      setPricingForm(f => ({
+        ...f,
+        provider:        ep.provider          ?? f.provider,
+        currency:        home.currency        ?? f.currency,
+        area:            elec.area            ?? f.area,
+        markupRate:      elec.markupRate      ?? f.markupRate,
+        vatMultiplier:   elec.vatMultiplier   ?? f.vatMultiplier,
+        additionalCosts: elec.additionalCosts ?? f.additionalCosts,
+        taxReduction:    elec.taxReduction    ?? f.taxReduction,
+      }));
+      if (inv.inverterType) setInverterForm(f => ({ ...f, inverterType: inv.inverterType }));
+      if (inv.deviceId) setInverterForm(f => ({ ...f, deviceId: inv.deviceId }));
+    }).catch((err: unknown) => {
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      if (status !== 404) {
+        console.error('Failed to load existing settings:', err);
+      }
+    }).finally(() => {
+      handleScan();
+    });
+  }, [handleScan]);
 
   const handleConfirm = async () => {
     if (!discovery) return;
@@ -269,67 +186,68 @@ const SetupWizardPage: React.FC = () => {
     setConfirmError(null);
     try {
       await api.post('/api/setup/confirm', {
-        sensors: editedSensors,
+        sensors,
         nordpool_area: discovery.nordpoolArea,
         nordpool_config_entry_id: discovery.nordpoolConfigEntryId,
         growatt_device_id: discovery.growattDeviceId,
       });
       setStep(2);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Configuration failed';
-      setConfirmError(message);
+      setConfirmError(err instanceof Error ? err.message : 'Configuration failed');
     } finally {
       setConfirming(false);
     }
   };
 
-  const toggleIntegration = (id: string) => {
-    setExpandedIntegrations(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  const handleComplete = async () => {
+    if (!discovery) return;
+    setCompleting(true);
+    setCompleteError(null);
+    try {
+      await api.post('/api/setup/complete', {
+        sensors,
+        nordpoolArea: pricingForm.area || discovery.nordpoolArea,
+        nordpoolConfigEntryId: discovery.nordpoolConfigEntryId,
+        growattDeviceId: discovery.growattDeviceId,
+        // Battery
+        totalCapacity: batteryForm.totalCapacity,
+        minSoc: batteryForm.minSoc,
+        maxSoc: batteryForm.maxSoc,
+        maxChargeDischargePower: batteryForm.maxChargeDischargePowerKw,
+        cycleCost: batteryForm.cycleCostPerKwh,
+        minActionProfitThreshold: batteryForm.minActionProfit,
+        // Home
+        currency: pricingForm.currency,
+        consumption: homeForm.consumption,
+        consumptionStrategy: homeForm.consumptionStrategy,
+        maxFuseCurrent: homeForm.maxFuseCurrent,
+        voltage: homeForm.voltage,
+        safetyMarginFactor: homeForm.safetyMarginFactor,
+        phaseCount: homeForm.phaseCount,
+        powerMonitoringEnabled: homeForm.powerMonitoringEnabled,
+        // Electricity
+        area: pricingForm.area || discovery.nordpoolArea,
+        provider: pricingForm.provider,
+        markupRate: pricingForm.markupRate,
+        vatMultiplier: pricingForm.vatMultiplier,
+        additionalCosts: pricingForm.additionalCosts,
+        taxReduction: pricingForm.taxReduction,
+        // Inverter
+        inverterType: inverterForm.inverterType,
+      });
+      setStep(5);
+    } catch (err: unknown) {
+      setCompleteError(err instanceof Error ? err.message : 'Setup failed');
+    } finally {
+      setCompleting(false);
+    }
   };
 
-  const hasAllRequired = () => {
-    for (const integration of INTEGRATIONS) {
-      for (const group of integration.sensorGroups) {
-        for (const s of group.sensors) {
-          if (s.required && !editedSensors[s.key]) return false;
-        }
-      }
-    }
-    return true;
-  };
-
-  /** Render metadata row for an integration */
-  const renderMetadata = (integration: IntegrationDef) => {
-    if (!discovery) return null;
-    if (integration.id === 'growatt') {
-      return (
-        <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500 dark:text-gray-400">
-          <span>SN: <span className="font-mono">{discovery.deviceSn ?? 'unknown'}</span></span>
-          {discovery.growattDeviceId && (
-            <span>Device ID: <span className="font-mono">{discovery.growattDeviceId}</span></span>
-          )}
-        </div>
-      );
-    }
-    if (integration.id === 'nordpool') {
-      return (
-        <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500 dark:text-gray-400">
-          {discovery.nordpoolArea && (
-            <span>Price Area: <span className="font-semibold">{discovery.nordpoolArea}</span></span>
-          )}
-          {discovery.nordpoolConfigEntryId && (
-            <span>Config Entry: <span className="font-mono">{discovery.nordpoolConfigEntryId}</span></span>
-          )}
-        </div>
-      );
-    }
-    return null;
-  };
+  const allRequiredFilled = INTEGRATIONS.every(integration =>
+    integration.sensorGroups.every(group =>
+      group.sensors.every(s => !s.required || !!sensors[s.key]),
+    ),
+  );
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col items-center justify-center p-6">
@@ -367,7 +285,7 @@ const SetupWizardPage: React.FC = () => {
           ))}
         </div>
 
-        {/* Step 0: Scanning */}
+        {/* ── Step 0: Scanning ── */}
         {step === 0 && (
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
             <div className="text-center py-8">
@@ -379,7 +297,6 @@ const SetupWizardPage: React.FC = () => {
                 </>
               ) : scanError ? (
                 <>
-                  <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
                   <p className="text-lg font-medium text-gray-900 dark:text-white">Discovery failed</p>
                   <p className="text-red-500 mt-1 text-sm">{scanError}</p>
                   <button onClick={handleScan} className="mt-4 px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 font-medium">
@@ -391,136 +308,35 @@ const SetupWizardPage: React.FC = () => {
           </div>
         )}
 
-        {/* Step 1: Integration Review */}
+        {/* ── Step 1: Review Sensors ── */}
         {step === 1 && discovery && (
           <div className="space-y-3">
-            {INTEGRATIONS.map(integration => {
-              const found = isIntegrationFound(integration.id, discovery, editedSensors);
-              const counts = integrationSensorCounts(integration, editedSensors);
-              const expanded = expandedIntegrations.has(integration.id);
-              const hasSensors = integration.sensorGroups.length > 0;
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Review Sensors</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                Confirm the detected sensor entity IDs. Expand each integration to view or correct individual sensors.
+                Fields marked <span className="font-semibold text-orange-500">*</span> are required.
+              </p>
+            </div>
 
-              return (
-                <div key={integration.id} className="bg-white dark:bg-gray-800 rounded-xl shadow-lg overflow-hidden">
-                  {/* Integration header */}
-                  <button
-                    type="button"
-                    onClick={() => toggleIntegration(integration.id)}
-                    className="w-full px-5 py-4 flex items-start gap-3 text-left cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-750"
-                  >
-                    {/* Status icon */}
-                    {found
-                      ? <CheckCircle className="h-5 w-5 text-green-500 flex-shrink-0 mt-0.5" />
-                      : <AlertCircle className="h-5 w-5 text-orange-400 flex-shrink-0 mt-0.5" />}
+            {discovery.vatMultiplier != null && (
+              <div className="rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 px-4 py-2 text-xs text-green-800 dark:text-green-300">
+                Sensors and settings pre-filled from detected integrations. Review and correct as needed.
+              </div>
+            )}
 
-                    {/* Name + description + metadata */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold text-gray-900 dark:text-white">{integration.name}</span>
-                        <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${
-                          integration.required
-                            ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300'
-                            : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400'
-                        }`}>
-                          {integration.required ? 'REQUIRED' : 'OPTIONAL'}
-                        </span>
-                        {!found && (
-                          <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400">
-                            NOT FOUND
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{integration.description}</p>
-                      {found && renderMetadata(integration)}
-                    </div>
+            <SensorConfigSection
+              sensors={sensors}
+              onChange={setSensors}
+              discovery={discovery}
+            />
 
-                    {/* Sensor count + expand chevron */}
-                    <div className="flex items-center gap-2 flex-shrink-0 mt-0.5">
-                      {hasSensors && (
-                        <span className={`text-xs font-medium ${
-                          counts.missingRequired > 0
-                            ? 'text-orange-500'
-                            : counts.configured === counts.total
-                              ? 'text-green-600 dark:text-green-400'
-                              : 'text-gray-500 dark:text-gray-400'
-                        }`}>
-                          {counts.configured}/{counts.total}
-                        </span>
-                      )}
-                      <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform ${expanded ? 'rotate-180' : ''}`} />
-                    </div>
-                  </button>
-
-                  {/* Expanded detail */}
-                  {expanded && hasSensors && (
-                    <div className="border-t border-gray-100 dark:border-gray-700 px-5 pb-4">
-                      {integration.sensorGroups.map(group => {
-                        const groupConfigured = group.sensors.filter(s => editedSensors[s.key]).length;
-                        return (
-                          <div key={group.name} className="mt-3">
-                            <div className="flex items-center gap-2 mb-2">
-                              <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
-                                {group.name}
-                              </h4>
-                              <span className="text-[10px] text-gray-400 dark:text-gray-500">
-                                {groupConfigured}/{group.sensors.length}
-                              </span>
-                            </div>
-                            <div className="space-y-1.5">
-                              {group.sensors.map(sensor => {
-                                const value = editedSensors[sensor.key] ?? '';
-                                const isMissing = !value;
-                                return (
-                                  <div key={sensor.key} className={`flex flex-col sm:flex-row sm:items-center gap-1 p-2 rounded-lg ${
-                                    isMissing && sensor.required
-                                      ? 'bg-orange-50 dark:bg-orange-900/10'
-                                      : isMissing
-                                        ? 'bg-gray-50 dark:bg-gray-700/30'
-                                        : 'bg-gray-50 dark:bg-gray-700/50'
-                                  }`}>
-                                    <div className="flex items-center gap-1.5 sm:w-52 flex-shrink-0">
-                                      {isMissing
-                                        ? <AlertCircle className="h-3 w-3 text-orange-400 flex-shrink-0" />
-                                        : <CheckCircle className="h-3 w-3 text-green-500 flex-shrink-0" />}
-                                      <label className="text-xs font-medium text-gray-600 dark:text-gray-300">
-                                        {sensor.label}
-                                      </label>
-                                      {sensor.required && (
-                                        <span className="text-[9px] text-orange-500 dark:text-orange-400 font-medium">*</span>
-                                      )}
-                                    </div>
-                                    <input
-                                      type="text"
-                                      value={value}
-                                      onChange={e => setEditedSensors(prev => ({ ...prev, [sensor.key]: e.target.value }))}
-                                      placeholder={isMissing ? 'Not detected — enter entity ID' : ''}
-                                      className={`flex-1 text-xs px-2 py-1 rounded border font-mono
-                                        ${isMissing && sensor.required
-                                          ? 'border-orange-300 dark:border-orange-600 bg-white dark:bg-gray-800 text-orange-700 dark:text-orange-300 placeholder-orange-400'
-                                          : 'border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200'}
-                                        focus:outline-none focus:ring-1 focus:ring-blue-400`}
-                                    />
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-
-            {/* Required sensors warning */}
-            {!hasAllRequired() && (
+            {!allRequiredFilled && (
               <div className="p-3 bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-lg text-sm text-orange-700 dark:text-orange-300">
                 Some required sensors (marked with <span className="font-semibold">*</span>) are missing. Expand the integration to configure them manually.
               </div>
             )}
 
-            {/* Action buttons */}
             <div className="flex justify-between pt-2">
               <button
                 onClick={handleScan}
@@ -534,8 +350,8 @@ const SetupWizardPage: React.FC = () => {
                 disabled={confirming}
                 className="flex items-center space-x-2 px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 font-medium disabled:opacity-60"
               >
-                {confirming ? <div className="h-4 w-4 border-2 border-white rounded-full border-t-transparent animate-spin" /> : null}
-                <span>Apply Configuration</span>
+                {confirming && <div className="h-4 w-4 border-2 border-white rounded-full border-t-transparent animate-spin" />}
+                <span>Next: Electricity Pricing</span>
                 <ChevronRight className="h-4 w-4" />
               </button>
             </div>
@@ -546,28 +362,154 @@ const SetupWizardPage: React.FC = () => {
           </div>
         )}
 
-        {/* Step 2: Success */}
+        {/* ── Step 2: Electricity Pricing ── */}
         {step === 2 && (
-          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
-            <div className="text-center py-8">
-              <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4" />
-              <h2 className="text-xl font-bold text-gray-900 dark:text-white">Configuration Applied!</h2>
-              <p className="text-gray-600 dark:text-gray-400 mt-2">
-                BESS Manager has been configured with your discovered sensors.
-                The system will begin operating immediately.
+          <div className="space-y-3">
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Electricity Pricing</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                How the optimizer calculates the real cost of buying and selling electricity. Getting this right is essential for accurate savings calculations.
               </p>
-              <button
-                onClick={() => navigate('/', { replace: true })}
-                className="mt-6 px-8 py-3 bg-green-500 text-white rounded-lg hover:bg-green-600 font-semibold text-lg"
-              >
-                Go to Dashboard
+            </div>
+
+            {discovery?.vatMultiplier != null && (
+              <div className="rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 px-4 py-2 text-xs text-green-800 dark:text-green-300">
+                Currency, VAT multiplier and price area pre-filled from detected Nord Pool integration.
+              </div>
+            )}
+
+            <PricingFormSection form={pricingForm} onChange={setPricingForm} />
+
+            <div className="flex justify-between pt-2">
+              <button onClick={() => setStep(1)}
+                className="flex items-center space-x-1 px-4 py-2 text-gray-600 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700">
+                <ChevronLeft className="h-4 w-4" /><span>Back</span>
+              </button>
+              <button onClick={() => setStep(3)}
+                className="flex items-center space-x-2 px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 font-medium">
+                <span>Next: Battery</span><ChevronRight className="h-4 w-4" />
               </button>
             </div>
           </div>
         )}
 
+        {/* ── Step 3: Battery ── */}
+        {step === 3 && (
+          <div className="space-y-3">
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Battery</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                Your inverter model and battery hardware specifications. These values are used by the optimizer to plan charge and discharge schedules.
+              </p>
+            </div>
+
+            <BatteryFormSection
+              form={batteryForm}
+              onChange={setBatteryForm}
+              inverterForm={inverterForm}
+              onInverterChange={setInverterForm}
+              currency={pricingForm.currency}
+              weatherEntity={sensors['weather_entity']}
+            />
+
+            <div className="flex justify-between pt-2">
+              <button onClick={() => setStep(2)}
+                className="flex items-center space-x-1 px-4 py-2 text-gray-600 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700">
+                <ChevronLeft className="h-4 w-4" /><span>Back</span>
+              </button>
+              <button onClick={() => setStep(4)}
+                className="flex items-center space-x-2 px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 font-medium">
+                <span>Next: Home</span><ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Step 4: Home ── */}
+        {step === 4 && (
+          <div className="space-y-3">
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Home</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                Fuse protection prevents the main fuse from blowing when the battery charges at the same time as other high loads. Recommended if your home does not have hardware power limiting.
+              </p>
+            </div>
+
+            <HomeFormSection form={homeForm} onChange={setHomeForm} />
+
+            {completeError && (
+              <p className="text-sm text-red-600 dark:text-red-400">{completeError}</p>
+            )}
+            <div className="flex justify-between pt-2">
+              <button onClick={() => setStep(3)}
+                className="flex items-center space-x-1 px-4 py-2 text-gray-600 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700">
+                <ChevronLeft className="h-4 w-4" /><span>Back</span>
+              </button>
+              <button
+                onClick={handleComplete}
+                disabled={completing}
+                className="flex items-center space-x-2 px-6 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 font-medium disabled:opacity-60"
+              >
+                {completing && <div className="h-4 w-4 border-2 border-white rounded-full border-t-transparent animate-spin" />}
+                <span>Finish Setup</span><ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Step 5: Done ── */}
+        {step === 5 && (
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
+            <div className="text-center py-6">
+              <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4" />
+              <h2 className="text-xl font-bold text-gray-900 dark:text-white">Setup Complete!</h2>
+              <p className="text-gray-600 dark:text-gray-400 mt-2">
+                BESS Manager is configured and ready to optimize your battery.
+              </p>
+            </div>
+
+            <div className="mt-2 rounded-lg bg-gray-50 dark:bg-gray-700 p-4 space-y-2 text-sm">
+              <div className="flex justify-between">
+                <span className="text-gray-500 dark:text-gray-400">Battery capacity</span>
+                <span className="font-medium text-gray-900 dark:text-white">{batteryForm.totalCapacity} kWh</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500 dark:text-gray-400">SOC range</span>
+                <span className="font-medium text-gray-900 dark:text-white">{batteryForm.minSoc}% – {batteryForm.maxSoc}%</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500 dark:text-gray-400">Max power</span>
+                <span className="font-medium text-gray-900 dark:text-white">{batteryForm.maxChargeDischargePowerKw} kW</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500 dark:text-gray-400">Inverter type</span>
+                <span className="font-medium text-gray-900 dark:text-white">{inverterForm.inverterType}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500 dark:text-gray-400">Currency</span>
+                <span className="font-medium text-gray-900 dark:text-white">{pricingForm.currency}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500 dark:text-gray-400">Price provider</span>
+                <span className="font-medium text-gray-900 dark:text-white">{pricingForm.provider}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500 dark:text-gray-400">VAT multiplier</span>
+                <span className="font-medium text-gray-900 dark:text-white">{pricingForm.vatMultiplier}</span>
+              </div>
+            </div>
+
+            <button
+              onClick={() => navigate('/', { replace: true })}
+              className="mt-6 w-full px-8 py-3 bg-green-500 text-white rounded-lg hover:bg-green-600 font-semibold text-base"
+            >
+              Go to Dashboard
+            </button>
+          </div>
+        )}
+
         <p className="text-center mt-4 text-xs text-gray-400 dark:text-gray-500">
-          Sensors can be reconfigured at any time via Auto-Configure on the System Health page.
+          Settings can be updated at any time via the Settings page.
         </p>
       </div>
     </div>

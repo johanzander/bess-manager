@@ -19,7 +19,8 @@ BESS Battery Manager is a comprehensive solution for optimizing battery energy s
 - **Real-Time Monitoring**: Live dashboard with energy flow visualization
 - **Decision Intelligence**: Detailed hourly strategy analysis and economic reasoning
 - **Savings Analysis**: Historical financial reports and performance tracking
-- **System Health**: Comprehensive diagnostics and sensor validation
+- **Auto-Configuration**: Setup wizard scans Home Assistant and detects Growatt, Nordpool, Solcast and other integrations automatically — no manual entity ID lookup required
+- **System Health**: Comprehensive diagnostics and sensor validation in the Settings page
 
 ## Installation
 
@@ -39,26 +40,34 @@ For detailed installation instructions, see the [Installation Guide](https://git
 
 ## Configuration
 
-### Battery Settings
+All settings are configured through the web interface — no manual YAML editing required for
+battery, pricing, home, or sensor settings.
+
+The only setting that belongs in the add-on configuration (Options tab) is `influxdb`:
 
 ```yaml
-battery:
-  total_capacity: 30.0              # Battery capacity in kWh
-  max_charge_discharge_power: 15.0  # Max power in kW
-  cycle_cost: 0.50                  # Battery wear cost per kWh (in your currency)
-  min_action_profit_threshold: 1.5  # Minimum profit for battery actions
+influxdb:
+  url: "http://homeassistant.local:8086/api/v2/query"
+  bucket: "homeassistant/autogen"
+  username: "bess"
+  password: "your_password_here"
 ```
 
-### Price Settings
+### First-Time Setup
 
-```yaml
-electricity_price:
-  area: "SE4"                       # Nordpool area
-  markup_rate: 0.08                 # Electricity markup per kWh
-  vat_multiplier: 1.25              # 25% VAT
-  additional_costs: 1.03            # Additional costs per kWh
-  tax_reduction: 0.6518             # Tax reduction for sold energy
-```
+On first launch, a **Setup Wizard** guides you through auto-discovering your Growatt, Nordpool,
+Solcast and other integrations. It fills in sensor entity IDs automatically. The wizard can be
+re-run at any time from **Settings → Sensors → Auto-Configure**.
+
+### Settings Page
+
+All other configuration is done in the **Settings** page:
+
+- **Home** — Currency, consumption baseline, fuse, voltage, phase count, safety margin
+- **Pricing** — Energy provider (Nordpool/Octopus), price area, VAT, markup, additional costs
+- **Battery** — Capacity, power limits, SOC range, cycle cost, min action profit threshold
+- **Sensors** — All sensor entity IDs grouped by integration, with live health status per sensor
+- **Health** — Full component health check with refresh and debug export
 
 ### Required Sensors
 
@@ -69,7 +78,7 @@ The add-on requires sensors for:
 - Pricing: Electricity spot prices via Nordpool or Octopus Energy (today and tomorrow)
 - Consumption: 48-hour average forecast
 
-See the [Installation Guide](https://github.com/johanzander/bess-manager/blob/main/docs/INSTALLATION.md) for complete sensor configuration examples.
+See the [Installation Guide](https://github.com/johanzander/bess-manager/blob/main/docs/INSTALLATION.md) for full setup instructions.
 
 ## Usage
 
@@ -83,7 +92,7 @@ Access the BESS Manager dashboard via Settings → Add-ons → BESS Manager → 
 2. **Savings**: Financial analysis and historical reports
 3. **Inverter**: Battery schedule management and status
 4. **Insights**: Decision intelligence and strategy analysis
-5. **System Health**: Component diagnostics and sensor validation
+5. **Settings**: All configuration — battery, pricing, sensors, and component health
 
 ## How It Works
 
@@ -98,7 +107,8 @@ Access the BESS Manager dashboard via Settings → Add-ons → BESS Manager → 
 
 ### Check System Health
 
-Go to the System Health page in the web interface to verify all sensors are working correctly.
+Go to **Settings → Health** in the web interface to verify all sensors and integrations are
+working correctly.
 
 ### View Logs
 

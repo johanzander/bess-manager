@@ -1,6 +1,7 @@
 # Energy Management System Improvements - Prioritized Implementation Plan
 
-## 🔴 **CRITICAL PRIORITY** (System Reliability)
+
+## �🔴 **CRITICAL PRIORITY** (System Reliability)
 
 ### 0. **Fix Battery Discharge Power Control Bug**
 
@@ -343,6 +344,24 @@ This would make the profitability gate compare apples-to-apples with the dashboa
 **Benefits**: Type safety, extensibility for locale/timezone/precision without signature changes, future-proof for internationalization
 
 **Files**: `backend/api_dataclasses.py`, `backend/api.py`
+
+### Hardcoded Fallback Values Violating CLAUDE.md
+
+**Impact**: Medium | **Effort**: Low | **Dependencies**: None
+
+**Description**: Several places in `backend/api.py` use hardcoded fallback values and `hasattr` guards that violate the CLAUDE.md principle "Never use hasattr, fallbacks or default values — use error/assert instead". These mask real sensor failures with fabricated data.
+
+**Locations to fix**:
+
+- `battery_soe_kwh = 25.0` — hardcoded default SOE (line ~1465)
+- `battery_capacity = 50.0` — hardcoded default capacity (line ~1466)
+- `hasattr(bess_controller.system, "controller")` guard (line ~1470)
+- `hasattr(bess_controller.system, "battery_settings")` guard (line ~1476)
+- `except Exception: pass  # Silently continue with default` (line ~1487)
+
+**Fix**: Remove the entire try/except wrapper and default assignments. Access `bess_controller.system.controller` and `bess_controller.system.battery_settings` directly — if they are absent the system is misconfigured and should fail explicitly.
+
+**Files**: `backend/api.py`
 
 ### Other Technical Debt
 

@@ -49,6 +49,12 @@ class OfficialNordpoolSource(PriceSource):
         Raises:
             ValueError: If prices cannot be fetched
         """
+        if not self.config_entry_id:
+            raise ValueError(
+                "Nordpool integration not configured: config_entry_id is missing. "
+                "Run the setup wizard to configure the Nordpool integration."
+            )
+
         logger.info(
             f"Fetching Nordpool prices for {target_date} using official integration"
         )
@@ -141,34 +147,7 @@ class OfficialNordpoolSource(PriceSource):
             "checks": [],
         }
 
-        # Test the service call with today's date
-        today = time_utils.today()
-
-        service_check = {
-            "name": "Nordpool Service Call",
-            "status": "OK",
-            "error": None,
-            "value": "Available",
-        }
-
-        try:
-            # Try to get today's prices to verify the integration works
-            prices = self.get_prices_for_date(today)
-            service_check.update(
-                {"status": "OK", "value": f"{len(prices)} hourly prices available"}
-            )
-
-        except Exception as e:
-            service_check.update(
-                {
-                    "status": "ERROR",
-                    "error": f"Service call failed: {e!s}",
-                    "value": "N/A",
-                }
-            )
-            health_check["status"] = "ERROR"
-
-        # Add config entry check
+        # Check config entry ID first — no point calling the API without it
         config_check = {
             "name": "Configuration Entry",
             "status": "OK",
@@ -182,6 +161,33 @@ class OfficialNordpoolSource(PriceSource):
                     "status": "ERROR",
                     "error": "No config entry ID configured",
                     "value": "Missing",
+                }
+            )
+            health_check["status"] = "ERROR"
+            health_check["checks"] = [config_check]
+            return health_check
+
+        # Test the service call with today's date
+        today = time_utils.today()
+
+        service_check = {
+            "name": "Nordpool Service Call",
+            "status": "OK",
+            "error": None,
+            "value": "Available",
+        }
+
+        try:
+            prices = self.get_prices_for_date(today)
+            service_check.update(
+                {"status": "OK", "value": f"{len(prices)} hourly prices available"}
+            )
+        except Exception as e:
+            service_check.update(
+                {
+                    "status": "ERROR",
+                    "error": f"Service call failed: {e!s}",
+                    "value": "N/A",
                 }
             )
             health_check["status"] = "ERROR"

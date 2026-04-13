@@ -312,8 +312,8 @@ const InverterStatusDashboard: React.FC = () => {
   };
 
   const fetchBatterySettings = async (): Promise<BatterySettings> => {
-    const response = await api.get('/api/settings/battery');
-    return response.data;
+    const response = await api.get('/api/settings');
+    return response.data.battery;
   };
 
   const fetchDashboardData = async (): Promise<DashboardData> => {

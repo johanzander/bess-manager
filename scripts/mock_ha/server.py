@@ -112,6 +112,15 @@ def _load_scenario() -> None:
             logger.info("Nordpool prices loaded: %s", summary)
         else:
             logger.warning("No nordpool prices found in scenario — price fetches will return empty")
+    else:
+        # mock_time is required — without it we cannot anchor prices to a date and
+        # BESS will run against real wall-clock time with no price data.
+        # Regenerate the scenario with from_debug_log.py to fix this.
+        raise ValueError(
+            f"Scenario '{scenario_name}' has no mock_time. "
+            "Regenerate it with: "
+            "python scripts/mock_ha/scenarios/from_debug_log.py <debug_log>"
+        )
 
     logger.info(
         "Loaded scenario '%s' — %d sensors, %d TOU segments",
@@ -148,6 +157,12 @@ def _make_state_response(entity_id: str, value: Any) -> dict:
 async def get_config() -> JSONResponse:
     """Return HA configuration including the scenario timezone."""
     return JSONResponse({"time_zone": _timezone})
+
+
+@app.get("/api/states")
+async def get_all_states() -> JSONResponse:
+    """Return all entity states as a list — used by auto-discovery."""
+    return JSONResponse([_make_state_response(eid, val) for eid, val in _sensors.items()])
 
 
 @app.get("/api/states/{entity_id:path}")

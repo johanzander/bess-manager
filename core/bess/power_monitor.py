@@ -88,13 +88,13 @@ class HomePowerMonitor:
                     "name": "Power Monitoring",
                     "description": "Monitors home power consumption and adapts battery charging",
                     "required": False,
-                    "status": "WARNING",
+                    "status": "OK",
                     "checks": [
                         {
                             "name": "Power Monitor Status",
                             "entity_id": None,
-                            "status": "WARNING",
-                            "error": "Disabled — set power_monitoring_enabled: true in config to enable",
+                            "status": "OK",
+                            "error": "Disabled — enable power monitoring in Settings → Home",
                         }
                     ],
                     "last_run": datetime.now().isoformat(),
@@ -117,7 +117,7 @@ class HomePowerMonitor:
             is_required=False,
             controller=self.controller,
             all_methods=all_methods,
-            required_methods=all_methods,
+            required_methods=[],
         )
 
         return [health_check]

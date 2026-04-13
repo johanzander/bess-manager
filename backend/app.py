@@ -10,6 +10,7 @@ import log_config as _  # noqa: F401
 
 # Import endpoints router
 from api import router as endpoints_router
+from api_conversion import build_system_settings
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from fastapi import FastAPI
@@ -371,96 +372,7 @@ class BESSController:
                 raise ValueError("Configuration options are required but not provided")
 
             logger.debug(f"Applying settings: {json.dumps(options, indent=2)}")
-
-            # Validate required sections exist
-            required_sections = ["battery", "electricity_price", "home"]
-            for section in required_sections:
-                if section not in options:
-                    raise ValueError(
-                        f"Required configuration section '{section}' is missing from config.yaml"
-                    )
-
-            # Validate required values without defaults
-            battery_config = options["battery"]
-            electricity_price_config = options["electricity_price"]
-            home_config = options["home"]
-
-            # Required battery settings
-            required_battery_keys = [
-                "total_capacity",
-                "min_soc",
-                "max_soc",
-                "cycle_cost",
-                "max_charge_discharge_power",
-                "min_action_profit_threshold",
-            ]
-            for key in required_battery_keys:
-                if key not in battery_config:
-                    raise ValueError(
-                        f"Required battery setting '{key}' is missing from config.yaml"
-                    )
-
-            # Required electricity price settings
-            required_price_keys = [
-                "area",
-                "markup_rate",
-                "vat_multiplier",
-                "additional_costs",
-                "tax_reduction",
-            ]
-            for key in required_price_keys:
-                if key not in electricity_price_config:
-                    raise ValueError(
-                        f"Required electricity_price setting '{key}' is missing from config.yaml"
-                    )
-
-            # Required home settings
-            required_home_keys = [
-                "consumption",
-                "currency",
-                "max_fuse_current",
-                "voltage",
-                "safety_margin_factor",
-                "phase_count",
-                "consumption_strategy",
-                "power_monitoring_enabled",
-            ]
-            for key in required_home_keys:
-                if key not in home_config:
-                    raise ValueError(
-                        f"Required home setting '{key}' is missing from config.yaml"
-                    )
-
-            settings = {
-                "battery": {
-                    "totalCapacity": battery_config["total_capacity"],
-                    "minSoc": battery_config["min_soc"],
-                    "maxSoc": battery_config["max_soc"],
-                    "cycleCostPerKwh": battery_config["cycle_cost"],
-                    "maxChargePowerKw": battery_config["max_charge_discharge_power"],
-                    "maxDischargePowerKw": battery_config["max_charge_discharge_power"],
-                    "minActionProfitThreshold": battery_config[
-                        "min_action_profit_threshold"
-                    ],
-                },
-                "home": {
-                    "defaultHourly": home_config["consumption"],
-                    "currency": home_config["currency"],
-                    "maxFuseCurrent": home_config["max_fuse_current"],
-                    "voltage": home_config["voltage"],
-                    "safetyMargin": home_config["safety_margin_factor"],
-                    "phaseCount": home_config["phase_count"],
-                    "consumptionStrategy": home_config["consumption_strategy"],
-                    "powerMonitoringEnabled": home_config["power_monitoring_enabled"],
-                },
-                "price": {
-                    "area": electricity_price_config["area"],
-                    "markupRate": electricity_price_config["markup_rate"],
-                    "vatMultiplier": electricity_price_config["vat_multiplier"],
-                    "additionalCosts": electricity_price_config["additional_costs"],
-                    "taxReduction": electricity_price_config["tax_reduction"],
-                },
-            }
+            settings = build_system_settings(options)
 
             logger.debug(f"Formatted settings: {json.dumps(settings, indent=2)}")
             self.system.update_settings(settings)

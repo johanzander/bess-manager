@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CheckCircle, ChevronRight, ChevronLeft, Zap } from 'lucide-react';
 import api from '../lib/api';
@@ -33,6 +33,7 @@ const SetupWizardPage: React.FC = () => {
   const [confirmError, setConfirmError] = useState<string | null>(null);
   const [completing, setCompleting] = useState(false);
   const [completeError, setCompleteError] = useState<string | null>(null);
+  const existingSensorsRef = useRef<Record<string, string>>({});
 
   const [batteryForm, setBatteryForm] = useState<BatteryForm>({
     totalCapacity: 30.0,
@@ -105,12 +106,13 @@ const SetupWizardPage: React.FC = () => {
         setInverterForm(f => ({ ...f, deviceId: d.growattDeviceId! }));
       }
 
-      // Merge discovered sensors with empty entries for all known sensor keys
+      // Merge discovered sensors with existing config. Discovered values take
+      // priority; existing config fills gaps when discovery fails (e.g. MID VR).
       const allSensors: Record<string, string> = {};
       for (const integration of INTEGRATIONS) {
         for (const group of integration.sensorGroups) {
           for (const s of group.sensors) {
-            allSensors[s.key] = d.sensors[s.key] ?? '';
+            allSensors[s.key] = d.sensors[s.key] ?? existingSensorsRef.current[s.key] ?? '';
           }
         }
       }
@@ -128,13 +130,19 @@ const SetupWizardPage: React.FC = () => {
     // Load existing settings so re-running the wizard preserves user config,
     // then run the sensor scan. Sequencing via .finally() ensures the scan
     // never overwrites the loaded values (scan seeds only auto-detected hints).
-    api.get('/api/settings/all').then(res => {
+    api.get('/api/settings').then(res => {
       const s = res.data;
       const bat = s.battery ?? {};
       const home = s.home ?? {};
       const elec = s.electricityPrice ?? {};
       const ep = s.energyProvider ?? {};
       const inv = s.growatt ?? {};
+
+      // Cache existing sensors so handleScan can use them as fallback when
+      // auto-discovery fails (e.g. MID VR inverter with different entity naming).
+      if (s.sensors && typeof s.sensors === 'object') {
+        existingSensorsRef.current = s.sensors as Record<string, string>;
+      }
 
       setBatteryForm(f => ({
         ...f,
@@ -160,13 +168,17 @@ const SetupWizardPage: React.FC = () => {
       }));
       setPricingForm(f => ({
         ...f,
-        provider:        ep.provider          ?? f.provider,
-        currency:        home.currency        ?? f.currency,
-        area:            elec.area            ?? f.area,
-        markupRate:      elec.markupRate      ?? f.markupRate,
-        vatMultiplier:   elec.vatMultiplier   ?? f.vatMultiplier,
-        additionalCosts: elec.additionalCosts ?? f.additionalCosts,
-        taxReduction:    elec.taxReduction    ?? f.taxReduction,
+        provider:              ep.provider                           ?? f.provider,
+        currency:              home.currency                        ?? f.currency,
+        area:                  elec.area                            ?? f.area,
+        markupRate:            elec.markupRate                      ?? f.markupRate,
+        vatMultiplier:         elec.vatMultiplier                   ?? f.vatMultiplier,
+        additionalCosts:       elec.additionalCosts                 ?? f.additionalCosts,
+        taxReduction:          elec.taxReduction                    ?? f.taxReduction,
+        // Restore saved config entry IDs so manual entries survive a wizard re-run
+        nordpoolConfigEntryId: ep.nordpoolOfficial?.configEntryId  ?? f.nordpoolConfigEntryId,
+        nordpoolTodayEntity:   ep.nordpool?.todayEntity            ?? f.nordpoolTodayEntity,
+        nordpoolTomorrowEntity: ep.nordpool?.tomorrowEntity        ?? f.nordpoolTomorrowEntity,
       }));
       if (inv.inverterType) setInverterForm(f => ({ ...f, inverterType: inv.inverterType }));
       if (inv.deviceId) setInverterForm(f => ({ ...f, deviceId: inv.deviceId }));
@@ -188,8 +200,9 @@ const SetupWizardPage: React.FC = () => {
       await api.post('/api/setup/confirm', {
         sensors,
         nordpool_area: discovery.nordpoolArea,
-        nordpool_config_entry_id: discovery.nordpoolConfigEntryId,
-        growatt_device_id: discovery.growattDeviceId,
+        // Prefer the user-entered form value; fall back to auto-detected value
+        nordpool_config_entry_id: pricingForm.nordpoolConfigEntryId || discovery.nordpoolConfigEntryId,
+        growatt_device_id: inverterForm.deviceId || discovery.growattDeviceId,
       });
       setStep(2);
     } catch (err: unknown) {
@@ -207,8 +220,9 @@ const SetupWizardPage: React.FC = () => {
       await api.post('/api/setup/complete', {
         sensors,
         nordpoolArea: pricingForm.area || discovery.nordpoolArea,
-        nordpoolConfigEntryId: discovery.nordpoolConfigEntryId,
-        growattDeviceId: discovery.growattDeviceId,
+        // Prefer the user-entered form value; fall back to auto-detected value
+        nordpoolConfigEntryId: pricingForm.nordpoolConfigEntryId || discovery.nordpoolConfigEntryId,
+        growattDeviceId: inverterForm.deviceId || discovery.growattDeviceId,
         // Battery
         totalCapacity: batteryForm.totalCapacity,
         minSoc: batteryForm.minSoc,

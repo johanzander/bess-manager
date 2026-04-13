@@ -278,6 +278,19 @@ class BatterySystemManager:
             logger.error(f"Failed to start BatterySystemManager: {e}")
             raise
 
+    def reinitialize_historical_data(self) -> None:
+        """Re-run the historical InfluxDB backfill.
+
+        Called after the setup wizard configures sensors so that today's
+        history is available for the first optimization run.
+        Re-resolves sensor entity IDs first (they were empty at startup
+        before the wizard ran), then clears and refills the historical store.
+        """
+        logger.info("Re-initializing historical data after wizard setup")
+        self.sensor_collector.re_resolve_sensors()
+        self.historical_store.clear()
+        self._fetch_and_initialize_historical_data()
+
     def update_battery_schedule(
         self, current_period: int, prepare_next_day: bool = False
     ) -> bool:
@@ -2233,6 +2246,12 @@ class BatterySystemManager:
                 )
                 self._price_manager.tax_reduction = self.price_settings.tax_reduction
                 self._price_manager.area = self.price_settings.area
+                self._price_manager.clear_cache()
+
+            if "energy_provider" in settings:
+                self._energy_provider_config = settings["energy_provider"]
+                new_source = self._create_price_source(self._controller)
+                self._price_manager.price_source = new_source
                 self._price_manager.clear_cache()
 
             logger.info("Settings updated successfully")

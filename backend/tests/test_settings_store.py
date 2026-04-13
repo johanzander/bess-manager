@@ -10,8 +10,6 @@ import os
 import pytest
 import settings_store as _sm
 from api_dataclasses import (
-    APIHomeSettingsPayload,
-    APIPriceSettings,
     APISensorsPayload,
     APISetupCompletePayload,
 )
@@ -245,15 +243,34 @@ class TestApplyDiscovered:
 
         assert store.get_section("sensors")["battery_soc"] == "sensor.battery_soc"
 
-    def test_discovery_does_not_overwrite_existing_sensor(self, tmp_path, monkeypatch):
-        """A sensor already configured by the user is not overwritten by discovery."""
+    def test_discovery_overwrites_existing_sensor(self, tmp_path, monkeypatch):
+        """A non-empty discovered entity ID replaces the existing sensor value.
+
+        This is intentional: re-running discovery must be able to correct a
+        previously wrong entity ID.  The wizard preserves existing values only
+        when discovery returns nothing (empty string), which is handled by the
+        ``if entity_id:`` guard in apply_discovered.
+        """
+        _patch_path(tmp_path, monkeypatch)
+        store = SettingsStore()
+        store.load({})
+        store.save_section("sensors", {"battery_soc": "sensor.old_value"})
+
+        store.apply_discovered(
+            sensor_map={"battery_soc": "sensor.corrected_by_discovery"},
+        )
+
+        assert store.get_section("sensors")["battery_soc"] == "sensor.corrected_by_discovery"
+
+    def test_discovery_empty_does_not_overwrite_existing_sensor(self, tmp_path, monkeypatch):
+        """An empty discovered value leaves the existing sensor value intact."""
         _patch_path(tmp_path, monkeypatch)
         store = SettingsStore()
         store.load({})
         store.save_section("sensors", {"battery_soc": "sensor.user_configured"})
 
         store.apply_discovered(
-            sensor_map={"battery_soc": "sensor.auto_discovered"},
+            sensor_map={"battery_soc": ""},
         )
 
         assert store.get_section("sensors")["battery_soc"] == "sensor.user_configured"
@@ -325,25 +342,6 @@ class TestPayloadValidation:
         payload = APISensorsPayload(sensors={"battery_soc": ""})
         assert payload.sensors["battery_soc"] == ""
 
-    def test_home_settings_payload_requires_all_fields(self):
-        """APIHomeSettingsPayload requires all home/grid fields — it is a full PUT body."""
-        with pytest.raises(ValidationError):
-            APIHomeSettingsPayload()  # type: ignore[call-arg]  # missing required fields
-
-    def test_home_settings_payload_accepts_complete_data(self):
-        """APIHomeSettingsPayload is valid when all fields are provided."""
-        payload = APIHomeSettingsPayload(
-            currency="SEK",
-            consumption=8.0,
-            consumptionStrategy="fixed",
-            maxFuseCurrent=25,
-            voltage=230,
-            safetyMarginFactor=0.9,
-            phaseCount=1,
-            powerMonitoringEnabled=False,
-        )
-        assert payload.currency == "SEK"
-
     def test_setup_complete_payload_entity_id_validated(self):
         """APISetupCompletePayload validates sensor entity IDs."""
         with pytest.raises(ValidationError):
@@ -361,31 +359,120 @@ class TestPayloadValidation:
 
 
 # ---------------------------------------------------------------------------
-# Price settings round-trip
+# Schema migration (_migrate_schema)
 # ---------------------------------------------------------------------------
 
 
-class TestPriceSettingsRoundTrip:
-    """APIPriceSettings.to_internal_update must invert from_internal."""
+class TestSchemaMigration:
+    """_migrate_schema must rename legacy fields and add missing defaults.
 
-    def test_to_internal_update_keys(self):
-        """to_internal_update returns the expected snake_case keys."""
-        settings = APIPriceSettings(
-            area="SE4",
-            markupRate=0.05,
-            vatMultiplier=1.25,
-            additionalCosts=0.02,
-            taxReduction=0.0,
-            minProfit=0.10,
-            useActualPrice=False,
+    All tests write an *old* settings file to disk, load it via SettingsStore,
+    and assert that the in-memory (and re-persisted) data uses the new names.
+    """
+
+    def _store_with_data(self, tmp_path, monkeypatch, data: dict) -> SettingsStore:
+        """Write raw data to the settings file and load it into a SettingsStore."""
+        path = _settings_path(tmp_path)
+        monkeypatch.setattr(_sm, "SETTINGS_PATH", path)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        store = SettingsStore()
+        store.load({})
+        return store
+
+    def test_home_consumption_renamed_to_default_hourly(self, tmp_path, monkeypatch):
+        """Old field 'consumption' must be renamed to 'default_hourly' on load."""
+        store = self._store_with_data(
+            tmp_path, monkeypatch,
+            {"home": {"consumption": 4.5, "currency": "SEK"}},
         )
+        home = store.get_section("home")
+        assert "default_hourly" in home, "Old 'consumption' not renamed to 'default_hourly'"
+        assert home["default_hourly"] == 4.5
+        assert "consumption" not in home
 
-        internal = settings.to_internal_update()
+    def test_home_safety_margin_factor_renamed(self, tmp_path, monkeypatch):
+        """Old field 'safety_margin_factor' must be renamed to 'safety_margin' on load."""
+        store = self._store_with_data(
+            tmp_path, monkeypatch,
+            {"home": {"safety_margin_factor": 1.2, "currency": "SEK"}},
+        )
+        home = store.get_section("home")
+        assert "safety_margin" in home
+        assert home["safety_margin"] == 1.2
+        assert "safety_margin_factor" not in home
 
-        assert internal["area"] == "SE4"
-        assert internal["markup_rate"] == 0.05
-        assert internal["vat_multiplier"] == 1.25
-        assert internal["additional_costs"] == 0.02
-        assert internal["tax_reduction"] == 0.0
-        assert internal["min_profit"] == 0.10
-        assert internal["use_actual_price"] is False
+    def test_battery_max_charge_discharge_power_split(self, tmp_path, monkeypatch):
+        """Old single-power field must be split into charge and discharge variants."""
+        store = self._store_with_data(
+            tmp_path, monkeypatch,
+            {"battery": {"max_charge_discharge_power": 10.0, "total_capacity": 30.0}},
+        )
+        battery = store.get_section("battery")
+        assert "max_charge_power_kw" in battery
+        assert "max_discharge_power_kw" in battery
+        assert battery["max_charge_power_kw"] == 10.0
+        assert battery["max_discharge_power_kw"] == 10.0
+        assert "max_charge_discharge_power" not in battery
+
+    def test_battery_cycle_cost_renamed(self, tmp_path, monkeypatch):
+        """Old field 'cycle_cost' must be renamed to 'cycle_cost_per_kwh'."""
+        store = self._store_with_data(
+            tmp_path, monkeypatch,
+            {"battery": {"cycle_cost": 0.8, "total_capacity": 30.0}},
+        )
+        battery = store.get_section("battery")
+        assert "cycle_cost_per_kwh" in battery
+        assert battery["cycle_cost_per_kwh"] == 0.8
+        assert "cycle_cost" not in battery
+
+    def test_battery_missing_fields_get_defaults(self, tmp_path, monkeypatch):
+        """Fields absent from an old store file are added with safe defaults."""
+        store = self._store_with_data(
+            tmp_path, monkeypatch,
+            {"battery": {"total_capacity": 30.0}},
+        )
+        battery = store.get_section("battery")
+        for field in ("cycle_cost_per_kwh", "min_action_profit_threshold",
+                      "charging_power_rate", "efficiency_charge", "efficiency_discharge"):
+            assert field in battery, f"Expected default for '{field}' to be added by migration"
+
+    def test_migration_persists_to_disk(self, tmp_path, monkeypatch):
+        """Migrated field names must be written back to disk immediately."""
+        path = _settings_path(tmp_path)
+        monkeypatch.setattr(_sm, "SETTINGS_PATH", path)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"home": {"consumption": 3.0, "currency": "NOK"}}, f)
+
+        # First load triggers migration and persists
+        SettingsStore().load({})
+
+        # Second load reads the persisted file — must show new field name
+        store2 = SettingsStore()
+        store2.load({})
+        assert store2.get_section("home")["default_hourly"] == 3.0
+        assert "consumption" not in store2.get_section("home")
+
+    def test_new_field_names_not_doubled(self, tmp_path, monkeypatch):
+        """If a file already uses new field names, migration must not create duplicates."""
+        store = self._store_with_data(
+            tmp_path, monkeypatch,
+            {
+                "battery": {
+                    "max_charge_power_kw": 12.0,
+                    "max_discharge_power_kw": 12.0,
+                    "cycle_cost_per_kwh": 0.6,
+                    "total_capacity": 30.0,
+                },
+                "home": {
+                    "default_hourly": 3.5,
+                    "safety_margin": 1.0,
+                    "currency": "SEK",
+                },
+            },
+        )
+        battery = store.get_section("battery")
+        assert "max_charge_discharge_power" not in battery
+        home = store.get_section("home")
+        assert "consumption" not in home
+        assert "safety_margin_factor" not in home

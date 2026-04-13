@@ -25,6 +25,7 @@ cd ..
 
 # Copy base files - make sure these match what Dockerfile expects
 cp backend/Dockerfile "$BUILD_DIR/Dockerfile"
+cp build.json "$BUILD_DIR/build.json"
 cp backend/app.py "$BUILD_DIR/app.py"
 cp backend/api.py "$BUILD_DIR/api.py"
 cp backend/api_conversion.py "$BUILD_DIR/api_conversion.py"

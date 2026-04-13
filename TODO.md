@@ -153,6 +153,46 @@ Future arbitrage calculations (the "expected arbitrage value" in economic chain 
 - Update frontend to show demo mode indicators
 - Ensure optimization algorithms work with mock data
 
+## 📄 **DOCUMENTATION IMPROVEMENTS**
+
+### Improve Consumption Forecast Documentation
+
+**Impact**: Medium | **Effort**: Low | **Dependencies**: `docs/INSTALLATION.md`
+
+**Current gap**: Step 3 explains *how* to create the 48h average sensor but not *why* it works or how to tune it for different households.
+
+**What to add**:
+
+- Explain what BESS does with the sensor: the DP optimizer uses the current sensor value as the predicted consumption for all future periods in the optimization horizon.
+- Explain why the battery-active filter matters: without it, battery discharge power inflates the apparent home consumption, causing the optimizer to over-predict load and charge more aggressively than needed.
+- Explain how to tune for your household:
+  - The 48h window is a good default — it captures both weekday and weekend patterns.
+  - If your consumption has strong seasonal variation (e.g. heat pump), consider a shorter window (12-24h) so the average adapts faster.
+  - If you have large predictable loads (sauna, hot tub), the average smooths these out — the optimizer will not plan for a 3 kW sauna spike at 19:00 specifically.
+  - EV charging: whether to include or exclude depends on whether BESS should see EV charging as "normal home load" (include → optimizer plans for it) or as a separate managed load (exclude → optimizer ignores it, relies on discharge inhibit sensor instead).
+
+---
+
+### Improve EV Charging / Discharge Inhibit Documentation
+
+**Impact**: Medium | **Effort**: Low | **Dependencies**: `docs/INSTALLATION.md`
+
+**Current gap**: Line 172 says "EV charging: Exclude if managed separately. Include if you want BESS to optimize around it." — too brief. The discharge inhibit sensor is not explained at all.
+
+**What to add**:
+
+BESS does not control EV charging — it is designed to work in parallel with it. Normally both the car and the battery charge when electricity is cheap, so there is no conflict.
+
+The exception is **Tibber grid rewards** (and similar grid balancing programs). Grid rewards can start EV charging even when prices are not at their lowest, because Tibber compensates you separately for supporting grid balancing.
+
+BESS auto-detects any `binary_sensor` whose entity ID ends with `_charging` or `_is_charging` (e.g. `binary_sensor.zap263668_charging`) and treats it as a **discharge inhibit** signal. When the sensor is `on`, BESS will not discharge the battery even if the schedule says to.
+
+If BESS were to discharge the battery at the same time, that energy would flow to the car instead of from the grid — you would miss out on the grid reward income while also losing the battery support you would have had for the home.
+
+The discharge inhibit only blocks discharging — it does not change the TOU schedule, trigger charging, or interfere with the EV charging session in any way.
+
+---
+
 ## 🟢 **LOW PRIORITY** (Polish)
 
 ### 7. Add Prediction accuracy and history
@@ -330,6 +370,48 @@ This would make the profitability gate compare apples-to-apples with the dashboa
 ---
 
 ## 🔧 **TECHNICAL DEBT**
+
+### Simplify Health Check Severity Model
+
+**Impact**: Low | **Effort**: Low-Medium | **Dependencies**: `health_check.py`, `power_monitor.py`, all callers of `perform_health_check()`
+
+**Description**: The current model has two independent knobs that are easy to misconfigure:
+
+- `is_required` — marks the component as critical to the system (used only by the dashboard banner to set `has_critical_errors`)
+- `required_methods` — controls whether a failing sensor inside the component shows ERROR vs WARNING on the component card
+
+These concepts are orthogonal but interact in non-obvious ways. The correct mapping of `is_required` → severity was never enforced, which caused `Power Monitoring` (`is_required=False`) to show ERROR instead of WARNING because `required_methods=all_methods` was passed. Fixed by hand, but the underlying design is fragile.
+
+**Proposed simplification**: Derive `required_methods` automatically from `is_required` instead of requiring callers to pass both:
+
+- `is_required=True` → all methods are required → failure → ERROR
+- `is_required=False` → no methods are required → failure → WARNING
+
+This eliminates the `required_methods` parameter entirely and makes the policy self-consistent: optional components can never show ERROR, required components always show ERROR on failure.
+
+**Files**: `core/bess/health_check.py`, `core/bess/power_monitor.py`, `core/bess/health_check.py` (all `perform_health_check()` call sites)
+
+---
+
+### Move `charging_power_rate` out of `BatterySettings`
+
+**Impact**: Low | **Effort**: Medium | **Dependencies**: `power_monitor.py`, `settings_store.py`, migration
+
+**Description**: `charging_power_rate` is stored in `BatterySettings` but it is not a battery hardware characteristic — it is a live Growatt number entity (`battery_charge_power_limit`) that is read and written via HA at runtime. It ended up in `BatterySettings` only because `power_monitor.py` needs an initial value before HA is read. That is weak justification for treating it as a user-facing battery setting.
+
+**What needs to change**:
+
+- Remove `charging_power_rate` from `BatterySettings` dataclass (`core/bess/settings.py`)
+- Update `power_monitor.py` to use a local constant or read the initial value from HA directly
+- Update schema migration in `settings_store.py` (remove from battery section, or move to growatt section)
+- Verify `_BATTERY_MODEL_ATTRS` in `api.py` updates automatically (it is derived from the dataclass, so it will)
+- Update any tests that reference `battery_settings.charging_power_rate`
+
+**Files**: `core/bess/settings.py`, `core/bess/power_monitor.py`, `backend/settings_store.py`
+
+---
+
+
 
 ### FormattingContext Architecture
 

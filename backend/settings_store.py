@@ -71,6 +71,7 @@ class SettingsStore:
         # First boot: migrate from options.json
         logger.info("bess_settings.json absent or empty — migrating from options.json")
         self.data = self._migrate_from_options(options)
+        self._migrate_schema()  # normalise any legacy field names copied from options.json
         self._write(self.data)
         logger.info(
             "Migration complete: wrote %d sections to %s",
@@ -121,7 +122,13 @@ class SettingsStore:
     ) -> None:
         """Merge auto-discovered values into the store and persist.
 
-        Existing non-empty values are not overwritten (discovery is additive).
+        Sensors: non-empty discovered values always overwrite existing ones so
+        that re-running discovery can correct previously wrong entity IDs.
+        Empty strings are ignored so that a partial discovery run does not
+        erase sensors that were already configured.
+
+        Nordpool area, config_entry_id, and Growatt device_id are additive:
+        they are only written when the field is currently empty.
 
         Args:
             sensor_map: Mapping of bess_sensor_key -> entity_id.
@@ -129,8 +136,9 @@ class SettingsStore:
             nordpool_config_entry_id: HA config entry UUID for Nordpool.
             growatt_device_id: HA device registry ID for the Growatt device.
         """
-        # Sensors — always overwrite with newly discovered values so that
-        # a corrected auto-discover run fixes previously wrong entity IDs.
+        # Sensors: overwrite with any non-empty discovered value.
+        # Empty strings are skipped so a partial discovery does not erase
+        # already-configured sensors.
         sensors = dict(self.data.get("sensors", {}))
         for key, entity_id in sensor_map.items():
             if entity_id:
@@ -278,17 +286,18 @@ class SettingsStore:
                 "total_capacity": BATTERY_STORAGE_SIZE_KWH,
                 "min_soc": BATTERY_MIN_SOC,
                 "max_soc": BATTERY_MAX_SOC,
-                "max_charge_discharge_power": BATTERY_MAX_CHARGE_DISCHARGE_POWER_KW,
-                "cycle_cost": BATTERY_CHARGE_CYCLE_COST,
+                "max_charge_power_kw": BATTERY_MAX_CHARGE_DISCHARGE_POWER_KW,
+                "max_discharge_power_kw": BATTERY_MAX_CHARGE_DISCHARGE_POWER_KW,
+                "cycle_cost_per_kwh": BATTERY_CHARGE_CYCLE_COST,
                 "min_action_profit_threshold": BATTERY_MIN_ACTION_PROFIT_THRESHOLD,
             },
             "home": {
-                "consumption": HOME_HOURLY_CONSUMPTION_KWH,
+                "default_hourly": HOME_HOURLY_CONSUMPTION_KWH,
                 "currency": DEFAULT_CURRENCY,
                 "consumption_strategy": "fixed",
                 "max_fuse_current": HOUSE_MAX_FUSE_CURRENT_A,
                 "voltage": HOUSE_VOLTAGE_V,
-                "safety_margin_factor": SAFETY_MARGIN_FACTOR,
+                "safety_margin": SAFETY_MARGIN_FACTOR,
                 "phase_count": 1,
                 "power_monitoring_enabled": False,
             },
@@ -310,14 +319,17 @@ class SettingsStore:
         }
 
     def _migrate_schema(self) -> None:
-        """Add missing keys introduced in newer versions of the schema.
+        """Add missing keys and normalize field names introduced in newer schema versions.
 
-        Called after loading bess_settings.json so that old files written
-        before a field was added are silently upgraded in place.  Values are
-        sourced from core constants so there is a single source of truth.
+        Called after loading bess_settings.json so that old files are silently
+        upgraded in place.  Values are sourced from core constants so there is a
+        single source of truth.
         """
         from core.bess.settings import (
             BATTERY_CHARGE_CYCLE_COST,
+            BATTERY_DEFAULT_CHARGING_POWER_RATE,
+            BATTERY_EFFICIENCY_CHARGE,
+            BATTERY_EFFICIENCY_DISCHARGE,
             BATTERY_MIN_ACTION_PROFIT_THRESHOLD,
         )
 
@@ -325,16 +337,52 @@ class SettingsStore:
 
         battery = self.data.get("battery")
         if isinstance(battery, dict):
+            # Rename: max_charge_discharge_power → max_charge_power_kw + max_discharge_power_kw
+            if "max_charge_discharge_power" in battery and "max_charge_power_kw" not in battery:
+                power = battery.pop("max_charge_discharge_power")
+                battery["max_charge_power_kw"] = power
+                battery["max_discharge_power_kw"] = power
+                logger.info("Schema migration: renamed max_charge_discharge_power → max_charge_power_kw/max_discharge_power_kw = %s", power)
+                changed = True
+
+            # Rename: cycle_cost → cycle_cost_per_kwh
+            if "cycle_cost" in battery and "cycle_cost_per_kwh" not in battery:
+                battery["cycle_cost_per_kwh"] = battery.pop("cycle_cost")
+                logger.info("Schema migration: renamed cycle_cost → cycle_cost_per_kwh = %s", battery["cycle_cost_per_kwh"])
+                changed = True
+
+            # Add missing fields with defaults
             for key, default in (
-                ("cycle_cost", BATTERY_CHARGE_CYCLE_COST),
+                ("cycle_cost_per_kwh", BATTERY_CHARGE_CYCLE_COST),
                 ("min_action_profit_threshold", BATTERY_MIN_ACTION_PROFIT_THRESHOLD),
+                ("charging_power_rate", BATTERY_DEFAULT_CHARGING_POWER_RATE),
+                ("efficiency_charge", BATTERY_EFFICIENCY_CHARGE),
+                ("efficiency_discharge", BATTERY_EFFICIENCY_DISCHARGE),
             ):
                 if key not in battery:
                     battery[key] = default
                     logger.info("Schema migration: added battery.%s = %s", key, default)
                     changed = True
+
             if changed:
                 self.data["battery"] = battery
+
+        home = self.data.get("home")
+        if isinstance(home, dict):
+            # Rename: consumption → default_hourly  (matches HomeSettings attribute name)
+            if "consumption" in home and "default_hourly" not in home:
+                home["default_hourly"] = home.pop("consumption")
+                logger.info("Schema migration: renamed home.consumption → home.default_hourly = %s", home["default_hourly"])
+                changed = True
+
+            # Rename: safety_margin_factor → safety_margin  (matches HomeSettings attribute name)
+            if "safety_margin_factor" in home and "safety_margin" not in home:
+                home["safety_margin"] = home.pop("safety_margin_factor")
+                logger.info("Schema migration: renamed home.safety_margin_factor → home.safety_margin = %s", home["safety_margin"])
+                changed = True
+
+            if changed:
+                self.data["home"] = home
 
         if changed:
             self._write(self.data)

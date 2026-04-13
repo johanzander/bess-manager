@@ -6,6 +6,7 @@ services:
       - ./core:/app/core:delegated
       - ./frontend/dist:/app/frontend:delegated
       - ./scripts/mock_ha/mock-entrypoint.sh:/mock-entrypoint.sh:ro
+      - ./backend/mock-bess-settings.json:/data/bess_settings.json
     environment:
       - HA_URL=http://mock-ha:8123
       - HA_TOKEN=mock_token

@@ -339,14 +339,35 @@ class HomeAssistantAPIController:
     # Maps entity ID suffix (after device_sn_) → BESS sensor key.
     # Used by discover_growatt_sensors() to map entity IDs from GET /api/states.
     # Entity IDs follow the pattern: <domain>.<device_sn>_<suffix>
+    #
+    # HA generates entity IDs from the slugified *translation name*, not the sensor key.
+    # E.g. key="tlx_statement_of_charge", name="State of charge (SoC)"
+    #      → entity ID suffix: "state_of_charge_soc"  (tlx_ never appears in entity IDs)
+    #
+    # The SOC sensor name was corrected at some point ("Statement of Charge SOC" →
+    # "State of charge (SoC)"), so both suffixes exist across installations.
+    # All other sensor names are stable — these entries cover MIN/TLX interface models
+    # (MIN, MID, MIC, MOD, MOC, NEO, etc.) via both official HA Core and HACS builds.
     ENTITY_SUFFIX_MAP: ClassVar[dict[str, str]] = {
-        "statement_of_charge_soc": "battery_soc",
+        # SOC — two variants due to historical translation name correction
+        "state_of_charge_soc": "battery_soc",       # current name: "State of charge (SoC)"
+        "statement_of_charge_soc": "battery_soc",   # old name: "Statement of Charge SOC"
+        # Real-time power sensors
         "battery_1_charging_w": "battery_charge_power",
         "battery_1_discharging_w": "battery_discharge_power",
         "import_power": "import_power",
         "export_power": "export_power",
         "local_load_power": "local_load_power",
         "internal_wattage": "pv_power",
+        # Grid charge switch — two variants (old key-based vs translation-name-based slug)
+        "charge_from_grid": "grid_charge",  # current name: "Charge from grid"
+        "ac_charge": "grid_charge",         # old name: key used directly as entity ID
+        # Number entities — names slugify to the same string as the key
+        "battery_charge_power_limit": "battery_charging_power_rate",
+        "battery_discharge_power_limit": "battery_discharging_power_rate",
+        "battery_charge_soc_limit": "battery_charge_stop_soc",
+        "battery_discharge_soc_limit": "battery_discharge_stop_soc",
+        # Lifetime energy sensors
         "lifetime_total_all_batteries_charged": "lifetime_battery_charged",
         "lifetime_total_all_batteries_discharged": "lifetime_battery_discharged",
         "lifetime_total_solar_energy": "lifetime_solar_energy",
@@ -355,11 +376,6 @@ class HomeAssistantAPIController:
         "lifetime_total_load_consumption": "lifetime_load_consumption",
         "lifetime_system_production": "lifetime_system_production",
         "lifetime_self_consumption": "lifetime_self_consumption",
-        "battery_charge_power_limit": "battery_charging_power_rate",
-        "battery_discharge_power_limit": "battery_discharging_power_rate",
-        "battery_charge_soc_limit": "battery_charge_stop_soc",
-        "battery_discharge_soc_limit": "battery_discharge_stop_soc",
-        "ac_charge": "grid_charge",
     }
 
     def resolve_sensor_for_influxdb(self, sensor_key: str) -> str | None:
@@ -1598,10 +1614,17 @@ class HomeAssistantAPIController:
     def _extract_growatt_device_sn(self, states: list[dict]) -> str | None:
         """Extract Growatt device serial number from entity IDs.
 
-        Growatt entities follow the naming pattern:
-        sensor.<device_sn>_statement_of_charge_soc
+        HA builds entity IDs from the slugified translation name, not the sensor key.
+        The SOC sensor (key="tlx_statement_of_charge") is used as the anchor because
+        it is present on all MIN/TLX inverters and has a stable, distinctive name.
 
-        The device serial number is the prefix before the first known suffix.
+        The translation name was corrected at some point, producing two possible suffixes:
+          sensor.<sn>_statement_of_charge_soc  (old name: "Statement of Charge SOC")
+          sensor.<sn>_state_of_charge_soc      (current name: "State of charge (SoC)")
+
+        Both are handled: "_statement_of_charge" is a substring of the old suffix,
+        and "_state_of_charge_soc" matches the current suffix.
+
         Assumes the serial number does not contain underscores (consistent with
         Growatt alphanumeric SN format, e.g. "rkm0d7n04x").
 
@@ -1615,7 +1638,7 @@ class HomeAssistantAPIController:
             entity_id = str(state.get("entity_id", ""))
             if not entity_id.startswith(("sensor.", "number.", "switch.")):
                 continue
-            if "_statement_of_charge" in entity_id:
+            if "_statement_of_charge" in entity_id or "_state_of_charge_soc" in entity_id:
                 object_id = entity_id.split(".", 1)[1]
                 return object_id.split("_", 1)[0]
 

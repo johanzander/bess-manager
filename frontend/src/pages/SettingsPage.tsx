@@ -118,73 +118,74 @@ const SettingsPage: React.FC = () => {
     setLoading(true);
     setLoadError(null);
     try {
-      const [batRes, homeRes, elecRes, provRes, invRes, senRes, healthRes] = await Promise.all([
-        api.get('/api/settings/battery'),
-        api.get('/api/settings/home'),
-        api.get('/api/settings/electricity'),
-        api.get('/api/settings/energy-provider'),
-        api.get('/api/settings/inverter'),
-        api.get('/api/settings/sensors'),
+      const [settingsRes, healthRes] = await Promise.all([
+        api.get('/api/settings'),
         api.get('/api/system-health').catch(() => ({ data: null })),
       ]);
 
+      const s = settingsRes.data;
+      const bat_s = s.battery ?? {};
+      const home_s = s.home ?? {};
+      const elec_s = s.electricityPrice ?? {};
+      const prov_s = s.energyProvider ?? {};
+      const growatt_s = s.growatt ?? {};
+      const nordpool = prov_s.nordpoolOfficial ?? {};
+      const nordpoolCustom = prov_s.nordpool ?? {};
+      const octopus = prov_s.octopus ?? {};
+
       const bat: BatteryForm = {
-        totalCapacity: batRes.data.totalCapacity ?? 0,
-        minSoc: batRes.data.minSoc ?? 0,
-        maxSoc: batRes.data.maxSoc ?? 100,
-        maxChargeDischargePowerKw: batRes.data.maxChargePowerKw ?? 0,
-        cycleCostPerKwh: batRes.data.cycleCostPerKwh ?? 0,
-        efficiencyCharge: batRes.data.efficiencyCharge ?? 97,
-        efficiencyDischarge: batRes.data.efficiencyDischarge ?? 97,
-        temperatureDeratingEnabled: batRes.data.temperatureDeratingEnabled ?? false,
-        minActionProfit: batRes.data.minActionProfitThreshold ?? 0,
+        totalCapacity: bat_s.totalCapacity ?? 0,
+        minSoc: bat_s.minSoc ?? 0,
+        maxSoc: bat_s.maxSoc ?? 100,
+        maxChargeDischargePowerKw: bat_s.maxChargePowerKw ?? 0,
+        cycleCostPerKwh: bat_s.cycleCostPerKwh ?? 0,
+        efficiencyCharge: bat_s.efficiencyCharge ?? 0.97,
+        efficiencyDischarge: bat_s.efficiencyDischarge ?? 0.95,
+        temperatureDeratingEnabled: bat_s.temperatureDerating?.enabled ?? false,
+        minActionProfit: bat_s.minActionProfitThreshold ?? 0,
       };
       setBatteryForm(bat);
       savedBattery.current = JSON.stringify(bat);
 
       const h: HomeForm = {
-        consumption: homeRes.data.consumption ?? 3.5,
-        consumptionStrategy: homeRes.data.consumptionStrategy ?? 'sensor',
-        maxFuseCurrent: homeRes.data.maxFuseCurrent ?? 25,
-        voltage: homeRes.data.voltage ?? 230,
-        safetyMarginFactor: homeRes.data.safetyMarginFactor ?? 1.0,
-        phaseCount: homeRes.data.phaseCount ?? 3,
-        powerMonitoringEnabled: homeRes.data.powerMonitoringEnabled ?? true,
+        consumption: home_s.defaultHourly ?? 3.5,
+        consumptionStrategy: home_s.consumptionStrategy ?? 'sensor',
+        maxFuseCurrent: home_s.maxFuseCurrent ?? 25,
+        voltage: home_s.voltage ?? 230,
+        safetyMarginFactor: home_s.safetyMargin ?? 1.0,
+        phaseCount: home_s.phaseCount ?? 3,
+        powerMonitoringEnabled: home_s.powerMonitoringEnabled ?? true,
       };
       setHomeForm(h);
       savedHome.current = JSON.stringify(h);
 
-      const nordpool = provRes.data.nordpoolOfficial ?? provRes.data.nordpool_official ?? {};
-      const nordpoolCustom = provRes.data.nordpool ?? {};
-      const octopus = provRes.data.octopus ?? {};
-
       const p: PricingForm = {
-        currency: homeRes.data.currency ?? '',
-        provider: provRes.data.provider ?? 'nordpool_official',
-        nordpoolConfigEntryId: nordpool.configEntryId ?? nordpool.config_entry_id ?? '',
-        nordpoolTodayEntity: nordpoolCustom.todayEntity ?? nordpoolCustom.today_entity ?? '',
-        nordpoolTomorrowEntity: nordpoolCustom.tomorrowEntity ?? nordpoolCustom.tomorrow_entity ?? '',
-        octopusImportTodayEntity: octopus.importTodayEntity ?? octopus.import_today_entity ?? '',
-        octopusImportTomorrowEntity: octopus.importTomorrowEntity ?? octopus.import_tomorrow_entity ?? '',
-        octopusExportTodayEntity: octopus.exportTodayEntity ?? octopus.export_today_entity ?? '',
-        octopusExportTomorrowEntity: octopus.exportTomorrowEntity ?? octopus.export_tomorrow_entity ?? '',
-        area: elecRes.data.area ?? '',
-        markupRate: elecRes.data.markupRate ?? 0,
-        vatMultiplier: elecRes.data.vatMultiplier ?? 1.25,
-        additionalCosts: elecRes.data.additionalCosts ?? 0,
-        taxReduction: elecRes.data.taxReduction ?? 0,
+        currency: home_s.currency ?? '',
+        provider: prov_s.provider ?? 'nordpool_official',
+        nordpoolConfigEntryId: nordpool.configEntryId ?? '',
+        nordpoolTodayEntity: nordpoolCustom.todayEntity ?? '',
+        nordpoolTomorrowEntity: nordpoolCustom.tomorrowEntity ?? '',
+        octopusImportTodayEntity: octopus.importTodayEntity ?? '',
+        octopusImportTomorrowEntity: octopus.importTomorrowEntity ?? '',
+        octopusExportTodayEntity: octopus.exportTodayEntity ?? '',
+        octopusExportTomorrowEntity: octopus.exportTomorrowEntity ?? '',
+        area: elec_s.area ?? '',
+        markupRate: elec_s.markupRate ?? 0,
+        vatMultiplier: elec_s.vatMultiplier ?? 1.25,
+        additionalCosts: elec_s.additionalCosts ?? 0,
+        taxReduction: elec_s.taxReduction ?? 0,
       };
       setPricingForm(p);
       savedPricing.current = JSON.stringify(p);
 
       const inv: InverterForm = {
-        inverterType: invRes.data.inverterType ?? invRes.data.inverter_type ?? 'MIN',
-        deviceId: invRes.data.deviceId ?? invRes.data.device_id ?? '',
+        inverterType: growatt_s.inverterType ?? 'MIN',
+        deviceId: growatt_s.deviceId ?? '',
       };
       setInverterForm(inv);
       savedInverter.current = JSON.stringify(inv);
 
-      const sen: Record<string, string> = senRes.data ?? {};
+      const sen: Record<string, string> = s.sensors ?? {};
       setSensors(sen);
       savedSensors.current = JSON.stringify(sen);
 
@@ -216,13 +217,13 @@ const SettingsPage: React.FC = () => {
       if (d.sensors && typeof d.sensors === 'object') {
         setSensors(prev => {
           const merged = {
-            ...d.sensors,
+            ...d.sensors as Record<string, string>,
             ...Object.fromEntries(Object.entries(prev).filter(([, v]) => v)),
           };
           // Drop empty-string entries so the result has the same shape as the
           // persisted sensor map. Without this, discovered empty keys trigger a
           // false dirty state even when nothing actually changed.
-          return Object.fromEntries(Object.entries(merged).filter(([, v]) => v));
+          return Object.fromEntries(Object.entries(merged).filter(([, v]) => v)) as Record<string, string>;
         });
       }
 
@@ -323,7 +324,18 @@ const SettingsPage: React.FC = () => {
   const saveHome = async () => {
     setSaving(true);
     try {
-      await api.put('/api/settings/home', { ...homeForm, currency: pricingForm.currency });
+      await api.patch('/api/settings', {
+        home: {
+          defaultHourly: homeForm.consumption,
+          consumptionStrategy: homeForm.consumptionStrategy,
+          maxFuseCurrent: homeForm.maxFuseCurrent,
+          voltage: homeForm.voltage,
+          safetyMargin: homeForm.safetyMarginFactor,
+          phaseCount: homeForm.phaseCount,
+          powerMonitoringEnabled: homeForm.powerMonitoringEnabled,
+          currency: pricingForm.currency,
+        },
+      });
       savedHome.current = JSON.stringify(homeForm);
       setToast({ type: 'success', message: 'Home settings saved.' });
     } catch (err) {
@@ -336,27 +348,31 @@ const SettingsPage: React.FC = () => {
   const savePricing = async () => {
     setSaving(true);
     try {
-      await Promise.all([
-        api.post('/api/settings/electricity', {
+      await api.patch('/api/settings', {
+        electricityPrice: {
           area: pricingForm.area,
           markupRate: pricingForm.markupRate,
           vatMultiplier: pricingForm.vatMultiplier,
           additionalCosts: pricingForm.additionalCosts,
           taxReduction: pricingForm.taxReduction,
           useActualPrice: false,
-        }),
-        api.put('/api/settings/energy-provider', {
+        },
+        energyProvider: {
           provider: pricingForm.provider,
-          nordpoolConfigEntryId: pricingForm.nordpoolConfigEntryId || null,
-          nordpoolTodayEntity: pricingForm.nordpoolTodayEntity || null,
-          nordpoolTomorrowEntity: pricingForm.nordpoolTomorrowEntity || null,
-          octopusImportTodayEntity: pricingForm.octopusImportTodayEntity || null,
-          octopusImportTomorrowEntity: pricingForm.octopusImportTomorrowEntity || null,
-          octopusExportTodayEntity: pricingForm.octopusExportTodayEntity || null,
-          octopusExportTomorrowEntity: pricingForm.octopusExportTomorrowEntity || null,
-        }),
-        api.put('/api/settings/home', { ...homeForm, currency: pricingForm.currency }),
-      ]);
+          nordpoolOfficial: { configEntryId: pricingForm.nordpoolConfigEntryId },
+          nordpool: {
+            todayEntity: pricingForm.nordpoolTodayEntity,
+            tomorrowEntity: pricingForm.nordpoolTomorrowEntity,
+          },
+          octopus: {
+            importTodayEntity: pricingForm.octopusImportTodayEntity,
+            importTomorrowEntity: pricingForm.octopusImportTomorrowEntity,
+            exportTodayEntity: pricingForm.octopusExportTodayEntity,
+            exportTomorrowEntity: pricingForm.octopusExportTomorrowEntity,
+          },
+        },
+        home: { currency: pricingForm.currency },
+      });
       savedPricing.current = JSON.stringify(pricingForm);
       savedHome.current = JSON.stringify(homeForm);
       setToast({ type: 'success', message: 'Electricity pricing settings saved.' });
@@ -370,30 +386,27 @@ const SettingsPage: React.FC = () => {
   const saveBattery = async () => {
     setSaving(true);
     try {
-      await Promise.all([
-        api.post('/api/settings/battery', {
+      await api.patch('/api/settings', {
+        battery: {
           totalCapacity: batteryForm.totalCapacity,
-          reservedCapacity: 0,
           minSoc: batteryForm.minSoc,
           maxSoc: batteryForm.maxSoc,
-          minSoeKwh: (batteryForm.totalCapacity * batteryForm.minSoc) / 100,
-          maxSoeKwh: (batteryForm.totalCapacity * batteryForm.maxSoc) / 100,
           maxChargePowerKw: batteryForm.maxChargeDischargePowerKw,
           maxDischargePowerKw: batteryForm.maxChargeDischargePowerKw,
           cycleCostPerKwh: batteryForm.cycleCostPerKwh,
           minActionProfitThreshold: batteryForm.minActionProfit,
           efficiencyCharge: batteryForm.efficiencyCharge,
           efficiencyDischarge: batteryForm.efficiencyDischarge,
-          estimatedConsumption: 0,
-          consumptionStrategy: 'sensor',
-          temperatureDeratingEnabled: batteryForm.temperatureDeratingEnabled,
-          temperatureDeratingWeatherEntity: sensors['weather_entity'] ?? '',
-        }),
-        api.put('/api/settings/inverter', {
+          temperatureDerating: {
+            enabled: batteryForm.temperatureDeratingEnabled,
+            weatherEntity: sensors['weather_entity'] ?? '',
+          },
+        },
+        growatt: {
           inverterType: inverterForm.inverterType,
-          deviceId: inverterForm.deviceId || null,
-        }),
-      ]);
+          deviceId: inverterForm.deviceId,
+        },
+      });
       savedBattery.current = JSON.stringify(batteryForm);
       savedInverter.current = JSON.stringify(inverterForm);
       setToast({ type: 'success', message: 'Battery settings saved.' });
@@ -407,19 +420,23 @@ const SettingsPage: React.FC = () => {
   const saveSensors = async () => {
     setSaving(true);
     try {
-      await Promise.all([
-        api.put('/api/settings/sensors', { sensors }),
-        api.put('/api/settings/energy-provider', {
+      await api.patch('/api/settings', {
+        sensors,
+        energyProvider: {
           provider: pricingForm.provider,
-          nordpoolConfigEntryId: pricingForm.nordpoolConfigEntryId || null,
-          nordpoolTodayEntity: pricingForm.nordpoolTodayEntity || null,
-          nordpoolTomorrowEntity: pricingForm.nordpoolTomorrowEntity || null,
-          octopusImportTodayEntity: pricingForm.octopusImportTodayEntity || null,
-          octopusImportTomorrowEntity: pricingForm.octopusImportTomorrowEntity || null,
-          octopusExportTodayEntity: pricingForm.octopusExportTodayEntity || null,
-          octopusExportTomorrowEntity: pricingForm.octopusExportTomorrowEntity || null,
-        }),
-      ]);
+          nordpoolOfficial: { configEntryId: pricingForm.nordpoolConfigEntryId },
+          nordpool: {
+            todayEntity: pricingForm.nordpoolTodayEntity,
+            tomorrowEntity: pricingForm.nordpoolTomorrowEntity,
+          },
+          octopus: {
+            importTodayEntity: pricingForm.octopusImportTodayEntity,
+            importTomorrowEntity: pricingForm.octopusImportTomorrowEntity,
+            exportTodayEntity: pricingForm.octopusExportTodayEntity,
+            exportTomorrowEntity: pricingForm.octopusExportTomorrowEntity,
+          },
+        },
+      });
       savedSensors.current = JSON.stringify(sensors);
       savedPricing.current = JSON.stringify(pricingForm);
       const failed = await checkAndUpdateSensorHealth(sensors);

@@ -78,122 +78,6 @@ def create_formatted_value(
 
 
 @dataclass
-class APIBatterySettings:
-    """Battery settings with clear SOC/SOE naming."""
-
-    totalCapacity: float  # kWh - total battery capacity
-    reservedCapacity: float  # kWh - reserved capacity
-
-    # State of Charge limits (%)
-    minSoc: float  # % (0-100) - minimum charge percentage
-    maxSoc: float  # % (0-100) - maximum charge percentage
-
-    # State of Energy limits (kWh) - calculated from SOC
-    minSoeKwh: float  # kWh - minimum energy (calculated)
-    maxSoeKwh: float  # kWh - maximum energy (calculated)
-
-    # Power limits (kW)
-    maxChargePowerKw: float  # kW - maximum charge power
-    maxDischargePowerKw: float  # kW - maximum discharge power
-
-    # Economic settings
-    cycleCostPerKwh: float  # cost per kWh per cycle
-    minActionProfitThreshold: float  # SEK - minimum profit to act on an arbitrage opportunity
-    chargingPowerRate: float  # % - charging power rate
-    efficiencyCharge: float  # % - charging efficiency
-    efficiencyDischarge: float  # % - discharge efficiency
-    estimatedConsumption: float  # kWh - estimated daily consumption
-    consumptionStrategy: str  # consumption forecast strategy
-    # Temperature derating (fields with defaults must be last in dataclass)
-    temperatureDeratingEnabled: bool = False
-    temperatureDeratingWeatherEntity: str = ""
-
-    @classmethod
-    def from_internal(
-        cls,
-        battery,
-        estimated_consumption: float,
-        consumption_strategy: str = "sensor",
-        temperature_derating=None,
-    ) -> APIBatterySettings:
-        """Convert from internal snake_case to canonical camelCase."""
-        td_enabled = temperature_derating.enabled if temperature_derating else False
-        td_entity = temperature_derating.weather_entity if temperature_derating else ""
-        return cls(
-            totalCapacity=battery.total_capacity,
-            reservedCapacity=battery.reserved_capacity,
-            minSoc=battery.min_soc,
-            maxSoc=battery.max_soc,
-            minSoeKwh=battery.min_soe_kwh,
-            maxSoeKwh=battery.max_soe_kwh,
-            maxChargePowerKw=battery.max_charge_power_kw,
-            maxDischargePowerKw=battery.max_discharge_power_kw,
-            cycleCostPerKwh=battery.cycle_cost_per_kwh,
-            minActionProfitThreshold=battery.min_action_profit_threshold,
-            chargingPowerRate=battery.charging_power_rate,
-            efficiencyCharge=battery.efficiency_charge,
-            efficiencyDischarge=battery.efficiency_discharge,
-            estimatedConsumption=estimated_consumption,
-            consumptionStrategy=consumption_strategy,
-            temperatureDeratingEnabled=td_enabled,
-            temperatureDeratingWeatherEntity=td_entity,
-        )
-
-    def to_internal_update(self) -> dict:
-        """Convert API updates back to internal snake_case."""
-        return {
-            "total_capacity": self.totalCapacity,
-            "min_soc": self.minSoc,
-            "max_soc": self.maxSoc,
-            "max_charge_power_kw": self.maxChargePowerKw,
-            "max_discharge_power_kw": self.maxDischargePowerKw,
-            "cycle_cost_per_kwh": self.cycleCostPerKwh,
-            "min_action_profit_threshold": self.minActionProfitThreshold,
-            "charging_power_rate": self.chargingPowerRate,
-            "efficiency_charge": self.efficiencyCharge,
-            "efficiency_discharge": self.efficiencyDischarge,
-        }
-
-
-@dataclass
-class APIPriceSettings:
-    """API response dataclass with canonical camelCase fields."""
-
-    area: str
-    markupRate: float
-    vatMultiplier: float
-    additionalCosts: float
-    taxReduction: float
-    useActualPrice: bool
-    minProfit: float = 0.0
-
-    @classmethod
-    def from_internal(cls, price) -> APIPriceSettings:
-        """Convert from internal snake_case to canonical camelCase."""
-        return cls(
-            area=price.area,
-            markupRate=price.markup_rate,
-            vatMultiplier=price.vat_multiplier,
-            additionalCosts=price.additional_costs,
-            taxReduction=price.tax_reduction,
-            minProfit=price.min_profit,
-            useActualPrice=price.use_actual_price,
-        )
-
-    def to_internal_update(self) -> dict:
-        """Convert API updates back to internal snake_case."""
-        return {
-            "area": self.area,
-            "markup_rate": self.markupRate,
-            "vat_multiplier": self.vatMultiplier,
-            "additional_costs": self.additionalCosts,
-            "tax_reduction": self.taxReduction,
-            "min_profit": self.minProfit,
-            "use_actual_price": self.useActualPrice,
-        }
-
-
-@dataclass
 class APIPredictionSnapshot:
     """API representation of PredictionSnapshot."""
 
@@ -973,48 +857,12 @@ class APIRealTimePower:
 
 
 # ---------------------------------------------------------------------------
-# Settings API models (Pydantic — used for PUT /api/settings/* endpoints)
+# Settings API models (Pydantic — used by setup wizard and sensor validation)
 # ---------------------------------------------------------------------------
 
 # Matches valid HA entity IDs: domain.object_id (case-insensitive to handle
 # user-defined entity IDs with uppercase letters in the object_id part).
 _ENTITY_ID_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_]*\.[a-zA-Z0-9_-]+$")
-
-
-class APIHomeSettingsPayload(BaseModel):
-    """Request/response body for home & grid settings."""
-
-    currency: str
-    consumption: float  # kWh hourly default
-    consumptionStrategy: str  # "sensor" | "fixed" | "influxdb_7d_avg"
-    maxFuseCurrent: int
-    voltage: int
-    safetyMarginFactor: float
-    phaseCount: int
-    powerMonitoringEnabled: bool
-
-
-class APIEnergyProviderPayload(BaseModel):
-    """Request/response body for energy provider settings."""
-
-    provider: str  # "nordpool_official" | "nordpool" | "octopus"
-    # Nordpool Official
-    nordpoolConfigEntryId: str | None = None
-    # Nordpool legacy sensor
-    nordpoolTodayEntity: str | None = None
-    nordpoolTomorrowEntity: str | None = None
-    # Octopus
-    octopusImportTodayEntity: str | None = None
-    octopusImportTomorrowEntity: str | None = None
-    octopusExportTodayEntity: str | None = None
-    octopusExportTomorrowEntity: str | None = None
-
-
-class APIInverterSettingsPayload(BaseModel):
-    """Request/response body for Growatt inverter settings."""
-
-    inverterType: str  # "MIN" | "SPH"
-    deviceId: str | None = None
 
 
 class APISensorsPayload(BaseModel):

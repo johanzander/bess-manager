@@ -354,6 +354,10 @@ def get_sensor_data_batch(sensors_list, target_date) -> dict:
         tzinfo=local_tz
     )
 
+    if not sensors_list:
+        _LOGGER.warning("No sensors configured — skipping InfluxDB query")
+        return {"status": "error", "message": "No sensors configured"}
+
     # Get configuration
     influxdb_config = get_influxdb_config()
     url = influxdb_config["url"]

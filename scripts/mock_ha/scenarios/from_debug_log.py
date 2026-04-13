@@ -92,7 +92,14 @@ def generate_scenario(log_path: str) -> None:
             mock_time = f"@{local_time_str}"
     else:
         output_name = Path(log_path).stem
-        mock_time = ""
+        # Filename has no date pattern — try export_timestamp from the document itself.
+        export_timestamp = log.system_info.get("export_timestamp")
+        tz_name = log.timezone or "UTC"
+        if export_timestamp:
+            local_dt = datetime.fromisoformat(export_timestamp).astimezone(ZoneInfo(tz_name))
+            mock_time = f"@{local_dt.strftime('%Y-%m-%d %H:%M:%S')}"
+        else:
+            mock_time = ""
 
     if d:
         buy_prices = d["buy_price"]

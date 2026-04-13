@@ -4,6 +4,23 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [8.1.1] - 2026-04-13
+
+### Added
+
+- Dashboard shows a dedicated "initializing" state immediately after wizard completion while the historical backfill and first schedule build run in the background (instead of a blank or error screen).
+- Wizard re-run no longer clears previously configured values — existing sensor entity IDs, Nordpool config entry ID, and Growatt device ID all survive a re-scan.
+
+### Changed
+
+- Settings API consolidated into a single `GET /api/settings` and `PATCH /api/settings` endpoint, replacing the previous per-section endpoints. Existing installs are migrated automatically on first boot. Frontend updated throughout.
+- Disabled power monitoring now reports `OK` in system health instead of `WARNING`.
+
+### Fixed
+
+- Growatt entity ID discovery now handles both the current SOC sensor name ("State of charge (SoC)") and the legacy name ("Statement of Charge SOC"), covering more installation variants.
+- InfluxDB query skipped cleanly when no sensors are configured, avoiding a crash during first-boot before the wizard completes.
+
 ## [8.0.7] - 2026-04-12
 
 ### Fixed

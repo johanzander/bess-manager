@@ -91,6 +91,16 @@ class SensorCollector:
         )
         return resolved_ids
 
+    def re_resolve_sensors(self) -> None:
+        """Re-resolve sensor entity IDs from the controller.
+
+        Called after wizard setup applies new sensor configuration so that
+        InfluxDB backfill uses the correct entity IDs instead of the empty
+        lists built at startup before sensors were configured.
+        """
+        self.cumulative_sensors = self._resolve_sensor_entity_ids()
+        self.power_sensors = self._resolve_power_sensor_ids()
+
     def _resolve_power_sensor_ids(self) -> list[str]:
         """Resolve power sensor keys to entity IDs for InfluxDB.
 

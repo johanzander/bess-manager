@@ -13,13 +13,9 @@ export function useSettings() {
   useEffect(() => {
     async function loadSettings() {
       try {
-        const [batteryRes, electricityRes] = await Promise.all([
-          api.get('/api/settings/battery'),
-          api.get('/api/settings/electricity')
-        ]);
-
-        setBatterySettings(batteryRes.data);
-        setElectricitySettings(electricityRes.data);
+        const res = await api.get('/api/settings');
+        setBatterySettings(res.data.battery ?? null);
+        setElectricitySettings(res.data.electricityPrice ?? null);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load settings');
         console.error('Settings fetch error:', err);

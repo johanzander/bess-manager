@@ -73,6 +73,7 @@ export default function DashboardPage({
 
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isInitializing, setIsInitializing] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
   const [isInitialLoad, setIsInitialLoad] = useState(true);
 
@@ -142,16 +143,21 @@ export default function DashboardPage({
       const response = dashboardResponse;
       
       if (response?.data) {
-        // Check if this is an error response with incomplete data
-        if (response.data.error === 'incomplete_data') {
+        if (response.data.error === 'initializing') {
+          // System just configured — backfill + schedule still running in background.
+          setIsInitializing(true);
+          setDashboardData(null);
+        } else if (response.data.error === 'incomplete_data') {
+          setIsInitializing(false);
           // Still set the data to what we have (may be partial or empty)
           setDashboardData(response.data);
-          
           // Show a warning but continue loading the page
           setError(`Warning: ${response.data.message} Some dashboard features might not display correctly.`);
         } else {
           // Normal successful response
+          setIsInitializing(false);
           setDashboardData(response.data);
+          setError(null);
         }
       } else {
         throw new Error('No data received from dashboard endpoint');
@@ -229,7 +235,7 @@ export default function DashboardPage({
       )}
 
       {/* Historical Data Warning Banner */}
-      {historicalDataStatus && historicalDataStatus.isIncomplete && !dismissedHistoricalWarning && (
+      {historicalDataStatus && historicalDataStatus.isIncomplete && !dismissedHistoricalWarning && !isInitializing && (
         <div className="bg-yellow-50 dark:bg-yellow-900/20 border-l-4 border-yellow-400 p-4 rounded shadow">
           <div className="flex items-start">
             <div className="flex-shrink-0">
@@ -310,8 +316,19 @@ export default function DashboardPage({
         </div>
       </div>
 
+      {/* Initializing state — backfill + schedule running in background */}
+      {isInitializing && (
+        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 p-6 rounded-lg text-center">
+          <div className="flex flex-col items-center gap-3">
+            <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-400 border-t-transparent" />
+            <h3 className="text-sm font-medium text-blue-800 dark:text-blue-200">Initializing system</h3>
+            <p className="text-sm text-blue-700 dark:text-blue-300">Loading historical data and building optimization schedule. This takes up to a minute after first setup.</p>
+          </div>
+        </div>
+      )}
+
       {/* Error Display */}
-      {error && (
+      {error && !isInitializing && (
         <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 p-4 rounded-lg">
           <div className="flex items-center">
             <AlertCircle className="h-5 w-5 text-red-400 mr-3" />
@@ -378,7 +395,7 @@ export default function DashboardPage({
             </div>
           </div>
         </>
-      ) : (
+      ) : !isInitializing ? (
         <div className="text-center py-8">
           <AlertCircle className="h-12 w-12 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
           <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">No Dashboard Data</h3>
@@ -392,7 +409,7 @@ export default function DashboardPage({
             Try Again
           </button>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

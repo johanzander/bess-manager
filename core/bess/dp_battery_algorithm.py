@@ -74,6 +74,7 @@ The algorithm returns comprehensive results including:
 __all__ = [
     "optimize_battery_schedule",
     "print_optimization_results",
+    "split_solar_forecast",
 ]
 
 
@@ -115,6 +116,36 @@ class StrategicIntent(Enum):
     IDLE = "IDLE"  # No significant action (includes natural solar export)
 
 
+def split_solar_forecast(
+    solar_production: list[float],
+    inverter_ac_capacity_kw: float,
+    period_duration_hours: float,
+) -> tuple[list[float], list[float]]:
+    """Split solar forecast into AC-available and DC-excess components.
+
+    When solar DC production exceeds the inverter's AC output capacity, the excess
+    flows directly to the battery on the DC bus (bypassing AC conversion). This
+    function splits the raw solar forecast into:
+
+    - ac_solar: the portion that can be converted to AC (capped at inverter limit)
+    - dc_excess: the portion exceeding the AC limit (can only charge the battery)
+
+    Args:
+        solar_production: Raw solar forecast per period (kWh).
+        inverter_ac_capacity_kw: Inverter AC output limit in kW. Must be > 0.
+            Caller is responsible for skipping the split when the feature is
+            disabled (inverter_ac_capacity_kw == 0).
+        period_duration_hours: Duration of each period in hours.
+
+    Returns:
+        Tuple of (ac_solar, dc_excess) lists, both same length as solar_production.
+    """
+    ac_limit_kwh = inverter_ac_capacity_kw * period_duration_hours
+    ac_solar = [min(s, ac_limit_kwh) for s in solar_production]
+    dc_excess = [max(0.0, s - ac_limit_kwh) for s in solar_production]
+    return ac_solar, dc_excess
+
+
 def _discretize_state_action_space(
     battery_settings: BatterySettings,
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -140,7 +171,11 @@ def _discretize_state_action_space(
 
 
 def _state_transition(
-    soe: float, power: float, battery_settings: BatterySettings, dt: float
+    soe: float,
+    power: float,
+    battery_settings: BatterySettings,
+    dt: float,
+    solar_excess_ac: float = 0.0,
 ) -> float:
     """
     Calculate the next state of energy based on current SOE and power action.
@@ -149,6 +184,12 @@ def _state_transition(
     - Charging: power x dt x efficiency = energy actually stored
     - Discharging: power x dt / efficiency = energy removed from storage
     This ensures that efficiency losses are properly accounted for in energy balance.
+
+    IDLE AUTO-CHARGING (load_first mode):
+    When power=0, the Growatt inverter operates in load_first mode where excess solar
+    automatically charges the battery before exporting to grid. solar_excess_ac (kW)
+    models this: any positive value causes the battery to charge up to the available
+    capacity and the inverter's charge power limit.
     """
     if power > 0:  # Charging
         # Energy stored = power throughput x charging efficiency
@@ -162,8 +203,11 @@ def _state_transition(
         actual_discharge = min(discharge_energy, available_energy)
         next_soe = soe - actual_discharge
 
-    else:  # Hold
-        next_soe = soe
+    else:  # IDLE (load_first mode): excess solar auto-charges battery
+        auto_charge_kw = min(solar_excess_ac, battery_settings.max_charge_power_kw)
+        auto_charge_stored = auto_charge_kw * dt * battery_settings.efficiency_charge
+        available_capacity = max(0.0, battery_settings.max_soe_kwh - soe)
+        next_soe = soe + min(auto_charge_stored, available_capacity)
 
     # Ensure SOE stays within physical bounds
     next_soe = min(
@@ -185,43 +229,62 @@ def _compute_reward(
     sell_price: list[float],
     solar_production: float,
     cost_basis: float,
+    dc_excess_solar: float = 0.0,
 ) -> tuple[float, float]:
     """Hot-path reward computation — returns scalars only, no dataclass allocation.
 
     CYCLE COST POLICY:
-    - Applied only to charging operations (not discharging)
     - Applied to energy actually stored (after efficiency losses)
-    - Grid costs applied to energy throughput (what you draw from grid)
-    - Cost basis includes BOTH grid costs AND cycle costs for profitability analysis
+    - For AC charging: cycle cost on energy stored from AC side
+    - For DC excess absorption: cycle cost on DC energy stored (zero grid cost)
+    - DC wear cost is always applied when dc_excess_solar > 0, regardless of AC action
+
+    DC EXCESS FLOW:
+    soe (pre-DC) -> soe_after_dc (absorbs dc_excess_solar) -> next_soe (AC action applied).
+    Caller must compute next_soe with _state_transition(soe_after_dc, power, ...).
 
     PROFITABILITY CHECK:
     - For any discharge, calculate the value of the discharged energy
     - Value = max(avoiding grid purchases, grid export revenue)
-    - Discharge only profitable if this value > cost_basis
+    - Discharge only profitable if this value > cost_basis (DC-blended)
     - Must account for discharge efficiency losses
 
-    Example for stored energy costing 2.61/kWh:
-    - If buy_price = 2.58, sell_price = 1.81
-    - Avoid purchase value: 2.58 x 0.95 = 2.45/kWh stored
-    - Export value: 1.81 x 0.95 = 1.72/kWh stored
-    - Best value: max(2.45, 1.72) = 2.45/kWh stored
-    - 2.45 < 2.61 → UNPROFITABLE (correctly blocked)
-
     Returns:
-        (reward, new_cost_basis) or (float("-inf"), cost_basis) if discharge is unprofitable.
+        (reward, new_cost_basis) or (float("-inf"), cost_basis_after_dc) if discharge unprofitable.
     """
     current_buy_price = buy_price[period]
     current_sell_price = sell_price[period]
 
     # Use same tolerance as main DP loop to handle floating-point imprecision from np.arange
-    # (e.g., intended 0.0 may be -5.33e-14, which must be treated as IDLE, not discharge)
     _power_tolerance = 0.001  # kW
 
-    # Battery flows
+    # ============================================================================
+    # DC EXCESS ABSORPTION (happens before AC decision)
+    # ============================================================================
+    dc_to_battery = min(dc_excess_solar, max(0.0, battery_settings.max_soe_kwh - soe))
+    soe_after_dc = soe + dc_to_battery
+    dc_wear_cost = dc_to_battery * battery_settings.cycle_cost_per_kwh
+
+    # Blend DC energy into cost basis at cycle-cost-only basis
+    if dc_to_battery > 0 and soe_after_dc > battery_settings.min_soe_kwh:
+        cost_basis_after_dc = (soe * cost_basis + dc_wear_cost) / soe_after_dc
+    else:
+        cost_basis_after_dc = cost_basis
+
+    # ============================================================================
+    # AC-SIDE ENERGY FLOWS
+    # ============================================================================
+    # solar_production here is AC solar (already capped at inverter limit by caller).
     battery_charged = max(0, power * dt) if power > _power_tolerance else 0.0
     battery_discharged = max(0, -power * dt) if power < -_power_tolerance else 0.0
 
-    # Grid flows from energy balance
+    # IDLE auto-charging: when power~=0 and next_soe > soe_after_dc, excess AC solar
+    # charged the battery (load_first mode). Derive throughput from SOE delta.
+    if -_power_tolerance <= power <= _power_tolerance and next_soe > soe_after_dc:
+        auto_charge_stored = next_soe - soe_after_dc
+        battery_charged = auto_charge_stored / battery_settings.efficiency_charge
+
+    # Grid flows from energy balance (AC solar only)
     energy_balance = (
         solar_production + battery_discharged - home_consumption - battery_charged
     )
@@ -231,39 +294,55 @@ def _compute_reward(
     # ============================================================================
     # BATTERY CYCLE COST AND COST BASIS CALCULATION
     # ============================================================================
-    new_cost_basis = cost_basis
+    new_cost_basis = cost_basis_after_dc
 
-    if power > _power_tolerance:  # Charging
+    if power > _power_tolerance:  # AC charging
         energy_stored = power * dt * battery_settings.efficiency_charge
-        battery_wear_cost = energy_stored * battery_settings.cycle_cost_per_kwh
+        ac_wear_cost = energy_stored * battery_settings.cycle_cost_per_kwh
+        battery_wear_cost = ac_wear_cost + dc_wear_cost
 
         solar_available = max(0, solar_production - home_consumption)
         solar_to_battery = min(solar_available, power * dt)
         grid_to_battery = max(0, (power * dt) - solar_to_battery)
         grid_energy_cost = grid_to_battery * current_buy_price
-        total_new_cost = grid_energy_cost + battery_wear_cost
+        total_new_cost = grid_energy_cost + ac_wear_cost
 
         if next_soe > battery_settings.min_soe_kwh:
-            existing_cost = soe * cost_basis
+            existing_cost = soe_after_dc * cost_basis_after_dc
             new_cost_basis = (existing_cost + total_new_cost) / next_soe
         else:
             new_cost_basis = (
-                (total_new_cost / energy_stored) if energy_stored > 0 else cost_basis
+                (total_new_cost / energy_stored)
+                if energy_stored > 0
+                else cost_basis_after_dc
             )
 
     elif power < -_power_tolerance:  # Discharging
-        battery_wear_cost = 0.0
+        battery_wear_cost = dc_wear_cost
 
-        # Profitability check: only discharge if value exceeds cost basis
+        # Profitability check vs DC-blended cost basis
         avoid_purchase_value = current_buy_price * battery_settings.efficiency_discharge
         export_value = current_sell_price * battery_settings.efficiency_discharge
         effective_value_per_kwh_stored = max(avoid_purchase_value, export_value)
 
-        if effective_value_per_kwh_stored <= cost_basis:
-            return float("-inf"), cost_basis
+        if effective_value_per_kwh_stored <= cost_basis_after_dc:
+            return float("-inf"), cost_basis_after_dc
 
-    else:  # Idle
-        battery_wear_cost = 0.0
+    else:  # IDLE
+        if next_soe > soe_after_dc:
+            # IDLE auto-charging from solar excess
+            auto_charge_stored = next_soe - soe_after_dc
+            ac_auto_wear_cost = (
+                auto_charge_stored * battery_settings.cycle_cost_per_kwh
+            )
+            battery_wear_cost = dc_wear_cost + ac_auto_wear_cost
+            if next_soe > battery_settings.min_soe_kwh:
+                existing_cost = soe_after_dc * cost_basis_after_dc
+                new_cost_basis = (existing_cost + ac_auto_wear_cost) / next_soe
+            else:
+                new_cost_basis = cost_basis_after_dc
+        else:
+            battery_wear_cost = dc_wear_cost
 
     # ============================================================================
     # REWARD CALCULATION
@@ -289,6 +368,7 @@ def _build_period_data(
     solar_production: float,
     new_cost_basis: float,
     currency: str,
+    dc_excess_solar: float = 0.0,
 ) -> PeriodData:
     """Build full PeriodData for the winning action of a DP cell.
 
@@ -298,8 +378,21 @@ def _build_period_data(
     current_buy_price = buy_price[period]
     current_sell_price = sell_price[period]
 
-    battery_charged = max(0, power * dt) if power > 0 else 0.0
-    battery_discharged = max(0, -power * dt) if power < 0 else 0.0
+    _power_tolerance = 0.001
+
+    # DC absorption (before AC action)
+    dc_to_battery = min(dc_excess_solar, max(0.0, battery_settings.max_soe_kwh - soe))
+    soe_after_dc = soe + dc_to_battery
+    dc_clipped = dc_excess_solar - dc_to_battery
+    dc_wear_cost = dc_to_battery * battery_settings.cycle_cost_per_kwh
+
+    battery_charged = max(0, power * dt) if power > _power_tolerance else 0.0
+    battery_discharged = max(0, -power * dt) if power < -_power_tolerance else 0.0
+
+    # IDLE auto-charging surfaces as AC-side battery_charged
+    if -_power_tolerance <= power <= _power_tolerance and next_soe > soe_after_dc:
+        auto_charge_stored = next_soe - soe_after_dc
+        battery_charged = auto_charge_stored / battery_settings.efficiency_charge
 
     energy_balance = (
         solar_production + battery_discharged - home_consumption - battery_charged
@@ -316,20 +409,28 @@ def _build_period_data(
         grid_exported=grid_exported,
         battery_soe_start=soe,
         battery_soe_end=next_soe,
+        dc_excess_to_battery=dc_to_battery,
+        solar_clipped=dc_clipped,
     )
 
-    if power > 0:  # Charging
+    if power > _power_tolerance:  # Charging
         energy_stored = power * dt * battery_settings.efficiency_charge
-        battery_wear_cost = energy_stored * battery_settings.cycle_cost_per_kwh
+        ac_wear_cost = energy_stored * battery_settings.cycle_cost_per_kwh
+        battery_wear_cost = ac_wear_cost + dc_wear_cost
 
-        expected_stored = next_soe - soe
+        expected_stored = next_soe - soe_after_dc
         if abs(energy_stored - expected_stored) > 0.01:
             logger.warning(
                 f"Energy stored mismatch: calculated={energy_stored:.3f}, "
                 f"SOE delta={expected_stored:.3f}"
             )
+    elif -_power_tolerance <= power <= _power_tolerance and next_soe > soe_after_dc:
+        auto_charge_stored = next_soe - soe_after_dc
+        battery_wear_cost = (
+            dc_wear_cost + auto_charge_stored * battery_settings.cycle_cost_per_kwh
+        )
     else:
-        battery_wear_cost = 0.0
+        battery_wear_cost = dc_wear_cost
 
     import_cost = grid_imported * current_buy_price
     export_revenue = grid_exported * current_sell_price
@@ -510,6 +611,7 @@ def _run_dynamic_programming(
     terminal_value_per_kwh: float = 0.0,
     currency: str = "SEK",
     max_charge_power_per_period: list[float] | None = None,
+    dc_excess_solar: list[float] | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict]:
     """
     Enhanced DP that stores the PeriodData objects calculated during optimization.
@@ -557,6 +659,23 @@ def _run_dynamic_programming(
                 else None
             )
 
+            # DC excess absorption for this period (happens before AC decision)
+            dc_excess = dc_excess_solar[t] if dc_excess_solar is not None else 0.0
+            dc_to_battery = min(
+                dc_excess, max(0.0, battery_settings.max_soe_kwh - soe)
+            )
+            soe_after_dc = soe + dc_to_battery
+
+            # Solar excess for IDLE auto-charging (load_first mode).
+            # Excess AC solar auto-charges the battery before exporting to grid.
+            effective_max_charge = (
+                period_max_charge
+                if period_max_charge is not None
+                else battery_settings.max_charge_power_kw
+            )
+            solar_excess_kwh = max(0.0, solar_production[t] - home_consumption[t])
+            solar_excess_ac_kw = min(solar_excess_kwh / dt, effective_max_charge)
+
             # Try all possible actions
             for power in power_levels:
                 # Skip physically impossible actions (same as before)
@@ -564,7 +683,8 @@ def _run_dynamic_programming(
                 # (e.g., "0.0" might be 2.2e-16 which would incorrectly match "power > 0")
                 power_tolerance = 0.001  # kW
                 if power < -power_tolerance:  # Discharging
-                    available_energy = soe - battery_settings.min_soe_kwh
+                    # Available energy is from soe_after_dc (DC fills battery first)
+                    available_energy = soe_after_dc - battery_settings.min_soe_kwh
                     max_discharge_power = (
                         available_energy / dt * battery_settings.efficiency_discharge
                     )
@@ -575,7 +695,8 @@ def _run_dynamic_programming(
                     if period_max_charge is not None and power > period_max_charge:
                         continue
 
-                    available_capacity = battery_settings.max_soe_kwh - soe
+                    # Available capacity accounts for DC already absorbed
+                    available_capacity = battery_settings.max_soe_kwh - soe_after_dc
                     max_charge_power = (
                         available_capacity / dt / battery_settings.efficiency_charge
                     )
@@ -583,8 +704,10 @@ def _run_dynamic_programming(
                         continue
                 # else: IDLE (near-zero power) - no physical constraints to check
 
-                # Calculate next state
-                next_soe = _state_transition(soe, power, battery_settings, dt)
+                # Calculate next state from soe_after_dc (DC absorbed, then AC action)
+                next_soe = _state_transition(
+                    soe_after_dc, power, battery_settings, dt, solar_excess_ac_kw
+                )
                 if (
                     next_soe < battery_settings.min_soe_kwh
                     or next_soe > battery_settings.max_soe_kwh
@@ -604,6 +727,7 @@ def _run_dynamic_programming(
                     buy_price=buy_price,
                     sell_price=sell_price,
                     cost_basis=C[t, i],
+                    dc_excess_solar=dc_excess,
                 )
 
                 # Skip if unprofitable
@@ -643,6 +767,7 @@ def _run_dynamic_programming(
                     sell_price=sell_price,
                     new_cost_basis=best_new_cost_basis,
                     currency=currency,
+                    dc_excess_solar=dc_excess,
                 )
             else:
                 # No valid action found - create a default IDLE PeriodData
@@ -651,24 +776,43 @@ def _run_dynamic_programming(
                     f"No valid action found for period {t}, state {i} (SOE={soe:.1f}). "
                     f"Creating default IDLE state."
                 )
-                # Calculate IDLE scenario: no battery action, just grid covering consumption
+                # IDLE: no AC charging action, but DC excess + solar auto-charging
+                dc_clipped_idle = dc_excess - dc_to_battery
+                idle_auto_soe = _state_transition(
+                    soe_after_dc, 0.0, battery_settings, dt, solar_excess_ac_kw
+                )
+                idle_auto_stored = idle_auto_soe - soe_after_dc
+                idle_battery_charged = (
+                    idle_auto_stored / battery_settings.efficiency_charge
+                    if idle_auto_stored > 0
+                    else 0.0
+                )
                 idle_grid_imported = max(0, home_consumption[t] - solar_production[t])
-                idle_grid_exported = max(0, solar_production[t] - home_consumption[t])
+                idle_grid_exported = max(
+                    0,
+                    solar_production[t] - home_consumption[t] - idle_battery_charged,
+                )
                 idle_energy = EnergyData(
                     solar_production=solar_production[t],
                     home_consumption=home_consumption[t],
-                    battery_charged=0.0,
+                    battery_charged=idle_battery_charged,
                     battery_discharged=0.0,
                     grid_imported=idle_grid_imported,
                     grid_exported=idle_grid_exported,
                     battery_soe_start=soe,
-                    battery_soe_end=soe,
+                    battery_soe_end=idle_auto_soe,
+                    dc_excess_to_battery=dc_to_battery,
+                    solar_clipped=dc_clipped_idle,
+                )
+                dc_wear_idle = dc_to_battery * battery_settings.cycle_cost_per_kwh
+                ac_auto_wear_idle = (
+                    idle_auto_stored * battery_settings.cycle_cost_per_kwh
                 )
                 idle_economic = EconomicData.from_energy_data(
                     energy_data=idle_energy,
                     buy_price=buy_price[t],
                     sell_price=sell_price[t],
-                    battery_cycle_cost=0.0,
+                    battery_cycle_cost=dc_wear_idle + ac_auto_wear_idle,
                 )
                 idle_decision = DecisionData(
                     strategic_intent="IDLE",
@@ -692,12 +836,17 @@ def _run_dynamic_programming(
                     -(
                         idle_grid_imported * buy_price[t]
                         - idle_grid_exported * sell_price[t]
+                        + dc_wear_idle
+                        + ac_auto_wear_idle
                     )
                     + V[t + 1, i]
                 )
 
-            # Update cost basis for next time step
-            if best_action != 0 and t + 1 < horizon:
+            # Update cost basis for next time step — also propagate when DC excess
+            # or IDLE auto-charge changed the SOE without an explicit action.
+            if t + 1 < horizon and (
+                best_action != 0 or dc_to_battery > 0 or best_next_soe > soe
+            ):
                 next_i = round(
                     (best_next_soe - battery_settings.min_soe_kwh) / SOE_STEP_KWH
                 )
@@ -731,9 +880,15 @@ def _create_idle_schedule(
     solar_production: list[float],
     initial_soe: float,
     battery_settings: BatterySettings,
+    dt: float = 0.25,
+    dc_excess_solar: list[float] | None = None,
 ) -> OptimizationResult:
     """
-    Create an all-IDLE schedule where battery does nothing.
+    Create an all-IDLE schedule where battery does no explicit AC charging/discharging.
+
+    DC excess solar is still absorbed into the battery (a physical process that
+    happens automatically, independent of optimization decisions). In load_first
+    (IDLE) mode, excess AC solar also auto-charges the battery before exporting.
 
     Used as fallback when optimization doesn't meet minimum profit threshold.
     """
@@ -741,23 +896,52 @@ def _create_idle_schedule(
     current_soe = initial_soe
 
     for t in range(horizon):
-        # No battery action - pure grid consumption
+        # DC excess absorption (automatic, even in idle schedule)
+        dc_excess = dc_excess_solar[t] if dc_excess_solar is not None else 0.0
+        dc_to_battery = min(
+            dc_excess, max(0.0, battery_settings.max_soe_kwh - current_soe)
+        )
+        dc_clipped = dc_excess - dc_to_battery
+        soe_after_dc = current_soe + dc_to_battery
+        dc_wear_cost = dc_to_battery * battery_settings.cycle_cost_per_kwh
+
+        # Auto-charging from AC solar excess (load_first mode)
+        solar_excess_kwh = max(0.0, solar_production[t] - home_consumption[t])
+        auto_charge_kw = min(
+            solar_excess_kwh / dt, battery_settings.max_charge_power_kw
+        )
+        auto_charge_stored = min(
+            auto_charge_kw * dt * battery_settings.efficiency_charge,
+            max(0.0, battery_settings.max_soe_kwh - soe_after_dc),
+        )
+        auto_battery_charged = (
+            auto_charge_stored / battery_settings.efficiency_charge
+            if auto_charge_stored > 0
+            else 0.0
+        )
+        soe_end = soe_after_dc + auto_charge_stored
+        ac_auto_wear_cost = auto_charge_stored * battery_settings.cycle_cost_per_kwh
+
         energy_data = EnergyData(
             solar_production=solar_production[t],
             home_consumption=home_consumption[t],
-            battery_charged=0.0,
+            battery_charged=auto_battery_charged,
             battery_discharged=0.0,
             grid_imported=max(0, home_consumption[t] - solar_production[t]),
-            grid_exported=max(0, solar_production[t] - home_consumption[t]),
+            grid_exported=max(
+                0, solar_production[t] - home_consumption[t] - auto_battery_charged
+            ),
             battery_soe_start=current_soe,
-            battery_soe_end=current_soe,
+            battery_soe_end=soe_end,
+            dc_excess_to_battery=dc_to_battery,
+            solar_clipped=dc_clipped,
         )
 
         economic_data = EconomicData.from_energy_data(
             energy_data=energy_data,
             buy_price=buy_price[t],
             sell_price=sell_price[t],
-            battery_cycle_cost=0.0,
+            battery_cycle_cost=dc_wear_cost + ac_auto_wear_cost,
         )
 
         decision_data = DecisionData(
@@ -776,6 +960,7 @@ def _create_idle_schedule(
         )
 
         period_data_list.append(period_data)
+        current_soe = soe_end
 
     # Calculate economic summary for idle schedule
     total_base_cost = sum(home_consumption[i] * buy_price[i] for i in range(horizon))
@@ -820,6 +1005,7 @@ def optimize_battery_schedule(
     terminal_value_per_kwh: float = 0.0,
     currency: str = "SEK",
     max_charge_power_per_period: list[float] | None = None,
+    dc_excess_solar: list[float] | None = None,
 ) -> OptimizationResult:
     """
     Battery optimization that eliminates dual cost calculation by using
@@ -891,6 +1077,7 @@ def optimize_battery_schedule(
         terminal_value_per_kwh=terminal_value_per_kwh,
         currency=currency,
         max_charge_power_per_period=max_charge_power_per_period,
+        dc_excess_solar=dc_excess_solar,
     )
 
     # Step 2: Extract optimal path results directly from stored DP data
@@ -980,6 +1167,8 @@ def optimize_battery_schedule(
             solar_production=solar_production,
             initial_soe=initial_soe,
             battery_settings=battery_settings,
+            dt=dt,
+            dc_excess_solar=dc_excess_solar,
         )
 
     return OptimizationResult(

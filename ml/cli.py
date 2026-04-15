@@ -84,10 +84,13 @@ def _cmd_train(config: dict, target_date: date | None = None) -> None:
 
 
 def _cmd_predict(config: dict) -> None:
-    """Generate and display 24h predictions."""
+    """Generate and display predictions for tomorrow."""
+    from datetime import timedelta
+
     from ml.predictor import predict_with_timestamps
 
-    predictions = predict_with_timestamps(config)
+    target_date = date.today() + timedelta(days=1)
+    predictions = predict_with_timestamps(config, target_date)
 
     print("\n" + "=" * 60)
     print("24-HOUR CONSUMPTION PREDICTION")
@@ -674,18 +677,22 @@ featureImportance.forEach(([name, imp], i) => {{
 
 
 def _cmd_report(config: dict) -> None:
-    """Retrain model, generate predictions, and produce timestamped HTML chart."""
+    """Retrain model, generate predictions for tomorrow, produce HTML chart."""
+    from datetime import timedelta
+
     from ml.data_fetcher import fetch_history_context, fetch_weather_forecast
     from ml.predictor import predict_with_timestamps
     from ml.trainer import train_model
+
+    target_date = date.today() + timedelta(days=1)
 
     print("Retraining model...")
     train_result = train_model(config)
     print(f"  Train samples: {train_result['train_size']}")
     print(f"  MAE: {train_result['metrics']['mae_kwh']:.4f} kWh")
 
-    print("Generating predictions...")
-    predictions = predict_with_timestamps(config)
+    print(f"Generating predictions for {target_date}...")
+    predictions = predict_with_timestamps(config, target_date)
     total_kwh = sum(kwh for _, kwh in predictions)
     print(f"  Predicted 24h total: {total_kwh:.2f} kWh")
 
@@ -694,7 +701,7 @@ def _cmd_report(config: dict) -> None:
     print(f"  Weather points: {len(weather_df)}")
 
     print("Fetching history context...")
-    history_context = fetch_history_context(config)
+    history_context = fetch_history_context(config, target_date=target_date)
     print(f"  Yesterday total: {history_context['yesterday_total']:.2f} kWh")
 
     print("Generating HTML chart...")

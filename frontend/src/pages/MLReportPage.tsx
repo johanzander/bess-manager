@@ -35,6 +35,7 @@ interface MLReportData {
   predictions?: number[];
   yesterdayProfile?: number[];
   weekAvgProfile?: number[];
+  todayActuals?: (number | null)[];
 }
 
 function formatDateTime(iso: string): string {
@@ -140,6 +141,7 @@ const MLReportPage: React.FC = () => {
             predictions={data.predictions}
             yesterday={data.yesterdayProfile}
             weekAvg={data.weekAvgProfile}
+            todayActuals={data.todayActuals}
             forecastDate={data.forecastDate}
             activeStrategy={data.activeStrategy}
           />
@@ -224,6 +226,7 @@ interface ForecastChartProps {
   predictions?: number[];
   yesterday?: number[];
   weekAvg?: number[];
+  todayActuals?: (number | null)[];
   forecastDate?: string;
   activeStrategy?: string;
 }
@@ -232,21 +235,29 @@ const TOOLTIP_LABELS: Record<string, string> = {
   predicted: 'ML Predicted',
   weekAvg: 'Weekly Average',
   yesterday: 'Yesterday',
+  todayActuals: 'Today so far',
 };
 
-const ForecastChart: React.FC<ForecastChartProps> = ({ predictions, yesterday, weekAvg, forecastDate, activeStrategy }) => {
+const ForecastChart: React.FC<ForecastChartProps> = ({ predictions, yesterday, weekAvg, todayActuals, forecastDate, activeStrategy }) => {
   const hasAnyData = predictions?.length || weekAvg?.length;
   if (!hasAnyData) return null;
 
-  const length = Math.max(predictions?.length ?? 0, weekAvg?.length ?? 0, yesterday?.length ?? 0);
+  const length = Math.max(
+    predictions?.length ?? 0,
+    weekAvg?.length ?? 0,
+    yesterday?.length ?? 0,
+    todayActuals?.length ?? 0,
+  );
   const chartData = Array.from({ length }, (_, i) => {
     const label = i % 4 === 0 ? `${String(Math.floor(i / 4)).padStart(2, '0')}:00` : '';
+    const actual = todayActuals?.[i];
     return {
       period: i,
       label,
       predicted: predictions?.[i] !== undefined ? Math.round(predictions[i] * 1000) / 1000 : undefined,
       weekAvg: weekAvg?.[i] !== undefined ? Math.round(weekAvg[i] * 1000) / 1000 : undefined,
       yesterday: yesterday?.[i] !== undefined ? Math.round(yesterday[i] * 1000) / 1000 : undefined,
+      todayActuals: actual === null || actual === undefined ? undefined : Math.round(actual * 1000) / 1000,
     };
   });
 
@@ -258,7 +269,7 @@ const ForecastChart: React.FC<ForecastChartProps> = ({ predictions, yesterday, w
         Consumption Forecast{strategyLabel}
       </h2>
       <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-        96-period forecast{forecastDate ? ` for ${forecastDate}` : ''} vs yesterday's actual (kWh per 15 min)
+        Forecast{forecastDate ? ` for ${forecastDate}` : ''} &mdash; yesterday, weekly average, today so far (kWh per 15 min)
       </p>
       <ResponsiveContainer width="100%" height={260}>
         <LineChart data={chartData} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
@@ -314,6 +325,17 @@ const ForecastChart: React.FC<ForecastChartProps> = ({ predictions, yesterday, w
               strokeWidth={1.5}
               strokeDasharray="4 2"
               name="yesterday"
+            />
+          ) : null}
+          {todayActuals?.length ? (
+            <Line
+              type="monotone"
+              dataKey="todayActuals"
+              stroke="#ef4444"
+              dot={false}
+              strokeWidth={2}
+              connectNulls={false}
+              name="todayActuals"
             />
           ) : null}
         </LineChart>

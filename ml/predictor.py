@@ -11,19 +11,17 @@ Each row contains only features known ahead of time:
 """
 
 import logging
-from datetime import datetime
+from datetime import date, datetime, time
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from xgboost import XGBRegressor
 
 from ml.data_fetcher import (
     PERIODS_PER_DAY,
     fetch_history_context,
     fetch_weather_forecast,
 )
-from ml.feature_engineer import engineer_features
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -31,20 +29,15 @@ QUARTER_MINUTES = 15
 
 
 def _build_future_timestamps(
-    config: dict, periods: int = PERIODS_PER_DAY
+    config: dict,
+    target_date: date,
+    periods: int = PERIODS_PER_DAY,
 ) -> pd.DatetimeIndex:
-    """Generate 96 future 15-minute timestamps starting from the next quarter hour."""
+    """Generate 15-minute timestamps covering target_date from midnight."""
     from ml.data_fetcher import _get_local_tz
 
-    now = datetime.now(_get_local_tz(config))
-
-    # Round up to next quarter hour
-    minutes = now.minute
-    next_quarter = minutes + (QUARTER_MINUTES - minutes % QUARTER_MINUTES)
-    start = now.replace(minute=0, second=0, microsecond=0) + pd.Timedelta(
-        minutes=next_quarter
-    )
-
+    local_tz = _get_local_tz(config)
+    start = datetime.combine(target_date, time.min, tzinfo=local_tz)
     return pd.date_range(start=start, periods=periods, freq="15min")
 
 
@@ -66,8 +59,8 @@ def _build_prediction_dataframe(
     return df
 
 
-def predict_next_24h(config: dict) -> list[float]:
-    """Generate 96 quarter-hourly consumption predictions.
+def predict_next_24h(config: dict, target_date: date) -> list[float]:
+    """Generate 96 quarter-hourly consumption predictions for target_date.
 
     Uses direct multi-output prediction: builds a 96-row feature matrix
     with time features, weather forecast, and history context, then makes
@@ -75,6 +68,7 @@ def predict_next_24h(config: dict) -> list[float]:
 
     Args:
         config: Resolved ML config dict.
+        target_date: Local calendar date to forecast (midnight to midnight).
 
     Returns:
         List of 96 float values representing predicted consumption
@@ -86,6 +80,10 @@ def predict_next_24h(config: dict) -> list[float]:
         FileNotFoundError: If no trained model exists.
         RuntimeError: If data fetching fails.
     """
+    from xgboost import XGBRegressor
+
+    from ml.feature_engineer import engineer_features
+
     model_path = config["model_path"]
     if not Path(model_path).exists():
         raise FileNotFoundError(
@@ -107,11 +105,12 @@ def predict_next_24h(config: dict) -> list[float]:
     model.load_model(model_path)
     _LOGGER.info("Using %d features: %s", len(feature_columns), feature_columns)
 
-    # Step 1: Generate future timestamps
-    future_ts = _build_future_timestamps(config)
+    # Step 1: Generate future timestamps anchored at target_date midnight
+    future_ts = _build_future_timestamps(config, target_date)
     _LOGGER.info(
-        "Predicting %d periods: %s to %s",
+        "Predicting %d periods for %s: %s to %s",
         len(future_ts),
+        target_date,
         future_ts[0],
         future_ts[-1],
     )
@@ -120,9 +119,9 @@ def predict_next_24h(config: dict) -> list[float]:
     _LOGGER.info("Fetching weather forecast from Home Assistant...")
     weather_df = fetch_weather_forecast(config)
 
-    # Step 3: Fetch history context from InfluxDB
-    _LOGGER.info("Fetching history context from InfluxDB...")
-    history_context = fetch_history_context(config)
+    # Step 3: Fetch history context from InfluxDB (anchored to target_date)
+    _LOGGER.info("Fetching history context from InfluxDB for %s...", target_date)
+    history_context = fetch_history_context(config, target_date=target_date)
 
     # Step 4: Build raw DataFrame for future periods
     raw_df = _build_prediction_dataframe(future_ts)
@@ -158,8 +157,9 @@ def predict_next_24h(config: dict) -> list[float]:
     # Log summary statistics
     total_kwh = sum(result)
     _LOGGER.info(
-        "Prediction summary: total %.2f kWh, "
+        "Prediction summary for %s: total %.2f kWh, "
         "min %.3f kWh, max %.3f kWh, mean %.3f kWh per 15min",
+        target_date,
         total_kwh,
         min(result),
         max(result),
@@ -169,16 +169,22 @@ def predict_next_24h(config: dict) -> list[float]:
     return result
 
 
-def predict_with_timestamps(config: dict) -> list[tuple[datetime, float]]:
+def predict_with_timestamps(
+    config: dict, target_date: date
+) -> list[tuple[datetime, float]]:
     """Generate predictions with their associated timestamps.
 
     Convenience wrapper that pairs each prediction with its timestamp.
 
+    Args:
+        config: Resolved ML config dict.
+        target_date: Local calendar date to forecast.
+
     Returns:
         List of (datetime, kWh) tuples for 96 quarter-hourly periods.
     """
-    future_ts = _build_future_timestamps(config)
-    predictions = predict_next_24h(config)
+    future_ts = _build_future_timestamps(config, target_date)
+    predictions = predict_next_24h(config, target_date)
 
     return [
         (ts.to_pydatetime(), pred)

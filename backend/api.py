@@ -2665,24 +2665,75 @@ async def get_ml_report():
     with open(report_path) as f:
         report = json.load(f)
 
-    predictions = system._ml_forecast_cache
+    # Pick which cached forecast to render. Prefer today whenever it is
+    # cached; fall back to the newest key otherwise. This means the report
+    # shows today's forecast during the day (even right after startup when
+    # retrain has already populated both today and tomorrow), and only
+    # switches to tomorrow between 23:00 and 00:00 once today has been
+    # evicted by the stale sweep.
+    from core.bess import time_utils as _time_utils_sel
 
-    forecast_date = (
-        system._ml_forecast_cache_date.isoformat()
-        if system._ml_forecast_cache_date
-        else None
-    )
+    cache = system._ml_forecast_cache
+    _today_sel = _time_utils_sel.today()
+    if _today_sel in cache:
+        target_date = _today_sel
+    elif cache:
+        target_date = max(cache.keys())
+    else:
+        target_date = None
+    predictions = cache[target_date] if target_date is not None else None
+    forecast_date = target_date.isoformat() if target_date is not None else None
+
+    # History context and "today so far" are always anchored to the real
+    # calendar today so the chart's yesterday/weekly-average/today lines stay
+    # stable regardless of whether the forecast on display targets today or
+    # tomorrow (between 23:00 and 00:00 the forecast target is tomorrow, but
+    # "yesterday" on the chart should still be the real previous day).
+    from core.bess import time_utils as _time_utils
+
+    today = _time_utils.today()
 
     yesterday_profile = None
     week_avg_profile = None
     try:
         from ml.data_fetcher import fetch_history_context
 
-        history = fetch_history_context(ml_cfg)
+        history = fetch_history_context(ml_cfg, target_date=today)
         yesterday_profile = history["yesterday_profile"]
         week_avg_profile = history["week_avg_profile"]
     except Exception as e:
         logger.warning("Could not fetch history context for ML report: %s", e)
+
+    today_actuals: list[float | None] | None = None
+    try:
+        from ml.data_fetcher import fetch_actuals_for_date
+
+        today_actuals = fetch_actuals_for_date(ml_cfg, today)
+    except Exception as e:
+        logger.warning("Could not fetch today actuals for ML report: %s", e)
+
+    # When showing today's forecast, hide the portion that has already
+    # elapsed — those quarters are either front-padded zeros (HA weather
+    # forecast can't reach into the past) or stale values from the last
+    # quarter. The "Today so far" line covers the elapsed region instead.
+    if (
+        predictions is not None
+        and target_date is not None
+        and target_date == today
+    ):
+        from datetime import datetime as _dt
+        from zoneinfo import ZoneInfo as _ZI
+
+        tz_name = ml_cfg.get("location", {}).get("timezone", "UTC")
+        now_local = _dt.now(_ZI(tz_name))
+        now_quarter = now_local.hour * 4 + now_local.minute // 15
+        masked: list[float | None] = [None] * now_quarter + list(
+            predictions[now_quarter:]
+        )
+        # Pad or truncate to match the original length.
+        if len(masked) < len(predictions):
+            masked.extend([None] * (len(predictions) - len(masked)))
+        predictions = masked[: len(predictions)]
 
     return {
         "isActive": is_active,
@@ -2700,4 +2751,5 @@ async def get_ml_report():
         "predictions": predictions,
         "yesterdayProfile": yesterday_profile,
         "weekAvgProfile": week_avg_profile,
+        "todayActuals": today_actuals,
     }

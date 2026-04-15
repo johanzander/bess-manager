@@ -279,37 +279,42 @@ def fetch_training_data(
     return wide_df
 
 
-def fetch_recent_data(
+def fetch_actuals_for_date(
     config: dict,
-    days: int = 2,
-) -> pd.DataFrame:
-    """Fetch recent sensor data for prediction context.
+    target_date: date,
+) -> list[float | None]:
+    """Return a 96-length list of kWh-per-quarter actuals for target_date.
 
-    Fetches recent observed data from InfluxDB. Used to compute
-    history context features (yesterday's profile, weekly averages).
+    Positions at/after "now" return None so the frontend renders them as gaps.
+    Returns all-None if target_date is in the future.
 
     Args:
         config: Resolved ML config dict.
-        days: Number of days of recent data to fetch.
+        target_date: Local calendar date to fetch actuals for.
 
     Returns:
-        Wide-format DataFrame with the same column structure as fetch_training_data.
+        List of 96 values (float or None) keyed by quarter index.
 
     Raises:
-        RuntimeError: If InfluxDB query fails or returns insufficient data.
+        RuntimeError: If InfluxDB query fails.
     """
     local_tz = _get_local_tz(config)
-    target_sensor = config["target"]["sensor"]
-    feature_sensors = list(config["feature_sensors"].values())
-    all_sensors = [target_sensor, *feature_sensors]
+    now = datetime.now(local_tz)
+    today = now.date()
 
-    end_dt = datetime.now(local_tz)
-    start_dt = end_dt - timedelta(days=days)
+    if target_date > today:
+        return [None] * PERIODS_PER_DAY
+
+    start_dt = datetime.combine(target_date, datetime.min.time()).replace(
+        tzinfo=local_tz
+    )
+    end_dt = start_dt + timedelta(days=1)
 
     start_str = start_dt.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     end_str = end_dt.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    sensor_filter = _build_sensor_filter(all_sensors)
+    target_sensor = config["target"]["sensor"]
+    sensor_filter = _build_sensor_filter([target_sensor])
     bucket = config["influxdb"]["bucket"]
 
     flux_query = f"""from(bucket: "{bucket}")
@@ -319,32 +324,32 @@ def fetch_recent_data(
         |> sort(columns: ["_time"])
     """
 
-    _LOGGER.info("Fetching recent data for prediction (%d days)...", days)
+    _LOGGER.info("Fetching actuals for %s...", target_date)
     csv_text = _query_influxdb(config, flux_query, timeout=60)
-
     raw_df = _parse_csv_to_dataframe(csv_text, local_tz)
-    if raw_df.empty:
-        raise RuntimeError("No recent data returned from InfluxDB")
 
-    wide_df = _aggregate_to_quarters(raw_df)
+    actuals: list[float | None] = [None] * PERIODS_PER_DAY
 
-    # Rename columns
-    column_renames = {f"sensor.{target_sensor}": "target"}
-    for feature_name, sensor_id in config["feature_sensors"].items():
-        column_renames[f"sensor.{sensor_id}"] = feature_name
+    if not raw_df.empty:
+        wide_df = _aggregate_to_quarters(raw_df)
+        target_col = f"sensor.{target_sensor}"
+        if target_col in wide_df.columns:
+            series = wide_df[target_col]
+            if config["target"].get("unit") == "W":
+                series = series * (1.0 / (4 * 1000))
+            day_mask = series.index.date == target_date
+            day_series = series[day_mask]
+            for ts, val in day_series.items():
+                quarter_idx = ts.hour * 4 + ts.minute // 15
+                if 0 <= quarter_idx < PERIODS_PER_DAY:
+                    actuals[quarter_idx] = float(val)
 
-    wide_df = wide_df.rename(columns=column_renames)
-    wide_df = wide_df.ffill()
-    wide_df = wide_df.dropna(subset=["target"])
+    if target_date == today:
+        now_quarter = now.hour * 4 + now.minute // 15
+        for i in range(now_quarter, PERIODS_PER_DAY):
+            actuals[i] = None
 
-    _LOGGER.info(
-        "Recent data: %d rows, date range %s to %s",
-        len(wide_df),
-        wide_df.index.min(),
-        wide_df.index.max(),
-    )
-
-    return wide_df
+    return actuals
 
 
 def fetch_weather_forecast(config: dict) -> pd.DataFrame:

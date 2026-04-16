@@ -189,7 +189,7 @@ class StoredSchedule:
 ```python
 buy_price = (spot_price + markup) * vat_multiplier + additional_costs
 sell_price = spot_price * export_rate - tax_reduction
-```text
+```
 
 ### PowerMonitor
 
@@ -232,7 +232,7 @@ sell_price = spot_price * export_rate - tax_reduction
 
    └── DailyViewBuilder merges actual + predicted data
    └── Generate complete 24-hour view for UI/API
-```text
+```
 
 ### System Startup Flow
 
@@ -257,7 +257,7 @@ sell_price = spot_price * export_rate - tax_reduction
 
    └── Begin hourly update cycle
    └── Start power monitoring and charging adjustment
-```text
+```
 
 ## Key Algorithms
 
@@ -294,7 +294,7 @@ solar_to_grid = remaining_solar - solar_to_battery
 
 grid_to_home = max(0, home_consumption - solar_to_home)
 grid_to_battery = max(0, battery_charged - solar_to_battery)
-```text
+```
 
 ### Decision Intelligence
 
@@ -346,7 +346,7 @@ influxdb:
   bucket: "home_assistant/autogen"
   username: "your_db_username_here"
   password: "your_db_password_here"
-```text
+```
 
 ### Runtime Settings (`/data/bess_settings.json`)
 

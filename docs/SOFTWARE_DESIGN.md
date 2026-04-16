@@ -162,11 +162,10 @@ class StoredSchedule:
 
 **Key Responsibilities**:
 
-- Convert quarterly schedule to hourly Time-of-Use (TOU) intervals (hardware constraint)
-- Manage battery modes (load-first, battery-first)
+- Group consecutive same-mode quarterly periods into minimal TOU intervals (max 9 segments — hardware constraint)
+- Convert battery intents to battery modes (load-first, battery-first)
 - Configure grid charging and discharge rate settings
-- Apply battery intents to hardware parameters
-- Aggregate quarterly periods to hourly for Growatt inverter
+- Only create TOU segments for strategic periods (battery-first, grid-first); idle periods use default load-first behavior
 
 **Hardware Integration**:
 
@@ -219,10 +218,9 @@ sell_price = spot_price * export_rate - tax_reduction
    └── Record completed hour in HistoricalDataStore
    └── Immutable storage of what actually happened
 
-3. Optimization Decision
+3. Optimization
 
-   └── Check if reoptimization needed (significant changes)
-   └── Run DP algorithm for remaining hours
+   └── Run DP algorithm for remaining periods
    └── Store new schedule in ScheduleStore
 
 4. Hardware Application
@@ -250,11 +248,10 @@ sell_price = spot_price * export_rate - tax_reduction
    └── SensorCollector queries InfluxDB for today's data
    └── Rebuild HistoricalDataStore with actual measurements
 
-3. Schedule Recovery
+3. Initial Optimization
 
-   └── Determine current hour and battery state
-   └── Run optimization for remaining hours
-   └── Apply current schedule to hardware
+   └── First scheduled update runs fresh optimization
+   └── Apply schedule to hardware
 
 4. Service Start
 
@@ -264,9 +261,23 @@ sell_price = spot_price * export_rate - tax_reduction
 
 ## Key Algorithms
 
+### Dynamic Programming Optimization
+
+The DP algorithm uses **backward induction** to find the globally optimal battery schedule. Starting from the last period and working backwards, it evaluates all possible battery actions (charge/discharge/idle) at each period and selects the action that minimizes total electricity cost over the remaining horizon.
+
+**State space**: Discretized battery state of energy (SOE) levels.
+
+**Actions**: Discretized charge/discharge power levels, filtered by physical constraints (available energy, remaining capacity, power limits, temperature derating).
+
+**Transition**: Each action updates SOE accounting for charging/discharging efficiency losses, and updates the cost basis of stored energy (FIFO accounting).
+
+**Objective**: Minimize net electricity cost (grid import cost minus export revenue) while accounting for battery cycle degradation costs and a terminal value for energy remaining at end of horizon.
+
+**Profit threshold**: After optimization, total savings are compared against a horizon-scaled minimum threshold. If savings are too low relative to remaining day fraction, the schedule is rejected in favor of all-IDLE to prevent excessive cycling for marginal gains.
+
 ### Energy Flow Calculation
 
-The system calculates detailed energy flows using physical constraints:
+The system calculates detailed energy flows using energy conservation (solar and grid contributions must account for all consumption, charging, and export):
 
 ```python
 
@@ -285,16 +296,6 @@ grid_to_home = max(0, home_consumption - solar_to_home)
 grid_to_battery = max(0, battery_charged - solar_to_battery)
 ```text
 
-### Battery Intent Detection
-
-The system infers battery intent solely from the energy flows computed by the DP algorithm. After each period is solved, the detailed flows in `EnergyData` are derived automatically and used to classify intent:
-
-- **EXPORT_ARBITRAGE**: `battery_to_grid > 0.1 kWh`
-- **LOAD_SUPPORT**: `battery_to_home > 0.1 kWh` and `battery_to_grid <= 0.1 kWh`
-- **GRID_CHARGING**: `grid_to_battery >= 0.1 kWh`
-- **SOLAR_STORAGE**: `solar_to_battery > 0.1 kWh` and `grid_to_battery < 0.1 kWh`
-- **IDLE**: No significant battery activity in any flow
-
 ### Decision Intelligence
 
 Each optimization provides detailed economic reasoning:
@@ -303,6 +304,35 @@ Each optimization provides detailed economic reasoning:
 - **Future Value**: Expected benefits from strategic energy storage
 - **Economic Chain**: Step-by-step profit/loss calculation explanation
 - **Alternative Analysis**: Why other strategies were not chosen
+
+### Battery Action Intent Detection
+
+The system infers battery action intent solely from the energy flows computed by the DP algorithm. After each period is solved, the detailed flows in `EnergyData` are derived automatically and used to classify intent:
+
+- **EXPORT_ARBITRAGE**: `battery_to_grid > 0.1 kWh`
+- **LOAD_SUPPORT**: `battery_to_home > 0.1 kWh` and `battery_to_grid <= 0.1 kWh`
+- **GRID_CHARGING**: `grid_to_battery >= 0.1 kWh`
+- **SOLAR_STORAGE**: `solar_to_battery > 0.1 kWh` and `grid_to_battery < 0.1 kWh`
+- **IDLE**: No significant battery activity in any flow
+
+### TOU Schedule Generation
+
+The GrowattScheduleManager converts action intents into Time-of-Use (TOU) intervals for the Growatt inverter. Each intent maps to an inverter battery mode and control parameters:
+
+| Intent | Battery Mode | Grid Charge | Charge Rate | Discharge Rate |
+|---|---|---|---|---|
+| GRID_CHARGING | battery_first | On | 100% | 0% |
+| SOLAR_STORAGE | battery_first | Off | 100% | 0% |
+| LOAD_SUPPORT | load_first | Off | 0% | 100% |
+| EXPORT_ARBITRAGE | grid_first | Off | 0% | 100% |
+| IDLE | load_first | Off | 100% | 0% |
+
+**Schedule generation**:
+
+1. Group consecutive 15-minute periods that share the same battery mode
+2. Only create TOU segments for strategic modes (battery_first, grid_first) — load_first is the inverter default and needs no segment
+3. Enforce hardware constraints: max 9 TOU segments, chronological order, no overlaps
+4. Preserve past intervals to minimize unnecessary inverter writes
 
 ## Configuration and Settings
 
@@ -329,7 +359,7 @@ All other settings are stored in this file and managed via the settings API. Top
 - **`sensors`**: Entity ID mappings for all Home Assistant sensors
 - **`energy_provider`**: Price source selection (Nordpool or Octopus Energy) and area configuration
 
-### Auto-Configuration (Experimental)
+### Auto-Configuration
 
 On first startup with no sensors configured, the system offers an automated
 discovery flow via the setup wizard UI.
@@ -485,13 +515,6 @@ The system operates on **quarterly resolution (15-minute periods)** throughout t
 - **API**: Returns quarterly, aggregates only for display
 - **Frontend**: Displays both resolutions as user preference
 
-**Simplifications from Quarterly Design**:
-
-- No complex interval metadata
-- No triple data models (hourly/quarterly/metadata)
-- No hour-to-period conversions in core logic
-- Reduced code size by ~70% compared to previous design
-- Simple continuous indexing eliminates edge cases
 
 ## Development and Testing
 
@@ -514,8 +537,6 @@ The system operates on **quarterly resolution (15-minute periods)** throughout t
 - **Code Quality**: Ruff, Black, Pylance compliance
 - **Type Safety**: Strict typing with union operators (`|`)
 - **Documentation**: Comprehensive docstrings and design documentation
-- **Performance**: Optimization runtime and memory usage monitoring
-- **Period Validation**: No hardcoded 24/96 checks, DST-aware throughout
 
 ### Mock HA Environment
 

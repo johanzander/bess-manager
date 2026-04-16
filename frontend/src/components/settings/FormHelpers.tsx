@@ -55,6 +55,7 @@ export function txtInput(
   value: string,
   onChange: (_: string) => void,
   placeholder = '',
+  opts: { readOnly?: boolean } = {},
 ) {
   return (
     <label className="block">
@@ -63,8 +64,12 @@ export function txtInput(
         type="text"
         value={value}
         placeholder={placeholder}
-        onChange={e => onChange(e.target.value)}
-        className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+        readOnly={opts.readOnly}
+        onChange={e => { if (!opts.readOnly) onChange(e.target.value); }}
+        className={`mt-1 block w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500
+          ${opts.readOnly
+            ? 'bg-gray-50 dark:bg-gray-700/50 border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 cursor-default'
+            : 'bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white'}`}
       />
     </label>
   );

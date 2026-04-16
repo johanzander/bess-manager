@@ -43,6 +43,19 @@ class PriceSource:
         """
         raise NotImplementedError("Price sources must implement get_prices_for_date")
 
+    @property
+    def prices_are_final(self) -> bool:
+        """Whether prices from this source are already final (VAT-inclusive, retail).
+
+        When True, PriceManager skips the buy-price calculation (markup, VAT,
+        additional costs) and uses the raw price as-is.  Sell prices are still
+        taken from get_sell_prices_for_date() if provided, otherwise the raw
+        price + tax_reduction formula applies.
+
+        Default is False (sources return VAT-exclusive spot prices).
+        """
+        return False
+
     def get_sell_prices_for_date(self, target_date: date) -> list[float] | None:
         """Get separate sell/export prices for a specific date.
 
@@ -102,9 +115,10 @@ class MockSource(PriceSource):
             "status": "OK",
             "checks": [
                 {
-                    "component": "MockSource",
+                    "name": "MockSource",
                     "status": "OK",
-                    "message": f"Mock source with {len(self.test_prices)} test prices",
+                    "error": None,
+                    "value": f"Mock source with {len(self.test_prices)} test prices",
                 }
             ],
         }
@@ -122,22 +136,20 @@ class HomeAssistantSource(PriceSource):
         self,
         ha_controller,
         vat_multiplier: float,
-        today_entity: str,
-        tomorrow_entity: str,
+        entity: str,
     ) -> None:
-        """Initialize with Home Assistant controller and entity IDs.
+        """Initialize with Home Assistant controller and entity ID.
 
         Args:
             ha_controller: Controller with access to Home Assistant
             vat_multiplier: VAT multiplier used to convert VAT-inclusive prices to VAT-exclusive
                             (must be provided from config.yaml)
-            today_entity: HA entity ID for today's Nordpool prices
-            tomorrow_entity: HA entity ID for tomorrow's Nordpool prices
+            entity: HA entity ID for the Nordpool HACS sensor (exposes both today and
+                    tomorrow prices as attributes on the same entity)
         """
         self.ha_controller = ha_controller
         self.vat_multiplier = vat_multiplier
-        self.today_entity = today_entity
-        self.tomorrow_entity = tomorrow_entity
+        self.entity = entity
 
     def get_prices_for_date(self, target_date: date) -> list:
         """Get prices from Home Assistant for the specified date.
@@ -156,14 +168,13 @@ class HomeAssistantSource(PriceSource):
             )
 
         try:
-            # Fetch sensor data from both sensors using configured entity IDs
-            today_data = self._fetch_sensor_attributes(self.today_entity)
-            tomorrow_data = self._fetch_sensor_attributes(self.tomorrow_entity)
+            # Fetch sensor data — today and tomorrow attributes live on the same entity
+            sensor_data_all = self._fetch_sensor_attributes(self.entity)
 
-            # Try both sensors - use whichever has valid data for our target date
+            # Try both attribute sets on the single sensor
             for sensor_data, sensor_name in [
-                (today_data, "today"),
-                (tomorrow_data, "tomorrow"),
+                (sensor_data_all, "today"),
+                (sensor_data_all, "tomorrow"),
             ]:
                 if not sensor_data:
                     continue
@@ -332,9 +343,10 @@ class HomeAssistantSource(PriceSource):
                     "status": "OK",
                     "checks": [
                         {
-                            "component": "HomeAssistantSource",
+                            "name": "HomeAssistantSource",
                             "status": "OK",
-                            "message": f"Successfully fetched {len(today_prices)} prices for today",
+                            "error": None,
+                            "value": f"Successfully fetched {len(today_prices)} prices for today",
                         }
                     ],
                 }
@@ -343,9 +355,9 @@ class HomeAssistantSource(PriceSource):
                     "status": "ERROR",
                     "checks": [
                         {
-                            "component": "HomeAssistantSource",
+                            "name": "HomeAssistantSource",
                             "status": "ERROR",
-                            "message": "No price data available for today",
+                            "error": "No price data available for today",
                         }
                     ],
                 }
@@ -354,9 +366,9 @@ class HomeAssistantSource(PriceSource):
                 "status": "ERROR",
                 "checks": [
                     {
-                        "component": "HomeAssistantSource",
+                        "name": "HomeAssistantSource",
                         "status": "ERROR",
-                        "message": f"Failed to fetch prices: {e}",
+                        "error": f"Failed to fetch prices: {e}",
                     }
                 ],
             }
@@ -481,10 +493,12 @@ class PriceManager:
                 else:
                     sell_price = self._calculate_sell_price(price)
 
+                buy_price = price if self.price_source.prices_are_final else self._calculate_buy_price(price)
+
                 price_entry = {
                     "timestamp": timestamp.strftime("%Y-%m-%d %H:%M"),
                     "price": price,
-                    "buyPrice": self._calculate_buy_price(price),
+                    "buyPrice": buy_price,
                     "sellPrice": sell_price,
                 }
                 price_data.append(price_entry)

@@ -4,6 +4,22 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [8.2.0] - 2026-04-17
+
+### Changed
+
+- Nord Pool HACS custom sensor integration now uses a single sensor entity (which exposes both `raw_today` and `raw_tomorrow` attributes) instead of two separate sensor fields. Existing settings are migrated automatically on first boot.
+- Setup wizard pre-fills current Swedish default values for additional costs (0.77 SEK/kWh) and export compensation (0.20 SEK/kWh) for E.ON in SE4.
+- User Guide substantially expanded: full documentation for all three price providers, all three consumption forecast strategies, and the EV charging discharge inhibit feature.
+- Installation guide updated with corrected InfluxDB v2 connectivity test command.
+
+### Fixed
+
+- Nord Pool official integration now passes the configured area code to the `nordpool.get_prices_for_date` service call and looks up the response by that key. Previously the first list in the response was used regardless of area, which could return wrong-area prices on multi-area installations.
+- Octopus Energy prices are no longer incorrectly inflated by the markup/VAT/additional-costs formula. The backend now detects that Octopus rates are already all-in and uses them as-is for buy prices.
+- Switching price provider to Octopus Energy in the Settings UI now auto-resets markup rate, VAT multiplier, and additional costs to neutral values, preventing stale Nord Pool values from being saved.
+- Partial settings PATCH requests now use deep merge: updating a single nested field (e.g. `config_entry_id`) no longer silently erases sibling fields in the same section.
+
 ## [8.1.1] - 2026-04-13
 
 ### Added

@@ -207,6 +207,7 @@ class BatterySystemManager:
                 controller,
                 config_entry_id,
                 vat_multiplier=self.price_settings.vat_multiplier,
+                area=self.price_settings.area,
             )
             logger.info("Using official Home Assistant Nordpool integration")
             return price_source
@@ -217,8 +218,7 @@ class BatterySystemManager:
             return HomeAssistantSource(
                 controller,
                 vat_multiplier=self.price_settings.vat_multiplier,
-                today_entity=nordpool_config["today_entity"],
-                tomorrow_entity=nordpool_config["tomorrow_entity"],
+                entity=nordpool_config["entity"],
             )
 
         raise SystemConfigurationError(

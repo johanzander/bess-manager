@@ -42,7 +42,7 @@ const EMPTY_HOME: HomeForm = {
 const EMPTY_PRICING: PricingForm = {
   currency: 'SEK',
   provider: 'nordpool_official', nordpoolConfigEntryId: '',
-  nordpoolTodayEntity: '', nordpoolTomorrowEntity: '',
+  nordpoolEntity: '',
   octopusImportTodayEntity: '', octopusImportTomorrowEntity: '',
   octopusExportTodayEntity: '', octopusExportTomorrowEntity: '',
   area: '', markupRate: 0, vatMultiplier: 1.25, additionalCosts: 0,
@@ -74,13 +74,18 @@ const SettingsPage: React.FC = () => {
   const savedInverter = useRef<string>('');
   const savedSensors = useRef<string>('');
 
+  // Sensor keys arrive in arbitrary order from different sources (backend
+  // load vs. auto-configure merge), so sort keys before comparing.
+  const stableStringify = (obj: Record<string, string>) =>
+    JSON.stringify(Object.keys(obj).sort().reduce<Record<string, string>>((acc, k) => { acc[k] = obj[k]; return acc; }, {}));
+
   const isDirty: Record<Tab, boolean> = {
     home: JSON.stringify(homeForm) !== savedHome.current,
     pricing: JSON.stringify(pricingForm) !== savedPricing.current,
     battery:
       JSON.stringify(batteryForm) !== savedBattery.current ||
       JSON.stringify(inverterForm) !== savedInverter.current,
-    sensors: JSON.stringify(sensors) !== savedSensors.current,
+    sensors: stableStringify(sensors) !== savedSensors.current,
     health: false,
   };
 
@@ -163,8 +168,7 @@ const SettingsPage: React.FC = () => {
         currency: home_s.currency ?? '',
         provider: prov_s.provider ?? 'nordpool_official',
         nordpoolConfigEntryId: nordpool.configEntryId ?? '',
-        nordpoolTodayEntity: nordpoolCustom.todayEntity ?? '',
-        nordpoolTomorrowEntity: nordpoolCustom.tomorrowEntity ?? '',
+        nordpoolEntity: nordpoolCustom.entity ?? '',
         octopusImportTodayEntity: octopus.importTodayEntity ?? '',
         octopusImportTomorrowEntity: octopus.importTomorrowEntity ?? '',
         octopusExportTodayEntity: octopus.exportTodayEntity ?? '',
@@ -187,7 +191,7 @@ const SettingsPage: React.FC = () => {
 
       const sen: Record<string, string> = s.sensors ?? {};
       setSensors(sen);
-      savedSensors.current = JSON.stringify(sen);
+      savedSensors.current = stableStringify(sen);
 
       if (healthRes.data?.checks) {
         const map: Record<string, HealthStatus> = {};
@@ -235,13 +239,23 @@ const SettingsPage: React.FC = () => {
         }));
       }
 
-      setPricingForm(f => ({
-        ...f,
-        ...(d.nordpoolConfigEntryId ? { nordpoolConfigEntryId: d.nordpoolConfigEntryId } : {}),
-        ...(d.nordpoolArea ? { area: d.nordpoolArea } : {}),
-        ...(d.currency ? { currency: d.currency } : {}),
-        ...(d.vatMultiplier ? { vatMultiplier: d.vatMultiplier } : {}),
-      }));
+      // Only update discovery fields that actually changed.
+      // Never overwrite user-configured price calculation fields
+      // (vatMultiplier, markupRate, additionalCosts, taxReduction).
+      setPricingForm(f => {
+        const next = { ...f };
+        let changed = false;
+        if (d.nordpoolConfigEntryId && d.nordpoolConfigEntryId !== f.nordpoolConfigEntryId) {
+          next.nordpoolConfigEntryId = d.nordpoolConfigEntryId; changed = true;
+        }
+        if (d.nordpoolArea && d.nordpoolArea !== f.area) {
+          next.area = d.nordpoolArea; changed = true;
+        }
+        if (d.currency && d.currency !== f.currency) {
+          next.currency = d.currency; changed = true;
+        }
+        return changed ? next : f;
+      });
 
       if (d.detectedPhaseCount) {
         setHomeForm(f => ({ ...f, phaseCount: d.detectedPhaseCount }));
@@ -360,10 +374,7 @@ const SettingsPage: React.FC = () => {
         energyProvider: {
           provider: pricingForm.provider,
           nordpoolOfficial: { configEntryId: pricingForm.nordpoolConfigEntryId },
-          nordpool: {
-            todayEntity: pricingForm.nordpoolTodayEntity,
-            tomorrowEntity: pricingForm.nordpoolTomorrowEntity,
-          },
+          nordpool: { entity: pricingForm.nordpoolEntity },
           octopus: {
             importTodayEntity: pricingForm.octopusImportTodayEntity,
             importTomorrowEntity: pricingForm.octopusImportTomorrowEntity,
@@ -425,10 +436,7 @@ const SettingsPage: React.FC = () => {
         energyProvider: {
           provider: pricingForm.provider,
           nordpoolOfficial: { configEntryId: pricingForm.nordpoolConfigEntryId },
-          nordpool: {
-            todayEntity: pricingForm.nordpoolTodayEntity,
-            tomorrowEntity: pricingForm.nordpoolTomorrowEntity,
-          },
+          nordpool: { entity: pricingForm.nordpoolEntity },
           octopus: {
             importTodayEntity: pricingForm.octopusImportTodayEntity,
             importTomorrowEntity: pricingForm.octopusImportTomorrowEntity,
@@ -437,7 +445,7 @@ const SettingsPage: React.FC = () => {
           },
         },
       });
-      savedSensors.current = JSON.stringify(sensors);
+      savedSensors.current = stableStringify(sensors);
       savedPricing.current = JSON.stringify(pricingForm);
       const failed = await checkAndUpdateSensorHealth(sensors);
       if (failed.length > 0) {

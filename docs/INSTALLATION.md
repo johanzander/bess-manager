@@ -421,26 +421,19 @@ If no data appears in InfluxDB at all, check:
 #### Step 2: Verify the BESS user can read data
 
 Run the following `curl` command from the machine running Home Assistant (or any machine that can
-reach InfluxDB). Replace `<password>` with the BESS user's password:
+reach InfluxDB). Replace `<influxdb-host>`, `<db>`, and `<password>` with your values:
 
 ```bash
-curl -G "http://homeassistant.local:8086/query" \
-  --data-urlencode "db=homeassistant" \
-  --data-urlencode "q=SELECT last(value) FROM /sensor.*/ LIMIT 5" \
-  -u "bess:<password>"
+curl -s -o /dev/null -w "HTTP %{http_code}\n" -X POST "http://<influxdb-host>:8086/api/v2/query" -u "bess:<password>" -H "Content-type: application/vnd.flux" -H "Accept: application/csv" --data 'from(bucket: "<db>/autogen") |> range(start: -1h) |> limit(n: 1)'
 ```
 
-A working response looks like:
+This uses the same endpoint and query language as BESS, so it is an exact connectivity test.
 
-```json
-{"results":[{"statement_id":0,"series":[{"name":"sensor.growatt_...","columns":["time","last"],...}]}]}
-```
+Expected responses:
 
-If you get `{"results":[{"statement_id":0}]}` (empty series), no sensor data exists yet — wait
-a few minutes for HA to write some, then retry.
-
-If you get a `401 Unauthorized` error, the username or password is wrong, or the user does not
-have read access to the `homeassistant` database.
+- `HTTP 200` — working correctly
+- `HTTP 401` — wrong username or password
+- `HTTP 403` — Flux query language is not enabled in your InfluxDB configuration
 
 If you get a connection error, replace `homeassistant.local` with the IP address of your Home
 Assistant instance (e.g. `192.168.1.100`).

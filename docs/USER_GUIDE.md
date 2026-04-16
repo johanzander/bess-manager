@@ -233,16 +233,92 @@ The logs show:
 - **Min SOC**: Set safety margin (10-20% recommended)
 - **Cycle Cost**: Balance between battery wear and optimization aggressiveness
 
-### Price Settings
+### Electricity Price Settings
 
-- **Area**: Must match your pricing area (Nordpool area code, or "UK" for Octopus)
-- **Additional Costs**: Include all taxes, fees, and markup for accurate calculations (set to 0 for Octopus as prices are VAT-inclusive)
+BESS needs hourly spot prices to decide when to charge and discharge. Three price providers are supported — pick the one that matches the integration you have installed in Home Assistant.
+
+#### Provider: Nord Pool (official HA integration)
+
+Recommended for most European users. This is the official Nord Pool integration built into Home Assistant (available since HA 2024.10).
+
+- **Prerequisites**: Add Nord Pool under Settings → Devices & Services → Add Integration → Nord Pool. Configure your market area (e.g. SE4, NO1, DK1, FI) and currency there.
+- **How it works**: BESS calls the `nordpool.get_prices_for_date` service using the Config Entry ID to fetch today's and tomorrow's hourly spot prices.
+- **Config Entry ID**: A unique identifier for your Nord Pool integration instance. Auto-detected by Auto-Configure. You can also find it in the HA URL when viewing the integration (the long hex string).
+- **Area & Currency**: Determined by the integration's own configuration and shown read-only in BESS. These are not configurable in BESS — change them in the HA Nord Pool integration settings if needed.
+
+#### Provider: Nord Pool (HACS custom sensor)
+
+For users with the Nord Pool HACS custom integration (installed from [github.com/custom-components/nordpool](https://github.com/custom-components/nordpool)).
+
+- **Prerequisites**: Nord Pool installed via HACS. The integration creates a single sensor entity whose name encodes the area and currency, e.g. `sensor.nordpool_kwh_se4_sek_3`.
+- **How it works**: BESS reads the `raw_today` and `raw_tomorrow` attributes from your Nord Pool sensor to get hourly spot prices. Both today's and tomorrow's prices live on the same sensor entity.
+- **Sensor**: The entity ID of your Nord Pool sensor. Auto-detected by Auto-Configure, or enter it manually.
+- **Area & Currency**: Inferred from the sensor name and shown read-only in BESS.
+
+#### Provider: Octopus Energy
+
+For UK users on the Octopus Energy Agile tariff.
+
+- **Prerequisites**: The Octopus Energy HACS integration installed and configured. It creates event entities that update with upcoming half-hourly rates.
+- **How it works**: BESS reads four event entities — today's and tomorrow's import rates, and today's and tomorrow's export rates. Prices are already VAT-inclusive in GBP/kWh.
+- **Entities**: Four event entity IDs for import/export today/tomorrow. All are auto-detected by Auto-Configure.
+
+#### Price Calculation
+
+Once BESS has the raw spot price from your provider, it applies your configured fees and taxes to compute the actual buy and sell prices used for optimization:
+
+- **Markup Rate**: Your energy provider's margin fee, applied before VAT. E.g. Tibber charges ~0.08 SEK/kWh, Ellevio ~0.15.
+- **VAT Multiplier**: The VAT factor. 1.25 = 25% (Sweden/Norway), 1.24 = 24% (Finland), 1.22 = 22% (Estonia), 1.20 = 20% (UK).
+- **Additional Costs**: Grid transfer fee + energy tax, summed as a single per-kWh value including VAT. E.g. E.ON: (0.2584 + 0.3600) × 1.25 = 0.773 SEK/kWh.
+- **Export Compensation**: Per-kWh payment from your grid operator when you sell surplus electricity. Check your energy bill, e.g. E.ON under "Producent/Självfaktura": 0.1988 SEK/kWh.
+
+The formulas:
+
+- **Buy price** = (spot + markup) × VAT multiplier + additional costs
+- **Sell price** = spot + export compensation
+
+For Octopus Energy, prices are already final (VAT-inclusive, GBP/kWh). Markup, VAT, and Additional Costs are not applied — only Export Compensation is used.
 
 ### Consumption Prediction
 
-- System learns your patterns automatically
-- Manually adjust if you have predictable high-usage periods
-- Consider seasonal variations (heating/cooling)
+BESS needs a forecast of your home consumption to plan the battery schedule. Three strategies are available, configured via `home.consumption_strategy` in your add-on settings:
+
+#### Strategy 1: `sensor` (default)
+
+BESS reads a Home Assistant sensor named `*48h_avg*grid_import*` (the exact entity ID is auto-discovered by name pattern). This sensor should be a 48-hour rolling average of your grid import power, filtered to exclude periods when the battery is active. See [INSTALLATION.md](INSTALLATION.md), Step 3 for how to create it.
+
+The same flat value is used as the predicted consumption for all 96 periods of the day — it is an average, not a time-of-day profile.
+
+**Why filter out battery activity?** When the battery discharges, it reduces grid import. Without the filter, battery-active periods would lower the average and cause the optimizer to under-predict consumption.
+
+**EV charging — include or exclude?**
+
+- **Exclude** (recommended for most users): The average reflects pure home consumption. The optimizer does not plan for EV charging load, but the discharge inhibit sensor (see below) prevents the battery from discharging while the car charges. This is the more robust choice when EV charging is irregular.
+- **Include**: The optimizer sees the total actual load and may hold back battery capacity in anticipation. This works well only if you charge the car on a very predictable schedule (same time, same amount every night).
+
+The 48h window is a sensible default. If your consumption varies strongly with season (e.g. heat pump), you can create the sensor with a shorter window (12–24h) so it adapts faster — just keep the `48h_avg_grid_import` naming so BESS discovers it correctly.
+
+#### Strategy 2: `fixed`
+
+Uses a single fixed kWh/hour value set in `home.default_hourly`. No sensor required. Useful as a fallback or for very predictable consumption, but does not adapt to actual usage.
+
+#### Strategy 3: `influxdb_7d_avg`
+
+Queries InfluxDB for the past 7 days of your local load power sensor and builds a 96-period average profile (one value per 15-minute slot, averaged across the same slot for the last 7 days). This gives a time-of-day shaped forecast — higher during evening peaks, lower overnight — rather than a flat value.
+
+Requires `local_load_power` sensor configured in your add-on sensor settings and InfluxDB access.
+
+This should give the best prediction of the three options, but require an influxdb to be set up.
+
+### EV Charging and Discharge Inhibit
+
+BESS does not control EV charging — it is designed to work alongside it. Under normal circumstances there is no conflict: when electricity is cheap, both the car and the battery charge at the same time.
+
+The exception is grid reward programs such as **Tibber grid rewards**. These programs can start EV charging for grid balancing reasons, even when the spot price is not at its lowest. If BESS were to discharge the battery at the same time, that energy would flow toward the car instead of from the grid — you would miss the grid reward income and also lose the battery capacity you would otherwise have had available for the home.
+
+To prevent this, BESS auto-detects any `binary_sensor` whose entity ID ends with `_charging` (for example `binary_sensor.zap263668_charging`) and treats it as a **discharge inhibit** signal. When the sensor is `on`, battery discharging is paused regardless of what the schedule says.
+
+The discharge inhibit only affects discharging — it does not change the TOU schedule, trigger battery charging, or interfere with the EV charging session in any way.
 
 ## Advanced Features
 

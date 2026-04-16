@@ -45,7 +45,6 @@ def start() -> None
 - Calculate detailed energy flows (solar-to-home, grid-to-battery, etc.)
 - Validate energy balance and detect sensor anomalies
 - Reconstruct historical data during system startup
-- Support strategic intent reconstruction from sensor patterns
 
 **Data Sources**:
 
@@ -85,15 +84,15 @@ def start() -> None
 
 **Inputs**:
 
-- 96 quarterly (15-minute) electricity price forecast
+- Variable-length electricity price forecast at 15-minute resolution (from current period through end of available data; may span into the next day when tomorrow's prices are available)
 - Battery parameters (capacity, limits, cycle cost)
-- Consumption predictions (96 quarterly periods)
-- Solar production forecast (96 quarterly periods)
+- Consumption predictions (one entry per period, matching price array length)
+- Solar production forecast (one entry per period, matching price array length)
 - Current battery state and cost basis
 
 **Outputs**:
 
-- Quarterly battery actions (charge/discharge/idle) for 96 periods
+- Battery actions (charge/discharge/idle) for each period in the horizon
 - Expected battery SOC progression at 15-minute resolution
 - Economic analysis (costs, savings, decision reasoning)
 
@@ -104,7 +103,7 @@ def start() -> None
 **Key Responsibilities**:
 
 - Merge historical actuals with current predictions
-- Provide always-complete 96-period quarterly data for UI/API
+- Provide always-complete quarterly data for today (92–100 periods) for UI/API
 - Recalculate total daily savings from combined data
 - Mark data sources (actual vs predicted) for each period
 
@@ -166,7 +165,7 @@ class StoredSchedule:
 - Convert quarterly schedule to hourly Time-of-Use (TOU) intervals (hardware constraint)
 - Manage battery modes (load-first, battery-first)
 - Configure grid charging and discharge rate settings
-- Apply strategic intents to hardware parameters
+- Apply battery intents to hardware parameters
 - Aggregate quarterly periods to hourly for Growatt inverter
 
 **Hardware Integration**:
@@ -286,14 +285,15 @@ grid_to_home = max(0, home_consumption - solar_to_home)
 grid_to_battery = max(0, battery_charged - solar_to_battery)
 ```text
 
-### Strategic Intent Detection
+### Battery Intent Detection
 
-The system infers strategic intent from sensor measurements:
+The system infers battery intent solely from the energy flows computed by the DP algorithm. After each period is solved, the detailed flows in `EnergyData` are derived automatically and used to classify intent:
 
-- **GRID_CHARGING**: Battery charging while grid imports exceed consumption
-- **SOLAR_CHARGING**: Battery charging during solar production periods
-- **PEAK_EXPORT**: Battery discharging during high-price periods
-- **LOAD_SUPPORT**: Battery discharging to reduce grid imports
+- **EXPORT_ARBITRAGE**: `battery_to_grid > 0.1 kWh`
+- **LOAD_SUPPORT**: `battery_to_home > 0.1 kWh` and `battery_to_grid <= 0.1 kWh`
+- **GRID_CHARGING**: `grid_to_battery >= 0.1 kWh`
+- **SOLAR_STORAGE**: `solar_to_battery > 0.1 kWh` and `grid_to_battery < 0.1 kWh`
+- **IDLE**: No significant battery activity in any flow
 
 ### Decision Intelligence
 
@@ -306,39 +306,28 @@ Each optimization provides detailed economic reasoning:
 
 ## Configuration and Settings
 
-### Battery Configuration
+Settings are managed through the web UI and persisted to `/data/bess_settings.json`. The only setting that remains in the HA Supervisor-controlled `config.yaml` (and thus `/data/options.json`) is the InfluxDB connection.
+
+### InfluxDB Configuration (`config.yaml`)
 
 ```yaml
-battery:
-  total_capacity: 30.0          # kWh
-  min_soc: 10.0                # %
-  max_soc: 100.0               # %
-  max_charge_discharge_power: 15.0  # kW
-  cycle_cost: 0.40             # SEK/kWh
+influxdb:
+  url: "http://homeassistant.local:8086/api/v2/query"
+  bucket: "home_assistant/autogen"
+  username: "your_db_username_here"
+  password: "your_db_password_here"
 ```text
 
-### Price Configuration
+### Runtime Settings (`/data/bess_settings.json`)
 
-```yaml
-electricity_price:
-  area: "SE4"                  # Nordpool area
-  markup_rate: 0.08            # SEK/kWh
-  vat_multiplier: 1.25         # 25% VAT
-  additional_costs: 1.03       # Grid charges
-  tax_reduction: 0.6518        # Export compensation
-```text
+All other settings are stored in this file and managed via the settings API. Top-level sections:
 
-### Sensor Configuration
-
-```yaml
-sensors:
-  battery_soc: "sensor.battery_level"
-  grid_import_power: "sensor.grid_import"
-  solar_production: "sensor.solar_production"
-
-  # ... additional sensor mappings
-
-```text
+- **`battery`**: `total_capacity`, `min_soc`, `max_soc`, `max_charge_power_kw`, `max_discharge_power_kw`, `cycle_cost_per_kwh`, `min_action_profit_threshold`, `charging_power_rate`, `efficiency_charge`, `efficiency_discharge`
+- **`electricity_price`**: `area`, `markup_rate`, `vat_multiplier`, `additional_costs`, `tax_reduction`, `min_profit`, `use_actual_price`
+- **`home`**: `max_fuse_current`, `voltage`, `safety_margin`, `phase_count`, `default_hourly`, `currency`, `consumption_strategy`, `power_monitoring_enabled`
+- **`growatt`**: Inverter device ID and integration settings
+- **`sensors`**: Entity ID mappings for all Home Assistant sensors
+- **`energy_provider`**: Price source selection (Nordpool or Octopus Energy) and area configuration
 
 ### Auto-Configuration (Experimental)
 
@@ -417,7 +406,7 @@ The system operates on **quarterly resolution (15-minute periods)** throughout t
                              ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                      PriceManager                               │
-│  - get_available_prices() → (buy[96], sell[96])                 │
+│  - get_available_prices() → (buy[N], sell[N])                   │
 │  - Normalises provider data to quarterly arrays (no expansion)  │
 │  - DST-aware: validates 92-100 periods                          │
 │  - Simple array indexing: index 0 = today 00:00-00:15           │
@@ -426,7 +415,7 @@ The system operates on **quarterly resolution (15-minute periods)** throughout t
                              ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                 BatterySystemManager                            │
-│  - Optimization: 96 quarterly periods                           │
+│  - Optimization: variable-length horizon (today + tomorrow)     │
 │  - Storage: record_period(period_index, period_data)            │
 │  - Collection: Uses period indices (0-95 normal, 0-91/99 DST)   │
 │  - InfluxDB: Queries at 15-minute boundaries                    │
@@ -447,7 +436,7 @@ The system operates on **quarterly resolution (15-minute periods)** throughout t
 ┌─────────────────────────────────────────────────────────────────┐
 │                   DailyViewBuilder                              │
 │  - Merges actual (past) + predicted (future)                    │
-│  - Returns 96 quarterly PeriodData items                        │
+│  - Returns 96 quarterly PeriodData items (today only)           │
 │  - Simple logic: if i < current_period: actual, else: predicted │
 │  - Calculates summary statistics                                │
 └────────────────────────────┬────────────────────────────────────┘
@@ -455,7 +444,7 @@ The system operates on **quarterly resolution (15-minute periods)** throughout t
                              ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                     API Layer (FastAPI)                         │
-│  - GET /api/dashboard?resolution=quarter-hourly → 96 periods    │
+│  - GET /api/dashboard?resolution=quarter-hourly → today's periods│
 │  - GET /api/dashboard?resolution=hourly → 24 aggregated         │
 │  - Internal data: Always quarterly (96 periods)                 │
 │  - Aggregation: Display-only feature for UI                     │
@@ -475,9 +464,9 @@ The system operates on **quarterly resolution (15-minute periods)** throughout t
 
 **Quarterly-First Architecture**:
 
-- All internal data structures use 96 quarterly periods
-- No hourly resolution at core level - only for display
-- Simple integer indices (0-95 for normal day)
+- Internal data structures use one entry per period (92–100 depending on DST)
+- The DP optimizer operates on a variable-length horizon (today's remaining periods plus tomorrow's when available)
+- Simple integer indices (0-95 for a normal day, 0-91/0-99 for DST transitions)
 - Array-based operations (slicing, summing, mapping)
 
 **DST Handling**:
@@ -490,7 +479,7 @@ The system operates on **quarterly resolution (15-minute periods)** throughout t
 **Data Flow**:
 
 - **Price Provider**: Nordpool or Octopus Energy provides quarterly prices
-- **Optimization**: Operates on 96-period arrays
+- **Optimization**: Operates on variable-length arrays (today's remaining periods + tomorrow's when available)
 - **Storage**: Indexes by period_index (0-95)
 - **InfluxDB**: Queries at 15-minute boundaries
 - **API**: Returns quarterly, aggregates only for display

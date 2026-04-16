@@ -364,15 +364,14 @@ class DebugDataAggregator:
 
         if provider == "nordpool":
             nordpool_cfg = config["nordpool"]
-            for key in ("today_entity", "tomorrow_entity"):
-                entity_id = nordpool_cfg.get(key)
-                if entity_id:
-                    try:
-                        state = controller.get_entity_state_raw(entity_id)
-                        if state:
-                            snapshot[entity_id] = self._strip_ha_metadata(state)
-                    except Exception as e:
-                        logger.warning("Failed to fetch nordpool entity %s: %s", entity_id, e)
+            entity_id = nordpool_cfg.get("entity")
+            if entity_id:
+                try:
+                    state = controller.get_entity_state_raw(entity_id)
+                    if state:
+                        snapshot[entity_id] = self._strip_ha_metadata(state)
+                except Exception as e:
+                    logger.warning("Failed to fetch nordpool entity %s: %s", entity_id, e)
 
         elif provider == "octopus":
             octopus_cfg = config["octopus"]

@@ -26,6 +26,55 @@
 
 ## 🟡 **HIGH PRIORITY** (Core Functionality)
 
+### **Add SolaX Modbus inverter support**
+
+**Impact**: High | **Effort**: High | **Dependencies**: Inverter abstraction layer, `GrowattScheduleManager`
+
+**Description**: Add support for the [homeassistant-solax-modbus](https://github.com/wills106/homeassistant-solax-modbus) integration alongside the existing Growatt integration. This would allow BESS Manager to be used with SolaX inverters, significantly expanding the supported hardware.
+
+**Implementation**:
+
+- Introduce an inverter abstraction layer (interface/protocol) that `GrowattScheduleManager` and a new `SolaXScheduleManager` both implement
+- Implement `SolaXScheduleManager` using SolaX Modbus entities for TOU schedule deployment and battery mode control
+- Add inverter type selection to settings (`config.yaml`, `BatterySettings`, setup wizard)
+- Route schedule deployment through the selected inverter manager in `BatterySystemManager`
+- Verify sensor mapping: SolaX entities for battery SOC, charge/discharge power, and grid import/export may differ from Growatt names
+- Update health checks to validate the correct inverter entities based on selected type
+- Add SolaX-specific documentation to `docs/INSTALLATION.md`
+
+**Files**: `core/bess/growatt_schedule_manager.py` (extract interface), new `core/bess/solax_schedule_manager.py`, `core/bess/battery_system_manager.py`, `core/bess/settings.py`, `backend/settings_store.py`, `config.yaml`
+
+---
+
+### **Rename `strategic_intent` to `battery_intent` throughout the codebase**
+
+**Impact**: Low | **Effort**: Low | **Dependencies**: `decision_intelligence.py`, `dp_battery_algorithm.py`, `sph_schedule.py`, `models.py`, frontend
+
+**Description**: The term "strategic intent" has been replaced with "battery intent" in the software design document. Rename accordingly in code:
+
+- `StrategicIntent` enum → `BatteryIntent` (`dp_battery_algorithm.py`)
+- `strategic_intent` field → `battery_intent` in `DecisionData` (`models.py`)
+- All assignments and references in `decision_intelligence.py`, `sph_schedule.py`, `battery_system_manager.py`, and any API serialization
+- Frontend: any display label or type referencing `strategicIntent` / `strategic_intent`
+
+### **Investigate redundant `power` gate in strategic intent detection**
+
+**Impact**: Low | **Effort**: Low | **Dependencies**: `decision_intelligence.py`, `dp_battery_algorithm.py`
+
+**Description**: In `create_decision_data` (`decision_intelligence.py`), strategic intent is determined by an outer `power < -0.1` / `power > 0.1` check followed by inner energy flow checks (`battery_to_grid`, `grid_to_battery`). The `power` check is likely redundant: the detailed flows in `EnergyData` are derived automatically via `_calculate_detailed_flows()` from `battery_charged`/`battery_discharged`, so if `power < -0.1` then `battery_discharged > 0` and the flow checks already handle the distinction. The inner flow thresholds (0.1 kWh) also provide the same noise filtering as the outer power threshold. Verify whether the outer `power` gate can be removed and intent determined solely from energy flows.
+
+
+
+### **Improve InfluxDB health check error messages in UI**
+
+**Impact**: Medium | **Effort**: Low | **Dependencies**: Health check system
+
+**Description**: The health check currently surfaces raw HTTP status codes for InfluxDB failures. Map them to actionable user messages:
+
+- `HTTP 401` → "Wrong username or password"
+- `HTTP 403` → "Flux query language is not enabled in your InfluxDB configuration"
+- Connection error → "Cannot reach InfluxDB at the configured URL"
+
 ### 1. **Improve Battery SOC and Actions Component**
 
 **Impact**: Medium-High | **Effort**: High | **Dependencies**: Backend cost calculations

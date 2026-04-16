@@ -21,24 +21,17 @@ export function HomeFormSection({ form, onChange }: Props) {
     <div className="space-y-3">
       <SectionCard
         title="Home Consumption Prediction"
-        description="The data source the optimizer uses for expected home load each hour. A sensor gives the most accurate forecast; use a fixed value if no consumption sensor is available."
+        description="The data source the optimizer uses for home load prediction."
       >
         {radioGroup(
           'Data source',
           [
-            { value: 'sensor', label: 'Home Assistant sensor' },
             { value: 'fixed', label: 'Fixed value' },
+            { value: 'sensor', label: 'Home Assistant sensor' },
             { value: 'influxdb_7d_avg', label: 'InfluxDB (requires InfluxDB integration)' },
           ],
           form.consumptionStrategy,
           v => onChange({ ...form, consumptionStrategy: v }),
-        )}
-        {form.consumptionStrategy === 'sensor' && (
-          <p className="text-xs text-gray-500 dark:text-gray-400 pt-1">
-            Reads any HA sensor that provides an hourly consumption estimate — for example a custom helper
-            that computes a 48h rolling average of grid import.
-            Configure the sensor entity ID in the <strong>Sensors</strong> tab under Consumption Forecast.
-          </p>
         )}
         {form.consumptionStrategy === 'fixed' && (
           <div className="pt-1">
@@ -46,6 +39,13 @@ export function HomeFormSection({ form, onChange }: Props) {
             {numField('Default Hourly Consumption', form.consumption,
               v => onChange({ ...form, consumption: v }), { unit: 'kWh', min: 0, step: 0.1 })}
           </div>
+        )}
+        {form.consumptionStrategy === 'sensor' && (
+          <p className="text-xs text-gray-500 dark:text-gray-400 pt-1">
+            Reads any HA sensor that provides an hourly consumption estimate — for example a custom helper
+            that computes a 48h rolling average of grid import.
+            Configure the sensor entity ID in the <strong>Sensors</strong> tab under Consumption Forecast.
+          </p>
         )}
         {form.consumptionStrategy === 'influxdb_7d_avg' && (
           <p className="text-xs text-gray-500 dark:text-gray-400 pt-1">

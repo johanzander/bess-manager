@@ -7,15 +7,12 @@ import dataclasses
 import threading
 from datetime import datetime, timedelta
 
-from core.bess.settings import BatterySettings as _BatterySettings
-
 from api_conversion import convert_keys_to_camel_case, convert_keys_to_snake_case
 from api_dataclasses import (
     _ENTITY_ID_RE,
     APIDashboardHourlyData,
     APIDashboardResponse,
     APIPredictionSnapshot,
-    APISensorsPayload,
     APISetupCompletePayload,
     APISnapshotComparison,
     create_formatted_value,
@@ -26,9 +23,26 @@ from pydantic import BaseModel, field_validator
 
 from core.bess import time_utils
 from core.bess.health_check import run_system_health_checks
+from core.bess.settings import BatterySettings as _BatterySettings
 from core.bess.time_utils import get_period_count
 
 router = APIRouter()
+
+
+def _deep_merge(base: dict, updates: dict) -> dict:
+    """Recursively merge *updates* into *base*, preserving nested dict values.
+
+    Nested dicts are merged key-by-key so that a partial update (e.g. only
+    ``config_entry_id``) cannot erase sibling keys that already exist in the
+    stored section.  All other value types are overwritten as normal.
+    """
+    result = dict(base)
+    for key, value in updates.items():
+        if isinstance(value, dict) and isinstance(result.get(key), dict):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = value
+    return result
 
 
 def _refresh_health(bess_controller) -> None:
@@ -134,9 +148,11 @@ async def patch_settings(updates: dict):
                             detail=f"Invalid entity ID format: {value!r}",
                         )
 
-            # Read-modify-write: merge into the existing section
+            # Read-modify-write: merge into the existing section.
+            # Use deep merge so that partial updates to nested sub-dicts (e.g.
+            # nordpool_official.config_entry_id) do not erase sibling keys.
             section = bess_controller.settings_store.get_section(store_key)
-            section.update(snake_data)
+            section = _deep_merge(section, snake_data)
             bess_controller.settings_store.save_section(store_key, section)
 
             # Apply in-memory updates for sections that drive live behaviour

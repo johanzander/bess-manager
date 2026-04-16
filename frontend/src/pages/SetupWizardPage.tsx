@@ -67,16 +67,15 @@ const SetupWizardPage: React.FC = () => {
     currency: 'SEK',
     area: '',
     nordpoolConfigEntryId: '',
-    nordpoolTodayEntity: '',
-    nordpoolTomorrowEntity: '',
+    nordpoolEntity: '',
     octopusImportTodayEntity: '',
     octopusImportTomorrowEntity: '',
     octopusExportTodayEntity: '',
     octopusExportTomorrowEntity: '',
     markupRate: 0.08,
     vatMultiplier: 1.25,
-    additionalCosts: 1.03,
-    taxReduction: 0.0,
+    additionalCosts: 0.77,
+    taxReduction: 0.2,
   });
 
   const handleScan = useCallback(async () => {
@@ -176,9 +175,8 @@ const SetupWizardPage: React.FC = () => {
         additionalCosts:       elec.additionalCosts                 ?? f.additionalCosts,
         taxReduction:          elec.taxReduction                    ?? f.taxReduction,
         // Restore saved config entry IDs so manual entries survive a wizard re-run
-        nordpoolConfigEntryId: ep.nordpoolOfficial?.configEntryId  ?? f.nordpoolConfigEntryId,
-        nordpoolTodayEntity:   ep.nordpool?.todayEntity            ?? f.nordpoolTodayEntity,
-        nordpoolTomorrowEntity: ep.nordpool?.tomorrowEntity        ?? f.nordpoolTomorrowEntity,
+        nordpoolConfigEntryId: ep.nordpoolOfficial?.configEntryId ?? f.nordpoolConfigEntryId,
+        nordpoolEntity:        ep.nordpool?.entity               ?? f.nordpoolEntity,
       }));
       if (inv.inverterType) setInverterForm(f => ({ ...f, inverterType: inv.inverterType }));
       if (inv.deviceId) setInverterForm(f => ({ ...f, deviceId: inv.deviceId }));

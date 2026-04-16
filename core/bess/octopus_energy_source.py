@@ -57,6 +57,10 @@ class OctopusEnergySource(PriceSource):
         self.export_today_entity = export_today_entity
         self.export_tomorrow_entity = export_tomorrow_entity
 
+    @property
+    def prices_are_final(self) -> bool:
+        return True
+
     def get_prices_for_date(self, target_date: date) -> list[float]:
         """Get import rates from Octopus Energy for the specified date.
 
@@ -248,38 +252,38 @@ class OctopusEnergySource(PriceSource):
 
         # Test import rates
         import_check = {
-            "component": "OctopusEnergySource (Import)",
+            "name": "OctopusEnergySource (Import)",
             "status": "OK",
-            "message": "",
+            "error": None,
         }
         try:
             import_prices = self.get_prices_for_date(today)
-            import_check["message"] = (
+            import_check["value"] = (
                 f"Successfully fetched {len(import_prices)} import rates for today"
             )
         except Exception as e:
             import_check["status"] = "ERROR"
-            import_check["message"] = f"Failed to fetch import rates: {e}"
+            import_check["error"] = f"Failed to fetch import rates: {e}"
             overall_status = "ERROR"
         checks.append(import_check)
 
         # Test export rates
         export_check = {
-            "component": "OctopusEnergySource (Export)",
+            "name": "OctopusEnergySource (Export)",
             "status": "OK",
-            "message": "",
+            "error": None,
         }
         try:
             export_prices = self.get_sell_prices_for_date(today)
             if export_prices is not None:
-                export_check["message"] = (
+                export_check["value"] = (
                     f"Successfully fetched {len(export_prices)} export rates for today"
                 )
             else:
-                export_check["message"] = "No export entity configured"
+                export_check["value"] = "No export entity configured"
         except Exception as e:
             export_check["status"] = "WARNING"
-            export_check["message"] = f"Failed to fetch export rates: {e}"
+            export_check["error"] = f"Failed to fetch export rates: {e}"
             if overall_status == "OK":
                 overall_status = "WARNING"
         checks.append(export_check)

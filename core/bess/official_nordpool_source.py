@@ -22,7 +22,7 @@ class OfficialNordpoolSource(PriceSource):
     """
 
     def __init__(
-        self, ha_controller, config_entry_id: str, vat_multiplier: float
+        self, ha_controller, config_entry_id: str, vat_multiplier: float, area: str = ""
     ) -> None:
         """Initialize with Home Assistant controller and config entry ID.
 
@@ -30,10 +30,14 @@ class OfficialNordpoolSource(PriceSource):
             ha_controller: Controller with access to Home Assistant services
             config_entry_id: Configuration entry ID for the Nordpool integration
             vat_multiplier: VAT multiplier (prices from official integration are VAT-exclusive)
+            area: Market area code (e.g. "SE4", "NO1"). When provided it is passed
+                  to the service call and used as the response key for an exact lookup.
+                  When empty the first list in the response is used as a fallback.
         """
         self.ha_controller = ha_controller
         self.config_entry_id = config_entry_id
         self.vat_multiplier = vat_multiplier
+        self.area = area
 
     def get_prices_for_date(self, target_date: date) -> list[float]:
         """Get prices from official Nordpool integration for the specified date.
@@ -74,10 +78,12 @@ class OfficialNordpoolSource(PriceSource):
             # Call the nordpool.get_prices_for_date service
             date_str = target_date.strftime("%Y-%m-%d")
 
-            service_data = {
+            service_data: dict = {
                 "config_entry": self.config_entry_id,
                 "date": date_str,
             }
+            if self.area:
+                service_data["areas"] = self.area
 
             # Make service call
             response = self.ha_controller._service_call_with_retry(
@@ -94,16 +100,23 @@ class OfficialNordpoolSource(PriceSource):
 
             service_response = response["service_response"]
 
-            # Extract price entries from service response
-            # Official integration returns data under area code key (e.g., "SE4", "NO2", "DK1")
-            price_entries = []
-
-            # Find the first list value in the response (should be the price data)
-            for key, value in service_response.items():
-                if isinstance(value, list) and value:
-                    price_entries = value
-                    logger.debug(f"Found price data under key: {key}")
-                    break
+            # Response is keyed by area code (e.g. {"SE4": [...]}).
+            # Use the configured area for an exact lookup; fall back to the first
+            # list in the response for installs where area is not yet configured.
+            price_entries: list = []
+            if self.area:
+                price_entries = service_response.get(self.area, [])
+                if not price_entries:
+                    # Area codes are always uppercase in the response
+                    price_entries = service_response.get(self.area.upper(), [])
+                if price_entries:
+                    logger.debug(f"Found price data under area key: {self.area}")
+            if not price_entries:
+                for key, value in service_response.items():
+                    if isinstance(value, list) and value:
+                        price_entries = value
+                        logger.debug(f"Found price data under key: {key} (fallback)")
+                        break
 
             if not price_entries:
                 raise ValueError(

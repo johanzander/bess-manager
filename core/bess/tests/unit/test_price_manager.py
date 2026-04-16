@@ -76,8 +76,7 @@ def test_controller_price_fetching():
     ha_source = HomeAssistantSource(
         mock_controller,
         vat_multiplier=1.25,
-        today_entity="sensor.nordpool_kwh_se4_sek_2_10_025",
-        tomorrow_entity="sensor.nordpool_kwh_se4_sek_2_10_025",
+        entity="sensor.nordpool_kwh_se4_sek_2_10_025",
     )
     pm = PriceManager(
         price_source=ha_source,
@@ -177,8 +176,7 @@ def test_home_assistant_source_vat_parameter():
     ha_source_default = HomeAssistantSource(
         mock_controller,
         vat_multiplier=1.25,
-        today_entity=entity,
-        tomorrow_entity=entity,
+        entity=entity,
     )
     prices_default = ha_source_default.get_prices_for_date(today_date)
     assert prices_default[0] == 1.6  # 2.0 / 1.25 = 1.6
@@ -187,8 +185,7 @@ def test_home_assistant_source_vat_parameter():
     ha_source_custom = HomeAssistantSource(
         mock_controller,
         vat_multiplier=1.20,
-        today_entity=entity,
-        tomorrow_entity=entity,
+        entity=entity,
     )
     prices_custom = ha_source_custom.get_prices_for_date(today_date)
     assert round(prices_custom[0], 4) == round(2.0 / 1.20, 4)  # ~1.6667

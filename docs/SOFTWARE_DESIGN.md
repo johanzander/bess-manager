@@ -273,11 +273,13 @@ The DP algorithm uses **backward induction** to find the globally optimal batter
 
 **Objective**: Minimize net electricity cost (grid import cost minus export revenue) while accounting for battery cycle degradation costs and a terminal value for energy remaining at end of horizon.
 
+**Output**: For each period, the algorithm produces the optimal battery action, the resulting detailed energy flows (solar-to-home, grid-to-battery, etc.), economic data (costs, savings), and the strategic intent classification.
+
 **Profit threshold**: After optimization, total savings are compared against a horizon-scaled minimum threshold. If savings are too low relative to remaining day fraction, the schedule is rejected in favor of all-IDLE to prevent excessive cycling for marginal gains.
 
 ### Energy Flow Calculation
 
-The system calculates detailed energy flows using energy conservation (solar and grid contributions must account for all consumption, charging, and export):
+The system decomposes measured energy totals into detailed flows (e.g., solar-to-home, grid-to-battery) using energy conservation constraints:
 
 ```python
 

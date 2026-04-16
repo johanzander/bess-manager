@@ -95,7 +95,13 @@ class TestEnergyData:
         assert energy.grid_to_battery == 0.0  # No grid charging
 
     def test_detailed_flow_calculation_idle_scenario(self):
-        """Test detailed flow calculation for idle battery scenario."""
+        """Test detailed flow calculation for idle battery scenario.
+
+        Note: The DP algorithm now provides non-zero battery_charged for IDLE
+        periods with excess solar (implicit solar charging). This test validates
+        EnergyData accounting with battery_charged=0, which is still a valid
+        input — EnergyData correctly distributes whatever flows it receives.
+        """
         energy = EnergyData(
             solar_production=4.0,  # 4 kWh solar
             home_consumption=3.0,  # 3 kWh home consumption

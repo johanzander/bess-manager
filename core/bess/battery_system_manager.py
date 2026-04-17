@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import statistics
+import traceback
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -34,7 +35,9 @@ from .models import (
     PeriodData,
     infer_intent_from_flows,
 )
+from .influxdb_helper import get_power_sensor_data_batch
 from .octopus_energy_source import OctopusEnergySource
+from .official_nordpool_source import OfficialNordpoolSource
 from .power_monitor import HomePowerMonitor
 from .prediction_snapshot import PredictionSnapshotStore
 from .price_manager import HomeAssistantSource, PriceManager, PriceSource
@@ -201,8 +204,6 @@ class BatterySystemManager:
         if provider == "nordpool_official":
             nordpool_official_config = config["nordpool_official"]
             config_entry_id = nordpool_official_config["config_entry_id"]
-            from .official_nordpool_source import OfficialNordpoolSource
-
             price_source = OfficialNordpoolSource(
                 controller,
                 config_entry_id,
@@ -732,8 +733,6 @@ class BatterySystemManager:
         Queries InfluxDB for the past 7 days of the local_load_power sensor
         and returns the 96-value weekly average profile (kWh per 15-min period).
         """
-        from .influxdb_helper import get_power_sensor_data_batch
-
         sensors_config = self._addon_options.get("sensors", {})
         target_sensor = sensors_config.get("local_load_power", "")
         if not target_sensor:
@@ -1662,8 +1661,6 @@ class BatterySystemManager:
             return temp_schedule, temp_growatt
 
         except Exception as e:
-            import traceback
-
             logger.error(f"Failed to create schedule: {e}")
             logger.error(f"Trace: {traceback.format_exc()}")
             return None
@@ -2176,6 +2173,11 @@ class BatterySystemManager:
             if self._power_monitor:
                 self._power_monitor.update_target_charging_power(charge_rate)
                 self._power_monitor.adjust_battery_charging()
+            else:
+                # Power monitor disabled — write charge rate directly so the
+                # inverter register is not left at a stale value (e.g. 0% from a
+                # preceding LOAD_SUPPORT or EXPORT_ARBITRAGE period).
+                self.controller.set_charging_power_rate(int(charge_rate))
 
         except (AttributeError, ValueError, KeyError) as e:
             logger.error("Failed to adjust charging power: %s", str(e))

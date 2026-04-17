@@ -787,6 +787,17 @@ class SphScheduleManager:
             for intent, hours in intent_hours.items()
         }
 
+    def _get_intent_description(self, intent: str) -> str:
+        """Get human-readable description of strategic intent."""
+        descriptions = {
+            "GRID_CHARGING": "Storing cheap grid energy for later use",
+            "SOLAR_STORAGE": "Storing excess solar energy for evening/night",
+            "LOAD_SUPPORT": "Using battery to support home consumption",
+            "EXPORT_ARBITRAGE": "Selling stored energy to grid for profit",
+            "IDLE": "No significant battery activity",
+        }
+        return descriptions.get(intent, "Unknown intent")
+
     def get_detailed_period_groups(
         self, intents: list[str] | None = None
     ) -> list[dict]:

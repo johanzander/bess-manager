@@ -64,6 +64,7 @@ ROBUST RECOVERY: When TOU corruption detected (overlaps, wrong order, duplicates
 
 """
 
+import io
 import logging
 from typing import ClassVar
 
@@ -1893,9 +1894,6 @@ class GrowattScheduleManager:
 
         # For write counting, we need to intercept the differential update logic
         # The Fixed Time Slots algorithm logs the actual writes, so we can count those
-        import io
-        import logging
-
         # Capture logs to count actual hardware writes
         log_capture = io.StringIO()
         handler = logging.StreamHandler(log_capture)

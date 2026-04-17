@@ -8,7 +8,7 @@ debugpy==1.6.7
 python-dotenv==1.0.0
 APScheduler==3.11.0
 watchdog==3.0.0
-loguru==0.6.0
+loguru==0.7.3
 pyyaml
 watchdog
 numpy

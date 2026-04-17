@@ -8,6 +8,7 @@ to hardware control using the new PeriodData structures throughout.
 UPDATED: All tests now pass explicit current_hour parameter for deterministic testing.
 """
 
+import time
 from datetime import datetime, timedelta
 
 import pytest
@@ -374,8 +375,6 @@ class TestPerformanceWorkflows:
     )
     def test_optimization_performance(self, quarterly_battery_system):
         """Test that optimization completes in reasonable time."""
-        import time
-
         current_hour = 8
         current_period = current_hour * 4  # Convert to quarterly periods
 

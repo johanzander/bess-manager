@@ -100,9 +100,18 @@ def test_influxdb_connection() -> dict:
         )
 
         if response.status_code != 200:
+            status_messages = {
+                401: "Wrong username or password",
+                403: "Flux query language is not enabled in your InfluxDB configuration",
+                404: "InfluxDB API endpoint not found — check the URL",
+            }
+            message = status_messages.get(
+                response.status_code,
+                f"InfluxDB returned HTTP {response.status_code}",
+            )
             return {
                 "status": "error",
-                "message": f"InfluxDB returned HTTP {response.status_code}",
+                "message": message,
             }
 
         has_valid_csv = "_value" in response.text and "_time" in response.text
@@ -120,6 +129,11 @@ def test_influxdb_connection() -> dict:
             ),
         }
 
+    except requests.ConnectionError:
+        return {
+            "status": "error",
+            "message": f"Cannot reach InfluxDB at {url}",
+        }
     except requests.RequestException as e:
         return {"status": "error", "message": f"Connection error: {e!s}"}
 

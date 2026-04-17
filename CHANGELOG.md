@@ -4,6 +4,21 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [8.2.1] - 2026-04-17
+
+### Fixed
+
+- SOLAR_STORAGE and GRID_CHARGING periods now correctly write charge rate 100% to the inverter register when power monitoring is disabled. Previously, a stale 0% rate left by a preceding LOAD_SUPPORT or EXPORT_ARBITRAGE period caused the inverter to export excess solar instead of storing it.
+- Nordpool service contract tests now pass when run in isolation, not just as part of the full suite. Backend test path setup no longer implicitly depends on core tests running first.
+- InfluxDB health check now shows actionable error messages (e.g. "Wrong username or password" for HTTP 401) instead of raw status codes.
+- Removed hardcoded fallback values and `hasattr` guards in API endpoints that masked configuration errors with fabricated data. The system now fails explicitly when misconfigured.
+- Detailed schedule endpoint no longer sends `batterySocEnd` and `soc` fields that were hardcoded placeholders (50%) and never actually displayed — dashboard data always owns those values.
+
+### Changed
+
+- Removed redundant local imports throughout the codebase. All imports are now at module level.
+- Added `_get_intent_description()` to `SphScheduleManager` for consistent interface with `GrowattScheduleManager`.
+
 ## [8.2.0] - 2026-04-17
 
 ### Changed

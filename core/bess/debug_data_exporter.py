@@ -208,8 +208,6 @@ class DebugDataAggregator:
 
     def _get_timezone(self) -> str:
         """Return the IANA timezone name currently used by BESS (e.g. 'Europe/Stockholm')."""
-        from . import time_utils
-
         return str(time_utils.TIMEZONE)
 
     def _get_uptime_hours(self) -> float:

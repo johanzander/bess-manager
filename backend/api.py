@@ -1214,7 +1214,7 @@ async def get_inverter_status():
 
     try:
         # Safety checks to avoid None references
-        if not hasattr(bess_controller, "system") or bess_controller.system is None:
+        if bess_controller.system is None:
             logger.error("Battery system not initialized")
             raise HTTPException(
                 status_code=503, detail="Battery system not initialized"
@@ -1331,12 +1331,11 @@ async def get_growatt_detailed_schedule():
                 # Get price for this hour
                 price = 1.0
                 try:
-                    if hasattr(bess_controller.system, "price_manager"):
-                        price_entries = (
-                            bess_controller.system.price_manager.get_today_prices()
-                        )
-                        if hour < len(price_entries):
-                            price = price_entries[hour]
+                    price_entries = (
+                        bess_controller.system.price_manager.get_today_prices()
+                    )
+                    if hour < len(price_entries):
+                        price = price_entries[hour]
                 except Exception as e:
                     logger.warning(f"Failed to get price for hour {hour}: {e}")
 
@@ -1346,63 +1345,28 @@ async def get_growatt_detailed_schedule():
                 battery_discharged = (
                     abs(min(0, battery_action)) if battery_action < 0 else 0
                 )
-                battery_soe_kwh = 25.0  # Default SOE value in kWh
-                battery_capacity = 50.0  # Default capacity in kWh
-
-                # Try to get actual SOE values from controller if possible
-                try:
-                    if hour == current_hour and hasattr(
-                        bess_controller.system, "controller"
-                    ):
-                        battery_soc_percent = bess_controller.system.controller.get_battery_soc()
-                        # Convert SOC percent to SOE kWh
-                        if hasattr(bess_controller.system, "battery_settings"):
-                            battery_capacity = (
-                                bess_controller.system.battery_settings.total_capacity
-                            )
-                            battery_soe_kwh = (
-                                battery_soc_percent / 100.0
-                            ) * battery_capacity
-                        else:
-                            battery_soe_kwh = (
-                                battery_soc_percent / 100.0
-                            ) * battery_capacity
-                except Exception:
-                    pass  # Silently continue with default
-
-                # Calculate SOC for display
-                battery_soc_end = (battery_soe_kwh / battery_capacity) * 100.0
-
                 schedule_data.append(
                     {
                         "hour": hour,
                         "mode": hourly_settings.get("state", "idle"),
                         "batt_mode": battery_mode,
-                        "batteryMode": battery_mode,  # Add alias for frontend compatibility
+                        "batteryMode": battery_mode,
                         "grid_charge": hourly_settings.get("grid_charge", False),
                         "discharge_rate": hourly_settings.get("discharge_rate", 100),
-                        "dischargePowerRate": hourly_settings.get(
-                            "discharge_rate", 100
-                        ),  # Add alias
-                        "chargePowerRate": 100,  # Default charge power rate
+                        "dischargePowerRate": hourly_settings.get("discharge_rate", 100),
+                        "chargePowerRate": 100,
                         "strategic_intent": strategic_intent,
-                        "intent_description": (
-                            schedule_manager._get_intent_description(strategic_intent)
-                            if hasattr(schedule_manager, "_get_intent_description")
-                            else ""
+                        "intent_description": schedule_manager._get_intent_description(
+                            strategic_intent
                         ),
                         "action": action,
                         "action_color": action_color,
                         "battery_action": battery_action,
-                        "battery_action_kw": hourly_settings.get(
-                            "battery_action_kw", 0.0
-                        ),
-                        "batteryCharged": battery_charged,  # Add for frontend compatibility
-                        "batteryDischarged": battery_discharged,  # Add for frontend compatibility
-                        "soc": 50.0,
-                        "batterySocEnd": battery_soc_end,  # Add for frontend compatibility
+                        "battery_action_kw": hourly_settings.get("battery_action_kw", 0.0),
+                        "batteryCharged": battery_charged,
+                        "batteryDischarged": battery_discharged,
                         "price": price,
-                        "electricity_price": price,  # Add this for frontend compatibility
+                        "electricity_price": price,
                         "grid_power": 0,
                         "is_current": hour == current_hour,
                     }
@@ -1540,13 +1504,13 @@ async def get_tou_settings():
 
     try:
         # Safety checks
-        if not hasattr(bess_controller, "system") or bess_controller.system is None:
+        if bess_controller.system is None:
             logger.error("Battery system not initialized")
             raise HTTPException(
                 status_code=503, detail="Battery system not initialized"
             )
 
-        if not hasattr(bess_controller.system, "_schedule_manager"):
+        if bess_controller.system._schedule_manager is None:
             logger.error("Schedule manager not initialized")
             raise HTTPException(
                 status_code=503, detail="Schedule manager not initialized"
@@ -1604,13 +1568,13 @@ async def get_strategic_intents():
 
     try:
         # Safety checks
-        if not hasattr(bess_controller, "system") or bess_controller.system is None:
+        if bess_controller.system is None:
             logger.error("Battery system not initialized")
             raise HTTPException(
                 status_code=503, detail="Battery system not initialized"
             )
 
-        if not hasattr(bess_controller.system, "_schedule_manager"):
+        if bess_controller.system._schedule_manager is None:
             logger.error("Schedule manager not initialized")
             raise HTTPException(
                 status_code=503, detail="Schedule manager not initialized"
@@ -1619,9 +1583,7 @@ async def get_strategic_intents():
         schedule_manager = bess_controller.system._schedule_manager
 
         # Get strategic intent summary
-        strategic_summary = {}
-        if hasattr(schedule_manager, "get_strategic_intent_summary"):
-            strategic_summary = schedule_manager.get_strategic_intent_summary()
+        strategic_summary = schedule_manager.get_strategic_intent_summary()
 
         # Get hourly strategic intents
         hourly_intents = []
@@ -1629,11 +1591,7 @@ async def get_strategic_intents():
             try:
                 settings = schedule_manager.get_hourly_settings(hour)
                 intent = settings.get("strategic_intent", "IDLE")
-                description = (
-                    schedule_manager._get_intent_description(intent)
-                    if hasattr(schedule_manager, "_get_intent_description")
-                    else "No description available"
-                )
+                description = schedule_manager._get_intent_description(intent)
 
                 hourly_intents.append(
                     {
@@ -1707,10 +1665,7 @@ async def get_dashboard_health_summary():
         logger.debug("Starting dashboard health summary check")
 
         # Check if system is in degraded mode first
-        if (
-            hasattr(bess_controller.system, "has_critical_sensor_failures")
-            and bess_controller.system.has_critical_sensor_failures()
-        ):
+        if bess_controller.system.has_critical_sensor_failures():
             # System is in degraded mode due to critical sensor failures
             critical_failures = bess_controller.system.get_critical_sensor_failures()
             critical_issues = []

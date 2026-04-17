@@ -64,8 +64,6 @@ class OfficialNordpoolSource(PriceSource):
         )
 
         # Only support today and tomorrow (official integration limitation)
-        from . import time_utils
-
         current_date = time_utils.today()
         tomorrow_date = current_date + timedelta(days=1)
 

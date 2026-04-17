@@ -65,15 +65,9 @@
 
 
 
-### **Improve InfluxDB health check error messages in UI**
+### ~~**Improve InfluxDB health check error messages in UI**~~ ✅ Completed (v8.2.1)
 
-**Impact**: Medium | **Effort**: Low | **Dependencies**: Health check system
-
-**Description**: The health check currently surfaces raw HTTP status codes for InfluxDB failures. Map them to actionable user messages:
-
-- `HTTP 401` → "Wrong username or password"
-- `HTTP 403` → "Flux query language is not enabled in your InfluxDB configuration"
-- Connection error → "Cannot reach InfluxDB at the configured URL"
+**Resolution**: HTTP 401/403/404 now show actionable messages; ConnectionError shows the URL that failed.
 
 ### 1. **Improve Battery SOC and Actions Component**
 
@@ -476,23 +470,9 @@ This eliminates the `required_methods` parameter entirely and makes the policy s
 
 **Files**: `backend/api_dataclasses.py`, `backend/api.py`
 
-### Hardcoded Fallback Values Violating CLAUDE.md
+### ~~Hardcoded Fallback Values Violating CLAUDE.md~~ ✅ Completed (v8.2.1)
 
-**Impact**: Medium | **Effort**: Low | **Dependencies**: None
-
-**Description**: Several places in `backend/api.py` use hardcoded fallback values and `hasattr` guards that violate the CLAUDE.md principle "Never use hasattr, fallbacks or default values — use error/assert instead". These mask real sensor failures with fabricated data.
-
-**Locations to fix**:
-
-- `battery_soe_kwh = 25.0` — hardcoded default SOE (line ~1465)
-- `battery_capacity = 50.0` — hardcoded default capacity (line ~1466)
-- `hasattr(bess_controller.system, "controller")` guard (line ~1470)
-- `hasattr(bess_controller.system, "battery_settings")` guard (line ~1476)
-- `except Exception: pass  # Silently continue with default` (line ~1487)
-
-**Fix**: Remove the entire try/except wrapper and default assignments. Access `bess_controller.system.controller` and `bess_controller.system.battery_settings` directly — if they are absent the system is misconfigured and should fail explicitly.
-
-**Files**: `backend/api.py`
+**Resolution**: All `hasattr` guards and hardcoded fallback values removed from `api.py`. System now accesses `battery_settings`, `controller`, `price_manager`, `_schedule_manager`, and `has_critical_sensor_failures` directly. Added `_get_intent_description()` to `SphScheduleManager` to eliminate polymorphism-related `hasattr`.
 
 ### Other Technical Debt
 

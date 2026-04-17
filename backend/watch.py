@@ -8,6 +8,7 @@ FastAPI application when changes are detected.
 import os
 import subprocess
 import sys
+import threading
 import time
 
 from watchdog.events import FileSystemEventHandler
@@ -99,8 +100,6 @@ def start_server():
         for line in server_process.stdout:
             sys.stdout.write(line)
             sys.stdout.flush()
-
-    import threading
 
     output_thread = threading.Thread(target=stream_output)
     output_thread.daemon = True

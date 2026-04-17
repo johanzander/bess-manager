@@ -4,6 +4,7 @@ Main application entry point for the BESS management system.
 
 import json
 import os
+import traceback
 from contextlib import asynccontextmanager
 
 import log_config as _  # noqa: F401
@@ -55,10 +56,6 @@ app = FastAPI(root_path=INGRESS_PREFIX, lifespan=lifespan)
 # Add global exception handler to prevent server restarts
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):
-    import traceback
-
-    from fastapi.responses import JSONResponse
-
     # Get the full stack trace
     tb_str = traceback.format_exception(type(exc), exc, exc.__traceback__)
     error_msg = "".join(tb_str)

@@ -1,4 +1,5 @@
 import logging
+import math
 from datetime import datetime
 
 from .influxdb_helper import (
@@ -173,8 +174,6 @@ def perform_health_check(
                 # Handle different return types
                 if isinstance(value, list):
                     # Handle list values (like predictions)
-                    import math
-
                     if len(value) == 0:
                         check_result.update(
                             {
@@ -208,8 +207,6 @@ def perform_health_check(
                                 }
                             )
                 elif value is not None:
-                    import math
-
                     if isinstance(value, int | float) and math.isnan(value):
                         check_result.update(
                             {

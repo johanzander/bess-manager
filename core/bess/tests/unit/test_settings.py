@@ -147,8 +147,6 @@ def test_battery_settings_camelcase_update():
 
 def test_battery_settings_invalid_key_raises_error():
     """Test that update method raises AttributeError for invalid keys."""
-    import pytest
-
     settings = BatterySettings()
 
     # Attempt to update with an invalid key should raise AttributeError

@@ -9,8 +9,9 @@ import type { HomeForm } from '../components/settings/HomeFormSection';
 import { PricingFormSection } from '../components/settings/PricingFormSection';
 import type { PricingForm } from '../components/settings/PricingFormSection';
 import { BatteryFormSection } from '../components/settings/BatteryFormSection';
-import type { BatteryForm, InverterForm } from '../components/settings/BatteryFormSection';
+import type { BatteryForm } from '../components/settings/BatteryFormSection';
 import { SensorConfigSection } from '../components/settings/SensorConfigSection';
+import type { InverterForm } from '../components/settings/SensorConfigSection';
 
 // ---------------------------------------------------------------------------
 // Local types
@@ -225,12 +226,14 @@ const SettingsPage: React.FC = () => {
         });
       }
 
-      if (d.inverterType || d.growattDeviceId) {
-        setInverterForm(f => ({
-          ...f,
-          ...(d.inverterType ? { inverterType: d.inverterType } : {}),
-          ...(d.growattDeviceId ? { deviceId: d.growattDeviceId } : {}),
-        }));
+      if (d.inverterType) {
+        // Map backend discovery values to UI inverter type values (uppercase)
+        const platformToType: Record<string, string> = { solax: 'SOLAX', MIN: 'MIN', SPH: 'SPH' };
+        const uiType = platformToType[d.inverterType] ?? d.inverterType.toUpperCase();
+        setInverterForm(f => ({ ...f, inverterType: uiType }));
+      }
+      if (d.growattDeviceId) {
+        setInverterForm(f => ({ ...f, deviceId: d.growattDeviceId }));
       }
 
       // Only update discovery fields that actually changed.
@@ -439,7 +442,7 @@ const SettingsPage: React.FC = () => {
 
   // ── tab definitions ───────────────────────────────────────────────────
   const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
-    { id: 'sensors', label: 'Sensors', icon: <Sun className="h-4 w-4" /> },
+    { id: 'sensors', label: 'Integrations', icon: <Sun className="h-4 w-4" /> },
     { id: 'pricing', label: 'Electricity Pricing', icon: <Zap className="h-4 w-4" /> },
     { id: 'battery', label: 'Battery', icon: <Battery className="h-4 w-4" /> },
     { id: 'home', label: 'Home', icon: <Home className="h-4 w-4" /> },
@@ -515,7 +518,7 @@ const SettingsPage: React.FC = () => {
                 {tab === 'home' && 'Home electrical setup and consumption prediction for the optimizer.'}
                 {tab === 'pricing' && 'Electricity price source and cost calculation (markup, VAT, tax reduction).'}
                 {tab === 'battery' && 'Growatt inverter type and battery parameters.'}
-                {tab === 'sensors' && 'All sensor entity IDs, grouped by integration.'}
+                {tab === 'sensors' && 'Inverter platform selection and sensor entity IDs for each integration.'}
                 {tab === 'health' && 'System component health and diagnostics.'}
               </p>
               <div className="flex items-center gap-2 flex-shrink-0">
@@ -556,8 +559,6 @@ const SettingsPage: React.FC = () => {
             <BatteryFormSection
               form={batteryForm}
               onChange={setBatteryForm}
-              inverterForm={inverterForm}
-              onInverterChange={setInverterForm}
               currency={pricingForm.currency}
               weatherEntity={sensors['weather_entity']}
             />
@@ -572,6 +573,8 @@ const SettingsPage: React.FC = () => {
               <SensorConfigSection
                 sensors={sensors}
                 onChange={setSensors}
+                inverterForm={inverterForm}
+                onInverterChange={setInverterForm}
                 sensorStatus={sensorStatus}
               />
             </div>

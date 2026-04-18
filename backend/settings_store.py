@@ -26,6 +26,7 @@ OWNED_SECTIONS = (
     "electricity_price",
     "energy_provider",
     "growatt",
+    "inverter",
     "sensors",
 )
 
@@ -319,6 +320,7 @@ class SettingsStore:
                 "octopus": {},
             },
             "growatt": {"inverter_type": "", "device_id": ""},
+            "inverter": {"platform": "", "device_id": ""},
             "sensors": {},
         }
 
@@ -418,6 +420,23 @@ class SettingsStore:
                     ep["nordpool"] = nordpool
                     self.data["energy_provider"] = ep
                     changed = True
+
+        growatt = self.data.get("growatt")
+        if isinstance(growatt, dict):
+            old_type = growatt.get("inverter_type", "")
+            inverter = dict(self.data.get("inverter", {}))
+            if old_type and not inverter.get("platform"):
+                platform = "growatt_sph" if old_type == "SPH" else "growatt_min"
+                inverter["platform"] = platform
+                if not inverter.get("device_id") and growatt.get("device_id"):
+                    inverter["device_id"] = growatt["device_id"]
+                self.data["inverter"] = inverter
+                logger.info(
+                    "Schema migration: growatt.inverter_type=%s → inverter.platform=%s",
+                    old_type,
+                    platform,
+                )
+                changed = True
 
         if changed:
             self._write(self.data)

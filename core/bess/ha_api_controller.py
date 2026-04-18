@@ -379,6 +379,31 @@ class HomeAssistantAPIController:
         "lifetime_self_consumption": "lifetime_self_consumption",
     }
 
+    # Used by discover_solax_sensors() to map entity IDs from GET /api/states.
+    # SolaX entities follow the pattern: <domain>.<device_prefix>_<suffix>
+    # where <device_prefix> is typically the inverter serial number prefixed with
+    # "solax_" (e.g. "solax_abc123").
+    #
+    # Sensor suffixes come from the homeassistant-solax-modbus integration
+    # (github.com/wills106/homeassistant-solax-modbus).  Control entity suffixes
+    # (power_control, active_power, autorepeat_duration, trigger) are part of the
+    # VPP (Virtual Power Plant) feature added in v3.x of that integration.
+    SOLAX_ENTITY_SUFFIX_MAP: ClassVar[dict[str, str]] = {
+        # Monitoring sensors (sensor.<prefix>_<suffix>)
+        "battery_capacity": "battery_soc",
+        "battery_power_charge": "battery_charge_power",
+        "battery_power_discharge": "battery_discharge_power",
+        "measured_power": "import_power",
+        "pv_power_1": "pv_power",
+        "house_load": "local_load_power",
+        # VPP control entities (select/number/button.<prefix>_<suffix>)
+        "power_control": "solax_power_control_mode",
+        "active_power": "solax_active_power",
+        "autorepeat_duration": "solax_autorepeat_duration",
+        "trigger": "solax_power_control_trigger",
+        "battery_minimum_capacity": "solax_battery_min_soc",
+    }
+
     def resolve_sensor_for_influxdb(self, sensor_key: str) -> str | None:
         """Resolve sensor key to entity ID formatted for InfluxDB (without 'sensor.' prefix).
 
@@ -1139,6 +1164,94 @@ class HomeAssistantAPIController:
             logger.warning("Failed to read AC discharge times: %s", str(e))
             return {}
 
+    # ── SolaX VPP control ─────────────────────────────────────────────────────
+
+    def set_solax_active_power_control(self, watts: int) -> None:
+        """Issue a SolaX VPP active-power command.
+
+        Enables battery control mode, sets the active power target, arms
+        autorepeat for 1 200 s (covers a 15-min period with margin), then
+        triggers the command.
+
+        Args:
+            watts: Target power in watts.  Positive = charge, negative = discharge.
+        """
+        mode_entity = self._get_entity_for_service("solax_power_control_mode")
+        power_entity = self._get_entity_for_service("solax_active_power")
+        repeat_entity = self._get_entity_for_service("solax_autorepeat_duration")
+        trigger_entity = self._get_entity_for_service("solax_power_control_trigger")
+
+        logger.info("SolaX VPP: enabling battery control, power=%d W", watts)
+
+        self._service_call_with_retry(
+            "select",
+            "select_option",
+            operation="SolaX VPP enable battery control",
+            entity_id=mode_entity,
+            option="Enabled Battery Control",
+        )
+        self._service_call_with_retry(
+            "number",
+            "set_value",
+            operation="SolaX VPP set active power",
+            entity_id=power_entity,
+            value=watts,
+        )
+        self._service_call_with_retry(
+            "number",
+            "set_value",
+            operation="SolaX VPP set autorepeat duration",
+            entity_id=repeat_entity,
+            value=1200,
+        )
+        self._service_call_with_retry(
+            "button",
+            "press",
+            operation="SolaX VPP trigger",
+            entity_id=trigger_entity,
+        )
+
+    def set_solax_vpp_disabled(self) -> None:
+        """Disable SolaX VPP mode, reverting the inverter to self-use behaviour.
+
+        Used for IDLE and SOLAR_STORAGE intents where the inverter's default
+        self-use logic should take over.  Autorepeat on previous commands
+        expires naturally; this call cancels active control explicitly.
+        """
+        mode_entity = self._get_entity_for_service("solax_power_control_mode")
+
+        logger.info("SolaX VPP: disabling battery control (self-use mode)")
+
+        self._service_call_with_retry(
+            "select",
+            "select_option",
+            operation="SolaX VPP disable battery control",
+            entity_id=mode_entity,
+            option="Disabled Battery Control",
+        )
+
+    def set_solax_min_soc(self, min_soc: int) -> None:
+        """Write the battery minimum SOC to the SolaX inverter.
+
+        Args:
+            min_soc: Minimum state-of-charge in percent (0-100).
+        """
+        entity_id = self._get_entity_for_service("solax_battery_min_soc")
+        logger.info("SolaX: setting battery minimum SOC to %d%%", min_soc)
+        self._service_call_with_retry(
+            "number",
+            "set_value",
+            operation="SolaX set battery minimum SOC",
+            entity_id=entity_id,
+            value=min_soc,
+        )
+
+    def get_solax_power_control_mode(self) -> str | None:
+        """Read the current SolaX power control mode."""
+        return self._get_raw_state("solax_power_control_mode")
+
+    # ─────────────────────────────────────────────────────────────────────────
+
     def set_test_mode(self, enabled):
         """Enable or disable test mode."""
         self.test_mode = enabled
@@ -1558,6 +1671,8 @@ class HomeAssistantAPIController:
             "growatt_found": False,
             "device_sn": None,
             "growatt_device_id": None,
+            "solax_found": False,
+            "solax_device_prefix": None,
             "nordpool_found": False,
             "nordpool_area": None,
             "nordpool_config_entry_id": None,
@@ -1574,6 +1689,11 @@ class HomeAssistantAPIController:
         if device_sn:
             result["growatt_found"] = True
             result["device_sn"] = device_sn
+
+        solax_prefix = self._extract_solax_device_prefix(states)
+        if solax_prefix:
+            result["solax_found"] = True
+            result["solax_device_prefix"] = solax_prefix
 
         for state in states:
             entity_id = str(state.get("entity_id", "")).lower()
@@ -1604,11 +1724,14 @@ class HomeAssistantAPIController:
             )
 
         # ── Auto-detected hints ───────────────────────────────────────────
-        # Inverter type: determined from registered growatt_server services
-        # (MIN: update_time_segment, SPH: write_ac_charge_times).
-        # Only set when WebSocket succeeded; None means undetermined.
+        # Inverter type: Growatt is determined from registered growatt_server
+        # services (MIN: update_time_segment, SPH: write_ac_charge_times).
+        # SolaX is detected from entity-ID patterns (no WebSocket needed).
+        # Growatt takes priority when both are present.
         if result["growatt_found"]:
             result["inverter_type"] = metadata.get("growatt_inverter_type")
+        elif result["solax_found"]:
+            result["inverter_type"] = "solax"
 
         # Currency & VAT from Nordpool area
         area_hints = self._hints_from_nordpool_area(result.get("nordpool_area"))
@@ -1702,6 +1825,83 @@ class HomeAssistantAPIController:
             "Discovered %d Growatt sensors for device %s",
             len(result),
             device_sn,
+        )
+        return result
+
+    def _extract_solax_device_prefix(self, states: list[dict]) -> str | None:
+        """Extract the SolaX device prefix from entity states.
+
+        Uses two SolaX-specific sensor suffixes (``battery_capacity`` and
+        ``battery_power_charge``) as a combined anchor.  Both suffixes must
+        share the same object-ID prefix for the detection to match, which
+        eliminates false-positives from unrelated integrations.
+
+        Args:
+            states: List of state dicts from /api/states.
+
+        Returns:
+            Device prefix string (e.g. ``"solax_abc123"``), or None if no
+            SolaX entities are detected.
+        """
+        capacity_prefixes: set[str] = set()
+        charge_prefixes: set[str] = set()
+
+        for state in states:
+            entity_id = str(state.get("entity_id", ""))
+            if not entity_id.startswith("sensor."):
+                continue
+            object_id = entity_id[len("sensor.") :]
+            if object_id.endswith("_battery_capacity"):
+                capacity_prefixes.add(object_id[: -len("_battery_capacity")])
+            elif object_id.endswith("_battery_power_charge"):
+                charge_prefixes.add(object_id[: -len("_battery_power_charge")])
+
+        common = capacity_prefixes & charge_prefixes
+        if not common:
+            return None
+
+        prefix = next(iter(common))
+        logger.debug("SolaX device prefix detected: %r", prefix)
+        return prefix
+
+    def discover_solax_sensors(
+        self, device_prefix: str, states: list[dict]
+    ) -> dict[str, str]:
+        """Discover SolaX sensor and control entity IDs for a given device prefix.
+
+        Maps entities matching the device prefix to BESS sensor keys using
+        known SolaX entity naming conventions (homeassistant-solax-modbus).
+
+        SolaX entities follow the pattern: <domain>.<device_prefix>_<suffix>.
+        Sensor entities use the ``sensor.`` domain; VPP control entities use
+        ``select.``, ``number.``, or ``button.`` domains.
+
+        Args:
+            device_prefix: SolaX device prefix (e.g. ``"solax_abc123"``).
+            states: List of state dicts from /api/states.
+
+        Returns:
+            dict mapping bess_sensor_key → entity_id for all discovered entities.
+        """
+        result: dict[str, str] = {}
+        object_prefix = f"{device_prefix}_"
+        valid_domains = ("sensor.", "select.", "number.", "button.")
+
+        for state in states:
+            entity_id = str(state.get("entity_id", ""))
+            if not any(entity_id.startswith(d) for d in valid_domains):
+                continue
+            object_id = entity_id.split(".", 1)[1]
+            if not object_id.startswith(object_prefix):
+                continue
+            suffix = object_id[len(object_prefix) :]
+            if suffix in self.SOLAX_ENTITY_SUFFIX_MAP:
+                result[self.SOLAX_ENTITY_SUFFIX_MAP[suffix]] = entity_id
+
+        logger.info(
+            "Discovered %d SolaX entities for prefix %r",
+            len(result),
+            device_prefix,
         )
         return result
 

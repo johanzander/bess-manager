@@ -19,6 +19,14 @@ export interface IntegrationDef {
   sensorGroups: SensorGroup[];
 }
 
+// Map inverter type UI values to their integration IDs.
+// Used by the wizard to show only the relevant inverter integration.
+export const INVERTER_INTEGRATION_IDS: Record<string, string> = {
+  MIN: 'growatt',
+  SPH: 'growatt',
+  SOLAX: 'solax',
+};
+
 export const INTEGRATIONS: IntegrationDef[] = [
   {
     id: 'growatt',
@@ -59,6 +67,40 @@ export const INTEGRATIONS: IntegrationDef[] = [
           { key: 'lifetime_load_consumption', label: 'Total Load Consumption', required: true },
           { key: 'lifetime_system_production', label: 'Total System Production', required: false },
           { key: 'lifetime_self_consumption', label: 'Total Self Consumption', required: false },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'solax',
+    name: 'SolaX Modbus',
+    required: true,
+    description: 'Battery inverter — SolaX inverter controlled via the homeassistant-solax-modbus integration (VPP active-power commands)',
+    sensorGroups: [
+      {
+        name: 'Battery Monitoring',
+        sensors: [
+          { key: 'battery_soc', label: 'Battery Capacity (SOC)', required: true },
+          { key: 'battery_charge_power', label: 'Battery Charge Power', required: true },
+          { key: 'battery_discharge_power', label: 'Battery Discharge Power', required: true },
+        ],
+      },
+      {
+        name: 'Power Monitoring',
+        sensors: [
+          { key: 'pv_power', label: 'PV Power', required: false },
+          { key: 'local_load_power', label: 'House Load', required: false },
+          { key: 'import_power', label: 'Measured Power (Grid)', required: false },
+        ],
+      },
+      {
+        name: 'VPP Control',
+        sensors: [
+          { key: 'solax_power_control_mode', label: 'Power Control Mode', required: true },
+          { key: 'solax_active_power', label: 'Active Power Target', required: true },
+          { key: 'solax_autorepeat_duration', label: 'Autorepeat Duration', required: true },
+          { key: 'solax_power_control_trigger', label: 'Power Control Trigger', required: true },
+          { key: 'solax_battery_min_soc', label: 'Battery Minimum SOC', required: true },
         ],
       },
     ],

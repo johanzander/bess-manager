@@ -1,6 +1,6 @@
-"""Growatt schedule management module with Strategic Intent Conversion.
+"""Growatt MIN inverter controller.
 
-This module converts strategic intents from the DP algorithm into Growatt-specific
+This module converts strategic intents from the DP algorithm into Growatt MIN-specific
 Time of Use (TOU) intervals while meeting strict inverter hardware requirements.
 
 PROBLEM STATEMENT & REQUIREMENTS:
@@ -66,20 +66,20 @@ ROBUST RECOVERY: When TOU corruption detected (overlaps, wrong order, duplicates
 
 import io
 import logging
-from typing import ClassVar
 
 from . import time_utils
 from .dp_schedule import DPSchedule
 from .health_check import perform_health_check
+from .inverter_controller import InverterController
 from .settings import BatterySettings
 
 logger = logging.getLogger(__name__)
 
 
-class GrowattScheduleManager:
-    """Creates Growatt-specific schedules using strategic intents from DP algorithm.
+class GrowattMinController(InverterController):
+    """Creates Growatt MIN inverter schedules using strategic intents from DP algorithm.
 
-    This class manages the conversion between strategic intents and Growatt-specific
+    This class manages the conversion between strategic intents and Growatt MIN-specific
     Time of Use (TOU) intervals. It uses the strategic reasoning captured at decision
     time in the DP algorithm rather than analyzing energy flows afterward.
 
@@ -132,61 +132,27 @@ class GrowattScheduleManager:
     home before excess flows to the battery.
     """
 
-    # Map strategic intents to Growatt battery modes.
-    # - battery_first: Grid powers home, battery preserved (or charged if AC charge enabled)
-    # - load_first: Solar serves home first, excess to battery (inverter default behavior)
-    # - grid_first: Priority to export to grid
-    INTENT_TO_MODE: ClassVar[dict[str, str]] = {
-        "GRID_CHARGING": "battery_first",
-        "SOLAR_STORAGE": "load_first",
-        "LOAD_SUPPORT": "load_first",
-        "EXPORT_ARBITRAGE": "grid_first",
-        "IDLE": "load_first",
-    }
-
-    # Map strategic intents to inverter control settings
-    # Each intent determines: grid_charge, charge_rate, discharge_rate
-    INTENT_TO_CONTROL: ClassVar[dict[str, dict[str, bool | int]]] = {
-        "GRID_CHARGING": {"grid_charge": True, "charge_rate": 100, "discharge_rate": 0},
-        "SOLAR_STORAGE": {
-            "grid_charge": False,
-            "charge_rate": 100,
-            "discharge_rate": 0,
-        },
-        "LOAD_SUPPORT": {"grid_charge": False, "charge_rate": 0, "discharge_rate": 100},
-        "EXPORT_ARBITRAGE": {
-            "grid_charge": False,
-            "charge_rate": 0,
-            "discharge_rate": 100,
-        },
-        "IDLE": {"grid_charge": False, "charge_rate": 100, "discharge_rate": 0},
-    }
-
     def __init__(self, battery_settings: BatterySettings) -> None:
-        """Initialize the schedule manager with required battery settings for power calculations."""
-        if battery_settings is None:
-            raise ValueError("battery_settings is required and cannot be None")
+        """Initialize the MIN controller with required battery settings for power calculations."""
+        super().__init__(battery_settings)
 
         self.max_intervals = 9  # Growatt supports up to 9 TOU intervals
-        self.current_schedule = None
         self.detailed_intervals = []  # For overview display
-        self.tou_intervals = []  # For actual TOU settings
-        self.active_tou_intervals: list[dict] = (
+        self._active_tou_intervals: list[dict] = (
             []
         )  # Subset of tou_intervals written to hardware (max 9)
         self.current_hour = 0  # Track current hour (0-23) for TOU schedule boundaries
-        self.hourly_settings = {}  # Pre-calculated settings for each hour (0-23)
-        self.strategic_intents = []  # Store strategic intents from DP algorithm
-        self.corruption_detected = (
-            False  # Flag to force hardware write when corruption found
-        )
-
-        # Required battery settings for power calculations
-        self.battery_settings = battery_settings
-        self.max_charge_power_kw = battery_settings.max_charge_power_kw
-        self.max_discharge_power_kw = battery_settings.max_discharge_power_kw
 
         # Fixed time slots configuration (9 slots, ~2h40m each)
+
+    @property
+    def active_tou_intervals(self) -> list[dict]:
+        """Return the subset of TOU intervals currently written to hardware (max 9)."""
+        return self._active_tou_intervals
+
+    @active_tou_intervals.setter
+    def active_tou_intervals(self, value: list[dict]) -> None:
+        self._active_tou_intervals = value
 
     def _calculate_power_rates_from_action(
         self, battery_action_kw: float, intent: str
@@ -328,133 +294,6 @@ class GrowattScheduleManager:
             )
 
         return groups
-
-    def get_detailed_period_groups(
-        self, intents: list[str] | None = None
-    ) -> list[dict]:
-        """Get period groups with full control parameters for display/API.
-
-        Groups consecutive 15-minute periods ONLY when ALL parameters are identical:
-        - Strategic intent
-        - Battery mode
-        - Grid charge
-        - Charge power rate
-        - Discharge power rate
-
-        Args:
-            intents: Optional list of strategic intents to group. If None,
-                     uses self.strategic_intents (today's schedule).
-
-        Returns:
-            List of period groups with all control parameters
-        """
-        effective_intents = intents if intents is not None else self.strategic_intents
-        if not effective_intents:
-            return []
-
-        num_periods = len(effective_intents)
-
-        # Build detailed settings for each 15-minute period
-        period_settings = []
-        for period in range(num_periods):
-            intent = effective_intents[period]
-            mode = self.INTENT_TO_MODE.get(intent, "load_first")
-            control = self.INTENT_TO_CONTROL.get(
-                intent, {"grid_charge": False, "charge_rate": 100, "discharge_rate": 0}
-            )
-
-            period_settings.append(
-                {
-                    "period": period,
-                    "intent": intent,
-                    "mode": mode,
-                    "grid_charge": control["grid_charge"],
-                    "charge_rate": control["charge_rate"],
-                    "discharge_rate": control["discharge_rate"],
-                }
-            )
-
-        # Group consecutive periods with identical settings
-        groups = []
-        current_group = None
-
-        for ps in period_settings:
-            if current_group is not None and (
-                ps["intent"] == current_group["intent"]
-                and ps["mode"] == current_group["mode"]
-                and ps["grid_charge"] == current_group["grid_charge"]
-                and ps["charge_rate"] == current_group["charge_rate"]
-                and ps["discharge_rate"] == current_group["discharge_rate"]
-            ):
-                current_group["end_period"] = ps["period"]
-                current_group["count"] += 1
-            else:
-                if current_group is not None:
-                    groups.append(current_group)
-                current_group = {
-                    "start_period": ps["period"],
-                    "end_period": ps["period"],
-                    "intent": ps["intent"],
-                    "mode": ps["mode"],
-                    "grid_charge": ps["grid_charge"],
-                    "charge_rate": ps["charge_rate"],
-                    "discharge_rate": ps["discharge_rate"],
-                    "count": 1,
-                }
-
-        if current_group is not None:
-            groups.append(current_group)
-
-        # Convert to display format with time strings
-        result = []
-        for group in groups:
-            start_h, start_m = self._period_to_time(group["start_period"])
-            end_h, end_m = self._period_to_time(group["end_period"])
-            end_m += 14  # Last minute of period
-
-            # Handle DST: cap to 23:59
-            if end_h >= 24:
-                end_h = 23
-                end_m = 59
-
-            result.append(
-                {
-                    "start_time": f"{start_h:02d}:{start_m:02d}",
-                    "end_time": f"{end_h:02d}:{end_m:02d}",
-                    "start_period": group["start_period"],
-                    "end_period": group["end_period"],
-                    "intent": group["intent"],
-                    "mode": group["mode"],
-                    "grid_charge": group["grid_charge"],
-                    "charge_rate": group["charge_rate"],
-                    "discharge_rate": group["discharge_rate"],
-                    "period_count": group["count"],
-                    "duration_minutes": group["count"] * 15,
-                }
-            )
-
-        return result
-
-    def _period_to_time(self, period: int) -> tuple[int, int]:
-        """Convert period number to hour and minute.
-
-        Note: During DST transitions, the number of periods varies:
-        - Normal day: 96 periods (24 hours)
-        - Spring forward: 92 periods (23 hours)
-        - Fall back: 100 periods (25 hours)
-
-        For periods >= 96 (fall-back extra hour), hour will be >= 24.
-        Callers must handle this (e.g., cap to 23:59 for TOU schedules).
-
-        Args:
-            period: Period number (0-95 normally, 0-99 during fall-back)
-
-        Returns:
-            Tuple of (hour, minute) - hour may exceed 23 during DST fall-back
-        """
-        hour = period // 4
-        minute = (period % 4) * 15
-        return hour, minute
 
     def _groups_to_tou_intervals(self, groups: list[dict]) -> list[dict]:
         """Convert period groups to Growatt TOU intervals.
@@ -748,7 +587,7 @@ class GrowattScheduleManager:
         current_period: int = 0,
         previous_tou_intervals: list[dict] | None = None,
     ):
-        """Process DPSchedule with strategic intents into Growatt format."""
+        """Process DPSchedule with strategic intents into Growatt MIN format."""
         logger.info(
             "Creating Growatt schedule using strategic intents from DP algorithm"
         )
@@ -793,11 +632,9 @@ class GrowattScheduleManager:
         3. Select next 9 non-expired intervals for hardware (active_tou_intervals)
         """
         if not self.strategic_intents:
-            logger.warning(
-                "No strategic intents available, falling back to action-based analysis"
+            raise ValueError(
+                "No strategic intents available — cannot convert to TOU intervals"
             )
-            self._consolidate_and_convert_fallback()
-            return
 
         logger.info(
             "Converting %d strategic intents to TOU intervals using 15-minute resolution",
@@ -878,153 +715,9 @@ class GrowattScheduleManager:
             len(self.active_tou_intervals),
         )
 
-    def _get_period_intent_summary(self, start_hour: int, end_hour: int) -> str:
-        """Get a summary of intents for a period (aggregated from quarterly periods)."""
-        if not self.strategic_intents:
-            return "unknown"
-
-        # Aggregate quarterly strategic intents for the hour range
-        num_periods = len(self.strategic_intents)
-        period_intents = []
-
-        for hour in range(start_hour, end_hour + 1):
-            # Get quarterly periods for this hour (4 periods per hour normally)
-            start_period = hour * 4
-            end_period = min(start_period + 4, num_periods)
-
-            # Add all quarterly intents for this hour
-            for period in range(start_period, end_period):
-                if period < num_periods:
-                    period_intents.append(self.strategic_intents[period])
-
-        if not period_intents:
-            return "unknown"
-
-        # Return most common intent in period
-        intent_counts = {}
-        for intent in period_intents:
-            intent_counts[intent] = intent_counts.get(intent, 0) + 1
-
-        most_common = max(intent_counts.items(), key=lambda x: x[1])
-        if len(set(period_intents)) == 1:
-            return most_common[0]
-        else:
-            return f"{most_common[0]} (+{len(set(period_intents))-1} others)"
-
-    def _strategic_intent_to_battery_mode(self, strategic_intent):
-        """Convert strategic intent to Growatt battery mode."""
-        intent_to_mode = {
-            "IDLE": "load_first",
-            "GRID_CHARGING": "battery_first",
-            "SOLAR_STORAGE": "load_first",
-            "EXPORT_ARBITRAGE": "grid_first",
-        }
-        return intent_to_mode.get(strategic_intent, "load_first")
-
-    def _consolidate_and_convert_fallback(self):
-        """Fallback conversion when no strategic intents are available."""
-        logger.debug("Using fallback conversion based on battery actions")
-        # Keep existing logic as fallback when intents aren't available
-        # This preserves backward compatibility
-        if not self.current_schedule:
-            return
-
-        hourly_intervals = self.current_schedule.get_daily_intervals()
-        if not hourly_intervals:
-            return
-
-        # Use action-based logic as fallback
-        battery_first_hours = []
-        for hour in range(self.current_hour, 24):
-            for interval in hourly_intervals:
-                interval_hour = int(interval["start_time"].split(":")[0])
-                if interval_hour == hour:
-                    state = interval.get("state", "idle")
-                    if state == "discharging" or state == "charging":
-                        battery_first_hours.append(hour)
-                    break
-
-        # Create simple TOU intervals for battery_first hours
-        if battery_first_hours:
-            # Group consecutive hours
-            consecutive_periods = []
-            current_period = [battery_first_hours[0]]
-
-            for i in range(1, len(battery_first_hours)):
-                if battery_first_hours[i] == battery_first_hours[i - 1] + 1:
-                    current_period.append(battery_first_hours[i])
-                else:
-                    consecutive_periods.append(current_period)
-                    current_period = [battery_first_hours[i]]
-
-            consecutive_periods.append(current_period)
-
-            for period in consecutive_periods:
-                segment_id = len(self.tou_intervals) + 1
-                start_time = f"{period[0]:02d}:00"
-                end_time = f"{period[-1]:02d}:59"
-
-                self.tou_intervals.append(
-                    {
-                        "segment_id": segment_id,
-                        "batt_mode": "battery_first",
-                        "start_time": start_time,
-                        "end_time": end_time,
-                        "enabled": True,
-                        "strategic_intent": self._get_period_intent_summary(
-                            period[0], period[-1]
-                        ),
-                    }
-                )
-
-    def get_hourly_settings(self, hour):
-        if hour not in self.hourly_settings:
-            raise ValueError(
-                f"No hourly settings for hour {hour}. Strategic intents: {len(self.strategic_intents)}, Settings calculated: {len(self.hourly_settings)}"
-            )
-
-        return self.hourly_settings[hour]
-
-    def get_strategic_intent_summary(self) -> dict:
-        """Get a summary of strategic intents for the day (aggregated from quarterly periods)."""
-        if not self.strategic_intents:
-            return {}
-
-        # Aggregate quarterly strategic intents into hourly intents
-        num_periods = len(self.strategic_intents)
-        num_hours = (num_periods + 3) // 4  # Round up to handle partial hours
-
-        intent_hours = {}
-        for hour in range(num_hours):
-            # Get dominant strategic intent for this hour (aggregates 4 quarterly periods)
-            intent = self._get_hourly_intent(hour)
-
-            if intent not in intent_hours:
-                intent_hours[intent] = []
-            intent_hours[intent].append(hour)
-
-        summary = {}
-        for intent, hours in intent_hours.items():
-            summary[intent] = {
-                "hours": hours,
-                "count": len(hours),
-                "description": self._get_intent_description(intent),
-            }
-
-        return summary
-
-    def _get_intent_description(self, intent: str) -> str:
-        """Get human-readable description of strategic intent."""
-        descriptions = {
-            "GRID_CHARGING": "Storing cheap grid energy for later use",
-            "SOLAR_STORAGE": "Storing excess solar energy for evening/night",
-            "LOAD_SUPPORT": "Using battery to support home consumption",
-            "EXPORT_ARBITRAGE": "Selling stored energy to grid for profit",
-            "IDLE": "No significant battery activity",
-        }
-        return descriptions.get(intent, "Unknown intent")
-
-    def compare_schedules(self, other_schedule, from_period: int = 0):
+    def compare_schedules(
+        self, other_schedule: "GrowattMinController", from_period: int = 0
+    ) -> tuple[bool, str]:
         """Compare TOU intervals from a specific period onwards.
 
         Uses 15-minute period granularity to match TOU segment resolution.
@@ -1163,7 +856,7 @@ class GrowattScheduleManager:
         return False, "TOU intervals match"
 
     def initialize_from_tou_segments(self, tou_segments, current_hour=0):
-        """Initialize GrowattScheduleManager with TOU intervals from the inverter."""
+        """Initialize GrowattMinController with TOU intervals from the inverter."""
         self.current_hour = current_hour
         self.tou_intervals = []
 
@@ -1544,6 +1237,19 @@ class GrowattScheduleManager:
 
         logger.info("\n".join(lines))
 
+    def _write_period_to_hardware(
+        self, controller, grid_charge: bool, discharge_rate: int
+    ) -> None:
+        """Write per-period grid charge and discharge settings to Growatt MIN hardware.
+
+        Args:
+            controller: HomeAssistantAPIController instance
+            grid_charge: Whether to enable grid charging
+            discharge_rate: Discharge power rate (0-100%)
+        """
+        controller.set_grid_charge(grid_charge)
+        controller.set_discharging_power_rate(discharge_rate)
+
     def write_schedule_to_hardware(
         self,
         controller,
@@ -1683,6 +1389,7 @@ class GrowattScheduleManager:
                     for d in to_disable
                 ):
                     continue
+
                 if not current_segment.get("enabled", True):
                     continue
 
@@ -1810,7 +1517,7 @@ class GrowattScheduleManager:
             )
 
     def read_and_initialize_from_hardware(self, controller, current_hour: int) -> None:
-        """Read current TOU schedule from inverter and initialize this manager.
+        """Read current TOU schedule from inverter and initialize this controller.
 
         Args:
             controller: HomeAssistantAPIController instance
@@ -2033,7 +1740,7 @@ class GrowattScheduleManager:
         # Capture logs to count actual hardware writes
         log_capture = io.StringIO()
         handler = logging.StreamHandler(log_capture)
-        logger = logging.getLogger("core.bess.growatt_schedule")
+        logger = logging.getLogger("core.bess.growatt_min_controller")
         logger.addHandler(handler)
 
         try:

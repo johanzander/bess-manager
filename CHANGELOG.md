@@ -4,6 +4,29 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.0.0b1] - 2026-04-18
+
+### Added
+
+- SolaX inverter support via homeassistant-solax-modbus integration (VPP active-power commands).
+- Setup wizard auto-detects SolaX entities and shows platform-specific sensor configuration.
+- Dashboard shows platform-aware hardware schedule section (TOU intervals for Growatt, VPP control info for SolaX).
+
+### Changed
+
+- Inverter scheduling refactored into an `InverterController` base class with `GrowattMinController`, `GrowattSphController`, and `SolaxController` subclasses.
+- Inverter platform configuration moved from `growatt.inverter_type` to `inverter.platform` (existing settings are migrated automatically).
+- API endpoints `/api/inverter/status` and `/api/inverter/schedule` added as canonical paths (legacy `/api/growatt/*` aliases preserved).
+
+### Fixed
+
+- Inverter status endpoint returned hardcoded `charge_stop_soc: 100%` instead of the configured `max_soc` from battery settings.
+- SOLAR_STORAGE intent now uses `load_first` mode instead of `battery_first` on Growatt MIN and SPH inverters. The previous `battery_first` mode routed solar to the battery first, causing unnecessary grid imports to serve the home even when excess solar was available for both.
+- DP optimizer no longer cycles charge/discharge during solar hours. The profitability check now accounts for the opportunity cost of stored energy: when sell > buy, discharge-for-export is blocked (round-trip losses make it unprofitable); when excess solar is available, the sell price is used as the cost basis floor (solar could have been exported instead). ([#73](https://github.com/johanzander/bess-manager/issues/73))
+- IDLE periods now correctly model passive solar charging with charge rate clamping, and are classified as SOLAR_STORAGE when the battery absorbs excess solar.
+- Setup wizard failed to auto-detect `battery_discharge_soc_limit_on_grid` entity on Growatt models that expose separate on-grid/off-grid SOC limit entities.
+- MIN inverter returned 500 errors when the TOU schedule exceeded 9 slots on price-volatile days. Hardware writes now use only the active (capped) intervals with content-aware slot assignment to avoid evicting still-needed segments. (thanks [@pookey](https://github.com/pookey))
+
 ## [8.5.0] - 2026-05-09
 
 ### Added

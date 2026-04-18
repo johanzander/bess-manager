@@ -77,7 +77,7 @@ export function txtInput(
 
 export function radioGroup<T extends string>(
   label: string,
-  options: { value: T; label: string }[],
+  options: { value: T; label: string; disabled?: boolean; hint?: string }[],
   value: T,
   onChange: (_: T) => void,
 ) {
@@ -86,16 +86,20 @@ export function radioGroup<T extends string>(
       <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{label}</span>
       <div className="flex flex-wrap gap-x-5 gap-y-1 pt-1">
         {options.map(opt => (
-          <label key={opt.value} className="flex items-center space-x-2 cursor-pointer">
+          <label key={opt.value} className={`flex items-center space-x-2 ${opt.disabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}>
             <input
               type="radio"
               name={label}
               value={opt.value}
               checked={value === opt.value}
+              disabled={opt.disabled}
               onChange={() => onChange(opt.value)}
               className="text-blue-500"
             />
-            <span className="text-sm text-gray-700 dark:text-gray-300">{opt.label}</span>
+            <span className="text-sm text-gray-700 dark:text-gray-300">
+              {opt.label}
+              {opt.hint && <span className="text-[10px] text-gray-400 dark:text-gray-500 ml-1">({opt.hint})</span>}
+            </span>
           </label>
         ))}
       </div>

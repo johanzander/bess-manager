@@ -22,11 +22,13 @@ from .dp_schedule import DPSchedule
 from .exceptions import (
     SystemConfigurationError,
 )
+from .growatt_min_controller import GrowattMinController
+from .growatt_sph_controller import GrowattSphController
 from .ha_api_controller import HomeAssistantAPIController
 from .health_check import run_system_health_checks
 from .historical_data_store import HistoricalDataStore
 from .influxdb_helper import get_power_sensor_data_batch
-from .min_schedule import GrowattScheduleManager
+from .inverter_controller import InverterController
 from .models import (
     DecisionData,
     EconomicData,
@@ -49,7 +51,7 @@ from .settings import (
     TemperatureDeratingSettings,
     apply_temperature_derating,
 )
-from .sph_schedule import SphScheduleManager
+from .solax_controller import SolaxController
 from .time_utils import (
     format_period,
     get_period_count,
@@ -111,8 +113,8 @@ class BatterySystemManager:
         )
 
         # Initialize hardware interface with battery settings
-        self._schedule_manager: GrowattScheduleManager | SphScheduleManager = (
-            self._create_schedule_manager()
+        self._inverter_controller: InverterController = (
+            self._create_inverter_controller()
         )
 
         # Initialize price manager
@@ -161,14 +163,20 @@ class BatterySystemManager:
             raise RuntimeError("Controller not initialized - system not started")
         return self._controller
 
-    def _create_schedule_manager(self) -> "GrowattScheduleManager | SphScheduleManager":
-        """Create a schedule manager instance matching the configured inverter type."""
-        _inverter_type = self._addon_options.get("growatt", {}).get(
-            "inverter_type", "MIN"
+    def _create_inverter_controller(self) -> InverterController:
+        """Create an inverter controller instance matching the configured inverter type."""
+        self.inverter_platform = self._addon_options.get("inverter", {}).get(
+            "platform"
+        ) or (
+            "growatt_sph"
+            if self._addon_options.get("growatt", {}).get("inverter_type") == "SPH"
+            else "growatt_min"
         )
-        if _inverter_type == "SPH":
-            return SphScheduleManager(battery_settings=self.battery_settings)
-        return GrowattScheduleManager(battery_settings=self.battery_settings)
+        if self.inverter_platform == "growatt_sph":
+            return GrowattSphController(battery_settings=self.battery_settings)
+        if self.inverter_platform == "solax":
+            return SolaxController(battery_settings=self.battery_settings)
+        return GrowattMinController(battery_settings=self.battery_settings)
 
     def _create_price_source(self, controller) -> PriceSource:
         """Create the appropriate price source based on energy_provider config.
@@ -233,7 +241,7 @@ class BatterySystemManager:
         """
         logger.info("Syncing SOC limits from config to inverter...")
         try:
-            self._schedule_manager.sync_soc_limits(self.controller)
+            self._inverter_controller.sync_soc_limits(self.controller)
         except Exception as e:
             logger.warning(
                 "Could not sync SOC limits to inverter at startup "
@@ -402,14 +410,12 @@ class BatterySystemManager:
                 # keeps working. temp_growatt has fresh schedule/intents/hourly
                 # settings but empty TOU intervals — without this, the in-memory
                 # record of what's on the inverter is erased every cycle.
-                temp_growatt.tou_intervals = self._schedule_manager.tou_intervals.copy()
-                # Growatt tracks active (hardware-written) intervals separately;
-                # SPH derives active_tou_intervals from tou_intervals via property.
-                if isinstance(self._schedule_manager, GrowattScheduleManager):
-                    temp_growatt.active_tou_intervals = (
-                        self._schedule_manager.active_tou_intervals.copy()
+                temp_growatt.tou_intervals = self._inverter_controller.tou_intervals.copy()
+                if isinstance(self._inverter_controller, GrowattMinController):
+                    temp_growatt._active_tou_intervals = (
+                        self._inverter_controller._active_tou_intervals.copy()
                     )
-                self._schedule_manager = temp_growatt
+                self._inverter_controller = temp_growatt
 
             # Capture prediction snapshot after schedule is applied
             if not prepare_next_day:
@@ -441,8 +447,10 @@ class BatterySystemManager:
             return
 
         # Log Growatt TOU schedule and detailed schedule
-        self._schedule_manager.log_current_TOU_schedule("=== GROWATT TOU SCHEDULE ===")
-        self._schedule_manager.log_detailed_schedule(
+        self._inverter_controller.log_current_TOU_schedule(
+            "=== GROWATT TOU SCHEDULE ==="
+        )
+        self._inverter_controller.log_detailed_schedule(
             "=== GROWATT DETAILED SCHEDULE ==="
         )
 
@@ -462,7 +470,7 @@ class BatterySystemManager:
             daily_view = self.daily_view_builder.build_daily_view(optimization_period)
 
             # Get current Growatt schedule
-            growatt_schedule = self._schedule_manager.tou_intervals.copy()
+            growatt_schedule = self._inverter_controller.tou_intervals.copy()
 
             # Store snapshot
             self.prediction_snapshot_store.store_snapshot(
@@ -498,7 +506,7 @@ class BatterySystemManager:
                 return
 
             current_hour = time_utils.now().hour
-            self._schedule_manager.read_and_initialize_from_hardware(
+            self._inverter_controller.read_and_initialize_from_hardware(
                 self._controller, current_hour
             )
 
@@ -1407,7 +1415,7 @@ class BatterySystemManager:
         optimization_data: dict[str, list[float]],
         is_first_run: bool,
         prepare_next_day: bool,
-    ) -> tuple[DPSchedule, GrowattScheduleManager] | None:
+    ) -> tuple[DPSchedule, InverterController] | None:
         """Create updated schedule from OptimizationResult with strategic intents and CORRECT SOC mapping."""
 
         try:
@@ -1469,12 +1477,13 @@ class BatterySystemManager:
             # to avoid the "majority IDLE" bug where updating at :45 (period 3 of an hour) causes
             # periods 0,1,2 to default to IDLE, flipping the hourly intent and dropping TOU coverage.
             if (
-                self._schedule_manager.strategic_intents
-                and len(self._schedule_manager.strategic_intents) >= optimization_period
+                self._inverter_controller.strategic_intents
+                and len(self._inverter_controller.strategic_intents)
+                >= optimization_period
             ):
                 # Preserve previous intents for past periods
                 full_day_strategic_intents = (
-                    self._schedule_manager.strategic_intents.copy()
+                    self._inverter_controller.strategic_intents.copy()
                 )
                 logger.debug(
                     f"Preserving {optimization_period} past strategic intents from previous schedule"
@@ -1518,7 +1527,7 @@ class BatterySystemManager:
 
             # Truncate all arrays to today's period count before creating DPSchedule.
             # The optimizer may have used an extended horizon (up to 192 periods) to make
-            # better decisions for today, but DPSchedule and GrowattScheduleManager are
+            # better decisions for today, but DPSchedule and InverterController are
             # day-centric and the Growatt inverter has no date awareness in TOU segments.
             if not prepare_next_day:
                 today_period_count = get_period_count(time_utils.today())
@@ -1615,9 +1624,7 @@ class BatterySystemManager:
             temp_schedule.strategic_intents = full_day_strategic_intents
 
             # Create schedule manager matching current inverter type
-            temp_growatt: GrowattScheduleManager | SphScheduleManager = (
-                self._create_schedule_manager()
-            )
+            temp_growatt: InverterController = self._create_inverter_controller()
             temp_growatt.strategic_intents = full_day_strategic_intents
 
             # Create schedule with rolling window — only future periods get TOU segments
@@ -1625,7 +1632,7 @@ class BatterySystemManager:
             previous_tou = (
                 []
                 if prepare_next_day
-                else self._schedule_manager.active_tou_intervals.copy()
+                else self._inverter_controller.active_tou_intervals.copy()
             )
             logger.info(f"Creating Growatt schedule for period={effective_period}")
             temp_growatt.create_schedule(
@@ -1646,7 +1653,7 @@ class BatterySystemManager:
         is_first_run: bool,
         period: int,
         prepare_next_day: bool,
-        temp_growatt: GrowattScheduleManager | SphScheduleManager,
+        temp_growatt: InverterController,
         optimization_period: int,
         temp_schedule: DPSchedule,
     ) -> tuple[bool, str]:
@@ -1657,7 +1664,7 @@ class BatterySystemManager:
         # Special case: preparing next day (runs at 23:55 for 00:00 start)
         if prepare_next_day:
             # Compare full day TOU settings for tomorrow (from start of day)
-            schedules_differ, reason = self._schedule_manager.compare_schedules(
+            schedules_differ, reason = self._inverter_controller.compare_schedules(
                 other_schedule=temp_growatt, from_period=0
             )
 
@@ -1670,7 +1677,7 @@ class BatterySystemManager:
 
         # Normal case: compare TOU settings from current period onwards
         try:
-            schedules_differ, reason = self._schedule_manager.compare_schedules(
+            schedules_differ, reason = self._inverter_controller.compare_schedules(
                 other_schedule=temp_growatt, from_period=period
             )
 
@@ -1689,7 +1696,7 @@ class BatterySystemManager:
         self,
         period: int,
         temp_schedule: DPSchedule,
-        temp_growatt: GrowattScheduleManager | SphScheduleManager,
+        temp_growatt: InverterController,
         reason: str,
         prepare_next_day: bool,
     ) -> None:
@@ -1710,7 +1717,7 @@ class BatterySystemManager:
         self._current_schedule = temp_schedule
 
         try:
-            current_tou = self._schedule_manager.active_tou_intervals
+            current_tou = self._inverter_controller.active_tou_intervals
             effective_period = 0 if prepare_next_day else period
 
             if self._controller is None:
@@ -1721,7 +1728,7 @@ class BatterySystemManager:
                 )
 
             # Update schedule manager
-            self._schedule_manager = temp_growatt
+            self._inverter_controller = temp_growatt
 
             # Clear corruption flag after successful hardware write
             if temp_growatt.corruption_detected:
@@ -1744,73 +1751,40 @@ class BatterySystemManager:
         """Apply period settings with proper charge/discharge power rates.
 
         Uses per-period strategic intent for full quarterly resolution control.
+        Delegates the intent→rates mapping and hardware write to the inverter controller.
         """
-
-        # Get current period's strategic intent (quarterly resolution)
-        if period >= len(self._schedule_manager.strategic_intents):
+        # Guard: period must be within the strategic intents array
+        if period >= len(self._inverter_controller.strategic_intents):
             logger.warning(
                 "Period %d exceeds strategic intents length %d",
                 period,
-                len(self._schedule_manager.strategic_intents),
+                len(self._inverter_controller.strategic_intents),
             )
             return
 
-        strategic_intent = self._schedule_manager.strategic_intents[period]
+        strategic_intent = self._inverter_controller.strategic_intents[period]
 
-        # Get battery action for this specific period
-        # Note: actions now store energy (kWh) per period, convert to power (kW)
+        # Get battery action for this specific period (kWh → kW)
         battery_action_kwh = 0.0
         battery_action_kw = 0.0
         if (
-            self._schedule_manager.current_schedule
-            and self._schedule_manager.current_schedule.actions
+            self._inverter_controller.current_schedule
+            and self._inverter_controller.current_schedule.actions
         ):
-            if period < len(self._schedule_manager.current_schedule.actions):
-                battery_action_kwh = self._schedule_manager.current_schedule.actions[
+            if period < len(self._inverter_controller.current_schedule.actions):
+                battery_action_kwh = self._inverter_controller.current_schedule.actions[
                     period
                 ]
-                # Convert kWh to kW: power = energy / time
-                # Calculate period duration from number of periods per day
-                num_periods = len(self._schedule_manager.current_schedule.actions)
+                num_periods = len(self._inverter_controller.current_schedule.actions)
                 period_duration_hours = 24.0 / num_periods
                 battery_action_kw = battery_action_kwh / period_duration_hours
 
-        # Determine charge/discharge rates based on period's strategic intent
-        if strategic_intent == "GRID_CHARGING":
-            grid_charge = True
-            discharge_rate = 0
-
-        elif strategic_intent == "SOLAR_STORAGE":
-            grid_charge = False
-            discharge_rate = 0
-
-        elif strategic_intent == "LOAD_SUPPORT":
-            grid_charge = False
-            discharge_rate = 100  # Full discharge for load support
-
-        elif strategic_intent == "EXPORT_ARBITRAGE":
-            grid_charge = False
-            # Calculate discharge rate from battery action
-            if battery_action_kw < -0.01:  # Discharging
-                discharge_power_pct = (
-                    abs(battery_action_kw)
-                    / self.battery_settings.max_discharge_power_kw
-                    * 100
-                )
-                discharge_rate = min(100, max(0, int(discharge_power_pct)))
-            else:
-                discharge_rate = 0
-
-        elif strategic_intent == "IDLE":
-            grid_charge = False
-            discharge_rate = 0
-
-        else:
-            logger.warning(
-                "Unknown strategic intent: %s, using IDLE defaults", strategic_intent
+        # Delegate intent→rates mapping to the inverter controller
+        grid_charge, discharge_rate = (
+            self._inverter_controller.compute_rates_for_period(
+                period, battery_action_kw
             )
-            grid_charge = False
-            discharge_rate = 0
+        )
 
         # Store the schedule's desired discharge rate before inhibit check so that
         # apply_discharge_inhibit() can restore it when the inhibit sensor clears.
@@ -1837,24 +1811,25 @@ class BatterySystemManager:
             discharge_rate,
         )
 
-        # Apply grid charge setting
         logger.debug(
             "HARDWARE: Setting grid charge to %s for period %d",
             grid_charge,
             period,
         )
-        self.controller.set_grid_charge(grid_charge)
-
-        # Apply charging power rate
-        self.adjust_charging_power()
-
-        # Apply discharge power rate
         logger.info(
             "HARDWARE: Setting discharge power rate to %d%% for period %d",
             discharge_rate,
             period,
         )
-        self.controller.set_discharging_power_rate(discharge_rate)
+
+        # Delegate hardware write to the inverter controller
+        self._inverter_controller.apply_period(
+            self.controller, grid_charge, discharge_rate
+        )
+
+        # Apply charging power rate (BSM-level concern: uses power monitor)
+        self.adjust_charging_power()
+
         self._last_applied_discharge_rate = discharge_rate
 
     def _calculate_initial_cost_basis(self, current_period: int) -> float:
@@ -2143,7 +2118,7 @@ class BatterySystemManager:
         try:
             # Get current hour settings to ensure power monitor uses the correct target
             current_hour = time_utils.now().hour
-            settings = self._schedule_manager.get_hourly_settings(current_hour)
+            settings = self._inverter_controller.get_hourly_settings(current_hour)
             charge_rate = settings.get("charge_rate", 0)
 
             if self._power_monitor:

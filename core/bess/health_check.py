@@ -308,11 +308,11 @@ def run_system_health_checks(system_manager):
     price_checks = system_manager._price_manager.check_health()
     all_component_checks.extend(price_checks)
 
-    # 2. Growatt Schedule Manager (Battery Control) - core control system
-    growatt_checks = system_manager._schedule_manager.check_health(
+    # 2. Inverter Controller (Battery Control) - core control system
+    inverter_checks = system_manager._inverter_controller.check_health(
         system_manager._controller
     )
-    all_component_checks.extend(growatt_checks)
+    all_component_checks.extend(inverter_checks)
 
     # 3. & 4. SensorCollector (Battery Monitoring + Energy Monitoring) - operational sensors
     sensor_collector_health = system_manager.sensor_collector.check_health()

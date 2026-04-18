@@ -43,14 +43,14 @@ def _set_intent(bsm: BatterySystemManager, period: int, intent: str) -> None:
     """Set a single period's strategic intent, padding the rest with IDLE."""
     intents = ["IDLE"] * 96
     intents[period] = intent
-    bsm._schedule_manager.strategic_intents = intents
+    bsm._inverter_controller.strategic_intents = intents
 
 
 def _set_discharge_action(bsm: BatterySystemManager, period: int, kwh: float) -> None:
     """Set a battery action for EXPORT_ARBITRAGE discharge calculation."""
     actions = [0.0] * 96
     actions[period] = kwh
-    bsm._schedule_manager.current_schedule = SimpleNamespace(actions=actions)
+    bsm._inverter_controller.current_schedule = SimpleNamespace(actions=actions)
 
 
 PERIOD = 20  # Arbitrary test period

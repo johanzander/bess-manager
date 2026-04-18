@@ -593,7 +593,7 @@ class DebugDataAggregator:
             List of TOU segment dicts as held in active_tou_intervals
         """
         try:
-            return list(self.system._schedule_manager.active_tou_intervals)
+            return list(self.system._inverter_controller.active_tou_intervals)
         except Exception as e:
             logger.warning("Failed to serialize inverter TOU segments: %s", e)
             return []

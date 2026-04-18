@@ -2,15 +2,15 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CheckCircle, ChevronRight, ChevronLeft, Zap } from 'lucide-react';
 import api from '../lib/api';
-import { INTEGRATIONS } from '../lib/sensorDefinitions';
+import { INTEGRATIONS, INVERTER_INTEGRATION_IDS } from '../lib/sensorDefinitions';
 import { HomeFormSection } from '../components/settings/HomeFormSection';
 import type { HomeForm } from '../components/settings/HomeFormSection';
 import { PricingFormSection } from '../components/settings/PricingFormSection';
 import type { PricingForm } from '../components/settings/PricingFormSection';
 import { BatteryFormSection } from '../components/settings/BatteryFormSection';
-import type { BatteryForm, InverterForm } from '../components/settings/BatteryFormSection';
+import type { BatteryForm } from '../components/settings/BatteryFormSection';
 import { SensorConfigSection } from '../components/settings/SensorConfigSection';
-import type { DiscoveryResult } from '../components/settings/SensorConfigSection';
+import type { DiscoveryResult, InverterForm } from '../components/settings/SensorConfigSection';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -99,7 +99,10 @@ const SetupWizardPage: React.FC = () => {
         ...(d.nordpoolConfigEntryId ? { nordpoolConfigEntryId: d.nordpoolConfigEntryId } : {}),
       }));
       if (d.inverterType) {
-        setInverterForm(f => ({ ...f, inverterType: d.inverterType! }));
+        // Map backend platform keys to UI inverter type values
+        const platformToType: Record<string, string> = { solax: 'SOLAX', MIN: 'MIN', SPH: 'SPH' };
+        const uiType = platformToType[d.inverterType] ?? d.inverterType.toUpperCase();
+        setInverterForm(f => ({ ...f, inverterType: uiType }));
       }
       if (d.growattDeviceId) {
         setInverterForm(f => ({ ...f, deviceId: d.growattDeviceId! }));
@@ -178,7 +181,14 @@ const SetupWizardPage: React.FC = () => {
         nordpoolConfigEntryId: ep.nordpoolOfficial?.configEntryId ?? f.nordpoolConfigEntryId,
         nordpoolEntity:        ep.nordpool?.entity               ?? f.nordpoolEntity,
       }));
-      if (inv.inverterType) setInverterForm(f => ({ ...f, inverterType: inv.inverterType }));
+      // Restore inverter type from new inverter.platform or legacy growatt.inverter_type
+      const invNew = s.inverter ?? {};
+      const platformToType: Record<string, string> = { growatt_min: 'MIN', growatt_sph: 'SPH', solax: 'SOLAX' };
+      if (invNew.platform && platformToType[invNew.platform]) {
+        setInverterForm(f => ({ ...f, inverterType: platformToType[invNew.platform] }));
+      } else if (inv.inverterType) {
+        setInverterForm(f => ({ ...f, inverterType: inv.inverterType }));
+      }
       if (inv.deviceId) setInverterForm(f => ({ ...f, deviceId: inv.deviceId }));
     }).catch((err: unknown) => {
       const status = (err as { response?: { status?: number } })?.response?.status;
@@ -255,11 +265,16 @@ const SetupWizardPage: React.FC = () => {
     }
   };
 
-  const allRequiredFilled = INTEGRATIONS.every(integration =>
-    integration.sensorGroups.every(group =>
+  const activeInverterIntegrationId = INVERTER_INTEGRATION_IDS[inverterForm.inverterType] ?? 'growatt';
+  const inverterIntegrationIds = new Set(Object.values(INVERTER_INTEGRATION_IDS));
+
+  const allRequiredFilled = INTEGRATIONS.every(integration => {
+    // Skip inverter integrations that don't match the selected inverter type
+    if (inverterIntegrationIds.has(integration.id) && integration.id !== activeInverterIntegrationId) return true;
+    return integration.sensorGroups.every(group =>
       group.sensors.every(s => !s.required || !!sensors[s.key]),
-    ),
-  );
+    );
+  });
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col items-center justify-center p-6">
@@ -340,6 +355,8 @@ const SetupWizardPage: React.FC = () => {
             <SensorConfigSection
               sensors={sensors}
               onChange={setSensors}
+              inverterForm={inverterForm}
+              onInverterChange={setInverterForm}
               discovery={discovery}
             />
 
@@ -411,15 +428,13 @@ const SetupWizardPage: React.FC = () => {
             <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
               <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Battery</h2>
               <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                Your inverter model and battery hardware specifications. These values are used by the optimizer to plan charge and discharge schedules.
+                Battery hardware specifications. These values are used by the optimizer to plan charge and discharge schedules.
               </p>
             </div>
 
             <BatteryFormSection
               form={batteryForm}
               onChange={setBatteryForm}
-              inverterForm={inverterForm}
-              onInverterChange={setInverterForm}
               currency={pricingForm.currency}
               weatherEntity={sensors['weather_entity']}
             />

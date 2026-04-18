@@ -15,7 +15,7 @@ Key Principles:
 
 import pytest  # type: ignore
 
-from core.bess.growatt_schedule import GrowattScheduleManager
+from core.bess.growatt_min_controller import GrowattMinController
 from core.bess.settings import BatterySettings
 
 
@@ -55,7 +55,7 @@ def battery_settings():
 @pytest.fixture
 def scheduler(battery_settings):
     """Create a scheduler instance for testing."""
-    return GrowattScheduleManager(battery_settings)
+    return GrowattMinController(battery_settings)
 
 
 class TestStrategicIntentExecution:

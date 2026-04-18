@@ -1,8 +1,17 @@
 import React, { useState } from 'react';
 import { AlertCircle, CheckCircle, ChevronDown, ChevronUp } from 'lucide-react';
-import { INTEGRATIONS } from '../../lib/sensorDefinitions';
+import { INTEGRATIONS, INVERTER_INTEGRATION_IDS } from '../../lib/sensorDefinitions';
 import type { IntegrationDef } from '../../lib/sensorDefinitions';
 import type { HealthStatus } from '../../types';
+
+// ---------------------------------------------------------------------------
+// Inverter form (owned here — used by wizard and settings pages)
+// ---------------------------------------------------------------------------
+
+export interface InverterForm {
+  inverterType: string;
+  deviceId: string;
+}
 
 // ---------------------------------------------------------------------------
 // Discovery result type (used by the setup wizard)
@@ -12,6 +21,8 @@ export interface DiscoveryResult {
   growattFound: boolean;
   deviceSn: string | null;
   growattDeviceId: string | null;
+  solaxFound: boolean;
+  solaxDevicePrefix: string | null;
   nordpoolFound: boolean;
   nordpoolArea: string | null;
   nordpoolConfigEntryId: string | null;
@@ -33,6 +44,7 @@ function isIntegrationFound(
   sensors: Record<string, string>,
 ): boolean {
   if (id === 'growatt') return discovery.growattFound;
+  if (id === 'solax') return discovery.solaxFound;
   if (id === 'nordpool') return discovery.nordpoolFound;
   if (id === 'phase_current') {
     return !!(sensors['current_l1'] || sensors['current_l2'] || sensors['current_l3']);
@@ -102,9 +114,15 @@ function healthDot(
 // Props
 // ---------------------------------------------------------------------------
 
+// IDs of inverter integrations — only one should be visible at a time.
+const INVERTER_IDS = new Set(['growatt', 'solax']);
+
 interface Props {
   sensors: Record<string, string>;
   onChange: (sensors: Record<string, string>) => void;
+  // Inverter selection
+  inverterForm: InverterForm;
+  onInverterChange: (f: InverterForm) => void;
   // Wizard mode — pass discovery result
   discovery?: DiscoveryResult | null;
   // Settings mode — pass health status map
@@ -115,7 +133,7 @@ interface Props {
 // Component
 // ---------------------------------------------------------------------------
 
-export function SensorConfigSection({ sensors, onChange, discovery, sensorStatus = {} }: Props) {
+export function SensorConfigSection({ sensors, onChange, inverterForm, onInverterChange, discovery, sensorStatus = {} }: Props) {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const wizardMode = discovery != null;
 
@@ -127,16 +145,118 @@ export function SensorConfigSection({ sensors, onChange, discovery, sensorStatus
     });
   };
 
-  const visibleIntegrations = INTEGRATIONS.filter(intg => intg.sensorGroups.length > 0);
+  // Derive active inverter integration from the selected type
+  const activeInverterIntegrationId = INVERTER_INTEGRATION_IDS[inverterForm.inverterType] ?? 'growatt';
+  const isGrowatt = activeInverterIntegrationId === 'growatt';
+
+  // Detection flags for disabling platform options
+  const growattDetected = !wizardMode || discovery.growattFound;
+  const solaxDetected = !wizardMode || discovery.solaxFound;
+
+  const handlePlatformChange = (platform: 'growatt' | 'solax') => {
+    if (platform === 'solax') {
+      onInverterChange({ ...inverterForm, inverterType: 'SOLAX' });
+    } else {
+      // When switching to Growatt, default to MIN unless already a Growatt type
+      const currentIsGrowatt = inverterForm.inverterType === 'MIN' || inverterForm.inverterType === 'SPH';
+      onInverterChange({
+        ...inverterForm,
+        inverterType: currentIsGrowatt ? inverterForm.inverterType : 'MIN',
+      });
+    }
+  };
+
+  const visibleIntegrations = INTEGRATIONS.filter(intg => {
+    if (intg.sensorGroups.length === 0) return false;
+    // Hide the inactive inverter integration
+    if (INVERTER_IDS.has(intg.id) && intg.id !== activeInverterIntegrationId) return false;
+    return true;
+  });
 
   return (
     <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
       <div className="px-5 py-4 border-b border-gray-100 dark:border-gray-700/60">
-        <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Sensor Entity IDs</h3>
+        <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Integrations & Sensors</h3>
         <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-          Entity IDs for each integration. Expand a category to view and edit.
+          Select your inverter platform and review sensor entity IDs for each integration.
         </p>
       </div>
+
+      {/* ── Inverter Platform Selection ──────────────────────────────── */}
+      <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-700">
+        <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-3">
+          Inverter Platform
+        </p>
+
+        {/* Platform radio: Growatt vs SolaX */}
+        <div className="flex flex-wrap gap-x-6 gap-y-2">
+          {([
+            { platform: 'growatt' as const, label: 'Growatt', detected: growattDetected },
+            { platform: 'solax' as const, label: 'SolaX Modbus', detected: solaxDetected },
+          ]).map(opt => {
+            const isSelected = activeInverterIntegrationId === opt.platform;
+            return (
+              <label
+                key={opt.platform}
+                className={`flex items-center gap-2 ${opt.detected ? 'cursor-pointer' : 'opacity-40 cursor-not-allowed'}`}
+              >
+                <input
+                  type="radio"
+                  name="inverter-platform"
+                  checked={isSelected}
+                  disabled={!opt.detected}
+                  onChange={() => handlePlatformChange(opt.platform)}
+                  className="text-blue-500"
+                />
+                <span className="flex items-center gap-1.5 text-sm text-gray-700 dark:text-gray-300">
+                  {wizardMode && (
+                    <span className={`h-2 w-2 rounded-full flex-shrink-0 ${opt.detected ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'}`} />
+                  )}
+                  {opt.label}
+                  {wizardMode && !opt.detected && (
+                    <span className="text-[10px] text-gray-400 dark:text-gray-500">not detected</span>
+                  )}
+                </span>
+              </label>
+            );
+          })}
+        </div>
+
+        {/* Growatt sub-options: MIN/SPH + device ID */}
+        {isGrowatt && (
+          <div className="mt-3 ml-6 pl-3 border-l-2 border-gray-200 dark:border-gray-600 space-y-2">
+            <div className="flex flex-wrap gap-x-5 gap-y-1">
+              {([
+                { value: 'MIN', label: 'MIC/MIN/MOD/MID (AC-coupled)' },
+                { value: 'SPH', label: 'SPH (DC-coupled)' },
+              ]).map(opt => (
+                <label key={opt.value} className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="growatt-type"
+                    checked={inverterForm.inverterType === opt.value}
+                    onChange={() => onInverterChange({ ...inverterForm, inverterType: opt.value })}
+                    className="text-blue-500"
+                  />
+                  <span className="text-sm text-gray-600 dark:text-gray-300">{opt.label}</span>
+                </label>
+              ))}
+            </div>
+            <label className="block">
+              <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Device ID</span>
+              <input
+                type="text"
+                value={inverterForm.deviceId}
+                placeholder="Growatt device serial number"
+                onChange={e => onInverterChange({ ...inverterForm, deviceId: e.target.value })}
+                className="mt-0.5 block w-full sm:w-72 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-1.5 text-sm font-mono text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
+              />
+            </label>
+          </div>
+        )}
+      </div>
+
+      {/* ── Integration Sensor Lists ────────────────────────────────── */}
       <div className="divide-y divide-gray-100 dark:divide-gray-700/50">
         {visibleIntegrations.map(intg => {
           const counts = integrationSensorCounts(intg, sensors);

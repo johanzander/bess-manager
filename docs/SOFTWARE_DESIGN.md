@@ -156,20 +156,19 @@ class StoredSchedule:
 - Enables debugging and analysis of optimization decisions
 - Supports multiple optimizations per day as conditions change
 
-### GrowattScheduleManager
+### InverterController Hierarchy
 
-**Purpose**: Converts optimization results to Growatt inverter commands.
+**Purpose**: Converts optimization results to inverter-specific commands.
 
-**Key Responsibilities**:
+**Base class** `InverterController` provides shared intent-to-control mapping, hourly settings aggregation, and the abstract schedule interface. Three subclasses implement hardware-specific logic:
 
-- Group consecutive same-mode quarterly periods into minimal TOU intervals (max 9 segments — hardware constraint)
-- Convert battery intents to battery modes (load-first, battery-first)
-- Configure grid charging and discharge rate settings
-- Only create TOU segments for strategic periods (battery-first, grid-first); idle periods use default load-first behavior
+- **GrowattMinController** — Growatt MIN/MID/MOD (AC-coupled). Groups quarterly periods into TOU intervals (max 9 segments). Only creates segments for battery-first/grid-first; idle periods use load-first default.
+- **GrowattSphController** — Growatt SPH (DC-coupled). Uses separate charge/discharge period lists (max 3 each) with global power and SOC settings per write call.
+- **SolaxController** — SolaX (Modbus VPP). Issues per-period active-power commands instead of storing a persistent TOU schedule. Idle/solar periods disable VPP; charge/discharge periods set a watt target with autorepeat.
 
 **Hardware Integration**:
 
-- Formats schedules for Growatt inverter API
+- Each subclass formats schedules for its inverter's API
 - Handles inverter-specific constraints and capabilities
 - Manages schedule deployment and updates
 
@@ -225,7 +224,7 @@ sell_price = spot_price * export_rate - tax_reduction
 
 4. Hardware Application
 
-   └── GrowattScheduleManager converts to TOU intervals
+   └── InverterController converts to hardware-specific schedule
    └── Apply settings to inverter via HomeAssistantAPIController
 
 5. View Generation
@@ -319,7 +318,7 @@ The system infers battery action intent solely from the energy flows computed by
 
 ### TOU Schedule Generation
 
-The GrowattScheduleManager converts action intents into Time-of-Use (TOU) intervals for the Growatt inverter. Each intent maps to an inverter battery mode and control parameters:
+The InverterController converts action intents into hardware-specific schedules. Each intent maps to an inverter battery mode and control parameters (shown below for Growatt MIN; other inverters use the same intent mapping with different hardware commands):
 
 | Intent | Battery Mode | Grid Charge | Charge Rate | Discharge Rate |
 |---|---|---|---|---|

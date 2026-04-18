@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { ChevronDown, ChevronUp } from 'lucide-react';
-import { numField, txtInput, radioGroup, toggle, SectionCard } from './FormHelpers';
+import { numField, SectionCard, toggle } from './FormHelpers';
 
 export interface BatteryForm {
   totalCapacity: number;
@@ -14,48 +14,23 @@ export interface BatteryForm {
   minActionProfit: number;
 }
 
-export interface InverterForm {
-  inverterType: string;
-  deviceId: string;
-}
-
 interface Props {
   form: BatteryForm;
   onChange: (f: BatteryForm) => void;
-  inverterForm: InverterForm;
-  onInverterChange: (f: InverterForm) => void;
   currency?: string;
   weatherEntity?: string;
 }
 
 export function BatteryFormSection({
-  form, onChange, inverterForm, onInverterChange, currency = '', weatherEntity = '',
+  form, onChange, currency = '', weatherEntity = '',
 }: Props) {
   const [effOpen, setEffOpen] = useState(false);
 
   return (
     <div className="space-y-3">
       <SectionCard
-        title="Inverter Type"
-        description="Select your Growatt inverter series (auto-detected during setup)."
-      >
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            {radioGroup(
-              'Inverter type',
-              [{ value: 'MIN', label: 'MIN (AC-coupled)' }, { value: 'SPH', label: 'SPH (DC-coupled)' }],
-              inverterForm.inverterType,
-              v => onInverterChange({ ...inverterForm, inverterType: v }),
-            )}
-          </div>
-          {txtInput('Device ID', inverterForm.deviceId,
-            v => onInverterChange({ ...inverterForm, deviceId: v }), 'Growatt device ID')}
-        </div>
-      </SectionCard>
-
-      <SectionCard
         title="Capacity & SOC Limits"
-        description="Total battery capacity in kWh — set this to match your actual battery exactly. Min/Max SOC values are synced to the Growatt inverter and define the operating range the optimizer will stay within."
+        description="Total battery capacity in kWh — set this to match your actual battery exactly. Min/Max SOC values are synced to the inverter and define the operating range the optimizer will stay within."
       >
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           {numField('Total Capacity', form.totalCapacity,

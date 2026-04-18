@@ -8,7 +8,7 @@ schedule persistence using PeriodData structures.
 
 from unittest.mock import patch
 
-from core.bess.min_schedule import GrowattScheduleManager
+from core.bess.growatt_min_controller import GrowattMinController
 from core.bess.models import PeriodData
 
 
@@ -393,7 +393,7 @@ class TestChargeRateHardwareWrite:
 
     def _inject_intent(self, battery_system, intent: str, hour: int = 12) -> None:
         """Inject a single known intent for the given hour into the schedule manager."""
-        mgr = battery_system._schedule_manager
+        mgr = battery_system._inverter_controller
         # 96 quarter-hour periods; fill all with intent, override the target hour
         num_periods = 96
         intents = ["IDLE"] * num_periods
@@ -402,7 +402,7 @@ class TestChargeRateHardwareWrite:
         mgr.strategic_intents = intents
 
         # Populate hourly_settings for the target hour (mirrors INTENT_TO_CONTROL)
-        control = GrowattScheduleManager.INTENT_TO_CONTROL.get(
+        control = GrowattMinController.INTENT_TO_CONTROL.get(
             intent, {"grid_charge": False, "charge_rate": 0, "discharge_rate": 0}
         )
         mgr.hourly_settings[hour] = dict(control)

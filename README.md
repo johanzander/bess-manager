@@ -6,9 +6,9 @@ Intelligent Battery Energy Storage System (BESS) management and optimization for
 
 ## Overview
 
-The BESS Battery Manager is a sophisticated Home Assistant add-on that automatically optimizes Growatt inverter battery storage systems using dynamic programming algorithms and electricity market pricing. It continuously analyzes published electricity prices, solar production forecasts, and consumption predictions to determine optimal charge/discharge schedules that minimize your electricity costs.
+The BESS Battery Manager is a sophisticated Home Assistant add-on that automatically optimizes battery storage systems using dynamic programming algorithms and electricity market pricing. It supports Growatt (MIC/MIN/MOD/MID and SPH) and SolaX inverters. It continuously analyzes published electricity prices, solar production forecasts, and consumption predictions to determine optimal charge/discharge schedules that minimize your electricity costs.
 
-The system requires the Growatt, a price source (Nordpool or Octopus Energy), and solar forecast (e.g., Solcast) Home Assistant integrations to function, and optionally uses InfluxDB for historical data storage. Unlike simple timer-based systems, BESS Manager makes intelligent decisions by weighing multiple factors: current battery state, published electricity prices, solar weather forecasts, consumption estimates, and battery degradation costs. The system updates its optimization strategy every hour as new sensor data becomes available, ensuring your battery always operates in the most economically beneficial way while respecting technical constraints like charge rates and depth-of-discharge limits.
+The system requires a supported inverter integration (Growatt Server or SolaX Modbus), a price source (Nordpool or Octopus Energy), and optionally a solar forecast (e.g., Solcast) Home Assistant integration. InfluxDB is recommended for historical data storage. Unlike simple timer-based systems, BESS Manager makes intelligent decisions by weighing multiple factors: current battery state, published electricity prices, solar weather forecasts, consumption estimates, and battery degradation costs. The system updates its optimization strategy every hour as new sensor data becomes available, ensuring your battery always operates in the most economically beneficial way while respecting technical constraints like charge rates and depth-of-discharge limits.
 
 ## Key Capabilities
 
@@ -42,18 +42,18 @@ The BESS Manager provides a comprehensive web interface organized into focused p
 
 ### Supported Battery Systems
 
-- ✅ **Growatt inverters** with battery storage via Home Assistant
-- ⚠️ **Compatibility**: The Growatt inverter must provide control of battery settings such as charge power, discharge power and Time-of-Use.
-Tested with MIN/TLX inverters
+- ✅ **Growatt MIC/MIN/MOD/MID** — TOU schedule control via Growatt Server integration (token auth required)
+- ✅ **Growatt SPH** — Charge/discharge period control via Growatt Server integration
+- ✅ **SolaX** — VPP active-power control via homeassistant-solax-modbus integration
 
 ### Required Integrations
 
 - 📊 **Nordpool** or **Octopus Energy** integration for electricity prices
-- 🏠 **Growatt** integration for battery control and energy monitoring
-- ☀️ **Solar forecast** integration (e.g., Solcast) for production predictions
+- 🏠 **Growatt Server** or **SolaX Modbus** integration for battery control and energy monitoring
 
 ### Optional Integrations
 
+- ☀️ **Solar forecast** integration (e.g., Solcast) for production predictions (optional)
 - 📈 **InfluxDB** integration - recommended to preserve historical data during server restarts
 - ⚡ **Tibber** integration  - optional for power monitoring and fuse protection
 

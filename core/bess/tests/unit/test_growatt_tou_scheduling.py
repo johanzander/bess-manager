@@ -841,3 +841,90 @@ class TestHardwareSlotCascading:
             "An interval with the same time range but a different mode must be "
             "marked pending_write=True — it has not been written to hardware"
         )
+
+
+class _CapturingController:
+    """Minimal controller stub that records every set_inverter_time_segment call."""
+
+    def __init__(self):
+        self.failure_tracker = None
+        self.calls: list[dict] = []
+
+    def set_inverter_time_segment(
+        self,
+        segment_id: int,
+        batt_mode: str,
+        start_time: str,
+        end_time: str,
+        enabled: bool,
+    ) -> None:
+        self.calls.append(
+            {
+                "segment_id": segment_id,
+                "batt_mode": batt_mode,
+                "start_time": start_time,
+                "end_time": end_time,
+                "enabled": enabled,
+            }
+        )
+
+
+class TestHardwareWriteRespectsSlotLimit:
+    """Regression tests: the inverter only accepts segment_id 1-9.
+
+    Writing a segment_id outside that range causes the Growatt HA service to
+    return 500. These tests verify that write_schedule_to_hardware never
+    issues such a call regardless of how many TOU intervals were generated.
+    """
+
+    def test_no_segment_id_above_nine_is_ever_written(self, scheduler):
+        """Even with overcapacity intents, every write uses a segment_id in 1..9."""
+        scheduler.strategic_intents = _OVERCAPACITY_INTENTS
+        scheduler._consolidate_and_convert_with_strategic_intents(current_period=0)
+
+        controller = _CapturingController()
+        scheduler.write_schedule_to_hardware(
+            controller, effective_period=0, current_tou=[]
+        )
+
+        assert controller.calls, "Expected at least one hardware write"
+        for call in controller.calls:
+            assert (
+                1 <= call["segment_id"] <= 9
+            ), f"segment_id {call['segment_id']} exceeds hardware slot range 1-9"
+
+    def test_write_count_never_exceeds_hardware_slot_count(self, scheduler):
+        """write_schedule_to_hardware must not push more than 9 segments."""
+        scheduler.strategic_intents = _OVERCAPACITY_INTENTS
+        scheduler._consolidate_and_convert_with_strategic_intents(current_period=0)
+
+        controller = _CapturingController()
+        scheduler.write_schedule_to_hardware(
+            controller, effective_period=0, current_tou=[]
+        )
+
+        assert (
+            len(controller.calls) <= 9
+        ), f"Wrote {len(controller.calls)} segments, exceeds hardware limit of 9"
+
+    def test_segment_ids_remain_in_range_after_earlier_segments_expire(
+        self, scheduler
+    ):
+        """Mid-day rebuild (some segments expired) must still produce ids 1..9.
+
+        Regression for the case where _select_hardware_intervals previously
+        preserved inherited ids like 10..18 from the renumbered tou_intervals.
+        """
+        scheduler.strategic_intents = _OVERCAPACITY_INTENTS
+        # period 12 = 03:00 — the 01:00 segment has expired, leaving 9 candidates.
+        scheduler._consolidate_and_convert_with_strategic_intents(current_period=12)
+
+        controller = _CapturingController()
+        scheduler.write_schedule_to_hardware(
+            controller, effective_period=12, current_tou=[]
+        )
+
+        for call in controller.calls:
+            assert (
+                1 <= call["segment_id"] <= 9
+            ), f"segment_id {call['segment_id']} exceeds hardware slot range 1-9"

@@ -520,6 +520,14 @@ class GrowattScheduleManager:
         non_expired.sort(key=lambda x: x["start_time"])
         hardware_intervals = non_expired[: self.max_intervals]
 
+        # Renumber to 1..N so segment_ids are always within the inverter's
+        # 1-9 hardware slot range, even after earlier segments expire.
+        # Without this, segment_ids inherited from self.tou_intervals (which
+        # can grow >9 on volatile days) get pushed to the Growatt service and
+        # the integration returns 500.
+        for i, interval in enumerate(hardware_intervals, 1):
+            interval["segment_id"] = i
+
         if len(non_expired) > self.max_intervals:
             pending_count = len(non_expired) - self.max_intervals
             logger.info(
@@ -1435,7 +1443,12 @@ class GrowattScheduleManager:
         Returns:
             Tuple of (segments_updated, segments_disabled)
         """
-        new_tou = self.tou_intervals
+        # Only the active (hardware-programmed) intervals are eligible to be
+        # written. self.tou_intervals can hold more than the 9 slots the MIN
+        # inverter supports; the overflow is pending_write and must not reach
+        # set_inverter_time_segment, otherwise the Growatt service rejects the
+        # out-of-range segment_id with 500.
+        new_tou = self.active_tou_intervals
 
         logger.info(
             "TOU comparison: Current=%d intervals, New=%d intervals",

@@ -18,7 +18,7 @@ The system requires the Growatt, a price source (Nordpool or Octopus Energy), an
 
 **Battery Wear Economics**: Incorporates battery degradation costs (cycle cost) into optimization calculations to balance immediate savings against long-term battery life.
 
-**Hourly Re-optimization**: Recalculates the optimal 24-hour schedule every hour as predicted values become actual.
+**Continuous Re-optimization**: Recalculates the optimal schedule every 15 minutes for as long as electricity prices are available, updating as predicted values become actual.
 
 **Comprehensive Energy Tracking**: Tracks all energy flows (solar production, grid import/export, battery charge/discharge, home consumption) with detailed cost analysis and savings calculations.
 

@@ -367,6 +367,7 @@ class HomeAssistantAPIController:
         "battery_discharge_power_limit": "battery_discharging_power_rate",
         "battery_charge_soc_limit": "battery_charge_stop_soc",
         "battery_discharge_soc_limit": "battery_discharge_stop_soc",
+        "battery_discharge_soc_limit_on_grid": "battery_discharge_stop_soc",
         # Lifetime energy sensors
         "lifetime_total_all_batteries_charged": "lifetime_battery_charged",
         "lifetime_total_all_batteries_discharged": "lifetime_battery_discharged",

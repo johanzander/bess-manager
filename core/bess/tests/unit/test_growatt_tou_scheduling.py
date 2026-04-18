@@ -928,3 +928,118 @@ class TestHardwareWriteRespectsSlotLimit:
             assert (
                 1 <= call["segment_id"] <= 9
             ), f"segment_id {call['segment_id']} exceeds hardware slot range 1-9"
+
+
+class _SimulatingController(_CapturingController):
+    """Controller stub that also models the inverter's TOU slot table.
+
+    Writes with enabled=True occupy the slot; enabled=False clears it.
+    `hardware_segments()` returns the currently programmed segments, suitable
+    for passing back as `current_tou` on the next cycle.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.slots: dict[int, dict] = {}
+
+    def set_inverter_time_segment(
+        self,
+        segment_id: int,
+        batt_mode: str,
+        start_time: str,
+        end_time: str,
+        enabled: bool,
+    ) -> None:
+        super().set_inverter_time_segment(
+            segment_id, batt_mode, start_time, end_time, enabled
+        )
+        if enabled:
+            self.slots[segment_id] = {
+                "segment_id": segment_id,
+                "batt_mode": batt_mode,
+                "start_time": start_time,
+                "end_time": end_time,
+                "enabled": True,
+            }
+        else:
+            self.slots.pop(segment_id, None)
+
+    def hardware_segments(self) -> list[dict]:
+        return [dict(s) for s in self.slots.values()]
+
+
+class TestSlotAssignmentPreservesActiveSegments:
+    """When a previously-pending segment promotes to active across cycles, the
+    write logic must place it in a freed slot — not overwrite a slot that
+    still holds a needed segment.
+    """
+
+    def _content_set(self, segments) -> set[tuple]:
+        return {
+            (s["start_time"], s["end_time"], s["batt_mode"]) for s in segments
+        }
+
+    def test_promoted_pending_segment_does_not_evict_still_needed_segments(
+        self, scheduler
+    ):
+        scheduler.strategic_intents = _OVERCAPACITY_INTENTS
+
+        # Cycle 1 at start of day: 9 of the 10 strategic segments fit on hardware.
+        scheduler._consolidate_and_convert_with_strategic_intents(current_period=0)
+        controller = _SimulatingController()
+        scheduler.write_schedule_to_hardware(
+            controller, effective_period=0, current_tou=[]
+        )
+
+        cycle1_hardware = self._content_set(controller.hardware_segments())
+        assert (
+            len(cycle1_hardware) == 9
+        ), f"Cycle 1 must populate all 9 slots, got {len(cycle1_hardware)}"
+
+        # Cycle 2 at 03:00: the 01:00 segment has expired and the previously
+        # pending 19:00 segment is now part of the active 9.
+        scheduler._consolidate_and_convert_with_strategic_intents(current_period=12)
+        scheduler.write_schedule_to_hardware(
+            controller,
+            effective_period=12,
+            current_tou=controller.hardware_segments(),
+        )
+
+        hardware_after = self._content_set(controller.hardware_segments())
+        wanted = self._content_set(scheduler.active_tou_intervals)
+
+        # Every interval the scheduler considers active must actually be on
+        # hardware after cycle 2 — none silently evicted by slot collision.
+        missing = wanted - hardware_after
+        assert not missing, (
+            f"Active intervals missing from hardware after pending promotion: "
+            f"{sorted(missing)}"
+        )
+
+        # And every slot id used is still in the legal 1..9 range.
+        for slot_id in controller.slots:
+            assert 1 <= slot_id <= 9
+
+    def test_unchanged_segments_are_not_rewritten_across_cycles(self, scheduler):
+        """Idempotency: if nothing changes between cycles, no hardware write
+        should be emitted in the second cycle."""
+        scheduler.strategic_intents = _OVERCAPACITY_INTENTS
+        scheduler._consolidate_and_convert_with_strategic_intents(current_period=0)
+
+        controller = _SimulatingController()
+        scheduler.write_schedule_to_hardware(
+            controller, effective_period=0, current_tou=[]
+        )
+        cycle1_call_count = len(controller.calls)
+        assert cycle1_call_count > 0
+
+        # Re-run the same conversion at the same period — no state has changed.
+        scheduler._consolidate_and_convert_with_strategic_intents(current_period=0)
+        scheduler.write_schedule_to_hardware(
+            controller,
+            effective_period=0,
+            current_tou=controller.hardware_segments(),
+        )
+        assert (
+            len(controller.calls) == cycle1_call_count
+        ), "Cycle 2 with identical state should not issue any new writes"

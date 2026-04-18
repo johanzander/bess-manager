@@ -1,7 +1,7 @@
-name: "BESS Manager"
-description: "Battery Energy Storage System optimization and management"
+name: "BESS Manager Beta"
+description: "Battery Energy Storage System optimization and management (beta channel)"
 version: "9.0.0b1"
-slug: "bess_manager"
+slug: "bess_manager_beta"
 init: false
 arch:
   - aarch64
@@ -16,7 +16,7 @@ ports:
 ingress: true
 ingress_port: 8080
 panel_icon: mdi:battery-charging
-panel_title: BESS Manager
+panel_title: BESS Manager Beta
 panel_admin: true
 hassio_api: true
 homeassistant_api: true

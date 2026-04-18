@@ -4,6 +4,12 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [8.2.2] - 2026-04-18
+
+### Fixed
+
+- MIN inverter returned 500 errors when the TOU schedule exceeded 9 slots on price-volatile days. Hardware writes now use only the active (capped) intervals with content-aware slot assignment to avoid evicting still-needed segments. (thanks [@pookey](https://github.com/pookey))
+
 ## [8.2.1] - 2026-04-17
 
 ### Fixed

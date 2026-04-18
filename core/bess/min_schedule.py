@@ -545,6 +545,64 @@ class GrowattScheduleManager:
 
         return hardware_intervals
 
+    def _assign_hardware_slots(
+        self, new_tou: list[dict], current_tou: list[dict]
+    ) -> None:
+        """Stamp each new_tou entry with a hardware slot id in 1..max_intervals.
+
+        The Growatt MIN inverter addresses its TOU table by slot number (1-9).
+        The slot id on a new interval must either match the slot that already
+        holds the same content on hardware (so we skip a redundant write) or
+        target a slot that is either unoccupied or being freed in this cycle.
+        Otherwise the write would overwrite a still-needed segment.
+
+        Mutates new_tou in place. current_tou is read-only.
+        """
+
+        def content_key(segment: dict) -> tuple:
+            return (
+                segment["start_time"],
+                segment["end_time"],
+                segment["batt_mode"],
+                segment.get("enabled", True),
+            )
+
+        new_keys = {content_key(s) for s in new_tou}
+
+        # Current segments whose content survives into new_tou keep their slot.
+        preserved_slot_by_key: dict[tuple, int] = {}
+        occupied_slots: set[int] = set()
+        for current in current_tou:
+            slot = current.get("segment_id")
+            if not isinstance(slot, int) or not (1 <= slot <= self.max_intervals):
+                continue
+            key = content_key(current)
+            if key in new_keys and key not in preserved_slot_by_key:
+                preserved_slot_by_key[key] = slot
+                occupied_slots.add(slot)
+
+        needs_slot: list[dict] = []
+        for segment in new_tou:
+            key = content_key(segment)
+            if key in preserved_slot_by_key:
+                segment["segment_id"] = preserved_slot_by_key[key]
+            else:
+                needs_slot.append(segment)
+
+        free_slots = sorted(
+            set(range(1, self.max_intervals + 1)) - occupied_slots
+        )
+        if len(needs_slot) > len(free_slots):
+            # active_tou_intervals is capped at max_intervals, so this should
+            # never trigger. Surfacing it rather than silently skipping keeps
+            # the hardware invariant visible.
+            raise RuntimeError(
+                f"Not enough hardware slots: need {len(needs_slot)}, "
+                f"have {len(free_slots)} (occupied={sorted(occupied_slots)})"
+            )
+        for segment, slot in zip(needs_slot, free_slots, strict=False):
+            segment["segment_id"] = slot
+
     def _calculate_hourly_settings_with_strategic_intents(self):
         """Pre-calculate hourly settings using strategic intents and proper power rates.
 
@@ -1435,7 +1493,18 @@ class GrowattScheduleManager:
         Returns:
             Tuple of (segments_updated, segments_disabled)
         """
-        new_tou = self.tou_intervals
+        # Only the active (hardware-programmed) intervals are eligible to be
+        # written. self.tou_intervals can hold more than the 9 slots the MIN
+        # inverter supports; the overflow is pending_write and must not reach
+        # set_inverter_time_segment, otherwise the Growatt service rejects the
+        # out-of-range segment_id with 500.
+        new_tou = self.active_tou_intervals
+
+        # Assign hardware slot ids (segment_id 1..max_intervals) to new_tou.
+        # Preserves the slot of any interval already on hardware (matched by
+        # content) so still-needed segments are not overwritten when a
+        # previously-pending interval is promoted into the active 9.
+        self._assign_hardware_slots(new_tou, current_tou)
 
         logger.info(
             "TOU comparison: Current=%d intervals, New=%d intervals",

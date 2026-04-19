@@ -405,6 +405,32 @@ def extract_economic_values_from_reward(
     return immediate_value, future_value
 
 
+def classify_strategic_intent(power: float, energy_data: EnergyData) -> str:
+    """Classify the strategic intent of a battery action based on power and energy flows.
+
+    Intent controls hardware behavior via the Growatt TOU schedule and is displayed
+    to the user in the UI. Must accurately reflect the actual action.
+
+    Args:
+        power: Battery power action (+ charge, - discharge) in kW.
+        energy_data: Complete energy flow data for the period.
+
+    Returns:
+        One of: GRID_CHARGING, SOLAR_STORAGE, LOAD_SUPPORT, EXPORT_ARBITRAGE, IDLE.
+    """
+    if power < -0.1:  # Discharging
+        if energy_data.battery_to_grid > 0.1:
+            return "EXPORT_ARBITRAGE"
+        return "LOAD_SUPPORT"
+    elif power > 0.1:  # Charging
+        if energy_data.grid_to_battery >= 0.1:
+            return "GRID_CHARGING"
+        return "SOLAR_STORAGE"
+    elif energy_data.battery_charged > 0.01:
+        return "SOLAR_STORAGE"
+    return "IDLE"
+
+
 def create_decision_data(
     power: float,
     energy_data: EnergyData,
@@ -443,22 +469,7 @@ def create_decision_data(
     Returns:
         Enhanced DecisionData with all fields populated including advanced flow patterns
     """
-    # Determine strategic intent based on actual energy flows
-    # CRITICAL: Intent controls hardware behavior via Growatt schedule
-    # Must accurately reflect actual action, not just economic conditions
-    if power < -0.1:  # Discharging
-        # Check actual flows: are we exporting to grid?
-        if energy_data.battery_to_grid > 0.1:
-            strategic_intent = "EXPORT_ARBITRAGE"
-        else:
-            strategic_intent = "LOAD_SUPPORT"
-    elif power > 0.1:  # Charging
-        if energy_data.grid_to_battery >= 0.1:
-            strategic_intent = "GRID_CHARGING"
-        else:
-            strategic_intent = "SOLAR_STORAGE"
-    else:
-        strategic_intent = "IDLE"
+    strategic_intent = classify_strategic_intent(power, energy_data)
 
     # Generate high-level strategic pattern name
     pattern_name = generate_strategic_pattern_name(strategic_intent, energy_data)

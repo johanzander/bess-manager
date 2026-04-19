@@ -1,7 +1,7 @@
 // frontend/src/pages/InsightsPage.tsx
 
 import React from 'react';
-import PredictionAnalysisView from '../components/PredictionAnalysisView';
+import PredictionAccuracyView from '../components/PredictionAccuracyView';
 import { TrendingUp } from 'lucide-react';
 
 const InsightsPage: React.FC = () => {
@@ -11,15 +11,15 @@ const InsightsPage: React.FC = () => {
       <div className="mb-6">
         <h1 className="text-3xl font-bold text-gray-900 dark:text-white flex items-center">
           <TrendingUp className="h-8 w-8 mr-3 text-purple-600 dark:text-purple-400" />
-          Prediction Analysis
+          Forecast Accuracy
         </h1>
         <p className="text-gray-600 dark:text-gray-300 mt-2">
-          Track how predictions evolve throughout the day and compare them against actual outcomes
+          See how solar and consumption predictions compared to actual outcomes
         </p>
       </div>
 
-      {/* Prediction Analysis View */}
-      <PredictionAnalysisView />
+      {/* Prediction Accuracy View */}
+      <PredictionAccuracyView />
     </div>
   );
 };

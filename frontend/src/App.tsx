@@ -6,8 +6,9 @@ import InverterPage from './pages/InverterPage';
 import InsightsPage from './pages/InsightsPage';
 import SetupWizardPage from './pages/SetupWizardPage';
 import SettingsPage from './pages/SettingsPage';
+import MLReportPage from './pages/MLReportPage';
 import { useSettings } from './hooks/useSettings';
-import { Home, TrendingUp, Brain, Zap, Sun, Moon, Settings } from 'lucide-react';
+import { Home, TrendingUp, Brain, Zap, Sun, Moon, Settings, LineChart } from 'lucide-react';
 import api from './lib/api';
 
 // An ErrorBoundary component to catch rendering errors
@@ -80,7 +81,7 @@ const Navigation = () => {
     // FIXED: Dashboard should be active for both "/" and when no specific page is selected
     if (path === '/') {
       // Dashboard is active for root path OR if we're not on any of the other specific pages
-      const otherPages = ['/insights', '/savings', '/inverter', '/settings'];
+      const otherPages = ['/insights', '/savings', '/inverter', '/settings', '/ml-report'];
       const isOnOtherPage = otherPages.some(page => location.pathname.startsWith(page));
       const isDashboardActive = location.pathname === '/' || !isOnOtherPage;
       
@@ -125,6 +126,14 @@ const Navigation = () => {
       >
         <Brain className="h-5 w-5" />
         <span className="hidden sm:inline">Insights</span>
+      </Link>
+      <Link
+        to="/ml-report"
+        className={`p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center space-x-1 ${isActive('/ml-report')}`}
+        title="ML forecast quality & model metrics"
+      >
+        <LineChart className="h-5 w-5" />
+        <span className="hidden sm:inline">ML Report</span>
       </Link>
       <Link
         to="/settings"
@@ -286,7 +295,7 @@ function App() {
                 <Routes>
                   <Route path="/setup" element={<SetupWizardPage />} />
                   <Route path="/" element={
-                    <DashboardPage 
+                    <DashboardPage
                       onLoadingChange={(_: boolean) => {}}
                       settings={mergedSettings}
                     />
@@ -296,6 +305,7 @@ function App() {
                   <Route path="/savings" element={<SavingsAnalysisPage />} />
                   <Route path="/inverter" element={<InverterPage />} />
                   <Route path="/settings" element={<SettingsPage />} />
+                  <Route path="/ml-report" element={<MLReportPage />} />
                   <Route path="/system-health" element={<Navigate to="/settings" replace />} />
                   {/* Catch-all route: redirect any unmatched paths to dashboard */}
                   <Route path="*" element={<Navigate to="/" replace />} />

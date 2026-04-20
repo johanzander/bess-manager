@@ -7,6 +7,7 @@ services:
     volumes:
       - ./backend:/app/backend:delegated
       - ./core:/app/core:delegated
+      - ./ml:/app/ml:delegated
       - ./frontend/dist:/app/frontend:delegated
       - ./backend/dev-options.json:/data/options.json:ro
       - ./backend/dev-bess-settings.json:/data/bess_settings.json

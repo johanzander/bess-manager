@@ -145,6 +145,9 @@ class BatterySystemManager:
         self._consumption_predictions: list[float] | None = None
         self._solar_predictions: list[float] | None = None
 
+        # ML forecast cache keyed by target calendar date
+        self._ml_forecast_cache: dict[date, list[float]] = {}
+
         # Critical sensor failure tracking for graceful degradation
         self._critical_sensor_failures = []
 
@@ -268,6 +271,27 @@ class BatterySystemManager:
 
                 # Initialize historical data - using improved sensor collector
                 self._fetch_and_initialize_historical_data()
+
+                # Validate ML strategy availability; fall back to 'fixed' if ML config missing
+                if self.home_settings.consumption_strategy == "ml_prediction":
+                    if not self._addon_options.get("ml"):
+                        logger.error(
+                            "consumption_strategy is 'ml_prediction' but 'ml' config section "
+                            "is missing. Falling back to 'fixed' strategy."
+                        )
+                        self.home_settings.consumption_strategy = "fixed"
+
+                # Retrain ML model on boot — retrain warms the forecast cache
+                # for today and tomorrow.
+                if self._addon_options.get("ml"):
+                    try:
+                        logger.info("Retraining ML model on startup...")
+                        self._retrain_ml_model()
+                    except Exception as e:
+                        logger.error(
+                            "ML model training/prediction failed on startup: %s", e
+                        )
+
 
                 # Fetch predictions
                 self._fetch_predictions()
@@ -677,7 +701,7 @@ class BatterySystemManager:
                 logger.warning("Cannot fetch predictions: controller is not available")
                 return
 
-            consumption_predictions = self._get_consumption_forecast()
+            consumption_predictions = self._get_consumption_forecast(time_utils.today())
             solar_predictions = self._controller.get_solar_forecast()
 
             # Store the predictions (this was missing!)
@@ -704,11 +728,13 @@ class BatterySystemManager:
         except Exception as e:
             logger.warning(f"Failed to fetch predictions: {e}")
 
-    def _get_consumption_forecast(self) -> list[float]:
+    def _get_consumption_forecast(self, target_date: date) -> list[float]:
         """Get consumption forecast based on the configured strategy.
 
         Dispatches to the appropriate data source based on
-        home_settings.consumption_strategy.
+        home_settings.consumption_strategy. target_date is only consumed by
+        the ml_prediction strategy; other strategies are calendar-agnostic
+        and ignore it.
 
         Returns:
             List of 96 float values (kWh per 15-minute period).
@@ -724,6 +750,9 @@ class BatterySystemManager:
 
         if strategy == "influxdb_7d_avg":
             return self._get_influxdb_7d_avg_forecast()
+
+        if strategy == "ml_prediction":
+            return self._get_ml_prediction_forecast(target_date)
 
         raise ValueError(f"Unknown consumption_strategy: '{strategy}'")
 
@@ -793,6 +822,118 @@ class BatterySystemManager:
 
         return avg_profile
 
+    def _evict_stale_ml_cache(self) -> None:
+        """Drop cached ML forecasts for dates earlier than today."""
+        today = time_utils.today()
+        for stale in [d for d in self._ml_forecast_cache if d < today]:
+            del self._ml_forecast_cache[stale]
+
+    def _get_ml_prediction_forecast(self, target_date: date) -> list[float]:
+        """Get consumption forecast from the ML prediction model for target_date.
+
+        Cache is keyed by target calendar date so today's and tomorrow's
+        forecasts coexist. Stale entries (before today) are evicted on access.
+        On cache miss, lazily generate for target_date. If generation fails,
+        fall back to a fixed-consumption profile sized to target_date.
+        """
+        self._evict_stale_ml_cache()
+
+        cached = self._ml_forecast_cache.get(target_date)
+        if cached is not None:
+            return cached
+
+        self._generate_ml_predictions(target_date)
+        cached = self._ml_forecast_cache.get(target_date)
+        if cached is not None:
+            return cached
+
+        logger.warning(
+            "ML forecast unavailable for %s, falling back to fixed consumption",
+            target_date,
+        )
+        period_count = time_utils.get_period_count(target_date)
+        quarterly = self.home_settings.default_hourly / 4.0
+        return [quarterly] * period_count
+
+    def _retrain_ml_model(self) -> None:
+        """Retrain the ML model and warm the forecast cache for today + tomorrow."""
+        from ml.config import load_config
+        from ml.trainer import train_model
+
+        try:
+            ml_config = load_config(app_options=self._addon_options)
+            train_model(ml_config)
+            logger.info("ML model retrained successfully")
+        except Exception as e:
+            logger.exception("Failed to retrain ML model: %s", e)
+            return
+
+        # Wipe cache to force fresh generation against the newly trained model.
+        self._ml_forecast_cache = {}
+
+        today = time_utils.today()
+        tomorrow = today + timedelta(days=1)
+        for target_date in (today, tomorrow):
+            try:
+                self._generate_ml_predictions(target_date)
+            except Exception as e:
+                logger.warning(
+                    "Post-retrain forecast generation failed for %s: %s",
+                    target_date,
+                    e,
+                )
+
+    def _generate_ml_predictions(self, target_date: date) -> None:
+        """Generate ML predictions for target_date and cache them."""
+        from ml.config import load_config
+        from ml.predictor import predict_next_24h
+
+        try:
+            ml_config = load_config(app_options=self._addon_options)
+            predictions = predict_next_24h(ml_config, target_date)
+
+            expected = time_utils.get_period_count(target_date)
+            if predictions is None:
+                logger.warning("ML prediction for %s returned None", target_date)
+                return
+
+            pad = expected - len(predictions)
+            if pad > 0:
+                # HA weather forecasts only cover "now onward", so when we ask
+                # for today from midnight, feature engineering drops the
+                # already-elapsed quarters. Front-pad with zeros so the
+                # cached vector stays calendar-aligned: the optimiser only
+                # reads from current_period onward, and the ML Report masks
+                # the padded region out for display.
+                predictions = [0.0] * pad + list(predictions)
+                logger.info(
+                    "ML prediction for %s was short by %d quarters, "
+                    "front-padded to %d",
+                    target_date,
+                    pad,
+                    expected,
+                )
+            elif pad < 0:
+                logger.warning(
+                    "ML prediction for %s returned %d periods, expected %d",
+                    target_date,
+                    len(predictions),
+                    expected,
+                )
+                return
+
+            self._ml_forecast_cache[target_date] = list(predictions)
+            logger.info(
+                "ML predictions generated for %s: %.1f kWh total",
+                target_date,
+                sum(predictions),
+            )
+
+        except Exception as e:
+            logger.exception(
+                "Failed to generate ML predictions for %s: %s", target_date, e
+            )
+
     def _handle_special_cases(self, period: int, prepare_next_day: bool) -> None:
         """Handle special cases like midnight transition."""
         if period == 0 and not prepare_next_day:
@@ -814,9 +955,12 @@ class BatterySystemManager:
             logger.info(
                 "Preparing for next day - clearing historical store and refreshing predictions"
             )
-            # Clear historical store to prevent yesterday's data from appearing as today's future data
+            # Clear historical store so yesterday's data does not appear as today's future data.
             self.historical_store.clear()
             self.prediction_snapshot_store.clear()
+            # The 23:00 retrain job owns ML cache warm-up for today/tomorrow.
+            # If tomorrow is not yet cached at 23:55, _get_ml_prediction_forecast
+            # will lazy-generate inside _gather_optimization_data.
             self._fetch_predictions()
 
     def _get_price_data(
@@ -1069,7 +1213,8 @@ class BatterySystemManager:
 
         if prepare_next_day:
             # For next day, use predictions only
-            consumption_predictions = self._get_consumption_forecast()
+            tomorrow = time_utils.today() + timedelta(days=1)
+            consumption_predictions = self._get_consumption_forecast(tomorrow)
             solar_predictions = self.controller.get_solar_forecast()
 
             consumption_data = consumption_predictions
@@ -1087,7 +1232,7 @@ class BatterySystemManager:
             completed_periods = [
                 i for i, p in enumerate(today_periods) if p is not None
             ]
-            predictions_consumption = self._get_consumption_forecast()
+            predictions_consumption = self._get_consumption_forecast(time_utils.today())
             predictions_solar = self.controller.get_solar_forecast()
 
             # Extend predictions for tomorrow when horizon exceeds today

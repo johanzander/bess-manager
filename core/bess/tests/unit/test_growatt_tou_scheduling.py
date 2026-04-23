@@ -124,8 +124,13 @@ class TestStrategicIntentExecution:
                 hour
             ), f"Hour {hour} should not enable charging"
 
-    def test_solar_storage_enables_battery_charge(self, scheduler):
-        """Test that SOLAR_STORAGE strategic intent enables battery charging."""
+    def test_solar_storage_uses_default_mode(self, scheduler):
+        """Test that SOLAR_STORAGE uses load_first (inverter default).
+
+        SOLAR_STORAGE uses load_first so solar serves the home first and excess
+        charges the battery. This is the inverter's default behavior, so no TOU
+        segment is needed — the inverter handles it naturally.
+        """
         strategic_intents = hourly_to_quarterly(
             {
                 12: "SOLAR_STORAGE",
@@ -137,13 +142,13 @@ class TestStrategicIntentExecution:
         scheduler.strategic_intents = strategic_intents
         scheduler._consolidate_and_convert_with_strategic_intents()
 
-        # BEHAVIOR: Battery should be configured for charging during strategic solar storage hours
-        strategic_hours_covered = all(
-            scheduler.is_hour_configured_for_charging(hour) for hour in [12, 13]
-        )
+        # BEHAVIOR: SOLAR_STORAGE should use load_first (default mode, no TOU segment needed)
         assert (
-            strategic_hours_covered
-        ), "All strategic solar storage hours must be covered for charging"
+            scheduler.get_hour_battery_mode(12) == "load_first"
+        ), "SOLAR_STORAGE hours should use load_first"
+        assert (
+            scheduler.get_hour_battery_mode(13) == "load_first"
+        ), "SOLAR_STORAGE hours should use load_first"
 
     def test_mixed_strategic_intents_execute_correctly(self, scheduler):
         """Test that different strategic intents in the same schedule work correctly."""
@@ -164,9 +169,9 @@ class TestStrategicIntentExecution:
         assert scheduler.is_hour_configured_for_charging(
             3
         ), "Hour 3 should enable grid charging"
-        assert scheduler.is_hour_configured_for_charging(
-            12
-        ), "Hour 12 should enable solar storage"
+        assert (
+            scheduler.get_hour_battery_mode(12) == "load_first"
+        ), "Hour 12 (SOLAR_STORAGE) should use load_first"
         assert scheduler.is_hour_configured_for_export(
             19
         ), "Hour 19 should enable export"
@@ -174,7 +179,7 @@ class TestStrategicIntentExecution:
             20
         ), "Hour 20 should enable export"
 
-        # BEHAVIOR: IDLE hours should use default mode
+        # BEHAVIOR: IDLE and SOLAR_STORAGE hours should use default mode
         assert (
             scheduler.get_hour_battery_mode(0) == "load_first"
         ), "IDLE hours should be load_first"

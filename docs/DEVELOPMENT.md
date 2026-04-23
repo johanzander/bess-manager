@@ -285,6 +285,15 @@ python scripts/mock_ha/scenarios/from_debug_log.py bess-debug-2026-03-24-225535.
 ./mock-run.sh 2026-03-24-225535
 ```
 
+To replay from a specific time of day (useful for testing optimizer behavior at
+a particular hour), pass an optional `HH:MM` argument:
+
+```bash
+./mock-run.sh 2026-04-22-202249 09:00    # run as if it is 09:00 on that date
+```
+
+The date is kept from the scenario; only the time is overridden.
+
 - BESS UI: <http://localhost:8080>
 - Service call log (inverter writes): <http://localhost:8123/mock/service_log>
 - Sensor states: <http://localhost:8123/mock/sensors>
@@ -353,6 +362,9 @@ python scripts/mock_ha/scenarios/from_debug_log.py bess-debug-YYYY-MM-DD-HHMMSS.
 
 # Run replay — BESS runs as if it is that exact moment in time
 ./mock-run.sh YYYY-MM-DD-HHMMSS
+
+# Run replay from a specific time (e.g. to test optimizer before solar hours)
+./mock-run.sh YYYY-MM-DD-HHMMSS 09:00
 ```
 
 ### Debug Log Export

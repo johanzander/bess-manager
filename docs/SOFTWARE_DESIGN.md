@@ -324,10 +324,12 @@ The GrowattScheduleManager converts action intents into Time-of-Use (TOU) interv
 | Intent | Battery Mode | Grid Charge | Charge Rate | Discharge Rate |
 |---|---|---|---|---|
 | GRID_CHARGING | battery_first | On | 100% | 0% |
-| SOLAR_STORAGE | battery_first | Off | 100% | 0% |
+| SOLAR_STORAGE | load_first | Off | 100% | 0% |
 | LOAD_SUPPORT | load_first | Off | 0% | 100% |
 | EXPORT_ARBITRAGE | grid_first | Off | 0% | 100% |
 | IDLE | load_first | Off | 100% | 0% |
+
+**Why SOLAR_STORAGE and IDLE share the same inverter settings**: Both use `load_first` because solar energy serving the home directly is always more valuable than routing it through the battery (which incurs cycle cost). If prices are cheap enough to justify prioritizing battery charging over home load, the DP algorithm uses `GRID_CHARGING` instead, which enables AC grid-to-battery charging via `battery_first` mode. Using `battery_first` without `grid_charge` would cause unnecessary grid imports by routing solar to the battery first while the grid serves the home.
 
 **Schedule generation**:
 

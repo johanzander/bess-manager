@@ -9,21 +9,6 @@
 
 **Description**: Discharge power seems to always be 100% leading to higher export than intended during EXPORT_ARBITRAGE operations.
 
-### ~~1. **Extended Horizon Optimization**~~ ✅ Completed (v7.2.0-v7.3.0, PRs #21-#22)
-
-**Impact**: High | **Effort**: Medium | **Dependencies**: Price manager, DP algorithm
-
-**Description**: Use tomorrow's electricity prices to extend the intraday optimization horizon to cover today + tomorrow (up to 192 periods), enabling true cross-day arbitrage decisions.
-
-**Background**: The intraday optimizer (runs every 15 min) currently uses only `get_today_prices()`, giving a shrinking horizon toward midnight. A zero terminal value caused the optimizer to export battery energy late in the day rather than holding it for self-consumption overnight/tomorrow. **Option 3 (terminal value from tomorrow's mean price) was deployed as a minimal fix** — it stops premature exporting but does not enable true cross-day arbitrage.
-
-**Implementation**:
-
-- ✅ Modify OptimizationManager to fetch tomorrow's prices when available (PR #21)
-- ✅ Extend DP algorithm input to handle 48+ hour horizons (PR #21, 192 periods)
-- ✅ Update ViewBuilder to display extended optimization results (PR #22 dashboard, PR #23 inverter)
-- N/A Multi-day TOU schedule management — Growatt TOU segments are dateless (HH:MM), so multi-day TOU isn't possible at the hardware level. The optimizer uses tomorrow's data for better decisions, but only today's schedule is deployed.
-
 ## 🟡 **HIGH PRIORITY** (Core Functionality)
 
 ### **Add SolaX Modbus inverter support**
@@ -253,23 +238,9 @@ But at noon every day we get tomorrows schedule. We could use this information t
 
 ## 🔵 **ROBUSTNESS IMPROVEMENTS** (System Observability)
 
-### **Complete or Remove EV Energy Meter Integration**
+### ~~**Complete or Remove EV Energy Meter Integration**~~ ✅ Completed (v8.0.0)
 
-**Impact**: Low | **Effort**: Low-Medium | **Dependencies**: `energy_flow_calculator.py`, `sensor_collector.py`, `ha_api_controller.py`
-
-**Current state**: The EV charger energy meter (`ev_energy_meter`) is partially wired in but the feature is incomplete:
-
-- `sensor_collector.py`: `ev_energy_meter` is in `cumulative_sensor_keys` and `sensor_method_map` (→ `get_ev_energy`)
-- `energy_flow_calculator.py`: maps to `aux_load` and calculates the delta per period
-- `ha_api_controller.py`: has `get_ev_energy_meter` in `METHOD_SENSOR_MAP` but no corresponding `def get_ev_energy_meter()` method
-- `aux_load` is computed but **never consumed** — nothing in the API, savings calculations, or dashboard uses it
-
-The sensor is intentionally excluded from health checks to avoid spurious warnings.
-
-**Options**:
-
-1. **Finish it**: Implement `def get_ev_energy_meter(self)` in `ha_api_controller.py`, fix the method name mismatch (`get_ev_energy` vs `get_ev_energy_meter` in sensor_collector), surface `aux_load` in the dashboard and savings breakdown, add to optional health checks
-2. **Remove it**: Delete the dead `ev_energy_meter` entries from `cumulative_sensor_keys`, `sensor_method_map`, `METHOD_SENSOR_MAP`, and `energy_flow_calculator.py`
+**Resolution**: EV energy meter dead code removed entirely in v8.0.0 release.
 
 ---
 
@@ -409,6 +380,29 @@ total_base_cost = sum(
 ```
 
 This would make the profitability gate compare apples-to-apples with the dashboard savings, and prevent approving battery operations that lose money relative to the solar-only baseline.
+
+---
+
+## 🧪 **TEST FRAMEWORK IMPROVEMENTS**
+
+### Unify and strengthen test infrastructure
+
+**Impact**: Medium | **Effort**: Medium | **Dependencies**: `core/bess/tests/unit/`, `backend/tests/`
+
+**Description**: The test suite has grown organically and would benefit from a coherent structure. Currently:
+
+- **Scenario tests** (`test_scenarios.py`) use JSON data files and only assert on economic summary values (`base_cost`, `battery_solar_cost`, `savings`, `savings_pct`). They cannot express behavioral assertions like "the optimizer should choose SOLAR_STORAGE over IDLE."
+- **Standalone tests** (`test_idle_solar_charging.py`, `test_terminal_value.py`) test behavioral properties but live outside the scenario framework, duplicating setup boilerplate.
+- **Backend tests** (`backend/tests/`) cover API conversion, settings contracts, and settings store but are disconnected from core algorithm tests.
+
+**What to improve**:
+
+- Extend the scenario framework to support **behavioral assertions** (strategic intent distribution, constraint validation) alongside economic assertions — so new regression tests like issue #73 can be expressed as scenario JSON files with richer `expected_results`
+- Add a shared fixture or helper for constructing `BatterySettings` + running `optimize_battery_schedule`, reducing boilerplate across standalone tests
+- Consider supporting both hourly and quarterly resolution scenarios (currently all scenarios are hourly, but real optimization runs at 15-min resolution)
+- Review whether backend integration tests should exercise the full optimization→API pipeline end-to-end
+
+**Files**: `core/bess/tests/unit/test_scenarios.py`, `core/bess/tests/unit/data/*.json`, `core/bess/tests/conftest.py`, `backend/tests/`
 
 ---
 

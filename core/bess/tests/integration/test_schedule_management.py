@@ -381,9 +381,9 @@ class TestChargeRateHardwareWrite:
     """Charge rate must be written to the inverter register unconditionally.
 
     Bug scenario: a LOAD_SUPPORT or EXPORT_ARBITRAGE period sets charge_rate=0
-    on the inverter. A subsequent SOLAR_STORAGE period (battery_first mode) must
+    on the inverter. A subsequent SOLAR_STORAGE period (load_first mode) must
     overwrite that register with 100% — otherwise the inverter runs in
-    battery_first with 0% charge power and exports excess solar instead of
+    load_first with 0% charge power and exports excess solar instead of
     storing it.
 
     When power monitoring is disabled (_power_monitor is None), the only write

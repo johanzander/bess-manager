@@ -47,7 +47,7 @@ class SphScheduleManager:
 
     INTENT_TO_MODE: ClassVar[dict[str, str]] = {
         "GRID_CHARGING": "battery_first",
-        "SOLAR_STORAGE": "battery_first",
+        "SOLAR_STORAGE": "load_first",
         "LOAD_SUPPORT": "load_first",
         "EXPORT_ARBITRAGE": "grid_first",
         "IDLE": "load_first",

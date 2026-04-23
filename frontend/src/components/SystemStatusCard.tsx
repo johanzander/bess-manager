@@ -392,14 +392,17 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "" }) =
         },
         {
           label: "Battery Mode",
-          value: (statusData.realTimePower?.netBatteryPower?.value || 0) > 0.1 ? 'Charging' :
-                 (statusData.realTimePower?.netBatteryPower?.value || 0) < -0.1 ? 'Discharging' : 'Idle',
+          value: (() => {
+            const mode = statusData.batteryStatus.batteryMode?.toLowerCase() ?? '';
+            switch (mode) {
+              case 'load_first': return 'Load First';
+              case 'battery_first': return 'Battery First';
+              case 'grid_first': return 'Grid First';
+              default: return statusData.batteryStatus.batteryMode ?? 'Unknown';
+            }
+          })(),
           unit: "",
-          icon: (statusData.realTimePower?.netBatteryPower?.value || 0) > 0.1 ? TrendingUp :
-                (statusData.realTimePower?.netBatteryPower?.value || 0) < -0.1 ? TrendingDown : Zap,
-          color: (statusData.realTimePower?.netBatteryPower?.value || 0) > 0.1 ? 'green' as const :
-                 (statusData.realTimePower?.netBatteryPower?.value || 0) < -0.1 ? 'yellow' as const : 'blue' as const,
-          pill: true
+          icon: Battery
         }
       ]
     },

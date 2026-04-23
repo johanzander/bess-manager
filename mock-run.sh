@@ -2,7 +2,8 @@
 # Mock HA development environment — runs BESS against a synthetic Home Assistant server.
 #
 # Usage:
-#   ./mock-run.sh 2026-03-24-225535      # replay from generated scenario
+#   ./mock-run.sh 2026-03-24-225535          # replay from generated scenario
+#   ./mock-run.sh 2026-03-24-225535 09:00    # replay from 09:00 instead of original time
 #
 # To generate a replay scenario from a debug log:
 #   python scripts/mock_ha/scenarios/from_debug_log.py docs/bess-debug-2026-03-24-225535.md
@@ -17,7 +18,10 @@
 set -euo pipefail
 
 if [ $# -eq 0 ]; then
-  echo "Usage: ./mock-run.sh <scenario>"
+  echo "Usage: ./mock-run.sh <scenario> [HH:MM]"
+  echo ""
+  echo "  <scenario>  Scenario name (without .json extension)"
+  echo "  [HH:MM]     Optional time override — run as if it is this time on the scenario date"
   echo ""
   echo "Generate a scenario from a debug log first:"
   echo "  python scripts/mock_ha/scenarios/from_debug_log.py docs/bess-debug-YYYY-MM-DD-HHMMSS.md"
@@ -104,10 +108,20 @@ fi
 MOCK_TIME=$(python3 -c "import json; d=json.load(open('$SCENARIO_FILE')); print(d.get('mock_time',''))")
 TZ=$(python3 -c "import json; d=json.load(open('$SCENARIO_FILE')); print(d.get('timezone','Europe/Stockholm'))")
 export TZ
-export MOCK_TIME
-if [ -n "$MOCK_TIME" ]; then
-  echo "Mock time:     $MOCK_TIME  (BESS will run as if it is this time)"
+
+# Optional time override: ./mock-run.sh <scenario> 09:00
+# Replaces the time portion of mock_time while keeping the original date.
+if [ -n "${2:-}" ]; then
+  OVERRIDE_TIME=$2
+  MOCK_DATE=$(echo "$MOCK_TIME" | sed -n 's/.*\([0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}\).*/\1/p')
+  MOCK_TIME="@${MOCK_DATE} ${OVERRIDE_TIME}:00"
+  echo "Mock time:     $MOCK_TIME  (overridden from command line)"
+else
+  if [ -n "$MOCK_TIME" ]; then
+    echo "Mock time:     $MOCK_TIME  (from scenario)"
+  fi
 fi
+export MOCK_TIME
 
 # Build frontend
 echo "Building frontend..."

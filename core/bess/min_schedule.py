@@ -29,7 +29,7 @@ APPROACH:
 
 Strategic intents (from DP algorithm) are converted to battery modes:
 - GRID_CHARGING → battery_first (AC charging enabled)
-- SOLAR_STORAGE → battery_first (charging priority)
+- SOLAR_STORAGE → load_first (solar serves home first, excess to battery)
 - LOAD_SUPPORT → load_first (discharging priority)
 - EXPORT_ARBITRAGE → grid_first (export priority)
 - IDLE → load_first (normal operation)
@@ -83,25 +83,65 @@ class GrowattScheduleManager:
     Time of Use (TOU) intervals. It uses the strategic reasoning captured at decision
     time in the DP algorithm rather than analyzing energy flows afterward.
 
-    Strategic Intent → Growatt Mode Mapping:
-    - GRID_CHARGING → battery_first (enables AC charging)
-    - SOLAR_STORAGE → battery_first (charging priority)
-    - LOAD_SUPPORT → load_first (discharging priority)
-    - EXPORT_ARBITRAGE → grid_first (export priority)
-    - IDLE → load_first (normal operation)
+    Strategic Intent → Inverter Behavior:
+
+    GRID_CHARGING (battery_first, grid_charge=True, charge=100, discharge=0):
+      Purpose: Charge battery from grid during cheap hours for later arbitrage.
+      Flow: Grid → battery (AC charging). Grid → home. Battery does not discharge.
+
+    SOLAR_STORAGE (load_first, grid_charge=False, charge=100, discharge=0):
+      Purpose: Store excess solar for expensive evening hours.
+      Flow: Solar → home first, excess solar → battery. Grid covers any shortfall.
+      Battery does not discharge — energy preserved for later LOAD_SUPPORT.
+      Uses load_first so solar serves home directly, avoiding unnecessary grid import
+      that battery_first would cause by routing solar to battery first.
+
+    LOAD_SUPPORT (load_first, grid_charge=False, charge=0, discharge=100):
+      Purpose: Discharge stored energy to offset expensive grid consumption.
+      Flow: Battery → home. Solar → home. Grid covers remainder if needed.
+      Battery does not charge — energy is being spent, not accumulated.
+
+    EXPORT_ARBITRAGE (grid_first, grid_charge=False, charge=0, discharge=100):
+      Purpose: Export stored energy to grid during high sell-price hours.
+      Flow: Battery → grid (export). Solar → grid. Grid may still serve home.
+
+    IDLE (load_first, grid_charge=False, charge=100, discharge=0):
+      Purpose: Normal operation when no active strategy is needed.
+      Flow: Solar → home, excess solar → battery. Grid covers shortfall.
+      Battery does not discharge. Similar to SOLAR_STORAGE but without
+      active optimization intent.
+
+    Design rationale — why SOLAR_STORAGE and IDLE use the same inverter settings:
+
+    SOLAR_STORAGE and IDLE produce identical inverter behavior (load_first, charge
+    enabled, no discharge). The distinction is semantic: the DP algorithm uses
+    SOLAR_STORAGE when it actively decides to accumulate energy, and IDLE when no
+    strategy is needed. At the inverter level, load_first is correct for both because:
+
+    1. Solar energy serving the home directly is always >= the value of routing it
+       through the battery (which incurs cycle cost and conversion losses).
+    2. If prices are cheap enough to justify prioritizing battery over home load,
+       the DP algorithm should use GRID_CHARGING instead (battery_first + grid_charge),
+       which charges from both solar and grid simultaneously.
+    3. battery_first without grid_charge causes the inverter to route solar to the
+       battery first, forcing unnecessary grid import to serve the home — a strictly
+       worse outcome when there is excess solar.
+
+    Therefore only GRID_CHARGING uses battery_first mode. All other intents that
+    allow charging (SOLAR_STORAGE, IDLE) use load_first to ensure solar serves the
+    home before excess flows to the battery.
     """
 
     # Map strategic intents to Growatt battery modes.
-    # This determines which mode each intent triggers on the inverter.
     # - battery_first: Grid powers home, battery preserved (or charged if AC charge enabled)
-    # - load_first: Battery discharges to support home load (inverter default behavior)
+    # - load_first: Solar serves home first, excess to battery (inverter default behavior)
     # - grid_first: Priority to export to grid
     INTENT_TO_MODE: ClassVar[dict[str, str]] = {
-        "GRID_CHARGING": "battery_first",  # Enable AC charging for arbitrage
-        "SOLAR_STORAGE": "battery_first",  # Priority to battery charging from solar
-        "LOAD_SUPPORT": "load_first",  # Priority to battery discharge for load
-        "EXPORT_ARBITRAGE": "grid_first",  # Priority to grid export for profit
-        "IDLE": "load_first",  # Normal operation, allows battery discharge
+        "GRID_CHARGING": "battery_first",
+        "SOLAR_STORAGE": "load_first",
+        "LOAD_SUPPORT": "load_first",
+        "EXPORT_ARBITRAGE": "grid_first",
+        "IDLE": "load_first",
     }
 
     # Map strategic intents to inverter control settings
@@ -880,7 +920,7 @@ class GrowattScheduleManager:
         intent_to_mode = {
             "IDLE": "load_first",
             "GRID_CHARGING": "battery_first",
-            "SOLAR_STORAGE": "battery_first",
+            "SOLAR_STORAGE": "load_first",
             "EXPORT_ARBITRAGE": "grid_first",
         }
         return intent_to_mode.get(strategic_intent, "load_first")
@@ -1472,7 +1512,7 @@ class GrowattScheduleManager:
         )
         lines.append("* indicates current period")
         lines.append(
-            "Intent mapping: GRID_CHARGING/SOLAR_STORAGE→battery_first, EXPORT_ARBITRAGE→grid_first, IDLE/LOAD_SUPPORT→load_first"
+            "Intent mapping: GRID_CHARGING→battery_first, EXPORT_ARBITRAGE→grid_first, SOLAR_STORAGE/IDLE/LOAD_SUPPORT→load_first"
         )
 
         logger.info("\n".join(lines))

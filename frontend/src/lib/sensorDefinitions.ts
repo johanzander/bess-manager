@@ -91,6 +91,19 @@ export const INTEGRATIONS: IntegrationDef[] = [
           { key: 'pv_power', label: 'PV Power', required: false },
           { key: 'local_load_power', label: 'House Load', required: false },
           { key: 'import_power', label: 'Measured Power (Grid)', required: false },
+          { key: 'export_power', label: 'Grid Export Power', required: false },
+        ],
+      },
+      {
+        name: 'Lifetime Energy',
+        sensors: [
+          { key: 'lifetime_battery_charged', label: 'Battery Input Energy Total', required: false },
+          { key: 'lifetime_battery_discharged', label: 'Battery Output Energy Total', required: false },
+          { key: 'lifetime_solar_energy', label: 'Total Solar Energy', required: false },
+          { key: 'lifetime_import_from_grid', label: 'Grid Import Total', required: false },
+          { key: 'lifetime_export_to_grid', label: 'Grid Export Total', required: false },
+          { key: 'lifetime_load_consumption', label: 'Home Consumption Energy', required: false },
+          { key: 'lifetime_system_production', label: 'Total Yield', required: false },
         ],
       },
       {
@@ -101,6 +114,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
           { key: 'solax_autorepeat_duration', label: 'Autorepeat Duration', required: true },
           { key: 'solax_power_control_trigger', label: 'Power Control Trigger', required: true },
           { key: 'solax_battery_min_soc', label: 'Battery Minimum SOC', required: true },
+          { key: 'solax_charger_use_mode', label: 'Charger Use Mode', required: false },
         ],
       },
     ],

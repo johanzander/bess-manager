@@ -129,7 +129,14 @@ class EnergyFlowCalculator:
         battery_charged = flows.get("battery_charged", 0)
         battery_discharged = flows.get("battery_discharged", 0)
         export_to_grid = flows.get("export_to_grid", 0)
+        load_consumption = flows.get("load_consumption", 0)
+        import_from_grid = flows.get("import_from_grid", 0)
+
+        # Derive self_consumption (locally generated energy consumed by home)
+        # from sensor if available, otherwise compute from load - grid import.
         self_consumption = flows.get("self_consumption", 0)
+        if self_consumption == 0 and load_consumption > 0:
+            self_consumption = max(0, load_consumption - import_from_grid)
 
         solar_to_battery = max(
             0,

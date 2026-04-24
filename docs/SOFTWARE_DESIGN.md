@@ -369,8 +369,15 @@ discovery flow via the setup wizard UI.
 
 **Discovery process**:
 
-1. `GET /api/states` scans all HA entity states to identify Growatt entities
-   (matched by serial number prefix) and Nordpool sensor attributes.
+1. `GET /api/states` scans all HA entity states to identify inverter entities:
+   - **Growatt**: matched by serial number prefix in entity IDs.
+   - **SolaX**: matched by `solax_` prefix across all HA domains (`sensor`,
+     `select`, `number`, `button`). The homeassistant-solax-modbus integration
+     creates entities as `<domain>.solax_<suffix>` (single inverter) or
+     `<domain>.solax_<serial>_<suffix>` (multiple inverters). Detection requires
+     at least one known suffix from `SOLAX_ENTITY_SUFFIX_MAP` to confirm a genuine
+     SolaX integration (not manually renamed entities). The prefix with the most
+     matching suffixes is selected.
 2. HA WebSocket API queries the config entry and device registries to resolve
    the Nordpool `config_entry_id` and Growatt `device_id`.
 3. Optional integrations are detected by entity naming conventions (Solcast,
@@ -379,9 +386,9 @@ discovery flow via the setup wizard UI.
 5. Confirmed configuration is persisted to `/data/bess_discovered_config.json`
    and applied to the running system immediately without restart.
 
-**Limitations**: Discovery is designed for Growatt MIN/SPH inverters with
-standard HA integration entity naming. Non-standard entity names may require
-manual correction in the wizard.
+**Limitations**: Discovery relies on native integration entity naming.
+Manually renamed entities will not be auto-detected — use the wizard to
+correct sensor mappings manually.
 
 ## Health Monitoring
 

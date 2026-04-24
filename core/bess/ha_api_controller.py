@@ -379,29 +379,51 @@ class HomeAssistantAPIController:
         "lifetime_self_consumption": "lifetime_self_consumption",
     }
 
-    # Used by discover_solax_sensors() to map entity IDs from GET /api/states.
-    # SolaX entities follow the pattern: <domain>.<device_prefix>_<suffix>
-    # where <device_prefix> is typically the inverter serial number prefixed with
-    # "solax_" (e.g. "solax_abc123").
+    # Used by _extract_solax_device_prefix() and discover_solax_sensors().
+    # SolaX entities follow the pattern: <domain>.solax_<suffix> (single inverter)
+    # or <domain>.solax_<serial>_<suffix> (multiple inverters), where domain is
+    # sensor, select, number, or button.
+    # Detection anchors on the "solax_" prefix in entity IDs, then confirms
+    # the match by checking for known suffixes from this map.
     #
     # Sensor suffixes come from the homeassistant-solax-modbus integration
     # (github.com/wills106/homeassistant-solax-modbus).  Control entity suffixes
     # (power_control, active_power, autorepeat_duration, trigger) are part of the
     # VPP (Virtual Power Plant) feature added in v3.x of that integration.
     SOLAX_ENTITY_SUFFIX_MAP: ClassVar[dict[str, str]] = {
-        # Monitoring sensors (sensor.<prefix>_<suffix>)
+        # ── Real-time power sensors (sensor.<prefix>_<suffix>) ───────────
         "battery_capacity": "battery_soc",
         "battery_power_charge": "battery_charge_power",
         "battery_power_discharge": "battery_discharge_power",
         "measured_power": "import_power",
+        "grid_export": "export_power",
+        "grid_import": "import_power",  # alternative to measured_power
         "pv_power_1": "pv_power",
         "house_load": "local_load_power",
-        # VPP control entities (select/number/button.<prefix>_<suffix>)
-        "power_control": "solax_power_control_mode",
-        "active_power": "solax_active_power",
-        "autorepeat_duration": "solax_autorepeat_duration",
-        "trigger": "solax_power_control_trigger",
+        # ── Lifetime / cumulative energy sensors ─────────────────────────
+        # Battery energy (input = charged, output = discharged)
+        "battery_input_energy_total": "lifetime_battery_charged",
+        "battery_output_energy_total": "lifetime_battery_discharged",
+        # Solar energy
+        "total_solar_energy": "lifetime_solar_energy",
+        # Grid energy — two naming variants across Gen2/3 vs Gen4+
+        "grid_import_total": "lifetime_import_from_grid",
+        "total_grid_import": "lifetime_import_from_grid",
+        "grid_export_total": "lifetime_export_to_grid",
+        "total_grid_export": "lifetime_export_to_grid",
+        # Load consumption (Riemann sum of house_load power)
+        "home_consumption_energy": "lifetime_load_consumption",
+        # System production / yield
+        "total_yield": "lifetime_system_production",
+        # ── VPP control entities (select/number/button.<prefix>_<suffix>) ─
+        "remotecontrol_power_control": "solax_power_control_mode",
+        "remotecontrol_active_power": "solax_active_power",
+        "remotecontrol_autorepeat_duration": "solax_autorepeat_duration",
+        "remotecontrol_trigger": "solax_power_control_trigger",
         "battery_minimum_capacity": "solax_battery_min_soc",
+        "battery_minimum_capacity_grid_tied": "solax_battery_min_soc",
+        # ── Charger use mode (select entity) ─────────────────────────────
+        "charger_use_mode": "solax_charger_use_mode",
     }
 
     def resolve_sensor_for_influxdb(self, sensor_key: str) -> str | None:
@@ -1227,7 +1249,7 @@ class HomeAssistantAPIController:
             "select_option",
             operation="SolaX VPP disable battery control",
             entity_id=mode_entity,
-            option="Disabled Battery Control",
+            option="Disabled",
         )
 
     def set_solax_min_soc(self, min_soc: int) -> None:
@@ -1831,37 +1853,46 @@ class HomeAssistantAPIController:
     def _extract_solax_device_prefix(self, states: list[dict]) -> str | None:
         """Extract the SolaX device prefix from entity states.
 
-        Uses two SolaX-specific sensor suffixes (``battery_capacity`` and
-        ``battery_power_charge``) as a combined anchor.  Both suffixes must
-        share the same object-ID prefix for the detection to match, which
-        eliminates false-positives from unrelated integrations.
+        Detects the homeassistant-solax-modbus integration by looking for
+        entities across all domains (sensor, select, number, button) with
+        a ``solax_`` object-ID prefix.  The integration creates entities
+        as ``<domain>.solax_<suffix>`` (single inverter) or
+        ``<domain>.solax_<serial>_<suffix>`` (multiple inverters).
+
+        To confirm a genuine SolaX integration (not manually renamed entities),
+        we require at least one known suffix from ``SOLAX_ENTITY_SUFFIX_MAP``
+        to be present under the detected prefix.
 
         Args:
             states: List of state dicts from /api/states.
 
         Returns:
-            Device prefix string (e.g. ``"solax_abc123"``), or None if no
-            SolaX entities are detected.
+            Device prefix string (e.g. ``"solax"`` or ``"solax_abc123"``),
+            or None if no SolaX entities are detected.
         """
-        capacity_prefixes: set[str] = set()
-        charge_prefixes: set[str] = set()
+        valid_domains = ("sensor.", "select.", "number.", "button.")
+        solax_prefixes: dict[str, int] = {}
 
         for state in states:
             entity_id = str(state.get("entity_id", ""))
-            if not entity_id.startswith("sensor."):
+            if not any(entity_id.startswith(d) for d in valid_domains):
                 continue
-            object_id = entity_id[len("sensor.") :]
-            if object_id.endswith("_battery_capacity"):
-                capacity_prefixes.add(object_id[: -len("_battery_capacity")])
-            elif object_id.endswith("_battery_power_charge"):
-                charge_prefixes.add(object_id[: -len("_battery_power_charge")])
+            object_id = entity_id.split(".", 1)[1]
+            if not object_id.startswith("solax_"):
+                continue
 
-        common = capacity_prefixes & charge_prefixes
-        if not common:
+            for suffix in self.SOLAX_ENTITY_SUFFIX_MAP:
+                if object_id.endswith(f"_{suffix}"):
+                    prefix = object_id[: -len(f"_{suffix}")]
+                    solax_prefixes[prefix] = solax_prefixes.get(prefix, 0) + 1
+                    break
+
+        if not solax_prefixes:
             return None
 
-        prefix = next(iter(common))
-        logger.debug("SolaX device prefix detected: %r", prefix)
+        # Pick the prefix with the most matching suffixes.
+        prefix = max(solax_prefixes, key=solax_prefixes.get)  # type: ignore[arg-type]
+        logger.debug("SolaX device prefix detected: %r (%d entities)", prefix, solax_prefixes[prefix])
         return prefix
 
     def discover_solax_sensors(

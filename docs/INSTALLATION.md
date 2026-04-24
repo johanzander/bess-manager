@@ -23,6 +23,7 @@ Complete guide for installing and configuring BESS Battery Manager for Home Assi
 - A SolaX inverter with battery storage
 - The [homeassistant-solax-modbus](https://github.com/wills106/homeassistant-solax-modbus) integration (available via HACS) installed in Home Assistant
 - BESS controls the inverter via VPP active-power commands
+- Auto-detection requires **native entity names** — entities must use the `solax_` prefix (e.g. `sensor.solax_battery_capacity`, `select.solax_remotecontrol_power_control`). Detection scans all HA domains (`sensor`, `select`, `number`, `button`). Manually renamed entities will not be detected; use the setup wizard to map them manually
 
 ### Electricity Price Integration (Required)
 

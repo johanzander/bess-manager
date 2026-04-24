@@ -21,6 +21,13 @@ class SolaxMockController(MockHomeAssistantController):
         self.vpp_disabled_count: int = 0
         self.min_soc_set: list[int] = []
         self.power_control_mode: str | None = "Self Use Mode"
+        self.sensors.update({
+            "solax_power_control_mode": "select.solax_remotecontrol_power_control",
+            "solax_active_power": "number.solax_remotecontrol_active_power",
+            "solax_autorepeat_duration": "number.solax_remotecontrol_autorepeat_duration",
+            "solax_power_control_trigger": "button.solax_remotecontrol_trigger",
+            "solax_battery_min_soc": "number.solax_battery_minimum_capacity",
+        })
 
     def set_solax_active_power_control(self, watts: int) -> None:
         self.vpp_calls.append(watts)

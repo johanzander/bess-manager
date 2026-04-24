@@ -36,6 +36,7 @@ class MockHomeAssistantController(HomeAssistantAPIController):
 
     def __init__(self) -> None:
         """Initialize with default settings."""
+        self.sensors: dict[str, str] = {}
         self.settings = {
             "grid_charge": False,
             "discharge_rate": 0,

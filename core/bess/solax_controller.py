@@ -330,74 +330,92 @@ class SolaxController(InverterController):
 
     # ── Health check ──────────────────────────────────────────────────────────
 
+    # VPP entities required for battery control.
+    _VPP_ENTITIES: list[tuple[str, str]] = [
+        ("solax_power_control_mode", "Power Control Mode"),
+        ("solax_active_power", "Active Power"),
+        ("solax_autorepeat_duration", "Autorepeat Duration"),
+        ("solax_power_control_trigger", "Trigger"),
+        ("solax_battery_min_soc", "Battery Min SOC"),
+    ]
+
     def check_health(self, controller) -> list:
         """Check SolaX VPP control entity availability.
 
-        Verifies that the power control mode entity is readable, which
-        confirms connectivity to the solax-modbus integration.
+        Verifies that all VPP control entities are configured and readable,
+        confirming connectivity to the solax-modbus integration.
         """
-        try:
-            mode = controller.get_solax_power_control_mode()
-            if mode is not None:
-                check = {
-                    "name": "Power Control Mode",
-                    "key": "solax_power_control_mode",
-                    "entity_id": controller.sensors.get(
-                        "solax_power_control_mode", "Not configured"
-                    ),
-                    "status": "OK",
-                    "rawValue": mode,
-                    "displayValue": str(mode),
-                    "error": None,
-                }
-                overall_status = "OK"
-            else:
-                check = {
-                    "name": "Power Control Mode",
-                    "key": "solax_power_control_mode",
-                    "entity_id": controller.sensors.get(
-                        "solax_power_control_mode", "Not configured"
-                    ),
+        checks = []
+        has_error = False
+
+        for sensor_key, display_name in self._VPP_ENTITIES:
+            entity_id = controller.sensors.get(sensor_key, "")
+            if not entity_id:
+                checks.append({
+                    "name": display_name,
+                    "key": sensor_key,
+                    "entity_id": "Not configured",
                     "status": "ERROR",
                     "rawValue": None,
                     "displayValue": "N/A",
-                    "error": (
-                        "Entity returned None — check solax_power_control_mode "
-                        "sensor key in config"
-                    ),
-                }
-                overall_status = "ERROR"
-        except ValueError as e:
-            check = {
-                "name": "Power Control Mode",
-                "key": "solax_power_control_mode",
-                "entity_id": "Not configured",
-                "status": "ERROR",
-                "rawValue": None,
-                "displayValue": "N/A",
-                "error": f"Entity not configured: {e}",
-            }
-            overall_status = "ERROR"
-        except Exception as e:
-            check = {
-                "name": "Power Control Mode",
-                "key": "solax_power_control_mode",
-                "entity_id": controller.sensors.get(
-                    "solax_power_control_mode", "Not configured"
-                ),
-                "status": "ERROR",
-                "rawValue": None,
-                "displayValue": "N/A",
-                "error": f"Read failed: {e}",
-            }
-            overall_status = "ERROR"
+                    "error": f"Entity not configured — set {sensor_key} in sensor config",
+                })
+                has_error = True
+                continue
+
+            # Power control mode is the only one we can read; others are write-only
+            if sensor_key == "solax_power_control_mode":
+                try:
+                    mode = controller.get_solax_power_control_mode()
+                    if mode is not None:
+                        checks.append({
+                            "name": display_name,
+                            "key": sensor_key,
+                            "entity_id": entity_id,
+                            "status": "OK",
+                            "rawValue": mode,
+                            "displayValue": str(mode),
+                            "error": None,
+                        })
+                    else:
+                        checks.append({
+                            "name": display_name,
+                            "key": sensor_key,
+                            "entity_id": entity_id,
+                            "status": "ERROR",
+                            "rawValue": None,
+                            "displayValue": "N/A",
+                            "error": "Entity returned None — check sensor config",
+                        })
+                        has_error = True
+                except Exception as e:
+                    checks.append({
+                        "name": display_name,
+                        "key": sensor_key,
+                        "entity_id": entity_id,
+                        "status": "ERROR",
+                        "rawValue": None,
+                        "displayValue": "N/A",
+                        "error": f"Read failed: {e}",
+                    })
+                    has_error = True
+            else:
+                checks.append({
+                    "name": display_name,
+                    "key": sensor_key,
+                    "entity_id": entity_id,
+                    "status": "OK",
+                    "rawValue": None,
+                    "displayValue": "Configured",
+                    "error": None,
+                })
 
         health_check = {
             "name": "Battery Control (SolaX)",
             "description": "Controls SolaX inverter via VPP active-power commands",
             "required": True,
-            "status": overall_status,
-            "checks": [check],
+            "status": "ERROR" if has_error else "OK",
+            "checks": checks,
             "last_run": datetime.now().isoformat(),
         }
 

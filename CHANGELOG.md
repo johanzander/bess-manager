@@ -4,6 +4,17 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.0.0b2] - 2026-04-24
+
+### Fixed
+
+- SolaX auto-detection now anchors on the `solax_` prefix across all HA domains (`sensor`, `select`, `number`, `button`) instead of generic battery suffixes, eliminating false positives from other integrations.
+- SolaX entity suffix map expanded to cover all sensors required for feature parity with Growatt: grid export power, lifetime energy counters, load consumption, and correct VPP control entity names (`remotecontrol_*`).
+- SolaX sensor settings UI now includes all entity fields: power monitoring (including grid export), lifetime energy counters, and charger use mode.
+- SolaX VPP disable command sent wrong option value (`"Disabled Battery Control"` → `"Disabled"`).
+- SolaX health check now verifies all 5 VPP control entities, not just power control mode.
+- Self-consumption energy flow is now derived from `load - grid_import` when no dedicated sensor exists, removing the requirement for a `lifetime_self_consumption` sensor on platforms that don't provide one.
+
 ## [9.0.0b1] - 2026-04-18
 
 ### Added

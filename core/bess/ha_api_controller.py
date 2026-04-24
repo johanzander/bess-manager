@@ -1678,8 +1678,10 @@ class HomeAssistantAPIController:
     def discover_integrations(self) -> tuple[dict, list[dict]]:
         """Discover installed HA integrations relevant to BESS configuration.
 
-        Combines two official HA APIs:
-        - REST GET /api/states: entity IDs, attributes (device_sn, area, sensors)
+        Uses three official HA APIs:
+        - REST GET /api/config/entity_registry/list: platform-based integration
+          detection and entity-to-sensor mapping (robust against entity renaming)
+        - REST GET /api/states: live entity attributes (Nordpool area, phase counts)
         - WebSocket: config entries and device registry (config_entry_id, device_id)
 
         Returns:
@@ -1705,6 +1707,19 @@ class HomeAssistantAPIController:
             "vat_multiplier": None,
         }
 
+        # ── Entity registry: detect integrations by platform field ────────
+        try:
+            registry = self._fetch_entity_registry()
+            inverter_detected = self.detect_inverter_integrations(registry)
+            result["growatt_found"] = inverter_detected.get("growatt", False)
+            result["solax_found"] = inverter_detected.get("solax", False)
+        except SystemConfigurationError:
+            logger.warning(
+                "Entity registry unavailable; falling back to entity-ID detection"
+            )
+            registry = None
+
+        # ── States: Growatt device SN, Nordpool area, SolaX prefix ────────
         states = self._fetch_all_states()
 
         device_sn = self._extract_growatt_device_sn(states)
@@ -1712,6 +1727,8 @@ class HomeAssistantAPIController:
             result["growatt_found"] = True
             result["device_sn"] = device_sn
 
+        # SolaX prefix is still needed for states-based sensor discovery
+        # (used as fallback when entity registry is unavailable).
         solax_prefix = self._extract_solax_device_prefix(states)
         if solax_prefix:
             result["solax_found"] = True
@@ -1726,7 +1743,7 @@ class HomeAssistantAPIController:
                     if parsed_area:
                         result["nordpool_area"] = parsed_area
 
-        # Fetch HA-internal IDs via WebSocket
+        # ── WebSocket: HA-internal IDs ────────────────────────────────────
         metadata: dict = {}
         try:
             metadata = self.discover_ha_metadata(device_sn)
@@ -1748,7 +1765,7 @@ class HomeAssistantAPIController:
         # ── Auto-detected hints ───────────────────────────────────────────
         # Inverter type: Growatt is determined from registered growatt_server
         # services (MIN: update_time_segment, SPH: write_ac_charge_times).
-        # SolaX is detected from entity-ID patterns (no WebSocket needed).
+        # SolaX is detected from the entity registry platform field.
         # Growatt takes priority when both are present.
         if result["growatt_found"]:
             result["inverter_type"] = metadata.get("growatt_inverter_type")
@@ -2034,4 +2051,185 @@ class HomeAssistantAPIController:
                 result[key] = matched_id
 
         logger.info("Discovered %d optional sensor(s)", len(result))
+        return result
+
+    def _fetch_entity_registry(self) -> list[dict]:
+        """Fetch the full entity registry from Home Assistant via WebSocket.
+
+        The entity registry is only accessible through the WebSocket API
+        (not REST).  Each entry contains at minimum: ``entity_id``,
+        ``platform``, ``unique_id``.  The ``platform`` field identifies
+        which integration created the entity (e.g. ``"solax_modbus"``,
+        ``"growatt_server"``, ``"nordpool"``).
+
+        Raises:
+            SystemConfigurationError: If entity registry cannot be queried.
+        """
+        try:
+            results = self._ws_query([{"type": "config/entity_registry/list"}])
+            return results[0]
+        except Exception as e:
+            raise SystemConfigurationError(
+                f"Failed to query Home Assistant entity registry: {e}"
+            ) from e
+
+    # Platform names used by each integration in the HA entity registry.
+    _INVERTER_PLATFORMS: ClassVar[dict[str, list[str]]] = {
+        "growatt": ["growatt_server"],
+        "solax": ["solax_modbus", "solax"],
+    }
+    _PRICE_PLATFORMS: ClassVar[dict[str, list[str]]] = {
+        "nordpool": ["nordpool"],
+        "octopus_energy": ["octopus_energy"],
+    }
+    _FORECAST_PLATFORMS: ClassVar[dict[str, list[str]]] = {
+        "solcast": ["solcast_solar"],
+        "weather": ["weather"],
+    }
+
+    @staticmethod
+    def _detect_platforms(
+        entities: list[dict], platform_map: dict[str, list[str]]
+    ) -> dict[str, bool]:
+        """Check which integration platforms are present in the entity registry."""
+        # Build a set of all platform values for fast lookup
+        all_platforms = {p for platforms in platform_map.values() for p in platforms}
+        found_platforms: set[str] = set()
+        for entity in entities:
+            plat = entity.get("platform")
+            if plat and plat in all_platforms:
+                found_platforms.add(plat)
+
+        detected = {}
+        for name, platforms in platform_map.items():
+            is_found = any(p in found_platforms for p in platforms)
+            detected[name] = is_found
+            logger.info(
+                "Integration '%s': %s",
+                name,
+                "DETECTED" if is_found else "not found",
+            )
+        return detected
+
+    def detect_inverter_integrations(
+        self, entities: list[dict] | None = None
+    ) -> dict[str, bool]:
+        """Detect which inverter integrations are installed."""
+        if entities is None:
+            entities = self._fetch_entity_registry()
+        return self._detect_platforms(entities, self._INVERTER_PLATFORMS)
+
+    def detect_price_integrations(
+        self, entities: list[dict] | None = None
+    ) -> dict[str, bool]:
+        """Detect which price/energy integrations are installed."""
+        if entities is None:
+            entities = self._fetch_entity_registry()
+        return self._detect_platforms(entities, self._PRICE_PLATFORMS)
+
+    def detect_forecast_integrations(
+        self, entities: list[dict] | None = None
+    ) -> dict[str, bool]:
+        """Detect which forecast/weather integrations are installed."""
+        if entities is None:
+            entities = self._fetch_entity_registry()
+        return self._detect_platforms(entities, self._FORECAST_PLATFORMS)
+
+    def detect_all_integrations(self) -> dict[str, dict[str, bool]]:
+        """Detect all required and optional integrations.
+
+        Fetches the entity registry once and reuses it across all detection
+        methods to avoid redundant HTTP calls.
+        """
+        entities = self._fetch_entity_registry()
+        return {
+            "inverter": self.detect_inverter_integrations(entities),
+            "price": self.detect_price_integrations(entities),
+            "forecast": self.detect_forecast_integrations(entities),
+        }
+
+    def discover_sensors_from_registry(
+        self, entities: list[dict] | None = None
+    ) -> tuple[dict[str, str], str | None]:
+        """Discover inverter sensor entity IDs via the HA entity registry.
+
+        Uses the ``platform`` field to identify integration entities, then maps
+        entity ID suffixes to BESS sensor keys via the suffix maps.  This is
+        robust against entity renaming because it identifies the integration
+        directly rather than pattern-matching entity ID prefixes.
+
+        Args:
+            entities: Pre-fetched entity registry list, or None to fetch.
+
+        Returns:
+            Tuple of (sensor_map, detected_platform) where sensor_map is
+            bess_sensor_key -> entity_id and detected_platform is
+            ``"growatt"``, ``"solax"``, or None.
+        """
+        if entities is None:
+            entities = self._fetch_entity_registry()
+
+        inverter_detected = self.detect_inverter_integrations(entities)
+
+        # Growatt takes priority when both are present
+        if inverter_detected.get("growatt"):
+            return self._map_registry_entities(
+                entities,
+                ["growatt_server"],
+                self.ENTITY_SUFFIX_MAP,
+            ), "growatt"
+        if inverter_detected.get("solax"):
+            return self._map_registry_entities(
+                entities,
+                ["solax_modbus", "solax"],
+                self.SOLAX_ENTITY_SUFFIX_MAP,
+            ), "solax"
+
+        return {}, None
+
+    def _map_registry_entities(
+        self,
+        entities: list[dict],
+        platforms: list[str],
+        suffix_map: dict[str, str],
+    ) -> dict[str, str]:
+        """Map entity registry entries to BESS sensor keys using a suffix map.
+
+        Filters entities belonging to the given platforms, then matches the
+        entity_id suffix (object_id portion after the domain prefix) against
+        the provided suffix map.
+
+        Args:
+            entities: Full entity registry list.
+            platforms: HA platform names to filter by (e.g. ["solax_modbus"]).
+            suffix_map: Maps entity suffix -> BESS sensor key.
+
+        Returns:
+            dict mapping bess_sensor_key -> entity_id.
+        """
+        result: dict[str, str] = {}
+        platform_set = set(platforms)
+
+        for entity in entities:
+            if entity.get("platform") not in platform_set:
+                continue
+            entity_id = entity.get("entity_id", "")
+            if "." not in entity_id:
+                continue
+
+            object_id = entity_id.split(".", 1)[1]
+            # Try matching the full suffix or the portion after the first underscore
+            # prefix (device serial/name).  Entity IDs follow the pattern:
+            # <domain>.<prefix>_<suffix> where prefix may be a device identifier.
+            for suffix, bess_key in suffix_map.items():
+                if object_id.endswith(f"_{suffix}") or object_id == suffix:
+                    if bess_key not in result:
+                        result[bess_key] = entity_id
+                    break
+
+        logger.info(
+            "Mapped %d entities from registry (platforms=%s)",
+            len(result),
+            platforms,
+        )
         return result

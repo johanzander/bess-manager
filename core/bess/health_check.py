@@ -96,6 +96,10 @@ def determine_health_status(
             if is_working:
                 optional_working += 1
 
+    # ERROR if required methods were specified but none are configured at all
+    if required_methods and required_total == 0:
+        return "ERROR"
+
     # ERROR if not all required sensors are working
     # WARNING if any optional sensor is not working
     # OK if all sensors are working

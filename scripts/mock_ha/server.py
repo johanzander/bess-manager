@@ -17,7 +17,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 
 logging.basicConfig(
@@ -46,13 +46,116 @@ async def log_requests(request: Request, call_next):  # type: ignore[no-untyped-
 # Mutable state — populated at startup from scenario file
 _sensors: dict[str, Any] = {}
 _time_segments: list[dict] = []
-_ac_charge_times: list[dict] = []
-_ac_discharge_times: list[dict] = []
+_ac_charge_times: dict[str, Any] = {}
+_ac_discharge_times: dict[str, Any] = {}
 _service_log: list[dict] = []
 # Nordpool prices keyed by date string "YYYY-MM-DD" → list of quarterly prices (SEK/kWh)
 _nordpool_prices: dict[str, list[float]] = {}
 # IANA timezone name for this scenario (e.g. "Europe/Stockholm")
 _timezone: str = "UTC"
+# WebSocket registry data — populated from scenario or auto-generated from sensors
+_entity_registry: list[dict] = []
+_config_entries: list[dict] = []
+_device_registry: list[dict] = []
+_services: dict[str, Any] = {}
+
+
+def _generate_entity_registry(inverter_type: str) -> list[dict]:
+    """Auto-generate entity registry entries from _sensors dict.
+
+    Infers the HA integration platform from the inverter_type and sensor
+    entity IDs so that BESS auto-discovery can detect the integration.
+    """
+    platform_map = {
+        "min": "growatt_server",
+        "sph": "growatt_server",
+        "solax": "solax_modbus",
+    }
+    inverter_platform = platform_map.get(inverter_type, "growatt_server")
+
+    entries: list[dict] = []
+    for entity_id in _sensors:
+        # Determine platform from entity_id prefix patterns
+        platform = "homeassistant"
+        if "nordpool" in entity_id:
+            platform = "nordpool"
+        elif "solcast" in entity_id:
+            platform = "solcast_solar"
+        elif "solax" in entity_id.split(".", 1)[-1]:
+            platform = "solax_modbus"
+        elif any(
+            prefix in entity_id
+            for prefix in ("sensor.rkm", "number.rkm", "switch.rkm", "select.rkm")
+        ):
+            platform = inverter_platform
+
+        entries.append(
+            {
+                "entity_id": entity_id,
+                "platform": platform,
+                "unique_id": entity_id.replace(".", "_"),
+            }
+        )
+    return entries
+
+
+def _generate_config_entries(scenario: dict) -> list[dict]:
+    """Generate synthetic config entries for auto-discovery."""
+    entries = []
+    inverter_type = scenario.get("inverter_type", "min")
+
+    # Nordpool config entry (needed for nordpool_config_entry_id)
+    if any("nordpool" in k for k in _sensors):
+        entries.append(
+            {
+                "entry_id": "mock_nordpool_config_entry",
+                "domain": "nordpool",
+                "title": "Nordpool",
+                "state": "loaded",
+            }
+        )
+
+    # Inverter config entry
+    if inverter_type in ("min", "sph"):
+        entries.append(
+            {
+                "entry_id": "mock_growatt_config_entry",
+                "domain": "growatt_server",
+                "title": "Growatt Server",
+                "state": "loaded",
+            }
+        )
+    elif inverter_type == "solax":
+        entries.append(
+            {
+                "entry_id": "mock_solax_config_entry",
+                "domain": "solax_modbus",
+                "title": "SolaX Modbus",
+                "state": "loaded",
+            }
+        )
+
+    return entries
+
+
+def _generate_services(inverter_type: str) -> dict:
+    """Generate synthetic service list for inverter type detection."""
+    services: dict[str, Any] = {}
+
+    if inverter_type in ("min", "sph"):
+        growatt_services: dict[str, Any] = {}
+        # MIN uses update_time_segment, SPH uses write_ac_charge_times
+        if inverter_type == "min":
+            growatt_services["update_time_segment"] = {}
+            growatt_services["read_time_segments"] = {}
+        else:
+            growatt_services["write_ac_charge_times"] = {}
+            growatt_services["read_ac_charge_times"] = {}
+            growatt_services["write_ac_discharge_times"] = {}
+            growatt_services["read_ac_discharge_times"] = {}
+        services["growatt_server"] = growatt_services
+
+    return services
 
 
 def _load_scenario() -> None:
@@ -76,8 +179,8 @@ def _load_scenario() -> None:
     global _timezone
     _sensors.update(scenario.get("sensors", {}))
     _time_segments.extend(scenario.get("time_segments", []))
-    _ac_charge_times.extend(scenario.get("ac_charge_times", []))
-    _ac_discharge_times.extend(scenario.get("ac_discharge_times", []))
+    _ac_charge_times.update(scenario.get("ac_charge_times", {}))
+    _ac_discharge_times.update(scenario.get("ac_discharge_times", {}))
     _timezone = scenario.get("timezone", "UTC")
 
     # Build nordpool prices lookup for the mock get_prices_for_date service call.
@@ -98,8 +201,9 @@ def _load_scenario() -> None:
             attrs = nordpool_sensor.get("attributes", {})
             today_prices = attrs.get("today", [])
             tomorrow_prices = attrs.get("tomorrow", [])
-        else:
-            # nordpool_official uses service calls — no sensor state. Fall back to price_data.
+        if not nordpool_sensor or (not today_prices and not tomorrow_prices):
+            # nordpool_official uses service calls — sensor may exist but won't
+            # carry today/tomorrow price arrays. Fall back to price_data.
             price_data = scenario.get("price_data", {})
             today_prices = price_data.get("today", [])
             tomorrow_prices = price_data.get("tomorrow", [])
@@ -128,11 +232,35 @@ def _load_scenario() -> None:
             "python scripts/mock_ha/scenarios/from_debug_log.py <debug_log>"
         )
 
+    # WebSocket registry data — used by setup wizard auto-discovery
+    _entity_registry.extend(scenario.get("entity_registry", []))
+    _config_entries.extend(scenario.get("config_entries", []))
+    _device_registry.extend(scenario.get("device_registry", []))
+    _services.update(scenario.get("services", {}))
+
+    # Auto-generate entity registry from sensors if not provided
+    if not _entity_registry:
+        inverter_type = scenario.get("inverter_type", "min")
+        _entity_registry.extend(_generate_entity_registry(inverter_type))
+        logger.info(
+            "Auto-generated entity registry (%d entries) for inverter_type=%s",
+            len(_entity_registry),
+            inverter_type,
+        )
+
+    if not _config_entries:
+        _config_entries.extend(_generate_config_entries(scenario))
+
+    if not _services:
+        inverter_type = scenario.get("inverter_type", "min")
+        _services.update(_generate_services(inverter_type))
+
     logger.info(
-        "Loaded scenario '%s' — %d sensors, %d TOU segments",
+        "Loaded scenario '%s' — %d sensors, %d TOU segments, %d registry entries",
         scenario.get("name", scenario_name),
         len(_sensors),
         len(_time_segments),
+        len(_entity_registry),
     )
 
 
@@ -243,6 +371,89 @@ async def call_service(domain: str, service: str, request: Request) -> JSONRespo
 
     # All write operations: record and acknowledge
     return JSONResponse({})
+
+
+# ---------------------------------------------------------------------------
+# WebSocket API (entity registry, config entries, device registry, services)
+# ---------------------------------------------------------------------------
+
+
+@app.websocket("/api/websocket")
+async def websocket_endpoint(ws: WebSocket) -> None:
+    """Mock Home Assistant WebSocket API for auto-discovery.
+
+    Handles the HA auth handshake and responds to registry queries used
+    by BESS setup wizard auto-discovery.
+    """
+    await ws.accept()
+    try:
+        # Phase 1: Auth handshake
+        await ws.send_json({"type": "auth_required", "ha_version": "2024.1.0"})
+        auth_msg = await ws.receive_json()
+        if auth_msg.get("type") != "auth":
+            await ws.close(code=1008)
+            return
+        await ws.send_json({"type": "auth_ok", "ha_version": "2024.1.0"})
+
+        # Phase 2: Handle commands
+        while True:
+            msg = await ws.receive_json()
+            msg_id = msg.get("id", 0)
+            msg_type = msg.get("type", "")
+
+            if msg_type == "config/entity_registry/list":
+                await ws.send_json(
+                    {
+                        "id": msg_id,
+                        "type": "result",
+                        "success": True,
+                        "result": _entity_registry,
+                    }
+                )
+            elif msg_type == "config_entries/get":
+                await ws.send_json(
+                    {
+                        "id": msg_id,
+                        "type": "result",
+                        "success": True,
+                        "result": _config_entries,
+                    }
+                )
+            elif msg_type == "config/device_registry/list":
+                await ws.send_json(
+                    {
+                        "id": msg_id,
+                        "type": "result",
+                        "success": True,
+                        "result": _device_registry,
+                    }
+                )
+            elif msg_type == "get_services":
+                await ws.send_json(
+                    {
+                        "id": msg_id,
+                        "type": "result",
+                        "success": True,
+                        "result": _services,
+                    }
+                )
+            else:
+                logger.warning("Unknown WS command: %s", msg_type)
+                await ws.send_json(
+                    {
+                        "id": msg_id,
+                        "type": "result",
+                        "success": False,
+                        "error": {
+                            "code": "unknown_command",
+                            "message": f"Unknown: {msg_type}",
+                        },
+                    }
+                )
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        logger.warning("WebSocket error: %s", e)
 
 
 # ---------------------------------------------------------------------------

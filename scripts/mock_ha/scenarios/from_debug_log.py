@@ -266,8 +266,8 @@ def generate_scenario(log_path: str) -> None:
         ),
         "mock_time": mock_time,
         "time_segments": time_segments if inverter_type == "min" else None,
-        "ac_charge_times": [] if inverter_type == "sph" else None,
-        "ac_discharge_times": [] if inverter_type == "sph" else None,
+        "ac_charge_times": {"charge_power": 100, "charge_stop_soc": 95, "mains_enabled": False, "periods": []} if inverter_type == "sph" else None,
+        "ac_discharge_times": {"discharge_power": 100, "discharge_stop_soc": 15, "periods": []} if inverter_type == "sph" else None,
     }
     # Remove keys that don't apply to this inverter type or are absent
     scenario = {k: v for k, v in scenario.items() if v is not None}

@@ -362,33 +362,138 @@ All other settings are stored in this file and managed via the settings API. Top
 - **`sensors`**: Entity ID mappings for all Home Assistant sensors
 - **`energy_provider`**: Price source selection (Nordpool or Octopus Energy) and area configuration
 
-### Auto-Configuration
+### Platform Selection
 
-On first startup with no sensors configured, the system offers an automated
-discovery flow via the setup wizard UI.
+The system supports multiple inverter platforms, each with a dedicated controller subclass. The active platform is stored in `inverter.platform` as one of `"growatt_min"`, `"growatt_sph"`, or `"solax"`.
 
-**Discovery process**:
+Switching platform at runtime calls `BatterySystemManager.switch_inverter_platform()`, which destroys the current `InverterController` and creates the correct subclass (`GrowattMinController`, `GrowattSphController`, or `SolaxController`). No restart is required.
 
-1. `GET /api/states` scans all HA entity states to identify inverter entities:
-   - **Growatt**: matched by serial number prefix in entity IDs.
-   - **SolaX**: matched by `solax_` prefix across all HA domains (`sensor`,
-     `select`, `number`, `button`). The homeassistant-solax-modbus integration
-     creates entities as `<domain>.solax_<suffix>` (single inverter) or
-     `<domain>.solax_<serial>_<suffix>` (multiple inverters). Detection requires
-     at least one known suffix from `SOLAX_ENTITY_SUFFIX_MAP` to confirm a genuine
-     SolaX integration (not manually renamed entities). The prefix with the most
-     matching suffixes is selected.
-2. HA WebSocket API queries the config entry and device registries to resolve
-   the Nordpool `config_entry_id` and Growatt `device_id`.
-3. Optional integrations are detected by entity naming conventions (Solcast,
-   Zaptec/Easee EV meters, phase current sensors, weather entity, discharge inhibit).
-4. The user reviews and can correct the discovered mapping before applying.
-5. Confirmed configuration is persisted to `/data/bess_discovered_config.json`
-   and applied to the running system immediately without restart.
+### Auto-Detection and Integration Discovery
 
-**Limitations**: Discovery relies on native integration entity naming.
-Manually renamed entities will not be auto-detected — use the wizard to
-correct sensor mappings manually.
+On first startup with no sensors configured, or when the user triggers discovery from the setup wizard or settings page, the system runs a multi-stage auto-detection process via `HAAPIController.discover_integrations()`.
+
+#### Stage 1 — Integration Detection via Entity Registry
+
+The HA WebSocket API (`config/entity_registry/list`) returns every registered entity with its `platform` field.
+
+Detected integrations:
+
+| Category  |   HA Platform    | Detected As |
+|-----------|------------------|-------------|
+| Inverter  | `growatt_server` | Growatt     |
+| Inverter  | `solax_modbus`   | SolaX       |
+| Price     | `nordpool`       | Nordpool    |
+| Price     | `octopus_energy` | Octopus Energy |
+| Forecast  | `solcast_solar`  | Solcast solar forecast |
+| Forecast  | `weather`        | Weather (temperature derating) |
+
+#### Stage 2 — Device Identifier Extraction
+
+The HA REST API `/api/states` provides entity IDs and current values. The system uses naming patterns to extract device identifiers needed for service calls:
+
+- **Growatt device SN**: Extracted from SOC sensor anchor entities matching `sensor.<sn>_state_of_charge_soc` or `sensor.<sn>_statement_of_charge_soc`
+- **Nordpool area**: Extracted from the Nordpool entity ID or attributes
+- **Phase count**: Detected from phase current sensor entities (L1/L2/L3)
+
+#### Stage 3 — WebSocket Metadata Query
+
+The HA WebSocket API provides internal IDs not available through REST:
+
+- **Nordpool `config_entry_id`**: Required for the `nordpool.get_prices_for_date` service call
+- **Growatt `device_id`**: Required for service calls like `growatt_server.update_time_segment`
+- **Inverter type detection** (MIN vs SPH): Determined by which services are registered:
+  - MIN: `growatt_server.update_time_segment`
+  - SPH: `growatt_server.write_ac_charge_times`
+
+#### Stage 4 — Sensor Mapping via Entity Registry
+
+`discover_sensors_from_registry()` maps entity registry entries to BESS sensor keys. It filters entities by `platform` field (e.g. `growatt_server`), then matches the entity ID suffix against `ENTITY_SUFFIX_MAP` (Growatt) or `SOLAX_ENTITY_SUFFIX_MAP` (SolaX).
+
+This approach uses two layers of filtering: first the `platform` field (immutable — set by HA core when the integration creates the entity), then suffix matching on the `entity_id`. Platform filtering ensures only genuine integration entities are considered, regardless of naming. Suffix matching works as long as the entity ID retains the original suffix (e.g. `_state_of_charge_soc`). Changing the friendly name/label in HA does not affect the entity ID, so discovery is unaffected. However, if a user changes the actual entity ID to remove the suffix, manual mapping via the wizard is required.
+
+#### Derived Hints
+
+After discovery, the system derives additional configuration hints:
+
+- **Currency and VAT**: From the Nordpool area code prefix (SE → SEK/1.25, NO → NOK/1.25, DK → DKK/1.25, FI → EUR/1.255, etc.)
+- **Phase count**: From detected phase current sensors
+- **Inverter type**: From WebSocket service inspection (Growatt) or entity registry platform (SolaX)
+
+#### Optional Sensor Discovery
+
+Beyond core inverter and price sensors, discovery also detects:
+
+- **Solcast solar forecast**: Entities matching `solcast_solar` platform with `forecast_today` / `forecast_tomorrow` in the entity ID
+- **Weather**: Entities in the `weather.*` domain, preferring `weather.home` when multiple exist
+- **Phase currents**: `current_l1`, `current_l2`, `current_l3`
+- **EV charging inhibit**: Binary sensors ending with `_charging` or `_is_charging`
+- **Consumption forecast**: Custom helper sensor for 48-hour average grid import
+
+### Setup Wizard
+
+The setup wizard is a 6-step flow for first-time configuration. It is triggered when no sensor entity IDs are configured.
+
+#### Wizard API Endpoints
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/setup/status` | Returns `wizard_needed` flag based on whether sensors are configured |
+| `POST /api/setup/discover` | Runs full auto-discovery, returns sensors map, missing sensors, platform hints |
+| `POST /api/setup/confirm` | Persists discovered sensor config to `/data/bess_discovered_config.json` and applies to live controller |
+| `POST /api/setup/complete` | Atomic save of all wizard data across 6 settings sections |
+
+#### Wizard Steps (Frontend: `SetupWizardPage.tsx`)
+
+1. **Scan** — Calls `/api/setup/discover` to auto-detect integrations and sensors
+2. **Review Sensors** — Displays discovered sensor mappings, allows manual correction, selects inverter platform
+3. **Electricity Pricing** — Configure price area, provider (Nordpool/Octopus), markup, VAT (pre-filled from discovery hints)
+4. **Battery** — Set capacity, SOC limits, power rating, cycle cost
+5. **Home** — Set consumption, fuse current, voltage, phase count (pre-filled from detected phase count)
+6. **Complete** — Calls `/api/setup/complete` for atomic save
+
+#### Atomic Save (`/api/setup/complete`)
+
+The complete endpoint performs a single atomic operation that:
+
+1. Saves all 6 settings sections (`sensors`, `battery`, `home`, `electricity_price`, `energy_provider`, `inverter`/`growatt`) to `bess_settings.json` using read-modify-write to preserve non-wizard fields
+2. Maps the UI inverter type (MIN/SPH/SOLAX) to canonical platform names and calls `switch_inverter_platform()`
+3. Applies live updates to all running components (sensors, battery settings, home settings, price settings)
+4. Spawns a background thread that backfills historical data from InfluxDB, builds the daily schedule, and re-runs the health check
+
+#### Discovery-to-Completion Flow
+
+```text
+Frontend (SetupWizardPage)
+    │
+    ├── [1] POST /api/setup/discover
+    │       └── HAAPIController.discover_integrations()
+    │           ├── Entity Registry scan → platform detection
+    │           ├── Entity States scan → device SN / prefix extraction
+    │           ├── WebSocket query → internal IDs, inverter type
+    │           └── Sensor mapping → ENTITY_SUFFIX_MAP matching
+    │
+    ├── [2] POST /api/setup/confirm
+    │       └── Persist to /data/bess_discovered_config.json
+    │       └── Apply sensor config to live ha_controller
+    │
+    ├── [3] User fills remaining wizard steps (pricing, battery, home)
+    │
+    └── [4] POST /api/setup/complete
+            ├── SettingsStore.save_all() → atomic write of 6 sections
+            ├── switch_inverter_platform() → recreate controller
+            ├── update_settings() → apply live changes
+            └── Background: backfill history + build schedule + health check
+```
+
+### Settings Page (Ongoing Platform Management)
+
+After initial setup, the Settings page (`SettingsPage.tsx`) provides ongoing platform and sensor management through `PATCH /api/settings`.
+
+**Platform switching**: When the user changes the inverter platform in the Sensors tab, the backend validates the platform string, calls `switch_inverter_platform()` to recreate the controller, and re-runs the health check. Both platform configurations can coexist in the settings file — only the active platform's sensors are used at runtime.
+
+**Sensor editing**: Individual sensor entity IDs can be updated. The backend validates entity ID format (`[a-z]+\.[a-z0-9_]+`) before applying changes.
+
+**Re-discovery**: The user can trigger a fresh auto-discovery from the Settings page to update sensor mappings without going through the full wizard again.
 
 ## Health Monitoring
 

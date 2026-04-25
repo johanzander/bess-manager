@@ -265,6 +265,27 @@ const SetupWizardPage: React.FC = () => {
     }
   };
 
+  // When the user switches inverter platform, fill empty sensor fields from
+  // the new platform's auto-detected values.  User-entered values are preserved.
+  const handleInverterChange = (newForm: InverterForm) => {
+    setInverterForm(newForm);
+    if (!discovery?.platformSensors) return;
+
+    const newPlatform = INVERTER_INTEGRATION_IDS[newForm.inverterType] ?? 'growatt';
+    const platformMap = discovery.platformSensors[newPlatform];
+    if (!platformMap) return;
+
+    setSensors(prev => {
+      const next = { ...prev };
+      for (const [key, entityId] of Object.entries(platformMap)) {
+        if (!next[key]) {
+          next[key] = entityId;
+        }
+      }
+      return next;
+    });
+  };
+
   const activeInverterIntegrationId = INVERTER_INTEGRATION_IDS[inverterForm.inverterType] ?? 'growatt';
   const inverterIntegrationIds = new Set(Object.values(INVERTER_INTEGRATION_IDS));
 
@@ -356,7 +377,7 @@ const SetupWizardPage: React.FC = () => {
               sensors={sensors}
               onChange={setSensors}
               inverterForm={inverterForm}
-              onInverterChange={setInverterForm}
+              onInverterChange={handleInverterChange}
               discovery={discovery}
             />
 
@@ -376,7 +397,7 @@ const SetupWizardPage: React.FC = () => {
               </button>
               <button
                 onClick={handleConfirm}
-                disabled={confirming}
+                disabled={confirming || !allRequiredFilled}
                 className="flex items-center space-x-2 px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 font-medium disabled:opacity-60"
               >
                 {confirming && <div className="h-4 w-4 border-2 border-white rounded-full border-t-transparent animate-spin" />}

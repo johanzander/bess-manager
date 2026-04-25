@@ -27,6 +27,7 @@ export interface DiscoveryResult {
   nordpoolArea: string | null;
   nordpoolConfigEntryId: string | null;
   sensors: Record<string, string>;
+  platformSensors?: Record<string, Record<string, string>>;
   missingSensors: string[];
   inverterType: string | null;
   detectedPhaseCount: number | null;
@@ -149,9 +150,16 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
   const activeInverterIntegrationId = INVERTER_INTEGRATION_IDS[inverterForm.inverterType] ?? 'growatt';
   const isGrowatt = activeInverterIntegrationId === 'growatt';
 
-  // Detection flags for disabling platform options
-  const growattDetected = !wizardMode || discovery.growattFound;
-  const solaxDetected = !wizardMode || discovery.solaxFound;
+  // Detection flags for disabling platform options.
+  // In wizard mode, use discovery results. In settings mode, derive from
+  // configured sensors — if SolaX VPP entities are mapped, SolaX is available;
+  // if Growatt control entities are mapped, Growatt is available.
+  const growattDetected = wizardMode
+    ? discovery.growattFound
+    : Boolean(sensors['battery_charging_power_rate'] || sensors['grid_charge']);
+  const solaxDetected = wizardMode
+    ? discovery.solaxFound
+    : Boolean(sensors['solax_power_control_mode'] || sensors['solax_active_power']);
 
   const handlePlatformChange = (platform: 'growatt' | 'solax') => {
     if (platform === 'solax') {
@@ -229,18 +237,27 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
               {([
                 { value: 'MIN', label: 'MIC/MIN/MOD/MID (AC-coupled)' },
                 { value: 'SPH', label: 'SPH (DC-coupled)' },
-              ]).map(opt => (
-                <label key={opt.value} className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="radio"
-                    name="growatt-type"
-                    checked={inverterForm.inverterType === opt.value}
-                    onChange={() => onInverterChange({ ...inverterForm, inverterType: opt.value })}
-                    className="text-blue-500"
-                  />
-                  <span className="text-sm text-gray-600 dark:text-gray-300">{opt.label}</span>
-                </label>
-              ))}
+              ]).map(opt => {
+                // In wizard mode, disable the subtype that doesn't match auto-detection
+                const detectedType = discovery?.inverterType?.toUpperCase();
+                const subtypeDetected = !wizardMode || !detectedType || detectedType === opt.value;
+                return (
+                  <label
+                    key={opt.value}
+                    className={`flex items-center gap-2 ${subtypeDetected ? 'cursor-pointer' : 'opacity-40 cursor-not-allowed'}`}
+                  >
+                    <input
+                      type="radio"
+                      name="growatt-type"
+                      checked={inverterForm.inverterType === opt.value}
+                      disabled={!subtypeDetected}
+                      onChange={() => onInverterChange({ ...inverterForm, inverterType: opt.value })}
+                      className="text-blue-500"
+                    />
+                    <span className="text-sm text-gray-600 dark:text-gray-300">{opt.label}</span>
+                  </label>
+                );
+              })}
             </div>
             <label className="block">
               <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Device ID</span>

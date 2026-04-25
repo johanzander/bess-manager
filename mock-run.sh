@@ -63,7 +63,7 @@ json.dump(cfg, open('backend/dev-options.json', 'w'), indent=2)
 
 # Reset dev-bess-settings.json from the scenario bess_config so stale sensor
 # state from a previous run cannot override this scenario's sensor mapping.
-OWNED = ('home', 'battery', 'electricity_price', 'energy_provider', 'growatt', 'sensors')
+OWNED = ('home', 'battery', 'electricity_price', 'energy_provider', 'growatt', 'inverter', 'sensors')
 bess_settings = {k: cfg[k] for k in OWNED if k in cfg}
 
 # influxdb_7d_avg requires access to the original user's InfluxDB instance,

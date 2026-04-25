@@ -22,6 +22,7 @@ from loguru import logger
 from pydantic import BaseModel, field_validator
 
 from core.bess import time_utils
+from core.bess.exceptions import SystemConfigurationError
 from core.bess.health_check import run_system_health_checks
 from core.bess.settings import BatterySettings as _BatterySettings
 from core.bess.time_utils import get_period_count
@@ -69,6 +70,7 @@ _SECTION_MAP: dict[str, str] = {
     "electricityPrice": "electricity_price",
     "energyProvider": "energy_provider",
     "growatt": "growatt",
+    "inverter": "inverter",
     "sensors": "sensors",
 }
 
@@ -185,6 +187,29 @@ async def patch_settings(updates: dict):
                     bess_controller.ha_controller.growatt_device_id = section[
                         "device_id"
                     ]
+                # Map legacy inverter_type to platform and switch controller
+                inverter_type = section.get("inverter_type")
+                if inverter_type:
+                    platform_map = bess_controller.system._INVERTER_TYPE_TO_PLATFORM
+                    if inverter_type not in platform_map:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Unknown inverter_type '{inverter_type}', "
+                            f"expected one of {list(platform_map)}",
+                        )
+                    bess_controller.system.switch_inverter_platform(
+                        platform_map[inverter_type]
+                    )
+
+            elif store_key == "inverter":
+                platform = section.get("platform")
+                if platform:
+                    bess_controller.system.switch_inverter_platform(platform)
+                else:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Inverter section requires a 'platform' field",
+                    )
 
             elif store_key == "sensors":
                 bess_controller.ha_controller.sensors.update(
@@ -2354,11 +2379,12 @@ async def get_setup_status():
 
 @router.post("/api/setup/discover")
 async def run_setup_discovery():
-    """Run auto-discovery of Growatt and Nordpool integrations.
+    """Run auto-discovery of inverter and pricing integrations.
 
-    Queries the HA entity registry and config entries to deterministically map
-    all Growatt MIN sensor entity IDs to BESS sensor keys. Also detects the
-    Nordpool Official config entry ID and price area.
+    Uses the HA entity registry (platform field) for robust integration
+    detection, then maps entity suffixes to BESS sensor keys.  When the
+    entity registry is unavailable (e.g. older HA Core versions without
+    WebSocket support), uses states-based prefix matching instead.
 
     Returns:
         dict: Discovery results including found sensors, missing sensors, and
@@ -2373,22 +2399,49 @@ async def run_setup_discovery():
 
         sensors: dict[str, str] = {}
         missing_sensors: list[str] = []
+        platform_sensors: dict[str, dict[str, str]] = {}
 
-        if integrations["growatt_found"] and integrations["device_sn"]:
-            sensors = ha.discover_growatt_sensors(integrations["device_sn"], states)
-            # Identify which BESS sensor keys were not discovered
-            all_bess_keys = list(ha.ENTITY_SUFFIX_MAP.values())
-            missing_sensors = [k for k in all_bess_keys if k not in sensors]
-        elif integrations["solax_found"] and integrations["solax_device_prefix"]:
-            sensors = ha.discover_solax_sensors(
-                integrations["solax_device_prefix"], states
-            )
-            all_bess_keys = list(ha.SOLAX_ENTITY_SUFFIX_MAP.values())
-            missing_sensors = [k for k in all_bess_keys if k not in sensors]
-        else:
+        # Try entity-registry-based discovery first (robust against renaming)
+        registry_available = True
+        try:
+            registry = ha.fetch_entity_registry()
+        except SystemConfigurationError:
             logger.warning(
-                "No supported inverter integration found during setup discovery"
+                "Entity registry unavailable (HA may lack WebSocket support); "
+                "using states-based discovery"
             )
+            registry_available = False
+
+        if registry_available:
+            platform_sensors, detected_platform = (
+                ha.discover_sensors_from_registry(registry)
+            )
+            if platform_sensors:
+                sensors = dict(platform_sensors.get(detected_platform, {}))
+                suffix_map = (
+                    ha.ENTITY_SUFFIX_MAP
+                    if detected_platform == "growatt"
+                    else ha.SOLAX_ENTITY_SUFFIX_MAP
+                )
+                all_bess_keys = list(set(suffix_map.values()))
+                missing_sensors = [k for k in all_bess_keys if k not in sensors]
+
+        # Use states-based discovery when registry is unavailable or found nothing
+        if not sensors:
+            if integrations["growatt_found"] and integrations["device_sn"]:
+                sensors = ha.discover_growatt_sensors(integrations["device_sn"], states)
+                all_bess_keys = list(ha.ENTITY_SUFFIX_MAP.values())
+                missing_sensors = [k for k in all_bess_keys if k not in sensors]
+            elif integrations["solax_found"] and integrations["solax_device_prefix"]:
+                sensors = ha.discover_solax_sensors(
+                    integrations["solax_device_prefix"], states
+                )
+                all_bess_keys = list(ha.SOLAX_ENTITY_SUFFIX_MAP.values())
+                missing_sensors = [k for k in all_bess_keys if k not in sensors]
+            else:
+                logger.warning(
+                    "No supported inverter integration found during setup discovery"
+                )
 
         current_sensors = ha.discover_current_sensors(states)
         for phase_key, entity_id in current_sensors.items():
@@ -2425,8 +2478,9 @@ async def run_setup_discovery():
                 "vat_multiplier": integrations["vat_multiplier"],
             }
         )
-        # Attach sensors dict without key conversion
+        # Attach sensor dicts without key conversion
         result["sensors"] = sensors
+        result["platformSensors"] = platform_sensors
         return result
     except Exception as e:
         logger.error(f"Error during setup discovery: {e}")

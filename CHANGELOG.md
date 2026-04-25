@@ -4,6 +4,23 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.0.0b3] - 2025-04-25
+
+### Added
+
+- Runtime inverter platform switching via `switch_inverter_platform()` — no restart required when changing between Growatt MIN, Growatt SPH, and SolaX.
+- Entity-registry-based auto-discovery with states-based fallback for older HA versions without WebSocket support.
+- Setup wizard returns all detected platform sensors (`platformSensors`), allowing sensor fields to auto-fill when switching inverter platform.
+- Cross-platform integration test suite validates optimization, hardware writes, SOC limits, and health checks across all three inverter platforms.
+- Mock HA server now supports WebSocket API (entity registry, config entries, device registry, services) for end-to-end setup wizard testing.
+
+### Fixed
+
+- Health check returned OK when required methods were specified but none were configured (now correctly returns ERROR).
+- Setup wizard confirm button was enabled even when required sensor fields were empty.
+- Growatt subtype radio buttons (MIN/SPH) no longer allow selecting a type that contradicts auto-detection results.
+- Settings page detection of available platforms now derives from configured sensors instead of requiring a fresh discovery scan.
+
 ## [9.0.0b2] - 2026-04-24
 
 ### Fixed

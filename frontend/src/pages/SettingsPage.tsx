@@ -386,6 +386,9 @@ const SettingsPage: React.FC = () => {
           inverterType: inverterForm.inverterType,
           deviceId: inverterForm.deviceId,
         },
+        inverter: {
+          platform: { MIN: 'growatt_min', SPH: 'growatt_sph', SOLAX: 'solax' }[inverterForm.inverterType],
+        },
       });
       savedBattery.current = JSON.stringify(batteryForm);
       savedInverter.current = JSON.stringify(inverterForm);

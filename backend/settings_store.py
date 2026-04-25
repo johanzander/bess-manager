@@ -425,8 +425,9 @@ class SettingsStore:
         if isinstance(growatt, dict):
             old_type = growatt.get("inverter_type", "")
             inverter = dict(self.data.get("inverter", {}))
-            if old_type and not inverter.get("platform"):
-                platform = "growatt_sph" if old_type == "SPH" else "growatt_min"
+            _TYPE_TO_PLATFORM = {"MIN": "growatt_min", "SPH": "growatt_sph", "SOLAX": "solax"}
+            if old_type and not inverter.get("platform") and old_type in _TYPE_TO_PLATFORM:
+                platform = _TYPE_TO_PLATFORM[old_type]
                 inverter["platform"] = platform
                 if not inverter.get("device_id") and growatt.get("device_id"):
                     inverter["device_id"] = growatt["device_id"]

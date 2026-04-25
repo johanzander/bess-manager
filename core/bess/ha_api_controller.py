@@ -1709,7 +1709,7 @@ class HomeAssistantAPIController:
 
         # ── Entity registry: detect integrations by platform field ────────
         try:
-            registry = self._fetch_entity_registry()
+            registry = self.fetch_entity_registry()
             inverter_detected = self.detect_inverter_integrations(registry)
             result["growatt_found"] = inverter_detected.get("growatt", False)
             result["solax_found"] = inverter_detected.get("solax", False)
@@ -2053,7 +2053,7 @@ class HomeAssistantAPIController:
         logger.info("Discovered %d optional sensor(s)", len(result))
         return result
 
-    def _fetch_entity_registry(self) -> list[dict]:
+    def fetch_entity_registry(self) -> list[dict]:
         """Fetch the full entity registry from Home Assistant via WebSocket.
 
         The entity registry is only accessible through the WebSocket API
@@ -2116,7 +2116,7 @@ class HomeAssistantAPIController:
     ) -> dict[str, bool]:
         """Detect which inverter integrations are installed."""
         if entities is None:
-            entities = self._fetch_entity_registry()
+            entities = self.fetch_entity_registry()
         return self._detect_platforms(entities, self._INVERTER_PLATFORMS)
 
     def detect_price_integrations(
@@ -2124,7 +2124,7 @@ class HomeAssistantAPIController:
     ) -> dict[str, bool]:
         """Detect which price/energy integrations are installed."""
         if entities is None:
-            entities = self._fetch_entity_registry()
+            entities = self.fetch_entity_registry()
         return self._detect_platforms(entities, self._PRICE_PLATFORMS)
 
     def detect_forecast_integrations(
@@ -2132,7 +2132,7 @@ class HomeAssistantAPIController:
     ) -> dict[str, bool]:
         """Detect which forecast/weather integrations are installed."""
         if entities is None:
-            entities = self._fetch_entity_registry()
+            entities = self.fetch_entity_registry()
         return self._detect_platforms(entities, self._FORECAST_PLATFORMS)
 
     def detect_all_integrations(self) -> dict[str, dict[str, bool]]:
@@ -2141,7 +2141,7 @@ class HomeAssistantAPIController:
         Fetches the entity registry once and reuses it across all detection
         methods to avoid redundant HTTP calls.
         """
-        entities = self._fetch_entity_registry()
+        entities = self.fetch_entity_registry()
         return {
             "inverter": self.detect_inverter_integrations(entities),
             "price": self.detect_price_integrations(entities),
@@ -2150,8 +2150,8 @@ class HomeAssistantAPIController:
 
     def discover_sensors_from_registry(
         self, entities: list[dict] | None = None
-    ) -> tuple[dict[str, str], str | None]:
-        """Discover inverter sensor entity IDs via the HA entity registry.
+    ) -> tuple[dict[str, dict[str, str]], str | None]:
+        """Discover sensor entity IDs for all detected inverter platforms.
 
         Uses the ``platform`` field to identify integration entities, then maps
         entity ID suffixes to BESS sensor keys via the suffix maps.  This is
@@ -2162,30 +2162,37 @@ class HomeAssistantAPIController:
             entities: Pre-fetched entity registry list, or None to fetch.
 
         Returns:
-            Tuple of (sensor_map, detected_platform) where sensor_map is
-            bess_sensor_key -> entity_id and detected_platform is
-            ``"growatt"``, ``"solax"``, or None.
+            Tuple of (platform_sensors, detected_platform) where
+            platform_sensors maps platform name to its sensor dict
+            (e.g. ``{"growatt": {bess_key: entity_id, ...}, "solax": {...}}``)
+            and detected_platform is ``"growatt"``, ``"solax"``, or None.
+            Growatt takes priority when both are present.
         """
         if entities is None:
-            entities = self._fetch_entity_registry()
+            entities = self.fetch_entity_registry()
 
         inverter_detected = self.detect_inverter_integrations(entities)
+        platform_sensors: dict[str, dict[str, str]] = {}
+        detected_platform: str | None = None
 
-        # Growatt takes priority when both are present
         if inverter_detected.get("growatt"):
-            return self._map_registry_entities(
+            platform_sensors["growatt"] = self._map_registry_entities(
                 entities,
                 ["growatt_server"],
                 self.ENTITY_SUFFIX_MAP,
-            ), "growatt"
+            )
+            detected_platform = "growatt"
+
         if inverter_detected.get("solax"):
-            return self._map_registry_entities(
+            platform_sensors["solax"] = self._map_registry_entities(
                 entities,
                 ["solax_modbus", "solax"],
                 self.SOLAX_ENTITY_SUFFIX_MAP,
-            ), "solax"
+            )
+            if not detected_platform:
+                detected_platform = "solax"
 
-        return {}, None
+        return platform_sensors, detected_platform
 
     def _map_registry_entities(
         self,

@@ -8,8 +8,8 @@ import logging
 import os
 import statistics
 import traceback
-from datetime import date, timedelta
-from typing import Any
+from datetime import date, datetime, timedelta
+from typing import Any, ClassVar
 
 from . import time_utils
 from .daily_view_builder import DailyView, DailyViewBuilder
@@ -163,20 +163,80 @@ class BatterySystemManager:
             raise RuntimeError("Controller not initialized - system not started")
         return self._controller
 
+    VALID_PLATFORMS: ClassVar[set[str]] = {"growatt_min", "growatt_sph", "solax"}
+
+    _INVERTER_TYPE_TO_PLATFORM: ClassVar[dict[str, str]] = {
+        "MIN": "growatt_min",
+        "SPH": "growatt_sph",
+        "SOLAX": "solax",
+    }
+
     def _create_inverter_controller(self) -> InverterController:
         """Create an inverter controller instance matching the configured inverter type."""
-        self.inverter_platform = self._addon_options.get("inverter", {}).get(
-            "platform"
-        ) or (
-            "growatt_sph"
-            if self._addon_options.get("growatt", {}).get("inverter_type") == "SPH"
-            else "growatt_min"
+        inverter_section = self._addon_options.get("inverter", {})
+        platform = inverter_section.get("platform")
+
+        if not platform:
+            # Resolve from legacy growatt.inverter_type
+            inverter_type = self._addon_options.get("growatt", {}).get(
+                "inverter_type", "MIN"
+            )
+            assert inverter_type in self._INVERTER_TYPE_TO_PLATFORM, (
+                f"Unknown inverter_type '{inverter_type}', "
+                f"expected one of {list(self._INVERTER_TYPE_TO_PLATFORM)}"
+            )
+            platform = self._INVERTER_TYPE_TO_PLATFORM[inverter_type]
+
+        assert platform in self.VALID_PLATFORMS, (
+            f"Unknown inverter platform '{platform}', "
+            f"expected one of {sorted(self.VALID_PLATFORMS)}"
         )
+
+        self.inverter_platform = platform
+
         if self.inverter_platform == "growatt_sph":
             return GrowattSphController(battery_settings=self.battery_settings)
         if self.inverter_platform == "solax":
             return SolaxController(battery_settings=self.battery_settings)
         return GrowattMinController(battery_settings=self.battery_settings)
+
+    def switch_inverter_platform(self, platform: str) -> None:
+        """Switch the inverter controller to a different platform at runtime.
+
+        Called when the user changes the inverter platform in Settings.
+        Recreates the inverter controller if the platform actually changed.
+
+        Args:
+            platform: Target platform string ("growatt_min", "growatt_sph", or "solax")
+
+        Raises:
+            SystemConfigurationError: If platform is not a recognised value.
+        """
+        if platform not in self.VALID_PLATFORMS:
+            raise SystemConfigurationError(
+                message=f"Unknown inverter platform '{platform}', "
+                f"expected one of {sorted(self.VALID_PLATFORMS)}"
+            )
+
+        if platform == self.inverter_platform:
+            return
+
+        logger.info(
+            "Switching inverter platform: %s → %s",
+            self.inverter_platform,
+            platform,
+        )
+
+        # Update the options so _create_inverter_controller reads the new value
+        if "inverter" not in self._addon_options:
+            self._addon_options["inverter"] = {}
+        self._addon_options["inverter"]["platform"] = platform
+
+        self._inverter_controller = self._create_inverter_controller()
+        logger.info(
+            "Inverter controller recreated: %s",
+            type(self._inverter_controller).__name__,
+        )
 
     def _create_price_source(self, controller) -> PriceSource:
         """Create the appropriate price source based on energy_provider config.

@@ -27,15 +27,36 @@ logger = logging.getLogger(__name__)
 
 
 class MockHomeAssistantController(HomeAssistantAPIController):
+    """Mock Home Assistant controller for testing."""
+
     def _resolve_entity_id(self, sensor_key: str):
         """Mock entity ID resolution: returns a dummy entity_id for any sensor_key."""
         # For testing, just return 'sensor.' + sensor_key (simulate real entity IDs)
         return f"sensor.{sensor_key}", "mock"
 
-    """Mock Home Assistant controller for testing."""
+    def validate_methods_sensors(self, method_list: list) -> list:
+        """Return 'ok' status for all methods without making HTTP calls."""
+        results = []
+        for method_name in method_list:
+            method_info = self.METHOD_SENSOR_MAP.get(method_name, {})
+            results.append(
+                {
+                    "method_name": method_name,
+                    "name": method_info.get("name", method_name),
+                    "sensor_key": method_info.get("sensor_key", method_name),
+                    "entity_id": f"sensor.{method_info.get('sensor_key', method_name)}",
+                    "status": "ok",
+                    "error": None,
+                    "current_value": "0",
+                    "resolution_method": "mock",
+                }
+            )
+        return results
 
     def __init__(self) -> None:
         """Initialize with default settings."""
+        self.failure_tracker = None
+        self.growatt_device_id = None
         self.sensors: dict[str, str] = {}
         self.settings = {
             "grid_charge": False,
@@ -69,12 +90,30 @@ class MockHomeAssistantController(HomeAssistantAPIController):
         self.solar_forecast = [0.0] * 96
         self.solar_forecast_tomorrow = [0.0] * 96
 
+        # SolaX VPP entity mappings (needed for entity resolution)
+        self.sensors.update(
+            {
+                "solax_power_control_mode": "select.solax_remotecontrol_power_control",
+                "solax_active_power": "number.solax_remotecontrol_active_power",
+                "solax_autorepeat_duration": "number.solax_remotecontrol_autorepeat_duration",
+                "solax_power_control_trigger": "button.solax_remotecontrol_trigger",
+                "solax_battery_min_soc": "number.solax_battery_minimum_capacity",
+            }
+        )
+
         # Call tracking for integration tests
         self.calls = {
             "grid_charge": [],
             "discharge_rate": [],
             "charge_rate": [],
             "tou_segments": [],
+            # SPH
+            "ac_charge_times": [],
+            "ac_discharge_times": [],
+            # SolaX
+            "vpp_calls": [],
+            "vpp_disabled": [],
+            "min_soc": [],
         }
 
     # Required methods for Home Assistant Controller interface
@@ -148,6 +187,18 @@ class MockHomeAssistantController(HomeAssistantAPIController):
         """Get charging power rate setting."""
         return self.settings["charging_power_rate"]
 
+    def get_discharging_power_rate(self):
+        """Get discharging power rate setting."""
+        return self.settings["discharge_rate"]
+
+    def set_charge_stop_soc(self, soc):
+        """Set charge stop SOC."""
+        self.settings["charge_stop_soc"] = soc
+
+    def set_discharge_stop_soc(self, soc):
+        """Set discharge stop SOC."""
+        self.settings["discharge_stop_soc"] = soc
+
     def is_test_mode(self):
         """Check if test mode is enabled."""
         return self.settings["test_mode"]
@@ -187,6 +238,75 @@ class MockHomeAssistantController(HomeAssistantAPIController):
     def read_inverter_time_segments(self):
         """Read current TOU segments from inverter."""
         return []
+
+    # SPH methods (used by GrowattSphController)
+
+    def write_ac_charge_times(
+        self,
+        charge_power: int,
+        charge_stop_soc: int,
+        mains_enabled: bool,
+        **period_params: str | bool,
+    ) -> None:
+        """Record AC charge time write."""
+        self.calls["ac_charge_times"].append(
+            {
+                "charge_power": charge_power,
+                "charge_stop_soc": charge_stop_soc,
+                "mains_enabled": mains_enabled,
+                **period_params,
+            }
+        )
+
+    def read_ac_charge_times(self) -> dict:
+        """Read current AC charge time periods."""
+        return {
+            "charge_power": 100,
+            "charge_stop_soc": 100,
+            "mains_enabled": False,
+            "periods": [],
+        }
+
+    def write_ac_discharge_times(
+        self,
+        discharge_power: int,
+        discharge_stop_soc: int,
+        **period_params: str | bool,
+    ) -> None:
+        """Record AC discharge time write."""
+        self.calls["ac_discharge_times"].append(
+            {
+                "discharge_power": discharge_power,
+                "discharge_stop_soc": discharge_stop_soc,
+                **period_params,
+            }
+        )
+
+    def read_ac_discharge_times(self) -> dict:
+        """Read current AC discharge time periods."""
+        return {
+            "discharge_power": 100,
+            "discharge_stop_soc": 10,
+            "periods": [],
+        }
+
+    # SolaX methods (used by SolaxController)
+
+    def set_solax_active_power_control(self, watts: int) -> None:
+        """Record VPP active power control command."""
+        self.calls["vpp_calls"].append(watts)
+
+    def set_solax_vpp_disabled(self) -> None:
+        """Record VPP disable command."""
+        self.calls["vpp_disabled"].append(True)
+
+    def set_solax_min_soc(self, min_soc: int) -> None:
+        """Record SolaX min SOC write."""
+        self.calls["min_soc"].append(min_soc)
+
+    def get_solax_power_control_mode(self) -> str | None:
+        """Return mock power control mode."""
+        return "Self Use Mode"
 
 
 class MockSensorCollector:
@@ -581,6 +701,31 @@ def battery_system_with_arbitrage(mock_controller, arbitrage_prices, monkeypatch
 
     system = BatterySystemManager(controller=mock_controller, price_source=price_source)
 
+    return system
+
+
+@pytest.fixture(params=["growatt_min", "growatt_sph", "solax"])
+def platform_system(request, mock_controller, arbitrage_prices, monkeypatch):
+    """Create BatterySystemManager parametrized across all inverter platforms.
+
+    Each test using this fixture runs 3 times — once per platform.
+    Uses the production code path via addon_options["inverter"]["platform"].
+    """
+    from core.bess.price_manager import MockSource
+
+    monkeypatch.setattr(
+        "core.bess.sensor_collector.SensorCollector", MockSensorCollector
+    )
+
+    platform = request.param
+    price_source = MockSource(arbitrage_prices)
+    addon_options = {"inverter": {"platform": platform}}
+
+    system = BatterySystemManager(
+        controller=mock_controller,
+        price_source=price_source,
+        addon_options=addon_options,
+    )
     return system
 
 

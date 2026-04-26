@@ -112,8 +112,10 @@ class BatterySystemManager:
             self.battery_settings,
         )
 
-        # Initialize hardware interface with battery settings
-        self._inverter_controller: InverterController = (
+        # Initialize hardware interface with battery settings.
+        # On a fresh install no inverter platform is configured yet — the
+        # controller stays None until the user completes the setup wizard.
+        self._inverter_controller: InverterController | None = (
             self._create_inverter_controller()
         )
 
@@ -157,6 +159,11 @@ class BatterySystemManager:
         logger.debug("BatterySystemManager initialized")
 
     @property
+    def is_configured(self) -> bool:
+        """True when the system has a valid inverter platform and can operate."""
+        return self._inverter_controller is not None
+
+    @property
     def controller(self) -> HomeAssistantAPIController:
         """Get the Home Assistant controller."""
         if self._controller is None:
@@ -171,16 +178,29 @@ class BatterySystemManager:
         "SOLAX": "solax",
     }
 
-    def _create_inverter_controller(self) -> InverterController:
-        """Create an inverter controller instance matching the configured inverter type."""
+    def _create_inverter_controller(self) -> InverterController | None:
+        """Create an inverter controller instance matching the configured inverter type.
+
+        Returns None on a fresh install where no inverter platform has been
+        configured yet.  The controller is created later when the user completes
+        the setup wizard and calls ``switch_inverter_platform()``.
+        """
         inverter_section = self._addon_options.get("inverter", {})
         platform = inverter_section.get("platform")
 
         if not platform:
             # Resolve from legacy growatt.inverter_type
             inverter_type = self._addon_options.get("growatt", {}).get(
-                "inverter_type", "MIN"
+                "inverter_type", ""
             )
+            if not inverter_type:
+                # Fresh install — no inverter configured yet
+                logger.info(
+                    "No inverter platform configured — "
+                    "system will start in unconfigured mode"
+                )
+                self.inverter_platform = None
+                return None
             assert inverter_type in self._INVERTER_TYPE_TO_PLATFORM, (
                 f"Unknown inverter_type '{inverter_type}', "
                 f"expected one of {list(self._INVERTER_TYPE_TO_PLATFORM)}"
@@ -311,7 +331,20 @@ class BatterySystemManager:
             )
 
     def start(self) -> None:
-        """Start the system - preserves original functionality."""
+        """Start the system - preserves original functionality.
+
+        On a fresh install where no inverter is configured the system starts
+        in an unconfigured state.  The web UI is still reachable so the user
+        can complete the setup wizard, which will call
+        ``switch_inverter_platform()`` to finish initialization.
+        """
+        if not self.is_configured:
+            logger.info(
+                "System is unconfigured — skipping hardware initialization. "
+                "Complete the setup wizard to begin operation."
+            )
+            return
+
         try:
             if self._controller:
                 # Initialize power monitor only when feature is enabled
@@ -361,7 +394,12 @@ class BatterySystemManager:
     def update_battery_schedule(
         self, current_period: int, prepare_next_day: bool = False
     ) -> bool:
-        """Main schedule update method for quarterly resolution"""
+        """Main schedule update method for quarterly resolution."""
+        if not self.is_configured:
+            logger.warning(
+                "update_battery_schedule called on unconfigured system — skipping"
+            )
+            return False
 
         # Input validation (no upper bound due to DST transitions)
         if current_period < 0:
@@ -502,6 +540,8 @@ class BatterySystemManager:
 
     def log_battery_schedule(self, current_period: int) -> None:
         """Log the current battery schedule."""
+        if not self.is_configured:
+            return
         if not self._current_schedule:
             logger.warning("No current schedule available for reporting")
             return
@@ -2174,7 +2214,16 @@ class BatterySystemManager:
         return self.daily_view_builder.build_daily_view(current_period)
 
     def adjust_charging_power(self) -> None:
-        """Adjust charging power based on house consumption."""
+        """Adjust charging power based on house consumption.
+
+        SolaX inverters control power via VPP commands, not charge rate registers,
+        so this method is a no-op for SolaX platforms.
+        """
+        if not self.is_configured:
+            return
+        if self.inverter_platform == "solax":
+            return
+
         try:
             # Get current hour settings to ensure power monitor uses the correct target
             current_hour = time_utils.now().hour
@@ -2200,6 +2249,8 @@ class BatterySystemManager:
         state against the last applied discharge rate and writes to the inverter
         only when the state has actually changed, avoiding unnecessary Modbus writes.
         """
+        if not self.is_configured:
+            return
         inhibit_active = self.controller.get_discharge_inhibit_active()
         target_rate = 0 if inhibit_active else self._desired_discharge_rate
 

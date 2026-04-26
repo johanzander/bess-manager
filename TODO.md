@@ -408,6 +408,22 @@ This would make the profitability gate compare apples-to-apples with the dashboa
 
 ## 🔧 **TECHNICAL DEBT**
 
+### Move inverter-specific logic out of BatterySystemManager
+
+**Impact**: Low | **Effort**: Medium | **Dependencies**: `InverterController` base class
+
+**Description**: `BatterySystemManager` contains platform-specific checks like `if self.inverter_platform == "solax": return` in `adjust_charging_power()`. This logic belongs in the inverter controller layer — each controller should implement (or no-op) methods via the `InverterController` interface, so `BatterySystemManager` never branches on platform strings.
+
+**Examples**:
+
+- `adjust_charging_power()` — no-op for SolaX, active for Growatt
+- `grid_charge_enabled()` in `ha_api_controller.py` — not applicable to SolaX, logs a spurious WARNING
+
+**Files**: `core/bess/battery_system_manager.py`, `core/bess/inverter_controller.py`, `core/bess/solax_controller.py`, `core/bess/ha_api_controller.py`
+
+---
+
+
 ### Simplify Health Check Severity Model
 
 **Impact**: Low | **Effort**: Low-Medium | **Dependencies**: `health_check.py`, `power_monitor.py`, all callers of `perform_health_check()`

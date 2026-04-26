@@ -556,13 +556,18 @@ def sample_solar_data():
 
 
 # SYSTEM CONFIGURATION FIXTURES
+_DEFAULT_TEST_ADDON_OPTIONS: dict = {"inverter": {"platform": "growatt_min"}}
+
+
 @pytest.fixture
 def base_system(mock_controller):
     """Provide a clean system instance with mock controller."""
     from core.bess.price_manager import MockSource
 
     return BatterySystemManager(
-        controller=mock_controller, price_source=MockSource([1.0] * 96)
+        controller=mock_controller,
+        price_source=MockSource([1.0] * 96),
+        addon_options=_DEFAULT_TEST_ADDON_OPTIONS,
     )
 
 
@@ -681,7 +686,11 @@ def battery_system_integration(mock_controller, monkeypatch):
     price_source = MockSource([1.0] * 24)
 
     # Create system with real internal components
-    system = BatterySystemManager(controller=mock_controller, price_source=price_source)
+    system = BatterySystemManager(
+        controller=mock_controller,
+        price_source=price_source,
+        addon_options=_DEFAULT_TEST_ADDON_OPTIONS,
+    )
 
     return system
 
@@ -699,7 +708,11 @@ def battery_system_with_arbitrage(mock_controller, arbitrage_prices, monkeypatch
     # Use arbitrage prices
     price_source = MockSource(arbitrage_prices)
 
-    system = BatterySystemManager(controller=mock_controller, price_source=price_source)
+    system = BatterySystemManager(
+        controller=mock_controller,
+        price_source=price_source,
+        addon_options=_DEFAULT_TEST_ADDON_OPTIONS,
+    )
 
     return system
 
@@ -785,7 +798,11 @@ def quarterly_battery_system(mock_controller, quarterly_arbitrage_prices, monkey
     # Use quarterly prices (96 periods)
     price_source = MockSource(quarterly_arbitrage_prices)
 
-    system = BatterySystemManager(controller=mock_controller, price_source=price_source)
+    system = BatterySystemManager(
+        controller=mock_controller,
+        price_source=price_source,
+        addon_options=_DEFAULT_TEST_ADDON_OPTIONS,
+    )
 
     return system
 

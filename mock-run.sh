@@ -17,6 +17,18 @@
 
 set -euo pipefail
 
+# Derive a unique project name from the directory so multiple worktrees
+# can run side-by-side without container name conflicts.
+export COMPOSE_PROJECT_NAME="bess-mock-$(basename "$(pwd)")"
+
+# Derive stable ports from the directory name.  Uses a separate range
+# from dev-run.sh (8280-8379) so both can run simultaneously.
+if [ -z "${BESS_DEV_PORT:-}" ]; then
+  _hash=$(printf '%s' "$(basename "$(pwd)")" | cksum | awk '{print $1}')
+  export BESS_DEV_PORT=$(( 8280 + _hash % 100 ))
+fi
+export BESS_MOCK_HA_PORT="${BESS_MOCK_HA_PORT:-$(( BESS_DEV_PORT + 100 ))}"
+
 if [ $# -eq 0 ]; then
   echo "Usage: ./mock-run.sh <scenario> [HH:MM]"
   echo ""
@@ -141,19 +153,29 @@ docker-compose \
   -f docker-compose.mock.yml \
   up --build -d
 
-echo "Waiting for services to start..."
-sleep 5
-
-echo ""
-echo "==== Mock Environment Running ===="
-echo "  BESS UI:       http://localhost:8080"
-echo "  Service log:   http://localhost:8123/mock/service_log"
-echo "  Sensor state:  http://localhost:8123/mock/sensors"
-echo ""
-echo "Following logs... (Ctrl+C to stop)"
+echo "Waiting for BESS to start (following logs)..."
 echo ""
 
+# Reprint the banner on Ctrl+C so the user can find the URLs
+print_banner() {
+  echo ""
+  echo "========================================================"
+  echo "  BESS UI:       http://localhost:${BESS_DEV_PORT}"
+  echo "  Service log:   http://localhost:${BESS_MOCK_HA_PORT}/mock/service_log"
+  echo "  Sensor state:  http://localhost:${BESS_MOCK_HA_PORT}/mock/sensors"
+  echo "========================================================"
+  echo ""
+}
+trap 'print_banner; exit 0' INT
+
+# Stream logs; print the banner once BESS is fully started (Uvicorn ready).
+# After the banner, continue streaming logs normally.
 docker-compose \
   -f docker-compose.yml \
   -f docker-compose.mock.yml \
-  logs -f --no-log-prefix
+  logs -f --no-log-prefix 2>&1 | while IFS= read -r line; do
+    echo "$line"
+    if [[ "$line" == *"Uvicorn running on"* ]]; then
+      print_banner
+    fi
+  done

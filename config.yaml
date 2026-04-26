@@ -1,6 +1,6 @@
 name: "BESS Manager Beta"
 description: "Battery Energy Storage System optimization and management (beta channel)"
-version: "9.0.0b3"
+version: "9.0.0b4"
 slug: "bess_manager_beta"
 init: false
 arch:

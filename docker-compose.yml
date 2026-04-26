@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile.dev
-    container_name: bess-dev
+    container_name: ${COMPOSE_PROJECT_NAME:-bess}-dev
     volumes:
       - ./backend:/app/backend:delegated
       - ./core:/app/core:delegated
@@ -22,7 +22,7 @@ services:
       - PYTHONPATH=/app/backend:/app
       - WATCHFILES_FORCE_POLLING=true
     ports:
-      - "8080:8080"
+      - "${BESS_DEV_PORT:-8080}:8080"
     env_file:
       - .env
     command: sh -c "cd /app/backend && python3 watch.py"
@@ -38,7 +38,7 @@ services:
       - ./frontend:/app
       - /app/node_modules
     ports:
-      - "5174:5174"
+      - "${BESS_FRONTEND_PORT:-5174}:5174"
     environment:
       - TZ=${TZ:-UTC}
       - VITE_API_URL=http://bess-dev:8080

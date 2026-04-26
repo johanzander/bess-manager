@@ -774,7 +774,7 @@ class HomeAssistantAPIController:
                 resolution_method,
             )
         except ValueError:
-            logger.warning(
+            logger.debug(
                 "Could not get value for %s: sensor not configured", sensor_name
             )
             return None

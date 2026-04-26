@@ -4,6 +4,27 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.0.0b4] - 2026-04-26
+
+### Added
+
+- Fresh install support — system starts in unconfigured mode when no inverter platform is configured, serving the web UI and setup wizard without crashing.
+- Regression tests for fresh install startup scenarios (empty options, missing sections, unconfigured platform).
+- Docker multi-worktree support — unique container names and stable port derivation per worktree directory.
+
+### Fixed
+
+- Startup crash on fresh install (`AssertionError: Unknown inverter_type ''`) — `_create_inverter_controller()` now returns `None` gracefully.
+- SolaX spurious `Failed to adjust charging power` errors — `adjust_charging_power()` is now a no-op for SolaX (VPP controls power directly).
+- Noisy WARNING for unconfigured optional sensors (e.g. `lifetime_self_consumption` on SolaX) downgraded to DEBUG.
+- Default `additional_costs` updated to 0.773 SEK/kWh and `tax_reduction` to 0.1988 SEK/kWh matching E.ON example rates.
+- `dev-run.sh` and `mock-run.sh` now print the access URL after startup completes (after Uvicorn ready), not before logs flood the terminal.
+- Operational API endpoints return HTTP 503 (not 500) when system is unconfigured, guiding users to the setup wizard.
+
+### Changed
+
+- Scenario test data files now include explicit `price_data` so expected results are independent of global default changes.
+
 ## [9.0.0b3] - 2025-04-25
 
 ### Added

@@ -46,6 +46,25 @@ def _deep_merge(base: dict, updates: dict) -> dict:
     return result
 
 
+def _require_configured_system(bess_controller) -> None:
+    """Raise HTTP 503 if the BESS system has not been configured yet.
+
+    Call this at the top of any endpoint that requires a fully initialised
+    ``BatterySystemManager`` (inverter controller, scheduler, etc.).
+    The setup wizard endpoints intentionally skip this check so they remain
+    reachable on a fresh install.
+
+    Args:
+        bess_controller: The global BESSController instance (already imported
+            by the calling endpoint via ``from app import bess_controller``).
+    """
+    if not bess_controller.system.is_configured:
+        raise HTTPException(
+            status_code=503,
+            detail="System not configured. Complete the setup wizard first.",
+        )
+
+
 def _refresh_health(bess_controller) -> None:
     """Re-run the health check so the dashboard banner reflects the latest state.
 
@@ -425,6 +444,8 @@ async def get_dashboard_data(
     """
     from app import bess_controller
 
+    _require_configured_system(bess_controller)
+
     try:
         logger.debug(f"Starting dashboard data retrieval with resolution={resolution}")
 
@@ -773,6 +794,8 @@ async def get_decision_intelligence():
     Converts real HourlyData to exact mock format for frontend compatibility.
     """
     from app import bess_controller
+
+    _require_configured_system(bess_controller)
 
     try:
         # Get the daily view with real optimization data (same as dashboard)
@@ -1245,6 +1268,8 @@ async def get_inverter_status():
     """Get comprehensive real-time inverter status data."""
     from app import bess_controller
 
+    _require_configured_system(bess_controller)
+
     try:
         # Safety checks to avoid None references
         if bess_controller.system is None:
@@ -1308,6 +1333,8 @@ async def get_inverter_status():
 async def get_growatt_detailed_schedule():
     """Get detailed Growatt-specific schedule information with strategic intents."""
     from app import bess_controller
+
+    _require_configured_system(bess_controller)
 
     try:
         schedule_manager = bess_controller.system._inverter_controller
@@ -1544,6 +1571,8 @@ async def get_tou_settings():
     """Get current TOU (Time of Use) settings with strategic intent information."""
     from app import bess_controller
 
+    _require_configured_system(bess_controller)
+
     logger.info("/api/growatt/tou_settings")
 
     try:
@@ -1610,6 +1639,8 @@ async def get_strategic_intents():
     """Get strategic intent information for the current schedule."""
     from app import bess_controller
 
+    _require_configured_system(bess_controller)
+
     try:
         # Safety checks
         if bess_controller.system is None:
@@ -1669,8 +1700,9 @@ async def get_strategic_intents():
 @router.get("/api/system-health")
 async def get_system_health():
     """Get comprehensive system health including detailed sensor diagnostics."""
-
     from app import bess_controller
+
+    _require_configured_system(bess_controller)
 
     try:
         logger.debug("Starting system health check")
@@ -1702,8 +1734,9 @@ async def get_system_health():
 @router.get("/api/dashboard-health-summary")
 async def get_dashboard_health_summary():
     """Get lightweight health summary for dashboard alert banner - only critical issues."""
-
     from app import bess_controller
+
+    _require_configured_system(bess_controller)
 
     try:
         logger.debug("Starting dashboard health summary check")
@@ -1818,8 +1851,9 @@ async def get_historical_data_status():
     Returns information about missing historical data that may affect
     dashboard accuracy and optimization quality.
     """
-
     from app import bess_controller
+
+    _require_configured_system(bess_controller)
 
     try:
         # Get today's periods (quarterly resolution)
@@ -1864,6 +1898,8 @@ async def get_prediction_snapshots():
     """Get all prediction snapshots for today."""
     from app import bess_controller
 
+    _require_configured_system(bess_controller)
+
     try:
         snapshots = (
             bess_controller.system.prediction_snapshot_store.get_all_snapshots_today()
@@ -1895,6 +1931,8 @@ async def get_prediction_timeline():
     """Get timeline showing how predicted savings evolved throughout the day."""
     from app import bess_controller
 
+    _require_configured_system(bess_controller)
+
     try:
         snapshots = (
             bess_controller.system.prediction_snapshot_store.get_all_snapshots_today()
@@ -1923,6 +1961,8 @@ async def get_prediction_comparison(
 ):
     """Compare snapshot predictions vs what actually happened."""
     from app import bess_controller
+
+    _require_configured_system(bess_controller)
     from core.bess.prediction_analyzer import PredictionAnalyzer
 
     try:
@@ -1984,6 +2024,8 @@ async def compare_two_snapshots(
 ):
     """Compare two prediction snapshots to see how predictions evolved."""
     from app import bess_controller
+
+    _require_configured_system(bess_controller)
 
     try:
         # Get both snapshots
@@ -2236,6 +2278,8 @@ async def export_debug_data(compact: bool = True):
     from fastapi.responses import PlainTextResponse
 
     from app import bess_controller
+
+    _require_configured_system(bess_controller)
     from core.bess.debug_data_exporter import DebugDataAggregator
     from core.bess.debug_report_formatter import DebugReportFormatter
 
@@ -2297,6 +2341,8 @@ async def get_runtime_failures():
     """
     from app import bess_controller
 
+    _require_configured_system(bess_controller)
+
     try:
         failures = bess_controller.system.get_runtime_failures()
         # Convert to dict format for API response
@@ -2320,6 +2366,8 @@ async def dismiss_runtime_failure(failure_id: str):
         dict: Success confirmation
     """
     from app import bess_controller
+
+    _require_configured_system(bess_controller)
 
     try:
         bess_controller.system.dismiss_runtime_failure(failure_id)
@@ -2345,6 +2393,8 @@ async def dismiss_all_runtime_failures():
     """
     from app import bess_controller
 
+    _require_configured_system(bess_controller)
+
     try:
         count = bess_controller.system.dismiss_all_runtime_failures()
         return {"success": True, "message": f"Dismissed {count} runtime failures"}
@@ -2368,11 +2418,13 @@ async def get_setup_status():
     sensors = bess_controller.ha_controller.sensors
     total = len(sensors)
     configured = sum(1 for v in sensors.values() if v)
+    system_configured = bess_controller.system.is_configured
     return convert_keys_to_camel_case(
         {
-            "wizard_needed": configured == 0,
+            "wizard_needed": configured == 0 or not system_configured,
             "configured_sensors": configured,
             "total_sensors": total,
+            "system_configured": system_configured,
         }
     )
 
@@ -2656,6 +2708,14 @@ async def setup_complete(payload: APISetupCompletePayload):
         # Persist all sections atomically
         bess_controller.settings_store.save_all(sections)
 
+        # Activate the inverter controller on the live system.  On a fresh
+        # install this is the first time a platform is set, transitioning the
+        # system from unconfigured → operational.
+        if "inverter" in sections:
+            bess_controller.system.switch_inverter_platform(
+                sections["inverter"]["platform"]
+            )
+
         # Apply settings to live system so BESS starts immediately
         # without requiring a restart.
         if payload.sensors:
@@ -2730,6 +2790,10 @@ async def setup_complete(payload: APISetupCompletePayload):
                 logger.warning("Could not build schedule after backfill: %s", sched_err)
 
         threading.Thread(target=_backfill_then_schedule, daemon=True).start()
+
+        # Start the periodic scheduler if this is a fresh install and the
+        # scheduler was deferred during BESSController.start().
+        bess_controller.start_scheduler()
 
         # Re-run health check so the dashboard banner reflects the new configuration
         # instead of the stale failures recorded at startup (before sensors were set).

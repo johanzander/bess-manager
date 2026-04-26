@@ -160,7 +160,7 @@ def generate_scenario(log_path: str) -> None:
             ps = log.price_settings
             markup_rate = ps.get("markup_rate", 0.08)
             vat_multiplier = ps.get("vat_multiplier", 1.25)
-            additional_costs = ps.get("additional_costs", 1.03)
+            additional_costs = ps.get("additional_costs", 0.773)
 
             def _to_raw(buy: float) -> float:
                 return (buy - additional_costs) / vat_multiplier - markup_rate

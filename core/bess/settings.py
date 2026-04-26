@@ -33,8 +33,8 @@ def _camel_to_snake(name: str) -> str:
 DEFAULT_AREA = "SE4"
 MARKUP_RATE = 0.08  # per kWh in configured currency
 VAT_MULTIPLIER = 1.25  # 25% VAT
-ADDITIONAL_COSTS = 1.03  # additional costs per kWh (grid fees, energy tax, etc.)
-TAX_REDUCTION = 0.0  # tax reduction for sold energy per kWh (Swedish skattereduktion removed Jan 1 2026)
+ADDITIONAL_COSTS = 0.773  # grid transfer + energy tax incl. VAT, e.g. E.ON: (0.2584 + 0.3600) × 1.25
+TAX_REDUCTION = 0.1988  # export compensation (Nätnytta) per kWh, e.g. E.ON: 0.1988 SEK/kWh
 MIN_PROFIT = 0.2  # Minimum profit per kWh to consider a charge/discharge cycle
 USE_ACTUAL_PRICE = False  # Use raw Nordpool spot prices or include markup, VAT, etc.
 

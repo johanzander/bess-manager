@@ -40,7 +40,11 @@ def _make_system(
     """Create a BatterySystemManager with mocked dependencies."""
     if controller is None:
         controller = MockHomeAssistantController()
-    system = BatterySystemManager(controller=controller, price_source=price_source)
+    system = BatterySystemManager(
+        controller=controller,
+        price_source=price_source,
+        addon_options={"inverter": {"platform": "growatt_min"}},
+    )
     return system
 
 

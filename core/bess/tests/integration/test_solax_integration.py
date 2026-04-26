@@ -48,11 +48,11 @@ def _make_bsm_solax(
     """Create a BatterySystemManager wired with a SolaxController."""
     controller = SolaxMockController()
     price_source = MockSource(prices or [1.0] * 96)
-    bsm = BatterySystemManager(controller=controller, price_source=price_source)
-
-    # Replace the default Growatt controller with SolaX
-    battery_settings = bsm._inverter_controller.battery_settings
-    bsm._inverter_controller = SolaxController(battery_settings=battery_settings)
+    bsm = BatterySystemManager(
+        controller=controller,
+        price_source=price_source,
+        addon_options={"inverter": {"platform": "solax"}},
+    )
 
     return bsm, controller
 

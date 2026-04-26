@@ -1168,15 +1168,19 @@ class GrowattScheduleManager:
                 }
             )
 
-        # DIAGNOSTIC: Validate intervals read from inverter (log only, no recovery here)
+        # Validate intervals read from inverter (log only, no recovery here).
+        # Disabled slots retain stale times from previous schedules, so the
+        # full set of 9 slots will typically not be in chronological order.
+        # This is expected — log at INFO level.
         logger.info("Validating TOU intervals read from inverter...")
         raw_intervals_valid = self.validate_tou_intervals_ordering(
-            self.tou_intervals, "read_from_inverter_raw"
+            self.tou_intervals, "read_from_inverter_raw", log_level=logging.INFO
         )
 
         if not raw_intervals_valid:
-            logger.warning(
-                "⚠️  TOU intervals from inverter are corrupted - will recover during next schedule update"
+            logger.info(
+                "TOU intervals from inverter are not in chronological order"
+                " - will rebuild on next schedule update"
             )
         else:
             logger.info(
@@ -1318,12 +1322,15 @@ class GrowattScheduleManager:
         mins = minutes % 60
         return f"{hours:02d}:{mins:02d}"
 
-    def validate_tou_intervals_ordering(self, intervals=None, source="unknown"):
-        """Validate that TOU intervals are in chronological order and log warnings if not.
+    def validate_tou_intervals_ordering(
+        self, intervals=None, source="unknown", log_level=logging.WARNING
+    ):
+        """Validate that TOU intervals are in chronological order and log issues if found.
 
         Args:
             intervals: List of intervals to validate (default: self.tou_intervals)
             source: Description of where intervals came from (for logging)
+            log_level: Logging level for issues (default: WARNING)
 
         Returns:
             bool: True if intervals are properly ordered, False if issues found
@@ -1393,41 +1400,39 @@ class GrowattScheduleManager:
 
         # Log results
         if issues_found:
-            logger.warning(
-                "⚠️  TOU INTERVALS ORDERING ISSUES DETECTED (%s) ⚠️", source.upper()
+            logger.log(
+                log_level,
+                "TOU intervals not in chronological order (%s) - %d issue(s)",
+                source.upper(),
+                len(issues_found),
             )
-            logger.warning("Issues found:")
             for issue in issues_found:
-                logger.warning(f"  - {issue}")
+                logger.log(log_level, "  - %s", issue)
 
-            logger.warning("Current intervals:")
+            logger.log(log_level, "Current intervals:")
             for interval in intervals:
                 enabled_status = (
                     "Active" if interval.get("enabled", True) else "Disabled"
                 )
-                logger.warning(
-                    f"  Segment #{interval.get('segment_id', '?')}: "
-                    f"{interval.get('start_time', '?')}-{interval.get('end_time', '?')} "
-                    f"{interval.get('batt_mode', '?')} {enabled_status}"
+                logger.log(
+                    log_level,
+                    "  Segment #%s: %s-%s %s %s",
+                    interval.get("segment_id", "?"),
+                    interval.get("start_time", "?"),
+                    interval.get("end_time", "?"),
+                    interval.get("batt_mode", "?"),
+                    enabled_status,
                 )
-
-            logger.warning(
-                "🔍 This indicates either a bug in our TOU generation logic or "
-                "an issue with the Growatt inverter TOU handling."
-            )
             return False
         else:
             logger.debug("✅ TOU intervals ordering validation passed (%s)", source)
             return True
 
     def log_current_TOU_schedule(self, header=None):
-        """Log the final simplified TOU settings with validation."""
+        """Log the current TOU schedule in a formatted table."""
         daily_settings = self.get_daily_TOU_settings()
         if not daily_settings:
             return
-
-        # Validate intervals before logging
-        self.validate_tou_intervals_ordering(daily_settings, "generated_schedule")
 
         if not header:
             header = " -= Growatt TOU Schedule =- "

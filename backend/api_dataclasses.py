@@ -84,6 +84,7 @@ class APIPredictionSnapshot:
     snapshotTimestamp: str  # ISO format
     optimizationPeriod: int
     predictedDailySavings: FormattedValue
+    totalExpectedSavings: FormattedValue  # Actuals + predicted remainder
     periodCount: int  # From daily_view
     actualCount: int  # From daily_view
     growattScheduleCount: int  # Number of TOU intervals
@@ -99,11 +100,20 @@ class APIPredictionSnapshot:
         Returns:
             APIPredictionSnapshot with camelCase fields
         """
+        # Compute total savings same way as dashboard: grid_only_cost - hourly_cost
+        total_savings = sum(
+            p.economic.grid_only_cost - p.economic.hourly_cost
+            for p in snapshot.daily_view.periods
+            if p.economic is not None
+        )
         return cls(
             snapshotTimestamp=snapshot.snapshot_timestamp.isoformat(),
             optimizationPeriod=snapshot.optimization_period,
             predictedDailySavings=create_formatted_value(
                 snapshot.predicted_daily_savings, "currency", currency
+            ),
+            totalExpectedSavings=create_formatted_value(
+                total_savings, "currency", currency
             ),
             periodCount=len(snapshot.daily_view.periods),
             actualCount=snapshot.daily_view.actual_count,
@@ -125,6 +135,12 @@ class APIPeriodDeviation:
     predictedSolar: FormattedValue
     actualSolar: FormattedValue
     solarDeviation: FormattedValue
+    predictedGridImport: FormattedValue
+    actualGridImport: FormattedValue
+    gridImportDeviation: FormattedValue
+    predictedGridExport: FormattedValue
+    actualGridExport: FormattedValue
+    gridExportDeviation: FormattedValue
     predictedSavings: FormattedValue
     actualSavings: FormattedValue
     savingsDeviation: FormattedValue
@@ -170,6 +186,24 @@ class APIPeriodDeviation:
             solarDeviation=create_formatted_value(
                 period_deviation.solar_deviation, "energy_kwh_only", currency
             ),
+            predictedGridImport=create_formatted_value(
+                period_deviation.predicted_grid_import, "energy_kwh_only", currency
+            ),
+            actualGridImport=create_formatted_value(
+                period_deviation.actual_grid_import, "energy_kwh_only", currency
+            ),
+            gridImportDeviation=create_formatted_value(
+                period_deviation.grid_import_deviation, "energy_kwh_only", currency
+            ),
+            predictedGridExport=create_formatted_value(
+                period_deviation.predicted_grid_export, "energy_kwh_only", currency
+            ),
+            actualGridExport=create_formatted_value(
+                period_deviation.actual_grid_export, "energy_kwh_only", currency
+            ),
+            gridExportDeviation=create_formatted_value(
+                period_deviation.grid_export_deviation, "energy_kwh_only", currency
+            ),
             predictedSavings=create_formatted_value(
                 period_deviation.predicted_savings, "currency", currency
             ),
@@ -195,6 +229,14 @@ class APISnapshotComparison:
     totalActualSavings: FormattedValue
     savingsDeviation: FormattedValue
     primaryDeviationCause: str
+    # Full-day savings breakdown at snapshot time (actuals + predicted = total)
+    snapshotTotalSavings: FormattedValue
+    snapshotActualSavings: FormattedValue
+    snapshotPredictedSavings: FormattedValue
+    # Full-day savings breakdown now (actuals + predicted = total)
+    currentTotalSavings: FormattedValue
+    currentActualSavings: FormattedValue
+    currentPredictedSavings: FormattedValue
     predictedGrowattSchedule: list[dict]  # TOU intervals from snapshot
     currentGrowattSchedule: list[dict]  # Current TOU intervals
 
@@ -227,6 +269,24 @@ class APISnapshotComparison:
                 snapshot_comparison.savings_deviation, "currency", currency
             ),
             primaryDeviationCause=snapshot_comparison.primary_deviation_cause,
+            snapshotTotalSavings=create_formatted_value(
+                snapshot_comparison.snapshot_total_savings, "currency", currency
+            ),
+            snapshotActualSavings=create_formatted_value(
+                snapshot_comparison.snapshot_actual_savings, "currency", currency
+            ),
+            snapshotPredictedSavings=create_formatted_value(
+                snapshot_comparison.snapshot_predicted_savings, "currency", currency
+            ),
+            currentTotalSavings=create_formatted_value(
+                snapshot_comparison.current_total_savings, "currency", currency
+            ),
+            currentActualSavings=create_formatted_value(
+                snapshot_comparison.current_actual_savings, "currency", currency
+            ),
+            currentPredictedSavings=create_formatted_value(
+                snapshot_comparison.current_predicted_savings, "currency", currency
+            ),
             predictedGrowattSchedule=snapshot_comparison.predicted_growatt_schedule,
             currentGrowattSchedule=snapshot_comparison.current_growatt_schedule,
         )

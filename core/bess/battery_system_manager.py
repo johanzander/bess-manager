@@ -3,13 +3,12 @@ Complete replacement for battery_system.py that preserves ALL functionality.
 
 """
 
-import dataclasses
 import json
 import logging
 import os
 import statistics
 import traceback
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from typing import Any
 
 from . import time_utils
@@ -31,7 +30,6 @@ from .models import (
     DecisionData,
     EconomicData,
     EconomicSummary,
-    EnergyData,
     PeriodData,
     infer_intent_from_flows,
 )
@@ -39,7 +37,7 @@ from .influxdb_helper import get_power_sensor_data_batch
 from .octopus_energy_source import OctopusEnergySource
 from .official_nordpool_source import OfficialNordpoolSource
 from .power_monitor import HomePowerMonitor
-from .prediction_snapshot import PredictionSnapshotStore
+from .prediction_snapshot import PredictionSnapshotStore, _period_data_from_dict
 from .price_manager import HomeAssistantSource, PriceManager, PriceSource
 from .runtime_failure_tracker import RuntimeFailureTracker
 from .schedule_store import ScheduleStore
@@ -498,36 +496,6 @@ class BatterySystemManager:
         except Exception as e:
             logger.error(f"Failed to read current inverter schedule: {e}")
 
-    @staticmethod
-    def _period_data_from_dict(d: dict) -> PeriodData:
-        """Deserialize a PeriodData from a dict produced by dataclasses.asdict()."""
-        energy_init_fields = {f.name for f in dataclasses.fields(EnergyData) if f.init}
-        energy = EnergyData(
-            **{k: v for k, v in d["energy"].items() if k in energy_init_fields}
-        )
-
-        economic_fields = {f.name for f in dataclasses.fields(EconomicData) if f.init}
-        economic = EconomicData(
-            **{k: v for k, v in d["economic"].items() if k in economic_fields}
-        )
-
-        decision_fields = {f.name for f in dataclasses.fields(DecisionData) if f.init}
-        decision = DecisionData(
-            **{k: v for k, v in d["decision"].items() if k in decision_fields}
-        )
-
-        ts_raw = d["timestamp"]
-        ts = datetime.fromisoformat(ts_raw) if ts_raw else None
-
-        return PeriodData(
-            period=d["period"],
-            energy=energy,
-            timestamp=ts,
-            data_source=d["data_source"],
-            economic=economic,
-            decision=decision,
-        )
-
     def _load_historical_seed(self, current_period: int) -> bool:
         """Seed the historical store from BESS_HISTORICAL_SEED_FILE if set.
 
@@ -549,7 +517,7 @@ class BatterySystemManager:
             if entry is None:
                 continue
             try:
-                period_data = self._period_data_from_dict(entry)
+                period_data = _period_data_from_dict(entry)
                 if period_data.period < current_period:
                     self.historical_store.record_period(period_data.period, period_data)
                     loaded += 1

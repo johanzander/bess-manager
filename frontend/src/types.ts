@@ -166,6 +166,7 @@ export interface PredictionSnapshot {
   snapshotTimestamp: string;
   optimizationPeriod: number;
   predictedDailySavings: FormattedValue;
+  totalExpectedSavings: FormattedValue;
   periodCount: number;
   actualCount: number;
   growattScheduleCount: number;
@@ -182,6 +183,12 @@ export interface PeriodDeviation {
   predictedSolar: FormattedValue;
   actualSolar: FormattedValue;
   solarDeviation: FormattedValue;
+  predictedGridImport: FormattedValue;
+  actualGridImport: FormattedValue;
+  gridImportDeviation: FormattedValue;
+  predictedGridExport: FormattedValue;
+  actualGridExport: FormattedValue;
+  gridExportDeviation: FormattedValue;
   predictedSavings: FormattedValue;
   actualSavings: FormattedValue;
   savingsDeviation: FormattedValue;
@@ -197,6 +204,14 @@ export interface SnapshotComparison {
   totalActualSavings: FormattedValue;
   savingsDeviation: FormattedValue;
   primaryDeviationCause: string;
+  // Full-day savings breakdown at snapshot time (actuals + predicted = total)
+  snapshotTotalSavings: FormattedValue;
+  snapshotActualSavings: FormattedValue;
+  snapshotPredictedSavings: FormattedValue;
+  // Full-day savings breakdown now (actuals + predicted = total)
+  currentTotalSavings: FormattedValue;
+  currentActualSavings: FormattedValue;
+  currentPredictedSavings: FormattedValue;
   predictedGrowattSchedule: any[];
   currentGrowattSchedule: any[];
 }

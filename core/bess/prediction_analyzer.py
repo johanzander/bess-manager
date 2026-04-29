@@ -23,18 +23,24 @@ class PeriodDeviation:
     predicted_battery_action: float  # kWh (charge - discharge)
     predicted_consumption: float  # kWh
     predicted_solar: float  # kWh
+    predicted_grid_import: float  # kWh
+    predicted_grid_export: float  # kWh
     predicted_savings: float  # in configured currency
 
     # Actual values (from current DailyView)
     actual_battery_action: float  # kWh
     actual_consumption: float  # kWh
     actual_solar: float  # kWh
+    actual_grid_import: float  # kWh
+    actual_grid_export: float  # kWh
     actual_savings: float  # in configured currency
 
     # Deviations (actual - predicted)
     battery_action_deviation: float  # kWh
     consumption_deviation: float  # kWh
     solar_deviation: float  # kWh
+    grid_import_deviation: float  # kWh
+    grid_export_deviation: float  # kWh
     savings_deviation: float  # in configured currency
 
     deviation_type: str  # "CONSUMPTION_HIGHER", "SOLAR_LOWER", etc.
@@ -48,12 +54,22 @@ class SnapshotComparison:
     current_daily_view: DailyView
     period_deviations: list[PeriodDeviation]
 
-    # Aggregate metrics
+    # Aggregate metrics (comparison window only: snapshot_period to current actual_count)
     total_predicted_savings: float  # in configured currency
     total_actual_savings: float  # in configured currency
     savings_deviation: float  # in configured currency
 
     primary_deviation_cause: str  # "consumption", "solar", "battery_control"
+
+    # Full-day savings breakdown at snapshot time (actuals + predicted = total)
+    snapshot_total_savings: float
+    snapshot_actual_savings: float
+    snapshot_predicted_savings: float
+
+    # Full-day savings breakdown now (actuals + predicted = total)
+    current_total_savings: float
+    current_actual_savings: float
+    current_predicted_savings: float
 
     # Schedule comparison
     predicted_growatt_schedule: list[dict]  # TOU intervals from snapshot
@@ -113,18 +129,24 @@ class PredictionAnalyzer:
             predicted_battery_action = self._calculate_battery_action(snapshot_period)
             predicted_consumption = snapshot_period.energy.home_consumption
             predicted_solar = snapshot_period.energy.solar_production
+            predicted_grid_import = snapshot_period.energy.grid_imported
+            predicted_grid_export = snapshot_period.energy.grid_exported
             predicted_savings = snapshot_period.economic.hourly_savings
 
             # Extract actual values (what actually happened)
             actual_battery_action = self._calculate_battery_action(current_period)
             actual_consumption = current_period.energy.home_consumption
             actual_solar = current_period.energy.solar_production
+            actual_grid_import = current_period.energy.grid_imported
+            actual_grid_export = current_period.energy.grid_exported
             actual_savings = current_period.economic.hourly_savings
 
             # Calculate deviations
             battery_dev = actual_battery_action - predicted_battery_action
             consumption_dev = actual_consumption - predicted_consumption
             solar_dev = actual_solar - predicted_solar
+            grid_import_dev = actual_grid_import - predicted_grid_import
+            grid_export_dev = actual_grid_export - predicted_grid_export
             savings_dev = actual_savings - predicted_savings
 
             # Classify deviation type based on magnitude
@@ -138,14 +160,20 @@ class PredictionAnalyzer:
                     predicted_battery_action=predicted_battery_action,
                     predicted_consumption=predicted_consumption,
                     predicted_solar=predicted_solar,
+                    predicted_grid_import=predicted_grid_import,
+                    predicted_grid_export=predicted_grid_export,
                     predicted_savings=predicted_savings,
                     actual_battery_action=actual_battery_action,
                     actual_consumption=actual_consumption,
                     actual_solar=actual_solar,
+                    actual_grid_import=actual_grid_import,
+                    actual_grid_export=actual_grid_export,
                     actual_savings=actual_savings,
                     battery_action_deviation=battery_dev,
                     consumption_deviation=consumption_dev,
                     solar_deviation=solar_dev,
+                    grid_import_deviation=grid_import_dev,
+                    grid_export_deviation=grid_export_dev,
                     savings_deviation=savings_dev,
                     deviation_type=deviation_type,
                 )
@@ -167,6 +195,31 @@ class PredictionAnalyzer:
 
         savings_deviation = total_actual_savings - total_predicted_savings
 
+        # Full-day savings breakdown at snapshot time
+        # Use grid_only_cost - hourly_cost to match dashboard total savings definition
+        snapshot_actual_savings = sum(
+            p.economic.grid_only_cost - p.economic.hourly_cost
+            for p in snapshot.daily_view.periods
+            if p.data_source == "actual" and p.economic is not None
+        )
+        snapshot_predicted_savings = sum(
+            p.economic.grid_only_cost - p.economic.hourly_cost
+            for p in snapshot.daily_view.periods
+            if p.data_source == "predicted" and p.economic is not None
+        )
+
+        # Full-day savings breakdown now
+        current_actual_savings = sum(
+            p.economic.grid_only_cost - p.economic.hourly_cost
+            for p in current_daily_view.periods
+            if p.data_source == "actual" and p.economic is not None
+        )
+        current_predicted_savings = sum(
+            p.economic.grid_only_cost - p.economic.hourly_cost
+            for p in current_daily_view.periods
+            if p.data_source == "predicted" and p.economic is not None
+        )
+
         logger.info(
             "Snapshot comparison: predicted %.2f, actual %.2f, deviation %.2f (%s)",
             total_predicted_savings,
@@ -183,6 +236,12 @@ class PredictionAnalyzer:
             total_actual_savings=total_actual_savings,
             savings_deviation=savings_deviation,
             primary_deviation_cause=primary_cause,
+            snapshot_total_savings=snapshot_actual_savings + snapshot_predicted_savings,
+            snapshot_actual_savings=snapshot_actual_savings,
+            snapshot_predicted_savings=snapshot_predicted_savings,
+            current_total_savings=current_actual_savings + current_predicted_savings,
+            current_actual_savings=current_actual_savings,
+            current_predicted_savings=current_predicted_savings,
             predicted_growatt_schedule=snapshot.growatt_schedule,
             current_growatt_schedule=current_growatt_schedule,
         )

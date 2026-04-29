@@ -4,6 +4,12 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [8.4.1] - 2026-04-29
+
+### Fixed
+
+- Stale TOU segments left on inverter causing uncontrolled grid export after 24h+ uptime. Past TOU intervals were not cleaned up from hardware when the schedule transitioned to no future intervals. (thanks [@ehrw](https://github.com/ehrw))
+
 ## [8.4.0] - 2026-04-29
 
 ### Added

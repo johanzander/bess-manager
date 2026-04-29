@@ -171,9 +171,9 @@ class GrowattScheduleManager:
         self.current_schedule = None
         self.detailed_intervals = []  # For overview display
         self.tou_intervals = []  # For actual TOU settings
-        self.active_tou_intervals: list[
-            dict
-        ] = []  # Subset of tou_intervals written to hardware (max 9)
+        self.active_tou_intervals: list[dict] = (
+            []
+        )  # Subset of tou_intervals written to hardware (max 9)
         self.current_hour = 0  # Track current hour (0-23) for TOU schedule boundaries
         self.hourly_settings = {}  # Pre-calculated settings for each hour (0-23)
         self.strategic_intents = []  # Store strategic intents from DP algorithm
@@ -629,9 +629,7 @@ class GrowattScheduleManager:
             else:
                 needs_slot.append(segment)
 
-        free_slots = sorted(
-            set(range(1, self.max_intervals + 1)) - occupied_slots
-        )
+        free_slots = sorted(set(range(1, self.max_intervals + 1)) - occupied_slots)
         if len(needs_slot) > len(free_slots):
             # active_tou_intervals is capped at max_intervals, so this should
             # never trigger. Surfacing it rather than silently skipping keeps
@@ -1086,6 +1084,32 @@ class GrowattScheduleManager:
             end_minute = interval_end_minute(interval)
             if end_minute >= from_minute and interval.get("enabled", True):
                 relevant_new.append(interval)
+
+        # Detect stale hardware segments: current schedule has past TOU intervals
+        # that were deployed to hardware but have now expired. These must be
+        # explicitly disabled on the inverter; the Growatt treats TOU segments as
+        # daily-recurring time slots, so a stale segment will re-activate the
+        # next day at the same time, causing uncontrolled discharge/export.
+        past_enabled_current = [
+            i
+            for i in current_tou
+            if i.get("enabled", True) and interval_end_minute(i) < from_minute
+        ]
+        if past_enabled_current and not relevant_current and not relevant_new:
+            past_summary = ", ".join(
+                f"{i['start_time']}-{i['end_time']} {i['batt_mode']}"
+                for i in past_enabled_current
+            )
+            logger.info(
+                "DECISION: Schedules differ - %d past TOU interval(s) still on "
+                "hardware need cleanup: %s",
+                len(past_enabled_current),
+                past_summary,
+            )
+            return (
+                True,
+                f"Stale hardware cleanup ({len(past_enabled_current)} past intervals)",
+            )
 
         logger.info(
             f"Relevant intervals: Current={len(relevant_current)}, New={len(relevant_new)}"

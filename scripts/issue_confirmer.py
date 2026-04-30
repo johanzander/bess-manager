@@ -332,7 +332,8 @@ def main() -> None:
         "- Do NOT claim a bug is confirmed based on grep output or log entries alone.",
         "- If you cannot read the relevant code (file not found, etc.), verdict = cannot_confirm.",
         "- Be conservative: if you are unsure, prefer cannot_confirm over confirmed_bug.",
-        "- End your investigation by calling report_verdict exactly once.",
+        "- You MUST finish by calling report_verdict. Do NOT stop without calling it.",
+        "- If you feel done but haven't called report_verdict, call it immediately.",
     ]
     if rules_md:
         system_parts.append(f"\n<hard_constraints>\n{rules_md}\n</hard_constraints>")
@@ -371,7 +372,8 @@ def main() -> None:
     verdict: dict | None = None
 
     print("Starting agentic confirmation loop...")
-    for iteration in range(25):
+    nudge_count = 0
+    for _iteration in range(30):
         response = client.messages.create(
             model="claude-opus-4-6",
             max_tokens=8192,
@@ -382,10 +384,30 @@ def main() -> None:
         messages.append({"role": "assistant", "content": response.content})
 
         if response.stop_reason == "end_turn":
+            if verdict is not None:
+                break
+            # Model stopped without calling report_verdict — nudge it to conclude.
+            nudge_count += 1
+            if nudge_count > 3:
+                print(
+                    "WARNING: agent kept stopping without report_verdict after 3 nudges."
+                )
+                break
             print(
-                f"Agent finished after {iteration + 1} iterations (no report_verdict called)."
+                f"  Agent stopped without report_verdict (nudge {nudge_count}/3) — reminding it."
             )
-            break
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "You have not yet called report_verdict. "
+                        "You MUST call report_verdict now to conclude your investigation. "
+                        "If you are uncertain, use verdict='cannot_confirm' with your best explanation "
+                        "of what you found and what remains unclear."
+                    ),
+                }
+            )
+            continue
 
         if response.stop_reason == "tool_use":
             tool_results = []

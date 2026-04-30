@@ -14,8 +14,10 @@ CLI usage (from within the repo directory):
 import argparse
 import os
 import re
+import smtplib
 import subprocess
 import sys
+from email.mime.text import MIMEText
 from pathlib import Path
 
 import anthropic
@@ -114,6 +116,16 @@ TOOLS = [
             "required": [],
         },
     },
+    {
+        "name": "run_lint",
+        "description": (
+            "Run black (formatter) and ruff (linter) on the repository. "
+            "black auto-fixes formatting; ruff --fix auto-fixes safe issues. "
+            "Call this after run_tests passes. If ruff reports remaining errors, "
+            "read the output and fix them manually."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
 ]
 
 
@@ -193,13 +205,51 @@ def handle_tool(name: str, inputs: dict, repo_root: str, written_files: dict) ->
             cmd, cwd=repo_root, capture_output=True, text=True, timeout=120
         )
         output = result.stdout + result.stderr
-        # Cap output to avoid flooding context
         if len(output) > 6000:
             output = output[-6000:] + "\n... (truncated, showing last 6000 chars)"
         status = "PASSED" if result.returncode == 0 else "FAILED"
         return f"Tests {status} (exit code {result.returncode}):\n\n{output}"
 
+    if name == "run_lint":
+        return _run_lint(repo_root)
+
     return f"ERROR: unknown tool: {name}"
+
+
+def _run_lint(repo_root: str) -> str:
+    lines = []
+    # black auto-formats in place
+    r = subprocess.run(
+        ["black", "--quiet", "."], cwd=repo_root, capture_output=True, text=True
+    )
+    if r.stdout or r.stderr:
+        lines.append(f"black:\n{(r.stdout + r.stderr).strip()}")
+    else:
+        lines.append("black: OK (no changes needed)")
+
+    # ruff --fix applies safe auto-fixes
+    subprocess.run(
+        ["ruff", "check", "--fix", "--quiet", "."],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+
+    # ruff check (no fix) reports what remains
+    r2 = subprocess.run(
+        ["ruff", "check", "."], cwd=repo_root, capture_output=True, text=True
+    )
+    if r2.returncode == 0:
+        lines.append("ruff: OK")
+    else:
+        output = (r2.stdout + r2.stderr).strip()
+        if len(output) > 3000:
+            output = output[:3000] + "\n... (truncated)"
+        lines.append(f"ruff ERRORS (fix these):\n{output}")
+
+    passed = r2.returncode == 0
+    status = "PASSED" if passed else "FAILED"
+    return f"Lint {status}\n\n" + "\n\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -254,6 +304,41 @@ def slugify(text: str, max_len: int = 40) -> str:
     return text[:max_len].rstrip("-")
 
 
+def notify_email(
+    to_addr: str,
+    smtp_password: str,
+    pr_url: str,
+    issue_number: int,
+    title: str,
+    test_status: str,
+    lint_status: str,
+) -> None:
+    smtp_host = os.environ.get("SMTP_HOST", "smtp.gmail.com")
+    smtp_port = int(os.environ.get("SMTP_PORT", "587"))
+    from_addr = os.environ.get("SMTP_FROM", to_addr)
+
+    body = (
+        f"Draft PR ready for your review\n\n"
+        f"Issue #{issue_number}: {title}\n"
+        f"Tests: {test_status}\n"
+        f"Lint:  {lint_status}\n\n"
+        f"{pr_url}\n"
+    )
+    msg = MIMEText(body)
+    msg["Subject"] = f"[bess-manager] PR ready: Fix #{issue_number}: {title}"
+    msg["From"] = from_addr
+    msg["To"] = to_addr
+
+    try:
+        with smtplib.SMTP(smtp_host, smtp_port) as smtp:
+            smtp.starttls()
+            smtp.login(from_addr, smtp_password)
+            smtp.sendmail(from_addr, to_addr, msg.as_string())
+        print(f"Email notification sent to {to_addr}.")
+    except Exception as e:
+        print(f"Email notification failed (non-fatal): {e}")
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -294,9 +379,9 @@ def main() -> None:
         "Your job is to implement a fix for a GitHub issue by reading the codebase,",
         "understanding the problem, and making targeted, minimal code changes.",
         "Use the available tools to explore and modify the repository.",
-        "After writing all changes, call run_tests to verify nothing is broken.",
-        "If tests fail, read the failing output, fix the code, and run tests again.",
-        "When tests pass, stop calling tools and write a clear summary of what you",
+        "After writing all changes: (1) call run_tests, fix any failures;",
+        "(2) call run_lint, fix any ruff errors (black auto-formats for you).",
+        "When both pass, stop calling tools and write a clear summary of what you",
         "changed and why, in Markdown.",
     ]
     if rules_md:
@@ -328,7 +413,7 @@ def main() -> None:
             "Start by listing the top-level directory to understand the codebase structure.",
             "Read docs/agents/architecture.md for component overview and key file locations.",
             "Then read the relevant source files and implement the minimal fix.",
-            "After writing changes, call run_tests. Fix any failures before finishing.",
+            "After writing changes: call run_tests (fix failures), then call run_lint (fix ruff errors).",
         ]
     )
 
@@ -337,7 +422,8 @@ def main() -> None:
     messages = [{"role": "user", "content": user_message}]
     written_files: dict = {}
     summary = ""
-    tests_passed: bool | None = None  # None = not run, True/False = result
+    tests_passed: bool | None = None
+    lint_passed: bool | None = None
 
     print("Starting agentic fix loop...")
     for iteration in range(20):  # hard cap to prevent runaway loops
@@ -369,6 +455,8 @@ def main() -> None:
                     )
                     if block.name == "run_tests":
                         tests_passed = "Tests PASSED" in str(result)
+                    if block.name == "run_lint":
+                        lint_passed = "Lint PASSED" in str(result)
                     tool_results.append(
                         {
                             "type": "tool_result",
@@ -394,6 +482,14 @@ def main() -> None:
         )
         return
 
+    # Always auto-format before committing, even if the agent already ran lint.
+    # This is the final gate — prevents any formatting drift from reaching the PR.
+    print("Running pre-commit quality gate...")
+    lint_result = _run_lint(repo_root)
+    print(lint_result)
+    if lint_passed is None:
+        lint_passed = "Lint PASSED" in lint_result
+
     # Commit the changes
     branch_name = f"fix/issue-{issue_number}-{slugify(issue.title)}"
     print(f"Committing {len(written_files)} file(s) to branch: {branch_name}")
@@ -413,18 +509,30 @@ def main() -> None:
     print("Branch pushed.")
 
     # Open draft PR
-    if tests_passed is True:
-        test_status = "✅ Tests passed"
-    elif tests_passed is False:
-        test_status = "⚠️ Tests failed — review required"
-    else:
-        test_status = "⚪ Tests not run"
+    test_status = (
+        "✅ Tests passed"
+        if tests_passed is True
+        else (
+            "⚠️ Tests failed — review required"
+            if tests_passed is False
+            else "⚪ Not run"
+        )
+    )
+    lint_status = (
+        "✅ Lint passed"
+        if lint_passed is True
+        else (
+            "⚠️ Lint errors remain — review required"
+            if lint_passed is False
+            else "⚪ Not run"
+        )
+    )
 
     pr_body = "\n".join(
         [
             f"Fixes #{issue_number}",
             "",
-            f"**Test status**: {test_status}",
+            f"**Tests**: {test_status} | **Lint**: {lint_status}",
             "",
             "## Changes",
             summary or "See commits for details.",
@@ -445,6 +553,26 @@ def main() -> None:
         draft=True,
     )
     print(f"Draft PR created: {pr.html_url}")
+
+    # Assign the repo owner so GitHub sends a native notification email.
+    try:
+        pr.add_to_assignees(gh_repo.owner.login)
+    except Exception as e:
+        print(f"Could not assign PR (non-fatal): {e}")
+
+    # Optional email notification.
+    notification_email = os.environ.get("NOTIFICATION_EMAIL", "")
+    smtp_password = os.environ.get("SMTP_PASSWORD", "")
+    if notification_email and smtp_password:
+        notify_email(
+            notification_email,
+            smtp_password,
+            pr.html_url,
+            issue_number,
+            issue.title,
+            test_status,
+            lint_status,
+        )
 
     # Post a link on the issue
     issue.create_comment(

@@ -82,12 +82,48 @@ jobs:
           GITHUB_SERVER_URL: ${{ github.server_url }}
         run: python scripts/pr_reviewer.py
 
+  issue-confirm:
+    name: Issue Confirm
+    if: |
+      github.event.comment.user.login == github.repository_owner &&
+      github.event.issue.pull_request == null &&
+      contains(github.event.comment.body, '@claude-bot confirm')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/create-github-app-token@v1
+        id: app-token
+        with:
+          app-id: ${{ secrets.CLAUDE_REVIEWER_APP_ID }}
+          private-key: ${{ secrets.CLAUDE_REVIEWER_PRIVATE_KEY }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install anthropic PyGithub
+
+      - env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          REPO_FULL_NAME: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+        run: python scripts/issue_confirmer.py
+
   issue-fix:
     name: Issue Fix
     if: |
       github.event.comment.user.login == github.repository_owner &&
       github.event.issue.pull_request == null &&
-      contains(github.event.comment.body, '@claude-bot')
+      contains(github.event.comment.body, '@claude-bot') &&
+      !contains(github.event.comment.body, '@claude-bot confirm')
     runs-on: ubuntu-latest
     permissions:
       contents: write

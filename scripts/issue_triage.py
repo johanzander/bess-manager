@@ -358,16 +358,22 @@ _ANALYSIS_SYSTEM = """\
 You are an expert BESS (Battery Energy Storage System) support engineer and Python developer.
 Analyse this bug report. Debug logs, screenshots, and relevant source file excerpts may be provided.
 
-When diagnostic material is available your response MUST:
-1. Name the exact file and function where the bug most likely occurs.
-2. Quote specific evidence from the debug log or source that supports your hypothesis \
-(use inline code or a short block quote).
-3. Describe the exact condition that triggers the bug \
-(e.g. "after midnight, `current_period` wraps to 0 before `schedule_store` is cleared").
-4. Propose a concrete fix sketch — the actual change needed, not just a direction.
+Your job at this stage is to produce a focused INITIAL ANALYSIS — a starting point for a
+deeper code-level confirmation that will follow. Be factual and conservative.
 
-Do NOT paraphrase the issue description. Focus on root cause, evidence, and fix.
-Format your response in Markdown. Keep it under 500 words.\
+When diagnostic material is available your response MUST:
+1. Summarise what the debug log / screenshots show (observable symptoms, key values, error messages).
+2. Identify which part of the system is most likely involved, citing specific log entries or UI state.
+3. Name candidate files/functions based on the source excerpts — these are leads, not confirmed bugs.
+4. Describe the suspected trigger condition in plain terms.
+
+IMPORTANT CONSTRAINTS:
+- Do NOT claim "clear evidence of a bug" unless you have seen the exact defective code.
+  Source excerpts are grep hits — they show where to look, not that the bug is there.
+- Use hedged language: "the log suggests…", "this may be caused by…", "a likely candidate is…"
+- A follow-up confirmation step will read the actual source files and provide a firm verdict.
+
+Format your response in Markdown. Keep it under 400 words.\
 """
 
 
@@ -529,9 +535,8 @@ def main() -> None:
                 "",
                 analysis,
                 "",
-                "If this looks correct, trigger an automated fix with:",
-                "",
-                "> `@claude-bot fix this`",
+                "A code-level confirmation step will follow to verify whether this bug "
+                "exists in the current codebase before any fix is attempted.",
                 "",
                 bot_footer(),
             ]
@@ -584,9 +589,9 @@ def main() -> None:
                     "",
                     analysis,
                     "",
-                    "To trigger an automated fix:",
+                    "To trigger a code-level confirmation and then an automated fix, comment:",
                     "",
-                    "> `@claude-bot fix this`",
+                    "> `@claude-bot confirm`",
                     "",
                     bot_footer(),
                 ]

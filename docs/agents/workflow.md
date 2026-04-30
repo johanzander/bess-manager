@@ -21,21 +21,30 @@ Bad messages: `Fix issue`, `Update settings`, `Changes by bot`.
 ## Automated Issue Pipeline
 
 ```
-Issue opened       → issue-triage.yml fires automatically
-                     → classifies, labels, requests debug log if needed
-                     → posts root-cause analysis if debug log provided
+Issue opened         → issue-triage.yml (triage-new-issue job)
+                       → classifies, labels, requests debug log if needed
+                       → posts initial analysis if debug info present
 
-User provides log  → analyze_log job fires automatically
-                     → deeper analysis, suggests "@claude-bot fix this"
+User provides log    → analyze-debug-log job fires automatically
+                       → reads debug log / screenshots, posts initial hypotheses
+                       → auto-triggers auto-confirm-bug (next stage)
 
-@claude-bot fix    → claude-bot.yml fires → issue_fixer.py
-                     → explores codebase, implements fix, runs tests
-                     → opens draft PR (human gate — never auto-merged)
+auto-confirm-bug     → issue_confirmer.py (read-only agentic loop)
+                       → reads actual source files to verify bug in current code
+                       → posts verdict: confirmed_bug / likely_user_error /
+                         version_mismatch / cannot_confirm / needs_more_info
+                       → only suggests "@claude-bot fix this" if confirmed
 
-@claude-bot review → claude-bot.yml fires → pr_reviewer.py
-                     → checks against rules.md, posts review comment
+@claude-bot confirm  → claude-bot.yml → issue_confirmer.py (manual re-run)
 
-YOU approve + merge → human decision, always
+@claude-bot fix      → claude-bot.yml → issue_fixer.py
+                       → explores codebase, implements fix, runs tests
+                       → opens draft PR (human gate — never auto-merged)
+
+@claude-bot review   → claude-bot.yml → pr_reviewer.py
+                       → checks against rules.md, posts review comment
+
+YOU approve + merge  → human decision, always
 ```
 
 ## PR Merge Workflow

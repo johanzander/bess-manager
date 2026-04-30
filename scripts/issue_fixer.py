@@ -93,6 +93,27 @@ TOOLS = [
             "required": ["path", "content"],
         },
     },
+    {
+        "name": "run_tests",
+        "description": (
+            "Run the project test suite (pytest) and return the output. "
+            "Call this after writing all fixes to verify nothing is broken. "
+            "If tests fail, read the failing tests, fix the code, and run again."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": (
+                        "Optional: path to a specific test file or directory. "
+                        "Defaults to running the full suite."
+                    ),
+                },
+            },
+            "required": [],
+        },
+    },
 ]
 
 
@@ -162,6 +183,21 @@ def handle_tool(name: str, inputs: dict, repo_root: str, written_files: dict) ->
         full.write_text(content)
         written_files[rel_path] = content
         return f"Written: {rel_path}"
+
+    if name == "run_tests":
+        test_path = inputs.get("path", "")
+        cmd = ["python", "-m", "pytest", "--tb=short", "-q"]
+        if test_path:
+            cmd.append(test_path)
+        result = subprocess.run(
+            cmd, cwd=repo_root, capture_output=True, text=True, timeout=120
+        )
+        output = result.stdout + result.stderr
+        # Cap output to avoid flooding context
+        if len(output) > 6000:
+            output = output[-6000:] + "\n... (truncated, showing last 6000 chars)"
+        status = "PASSED" if result.returncode == 0 else "FAILED"
+        return f"Tests {status} (exit code {result.returncode}):\n\n{output}"
 
     return f"ERROR: unknown tool: {name}"
 
@@ -249,21 +285,28 @@ def main() -> None:
     gh_repo = gh.get_repo(repo_full_name)
     issue = gh_repo.get_issue(issue_number)
 
-    claude_md = read_file_if_exists(Path(repo_root) / "CLAUDE.md")
+    rules_md = read_file_if_exists(Path(repo_root) / "docs/agents/rules.md")
+    arch_md = read_file_if_exists(Path(repo_root) / "docs/agents/architecture.md")
+    patterns_md = read_file_if_exists(Path(repo_root) / "docs/agents/patterns.md")
 
     system_parts = [
         "You are claude-fixer, an autonomous software engineer bot.",
         "Your job is to implement a fix for a GitHub issue by reading the codebase,",
         "understanding the problem, and making targeted, minimal code changes.",
-        "Follow the project's coding guidelines exactly.",
         "Use the available tools to explore and modify the repository.",
-        "When you are done making changes, stop calling tools and write a clear",
-        "summary of what you changed and why, in Markdown.",
+        "After writing all changes, call run_tests to verify nothing is broken.",
+        "If tests fail, read the failing output, fix the code, and run tests again.",
+        "When tests pass, stop calling tools and write a clear summary of what you",
+        "changed and why, in Markdown.",
     ]
-    if claude_md:
+    if rules_md:
+        system_parts.append(f"\n<hard_constraints>\n{rules_md}\n</hard_constraints>")
+    if arch_md:
         system_parts.append(
-            f"\nThis repository's coding guidelines (CLAUDE.md):\n\n<claude_md>\n{claude_md}\n</claude_md>"
+            f"\n<architecture_reference>\n{arch_md}\n</architecture_reference>"
         )
+    if patterns_md:
+        system_parts.append(f"\n<code_patterns>\n{patterns_md}\n</code_patterns>")
     system_prompt = "\n".join(system_parts)
 
     user_message = "\n".join(
@@ -273,16 +316,19 @@ def main() -> None:
             "**Description:**",
             issue.body or "(no description)",
             "",
-            "**Labels:** " + ", ".join(lbl.name for lbl in issue.labels)
-            if issue.labels
-            else "",
+            (
+                "**Labels:** " + ", ".join(lbl.name for lbl in issue.labels)
+                if issue.labels
+                else ""
+            ),
             "",
             "## Your task",
             command,
             "",
-            "Start by reading CLAUDE.md (if present) and listing the top-level directory to",
-            "understand the codebase structure. Then read relevant files and implement the fix.",
-            "Make only the changes necessary to resolve the issue.",
+            "Start by listing the top-level directory to understand the codebase structure.",
+            "Read docs/agents/architecture.md for component overview and key file locations.",
+            "Then read the relevant source files and implement the minimal fix.",
+            "After writing changes, call run_tests. Fix any failures before finishing.",
         ]
     )
 
@@ -291,6 +337,7 @@ def main() -> None:
     messages = [{"role": "user", "content": user_message}]
     written_files: dict = {}
     summary = ""
+    tests_passed: bool | None = None  # None = not run, True/False = result
 
     print("Starting agentic fix loop...")
     for iteration in range(20):  # hard cap to prevent runaway loops
@@ -320,6 +367,8 @@ def main() -> None:
                     result = handle_tool(
                         block.name, block.input, repo_root, written_files
                     )
+                    if block.name == "run_tests":
+                        tests_passed = "Tests PASSED" in str(result)
                     tool_results.append(
                         {
                             "type": "tool_result",
@@ -364,9 +413,18 @@ def main() -> None:
     print("Branch pushed.")
 
     # Open draft PR
+    if tests_passed is True:
+        test_status = "✅ Tests passed"
+    elif tests_passed is False:
+        test_status = "⚠️ Tests failed — review required"
+    else:
+        test_status = "⚪ Tests not run"
+
     pr_body = "\n".join(
         [
             f"Fixes #{issue_number}",
+            "",
+            f"**Test status**: {test_status}",
             "",
             "## Changes",
             summary or "See commits for details.",

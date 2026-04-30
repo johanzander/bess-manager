@@ -376,6 +376,54 @@ The debug log includes:
 - `## Inverter TOU Segments` — active TOU slots held in memory, mirroring the
   current hardware state
 
+## Automated Agent Workflow
+
+GitHub issues are handled by a three-stage automated pipeline. See
+`docs/agents/workflow.md` for the full process description.
+
+### Stage 1 — Triage (automatic on every new issue)
+
+`.github/workflows/issue-triage.yml` fires when an issue is opened. It
+classifies the issue (bug / feature / question) and applies labels. For bugs
+without debug info it posts instructions for getting a BESS debug export. For
+bugs with debug info it posts an initial root-cause analysis immediately.
+
+When a user replies with a debug log on a `needs-debug-log` issue, the workflow
+fires again automatically and runs deeper analysis.
+
+### Stage 2 — Fix (triggered by `@claude-bot`)
+
+Commenting `@claude-bot fix this` on an issue triggers
+`.github/workflows/claude-bot.yml`, which runs `scripts/issue_fixer.py`. The
+bot explores the codebase, implements a fix, runs `pytest`, and opens a draft
+PR. It will attempt to fix test failures before opening the PR.
+
+### Stage 3 — Review (triggered by `@claude-bot` on a PR)
+
+Commenting `@claude-bot` on a PR triggers `scripts/pr_reviewer.py`, which
+reviews the diff against `docs/agents/rules.md` and `docs/agents/architecture.md`
+and posts a review comment.
+
+**Human gate**: Draft PRs are never merged automatically. You approve and merge.
+
+### Agent Documentation
+
+The `docs/agents/` directory contains focused files loaded into agent system prompts:
+
+| File | Purpose |
+|------|---------|
+| `rules.md` | Hard constraints (loaded by every agent) |
+| `architecture.md` | Component map and key files (agent summary) |
+| `patterns.md` | Code patterns with good/bad examples |
+| `testing.md` | Test philosophy and mock HA bug reproduction |
+| `workflow.md` | PR/release process and label conventions |
+
+### Testing Philosophy
+
+Tests must verify **behavior** (what the system does), not **implementation**
+(how it does it). A test that breaks when you swap two equivalent algorithms is
+a bad test. See `docs/agents/testing.md` for full guidance and examples.
+
 ## Claude Code Integration
 
 BESS Manager includes an MCP (Model Context Protocol) server for integration with Claude Code,

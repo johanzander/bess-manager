@@ -1,10 +1,8 @@
-# Architecture Reference
+# Architecture Reference (Agent Summary)
 
-## System Overview
-
-BESS Manager is a Home Assistant add-on that optimizes a battery storage unit
-for cost savings via price-based arbitrage and solar integration. A dynamic
-programming algorithm generates a 24-hour battery schedule at 15-minute resolution.
+> **Canonical source**: `docs/SOFTWARE_DESIGN.md` — read that for full component
+> details, algorithms, quarterly resolution design, and configuration reference.
+> This file is a compact agent-oriented summary for quick context loading.
 
 ## Component Map
 
@@ -21,13 +19,13 @@ backend/api_conversion.py   ← camelCase conversion + serialization
         ↓
 core/bess/                  ← Domain logic (no HA dependencies here)
   battery_system_manager.py  ← Main orchestrator
-  dp_battery_algorithm.py    ← Optimization engine (DP)
+  dp_battery_algorithm.py    ← Optimization engine (dynamic programming)
   ha_api_controller.py       ← HA sensor/device interface + METHOD_SENSOR_MAP
   sensor_collector.py        ← Data aggregation from InfluxDB + HA
   price_manager.py           ← Electricity pricing (Nordpool / Octopus)
-  growatt_schedule.py        ← Inverter TOU schedule format
+  growatt_schedule.py        ← Inverter TOU schedule format (max 9 segments)
   health_check.py            ← System validation utilities
-  exceptions.py              ← All custom exception types
+  exceptions.py              ← All custom exception types (add new ones here)
         ↓
 Home Assistant API + Growatt Inverter
 ```
@@ -52,11 +50,9 @@ All endpoints return camelCase JSON via `convert_keys_to_camel_case()`.
 | `GET /api/system-health` | Component diagnostics |
 | `GET /api/schedule` | Current inverter schedule |
 | `GET /api/decisions` | Hourly strategy analysis |
-| `GET /api/debug` | Full debug data export |
+| `GET /api/debug` | Full debug data export (used for mock HA scenarios) |
 
-## Data Models
-
-Defined in `backend/api_dataclasses.py`:
+## Key Data Models (`backend/api_dataclasses.py`)
 
 - `APIBatterySettings` — capacity, power limits, SOC bounds
 - `APIPriceSettings` — area, VAT, markup, tax reduction
@@ -80,20 +76,13 @@ return perform_health_check(
 
 Never implement custom health check logic — always use `perform_health_check()`.
 
-## Test Structure
+## Settings
 
-```
-core/bess/tests/
-  unit/              ← Fast, no HA connection required
-    data/            ← JSON scenario fixtures
-  integration/       ← Full system workflow tests
-backend/tests/       ← API endpoint tests
-```
+Stored in `/data/bess_settings.json`, managed via the settings API.
+`config.yaml` (root) controls only the InfluxDB connection and add-on schema.
+Current version is the `version:` field in `config.yaml`.
 
-Run all tests: `pytest`
-Run unit tests only: `pytest core/bess/tests/unit/`
+## Bug Reproduction
 
-## Version and Release
-
-Current version is the `version:` field in `config.yaml` (root directory).
-CHANGELOG is in `CHANGELOG.md`. Follow semantic versioning (PATCH/MINOR/MAJOR).
+When a user provides a debug log, bugs can be reproduced exactly using mock HA.
+See `docs/agents/testing.md` for the full workflow.

@@ -1,4 +1,7 @@
-# Development Workflow
+# Development Workflow (Agent Reference)
+
+> **Full guide**: `docs/DEVELOPMENT.md` — environment setup, Docker, VS Code,
+> deploying to hardware. This file covers only agent-specific process rules.
 
 ## Git Commit Policy
 
@@ -13,20 +16,40 @@ The update() method was checking for camelCase keys but dataclass attributes
 use snake_case. Added conversion to properly map keys before validation.
 ```
 
-Bad commit messages: `Fix issue`, `Update settings`, `Changes by bot`.
+Bad messages: `Fix issue`, `Update settings`, `Changes by bot`.
+
+## Automated Issue Pipeline
+
+```
+Issue opened       → issue-triage.yml fires automatically
+                     → classifies, labels, requests debug log if needed
+                     → posts root-cause analysis if debug log provided
+
+User provides log  → analyze_log job fires automatically
+                     → deeper analysis, suggests "@claude-bot fix this"
+
+@claude-bot fix    → claude-bot.yml fires → issue_fixer.py
+                     → explores codebase, implements fix, runs tests
+                     → opens draft PR (human gate — never auto-merged)
+
+@claude-bot review → claude-bot.yml fires → pr_reviewer.py
+                     → checks against rules.md, posts review comment
+
+YOU approve + merge → human decision, always
+```
 
 ## PR Merge Workflow
 
-1. **Review** — Read the diff, check for correctness, architecture fit, CLAUDE.md compliance.
-2. **Fix minor issues** — Apply small fixes directly. For substantial issues, request changes.
-3. **Update CHANGELOG** — Add entry under new version heading. Credit author:
+1. **Review** — check diff for correctness, architecture fit, `rules.md` compliance
+2. **Fix minor issues** — apply small fixes directly; request changes for anything substantial
+3. **Update CHANGELOG** — add entry under new version heading, credit author:
    `(thanks [@username](https://github.com/username))`
 4. **Bump version** in `config.yaml`:
    - `PATCH` (x.y.**Z**): bug fixes, doc/comment changes, no behavior change
    - `MINOR` (x.**Y**.0): new features, backwards-compatible
    - `MAJOR` (**X**.0.0): breaking changes
-5. **Merge** — Squash merge. Wait for explicit user approval.
-6. **Tag** — After user confirms hardware test: `git tag vX.Y.Z && git push origin vX.Y.Z`
+5. **Merge** — squash merge; wait for explicit user approval
+6. **Tag** — after user confirms hardware test: `git tag vX.Y.Z && git push origin vX.Y.Z`
 
 Never tag or merge without explicit user instruction.
 
@@ -37,24 +60,14 @@ Never tag or merge without explicit user instruction.
 
 ### Added
 
-- Short description of new feature. (thanks [@author](https://github.com/author))
+- Short description. (thanks [@author](https://github.com/author))
 
 ### Fixed
 
-- Short description of fix.
+- Short description.
 ```
 
-One line per change. No implementation details. Match the existing style.
-
-## Issue → PR Pipeline
-
-The automated pipeline (via GitHub Actions):
-
-1. Issue opened → triage bot classifies, requests debug log if needed
-2. User provides debug log → bot analyzes, identifies root cause
-3. User comments `@claude-bot fix this` → fix bot implements, runs tests, opens draft PR
-4. User comments `@claude-bot review` on PR → review bot checks against rules.md
-5. **User approves and merges** (human gate — never automated)
+One line per change. No implementation details. Match existing style.
 
 ## Labels
 
@@ -63,25 +76,10 @@ The automated pipeline (via GitHub Actions):
 | `bug` | Confirmed defect |
 | `enhancement` | Feature request |
 | `question` | Usage/config question |
-| `needs-debug-log` | Waiting for user to provide debug export |
+| `needs-debug-log` | Waiting for user debug export |
 | `bot-analyzed` | Triage bot has processed this issue |
-| `ready-for-review` | Draft PR is ready for human review |
+| `ready-for-review` | Draft PR ready for human review |
 
-## Quality Checks
+## Quality Gate
 
-Before any commit, run:
-
-```bash
-./scripts/quality-check.sh
-```
-
-Or individually:
-
-```bash
-black .
-ruff check --fix .
-cd frontend && npm run lint:fix
-pytest
-```
-
-All checks must pass. Zero tolerance for linter errors.
+Before any PR: `./scripts/quality-check.sh` must pass with zero errors.

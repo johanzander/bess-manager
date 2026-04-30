@@ -68,6 +68,8 @@ jobs:
     if: |
       github.event_name == 'issue_comment' &&
       github.event.issue.pull_request == null &&
+      github.event.issue.state == 'open' &&
+      github.actor != 'bess-manager-claude-bot[bot]' &&
       contains(toJson(github.event.issue.labels), 'needs-debug-log')
     runs-on: ubuntu-latest
     permissions:
@@ -93,6 +95,7 @@ jobs:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
           REPO_FULL_NAME: ${{ github.repository }}
           GITHUB_RUN_ID: ${{ github.run_id }}
           GITHUB_SERVER_URL: ${{ github.server_url }}

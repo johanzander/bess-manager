@@ -372,70 +372,37 @@ def main() -> None:
     verdict: dict | None = None
 
     print("Starting agentic confirmation loop...")
-    nudge_count = 0
-    for _iteration in range(30):
+    for _iteration in range(25):
         response = client.messages.create(
             model="claude-opus-4-6",
             max_tokens=8192,
             system=system_prompt,
             tools=TOOLS,
+            tool_choice={"type": "any"},  # model MUST call a tool every turn
             messages=messages,
         )
         messages.append({"role": "assistant", "content": response.content})
 
-        if response.stop_reason == "end_turn":
-            if verdict is not None:
-                break
-            # Model stopped without calling report_verdict — nudge it to conclude.
-            nudge_count += 1
-            if nudge_count > 3:
-                print(
-                    "WARNING: agent kept stopping without report_verdict after 3 nudges."
-                )
-                break
-            print(
-                f"  Agent stopped without report_verdict (nudge {nudge_count}/3) — reminding it."
-            )
-            messages.append(
+        tool_results = []
+        for block in response.content:
+            if block.type != "tool_use":
+                continue
+            print(f"  Tool call: {block.name}({list(block.input.keys())})")
+            result_text, maybe_verdict = handle_tool(block.name, block.input, repo_root)
+            if maybe_verdict is not None:
+                verdict = maybe_verdict
+            tool_results.append(
                 {
-                    "role": "user",
-                    "content": (
-                        "You have not yet called report_verdict. "
-                        "You MUST call report_verdict now to conclude your investigation. "
-                        "If you are uncertain, use verdict='cannot_confirm' with your best explanation "
-                        "of what you found and what remains unclear."
-                    ),
+                    "type": "tool_result",
+                    "tool_use_id": block.id,
+                    "content": result_text[:5000],
                 }
             )
-            continue
 
-        if response.stop_reason == "tool_use":
-            tool_results = []
-            for block in response.content:
-                if block.type == "tool_use":
-                    print(f"  Tool call: {block.name}({list(block.input.keys())})")
-                    result_text, maybe_verdict = handle_tool(
-                        block.name, block.input, repo_root
-                    )
-                    if maybe_verdict is not None:
-                        verdict = maybe_verdict
-                    tool_results.append(
-                        {
-                            "type": "tool_result",
-                            "tool_use_id": block.id,
-                            "content": result_text[:5000],
-                        }
-                    )
-            messages.append({"role": "user", "content": tool_results})
-
-            if verdict is not None:
-                print(
-                    f"Verdict received: {verdict['verdict']} ({verdict['confidence']})"
-                )
-                break
-        else:
-            print(f"Unexpected stop_reason: {response.stop_reason}")
+        if verdict is not None:
+            print(f"Verdict received: {verdict['verdict']} ({verdict['confidence']})")
             break
+        messages.append({"role": "user", "content": tool_results})
     else:
         print("WARNING: reached iteration cap without verdict.")
 

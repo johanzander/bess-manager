@@ -126,6 +126,31 @@ TOOLS = [
         ),
         "input_schema": {"type": "object", "properties": {}, "required": []},
     },
+    {
+        "name": "finish",
+        "description": (
+            "Signal that you are done. Call this when: (a) you have written all fixes "
+            "and tests+lint pass, OR (b) you investigated but determined no code change "
+            "is needed. Provide a summary of what you did and why."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "summary": {
+                    "type": "string",
+                    "description": (
+                        "Markdown summary of changes made (or explanation of why no "
+                        "changes were made). Be specific: list files modified and what changed."
+                    ),
+                },
+                "changed": {
+                    "type": "boolean",
+                    "description": "True if you wrote any code changes, False otherwise.",
+                },
+            },
+            "required": ["summary", "changed"],
+        },
+    },
 ]
 
 
@@ -381,8 +406,9 @@ def main() -> None:
         "Use the available tools to explore and modify the repository.",
         "After writing all changes: (1) call run_tests, fix any failures;",
         "(2) call run_lint, fix any ruff errors (black auto-formats for you).",
-        "When both pass, stop calling tools and write a clear summary of what you",
-        "changed and why, in Markdown.",
+        "When both pass, call finish() with a Markdown summary of what you changed and why.",
+        "If you investigated and determined no change is needed, call finish(changed=False).",
+        "You MUST call finish() to end your session — do not stop without calling it.",
     ]
     if rules_md:
         system_parts.append(f"\n<hard_constraints>\n{rules_md}\n</hard_constraints>")
@@ -426,48 +452,49 @@ def main() -> None:
     lint_passed: bool | None = None
 
     print("Starting agentic fix loop...")
-    for iteration in range(20):  # hard cap to prevent runaway loops
+    done = False
+    for _iteration in range(25):
         response = client.messages.create(
             model="claude-opus-4-6",
             max_tokens=8192,
             system=system_prompt,
             tools=TOOLS,
+            tool_choice={"type": "any"},  # model MUST call a tool every turn
             messages=messages,
         )
         messages.append({"role": "assistant", "content": response.content})
 
-        if response.stop_reason == "end_turn":
-            # Extract the final text summary
-            for block in response.content:
-                if hasattr(block, "text"):
-                    summary = block.text
-                    break
-            print(f"Agent finished after {iteration + 1} iterations.")
-            break
+        tool_results = []
+        for block in response.content:
+            if block.type != "tool_use":
+                continue
+            print(f"  Tool call: {block.name}({list(block.input.keys())})")
 
-        if response.stop_reason == "tool_use":
-            tool_results = []
-            for block in response.content:
-                if block.type == "tool_use":
-                    print(f"  Tool call: {block.name}({list(block.input.keys())})")
-                    result = handle_tool(
-                        block.name, block.input, repo_root, written_files
-                    )
-                    if block.name == "run_tests":
-                        tests_passed = "Tests PASSED" in str(result)
-                    if block.name == "run_lint":
-                        lint_passed = "Lint PASSED" in str(result)
-                    tool_results.append(
-                        {
-                            "type": "tool_result",
-                            "tool_use_id": block.id,
-                            "content": str(result)[:4000],  # cap per result
-                        }
-                    )
-            messages.append({"role": "user", "content": tool_results})
-        else:
-            print(f"Unexpected stop_reason: {response.stop_reason}")
+            if block.name == "finish":
+                summary = block.input.get("summary", "")
+                done = True
+                tool_results.append(
+                    {"type": "tool_result", "tool_use_id": block.id, "content": "Done."}
+                )
+                break
+
+            result = handle_tool(block.name, block.input, repo_root, written_files)
+            if block.name == "run_tests":
+                tests_passed = "Tests PASSED" in str(result)
+            if block.name == "run_lint":
+                lint_passed = "Lint PASSED" in str(result)
+            tool_results.append(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": block.id,
+                    "content": str(result)[:4000],
+                }
+            )
+
+        if done:
+            print(f"Agent called finish after {_iteration + 1} iterations.")
             break
+        messages.append({"role": "user", "content": tool_results})
     else:
         print("WARNING: reached iteration cap.")
 

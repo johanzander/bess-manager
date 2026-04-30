@@ -80,6 +80,27 @@ One line per change. No implementation details. Match existing style.
 | `bot-analyzed` | Triage bot has processed this issue |
 | `ready-for-review` | Draft PR ready for human review |
 
+## Email Notifications
+
+When a draft PR is opened by the issue fixer, two notifications fire:
+
+1. **GitHub native** — the repo owner is auto-assigned, which triggers GitHub's
+   own notification email. No extra setup needed.
+
+2. **Direct email** — for a dedicated email with PR link and test/lint status,
+   add two repository secrets (`Settings → Secrets → Actions`):
+
+   | Secret | Value |
+   |--------|-------|
+   | `NOTIFICATION_EMAIL` | Address to send to (and from, if using Gmail) |
+   | `SMTP_PASSWORD` | Gmail App Password (not your login password) |
+
+   Gmail App Password: `myaccount.google.com → Security → App passwords`.
+   Defaults to `smtp.gmail.com:587`. Override with `SMTP_HOST`, `SMTP_PORT`,
+   and `SMTP_FROM` secrets if using a different provider.
+
+   If the secrets are absent the step is silently skipped.
+
 ## Quality Gate
 
 Before any PR: `./scripts/quality-check.sh` must pass with zero errors.

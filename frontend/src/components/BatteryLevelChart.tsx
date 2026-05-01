@@ -102,7 +102,7 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
   });
 
   // Zero anchor at x=0: gives stepBefore a left edge so bars render from 0→1 for period 0
-  chartData.unshift({ hour: 0, periodNum: -1, batterySocPercent: chartData[0]?.batterySocPercent ?? 0, action: 0, charging: 0, discharging: 0, price: chartData[0]?.price ?? 0, dataSource: 'actual', isActual: true, isPredicted: false, isTomorrow: false });
+  chartData.unshift({ hour: 0, periodNum: -1, hourLabel: '', batterySocPercent: chartData[0]?.batterySocPercent ?? 0, action: 0, charging: 0, discharging: 0, price: chartData[0]?.price ?? 0, dataSource: 'actual', isActual: true, isPredicted: false, isTomorrow: false, batterySocEndFormatted: chartData[0]?.batterySocEndFormatted, batteryActionFormatted: chartData[0]?.batteryActionFormatted, buyPriceFormatted: chartData[0]?.buyPriceFormatted });
 
   // Append tomorrow's data with hour offset 24+
   const hasTomorrowData = tomorrowData && tomorrowData.length > 0;

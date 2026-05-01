@@ -102,5 +102,17 @@
     "base_to_battery_solar_savings_pct": 162.0,
     "total_charged": 49.0,
     "total_discharged": 44.4
+  },
+  "expected_behavior": {
+    "description": "Negative prices: should aggressively grid-charge during negative-price hours and export during positive peaks",
+    "intents_present": [
+      "GRID_CHARGING",
+      "EXPORT_ARBITRAGE"
+    ],
+    "savings_positive": true,
+    "constraints": {
+      "soe_within_bounds": true,
+      "power_within_limits": true
+    }
   }
 }

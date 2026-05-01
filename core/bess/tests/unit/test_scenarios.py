@@ -30,6 +30,13 @@ from core.bess.settings import (
     VAT_MULTIPLIER,
     BatterySettings,
 )
+from core.bess.tests.helpers import (
+    assert_intent_absent,
+    assert_intent_present,
+    assert_physical_constraints,
+    assert_savings_positive,
+    get_intent_distribution,
+)
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
@@ -232,3 +239,25 @@ def test_all_scenarios(scenario_name):
                 assert (
                     abs(battery_action) <= battery["max_discharge_power_kw"] + tolerance
                 ), f"Battery discharging action {abs(battery_action):.2f} kW exceeds max discharge power {battery['max_discharge_power_kw']} kW"
+
+    # ── Behavioral assertions (from expected_behavior in scenario JSON) ──
+    if "expected_behavior" in scenario:
+        behavior = scenario["expected_behavior"]
+        dist = get_intent_distribution(result)
+        logger.info(f"Intent distribution: {dist}")
+
+        for intent in behavior.get("intents_present", []):
+            assert_intent_present(result, intent)
+
+        for intent in behavior.get("intents_absent", []):
+            assert_intent_absent(result, intent)
+
+        if behavior.get("savings_positive"):
+            assert_savings_positive(result)
+
+        if behavior.get("constraints", {}).get("soe_within_bounds"):
+            assert_physical_constraints(result, battery)
+    else:
+        logger.info(
+            f"No expected_behavior for scenario {scenario_name}, skipping behavioral validation"
+        )

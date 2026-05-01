@@ -1,6 +1,6 @@
 # Test Framework Overhaul Plan
 
-> **Status**: Phase 1 — complete
+> **Status**: Phase 4 — complete
 > **Branch strategy**: Each phase is a separate branch merged to `main` before starting the next.
 
 ## Why

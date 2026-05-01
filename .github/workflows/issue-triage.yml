@@ -47,7 +47,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ steps.app-token.outputs.token }}
-          claude_args: "--max-turns 12"
+          claude_args: "--max-turns 12 --permission-mode bypassPermissions"
           prompt: |
             You are the **Stage 1 Triage** bot for issue #${{ github.event.issue.number || github.event.inputs.issue_number }} in johanzander/bess-manager.
 

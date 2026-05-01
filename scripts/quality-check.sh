@@ -19,6 +19,23 @@ ERRORS=0
 WARNINGS=0
 
 echo ""
+echo "📋 Running Python tests..."
+echo "---------------------------"
+
+if command -v pytest >/dev/null 2>&1; then
+    echo "🔸 Running fast tests (use 'pytest' directly to include slow algorithm tests)..."
+    if ! pytest -m "not slow" --tb=short -q; then
+        echo "❌ Tests failed"
+        ERRORS=$((ERRORS + 1))
+    else
+        echo "✅ Fast tests passed"
+    fi
+else
+    echo "⚠️  pytest not installed. Install with: pip install pytest"
+    WARNINGS=$((WARNINGS + 1))
+fi
+
+echo ""
 echo "📋 Checking Python code quality..."
 echo "-----------------------------------"
 

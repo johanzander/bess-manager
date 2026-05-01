@@ -8,6 +8,10 @@ produce reasonable outputs.
 
 import json
 import logging
+
+import pytest
+
+pytestmark = pytest.mark.slow
 import os
 from pathlib import Path
 

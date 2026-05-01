@@ -72,3 +72,12 @@ module = [
     "loguru.*",
 ]
 ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["core/bess/tests", "backend/tests"]
+python_files = "test_*.py"
+python_classes = "Test*"
+python_functions = "test_*"
+markers = [
+    "slow: tests that run the full DP optimizer (deselect with '-m not slow')",
+]

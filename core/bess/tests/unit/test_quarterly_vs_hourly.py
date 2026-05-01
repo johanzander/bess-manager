@@ -7,6 +7,10 @@ to verify that the higher resolution optimization is at least as good as
 the lower resolution version.
 """
 
+import pytest
+
+pytestmark = pytest.mark.slow
+
 from core.bess.dp_battery_algorithm import optimize_battery_schedule
 from core.bess.settings import BatterySettings
 

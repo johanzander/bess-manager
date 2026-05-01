@@ -5,6 +5,8 @@ from unittest.mock import patch
 
 import pytest
 
+pytestmark = pytest.mark.slow
+
 from core.bess.battery_system_manager import BatterySystemManager
 from core.bess.exceptions import PriceDataUnavailableError
 from core.bess.price_manager import MockSource

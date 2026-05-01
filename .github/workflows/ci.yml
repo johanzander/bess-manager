@@ -1,0 +1,115 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  # ── Detect which areas changed ──────────────────────────────────
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+      algorithm: ${{ steps.filter.outputs.algorithm }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            algorithm:
+              - 'core/bess/**'
+            backend:
+              - 'backend/**'
+              - 'core/bess/**'
+              - 'pyproject.toml'
+              - 'requirements-dev.txt'
+            frontend:
+              - 'frontend/**'
+
+  # ── Fast tests: backend API + non-optimizer unit tests ──────────
+  test-fast:
+    name: Fast tests
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install -r backend/requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Run fast tests
+        run: pytest -m "not slow" --tb=short -q
+
+  # ── Slow tests: full optimizer / scenario / integration ─────────
+  test-algorithm:
+    name: Algorithm tests
+    needs: changes
+    if: needs.changes.outputs.algorithm == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install -r backend/requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Run algorithm tests
+        run: pytest -m slow --tb=short -q
+
+  # ── Frontend: type-check + lint ─────────────────────────────────
+  test-frontend:
+    name: Frontend checks
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: cd frontend && npm ci
+      - run: cd frontend && npm run type-check
+      - run: cd frontend && npm run lint
+
+  # ── Quality gate: linting + formatting ────────────────��─────────
+  quality:
+    name: Code quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install tools
+        run: pip install black ruff
+
+      - name: Black formatting
+        run: black --check . --exclude="/(build|\.venv|node_modules)/"
+
+      - name: Ruff linting
+        run: ruff check . --exclude="build,.venv,node_modules"

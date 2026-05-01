@@ -260,9 +260,14 @@ class TestApplyDiscovered:
             sensor_map={"battery_soc": "sensor.corrected_by_discovery"},
         )
 
-        assert store.get_section("sensors")["battery_soc"] == "sensor.corrected_by_discovery"
+        assert (
+            store.get_section("sensors")["battery_soc"]
+            == "sensor.corrected_by_discovery"
+        )
 
-    def test_discovery_empty_does_not_overwrite_existing_sensor(self, tmp_path, monkeypatch):
+    def test_discovery_empty_does_not_overwrite_existing_sensor(
+        self, tmp_path, monkeypatch
+    ):
         """An empty discovered value leaves the existing sensor value intact."""
         _patch_path(tmp_path, monkeypatch)
         store = SettingsStore()
@@ -383,18 +388,22 @@ class TestSchemaMigration:
     def test_home_consumption_renamed_to_default_hourly(self, tmp_path, monkeypatch):
         """Old field 'consumption' must be renamed to 'default_hourly' on load."""
         store = self._store_with_data(
-            tmp_path, monkeypatch,
+            tmp_path,
+            monkeypatch,
             {"home": {"consumption": 4.5, "currency": "SEK"}},
         )
         home = store.get_section("home")
-        assert "default_hourly" in home, "Old 'consumption' not renamed to 'default_hourly'"
+        assert (
+            "default_hourly" in home
+        ), "Old 'consumption' not renamed to 'default_hourly'"
         assert home["default_hourly"] == 4.5
         assert "consumption" not in home
 
     def test_home_safety_margin_factor_renamed(self, tmp_path, monkeypatch):
         """Old field 'safety_margin_factor' must be renamed to 'safety_margin' on load."""
         store = self._store_with_data(
-            tmp_path, monkeypatch,
+            tmp_path,
+            monkeypatch,
             {"home": {"safety_margin_factor": 1.2, "currency": "SEK"}},
         )
         home = store.get_section("home")
@@ -405,7 +414,8 @@ class TestSchemaMigration:
     def test_battery_max_charge_discharge_power_split(self, tmp_path, monkeypatch):
         """Old single-power field must be split into charge and discharge variants."""
         store = self._store_with_data(
-            tmp_path, monkeypatch,
+            tmp_path,
+            monkeypatch,
             {"battery": {"max_charge_discharge_power": 10.0, "total_capacity": 30.0}},
         )
         battery = store.get_section("battery")
@@ -418,7 +428,8 @@ class TestSchemaMigration:
     def test_battery_cycle_cost_renamed(self, tmp_path, monkeypatch):
         """Old field 'cycle_cost' must be renamed to 'cycle_cost_per_kwh'."""
         store = self._store_with_data(
-            tmp_path, monkeypatch,
+            tmp_path,
+            monkeypatch,
             {"battery": {"cycle_cost": 0.8, "total_capacity": 30.0}},
         )
         battery = store.get_section("battery")
@@ -429,13 +440,21 @@ class TestSchemaMigration:
     def test_battery_missing_fields_get_defaults(self, tmp_path, monkeypatch):
         """Fields absent from an old store file are added with safe defaults."""
         store = self._store_with_data(
-            tmp_path, monkeypatch,
+            tmp_path,
+            monkeypatch,
             {"battery": {"total_capacity": 30.0}},
         )
         battery = store.get_section("battery")
-        for field in ("cycle_cost_per_kwh", "min_action_profit_threshold",
-                      "charging_power_rate", "efficiency_charge", "efficiency_discharge"):
-            assert field in battery, f"Expected default for '{field}' to be added by migration"
+        for field in (
+            "cycle_cost_per_kwh",
+            "min_action_profit_threshold",
+            "charging_power_rate",
+            "efficiency_charge",
+            "efficiency_discharge",
+        ):
+            assert (
+                field in battery
+            ), f"Expected default for '{field}' to be added by migration"
 
     def test_migration_persists_to_disk(self, tmp_path, monkeypatch):
         """Migrated field names must be written back to disk immediately."""
@@ -456,7 +475,8 @@ class TestSchemaMigration:
     def test_new_field_names_not_doubled(self, tmp_path, monkeypatch):
         """If a file already uses new field names, migration must not create duplicates."""
         store = self._store_with_data(
-            tmp_path, monkeypatch,
+            tmp_path,
+            monkeypatch,
             {
                 "battery": {
                     "max_charge_power_kw": 12.0,

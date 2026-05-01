@@ -78,7 +78,9 @@ def generate_scenario(log_path: str) -> None:
             # export_timestamp is a timezone-aware ISO string (e.g. "2026-04-02T15:42:18+00:00").
             # Convert to local time: libfaketime's @ format uses mktime() which is TZ-dependent,
             # so we must store local time to match the TZ set in the container.
-            local_dt = datetime.fromisoformat(export_timestamp).astimezone(ZoneInfo(tz_name))
+            local_dt = datetime.fromisoformat(export_timestamp).astimezone(
+                ZoneInfo(tz_name)
+            )
             mock_time = f"@{local_dt.strftime('%Y-%m-%d %H:%M:%S')}"
         elif log.timezone:
             # Older log with timezone but no export_timestamp — filename time is already local.
@@ -96,7 +98,9 @@ def generate_scenario(log_path: str) -> None:
         export_timestamp = log.system_info.get("export_timestamp")
         tz_name = log.timezone or "UTC"
         if export_timestamp:
-            local_dt = datetime.fromisoformat(export_timestamp).astimezone(ZoneInfo(tz_name))
+            local_dt = datetime.fromisoformat(export_timestamp).astimezone(
+                ZoneInfo(tz_name)
+            )
             mock_time = f"@{local_dt.strftime('%Y-%m-%d %H:%M:%S')}"
         else:
             mock_time = ""
@@ -131,7 +135,9 @@ def generate_scenario(log_path: str) -> None:
     else:
         # Legacy fallback for debug logs that predate entity snapshot capture.
         # Synthesises sensor values from processed data — approximate, not exact.
-        print("Note: No entity snapshot in log — synthesising sensors from processed data (legacy fallback).")
+        print(
+            "Note: No entity snapshot in log — synthesising sensors from processed data (legacy fallback)."
+        )
         remaining_today = 96 - opt_period
 
         consumption = d.get("full_home_consumption", [])
@@ -163,7 +169,9 @@ def generate_scenario(log_path: str) -> None:
 
             # raw_prices starts at opt_period, not midnight.
             today_fill = raw_prices[0] if raw_prices else 0.1
-            today_prices = [today_fill] * opt_period + list(raw_prices[:remaining_today])
+            today_prices = [today_fill] * opt_period + list(
+                raw_prices[:remaining_today]
+            )
             tomorrow_prices = list(raw_prices[remaining_today : remaining_today + 96])
             while len(tomorrow_prices) < 96:
                 tomorrow_prices.append(tomorrow_prices[-1] if tomorrow_prices else 0.1)
@@ -221,7 +229,9 @@ def generate_scenario(log_path: str) -> None:
             "sensor.solcast_pv_forecast_forecast_today": {
                 "state": str(round(sum(solar_today), 1)),
                 "attributes": {
-                    "detailedHourly": _quarterly_to_hourly_detail(solar_today, "2026-03-24")
+                    "detailedHourly": _quarterly_to_hourly_detail(
+                        solar_today, "2026-03-24"
+                    )
                 },
             },
             "sensor.solcast_pv_forecast_forecast_tomorrow": {
@@ -251,7 +261,9 @@ def generate_scenario(log_path: str) -> None:
         "bess_config": log.addon_options if log.addon_options else None,
         "sensors": sensors,
         "price_data": log.price_data if log.price_data else None,
-        "historical_periods": log.historical_periods if log.historical_periods else None,
+        "historical_periods": (
+            log.historical_periods if log.historical_periods else None
+        ),
         "mock_time": mock_time,
         "time_segments": time_segments if inverter_type == "min" else None,
         "ac_charge_times": [] if inverter_type == "sph" else None,
@@ -279,7 +291,9 @@ def generate_scenario(log_path: str) -> None:
     if mock_time:
         tz_name = log.timezone or "UTC"
         local_display = mock_time.lstrip("@")
-        print(f"      mock_time={local_display} {tz_name}  (BESS will run as if it is this time)")
+        print(
+            f"      mock_time={local_display} {tz_name}  (BESS will run as if it is this time)"
+        )
 
 
 if __name__ == "__main__":

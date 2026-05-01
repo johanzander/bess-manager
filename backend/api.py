@@ -182,7 +182,9 @@ async def patch_settings(updates: dict):
 
             elif store_key == "growatt":
                 if "device_id" in section:
-                    bess_controller.ha_controller.growatt_device_id = section["device_id"]
+                    bess_controller.ha_controller.growatt_device_id = section[
+                        "device_id"
+                    ]
 
             elif store_key == "sensors":
                 bess_controller.ha_controller.sensors.update(
@@ -403,8 +405,13 @@ async def get_dashboard_data(
 
         # Guard: if no schedule exists yet the system is still initializing.
         if not bess_controller.system.schedule_store.get_latest_schedule():
-            logger.info("Dashboard requested before schedule is ready — returning initializing state")
-            return {"error": "initializing", "message": "System is initializing. The optimization schedule will be ready shortly."}
+            logger.info(
+                "Dashboard requested before schedule is ready — returning initializing state"
+            )
+            return {
+                "error": "initializing",
+                "message": "System is initializing. The optimization schedule will be ready shortly.",
+            }
 
         # Get daily view data (always quarterly internally)
         daily_view = bess_controller.system.get_current_daily_view()
@@ -1353,7 +1360,9 @@ async def get_growatt_detailed_schedule():
                         "batteryMode": battery_mode,
                         "grid_charge": hourly_settings.get("grid_charge", False),
                         "discharge_rate": hourly_settings.get("discharge_rate", 100),
-                        "dischargePowerRate": hourly_settings.get("discharge_rate", 100),
+                        "dischargePowerRate": hourly_settings.get(
+                            "discharge_rate", 100
+                        ),
                         "chargePowerRate": 100,
                         "strategic_intent": strategic_intent,
                         "intent_description": schedule_manager._get_intent_description(
@@ -1362,7 +1371,9 @@ async def get_growatt_detailed_schedule():
                         "action": action,
                         "action_color": action_color,
                         "battery_action": battery_action,
-                        "battery_action_kw": hourly_settings.get("battery_action_kw", 0.0),
+                        "battery_action_kw": hourly_settings.get(
+                            "battery_action_kw", 0.0
+                        ),
                         "batteryCharged": battery_charged,
                         "batteryDischarged": battery_discharged,
                         "price": price,
@@ -2502,7 +2513,9 @@ async def setup_complete(payload: APISetupCompletePayload):
             if payload.cycleCost is not None:
                 battery["cycle_cost_per_kwh"] = payload.cycleCost
             if payload.minActionProfitThreshold is not None:
-                battery["min_action_profit_threshold"] = payload.minActionProfitThreshold
+                battery["min_action_profit_threshold"] = (
+                    payload.minActionProfitThreshold
+                )
             sections["battery"] = battery
 
         # --- home ---
@@ -2574,34 +2587,40 @@ async def setup_complete(payload: APISetupCompletePayload):
 
         live_updates: dict = {}
         if "battery" in sections:
-            live_updates["battery"] = _nn({
-                "totalCapacity": payload.totalCapacity,
-                "minSoc": payload.minSoc,
-                "maxSoc": payload.maxSoc,
-                "maxChargePowerKw": payload.maxChargeDischargePower,
-                "maxDischargePowerKw": payload.maxChargeDischargePower,
-                "cycleCostPerKwh": payload.cycleCost,
-                "minActionProfitThreshold": payload.minActionProfitThreshold,
-            })
+            live_updates["battery"] = _nn(
+                {
+                    "totalCapacity": payload.totalCapacity,
+                    "minSoc": payload.minSoc,
+                    "maxSoc": payload.maxSoc,
+                    "maxChargePowerKw": payload.maxChargeDischargePower,
+                    "maxDischargePowerKw": payload.maxChargeDischargePower,
+                    "cycleCostPerKwh": payload.cycleCost,
+                    "minActionProfitThreshold": payload.minActionProfitThreshold,
+                }
+            )
         if "home" in sections:
-            live_updates["home"] = _nn({
-                "defaultHourly": payload.consumption,
-                "currency": payload.currency,
-                "consumptionStrategy": payload.consumptionStrategy,
-                "maxFuseCurrent": payload.maxFuseCurrent,
-                "voltage": payload.voltage,
-                "safetyMargin": payload.safetyMarginFactor,
-                "phaseCount": payload.phaseCount,
-                "powerMonitoringEnabled": payload.powerMonitoringEnabled,
-            })
+            live_updates["home"] = _nn(
+                {
+                    "defaultHourly": payload.consumption,
+                    "currency": payload.currency,
+                    "consumptionStrategy": payload.consumptionStrategy,
+                    "maxFuseCurrent": payload.maxFuseCurrent,
+                    "voltage": payload.voltage,
+                    "safetyMargin": payload.safetyMarginFactor,
+                    "phaseCount": payload.phaseCount,
+                    "powerMonitoringEnabled": payload.powerMonitoringEnabled,
+                }
+            )
         if "electricity_price" in sections:
-            live_updates["price"] = _nn({
-                "area": sections["electricity_price"].get("area"),
-                "markupRate": payload.markupRate,
-                "vatMultiplier": payload.vatMultiplier,
-                "additionalCosts": payload.additionalCosts,
-                "taxReduction": payload.taxReduction,
-            })
+            live_updates["price"] = _nn(
+                {
+                    "area": sections["electricity_price"].get("area"),
+                    "markupRate": payload.markupRate,
+                    "vatMultiplier": payload.vatMultiplier,
+                    "additionalCosts": payload.additionalCosts,
+                    "taxReduction": payload.taxReduction,
+                }
+            )
         if live_updates:
             bess_controller.system.update_settings(live_updates)
 
@@ -2613,11 +2632,15 @@ async def setup_complete(payload: APISetupCompletePayload):
                 bess_controller.system.reinitialize_historical_data()
                 logger.info("Historical backfill complete after wizard setup")
             except Exception as backfill_err:
-                logger.warning("Historical backfill failed after setup: %s", backfill_err)
+                logger.warning(
+                    "Historical backfill failed after setup: %s", backfill_err
+                )
             try:
                 now = time_utils.now()
                 current_period = now.hour * 4 + now.minute // 15
-                bess_controller.system.update_battery_schedule(current_period=current_period)
+                bess_controller.system.update_battery_schedule(
+                    current_period=current_period
+                )
                 logger.info("Schedule built with historical data after wizard setup")
             except Exception as sched_err:
                 logger.warning("Could not build schedule after backfill: %s", sched_err)

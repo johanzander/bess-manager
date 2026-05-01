@@ -493,7 +493,11 @@ class PriceManager:
                 else:
                     sell_price = self._calculate_sell_price(price)
 
-                buy_price = price if self.price_source.prices_are_final else self._calculate_buy_price(price)
+                buy_price = (
+                    price
+                    if self.price_source.prices_are_final
+                    else self._calculate_buy_price(price)
+                )
 
                 price_entry = {
                     "timestamp": timestamp.strftime("%Y-%m-%d %H:%M"),

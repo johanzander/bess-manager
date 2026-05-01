@@ -159,9 +159,9 @@ class ScheduleStore:
             for i, period_data in enumerate(result.period_data):
                 target_period = opt_period + i
                 if target_period < 96:
-                    period_intents[
-                        target_period
-                    ] = period_data.decision.strategic_intent
+                    period_intents[target_period] = (
+                        period_data.decision.strategic_intent
+                    )
 
         # Store with date for validation on load
         data = {

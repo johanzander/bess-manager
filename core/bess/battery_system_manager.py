@@ -1485,9 +1485,9 @@ class BatterySystemManager:
             for i, period_data in enumerate(period_data_list):
                 target_period = optimization_period + i
                 if target_period < len(full_day_strategic_intents):
-                    full_day_strategic_intents[
-                        target_period
-                    ] = period_data.decision.strategic_intent
+                    full_day_strategic_intents[target_period] = (
+                        period_data.decision.strategic_intent
+                    )
 
             # Store initial SOE (kWh) in OptimizationResult for DailyViewBuilder.
             # _initial_soc_pct and _get_current_battery_soc() return SOC percent (0-100);

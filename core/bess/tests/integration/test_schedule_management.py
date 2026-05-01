@@ -411,7 +411,9 @@ class TestChargeRateHardwareWrite:
         self, battery_system, mock_controller
     ):
         """SOLAR_STORAGE must write charge_rate=100 even when power monitor is off."""
-        assert battery_system._power_monitor is None, "Fixture must have no power monitor"
+        assert (
+            battery_system._power_monitor is None
+        ), "Fixture must have no power monitor"
 
         self._inject_intent(battery_system, "SOLAR_STORAGE", hour=12)
         mock_controller.calls["charge_rate"].clear()
@@ -420,12 +422,12 @@ class TestChargeRateHardwareWrite:
             mock_now.return_value.hour = 12
             battery_system._apply_period_schedule(48)  # period 48 = hour 12
 
-        assert mock_controller.calls["charge_rate"], (
-            "SOLAR_STORAGE must write charge_rate to inverter"
-        )
-        assert mock_controller.calls["charge_rate"][-1] == 100, (
-            f"SOLAR_STORAGE charge_rate must be 100, got {mock_controller.calls['charge_rate'][-1]}"
-        )
+        assert mock_controller.calls[
+            "charge_rate"
+        ], "SOLAR_STORAGE must write charge_rate to inverter"
+        assert (
+            mock_controller.calls["charge_rate"][-1] == 100
+        ), f"SOLAR_STORAGE charge_rate must be 100, got {mock_controller.calls['charge_rate'][-1]}"
 
     def test_grid_charging_writes_charge_rate_100_without_power_monitor(
         self, battery_system, mock_controller
@@ -440,16 +442,14 @@ class TestChargeRateHardwareWrite:
             mock_now.return_value.hour = 2
             battery_system._apply_period_schedule(8)  # period 8 = hour 2
 
-        assert mock_controller.calls["charge_rate"], (
-            "GRID_CHARGING must write charge_rate to inverter"
-        )
-        assert mock_controller.calls["charge_rate"][-1] == 100, (
-            f"GRID_CHARGING charge_rate must be 100, got {mock_controller.calls['charge_rate'][-1]}"
-        )
+        assert mock_controller.calls[
+            "charge_rate"
+        ], "GRID_CHARGING must write charge_rate to inverter"
+        assert (
+            mock_controller.calls["charge_rate"][-1] == 100
+        ), f"GRID_CHARGING charge_rate must be 100, got {mock_controller.calls['charge_rate'][-1]}"
 
-    def test_load_support_writes_charge_rate_0(
-        self, battery_system, mock_controller
-    ):
+    def test_load_support_writes_charge_rate_0(self, battery_system, mock_controller):
         """LOAD_SUPPORT must write charge_rate=0 (discharge-only mode)."""
         assert battery_system._power_monitor is None
 
@@ -460,12 +460,12 @@ class TestChargeRateHardwareWrite:
             mock_now.return_value.hour = 19
             battery_system._apply_period_schedule(76)  # period 76 = hour 19
 
-        assert mock_controller.calls["charge_rate"], (
-            "LOAD_SUPPORT must write charge_rate to inverter"
-        )
-        assert mock_controller.calls["charge_rate"][-1] == 0, (
-            f"LOAD_SUPPORT charge_rate must be 0, got {mock_controller.calls['charge_rate'][-1]}"
-        )
+        assert mock_controller.calls[
+            "charge_rate"
+        ], "LOAD_SUPPORT must write charge_rate to inverter"
+        assert (
+            mock_controller.calls["charge_rate"][-1] == 0
+        ), f"LOAD_SUPPORT charge_rate must be 0, got {mock_controller.calls['charge_rate'][-1]}"
 
     def test_stale_zero_overwritten_when_solar_storage_follows_load_support(
         self, battery_system, mock_controller
@@ -495,9 +495,9 @@ class TestChargeRateHardwareWrite:
             mock_now.return_value.hour = 12
             battery_system._apply_period_schedule(48)
 
-        assert mock_controller.calls["charge_rate"], (
-            "SOLAR_STORAGE must write charge_rate after LOAD_SUPPORT"
-        )
+        assert mock_controller.calls[
+            "charge_rate"
+        ], "SOLAR_STORAGE must write charge_rate after LOAD_SUPPORT"
         assert mock_controller.calls["charge_rate"][-1] == 100, (
             "SOLAR_STORAGE must reset charge_rate to 100 — stale 0 from "
             f"LOAD_SUPPORT was not overwritten: {mock_controller.calls['charge_rate']}"

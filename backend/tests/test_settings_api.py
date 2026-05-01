@@ -122,9 +122,7 @@ class TestGetSettings:
 
     def test_sensors_come_from_ha_controller(self, mock_controller):
         """Sensor values must be sourced from ha_controller, not the store."""
-        mock_controller.ha_controller.sensors = {
-            "battery_soc": "sensor.battery_live"
-        }
+        mock_controller.ha_controller.sensors = {"battery_soc": "sensor.battery_live"}
         resp = _client.get("/api/settings")
         assert resp.json()["sensors"]["battery_soc"] == "sensor.battery_live"
 
@@ -161,12 +159,18 @@ class TestPatchSettingsSectionRouting:
         assert "Unknown settings section" in resp.json()["detail"]
 
     def test_known_sections_accepted(self, mock_controller):
-        for section in ("battery", "home", "electricityPrice",
-                        "energyProvider", "growatt", "sensors"):
+        for section in (
+            "battery",
+            "home",
+            "electricityPrice",
+            "energyProvider",
+            "growatt",
+            "sensors",
+        ):
             resp = _client.patch("/api/settings", json={section: {}})
-            assert resp.status_code == 200, (
-                f"Section '{section}' was unexpectedly rejected: {resp.text}"
-            )
+            assert (
+                resp.status_code == 200
+            ), f"Section '{section}' was unexpectedly rejected: {resp.text}"
 
 
 class TestPatchSettingsCamelToSnake:
@@ -199,8 +203,10 @@ class TestPatchSettingsCamelToSnake:
             "/api/settings",
             json={"sensors": {"battery_soc": "sensor.battery_soc_percent"}},
         )
-        assert mock_controller.ha_controller.sensors.get("battery_soc") == \
-            "sensor.battery_soc_percent"
+        assert (
+            mock_controller.ha_controller.sensors.get("battery_soc")
+            == "sensor.battery_soc_percent"
+        )
 
 
 # ===========================================================================
@@ -308,7 +314,9 @@ class TestPatchSettingsLiveUpdates:
             "/api/settings",
             json={"battery": {"temperatureDerating": {"enabled": True}}},
         )
-        mock_controller.system.temperature_derating.enabled = True  # assert setter called
+        mock_controller.system.temperature_derating.enabled = (
+            True  # assert setter called
+        )
         assert mock_controller.system.temperature_derating.enabled is True
 
     def test_health_refresh_called_after_patch(self, mock_controller):
@@ -331,8 +339,10 @@ class TestPatchSettingsSensorValidation:
             json={"sensors": {"battery_soc": "sensor.battery_soc_percent"}},
         )
         assert resp.status_code == 200
-        assert mock_controller.ha_controller.sensors.get("battery_soc") == \
-            "sensor.battery_soc_percent"
+        assert (
+            mock_controller.ha_controller.sensors.get("battery_soc")
+            == "sensor.battery_soc_percent"
+        )
 
     def test_invalid_entity_id_returns_422(self, mock_controller):
         resp = _client.patch(
@@ -352,7 +362,10 @@ class TestPatchSettingsSensorValidation:
         """Empty strings clear intent — they must not overwrite configured sensors."""
         mock_controller.ha_controller.sensors = {"battery_soc": "sensor.existing"}
         _client.patch("/api/settings", json={"sensors": {"battery_soc": ""}})
-        assert mock_controller.ha_controller.sensors.get("battery_soc") == "sensor.existing"
+        assert (
+            mock_controller.ha_controller.sensors.get("battery_soc")
+            == "sensor.existing"
+        )
 
     def test_multiple_valid_sensors_all_stored(self, mock_controller):
         payload = {
@@ -363,8 +376,12 @@ class TestPatchSettingsSensorValidation:
         }
         resp = _client.patch("/api/settings", json=payload)
         assert resp.status_code == 200
-        assert mock_controller.ha_controller.sensors["battery_soc"] == "sensor.battery_soc"
-        assert mock_controller.ha_controller.sensors["grid_power"] == "sensor.grid_power"
+        assert (
+            mock_controller.ha_controller.sensors["battery_soc"] == "sensor.battery_soc"
+        )
+        assert (
+            mock_controller.ha_controller.sensors["grid_power"] == "sensor.grid_power"
+        )
 
 
 # ===========================================================================

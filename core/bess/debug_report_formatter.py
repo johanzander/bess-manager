@@ -185,9 +185,7 @@ class DebugReportFormatter:
             return summary + "\n\n*No entity states available*"
 
         if not export.compact:
-            return (
-                summary
-                + f"""
+            return summary + f"""
 
 <details>
 <summary>Raw HA entity states ({count} entities — click to expand)</summary>
@@ -197,7 +195,6 @@ class DebugReportFormatter:
 ```
 
 </details>"""
-            )
 
         # Compact: flattened key:value table for quick reading,
         # full JSON in collapsible for mock HA replay.
@@ -214,9 +211,7 @@ class DebugReportFormatter:
 
         flat_table = "\n".join(rows)
 
-        return (
-            summary
-            + f"""
+        return summary + f"""
 
 {flat_table}
 
@@ -228,7 +223,6 @@ class DebugReportFormatter:
 ```
 
 </details>"""
-        )
 
     def _format_inverter_tou(self, export: DebugDataExport) -> str:
         segments = export.inverter_tou_segments
@@ -241,14 +235,11 @@ class DebugReportFormatter:
         if count == 0:
             return summary + "\n\n*No TOU segments available*"
 
-        return (
-            summary
-            + f"""
+        return summary + f"""
 
 ```json
 {self._format_json(segments)}
 ```"""
-        )
 
     def _format_historical_data(self, export: DebugDataExport) -> str:
         """Format historical data section with summary.
@@ -383,11 +374,7 @@ class DebugReportFormatter:
 ```"""
 
         # Input metadata (scalars only, skip large arrays)
-        input_meta = {
-            k: v
-            for k, v in input_data.items()
-            if not isinstance(v, list)
-        }
+        input_meta = {k: v for k, v in input_data.items() if not isinstance(v, list)}
         if input_meta:
             econ_block += f"""
 
@@ -434,7 +421,11 @@ class DebugReportFormatter:
 
 </details>"""
 
-        return summary_text + f"\n\n{econ_block}\n\n### Period Decisions\n\n{table}" + details
+        return (
+            summary_text
+            + f"\n\n{econ_block}\n\n### Period Decisions\n\n{table}"
+            + details
+        )
 
     def _format_snapshots(self, export: DebugDataExport) -> str:
         """Format prediction snapshots section with summary.

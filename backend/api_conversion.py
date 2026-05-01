@@ -72,9 +72,7 @@ def build_system_settings(options: dict) -> dict:
     required_sections = ["battery", "electricity_price", "home"]
     for section in required_sections:
         if section not in options:
-            raise ValueError(
-                f"Required configuration section '{section}' is missing"
-            )
+            raise ValueError(f"Required configuration section '{section}' is missing")
 
     battery_config = options["battery"]
     electricity_price_config = options["electricity_price"]
@@ -98,8 +96,7 @@ def build_system_settings(options: dict) -> dict:
             for snake, camel in BATTERY_STORE_TO_API.items()
         },
         "home": {
-            camel: home_config[snake]
-            for snake, camel in HOME_STORE_TO_API.items()
+            camel: home_config[snake] for snake, camel in HOME_STORE_TO_API.items()
         },
         "price": {
             camel: electricity_price_config[snake]
@@ -140,7 +137,9 @@ def convert_keys_to_camel_case(data: Any) -> Any:
 def convert_keys_to_snake_case(data: Any) -> Any:
     """Recursively convert all dict keys from camelCase to snake_case."""
     if isinstance(data, dict):
-        return {camel_to_snake(k): convert_keys_to_snake_case(v) for k, v in data.items()}
+        return {
+            camel_to_snake(k): convert_keys_to_snake_case(v) for k, v in data.items()
+        }
     if isinstance(data, list):
         return [convert_keys_to_snake_case(item) for item in data]
     return data

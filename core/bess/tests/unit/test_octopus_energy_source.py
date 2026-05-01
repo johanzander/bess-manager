@@ -95,7 +95,7 @@ class TestImportRateFetching:
     """Test fetching import rates from Octopus Energy entities."""
 
     def test_fetch_today_import_rates(self):
-        today = datetime.now().date()
+        today = time_utils.today()
         rates = _make_rates(today)
         controller = _make_ha_controller(rates)
         source = _make_source(controller)
@@ -111,7 +111,7 @@ class TestImportRateFetching:
         assert prices[95] == rates[47]["value_inc_vat"]
 
     def test_fetch_tomorrow_import_rates(self):
-        tomorrow = datetime.now().date() + timedelta(days=1)
+        tomorrow = time_utils.today() + timedelta(days=1)
         expected_quarterly = time_utils.get_period_count(tomorrow)
         expected_raw = expected_quarterly // 2
         rates = _make_rates(tomorrow, count=expected_raw)
@@ -123,7 +123,7 @@ class TestImportRateFetching:
         assert len(prices) == expected_quarterly
 
     def test_rejects_date_beyond_tomorrow(self):
-        day_after = datetime.now().date() + timedelta(days=2)
+        day_after = time_utils.today() + timedelta(days=2)
         controller = MagicMock()
         source = _make_source(controller)
 
@@ -132,7 +132,7 @@ class TestImportRateFetching:
 
     def test_too_few_rates_raises_error(self):
         """Rates below minimum threshold should fail validation."""
-        today = datetime.now().date()
+        today = time_utils.today()
         rates = _make_rates(today, count=20)  # Well below minimum of 46
         controller = _make_ha_controller(rates)
         source = _make_source(controller)
@@ -142,7 +142,7 @@ class TestImportRateFetching:
 
     def test_partial_rates_accepted(self):
         """46-47 rates should be accepted (Octopus publishes incrementally)."""
-        today = datetime.now().date()
+        today = time_utils.today()
         for count in (46, 47):
             rates = _make_rates(today, count=count)
             controller = _make_ha_controller(rates)
@@ -154,7 +154,7 @@ class TestImportRateFetching:
 
     def test_too_many_rates_raises_error(self):
         """More rates than expected for a single date should fail validation."""
-        today = datetime.now().date()
+        today = time_utils.today()
         expected_raw = time_utils.get_period_count(today) // 2
         rates = _make_rates(today, count=expected_raw)
         # Add duplicate rates that also fall on today to exceed expected_raw
@@ -174,7 +174,7 @@ class TestImportRateFetching:
             source.get_prices_for_date(today)
 
     def test_no_rates_attribute_raises_error(self):
-        today = datetime.now().date()
+        today = time_utils.today()
         controller = MagicMock()
         controller._api_request = MagicMock(
             return_value={"attributes": {"no_rates_key": []}}
@@ -185,7 +185,7 @@ class TestImportRateFetching:
             source.get_prices_for_date(today)
 
     def test_api_failure_raises_error(self):
-        today = datetime.now().date()
+        today = time_utils.today()
         controller = MagicMock()
         controller._api_request = MagicMock(side_effect=ConnectionError("timeout"))
         source = _make_source(controller)
@@ -198,7 +198,7 @@ class TestExportRateFetching:
     """Test fetching export/sell rates from Octopus Energy entities."""
 
     def test_fetch_export_rates(self):
-        today = datetime.now().date()
+        today = time_utils.today()
         import_rates = _make_rates(today)
         export_rates = _make_rates(today, export=True)
         controller = _make_ha_controller(import_rates, export_rates)
@@ -213,7 +213,7 @@ class TestExportRateFetching:
         assert sell_prices[1] == export_rates[0]["value_inc_vat"]
 
     def test_no_export_entity_returns_none(self):
-        today = datetime.now().date()
+        today = time_utils.today()
         controller = MagicMock()
         source = OctopusEnergySource(
             ha_controller=controller,
@@ -227,7 +227,7 @@ class TestExportRateFetching:
 
     def test_export_failure_returns_none(self):
         """Export rate failure should return None, not raise."""
-        today = datetime.now().date()
+        today = time_utils.today()
         controller = MagicMock()
         controller._api_request = MagicMock(side_effect=ConnectionError("timeout"))
         source = _make_source(controller)
@@ -237,7 +237,7 @@ class TestExportRateFetching:
     def test_default_get_sell_prices_for_date_returns_none(self):
         """Base PriceSource returns None for sell prices."""
         mock = MockSource([1.0])
-        assert mock.get_sell_prices_for_date(datetime.now().date()) is None
+        assert mock.get_sell_prices_for_date(time_utils.today()) is None
 
 
 class TestDateFilteringAndSorting:
@@ -245,7 +245,7 @@ class TestDateFilteringAndSorting:
 
     def test_filters_rates_by_date(self):
         """Only rates matching the target date should be included."""
-        today = datetime.now().date()
+        today = time_utils.today()
         tomorrow = today + timedelta(days=1)
 
         # Mix rates from today and tomorrow
@@ -261,7 +261,7 @@ class TestDateFilteringAndSorting:
 
     def test_sorts_rates_chronologically(self):
         """Rates should be sorted by start time regardless of input order."""
-        today = datetime.now().date()
+        today = time_utils.today()
         rates = _make_rates(today)
         # Reverse the order
         rates.reverse()
@@ -280,7 +280,7 @@ class TestHealthCheck:
     """Test health check functionality."""
 
     def test_healthy_source(self):
-        today = datetime.now().date()
+        today = time_utils.today()
         import_rates = _make_rates(today)
         export_rates = _make_rates(today, export=True)
         controller = _make_ha_controller(import_rates, export_rates)
@@ -309,7 +309,7 @@ class TestPriceManagerIntegration:
 
     def test_price_manager_uses_direct_sell_prices(self):
         """When source provides sell prices, PriceManager should use them directly."""
-        today = datetime.now().date()
+        today = time_utils.today()
         import_rates = _make_rates(today)
         export_rates = _make_rates(today, export=True)
         controller = _make_ha_controller(import_rates, export_rates)
@@ -335,7 +335,7 @@ class TestPriceManagerIntegration:
 
     def test_price_manager_timestamps_use_quarter_hour_spacing(self):
         """Timestamps should be 15 minutes apart (quarterly resolution)."""
-        today = datetime.now().date()
+        today = time_utils.today()
         rates = _make_rates(today)
         controller = _make_ha_controller(rates)
         source = _make_source(controller)
@@ -359,7 +359,7 @@ class TestPriceManagerIntegration:
 
     def test_price_manager_fallback_sell_without_export(self):
         """Without export entity, sell price should use calculated formula."""
-        today = datetime.now().date()
+        today = time_utils.today()
         rates = _make_rates(today)
         controller = _make_ha_controller(rates)
 

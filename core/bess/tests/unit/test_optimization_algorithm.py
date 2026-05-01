@@ -9,11 +9,11 @@ but don't test specific optimization results.
 
 import pytest
 
-pytestmark = pytest.mark.slow
-
 from core.bess.dp_battery_algorithm import optimize_battery_schedule
 from core.bess.models import EconomicSummary, PeriodData
 from core.bess.settings import BatterySettings
+
+pytestmark = pytest.mark.slow
 
 # Create a BatterySettings instance for testing
 battery_settings = BatterySettings()

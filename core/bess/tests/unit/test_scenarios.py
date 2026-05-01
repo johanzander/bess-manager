@@ -8,14 +8,10 @@ produce reasonable outputs.
 
 import json
 import logging
-
-import pytest
-
-pytestmark = pytest.mark.slow
 import os
 from pathlib import Path
 
-import pytest  # type: ignore
+import pytest
 
 from core.bess.dp_battery_algorithm import (
     optimize_battery_schedule,
@@ -37,6 +33,8 @@ from core.bess.tests.helpers import (
     assert_savings_positive,
     get_intent_distribution,
 )
+
+pytestmark = pytest.mark.slow
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"

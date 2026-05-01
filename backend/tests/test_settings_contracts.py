@@ -24,9 +24,8 @@ How to use when adding or renaming a settings field
 """
 
 import dataclasses
-import sys
 from datetime import date
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 import settings_store as _sm
@@ -247,6 +246,7 @@ class TestApplySettings:
 class TestBatteryModelAttrsConsistency:
     def test_attrs_match_dataclass_init_fields(self):
         from api import _BATTERY_MODEL_ATTRS  # type: ignore[import]
+
         from core.bess.settings import BatterySettings
 
         expected = frozenset(

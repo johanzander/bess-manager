@@ -2191,7 +2191,7 @@ async def export_debug_data(compact: bool = True):
             Logs are filtered to key events + last 50 lines (not the full log).
             Snapshots are rendered as a 5-field evolution table (not full JSON).
             Set to False only when a raw field not present in compact mode is needed
-            (full log, all schedules, all snapshots as JSON). Expect 30–80 MB.
+            (full log, all schedules, all snapshots as JSON). Expect 30-80 MB.
 
     Security:
     - Via HA ingress (browser): HA handles authentication

@@ -9,11 +9,11 @@ from types import SimpleNamespace
 
 import pytest
 
-pytestmark = pytest.mark.slow
-
 from core.bess.battery_system_manager import BatterySystemManager
 from core.bess.price_manager import MockSource
 from core.bess.tests.conftest import MockHomeAssistantController
+
+pytestmark = pytest.mark.slow
 
 
 class InhibitableController(MockHomeAssistantController):

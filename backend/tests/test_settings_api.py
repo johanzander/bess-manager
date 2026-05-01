@@ -17,10 +17,9 @@ from copy import deepcopy
 from unittest.mock import MagicMock
 
 import pytest
+from api import router
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
-from api import router
 
 # ---------------------------------------------------------------------------
 # Minimal FastAPI app that exercises the router under test
@@ -111,12 +110,12 @@ class TestGetSettings:
         assert resp.status_code == 200
 
     def test_battery_computed_fields_present(self, mock_controller):
-        """min_soe_kwh, max_soe_kwh, reservedCapacity computed from capacity × SOC%."""
+        """min_soe_kwh, max_soe_kwh, reservedCapacity computed from capacity x SOC%."""
         resp = _client.get("/api/settings")
         battery = resp.json()["battery"]
-        # 30 kWh × 10% min_soc = 3.0 kWh
+        # 30 kWh x 10% min_soc = 3.0 kWh
         assert battery["minSoeKwh"] == pytest.approx(3.0)
-        # 30 kWh × 95% max_soc = 28.5 kWh
+        # 30 kWh x 95% max_soc = 28.5 kWh
         assert battery["maxSoeKwh"] == pytest.approx(28.5)
         assert battery["reservedCapacity"] == pytest.approx(3.0)
 
@@ -400,7 +399,7 @@ class TestPatchSettingsResponse:
     def test_patch_response_includes_computed_battery_fields(self, mock_controller):
         resp = _client.patch("/api/settings", json={"battery": {"totalCapacity": 20.0}})
         battery = resp.json()["battery"]
-        # 20 kWh × 10% = 2.0 kWh min_soe
+        # 20 kWh x 10% = 2.0 kWh min_soe
         assert "minSoeKwh" in battery
         assert battery["minSoeKwh"] == pytest.approx(2.0)
 

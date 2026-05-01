@@ -294,7 +294,7 @@ class HomeAssistantSource(PriceSource):
         """Handle DST transitions for quarterly resolution (92-100 periods).
 
         Nordpool provides quarterly prices (15-minute intervals):
-        - Normal day: 96 periods (24 hours × 4)
+        - Normal day: 96 periods (24 hours x 4)
         - DST spring (23h): 92 periods
         - DST fall (25h): 100 periods
 

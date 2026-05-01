@@ -5,13 +5,13 @@ from unittest.mock import patch
 
 import pytest
 
-pytestmark = pytest.mark.slow
-
 from core.bess.battery_system_manager import BatterySystemManager
 from core.bess.exceptions import PriceDataUnavailableError
 from core.bess.price_manager import MockSource
 from core.bess.tests.conftest import MockHomeAssistantController, MockSensorCollector
 from core.bess.time_utils import get_period_count
+
+pytestmark = pytest.mark.slow
 
 
 class TodayOnlyMockSource(MockSource):

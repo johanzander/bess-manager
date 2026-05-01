@@ -39,7 +39,7 @@ error). No full snapshot JSON is needed — the 5-field evolution table is enoug
 
 ## compact=True vs compact=False
 
-compact=True  — default; serves all three use cases; targets ~200–500 KB.
+compact=True  - default; serves all three use cases; targets ~200-500 KB.
 compact=False — raw full dump; complete log, all schedules, all snapshots as JSON;
                 use when a specific field not present in compact mode is needed.
 """

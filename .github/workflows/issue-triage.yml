@@ -2,51 +2,31 @@
 #
 # TRIGGERS:
 #   issues.opened/reopened → classify, label, and respond to every new issue
-#   issue_comment.created  → when user provides debug log on a needs-debug-log issue,
-#                            run deeper analysis then auto-confirm the bug in code
-#   workflow_dispatch      → manually re-run triage or analyze_log on any issue
+#   workflow_dispatch      → manually re-run triage on any issue
 #
-# Pipeline stages (automatic):
-#   Stage 1 — triage-new-issue   : classify, label, request debug log if needed
-#   Stage 2 — analyze-debug-log  : analyse debug log / screenshots (initial hypotheses)
-#   Stage 3 — auto-confirm-bug   : read actual source files and confirm/deny the bug
+# Uses anthropics/claude-code-action@v1 (official Anthropic action).
+# Claude reads CLAUDE.md for project context and bot command instructions.
 #
-# After confirmation, the fix pipeline is triggered manually:
-#   Comment "@claude-bot fix this" on any issue to invoke issue_fixer.py
-#   Comment "@claude-bot confirm" to re-run the confirmation step manually
+# Pipeline overview:
+#   Stage 1 (auto)   — triage-new-issue : classify, label, gather info
+#   Stage 2 (manual) — @claude-bot confirm : read source and confirm/deny bug
+#   Stage 3 (manual) — @claude-bot fix this : implement fix, open draft PR
 
 name: Issue Triage
 
 on:
   issues:
     types: [opened, reopened]
-  issue_comment:
-    types: [created]
   workflow_dispatch:
     inputs:
       issue_number:
-        description: "Issue number to re-triage"
+        description: "Issue number to triage"
         required: true
         type: number
-      mode:
-        description: "Mode: triage (classify) or analyze_log (analyse debug data)"
-        required: true
-        default: triage
-        type: choice
-        options:
-          - triage
-          - analyze_log
 
 jobs:
-
-  # ---------------------------------------------------------------------------
-  # Triage new issues automatically (also handles manual workflow_dispatch)
-  # ---------------------------------------------------------------------------
-  triage-new-issue:
+  triage:
     name: Triage New Issue
-    if: |
-      github.event_name == 'issues' ||
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'triage')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -61,110 +41,31 @@ jobs:
           app-id: ${{ secrets.CLAUDE_REVIEWER_APP_ID }}
           private-key: ${{ secrets.CLAUDE_REVIEWER_PRIVATE_KEY }}
 
-      - uses: actions/setup-python@v5
+      - uses: anthropics/claude-code-action@v1
         with:
-          python-version: "3.12"
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ steps.app-token.outputs.token }}
+          claude_args: "--max-turns 15"
+          prompt: |
+            Triage issue #${{ github.event.issue.number || github.event.inputs.issue_number }} in the johanzander/bess-manager repository.
 
-      - run: pip install anthropic PyGithub
+            Read docs/agents/rules.md (hard constraints) and docs/agents/architecture.md (codebase layout).
+            Run: gh issue view ${{ github.event.issue.number || github.event.inputs.issue_number }} --json title,body,labels,comments
 
-      - env:
-          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          ISSUE_NUMBER: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.issue_number || github.event.issue.number }}
-          REPO_FULL_NAME: ${{ github.repository }}
-          GITHUB_RUN_ID: ${{ github.run_id }}
-          GITHUB_SERVER_URL: ${{ github.server_url }}
-          TRIAGE_MODE: triage
-        run: python scripts/issue_triage.py
+            Your tasks (in order):
+            1. Classify the issue: bug, question, feature-request, or other.
+            2. Apply labels with: gh issue edit <number> --add-label <label>
+               Available labels: bug, question, feature-request, needs-debug-log, bot-analyzed
+            3. Post a comment:
+               - For a potential bug with a debug log already attached: post a focused initial
+                 analysis. Use hedged language ("the log suggests...", "this may indicate...").
+                 Do NOT claim to have confirmed the bug — a separate confirmation step reads
+                 the actual source files. End with:
+                 "A code-level confirmation will follow. To trigger it: `@claude-bot confirm`"
+               - For a potential bug without a debug log: ask the user to provide one
+                 (System Health → Download Debug Report), label needs-debug-log.
+               - For a question or feature request: respond helpfully.
+               - For unclear reports: ask specific clarifying questions.
 
-  # ---------------------------------------------------------------------------
-  # Analyze debug log when user provides one on a waiting issue
-  # ---------------------------------------------------------------------------
-  analyze-debug-log:
-    name: Analyze Debug Log
-    if: |
-      (
-        github.event_name == 'issue_comment' &&
-        github.event.issue.pull_request == null &&
-        github.event.issue.state == 'open' &&
-        github.actor != 'bess-manager-claude-bot[bot]' &&
-        contains(toJson(github.event.issue.labels), 'needs-debug-log')
-      ) ||
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'analyze_log')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      issues: write
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/create-github-app-token@v1
-        id: app-token
-        with:
-          app-id: ${{ secrets.CLAUDE_REVIEWER_APP_ID }}
-          private-key: ${{ secrets.CLAUDE_REVIEWER_PRIVATE_KEY }}
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - run: pip install anthropic PyGithub
-
-      - env:
-          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          ISSUE_NUMBER: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.issue_number || github.event.issue.number }}
-          COMMENT_BODY: ${{ github.event.comment.body }}
-          REPO_FULL_NAME: ${{ github.repository }}
-          GITHUB_RUN_ID: ${{ github.run_id }}
-          GITHUB_SERVER_URL: ${{ github.server_url }}
-          TRIAGE_MODE: analyze_log
-        run: python scripts/issue_triage.py
-
-  # ---------------------------------------------------------------------------
-  # Auto-confirm bug after debug log analysis completes
-  # ---------------------------------------------------------------------------
-  auto-confirm-bug:
-    name: Auto-Confirm Bug
-    needs: analyze-debug-log
-    if: |
-      needs.analyze-debug-log.result == 'success' &&
-      (
-        (
-          github.event_name == 'issue_comment' &&
-          github.event.issue.pull_request == null &&
-          github.event.issue.state == 'open' &&
-          github.actor != 'bess-manager-claude-bot[bot]' &&
-          contains(toJson(github.event.issue.labels), 'needs-debug-log')
-        ) ||
-        (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'analyze_log')
-      )
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      issues: write
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/create-github-app-token@v1
-        id: app-token
-        with:
-          app-id: ${{ secrets.CLAUDE_REVIEWER_APP_ID }}
-          private-key: ${{ secrets.CLAUDE_REVIEWER_PRIVATE_KEY }}
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - run: pip install anthropic PyGithub
-
-      - env:
-          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          ISSUE_NUMBER: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.issue_number || github.event.issue.number }}
-          REPO_FULL_NAME: ${{ github.repository }}
-          GITHUB_RUN_ID: ${{ github.run_id }}
-          GITHUB_SERVER_URL: ${{ github.server_url }}
-        run: python scripts/issue_confirmer.py
+            IMPORTANT: Do NOT read source files to confirm bugs. Do NOT suggest fixes.
+            Focus only on classification, labeling, and information gathering.

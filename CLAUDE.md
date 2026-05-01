@@ -66,14 +66,52 @@ A React SPA (`frontend/`) provides the management interface.
 
 ## Automated Agent Workflow
 
-Issues on GitHub are handled by a three-stage pipeline:
+Issues on GitHub are handled by a three-stage pipeline powered by
+`anthropics/claude-code-action@v1`. This CLAUDE.md file is the primary
+instruction source — Claude reads it at the start of every bot session.
 
-1. **Triage** — runs on every new issue (`.github/workflows/issue-triage.yml`)
-2. **Fix** — triggered by `@claude-bot` comment (`scripts/issue_fixer.py`)
-3. **Review** — triggered by `@claude-bot` on a PR (`scripts/pr_reviewer.py`)
+### Stage 1 — Auto Triage (`.github/workflows/issue-triage.yml`)
 
-All agents load `docs/agents/rules.md` as hard constraints and
-`docs/agents/architecture.md` as structural reference.
+Runs automatically on every new issue. Classifies, labels, and either asks for
+a debug log or posts an initial analysis. Does NOT confirm bugs in source code.
+
+### Stage 2 — Confirm (`@claude-bot confirm` on an issue)
+
+**When triggered:** Read the full issue including all comments. Then:
+1. Read `docs/agents/rules.md` and `docs/agents/architecture.md`.
+2. Use `gh issue view <n>` to see the full issue context.
+3. Search the codebase for the code paths mentioned in the bug report.
+4. Read the actual source files (do not rely on search snippets alone).
+5. Post a comment with your verdict:
+   - **Bug confirmed** — quote the exact defective lines (file:line), explain
+     the root cause, and say: "To trigger a fix: `@claude-bot fix this`"
+   - **Cannot confirm** — explain what you read and why the bug isn't there.
+   - **Needs more info** — ask for the specific information missing.
+
+### Stage 3 — Fix (`@claude-bot fix this` on an issue)
+
+**When triggered:** Fix the confirmed bug and open a draft PR.
+1. Read `docs/agents/rules.md`, `docs/agents/architecture.md`,
+   `docs/agents/patterns.md`, and `docs/agents/workflow.md`.
+2. Use `gh issue view <n>` to understand the bug and any confirm-step evidence.
+3. Implement the minimal fix — no refactoring, no unrelated changes.
+4. Run `./scripts/quality-check.sh` and fix any failures before committing.
+5. Create a fresh branch `fix/issue-<number>-<short-slug>` and push it.
+6. Open a **draft** PR linked to the issue: `gh pr create --draft ...`
+7. Post a comment on the issue linking the PR.
+
+### PR Review (`@claude-bot` on a PR comment)
+
+Read `docs/agents/rules.md` and `.github/claude-bot.md` for the review
+checklist. Post inline comments on specific lines where issues are found.
+Summarize with an overall verdict (approve / request changes / comment).
+
+### General bot rules
+
+- Only the repo owner can trigger bot commands.
+- Always use `gh` CLI for all GitHub operations (issues, PRs, labels).
+- Never push directly to `main`.
+- Commit as the GitHub App bot identity (handled automatically by the action).
 
 ## Home Assistant Integration
 

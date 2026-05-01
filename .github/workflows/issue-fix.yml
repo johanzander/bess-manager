@@ -1,0 +1,134 @@
+# Stage 3 — Implement Fix (gated)
+#
+# Triggered manually with `@claude-bot fix` on an issue. Reads the
+# Stage 2 diagnosis comment, implements the minimal fix, runs the
+# quality gate, and opens a draft PR.
+
+name: Issue Fix
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  fix:
+    name: Implement Fix
+    if: |
+      github.event.comment.user.login == github.repository_owner &&
+      github.event.issue.pull_request == null &&
+      contains(github.event.comment.body, '@claude-bot fix')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/create-github-app-token@v2
+        id: app-token
+        with:
+          app-id: ${{ secrets.CLAUDE_REVIEWER_APP_ID }}
+          private-key: ${{ secrets.CLAUDE_REVIEWER_PRIVATE_KEY }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ steps.app-token.outputs.token }}
+          trigger_phrase: "@claude-bot fix"
+          claude_args: "--max-turns 80"
+          prompt: |
+            You are the **Stage 3 Fix** bot for issue #${{ github.event.issue.number }} in johanzander/bess-manager.
+
+            ──────────────────────────────────────────────────────────────────
+            REQUIRED READING (before writing any code)
+            ──────────────────────────────────────────────────────────────────
+            1. docs/agents/rules.md     — hard constraints (NON-NEGOTIABLE)
+            2. docs/agents/patterns.md  — code patterns
+            3. docs/agents/testing.md   — test philosophy
+            4. docs/agents/workflow.md  — commit/PR/release process
+
+            ──────────────────────────────────────────────────────────────────
+            PROCESS
+            ──────────────────────────────────────────────────────────────────
+            1. Read the issue and prior bot comments:
+                 gh issue view ${{ github.event.issue.number }} --json title,body,labels,comments
+
+            2. **Find the Stage 2 analysis comment** (posted by claude[bot]
+               with sections "Root cause" / "Evidence" / "Proposed fix").
+
+               If no Stage 2 analysis exists, STOP. Post this comment and exit:
+                 "No deep analysis found. Run `@claude-bot analyze` first so
+                  the fix is grounded in a confirmed root cause."
+
+            3. Implement the **minimal** fix following the Stage 2 plan.
+               - No refactoring outside the bug.
+               - No new abstractions, helpers, or "while we're here" cleanup.
+               - Match patterns in `docs/agents/patterns.md`.
+               - Use `x | None` (NOT `Optional[x]`).
+               - No `hasattr` / `getattr` with defaults / silent fallbacks.
+
+            4. Add or update a test that fails before the fix and passes
+               after. Test behavior, not implementation (see testing.md).
+
+            5. Run the full quality gate from the repo root:
+                 ./scripts/quality-check.sh
+               If it fails, fix the failure and re-run. Do not commit
+               anything until it passes with zero errors.
+
+            6. Create a fresh branch:
+                 git checkout -b fix/issue-${{ github.event.issue.number }}-<short-kebab-slug>
+
+            7. Commit. Follow workflow.md format (subject + blank line + body
+               explaining WHY). Reference the issue.
+
+            8. Push the branch and open a **DRAFT** PR:
+                 gh pr create --draft \
+                   --title "Fix #${{ github.event.issue.number }}: <one-line summary>" \
+                   --body "<see template below>" \
+                   --base main
+
+               PR body template:
+                 ## Summary
+                 - <bullet 1>
+                 - <bullet 2>
+
+                 ## Root cause
+                 <quote from Stage 2 analysis>
+
+                 ## Fix
+                 <what you changed and why>
+
+                 ## Test plan
+                 - [ ] `./scripts/quality-check.sh` passes locally (already done)
+                 - [ ] <user-runnable verification step>
+
+                 Closes #${{ github.event.issue.number }}
+
+            9. Comment on the issue with the PR link, then label the issue:
+                 gh issue edit ${{ github.event.issue.number }} --add-label has-fix-pr
+
+            ──────────────────────────────────────────────────────────────────
+            HARD CONSTRAINTS
+            ──────────────────────────────────────────────────────────────────
+            - PR MUST be a draft. Never auto-merge.
+            - Never push to `main` directly.
+            - If quality-check.sh keeps failing after 3 fix attempts, stop,
+              push the branch as-is, and post a comment explaining what
+              failed so the human can take over.
+            - Do NOT modify CHANGELOG.md or config.yaml version — that's a
+              human step at merge time.

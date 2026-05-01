@@ -20,32 +20,39 @@ Bad messages: `Fix issue`, `Update settings`, `Changes by bot`.
 
 ## Automated Issue Pipeline
 
+Four-stage pipeline. Each stage is its own workflow file under
+`.github/workflows/` and runs `anthropics/claude-code-action@v1`. There is
+no cross-stage routing through CLAUDE.md — each stage's prompt is
+self-contained.
+
 ```
-Issue opened         → issue-triage.yml (triage-new-issue job)
-                       → classifies, labels, requests debug log if needed
-                       → posts initial analysis if debug info present
+Issue opened/edited  → issue-triage.yml      [auto, ~$0.05]
+                       → classify, label
+                       → if log present:    label `ready-for-analysis`
+                       → if log missing:    label `needs-debug-log`,
+                                            ask user for log
 
-User provides log    → analyze-debug-log job fires automatically
-                       → reads debug log / screenshots, posts initial hypotheses
-                       → auto-triggers auto-confirm-bug (next stage)
+@claude-bot analyze  → issue-analyze.yml    [manual, ~$0.50–2]
+                       → reads CLAUDE.md, docs/agents/, debug log
+                       → delegates to `bess-analyst` sub-agent
+                       → posts Root cause / Evidence / Proposed fix
+                       → label `analyzed` (or `needs-human-review`)
 
-auto-confirm-bug     → issue_confirmer.py (read-only agentic loop)
-                       → reads actual source files to verify bug in current code
-                       → posts verdict: confirmed_bug / likely_user_error /
-                         version_mismatch / cannot_confirm / needs_more_info
-                       → only suggests "@claude-bot fix this" if confirmed
+@claude-bot fix      → issue-fix.yml        [manual, ~$1–4]
+                       → reads Stage 2 diagnosis comment
+                       → implements minimal fix, runs quality-check.sh
+                       → opens DRAFT PR (never auto-merged)
+                       → label `has-fix-pr`
 
-@claude-bot confirm  → claude-bot.yml → issue_confirmer.py (manual re-run)
-
-@claude-bot fix      → claude-bot.yml → issue_fixer.py
-                       → explores codebase, implements fix, runs tests
-                       → opens draft PR (human gate — never auto-merged)
-
-@claude-bot review   → claude-bot.yml → pr_reviewer.py
-                       → checks against rules.md, posts review comment
+@claude-bot review   → pr-review.yml        [manual, ~$0.50–2]
+                       → reviews diff against rules.md + claude-bot.md
+                       → posts inline comments + summary verdict
 
 YOU approve + merge  → human decision, always
 ```
+
+**Gates:** Stages 2, 3, and 4 are manually triggered — the bot never
+spends money on its own. Stage 1 is auto but cheap.
 
 ## PR Merge Workflow
 
@@ -80,14 +87,17 @@ One line per change. No implementation details. Match existing style.
 
 ## Labels
 
-| Label | Meaning |
-|-------|---------|
-| `bug` | Confirmed defect |
-| `enhancement` | Feature request |
-| `question` | Usage/config question |
-| `needs-debug-log` | Waiting for user debug export |
-| `bot-analyzed` | Triage bot has processed this issue |
-| `ready-for-review` | Draft PR ready for human review |
+| Label | Applied by | Meaning |
+|-------|------------|---------|
+| `bug` | Stage 1 | Reported defect |
+| `enhancement` | Stage 1 | Feature request |
+| `question` | Stage 1 | Usage/config question |
+| `needs-debug-log` | Stage 1 | Waiting for user debug export |
+| `bot-analyzed` | Stage 1 | Triage bot has processed this issue |
+| `ready-for-analysis` | Stage 1 | Debug log present, awaiting `@claude-bot analyze` |
+| `analyzed` | Stage 2 | Root-cause diagnosis posted, awaiting `@claude-bot fix` |
+| `needs-human-review` | Stage 2 | Stage 2 couldn't reach a conclusion |
+| `has-fix-pr` | Stage 3 | Draft PR opened |
 
 ## Email Notifications
 

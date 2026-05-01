@@ -1,10 +1,11 @@
 """Tests for extended DP optimization horizon with tomorrow's price data."""
 
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from unittest.mock import patch
 
 import pytest
 
+from core.bess import time_utils
 from core.bess.battery_system_manager import BatterySystemManager
 from core.bess.exceptions import PriceDataUnavailableError
 from core.bess.price_manager import MockSource
@@ -18,7 +19,7 @@ class TodayOnlyMockSource(MockSource):
     """Mock source that only returns prices for today, raises for tomorrow."""
 
     def get_prices_for_date(self, target_date: date) -> list:
-        if target_date > datetime.now().date():
+        if target_date > time_utils.today():
             raise PriceDataUnavailableError(
                 message="Tomorrow's prices not yet available"
             )
@@ -83,7 +84,7 @@ class TestGetPriceDataExtended:
 
         prices, _price_entries = system._get_price_data(prepare_next_day=False)
 
-        expected = get_period_count(datetime.now().date())
+        expected = get_period_count(time_utils.today())
         assert prices is not None
         assert _price_entries is not None
         assert len(prices) == expected
@@ -96,7 +97,7 @@ class TestGetPriceDataExtended:
 
         prices, _price_entries = system._get_price_data(prepare_next_day=True)
 
-        tomorrow = datetime.now().date() + timedelta(days=1)
+        tomorrow = time_utils.today() + timedelta(days=1)
         expected = get_period_count(tomorrow)
         assert prices is not None
         # prepare_next_day fetches only tomorrow's prices, no extension
@@ -288,9 +289,7 @@ class TestScheduleTruncation:
         dp_schedule, _growatt_manager = schedule_result
 
         # Verify all schedule arrays are bounded to today
-        from core.bess.time_utils import TIMEZONE
-
-        today_count = get_period_count(datetime.now(tz=TIMEZONE).date())
+        today_count = get_period_count(time_utils.today())
         assert len(dp_schedule.actions) <= today_count
         assert len(dp_schedule.state_of_energy) <= today_count
         assert len(dp_schedule.prices) <= today_count

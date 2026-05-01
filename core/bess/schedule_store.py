@@ -83,7 +83,7 @@ class ScheduleStore:
 
         # Create the stored schedule
         stored_schedule = StoredSchedule(
-            timestamp=datetime.now(),
+            timestamp=time_utils.now(),
             optimization_period=optimization_period,
             optimization_result=optimization_result,
         )

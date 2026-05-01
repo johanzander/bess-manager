@@ -1,0 +1,52 @@
+{
+  "battery": {
+    "total_capacity": 10.0,
+    "min_soc": 10,
+    "max_soc": 100,
+    "max_charge_power_kw": 5.0,
+    "max_discharge_power_kw": 5.0,
+    "cycle_cost_per_kwh": 0.4,
+    "min_action_profit_threshold": 0.0
+  },
+  "electricity_price": {
+    "area": "SE4",
+    "markup_rate": 0.08,
+    "vat_multiplier": 1.25,
+    "additional_costs": 1.03,
+    "tax_reduction": 0.0
+  },
+  "home": {
+    "default_hourly": 1.5,
+    "currency": "SEK",
+    "max_fuse_current": 25,
+    "voltage": 230,
+    "safety_margin": 1.0,
+    "phase_count": 3,
+    "consumption_strategy": "fixed",
+    "power_monitoring_enabled": false
+  },
+  "energy_provider": "nordpool",
+  "growatt": {
+    "config_entry_id": "mock_config_entry"
+  },
+  "sensors": {
+    "battery_soc": "sensor.growatt_battery_soc",
+    "battery_charge_power": "sensor.growatt_battery_charge_power",
+    "battery_discharge_power": "sensor.growatt_battery_discharge_power",
+    "import_power": "sensor.growatt_import_power",
+    "export_power": "sensor.growatt_export_power",
+    "pv_power": "sensor.growatt_pv_power",
+    "local_load_power": "sensor.growatt_load_power",
+    "battery_charging_power_rate": "number.growatt_battery_charging_power_rate",
+    "battery_discharging_power_rate": "number.growatt_battery_discharging_power_rate",
+    "battery_charge_stop_soc": "number.growatt_battery_charge_stop_soc",
+    "battery_discharge_stop_soc": "number.growatt_battery_discharge_stop_soc",
+    "grid_charge": "switch.growatt_grid_charge"
+  },
+  "influxdb": {
+    "url": "http://nonexistent:8086/api/v2/query",
+    "bucket": "homeassistant/autogen",
+    "username": "mock",
+    "password": "mock"
+  }
+}

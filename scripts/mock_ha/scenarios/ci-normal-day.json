@@ -1,0 +1,120 @@
+{
+  "name": "CI Normal Day",
+  "description": "Synthetic scenario for CI E2E tests. Winter day, SE4, moderate price spread, no solar.",
+  "mock_time": "@2025-01-15 08:30:00",
+  "timezone": "Europe/Stockholm",
+  "inverter_type": "sph",
+  "sensors": {
+    "sensor.growatt_battery_soc": {
+      "state": "50",
+      "attributes": { "unit_of_measurement": "%", "friendly_name": "Battery SOC" }
+    },
+    "sensor.growatt_battery_charge_power": {
+      "state": "0",
+      "attributes": { "unit_of_measurement": "W" }
+    },
+    "sensor.growatt_battery_discharge_power": {
+      "state": "500",
+      "attributes": { "unit_of_measurement": "W" }
+    },
+    "sensor.growatt_import_power": {
+      "state": "0",
+      "attributes": { "unit_of_measurement": "W" }
+    },
+    "sensor.growatt_export_power": {
+      "state": "0",
+      "attributes": { "unit_of_measurement": "W" }
+    },
+    "sensor.growatt_pv_power": {
+      "state": "0",
+      "attributes": { "unit_of_measurement": "W" }
+    },
+    "sensor.growatt_load_power": {
+      "state": "1500",
+      "attributes": { "unit_of_measurement": "W" }
+    },
+    "sensor.nordpool_kwh_se4_sek_3_10_025": {
+      "state": "0.85",
+      "attributes": {
+        "unit_of_measurement": "SEK/kWh",
+        "today": [0.50, 0.40, 0.30, 0.25, 0.25, 0.40, 0.70, 0.90, 1.10, 1.20, 1.30, 1.40, 1.30, 1.20, 1.10, 1.30, 1.40, 1.50, 1.60, 1.50, 1.30, 0.90, 0.70, 0.60],
+        "tomorrow": [0.45, 0.35, 0.28, 0.22, 0.20, 0.35, 0.65, 0.85, 1.05, 1.15, 1.25, 1.35, 1.25, 1.15, 1.05, 1.25, 1.35, 1.45, 1.55, 1.45, 1.25, 0.85, 0.65, 0.55]
+      }
+    },
+    "number.growatt_battery_charging_power_rate": {
+      "state": "100",
+      "attributes": { "unit_of_measurement": "%", "min": 0, "max": 100 }
+    },
+    "number.growatt_battery_discharging_power_rate": {
+      "state": "100",
+      "attributes": { "unit_of_measurement": "%", "min": 0, "max": 100 }
+    },
+    "number.growatt_battery_charge_stop_soc": {
+      "state": "100",
+      "attributes": { "unit_of_measurement": "%", "min": 10, "max": 100 }
+    },
+    "number.growatt_battery_discharge_stop_soc": {
+      "state": "10",
+      "attributes": { "unit_of_measurement": "%", "min": 10, "max": 100 }
+    },
+    "switch.growatt_grid_charge": {
+      "state": "off",
+      "attributes": {}
+    }
+  },
+  "time_segments": [],
+  "ac_charge_times": [],
+  "ac_discharge_times": [],
+  "bess_config": {
+    "battery": {
+      "total_capacity": 10.0,
+      "min_soc": 10,
+      "max_soc": 100,
+      "max_charge_power_kw": 5.0,
+      "max_discharge_power_kw": 5.0,
+      "cycle_cost_per_kwh": 0.40,
+      "min_action_profit_threshold": 0.0
+    },
+    "electricity_price": {
+      "area": "SE4",
+      "markup_rate": 0.08,
+      "vat_multiplier": 1.25,
+      "additional_costs": 1.03,
+      "tax_reduction": 0.0
+    },
+    "home": {
+      "default_hourly": 1.5,
+      "currency": "SEK",
+      "max_fuse_current": 25,
+      "voltage": 230,
+      "safety_margin": 1.0,
+      "phase_count": 3,
+      "consumption_strategy": "fixed",
+      "power_monitoring_enabled": false
+    },
+    "energy_provider": "nordpool",
+    "growatt": {
+      "config_entry_id": "mock_config_entry"
+    },
+    "sensors": {
+      "battery_soc": "sensor.growatt_battery_soc",
+      "battery_charge_power": "sensor.growatt_battery_charge_power",
+      "battery_discharge_power": "sensor.growatt_battery_discharge_power",
+      "import_power": "sensor.growatt_import_power",
+      "export_power": "sensor.growatt_export_power",
+      "pv_power": "sensor.growatt_pv_power",
+      "local_load_power": "sensor.growatt_load_power",
+      "battery_charging_power_rate": "number.growatt_battery_charging_power_rate",
+      "battery_discharging_power_rate": "number.growatt_battery_discharging_power_rate",
+      "battery_charge_stop_soc": "number.growatt_battery_charge_stop_soc",
+      "battery_discharge_stop_soc": "number.growatt_battery_discharge_stop_soc",
+      "grid_charge": "switch.growatt_grid_charge"
+    },
+    "influxdb": {
+      "url": "http://nonexistent:8086/api/v2/query",
+      "bucket": "homeassistant/autogen",
+      "username": "mock",
+      "password": "mock"
+    }
+  }
+}

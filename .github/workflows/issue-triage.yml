@@ -45,9 +45,10 @@ jobs:
 
       - uses: anthropics/claude-code-action@v1
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ steps.app-token.outputs.token }}
-          claude_args: "--max-turns 12"
+          # Haiku is plenty for classify+label; saves ~3x vs Sonnet.
+          claude_args: "--max-turns 12 --permission-mode bypassPermissions --model claude-haiku-4-5"
           prompt: |
             You are the **Stage 1 Triage** bot for issue #${{ github.event.issue.number || github.event.inputs.issue_number }} in johanzander/bess-manager.
 

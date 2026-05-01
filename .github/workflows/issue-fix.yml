@@ -47,10 +47,10 @@ jobs:
 
       - uses: anthropics/claude-code-action@v1
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ steps.app-token.outputs.token }}
           trigger_phrase: "@claude-bot fix"
-          claude_args: "--max-turns 80"
+          claude_args: "--max-turns 120 --permission-mode bypassPermissions"
           prompt: |
             You are the **Stage 3 Fix** bot for issue #${{ github.event.issue.number }} in johanzander/bess-manager.
 

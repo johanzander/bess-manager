@@ -51,3 +51,6 @@ build/
 docs/private/
 docs/bess-debug-*.md
 scripts/mock_ha/scenarios/*.json
+
+# Claude Code worktrees (temporary)
+.claude/worktrees/

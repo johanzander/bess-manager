@@ -66,52 +66,49 @@ A React SPA (`frontend/`) provides the management interface.
 
 ## Automated Agent Workflow
 
-Issues on GitHub are handled by a three-stage pipeline powered by
-`anthropics/claude-code-action@v1`. This CLAUDE.md file is the primary
-instruction source — Claude reads it at the start of every bot session.
+GitHub issues flow through a four-stage pipeline. Each stage is a separate
+workflow file with a self-contained prompt — there is no cross-stage routing
+through CLAUDE.md. All stages run on `anthropics/claude-code-action@v1`.
 
-### Stage 1 — Auto Triage (`.github/workflows/issue-triage.yml`)
+| Stage | Trigger | Workflow | Cost | What it does |
+|-------|---------|----------|------|--------------|
+| 1. Triage | `issues: opened/edited` (auto) | `issue-triage.yml` | ~$0.05 | Classify + label only. Gates on debug log presence. |
+| 2. Analyze | `@claude-bot analyze` (manual) | `issue-analyze.yml` | ~$0.50–2 | Delegates to `bess-analyst` sub-agent, posts root-cause diagnosis. No code changes. |
+| 3. Fix | `@claude-bot fix` (manual) | `issue-fix.yml` | ~$1–4 | Implements minimal fix per Stage 2 plan, runs `quality-check.sh`, opens draft PR. |
+| 4. Review | `@claude-bot` on a PR (manual) | `pr-review.yml` | ~$0.50–2 | Reviews diff against rules and checklist. |
 
-Runs automatically on every new issue. Classifies, labels, and either asks for
-a debug log or posts an initial analysis. Does NOT confirm bugs in source code.
+**Why gated, not auto:** Stages 2 and 3 cost real money. The user explicitly
+triggers each one after reading the previous stage's output.
 
-### Stage 2 — Confirm (`@claude-bot confirm` on an issue)
+**Label flow:**
 
-**When triggered:** Read the full issue including all comments. Then:
-1. Read `docs/agents/rules.md` and `docs/agents/architecture.md`.
-2. Use `gh issue view <n>` to see the full issue context.
-3. Search the codebase for the code paths mentioned in the bug report.
-4. Read the actual source files (do not rely on search snippets alone).
-5. Post a comment with your verdict:
-   - **Bug confirmed** — quote the exact defective lines (file:line), explain
-     the root cause, and say: "To trigger a fix: `@claude-bot fix this`"
-   - **Cannot confirm** — explain what you read and why the bug isn't there.
-   - **Needs more info** — ask for the specific information missing.
+```
+opened ──► bug + needs-debug-log     (Stage 1: no log)
+            │
+            └─ user adds log ──► bug + ready-for-analysis  (Stage 1 re-runs on edit)
+                                  │
+                  @claude-bot analyze
+                                  ▼
+                                  analyzed                 (Stage 2)
+                                  │
+                  @claude-bot fix
+                                  ▼
+                                  has-fix-pr               (Stage 3, draft PR open)
+```
 
-### Stage 3 — Fix (`@claude-bot fix this` on an issue)
-
-**When triggered:** Fix the confirmed bug and open a draft PR.
-1. Read `docs/agents/rules.md`, `docs/agents/architecture.md`,
-   `docs/agents/patterns.md`, and `docs/agents/workflow.md`.
-2. Use `gh issue view <n>` to understand the bug and any confirm-step evidence.
-3. Implement the minimal fix — no refactoring, no unrelated changes.
-4. Run `./scripts/quality-check.sh` and fix any failures before committing.
-5. Create a fresh branch `fix/issue-<number>-<short-slug>` and push it.
-6. Open a **draft** PR linked to the issue: `gh pr create --draft ...`
-7. Post a comment on the issue linking the PR.
-
-### PR Review (`@claude-bot` on a PR comment)
-
-Read `docs/agents/rules.md` and `.github/claude-bot.md` for the review
-checklist. Post inline comments on specific lines where issues are found.
-Summarize with an overall verdict (approve / request changes / comment).
+If Stage 2 can't reach a conclusion it applies `needs-human-review` instead
+of `analyzed`.
 
 ### General bot rules
 
 - Only the repo owner can trigger bot commands.
 - Always use `gh` CLI for all GitHub operations (issues, PRs, labels).
-- Never push directly to `main`.
-- Commit as the GitHub App bot identity (handled automatically by the action).
+- Never push directly to `main`. PRs are always opened as drafts.
+- The bot identity is `bess-manager-claude-bot` (a custom GitHub App). The
+  official Anthropic Claude App is **suspended** to avoid collisions —
+  do not unsuspend it.
+- Stage 2 must invoke the `bess-analyst` sub-agent. Skipping that step is
+  the failure mode the previous design suffered from.
 
 ## Home Assistant Integration
 

@@ -1,22 +1,20 @@
-# Issue Triage Bot
+# Stage 1 — Triage
 #
-# TRIGGERS:
-#   issues.opened/reopened → classify, label, and respond to every new issue
-#   workflow_dispatch      → manually re-run triage on any issue
+# Runs on every new or edited issue. Cheap classification only — no source
+# reading, no fix proposals. Decides whether the issue is ready for deep
+# analysis (Stage 2: issue-analyze.yml) or needs more info from the user.
 #
-# Uses anthropics/claude-code-action@v1 (official Anthropic action).
-# Claude reads CLAUDE.md for project context and bot command instructions.
-#
-# Pipeline overview:
-#   Stage 1 (auto)   — triage-new-issue : classify, label, gather info
-#   Stage 2 (manual) — @claude-bot confirm : read source and confirm/deny bug
-#   Stage 3 (manual) — @claude-bot fix this : implement fix, open draft PR
+# Pipeline:
+#   1. issue-triage.yml   (auto, this file)         — classify, label
+#   2. issue-analyze.yml  (manual: @claude-bot analyze) — deep root-cause
+#   3. issue-fix.yml      (manual: @claude-bot fix)     — implement, draft PR
+#   4. pr-review.yml      (manual: @claude-bot)         — PR review
 
 name: Issue Triage
 
 on:
   issues:
-    types: [opened, reopened]
+    types: [opened, edited, reopened]
   workflow_dispatch:
     inputs:
       issue_number:
@@ -26,16 +24,20 @@ on:
 
 jobs:
   triage:
-    name: Triage New Issue
+    name: Triage
+    # Don't re-triage issues that have already been deeply analyzed.
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      !contains(github.event.issue.labels.*.name, 'analyzed')
     runs-on: ubuntu-latest
     permissions:
       contents: read
       issues: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/create-github-app-token@v1
+      - uses: actions/create-github-app-token@v2
         id: app-token
         with:
           app-id: ${{ secrets.CLAUDE_REVIEWER_APP_ID }}
@@ -45,27 +47,62 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ steps.app-token.outputs.token }}
-          claude_args: "--max-turns 15"
+          claude_args: "--max-turns 12"
           prompt: |
-            Triage issue #${{ github.event.issue.number || github.event.inputs.issue_number }} in the johanzander/bess-manager repository.
+            You are the **Stage 1 Triage** bot for issue #${{ github.event.issue.number || github.event.inputs.issue_number }} in johanzander/bess-manager.
 
-            Read docs/agents/rules.md (hard constraints) and docs/agents/architecture.md (codebase layout).
-            Run: gh issue view ${{ github.event.issue.number || github.event.inputs.issue_number }} --json title,body,labels,comments
+            Run first:
+              gh issue view ${{ github.event.issue.number || github.event.inputs.issue_number }} --json title,body,labels,comments
 
-            Your tasks (in order):
-            1. Classify the issue: bug, question, feature-request, or other.
-            2. Apply labels with: gh issue edit <number> --add-label <label>
-               Available labels: bug, question, feature-request, needs-debug-log, bot-analyzed
-            3. Post a comment:
-               - For a potential bug with a debug log already attached: post a focused initial
-                 analysis. Use hedged language ("the log suggests...", "this may indicate...").
-                 Do NOT claim to have confirmed the bug — a separate confirmation step reads
-                 the actual source files. End with:
-                 "A code-level confirmation will follow. To trigger it: `@claude-bot confirm`"
-               - For a potential bug without a debug log: ask the user to provide one
-                 (System Health → Download Debug Report), label needs-debug-log.
-               - For a question or feature request: respond helpfully.
-               - For unclear reports: ask specific clarifying questions.
+            Classify into one of four buckets and act. Use `gh issue edit <n> --add-label <label>` for labels and `gh issue comment <n> -b "..."` for comments.
 
-            IMPORTANT: Do NOT read source files to confirm bugs. Do NOT suggest fixes.
-            Focus only on classification, labeling, and information gathering.
+            ──────────────────────────────────────────────────────────────────
+            (a) BUG WITH DEBUG LOG
+            ──────────────────────────────────────────────────────────────────
+            A debug log is present if the issue body or a comment contains a
+            JSON dump that looks like a debug report — e.g. keys like
+            "BESS Configuration", "Price Settings", "Health Check", or a
+            structured system-state JSON object.
+
+            Action:
+              - Labels: `bug`, `bot-analyzed`, `ready-for-analysis`
+              - Comment (concise, one short paragraph max):
+                  • One-line summary of the user's report
+                  • Confirm the debug log was received
+                  • End EXACTLY with: "Reply `@claude-bot analyze` to start deep code-level analysis."
+              - DO NOT speculate about root cause. DO NOT read source code.
+
+            ──────────────────────────────────────────────────────────────────
+            (b) BUG WITHOUT DEBUG LOG
+            ──────────────────────────────────────────────────────────────────
+            Action:
+              - Labels: `bug`, `bot-analyzed`, `needs-debug-log`
+              - Comment: politely ask the user to attach a debug log.
+                Steps: System Health → Download Debug Report → paste the JSON
+                in a comment or attach the file.
+              - Explain: deep analysis can't run without the log because the
+                code path depends on configuration and sensor state.
+
+            ──────────────────────────────────────────────────────────────────
+            (c) QUESTION or FEATURE REQUEST
+            ──────────────────────────────────────────────────────────────────
+            Action:
+              - Label: `question` or `enhancement`, plus `bot-analyzed`
+              - Comment: respond helpfully if the answer is in CLAUDE.md or
+                the issue is a usage question. Otherwise note it's queued for
+                human review.
+
+            ──────────────────────────────────────────────────────────────────
+            (d) UNCLEAR
+            ──────────────────────────────────────────────────────────────────
+            Action:
+              - Label: `bot-analyzed`
+              - Comment: ask ONE specific clarifying question.
+
+            ──────────────────────────────────────────────────────────────────
+            HARD CONSTRAINTS
+            ──────────────────────────────────────────────────────────────────
+            - DO NOT read source files. DO NOT propose fixes.
+            - DO NOT claim a bug is confirmed — that's Stage 2's job.
+            - Use hedged language ("the report suggests…", "this may indicate…").
+            - Keep your comment under ~150 words. Brevity > thoroughness here.

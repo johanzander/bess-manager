@@ -1,0 +1,111 @@
+# Stage 2 — Deep Analysis (gated)
+#
+# Triggered manually with `@claude-bot analyze` on an issue. Reads project
+# context, delegates technical investigation to the `bess-analyst` sub-agent,
+# reads source code to confirm, and posts a root-cause diagnosis.
+#
+# Does NOT modify files or open a PR. Stage 3 (issue-fix.yml) does that.
+
+name: Issue Deep Analysis
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  analyze:
+    name: Deep Analysis
+    if: |
+      github.event.comment.user.login == github.repository_owner &&
+      github.event.issue.pull_request == null &&
+      contains(github.event.comment.body, '@claude-bot analyze')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/create-github-app-token@v2
+        id: app-token
+        with:
+          app-id: ${{ secrets.CLAUDE_REVIEWER_APP_ID }}
+          private-key: ${{ secrets.CLAUDE_REVIEWER_PRIVATE_KEY }}
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ steps.app-token.outputs.token }}
+          trigger_phrase: "@claude-bot analyze"
+          claude_args: "--max-turns 60"
+          prompt: |
+            You are the **Stage 2 Deep Analysis** bot for issue #${{ github.event.issue.number }} in johanzander/bess-manager.
+
+            ──────────────────────────────────────────────────────────────────
+            REQUIRED READING (read these files before any analysis)
+            ──────────────────────────────────────────────────────────────────
+            1. docs/agents/rules.md           — hard constraints
+            2. docs/agents/architecture.md    — codebase layout & data flow
+            3. .claude/agents/bess-analyst.md — domain expertise checklist
+
+            ──────────────────────────────────────────────────────────────────
+            PROCESS
+            ──────────────────────────────────────────────────────────────────
+            1. Get full issue context:
+                 gh issue view ${{ github.event.issue.number }} --json title,body,labels,comments
+
+            2. **Delegate the investigation to the `bess-analyst` sub-agent.**
+               Use the Agent tool with `subagent_type: bess-analyst`. Pass it:
+                 - The issue title and body
+                 - The debug log JSON (from issue body or comments)
+                 - This task: "Find the root cause of this bug. Read the
+                   design docs and source files listed in your agent
+                   definition. Report: file:line of the defect, code
+                   excerpt, why it produces the reported symptom."
+
+            3. After the sub-agent reports back, **independently verify** by
+               reading the file:line locations it cited. Do not just trust
+               the summary — quote the actual code.
+
+            4. Post ONE comment on the issue with this structure:
+
+                  ## Root cause
+                  <one-paragraph plain-English explanation>
+
+                  ## Evidence
+                  - `path/to/file.py:LINE` — <quoted code excerpt>
+                  - <additional file:line refs as needed>
+
+                  ## Proposed fix
+                  <high-level approach in 2-4 sentences — NO code yet>
+
+                  ## Risks / open questions
+                  <anything you couldn't determine, edge cases, or test gaps>
+
+                  ---
+                  Reply `@claude-bot fix` to implement and open a draft PR.
+
+            5. Update labels:
+                 gh issue edit ${{ github.event.issue.number }} --add-label analyzed --remove-label ready-for-analysis
+
+            ──────────────────────────────────────────────────────────────────
+            IF YOU CAN'T REACH A CONCLUSION
+            ──────────────────────────────────────────────────────────────────
+            Post what you found, what you read, and what specific information
+            is still missing. Then:
+                 gh issue edit ${{ github.event.issue.number }} --add-label needs-human-review
+
+            Be honest — "I couldn't find the bug in the current code" is a
+            valid outcome. Do not invent a root cause to fill the template.
+
+            ──────────────────────────────────────────────────────────────────
+            HARD CONSTRAINTS
+            ──────────────────────────────────────────────────────────────────
+            - DO NOT modify any files.
+            - DO NOT open a PR.
+            - DO NOT skip the bess-analyst delegation step — it's the whole
+              point of this stage.
+            - Quote real code. Don't paraphrase.

@@ -1,0 +1,76 @@
+# Stage 4 — PR Review (manual)
+#
+# Triggered with `@claude-bot` on a pull request comment. Reviews the diff
+# against docs/agents/rules.md and the checklist in .github/claude-bot.md.
+
+name: PR Review
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  review:
+    name: Review PR
+    if: |
+      github.event.comment.user.login == github.repository_owner &&
+      github.event.issue.pull_request != null &&
+      contains(github.event.comment.body, '@claude-bot')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/create-github-app-token@v2
+        id: app-token
+        with:
+          app-id: ${{ secrets.CLAUDE_REVIEWER_APP_ID }}
+          private-key: ${{ secrets.CLAUDE_REVIEWER_PRIVATE_KEY }}
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ steps.app-token.outputs.token }}
+          trigger_phrase: "@claude-bot"
+          claude_args: "--max-turns 40"
+          prompt: |
+            You are the **PR Review** bot for PR #${{ github.event.issue.number }} in johanzander/bess-manager.
+
+            Required reading:
+              - docs/agents/rules.md         — hard constraints
+              - .github/claude-bot.md        — review checklist
+
+            Process:
+              1. Read the PR diff:
+                   gh pr diff ${{ github.event.issue.number }}
+                   gh pr view ${{ github.event.issue.number }} --json title,body,files,headRefName,baseRefName
+
+              2. Identify the linked issue (if any) and read its analysis.
+
+              3. Walk through the review checklist in `.github/claude-bot.md`.
+                 For each finding, post an INLINE comment on the specific
+                 line using `gh pr review` or `gh api` with the `comments[]`
+                 array. Do not bundle everything in one summary comment.
+
+              4. End with a single summary review using `gh pr review`:
+                   - APPROVE  — no blockers, only nits or none
+                   - REQUEST_CHANGES — at least one rule violation or correctness bug
+                   - COMMENT  — questions/observations only
+
+              5. The summary must include:
+                 - Whether the fix matches the linked issue's root-cause
+                 - Whether the test added would catch a regression
+                 - Whether the change is minimal (no scope creep)
+                 - Specific rule violations (file:line) if any
+
+            Hard constraints:
+              - DO NOT push commits, modify the branch, or change the PR
+                draft status.
+              - Quote real code in findings. Don't paraphrase.
+              - Be specific. "This could be cleaner" is not a useful comment.

@@ -176,3 +176,82 @@ class TestPhaseCountDetection:
     def test_partial_phases_counted(self):
         sensors = {"current_l1": "sensor.l1", "current_l2": "sensor.l2"}
         assert self._phase_count(sensors) == 2
+
+
+# ---------------------------------------------------------------------------
+# discover_ha_metadata — nordpool area extraction from config entry
+# ---------------------------------------------------------------------------
+
+
+class TestDiscoverHaMetadataNordpoolArea:
+    """Area is read from the nordpool config entry options/data, not entity states.
+
+    The official HA core integration (nordpool_official) never exposes a
+    sensor.nordpool* entity, so the area must come from the config entry.
+    """
+
+    def setup_method(self):
+        self.ctrl = _make_controller()
+
+    def _ws_stub(self, entries: list[dict]):
+        """Return a _ws_query replacement that yields the given config entries."""
+        # _ws_query returns [config_entries_result, devices_result, services_result]
+        return lambda cmds: [entries, [], {}]
+
+    def test_area_read_from_options(self, monkeypatch):
+        """Area in config entry options is returned as nordpool_area."""
+        entry = {
+            "domain": "nordpool",
+            "state": "loaded",
+            "entry_id": "abc",
+            "options": {"area": "SE3"},
+            "data": {},
+        }
+        monkeypatch.setattr(self.ctrl, "_ws_query", self._ws_stub([entry]))
+        result = self.ctrl.discover_ha_metadata(None)
+        assert result["nordpool_area"] == "SE3"
+
+    def test_area_read_from_data_when_options_empty(self, monkeypatch):
+        """Area in config entry data is used when options has no area key."""
+        entry = {
+            "domain": "nordpool",
+            "state": "loaded",
+            "entry_id": "abc",
+            "options": {},
+            "data": {"area": "NO1"},
+        }
+        monkeypatch.setattr(self.ctrl, "_ws_query", self._ws_stub([entry]))
+        result = self.ctrl.discover_ha_metadata(None)
+        assert result["nordpool_area"] == "NO1"
+
+    def test_area_is_uppercased(self, monkeypatch):
+        """Area codes are normalised to upper case regardless of source format."""
+        entry = {
+            "domain": "nordpool",
+            "state": "loaded",
+            "entry_id": "abc",
+            "options": {"area": "se3"},
+            "data": {},
+        }
+        monkeypatch.setattr(self.ctrl, "_ws_query", self._ws_stub([entry]))
+        result = self.ctrl.discover_ha_metadata(None)
+        assert result["nordpool_area"] == "SE3"
+
+    def test_no_nordpool_entry_returns_none_area(self, monkeypatch):
+        """nordpool_area is None when there is no loaded nordpool config entry."""
+        monkeypatch.setattr(self.ctrl, "_ws_query", self._ws_stub([]))
+        result = self.ctrl.discover_ha_metadata(None)
+        assert result["nordpool_area"] is None
+
+    def test_unloaded_entry_is_ignored(self, monkeypatch):
+        """Config entries that are not in 'loaded' state are skipped."""
+        entry = {
+            "domain": "nordpool",
+            "state": "not_loaded",
+            "entry_id": "abc",
+            "options": {"area": "SE3"},
+            "data": {},
+        }
+        monkeypatch.setattr(self.ctrl, "_ws_query", self._ws_stub([entry]))
+        result = self.ctrl.discover_ha_metadata(None)
+        assert result["nordpool_area"] is None

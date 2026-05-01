@@ -10,7 +10,10 @@
     "dev": "vite --host",
     "build": "vite build",
     "preview": "vite preview",
-    "generate-api": "openapi-typescript-codegen --config api-config.json"
+    "generate-api": "openapi-typescript-codegen --config api-config.json",
+    "type-check": "tsc --noEmit",
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix"
   },
   "keywords": [],
   "author": "",

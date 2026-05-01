@@ -97,9 +97,9 @@ def get_intents_at_hours(result, hours: list[int]) -> dict[int, str]:
 def assert_intent_at_hour(result, hour: int, expected_intent: str) -> None:
     """Assert that the optimizer chose a specific intent at a given hour."""
     actual = result.period_data[hour].decision.strategic_intent
-    assert actual == expected_intent, (
-        f"Hour {hour}: expected {expected_intent}, got {actual}"
-    )
+    assert (
+        actual == expected_intent
+    ), f"Hour {hour}: expected {expected_intent}, got {actual}"
 
 
 def assert_intent_present(result, intent: str, min_count: int = 1) -> None:
@@ -116,9 +116,9 @@ def assert_intent_absent(result, intent: str) -> None:
     """Assert that a strategic intent does not appear at all."""
     dist = get_intent_distribution(result)
     actual = dist.get(intent, 0)
-    assert actual == 0, (
-        f"Expected zero {intent} periods, got {actual}. Distribution: {dist}"
-    )
+    assert (
+        actual == 0
+    ), f"Expected zero {intent} periods, got {actual}. Distribution: {dist}"
 
 
 def assert_physical_constraints(result, battery: dict) -> None:
@@ -134,11 +134,19 @@ def assert_physical_constraints(result, battery: dict) -> None:
         soe_start = pd.energy.battery_soe_start
         soe_end = pd.energy.battery_soe_end
 
-        assert battery["min_soe_kwh"] - tolerance <= soe_start <= battery["max_soe_kwh"] + tolerance, (
+        assert (
+            battery["min_soe_kwh"] - tolerance
+            <= soe_start
+            <= battery["max_soe_kwh"] + tolerance
+        ), (
             f"Period {pd.period}: SOE start {soe_start:.2f} outside "
             f"[{battery['min_soe_kwh']}, {battery['max_soe_kwh']}]"
         )
-        assert battery["min_soe_kwh"] - tolerance <= soe_end <= battery["max_soe_kwh"] + tolerance, (
+        assert (
+            battery["min_soe_kwh"] - tolerance
+            <= soe_end
+            <= battery["max_soe_kwh"] + tolerance
+        ), (
             f"Period {pd.period}: SOE end {soe_end:.2f} outside "
             f"[{battery['min_soe_kwh']}, {battery['max_soe_kwh']}]"
         )
@@ -147,13 +155,13 @@ def assert_physical_constraints(result, battery: dict) -> None:
         if action and abs(action) > 0.01:
             power_tolerance = 1e-10
             if action > 0:
-                assert action <= battery["max_charge_power_kw"] + power_tolerance, (
-                    f"Period {pd.period}: charge {action:.2f} kW > max {battery['max_charge_power_kw']} kW"
-                )
+                assert (
+                    action <= battery["max_charge_power_kw"] + power_tolerance
+                ), f"Period {pd.period}: charge {action:.2f} kW > max {battery['max_charge_power_kw']} kW"
             else:
-                assert abs(action) <= battery["max_discharge_power_kw"] + power_tolerance, (
-                    f"Period {pd.period}: discharge {abs(action):.2f} kW > max {battery['max_discharge_power_kw']} kW"
-                )
+                assert (
+                    abs(action) <= battery["max_discharge_power_kw"] + power_tolerance
+                ), f"Period {pd.period}: discharge {abs(action):.2f} kW > max {battery['max_discharge_power_kw']} kW"
 
 
 def assert_savings_positive(result) -> None:

@@ -82,8 +82,16 @@ if [ -d "frontend" ] && find frontend/src -name "*.ts" -o -name "*.tsx" 2>/dev/n
     
     # Check if package.json exists
     if [ -f "package.json" ]; then
-        # Check TypeScript compilation
+        # Run frontend tests
         if command -v npm >/dev/null 2>&1; then
+            echo "🔸 Running frontend tests..."
+            if npm test 2>/dev/null; then
+                echo "✅ Frontend tests passed"
+            else
+                echo "❌ Frontend tests failed"
+                ERRORS=$((ERRORS + 1))
+            fi
+
             echo "🔸 Checking TypeScript compilation..."
             if npm run type-check >/dev/null 2>&1; then
                 echo "✅ TypeScript compilation OK"

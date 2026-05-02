@@ -209,7 +209,7 @@ class TestEndToEndChargeDischargeRates:
     def test_grid_charging_hours_have_correct_rates(self, scenario_name):
         """GRID_CHARGING: grid_charge=True, charge_rate=100%, discharge_rate=0%."""
         scenario = _load_scenario(scenario_name)
-        scheduler, intents = _run_and_build_schedule(scenario)
+        scheduler, _ = _run_and_build_schedule(scenario)
 
         for hour in range(24):
             if hour not in scheduler.hourly_settings:
@@ -235,7 +235,7 @@ class TestEndToEndChargeDischargeRates:
         is near-zero or slightly positive (e.g. marginal export opportunity).
         """
         scenario = _load_scenario(scenario_name)
-        scheduler, intents = _run_and_build_schedule(scenario)
+        scheduler, _ = _run_and_build_schedule(scenario)
 
         for hour in range(24):
             if hour not in scheduler.hourly_settings:
@@ -256,7 +256,7 @@ class TestEndToEndChargeDischargeRates:
     def test_idle_hours_have_correct_rates(self, scenario_name):
         """IDLE: grid_charge=False, discharge_rate=0%."""
         scenario = _load_scenario(scenario_name)
-        scheduler, intents = _run_and_build_schedule(scenario)
+        scheduler, _ = _run_and_build_schedule(scenario)
 
         for hour in range(24):
             if hour not in scheduler.hourly_settings:
@@ -274,7 +274,7 @@ class TestEndToEndChargeDischargeRates:
     def test_solar_storage_hours_have_correct_rates(self, scenario_name):
         """SOLAR_STORAGE: grid_charge=False, charge_rate=100%, discharge_rate=0%."""
         scenario = _load_scenario(scenario_name)
-        scheduler, intents = _run_and_build_schedule(scenario)
+        scheduler, _ = _run_and_build_schedule(scenario)
 
         for hour in range(24):
             if hour not in scheduler.hourly_settings:
@@ -295,7 +295,7 @@ class TestEndToEndChargeDischargeRates:
     def test_load_support_hours_have_correct_rates(self, scenario_name):
         """LOAD_SUPPORT: grid_charge=False, charge_rate=0%, discharge_rate=100%."""
         scenario = _load_scenario(scenario_name)
-        scheduler, intents = _run_and_build_schedule(scenario)
+        scheduler, _ = _run_and_build_schedule(scenario)
 
         for hour in range(24):
             if hour not in scheduler.hourly_settings:

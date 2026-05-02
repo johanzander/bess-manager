@@ -49,7 +49,7 @@ const colorClasses = {
   purple: 'text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/20'
 };
 
-const EnergyFlowCard: React.FC<{ card: EnergyFlowCard }> = ({ card }) => {
+const EnergyFlowCardView: React.FC<{ card: EnergyFlowCard }> = ({ card }) => {
   const IconComponent = card.icon;
   
   return (
@@ -360,7 +360,7 @@ const EnergyFlowCards: React.FC<EnergyFlowCardsProps> = ({ className = "" }) => 
   return (
     <div className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 ${className}`}>
       {cards.map((card, index) => (
-        <EnergyFlowCard key={index} card={card} />
+        <EnergyFlowCardView key={index} card={card} />
       ))}
     </div>
   );

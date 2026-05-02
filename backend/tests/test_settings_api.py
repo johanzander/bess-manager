@@ -17,10 +17,9 @@ from copy import deepcopy
 from unittest.mock import MagicMock
 
 import pytest
+from api import router
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
-from api import router
 
 # ---------------------------------------------------------------------------
 # Minimal FastAPI app that exercises the router under test
@@ -111,20 +110,18 @@ class TestGetSettings:
         assert resp.status_code == 200
 
     def test_battery_computed_fields_present(self, mock_controller):
-        """min_soe_kwh, max_soe_kwh, reservedCapacity computed from capacity × SOC%."""
+        """min_soe_kwh, max_soe_kwh, reservedCapacity computed from capacity x SOC%."""
         resp = _client.get("/api/settings")
         battery = resp.json()["battery"]
-        # 30 kWh × 10% min_soc = 3.0 kWh
+        # 30 kWh x 10% min_soc = 3.0 kWh
         assert battery["minSoeKwh"] == pytest.approx(3.0)
-        # 30 kWh × 95% max_soc = 28.5 kWh
+        # 30 kWh x 95% max_soc = 28.5 kWh
         assert battery["maxSoeKwh"] == pytest.approx(28.5)
         assert battery["reservedCapacity"] == pytest.approx(3.0)
 
     def test_sensors_come_from_ha_controller(self, mock_controller):
         """Sensor values must be sourced from ha_controller, not the store."""
-        mock_controller.ha_controller.sensors = {
-            "battery_soc": "sensor.battery_live"
-        }
+        mock_controller.ha_controller.sensors = {"battery_soc": "sensor.battery_live"}
         resp = _client.get("/api/settings")
         assert resp.json()["sensors"]["battery_soc"] == "sensor.battery_live"
 
@@ -161,12 +158,18 @@ class TestPatchSettingsSectionRouting:
         assert "Unknown settings section" in resp.json()["detail"]
 
     def test_known_sections_accepted(self, mock_controller):
-        for section in ("battery", "home", "electricityPrice",
-                        "energyProvider", "growatt", "sensors"):
+        for section in (
+            "battery",
+            "home",
+            "electricityPrice",
+            "energyProvider",
+            "growatt",
+            "sensors",
+        ):
             resp = _client.patch("/api/settings", json={section: {}})
-            assert resp.status_code == 200, (
-                f"Section '{section}' was unexpectedly rejected: {resp.text}"
-            )
+            assert (
+                resp.status_code == 200
+            ), f"Section '{section}' was unexpectedly rejected: {resp.text}"
 
 
 class TestPatchSettingsCamelToSnake:
@@ -199,8 +202,10 @@ class TestPatchSettingsCamelToSnake:
             "/api/settings",
             json={"sensors": {"battery_soc": "sensor.battery_soc_percent"}},
         )
-        assert mock_controller.ha_controller.sensors.get("battery_soc") == \
-            "sensor.battery_soc_percent"
+        assert (
+            mock_controller.ha_controller.sensors.get("battery_soc")
+            == "sensor.battery_soc_percent"
+        )
 
 
 # ===========================================================================
@@ -308,7 +313,9 @@ class TestPatchSettingsLiveUpdates:
             "/api/settings",
             json={"battery": {"temperatureDerating": {"enabled": True}}},
         )
-        mock_controller.system.temperature_derating.enabled = True  # assert setter called
+        mock_controller.system.temperature_derating.enabled = (
+            True  # assert setter called
+        )
         assert mock_controller.system.temperature_derating.enabled is True
 
     def test_health_refresh_called_after_patch(self, mock_controller):
@@ -331,8 +338,10 @@ class TestPatchSettingsSensorValidation:
             json={"sensors": {"battery_soc": "sensor.battery_soc_percent"}},
         )
         assert resp.status_code == 200
-        assert mock_controller.ha_controller.sensors.get("battery_soc") == \
-            "sensor.battery_soc_percent"
+        assert (
+            mock_controller.ha_controller.sensors.get("battery_soc")
+            == "sensor.battery_soc_percent"
+        )
 
     def test_invalid_entity_id_returns_422(self, mock_controller):
         resp = _client.patch(
@@ -352,7 +361,10 @@ class TestPatchSettingsSensorValidation:
         """Empty strings clear intent — they must not overwrite configured sensors."""
         mock_controller.ha_controller.sensors = {"battery_soc": "sensor.existing"}
         _client.patch("/api/settings", json={"sensors": {"battery_soc": ""}})
-        assert mock_controller.ha_controller.sensors.get("battery_soc") == "sensor.existing"
+        assert (
+            mock_controller.ha_controller.sensors.get("battery_soc")
+            == "sensor.existing"
+        )
 
     def test_multiple_valid_sensors_all_stored(self, mock_controller):
         payload = {
@@ -363,8 +375,12 @@ class TestPatchSettingsSensorValidation:
         }
         resp = _client.patch("/api/settings", json=payload)
         assert resp.status_code == 200
-        assert mock_controller.ha_controller.sensors["battery_soc"] == "sensor.battery_soc"
-        assert mock_controller.ha_controller.sensors["grid_power"] == "sensor.grid_power"
+        assert (
+            mock_controller.ha_controller.sensors["battery_soc"] == "sensor.battery_soc"
+        )
+        assert (
+            mock_controller.ha_controller.sensors["grid_power"] == "sensor.grid_power"
+        )
 
 
 # ===========================================================================
@@ -383,7 +399,7 @@ class TestPatchSettingsResponse:
     def test_patch_response_includes_computed_battery_fields(self, mock_controller):
         resp = _client.patch("/api/settings", json={"battery": {"totalCapacity": 20.0}})
         battery = resp.json()["battery"]
-        # 20 kWh × 10% = 2.0 kWh min_soe
+        # 20 kWh x 10% = 2.0 kWh min_soe
         assert "minSoeKwh" in battery
         assert battery["minSoeKwh"] == pytest.approx(2.0)
 

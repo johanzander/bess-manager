@@ -25,6 +25,7 @@ from .exceptions import (
 from .ha_api_controller import HomeAssistantAPIController
 from .health_check import run_system_health_checks
 from .historical_data_store import HistoricalDataStore
+from .influxdb_helper import get_power_sensor_data_batch
 from .min_schedule import GrowattScheduleManager
 from .models import (
     DecisionData,
@@ -33,7 +34,6 @@ from .models import (
     PeriodData,
     infer_intent_from_flows,
 )
-from .influxdb_helper import get_power_sensor_data_batch
 from .octopus_energy_source import OctopusEnergySource
 from .official_nordpool_source import OfficialNordpoolSource
 from .power_monitor import HomePowerMonitor
@@ -743,8 +743,7 @@ class BatterySystemManager:
         if not day_profiles:
             raise ValueError(
                 "influxdb_7d_avg strategy: no valid historical data found in InfluxDB "
-                "for the past 7 days of sensor '%s'"
-                % sensors_config.get("local_load_power", "")
+                f"for the past 7 days of sensor '{sensors_config.get('local_load_power', '')}'"
             )
 
         # Average across all valid days
@@ -1485,9 +1484,9 @@ class BatterySystemManager:
             for i, period_data in enumerate(period_data_list):
                 target_period = optimization_period + i
                 if target_period < len(full_day_strategic_intents):
-                    full_day_strategic_intents[
-                        target_period
-                    ] = period_data.decision.strategic_intent
+                    full_day_strategic_intents[target_period] = (
+                        period_data.decision.strategic_intent
+                    )
 
             # Store initial SOE (kWh) in OptimizationResult for DailyViewBuilder.
             # _initial_soc_pct and _get_current_battery_soc() return SOC percent (0-100);

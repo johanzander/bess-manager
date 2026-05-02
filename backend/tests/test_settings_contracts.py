@@ -24,9 +24,8 @@ How to use when adding or renaming a settings field
 """
 
 import dataclasses
-import sys
 from datetime import date
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 import settings_store as _sm
@@ -36,7 +35,6 @@ from api_conversion import (
     PRICE_STORE_TO_API,
 )
 from settings_store import SettingsStore
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -129,9 +127,9 @@ class TestBootstrapFieldConsistency:
             "Old field 'max_charge_discharge_power' still in battery settings. "
             "Startup would fail because _apply_settings requires max_charge_power_kw."
         )
-        assert "cycle_cost" not in battery or "cycle_cost_per_kwh" in battery, (
-            "Old field 'cycle_cost' present without new 'cycle_cost_per_kwh'."
-        )
+        assert (
+            "cycle_cost" not in battery or "cycle_cost_per_kwh" in battery
+        ), "Old field 'cycle_cost' present without new 'cycle_cost_per_kwh'."
 
     def test_no_old_field_names_in_home(self, tmp_path, monkeypatch):
         """Home store keys must use dataclass attribute names after bootstrap/migration."""
@@ -145,8 +143,12 @@ class TestBootstrapFieldConsistency:
             "Old field 'safety_margin_factor' still in home settings. "
             "Rename to 'safety_margin' to match HomeSettings attribute."
         )
-        assert "default_hourly" in home, "home.default_hourly missing from bootstrap defaults."
-        assert "safety_margin" in home, "home.safety_margin missing from bootstrap defaults."
+        assert (
+            "default_hourly" in home
+        ), "home.default_hourly missing from bootstrap defaults."
+        assert (
+            "safety_margin" in home
+        ), "home.safety_margin missing from bootstrap defaults."
 
 
 # ---------------------------------------------------------------------------
@@ -244,6 +246,7 @@ class TestApplySettings:
 class TestBatteryModelAttrsConsistency:
     def test_attrs_match_dataclass_init_fields(self):
         from api import _BATTERY_MODEL_ATTRS  # type: ignore[import]
+
         from core.bess.settings import BatterySettings
 
         expected = frozenset(
@@ -294,9 +297,7 @@ class TestNordpoolServiceContract:
         source = OfficialNordpoolSource(ha_controller, "test-config-entry-id", 1.25)
 
         # Patch time_utils so the date-range guard accepts our target_date.
-        with patch(
-            "core.bess.official_nordpool_source.time_utils"
-        ) as mock_time:
+        with patch("core.bess.official_nordpool_source.time_utils") as mock_time:
             mock_time.today.return_value = target_date
             source.get_prices_for_date(target_date)
 
@@ -314,9 +315,9 @@ class TestNordpoolServiceContract:
             "Service call must use field 'config_entry' — "
             "verify against HA's /api/services endpoint before changing"
         )
-        assert "config_entry_id" not in kwargs, (
-            "Field 'config_entry_id' causes a 400 — HA expects 'config_entry'"
-        )
+        assert (
+            "config_entry_id" not in kwargs
+        ), "Field 'config_entry_id' causes a 400 — HA expects 'config_entry'"
 
     def test_config_entry_value_passed_through(self):
         ha_controller = self._call_nordpool(date(2026, 4, 13))

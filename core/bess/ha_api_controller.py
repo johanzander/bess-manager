@@ -350,8 +350,8 @@ class HomeAssistantAPIController:
     # (MIN, MID, MIC, MOD, MOC, NEO, etc.) via both official HA Core and HACS builds.
     ENTITY_SUFFIX_MAP: ClassVar[dict[str, str]] = {
         # SOC — two variants due to historical translation name correction
-        "state_of_charge_soc": "battery_soc",       # current name: "State of charge (SoC)"
-        "statement_of_charge_soc": "battery_soc",   # old name: "Statement of Charge SOC"
+        "state_of_charge_soc": "battery_soc",  # current name: "State of charge (SoC)"
+        "statement_of_charge_soc": "battery_soc",  # old name: "Statement of Charge SOC"
         # Real-time power sensors
         "battery_1_charging_w": "battery_charge_power",
         "battery_1_discharging_w": "battery_discharge_power",
@@ -361,7 +361,7 @@ class HomeAssistantAPIController:
         "internal_wattage": "pv_power",
         # Grid charge switch — two variants (old key-based vs translation-name-based slug)
         "charge_from_grid": "grid_charge",  # current name: "Charge from grid"
-        "ac_charge": "grid_charge",         # old name: key used directly as entity ID
+        "ac_charge": "grid_charge",  # old name: key used directly as entity ID
         # Number entities — names slugify to the same string as the key
         "battery_charge_power_limit": "battery_charging_power_rate",
         "battery_discharge_power_limit": "battery_discharging_power_rate",
@@ -416,7 +416,9 @@ class HomeAssistantAPIController:
         if sensor_key in self.sensors:
             entity_id = self.sensors[sensor_key]
             if not entity_id or not entity_id.strip():
-                raise ValueError(f"Empty entity ID configured for sensor '{sensor_key}'")
+                raise ValueError(
+                    f"Empty entity ID configured for sensor '{sensor_key}'"
+                )
             return entity_id, "configured"
 
         # Require explicit configuration for all operations
@@ -1639,7 +1641,10 @@ class HomeAssistantAPIController:
             entity_id = str(state.get("entity_id", ""))
             if not entity_id.startswith(("sensor.", "number.", "switch.")):
                 continue
-            if "_statement_of_charge" in entity_id or "_state_of_charge_soc" in entity_id:
+            if (
+                "_statement_of_charge" in entity_id
+                or "_state_of_charge_soc" in entity_id
+            ):
                 object_id = entity_id.split(".", 1)[1]
                 return object_id.split("_", 1)[0]
 

@@ -96,5 +96,15 @@
     "base_to_battery_solar_savings_pct": 23.4,
     "total_charged": 44.8,
     "total_discharged": 44.8
+  },
+  "expected_behavior": {
+    "description": "High price spread without solar: should grid-charge at night lows and discharge during evening peaks",
+    "intents_present": ["GRID_CHARGING", "LOAD_SUPPORT"],
+    "intents_absent": ["SOLAR_STORAGE"],
+    "savings_positive": true,
+    "constraints": {
+      "soe_within_bounds": true,
+      "power_within_limits": true
+    }
   }
 }

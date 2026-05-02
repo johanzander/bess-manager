@@ -19,6 +19,23 @@ ERRORS=0
 WARNINGS=0
 
 echo ""
+echo "📋 Running Python tests..."
+echo "---------------------------"
+
+if command -v pytest >/dev/null 2>&1; then
+    echo "🔸 Running fast tests (use 'pytest' directly to include slow algorithm tests)..."
+    if ! pytest -m "not slow" --tb=short -q; then
+        echo "❌ Tests failed"
+        ERRORS=$((ERRORS + 1))
+    else
+        echo "✅ Fast tests passed"
+    fi
+else
+    echo "⚠️  pytest not installed. Install with: pip install pytest"
+    WARNINGS=$((WARNINGS + 1))
+fi
+
+echo ""
 echo "📋 Checking Python code quality..."
 echo "-----------------------------------"
 
@@ -65,8 +82,16 @@ if [ -d "frontend" ] && find frontend/src -name "*.ts" -o -name "*.tsx" 2>/dev/n
     
     # Check if package.json exists
     if [ -f "package.json" ]; then
-        # Check TypeScript compilation
+        # Run frontend tests
         if command -v npm >/dev/null 2>&1; then
+            echo "🔸 Running frontend tests..."
+            if npm test 2>/dev/null; then
+                echo "✅ Frontend tests passed"
+            else
+                echo "❌ Frontend tests failed"
+                ERRORS=$((ERRORS + 1))
+            fi
+
             echo "🔸 Checking TypeScript compilation..."
             if npm run type-check >/dev/null 2>&1; then
                 echo "✅ TypeScript compilation OK"

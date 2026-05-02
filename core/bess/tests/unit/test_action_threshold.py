@@ -10,6 +10,8 @@ import pytest  # type: ignore
 from core.bess.dp_battery_algorithm import optimize_battery_schedule
 from core.bess.settings import BatterySettings
 
+pytestmark = pytest.mark.slow
+
 
 class TestActionThreshold:
     """Test minimum action profit threshold feature."""

@@ -912,9 +912,7 @@ class TestHardwareWriteRespectsSlotLimit:
             len(controller.calls) <= 9
         ), f"Wrote {len(controller.calls)} segments, exceeds hardware limit of 9"
 
-    def test_segment_ids_remain_in_range_after_earlier_segments_expire(
-        self, scheduler
-    ):
+    def test_segment_ids_remain_in_range_after_earlier_segments_expire(self, scheduler):
         """Mid-day rebuild (some segments expired) must still produce ids 1..9.
 
         Regression for the case where _select_hardware_intervals previously
@@ -980,9 +978,7 @@ class TestSlotAssignmentPreservesActiveSegments:
     """
 
     def _content_set(self, segments) -> set[tuple]:
-        return {
-            (s["start_time"], s["end_time"], s["batt_mode"]) for s in segments
-        }
+        return {(s["start_time"], s["end_time"], s["batt_mode"]) for s in segments}
 
     def test_promoted_pending_segment_does_not_evict_still_needed_segments(
         self, scheduler

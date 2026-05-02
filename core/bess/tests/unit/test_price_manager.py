@@ -2,9 +2,10 @@
 Test the PriceManager implementation.
 """
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
+from core.bess import time_utils
 from core.bess.price_manager import HomeAssistantSource, MockSource, PriceManager
 
 
@@ -39,7 +40,7 @@ def test_controller_price_fetching():
     """Test price fetching from controller."""
     mock_controller = MagicMock()
 
-    today_date = datetime.now().date()
+    today_date = time_utils.today()
     tomorrow_date = today_date + timedelta(days=1)
 
     # Create 96 quarterly periods of test data (Nordpool provides quarterly)
@@ -150,7 +151,7 @@ def test_home_assistant_source_vat_parameter():
     """Test that the VAT multiplier parameter in HomeAssistantSource works correctly."""
     mock_controller = MagicMock()
 
-    today_date = datetime.now().date()
+    today_date = time_utils.today()
 
     # Create test data with 96 quarterly periods, all with price value of 2.0
     raw_today_data = []

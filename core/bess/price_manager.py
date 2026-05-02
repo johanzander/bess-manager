@@ -294,7 +294,7 @@ class HomeAssistantSource(PriceSource):
         """Handle DST transitions for quarterly resolution (92-100 periods).
 
         Nordpool provides quarterly prices (15-minute intervals):
-        - Normal day: 96 periods (24 hours × 4)
+        - Normal day: 96 periods (24 hours x 4)
         - DST spring (23h): 92 periods
         - DST fall (25h): 100 periods
 
@@ -493,7 +493,11 @@ class PriceManager:
                 else:
                     sell_price = self._calculate_sell_price(price)
 
-                buy_price = price if self.price_source.prices_are_final else self._calculate_buy_price(price)
+                buy_price = (
+                    price
+                    if self.price_source.prices_are_final
+                    else self._calculate_buy_price(price)
+                )
 
                 price_entry = {
                     "timestamp": timestamp.strftime("%Y-%m-%d %H:%M"),

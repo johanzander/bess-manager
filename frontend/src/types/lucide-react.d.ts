@@ -38,4 +38,5 @@ declare module 'lucide-react' {
   export const Info: FC<IconProps>;
   export const Eye: FC<IconProps>;
   export const Table2: FC<IconProps>;
+  export const Download: FC<IconProps>;
 }

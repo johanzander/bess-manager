@@ -1,0 +1,157 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  # ── Detect which areas changed ──────────────────────────────────
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+      algorithm: ${{ steps.filter.outputs.algorithm }}
+      e2e: ${{ steps.filter.outputs.e2e }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            algorithm:
+              - 'core/bess/**'
+            backend:
+              - 'backend/**'
+              - 'core/bess/**'
+              - 'pyproject.toml'
+              - 'requirements-dev.txt'
+            frontend:
+              - 'frontend/**'
+            e2e:
+              - 'backend/**'
+              - 'core/bess/**'
+              - 'frontend/**'
+              - 'e2e/**'
+              - 'scripts/mock_ha/**'
+              - 'docker-compose.ci.yml'
+
+  # ── Fast tests: backend API + non-optimizer unit tests ──────────
+  test-fast:
+    name: Fast tests
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install -r backend/requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Run fast tests
+        run: pytest -m "not slow" --tb=short -q
+
+  # ── Slow tests: full optimizer / scenario / integration ─────────
+  test-algorithm:
+    name: Algorithm tests
+    needs: changes
+    if: needs.changes.outputs.algorithm == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install -r backend/requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Run algorithm tests
+        run: pytest -m slow --tb=short -q
+
+  # ── Frontend: type-check + lint ─────────────────────────────────
+  test-frontend:
+    name: Frontend checks
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: cd frontend && npm ci
+      - run: cd frontend && npm test
+      - run: cd frontend && npm run type-check
+      - run: cd frontend && npm run lint
+
+  # ── E2E: Playwright against docker-compose mock HA ───────────────
+  # Disabled until docker-compose CI infrastructure is ready (Phase 3)
+  # e2e:
+  #   name: E2E tests
+  #   needs: changes
+  #   if: needs.changes.outputs.e2e == 'true'
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v5
+  #     - uses: actions/setup-node@v4
+  #       with:
+  #         node-version: "20"
+  #         cache: npm
+  #         cache-dependency-path: frontend/package-lock.json
+  #     - name: Build frontend
+  #       run: cd frontend && npm ci && npm run build
+  #     - name: Install Playwright
+  #       run: cd e2e && npm ci && npx playwright install chromium --with-deps
+  #     - name: Start mock HA environment
+  #       run: |
+  #         SCENARIO=ci-normal-day docker compose -f docker-compose.ci.yml up -d
+  #         timeout 120 bash -c 'until curl -sf http://localhost:8080/api/settings > /dev/null 2>&1; do sleep 2; done'
+  #     - name: Run Playwright tests
+  #       run: cd e2e && npx playwright test
+  #     - uses: actions/upload-artifact@v4
+  #       if: failure()
+  #       with:
+  #         name: playwright-report
+  #         path: e2e/playwright-report/
+  #     - name: Stop environment
+  #       if: always()
+  #       run: docker compose -f docker-compose.ci.yml down
+
+  # ── Quality gate: linting + formatting ──────────────────────────
+  quality:
+    name: Code quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install tools
+        run: pip install black ruff
+
+      - name: Black formatting
+        run: black --check . --exclude="/(build|\.venv|node_modules)/"
+
+      - name: Ruff linting
+        run: ruff check . --exclude="build,.venv,node_modules"

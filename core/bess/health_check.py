@@ -405,9 +405,9 @@ def check_historical_data_access():
             config_check["status"] = "WARNING"
             config_check["value"] = f"URL: {config['url']}"
             config_check["formatted_value"] = f"URL: {config['url']}"
-            config_check[
-                "error"
-            ] = "InfluxDB credentials are still set to placeholder values — InfluxDB is not configured"
+            config_check["error"] = (
+                "InfluxDB credentials are still set to placeholder values — InfluxDB is not configured"
+            )
             logger.warning(
                 "InfluxDB credentials are still set to placeholder values — InfluxDB is not configured"
             )

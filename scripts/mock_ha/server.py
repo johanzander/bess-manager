@@ -106,12 +106,18 @@ def _load_scenario() -> None:
         if today_prices:
             _nordpool_prices[ref_date.isoformat()] = today_prices
         if tomorrow_prices:
-            _nordpool_prices[(ref_date + timedelta(days=1)).isoformat()] = tomorrow_prices
+            _nordpool_prices[(ref_date + timedelta(days=1)).isoformat()] = (
+                tomorrow_prices
+            )
         if _nordpool_prices:
-            summary = ", ".join(f"{d} ({len(p)} periods)" for d, p in _nordpool_prices.items())
+            summary = ", ".join(
+                f"{d} ({len(p)} periods)" for d, p in _nordpool_prices.items()
+            )
             logger.info("Nordpool prices loaded: %s", summary)
         else:
-            logger.warning("No nordpool prices found in scenario — price fetches will return empty")
+            logger.warning(
+                "No nordpool prices found in scenario — price fetches will return empty"
+            )
     else:
         # mock_time is required — without it we cannot anchor prices to a date and
         # BESS will run against real wall-clock time with no price data.
@@ -162,7 +168,9 @@ async def get_config() -> JSONResponse:
 @app.get("/api/states")
 async def get_all_states() -> JSONResponse:
     """Return all entity states as a list — used by auto-discovery."""
-    return JSONResponse([_make_state_response(eid, val) for eid, val in _sensors.items()])
+    return JSONResponse(
+        [_make_state_response(eid, val) for eid, val in _sensors.items()]
+    )
 
 
 @app.get("/api/states/{entity_id:path}")

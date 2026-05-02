@@ -1,0 +1,54 @@
+# CI-friendly docker-compose for E2E tests.
+# No volume mounts, no live reload — builds everything into the image.
+#
+# Usage:
+#   SCENARIO=ci-normal-day docker compose -f docker-compose.ci.yml up -d
+#   # Wait for http://localhost:8080/api/system-health to respond
+#   # Run Playwright tests
+#   docker compose -f docker-compose.ci.yml down
+
+services:
+  bess:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile.dev
+    environment:
+      - HA_URL=http://mock-ha:8123
+      - HA_TOKEN=mock_token
+      - HA_TEST_MODE=false
+      - TZ=Europe/Stockholm
+      - PYTHONPATH=/app/backend:/app
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./backend:/app/backend:ro
+      - ./core:/app/core:ro
+      - ./frontend/dist:/app/frontend:ro
+      - ./e2e/ci-options.json:/data/options.json:ro
+      - ./e2e/ci-bess-settings.json:/data/bess_settings.json
+    command: ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8080"]
+    depends_on:
+      mock-ha:
+        condition: service_healthy
+    networks:
+      - ci-network
+
+  mock-ha:
+    build: ./scripts/mock_ha
+    environment:
+      - SCENARIO=${SCENARIO:-ci-normal-day}
+    ports:
+      - "8123:8123"
+    volumes:
+      - ./scripts/mock_ha/scenarios:/scenarios:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8123/mock/sensors')"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    networks:
+      - ci-network
+
+networks:
+  ci-network:
+    driver: bridge

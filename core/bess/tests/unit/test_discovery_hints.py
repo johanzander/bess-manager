@@ -6,7 +6,6 @@ Tests cover:
 - Phase count derivation in the discover endpoint (tested at the controller level)
 """
 
-
 from core.bess.ha_api_controller import HomeAssistantAPIController
 
 # ---------------------------------------------------------------------------

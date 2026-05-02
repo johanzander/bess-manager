@@ -39,7 +39,7 @@ error). No full snapshot JSON is needed — the 5-field evolution table is enoug
 
 ## compact=True vs compact=False
 
-compact=True  — default; serves all three use cases; targets ~200–500 KB.
+compact=True  - default; serves all three use cases; targets ~200-500 KB.
 compact=False — raw full dump; complete log, all schedules, all snapshots as JSON;
                 use when a specific field not present in compact mode is needed.
 """
@@ -369,7 +369,9 @@ class DebugDataAggregator:
                     if state:
                         snapshot[entity_id] = self._strip_ha_metadata(state)
                 except Exception as e:
-                    logger.warning("Failed to fetch nordpool entity %s: %s", entity_id, e)
+                    logger.warning(
+                        "Failed to fetch nordpool entity %s: %s", entity_id, e
+                    )
 
         elif provider == "octopus":
             octopus_cfg = config["octopus"]
@@ -386,11 +388,16 @@ class DebugDataAggregator:
                         if state:
                             snapshot[entity_id] = self._strip_ha_metadata(state)
                     except Exception as e:
-                        logger.warning("Failed to fetch octopus entity %s: %s", entity_id, e)
+                        logger.warning(
+                            "Failed to fetch octopus entity %s: %s", entity_id, e
+                        )
 
         elif provider != "nordpool_official":
             # nordpool_official uses service calls — no entity state to capture
-            logger.warning("Unknown energy provider '%s' — skipping provider entity snapshot", provider)
+            logger.warning(
+                "Unknown energy provider '%s' — skipping provider entity snapshot",
+                provider,
+            )
 
         logger.info("Entity snapshot captured: %d entities", len(snapshot))
         return snapshot

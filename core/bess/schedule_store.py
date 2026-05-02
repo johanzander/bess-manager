@@ -83,7 +83,7 @@ class ScheduleStore:
 
         # Create the stored schedule
         stored_schedule = StoredSchedule(
-            timestamp=datetime.now(),
+            timestamp=time_utils.now(),
             optimization_period=optimization_period,
             optimization_result=optimization_result,
         )
@@ -159,9 +159,9 @@ class ScheduleStore:
             for i, period_data in enumerate(result.period_data):
                 target_period = opt_period + i
                 if target_period < 96:
-                    period_intents[
-                        target_period
-                    ] = period_data.decision.strategic_intent
+                    period_intents[target_period] = (
+                        period_data.decision.strategic_intent
+                    )
 
         # Store with date for validation on load
         data = {

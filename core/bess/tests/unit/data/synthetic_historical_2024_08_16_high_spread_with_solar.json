@@ -42,5 +42,17 @@
     "base_to_battery_solar_savings_pct": 131.56,
     "total_charged": 1.6,
     "total_discharged": 4.0
+  },
+  "expected_behavior": {
+    "description": "Short horizon high spread with solar: charge and export",
+    "intents_present": [
+      "GRID_CHARGING",
+      "EXPORT_ARBITRAGE"
+    ],
+    "savings_positive": true,
+    "constraints": {
+      "soe_within_bounds": true,
+      "power_within_limits": true
+    }
   }
 }

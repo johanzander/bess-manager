@@ -61,7 +61,7 @@ def run_scenario(scenario: dict):
     buy_prices = price_manager.get_buy_prices(raw_prices=base_prices)
     sell_prices = price_manager.get_sell_prices(raw_prices=base_prices)
 
-    period_duration_hours = 1.0
+    period_duration_hours = scenario.get("period_duration_hours", 1.0)
 
     return optimize_battery_schedule(
         buy_price=buy_prices,

@@ -102,5 +102,17 @@
     "base_to_battery_solar_savings_pct": 131.5,
     "total_charged": 48.0,
     "total_discharged": 43.6
+  },
+  "expected_behavior": {
+    "description": "Extreme price volatility: aggressive grid-charge at lows, export at spikes",
+    "intents_present": [
+      "GRID_CHARGING",
+      "EXPORT_ARBITRAGE"
+    ],
+    "savings_positive": true,
+    "constraints": {
+      "soe_within_bounds": true,
+      "power_within_limits": true
+    }
   }
 }

@@ -119,9 +119,8 @@ def test_all_scenarios(scenario_name):
     buy_prices = price_manager.get_buy_prices(raw_prices=base_prices)
     sell_prices = price_manager.get_sell_prices(raw_prices=base_prices)
 
-    # These scenario files are hourly test data
-    # System runs quarterly internally, but these unit tests use hourly resolution
-    period_duration_hours = 1.0
+    # Use period_duration_hours from scenario if specified (quarterly=0.25), default hourly
+    period_duration_hours = scenario.get("period_duration_hours", 1.0)
 
     # Run optimization
     result = optimize_battery_schedule(

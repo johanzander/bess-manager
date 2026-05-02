@@ -102,5 +102,17 @@
     "base_to_battery_solar_savings_pct": 60.54,
     "total_charged": 28.0,
     "total_discharged": 25.6
+  },
+  "expected_behavior": {
+    "description": "Evening peak with solar: grid-charge off-peak, export during peak hours",
+    "intents_present": [
+      "GRID_CHARGING",
+      "EXPORT_ARBITRAGE"
+    ],
+    "savings_positive": true,
+    "constraints": {
+      "soe_within_bounds": true,
+      "power_within_limits": true
+    }
   }
 }

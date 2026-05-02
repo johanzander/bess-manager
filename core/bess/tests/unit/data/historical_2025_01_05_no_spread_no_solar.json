@@ -96,5 +96,21 @@
     "base_to_battery_solar_savings_pct": 0.19,
     "total_charged": 8.0,
     "total_discharged": 7.6
+  },
+  "expected_behavior": {
+    "description": "Flat prices, no solar: minimal arbitrage opportunity, mostly idle with some load support",
+    "intents_present": [
+      "IDLE",
+      "LOAD_SUPPORT"
+    ],
+    "intents_absent": [
+      "SOLAR_STORAGE",
+      "EXPORT_ARBITRAGE"
+    ],
+    "savings_positive": true,
+    "constraints": {
+      "soe_within_bounds": true,
+      "power_within_limits": true
+    }
   }
 }

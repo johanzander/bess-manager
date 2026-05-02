@@ -42,5 +42,16 @@
     "base_to_battery_solar_savings_pct": 82.89,
     "total_charged": 0.5,
     "total_discharged": 2.9
+  },
+  "expected_behavior": {
+    "description": "Short horizon evening peak with solar: charge and export during peak",
+    "intents_present": [
+      "EXPORT_ARBITRAGE"
+    ],
+    "savings_positive": true,
+    "constraints": {
+      "soe_within_bounds": true,
+      "power_within_limits": true
+    }
   }
 }

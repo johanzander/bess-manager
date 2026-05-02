@@ -102,5 +102,20 @@
     "base_to_battery_solar_savings_pct": 47.16,
     "total_charged": 34.8,
     "total_discharged": 31.6
+  },
+  "expected_behavior": {
+    "description": "Winter day: no solar, grid-charge at night lows, export during peaks",
+    "intents_present": [
+      "GRID_CHARGING",
+      "EXPORT_ARBITRAGE"
+    ],
+    "intents_absent": [
+      "SOLAR_STORAGE"
+    ],
+    "savings_positive": true,
+    "constraints": {
+      "soe_within_bounds": true,
+      "power_within_limits": true
+    }
   }
 }

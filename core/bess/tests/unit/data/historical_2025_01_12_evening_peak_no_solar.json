@@ -96,5 +96,20 @@
     "base_to_battery_solar_savings_pct": 11.29,
     "total_charged": 26.8,
     "total_discharged": 26.8
+  },
+  "expected_behavior": {
+    "description": "Evening peak without solar: grid-charge during off-peak, support load during evening peak",
+    "intents_present": [
+      "GRID_CHARGING",
+      "LOAD_SUPPORT"
+    ],
+    "intents_absent": [
+      "SOLAR_STORAGE"
+    ],
+    "savings_positive": true,
+    "constraints": {
+      "soe_within_bounds": true,
+      "power_within_limits": true
+    }
   }
 }

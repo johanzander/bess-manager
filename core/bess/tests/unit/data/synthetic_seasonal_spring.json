@@ -102,5 +102,18 @@
     "base_to_battery_solar_savings_pct": 78.4,
     "total_charged": 30.2,
     "total_discharged": 27.6
+  },
+  "expected_behavior": {
+    "description": "Spring day: solar storage and export arbitrage with grid charging backup",
+    "intents_present": [
+      "GRID_CHARGING",
+      "SOLAR_STORAGE",
+      "EXPORT_ARBITRAGE"
+    ],
+    "savings_positive": true,
+    "constraints": {
+      "soe_within_bounds": true,
+      "power_within_limits": true
+    }
   }
 }

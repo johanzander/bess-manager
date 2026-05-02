@@ -104,5 +104,20 @@
     "base_to_battery_solar_savings_pct": 2.3,
     "total_charged": 6.0,
     "total_discharged": 5.2
+  },
+  "expected_behavior": {
+    "description": "Night lows without solar: small spread so mostly idle, some grid charging",
+    "intents_present": [
+      "IDLE"
+    ],
+    "intents_absent": [
+      "SOLAR_STORAGE",
+      "EXPORT_ARBITRAGE"
+    ],
+    "savings_positive": true,
+    "constraints": {
+      "soe_within_bounds": true,
+      "power_within_limits": true
+    }
   }
 }

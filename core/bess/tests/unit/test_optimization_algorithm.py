@@ -12,6 +12,7 @@ import pytest
 from core.bess.dp_battery_algorithm import optimize_battery_schedule
 from core.bess.models import EconomicSummary, PeriodData
 from core.bess.settings import BatterySettings
+from core.bess.tests.helpers import assert_physical_constraints
 
 pytestmark = pytest.mark.slow
 
@@ -145,36 +146,22 @@ def test_battery_constraints_respected():
         battery_settings=battery_settings,
     )
 
-    # Test constraints using new PeriodData structure
+    # Test physical constraints using shared helper
+    battery_dict = {
+        "min_soe_kwh": battery_settings.min_soe_kwh,
+        "max_soe_kwh": battery_settings.max_soe_kwh,
+        "max_charge_power_kw": battery_settings.max_charge_power_kw,
+        "max_discharge_power_kw": battery_settings.max_discharge_power_kw,
+    }
+    assert_physical_constraints(results, battery_dict)
+
+    # Energy balance should be maintained (approximately)
     for hour_data in results.period_data:
-        # SOE is already in kWh, no conversion needed
-        soe_start_kwh = hour_data.energy.battery_soe_start
-        soe_end_kwh = hour_data.energy.battery_soe_end
-
-        assert (
-            battery_settings.min_soe_kwh
-            <= soe_start_kwh
-            <= battery_settings.max_soe_kwh
-        )
-        assert (
-            battery_settings.min_soe_kwh <= soe_end_kwh <= battery_settings.max_soe_kwh
-        )
-
-        # Battery action should respect power limits
-        if hour_data.decision.battery_action:
-            assert abs(hour_data.decision.battery_action) <= max(
-                battery_settings.max_charge_power_kw,
-                battery_settings.max_discharge_power_kw,
-            )
-
-        # Energy balance should be maintained (approximately)
         energy_in = hour_data.energy.solar_production + hour_data.energy.grid_imported
         energy_out = hour_data.energy.home_consumption + hour_data.energy.grid_exported
         battery_net = (
             hour_data.energy.battery_charged - hour_data.energy.battery_discharged
         )
-
-        # Energy balance: energy_in = energy_out + battery_net (within tolerance for efficiency losses)
         balance_error = abs(energy_in - energy_out - battery_net)
         assert balance_error < 0.1, f"Energy balance error too large: {balance_error}"
 

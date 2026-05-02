@@ -11,6 +11,7 @@ import pytest
 
 from core.bess.dp_battery_algorithm import optimize_battery_schedule
 from core.bess.settings import BatterySettings
+from core.bess.tests.helpers import assert_physical_constraints
 
 pytestmark = pytest.mark.slow
 
@@ -201,45 +202,15 @@ def test_quarterly_vs_hourly_optimization():
         period_duration_hours=1.0,  # 1-hour periods
     )
 
-    # Verify physical constraints for quarterly optimization
-    max_energy_per_quarter = (
-        battery_settings.max_charge_power_kw * 0.25
-    )  # 15 kW * 0.25h = 3.75 kWh
-
-    for i, period_data in enumerate(quarterly_result.period_data):
-        battery_charged = period_data.energy.battery_charged
-        battery_discharged = period_data.energy.battery_discharged
-
-        # Check charge constraint
-        assert battery_charged <= max_energy_per_quarter + 0.01, (
-            f"Period {i}: Charged {battery_charged:.2f} kWh exceeds "
-            f"max {max_energy_per_quarter:.2f} kWh for 15-min period"
-        )
-
-        # Check discharge constraint
-        assert battery_discharged <= max_energy_per_quarter + 0.01, (
-            f"Period {i}: Discharged {battery_discharged:.2f} kWh exceeds "
-            f"max {max_energy_per_quarter:.2f} kWh for 15-min period"
-        )
-
-    # Verify hourly optimization constraints
-    max_energy_per_hour = (
-        battery_settings.max_charge_power_kw * 1.0
-    )  # 15 kW * 1h = 15 kWh
-
-    for i, period_data in enumerate(hourly_result.period_data):
-        battery_charged = period_data.energy.battery_charged
-        battery_discharged = period_data.energy.battery_discharged
-
-        assert battery_charged <= max_energy_per_hour + 0.01, (
-            f"Hour {i}: Charged {battery_charged:.2f} kWh exceeds "
-            f"max {max_energy_per_hour:.2f} kWh for 1-hour period"
-        )
-
-        assert battery_discharged <= max_energy_per_hour + 0.01, (
-            f"Hour {i}: Discharged {battery_discharged:.2f} kWh exceeds "
-            f"max {max_energy_per_hour:.2f} kWh for 1-hour period"
-        )
+    # Verify physical constraints for both resolutions
+    battery_dict = {
+        "min_soe_kwh": battery_settings.min_soe_kwh,
+        "max_soe_kwh": battery_settings.max_soe_kwh,
+        "max_charge_power_kw": battery_settings.max_charge_power_kw,
+        "max_discharge_power_kw": battery_settings.max_discharge_power_kw,
+    }
+    assert_physical_constraints(quarterly_result, battery_dict)
+    assert_physical_constraints(hourly_result, battery_dict)
 
     # Extract savings
     quarterly_savings = quarterly_result.economic_summary.grid_to_battery_solar_savings

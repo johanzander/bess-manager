@@ -2453,47 +2453,20 @@ async def run_setup_discovery():
         missing_sensors: list[str] = []
         platform_sensors: dict[str, dict[str, str]] = {}
 
-        # Try entity-registry-based discovery first (robust against renaming)
-        registry_available = True
-        try:
-            registry = ha.fetch_entity_registry()
-        except SystemConfigurationError:
-            logger.warning(
-                "Entity registry unavailable (HA may lack WebSocket support); "
-                "using states-based discovery"
+        # Registry-based discovery (robust against entity renaming)
+        registry = ha.fetch_entity_registry()
+        platform_sensors, detected_platform = (
+            ha.discover_sensors_from_registry(registry)
+        )
+        if platform_sensors:
+            sensors = dict(platform_sensors.get(detected_platform, {}))
+            suffix_map = (
+                ha.ENTITY_SUFFIX_MAP
+                if detected_platform == "growatt"
+                else ha.SOLAX_ENTITY_SUFFIX_MAP
             )
-            registry_available = False
-
-        if registry_available:
-            platform_sensors, detected_platform = (
-                ha.discover_sensors_from_registry(registry)
-            )
-            if platform_sensors:
-                sensors = dict(platform_sensors.get(detected_platform, {}))
-                suffix_map = (
-                    ha.ENTITY_SUFFIX_MAP
-                    if detected_platform == "growatt"
-                    else ha.SOLAX_ENTITY_SUFFIX_MAP
-                )
-                all_bess_keys = list(set(suffix_map.values()))
-                missing_sensors = [k for k in all_bess_keys if k not in sensors]
-
-        # Use states-based discovery when registry is unavailable or found nothing
-        if not sensors:
-            if integrations["growatt_found"] and integrations["device_sn"]:
-                sensors = ha.discover_growatt_sensors(integrations["device_sn"], states)
-                all_bess_keys = list(ha.ENTITY_SUFFIX_MAP.values())
-                missing_sensors = [k for k in all_bess_keys if k not in sensors]
-            elif integrations["solax_found"] and integrations["solax_device_prefix"]:
-                sensors = ha.discover_solax_sensors(
-                    integrations["solax_device_prefix"], states
-                )
-                all_bess_keys = list(ha.SOLAX_ENTITY_SUFFIX_MAP.values())
-                missing_sensors = [k for k in all_bess_keys if k not in sensors]
-            else:
-                logger.warning(
-                    "No supported inverter integration found during setup discovery"
-                )
+            all_bess_keys = list(set(suffix_map.values()))
+            missing_sensors = [k for k in all_bess_keys if k not in sensors]
 
         current_sensors = ha.discover_current_sensors(states)
         for phase_key, entity_id in current_sensors.items():
@@ -2518,7 +2491,6 @@ async def run_setup_discovery():
                 "device_sn": integrations["device_sn"],
                 "growatt_device_id": integrations["growatt_device_id"],
                 "solax_found": integrations["solax_found"],
-                "solax_device_prefix": integrations["solax_device_prefix"],
                 "nordpool_found": integrations["nordpool_found"],
                 "nordpool_area": integrations["nordpool_area"],
                 "nordpool_config_entry_id": integrations["nordpool_config_entry_id"],

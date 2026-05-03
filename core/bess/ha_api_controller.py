@@ -336,9 +336,21 @@ class HomeAssistantAPIController:
         },
     }
 
-    # Maps entity ID suffix (after device_sn_) → BESS sensor key.
-    # Used by discover_growatt_sensors() to map entity IDs from GET /api/states.
-    # Entity IDs follow the pattern: <domain>.<device_sn>_<suffix>
+    # ── Entity Discovery Architecture ─────────────────────────────────────
+    # HA's entity registry has three key fields per entity:
+    #   unique_id  — assigned by the integration, NEVER changes (e.g. "rkm0d7n04x_import_power")
+    #   entity_id  — the API-callable name (e.g. "sensor.rkm0d7n04x_import_power"), user CAN rename
+    #   platform   — which integration created it (e.g. "growatt_server"), NEVER changes
+    #
+    # Discovery uses unique_id + platform (both immutable) to FIND the correct
+    # entities regardless of user renaming.  It then stores the entity_id because
+    # that is what HA's REST/WebSocket APIs require for reading sensor values.
+    # Re-running discovery after a rename will update the stored entity_id.
+    # ───────────────────────────────────────────────────────────────────────────
+
+    # Maps unique_id suffix → BESS sensor key for growatt_server entities.
+    # Used by _map_registry_entities() for registry-based discovery.
+    # unique_ids follow the pattern: <device_sn>_<suffix>
     #
     # HA generates entity IDs from the slugified *translation name*, not the sensor key.
     # E.g. key="tlx_statement_of_charge", name="State of charge (SoC)"
@@ -379,12 +391,9 @@ class HomeAssistantAPIController:
         "lifetime_self_consumption": "lifetime_self_consumption",
     }
 
-    # Used by _extract_solax_device_prefix() and discover_solax_sensors().
-    # SolaX entities follow the pattern: <domain>.solax_<suffix> (single inverter)
-    # or <domain>.solax_<serial>_<suffix> (multiple inverters), where domain is
-    # sensor, select, number, or button.
-    # Detection anchors on the "solax_" prefix in entity IDs, then confirms
-    # the match by checking for known suffixes from this map.
+    # Maps unique_id suffix → BESS sensor key for solax_modbus entities.
+    # Used by _map_registry_entities() for registry-based discovery.
+    # Includes both SolaX-native and Growatt inverter variants.
     #
     # Sensor suffixes come from the homeassistant-solax-modbus integration
     # (github.com/wills106/homeassistant-solax-modbus).  Control entity suffixes
@@ -392,18 +401,35 @@ class HomeAssistantAPIController:
     # VPP (Virtual Power Plant) feature added in v3.x of that integration.
     SOLAX_ENTITY_SUFFIX_MAP: ClassVar[dict[str, str]] = {
         # ── Real-time power sensors (sensor.<prefix>_<suffix>) ───────────
-        "battery_capacity": "battery_soc",
-        "battery_power_charge": "battery_charge_power",
-        "battery_power_discharge": "battery_discharge_power",
-        "measured_power": "import_power",
-        "grid_export": "export_power",
-        "grid_import": "import_power",  # alternative to measured_power
+        # solax_modbus creates entities with its own naming scheme regardless
+        # of which inverter brand is connected.  Both SolaX and Growatt
+        # inverter variants are listed where they differ.
+        #
+        # SOC
+        "battery_capacity": "battery_soc",  # SolaX native
+        "battery_soc": "battery_soc",  # Growatt inverter
+        # Battery power
+        "battery_power_charge": "battery_charge_power",  # SolaX native
+        "battery_charge_power": "battery_charge_power",  # Growatt inverter
+        "battery_power_discharge": "battery_discharge_power",  # SolaX native
+        "battery_discharge_power": "battery_discharge_power",  # Growatt inverter
+        # Grid power
+        "measured_power": "import_power",  # SolaX native
+        "total_forward_power": "import_power",  # Growatt inverter
+        "grid_export": "export_power",  # SolaX native
+        "grid_import": "import_power",  # SolaX native alternative
+        "total_reverse_power": "export_power",  # Growatt inverter
+        # Solar power
         "pv_power_1": "pv_power",
-        "house_load": "local_load_power",
+        # Load power
+        "house_load": "local_load_power",  # SolaX native
+        "total_load_power": "local_load_power",  # Growatt inverter
         # ── Lifetime / cumulative energy sensors ─────────────────────────
         # Battery energy (input = charged, output = discharged)
-        "battery_input_energy_total": "lifetime_battery_charged",
-        "battery_output_energy_total": "lifetime_battery_discharged",
+        "battery_input_energy_total": "lifetime_battery_charged",  # SolaX native
+        "total_battery_input_energy": "lifetime_battery_charged",  # Growatt inverter
+        "battery_output_energy_total": "lifetime_battery_discharged",  # SolaX native
+        "total_battery_output_energy": "lifetime_battery_discharged",  # Growatt inverter
         # Solar energy
         "total_solar_energy": "lifetime_solar_energy",
         # Grid energy — two naming variants across Gen2/3 vs Gen4+
@@ -424,6 +450,12 @@ class HomeAssistantAPIController:
         "battery_minimum_capacity_grid_tied": "solax_battery_min_soc",
         # ── Charger use mode (select entity) ─────────────────────────────
         "charger_use_mode": "solax_charger_use_mode",
+        # ── Growatt inverter: EMS charge/discharge rate control ───────────
+        "ems_charging_rate": "battery_charging_power_rate",
+        "ems_discharging_rate": "battery_discharging_power_rate",
+        "ems_charging_stop_soc": "battery_charge_stop_soc",
+        "ems_discharging_stop_soc": "battery_discharge_stop_soc",
+        "charger_switch": "grid_charge",
     }
 
     def resolve_sensor_for_influxdb(self, sensor_key: str) -> str | None:
@@ -1597,9 +1629,38 @@ class HomeAssistantAPIController:
                         nordpool_area = unique_id.split("-", 1)[0].upper()
                         break
 
-        # Find growatt device_id by matching device name to device_sn
+        # Find growatt config_entry_id for device matching
+        growatt_config_entry_id: str | None = None
+        for entry in config_entries_result:
+            if entry.get("domain") == "growatt_server" and entry.get("state") == "loaded":
+                growatt_config_entry_id = entry["entry_id"]
+                break
+
+        # Find growatt device_id from device registry.
+        # Strategy 1: match by identifiers containing the device SN
+        #   (immutable, unaffected by user renames)
+        # Strategy 2: match by config_entry belonging to growatt_server
+        #   (works even without a detected SN)
+        # Strategy 3: match by device name equal to device SN
+        #   (legacy fallback)
         growatt_device_id: str | None = None
         if device_sn:
+            sn_upper = device_sn.upper()
+            for device in devices_result:
+                for domain, identifier in device.get("identifiers", []):
+                    if str(identifier).upper() == sn_upper:
+                        growatt_device_id = device["id"]
+                        break
+                if growatt_device_id:
+                    break
+
+        if not growatt_device_id and growatt_config_entry_id:
+            for device in devices_result:
+                if growatt_config_entry_id in device.get("config_entries", []):
+                    growatt_device_id = device["id"]
+                    break
+
+        if not growatt_device_id and device_sn:
             sn_upper = device_sn.upper()
             for device in devices_result:
                 name = str(device.get("name", "")).upper()
@@ -1696,7 +1757,6 @@ class HomeAssistantAPIController:
             "device_sn": None,
             "growatt_device_id": None,
             "solax_found": False,
-            "solax_device_prefix": None,
             "nordpool_found": False,
             "nordpool_area": None,
             "nordpool_config_entry_id": None,
@@ -1708,31 +1768,18 @@ class HomeAssistantAPIController:
         }
 
         # ── Entity registry: detect integrations by platform field ────────
-        try:
-            registry = self.fetch_entity_registry()
-            inverter_detected = self.detect_inverter_integrations(registry)
-            result["growatt_found"] = inverter_detected.get("growatt", False)
-            result["solax_found"] = inverter_detected.get("solax", False)
-        except SystemConfigurationError:
-            logger.warning(
-                "Entity registry unavailable; falling back to entity-ID detection"
-            )
-            registry = None
+        registry = self.fetch_entity_registry()
+        inverter_detected = self.detect_inverter_integrations(registry)
+        result["growatt_found"] = inverter_detected.get("growatt", False)
+        result["solax_found"] = inverter_detected.get("solax", False)
 
-        # ── States: Growatt device SN, Nordpool area, SolaX prefix ────────
+        # ── States: Growatt device SN, Nordpool area ─────────────────────
         states = self._fetch_all_states()
 
         device_sn = self._extract_growatt_device_sn(states)
         if device_sn:
             result["growatt_found"] = True
             result["device_sn"] = device_sn
-
-        # SolaX prefix is still needed for states-based sensor discovery
-        # (used as fallback when entity registry is unavailable).
-        solax_prefix = self._extract_solax_device_prefix(states)
-        if solax_prefix:
-            result["solax_found"] = True
-            result["solax_device_prefix"] = solax_prefix
 
         for state in states:
             entity_id = str(state.get("entity_id", "")).lower()
@@ -1829,129 +1876,6 @@ class HomeAssistantAPIController:
 
         return None
 
-    def discover_growatt_sensors(
-        self, device_sn: str, states: list[dict]
-    ) -> dict[str, str]:
-        """Discover Growatt sensor entity IDs for a given device serial number.
-
-        Maps entities matching the device serial number to BESS sensor keys
-        using known Growatt entity naming conventions.
-
-        Growatt entities follow the pattern: <domain>.<device_sn>_<suffix>
-        The suffix is mapped to a BESS sensor key via ENTITY_SUFFIX_MAP.
-
-        Args:
-            device_sn: Growatt device serial number (e.g. "rkm0d7n04x")
-            states: List of state dicts from /api/states
-
-        Returns:
-            dict mapping bess_sensor_key -> entity_id for all discovered sensors
-        """
-        result: dict[str, str] = {}
-        prefix = f"{device_sn}_"
-        for state in states:
-            entity_id = str(state.get("entity_id", ""))
-            if not entity_id.startswith(("sensor.", "number.", "switch.")):
-                continue
-            object_id = entity_id.split(".", 1)[1]
-            if not object_id.startswith(prefix):
-                continue
-            suffix = object_id[len(prefix) :]
-            if suffix in self.ENTITY_SUFFIX_MAP:
-                result[self.ENTITY_SUFFIX_MAP[suffix]] = entity_id
-
-        logger.info(
-            "Discovered %d Growatt sensors for device %s",
-            len(result),
-            device_sn,
-        )
-        return result
-
-    def _extract_solax_device_prefix(self, states: list[dict]) -> str | None:
-        """Extract the SolaX device prefix from entity states.
-
-        Detects the homeassistant-solax-modbus integration by looking for
-        entities across all domains (sensor, select, number, button) with
-        a ``solax_`` object-ID prefix.  The integration creates entities
-        as ``<domain>.solax_<suffix>`` (single inverter) or
-        ``<domain>.solax_<serial>_<suffix>`` (multiple inverters).
-
-        To confirm a genuine SolaX integration (not manually renamed entities),
-        we require at least one known suffix from ``SOLAX_ENTITY_SUFFIX_MAP``
-        to be present under the detected prefix.
-
-        Args:
-            states: List of state dicts from /api/states.
-
-        Returns:
-            Device prefix string (e.g. ``"solax"`` or ``"solax_abc123"``),
-            or None if no SolaX entities are detected.
-        """
-        valid_domains = ("sensor.", "select.", "number.", "button.")
-        solax_prefixes: dict[str, int] = {}
-
-        for state in states:
-            entity_id = str(state.get("entity_id", ""))
-            if not any(entity_id.startswith(d) for d in valid_domains):
-                continue
-            object_id = entity_id.split(".", 1)[1]
-            if not object_id.startswith("solax_"):
-                continue
-
-            for suffix in self.SOLAX_ENTITY_SUFFIX_MAP:
-                if object_id.endswith(f"_{suffix}"):
-                    prefix = object_id[: -len(f"_{suffix}")]
-                    solax_prefixes[prefix] = solax_prefixes.get(prefix, 0) + 1
-                    break
-
-        if not solax_prefixes:
-            return None
-
-        # Pick the prefix with the most matching suffixes.
-        prefix = max(solax_prefixes, key=solax_prefixes.get)  # type: ignore[arg-type]
-        logger.debug("SolaX device prefix detected: %r (%d entities)", prefix, solax_prefixes[prefix])
-        return prefix
-
-    def discover_solax_sensors(
-        self, device_prefix: str, states: list[dict]
-    ) -> dict[str, str]:
-        """Discover SolaX sensor and control entity IDs for a given device prefix.
-
-        Maps entities matching the device prefix to BESS sensor keys using
-        known SolaX entity naming conventions (homeassistant-solax-modbus).
-
-        SolaX entities follow the pattern: <domain>.<device_prefix>_<suffix>.
-        Sensor entities use the ``sensor.`` domain; VPP control entities use
-        ``select.``, ``number.``, or ``button.`` domains.
-
-        Args:
-            device_prefix: SolaX device prefix (e.g. ``"solax_abc123"``).
-            states: List of state dicts from /api/states.
-
-        Returns:
-            dict mapping bess_sensor_key → entity_id for all discovered entities.
-        """
-        result: dict[str, str] = {}
-        object_prefix = f"{device_prefix}_"
-        valid_domains = ("sensor.", "select.", "number.", "button.")
-
-        for state in states:
-            entity_id = str(state.get("entity_id", ""))
-            if not any(entity_id.startswith(d) for d in valid_domains):
-                continue
-            object_id = entity_id.split(".", 1)[1]
-            if not object_id.startswith(object_prefix):
-                continue
-            suffix = object_id[len(object_prefix) :]
-            if suffix in self.SOLAX_ENTITY_SUFFIX_MAP:
-                result[self.SOLAX_ENTITY_SUFFIX_MAP[suffix]] = entity_id
-
-        logger.info(
-            "Discovered %d SolaX entities for prefix %r",
-            len(result),
-            device_prefix,
-        )
-        return result
 
     def discover_current_sensors(self, states: list[dict]) -> dict[str, str]:
         """Discover phase current sensor entity IDs.
@@ -2184,10 +2108,9 @@ class HomeAssistantAPIController:
             detected_platform = "growatt"
 
         if inverter_detected.get("solax"):
+            solax_platforms = ["solax_modbus", "solax"]
             platform_sensors["solax"] = self._map_registry_entities(
-                entities,
-                ["solax_modbus", "solax"],
-                self.SOLAX_ENTITY_SUFFIX_MAP,
+                entities, solax_platforms, self.SOLAX_ENTITY_SUFFIX_MAP,
             )
             if not detected_platform:
                 detected_platform = "solax"
@@ -2200,11 +2123,12 @@ class HomeAssistantAPIController:
         platforms: list[str],
         suffix_map: dict[str, str],
     ) -> dict[str, str]:
-        """Map entity registry entries to BESS sensor keys using a suffix map.
+        """Map entity registry entries to BESS sensor keys using unique_id.
 
-        Filters entities belonging to the given platforms, then matches the
-        entity_id suffix (object_id portion after the domain prefix) against
-        the provided suffix map.
+        Filters entities belonging to the given platforms, then matches
+        the ``unique_id`` suffix against the suffix map.  ``unique_id``
+        is assigned by the integration and never changes regardless of
+        user entity renaming — this is the only reliable matching strategy.
 
         Args:
             entities: Full entity registry list.
@@ -2217,6 +2141,10 @@ class HomeAssistantAPIController:
         result: dict[str, str] = {}
         platform_set = set(platforms)
 
+        # Sort suffixes longest-first so "total_grid_import" matches before
+        # the shorter "grid_import" when both are in the map.
+        sorted_suffixes = sorted(suffix_map.items(), key=lambda x: len(x[0]), reverse=True)
+
         for entity in entities:
             if entity.get("platform") not in platform_set:
                 continue
@@ -2224,12 +2152,10 @@ class HomeAssistantAPIController:
             if "." not in entity_id:
                 continue
 
-            object_id = entity_id.split(".", 1)[1]
-            # Try matching the full suffix or the portion after the first underscore
-            # prefix (device serial/name).  Entity IDs follow the pattern:
-            # <domain>.<prefix>_<suffix> where prefix may be a device identifier.
-            for suffix, bess_key in suffix_map.items():
-                if object_id.endswith(f"_{suffix}") or object_id == suffix:
+            unique_id = str(entity.get("unique_id", ""))
+
+            for suffix, bess_key in sorted_suffixes:
+                if unique_id.endswith(f"_{suffix}") or unique_id == suffix:
                     if bess_key not in result:
                         result[bess_key] = entity_id
                     break

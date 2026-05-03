@@ -22,7 +22,6 @@ export interface DiscoveryResult {
   deviceSn: string | null;
   growattDeviceId: string | null;
   solaxFound: boolean;
-  solaxDevicePrefix: string | null;
   nordpoolFound: boolean;
   nordpoolArea: string | null;
   nordpoolConfigEntryId: string | null;

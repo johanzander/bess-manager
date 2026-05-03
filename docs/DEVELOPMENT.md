@@ -168,20 +168,53 @@ If using VS Code with Remote-Containers:
 ### Testing
 
 ```bash
+# Fast tests only (recommended during development, ~3s)
+pytest -m "not slow"
+
+# Algorithm/integration tests (full optimizer, ~30min)
+pytest -m slow
 
 # Run all tests
-
 pytest
 
 # Run specific categories
-
 pytest core/bess/tests/unit/
 pytest core/bess/tests/integration/
 
 # Run with coverage
-
 pytest --cov=core.bess
-```text
+```
+
+Tests are split using `pytest.mark.slow`. The fast set covers backend API and
+non-optimizer unit tests. The slow set runs the full DP algorithm and integration
+scenarios.
+
+### Docker Build Verification
+
+To verify the production Docker image builds correctly and the app starts:
+
+```bash
+docker compose -f docker-compose.prod-test.yml up -d --build
+curl http://localhost:8080/api/system-health
+docker compose -f docker-compose.prod-test.yml down
+```
+
+This builds the real `Dockerfile` (which explicitly lists backend files to COPY)
+and boots it with mock-HA. Catches missing files that would cause runtime
+`ImportError` in production. Use `BESS_PORT=8081` if port 8080 is in use.
+
+### CI Pipeline
+
+CI runs on every PR (`.github/workflows/ci.yml`):
+
+- **Fast tests** — `pytest -m "not slow"` (when backend/core changes)
+- **Algorithm tests** — `pytest -m slow` (when `core/bess/` changes)
+- **Frontend checks** — `npm test`, type-check, lint (when `frontend/` changes)
+- **Code quality** — Black + Ruff (always)
+- **Docker build & boot** — production image smoke test (when backend/frontend/Dockerfile changes)
+
+The quality gate script (`scripts/quality-check.sh`) runs fast tests + linting
+and is used by the automated issue-fix bot.
 
 ### Code Quality
 

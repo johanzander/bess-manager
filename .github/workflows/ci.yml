@@ -37,6 +37,8 @@ jobs:
               - 'e2e/**'
               - 'scripts/mock_ha/**'
               - 'docker-compose.ci.yml'
+              - 'docker-compose.prod-test.yml'
+              - 'Dockerfile'
 
   # ── Fast tests: backend API + non-optimizer unit tests ──────────
   test-fast:
@@ -155,3 +157,35 @@ jobs:
 
       - name: Ruff linting
         run: ruff check . --exclude="build,.venv,node_modules"
+
+  # ── Docker build & boot: verify production image starts ──────────
+  docker-build-test:
+    name: Docker build & boot
+    needs: changes
+    if: needs.changes.outputs.e2e == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build and start production image
+        run: BESS_PORT=8080 docker compose -f docker-compose.prod-test.yml up -d --build
+
+      - name: Wait for app to boot
+        run: |
+          timeout 120 bash -c 'until curl -sf http://localhost:8080/api/system-health > /dev/null 2>&1; do sleep 2; done'
+
+      - name: Smoke test endpoints
+        run: |
+          echo "Testing /api/system-health..."
+          curl -sf http://localhost:8080/api/system-health | python3 -m json.tool > /dev/null
+          echo "Testing /api/settings..."
+          curl -sf http://localhost:8080/api/settings | python3 -m json.tool > /dev/null
+          echo "All endpoints responded with valid JSON."
+
+      - name: Dump logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.prod-test.yml logs
+
+      - name: Stop environment
+        if: always()
+        run: docker compose -f docker-compose.prod-test.yml down

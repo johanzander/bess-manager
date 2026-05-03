@@ -4,6 +4,14 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [8.4.2] - 2026-05-03
+
+### Fixed
+
+- Nordpool price area now correctly detected for the official HA core integration (`nordpool_official`); bootstrap default `SE4` placeholder no longer blocks discovery from setting the real area. ([#78](https://github.com/johanzander/bess-manager/issues/78), [#85](https://github.com/johanzander/bess-manager/pull/85))
+- Stale TOU segments on the inverter are now detectable after optimization cycles where schedules matched; TOU interval state is carried forward when the schedule manager is replaced, preventing stale segments from becoming invisible to BESS. ([#88](https://github.com/johanzander/bess-manager/pull/88))
+- `SOLAR_STORAGE` intent now correctly derives `batt_mode` from the `INTENT_TO_MODE` mapping (`load_first`) instead of the hardcoded `battery_first`. ([#88](https://github.com/johanzander/bess-manager/pull/88))
+
 ## [8.4.1] - 2026-04-29
 
 ### Fixed

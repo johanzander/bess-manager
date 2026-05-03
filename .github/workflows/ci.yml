@@ -37,6 +37,8 @@ jobs:
               - 'e2e/**'
               - 'scripts/mock_ha/**'
               - 'docker-compose.ci.yml'
+              - 'docker-compose.prod-test.yml'
+              - 'Dockerfile'
 
   # ── Fast tests: backend API + non-optimizer unit tests ──────────
   test-fast:
@@ -155,3 +157,39 @@ jobs:
 
       - name: Ruff linting
         run: ruff check . --exclude="build,.venv,node_modules"
+
+  # ── Docker build & boot: verify production image starts ──────────
+  docker-build-test:
+    name: Docker build & boot
+    needs: changes
+    if: needs.changes.outputs.e2e == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build production image
+        run: docker compose -f docker-compose.prod-test.yml build
+
+      - name: Start and verify process runs
+        run: |
+          BESS_PORT=8080 docker compose -f docker-compose.prod-test.yml up -d
+          sleep 10
+          # Verify the bess container is still running (not crashed from ImportError etc.)
+          STATUS=$(docker compose -f docker-compose.prod-test.yml ps bess --format '{{.State}}')
+          echo "Container state: $STATUS"
+          if [ "$STATUS" != "running" ]; then
+            echo "FAIL: bess container is not running (state: $STATUS)"
+            docker compose -f docker-compose.prod-test.yml logs bess
+            exit 1
+          fi
+          # Verify app logged successful initialization (not just an import crash)
+          docker compose -f docker-compose.prod-test.yml logs bess 2>&1 | grep -q "BESS Controller initialized"
+          echo "Production image boots correctly — no missing imports or COPY entries."
+
+      - name: Dump logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.prod-test.yml logs
+
+      - name: Stop environment
+        if: always()
+        run: docker compose -f docker-compose.prod-test.yml down

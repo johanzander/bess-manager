@@ -55,14 +55,47 @@ assert len(intervals) == 9
 ## Running the Test Suite
 
 ```bash
+pytest -m "not slow"                # fast tests only (~3s, 280+ tests)
+pytest -m slow                      # algorithm/integration tests (~30min)
 pytest                              # all tests
 pytest core/bess/tests/unit/        # unit tests only (fast, no HA required)
 pytest core/bess/tests/integration/ # integration tests
 pytest --cov=core.bess              # with coverage
 ```
 
+Tests are split by `pytest.mark.slow`. The slow marker is applied to all
+optimizer/DP tests and all integration tests (auto-marked via
+`core/bess/tests/integration/conftest.py`).
+
 The `run_tests` tool in `issue_fixer.py` calls `pytest --tb=short -q` automatically
 after writing fixes. Fix all failures before finishing.
+
+## CI Pipeline
+
+CI runs automatically on every PR and push to `main` (`.github/workflows/ci.yml`):
+
+| Job | Trigger | What it runs |
+|-----|---------|-------------|
+| **Fast tests** | `backend/` or `core/` changed | `pytest -m "not slow"` (~3s) |
+| **Algorithm tests** | `core/bess/` changed | `pytest -m slow` (~30min) |
+| **Frontend checks** | `frontend/` changed | `npm test` + type-check + lint |
+| **Code quality** | Always | Black + Ruff formatting/linting |
+| **Docker build & boot** | `backend/`, `core/`, `frontend/`, or `Dockerfile` changed | Builds production Dockerfile, boots with mock-HA, smoke-tests endpoints |
+
+The Docker build & boot job catches a common failure mode: the production
+`Dockerfile` explicitly lists backend files in its `COPY` command. If a new
+file is added but not listed, the image builds but crashes at runtime with
+an `ImportError`. This job verifies the app actually starts.
+
+`quality-check.sh` runs fast tests + linting and is used by the issue-fix bot.
+
+## Docker Compose Environments
+
+| File | Purpose |
+|------|---------|
+| `docker-compose.yml` | Local dev with hot-reload |
+| `docker-compose.ci.yml` | Fast E2E dev/test (Dockerfile.dev + volume mounts) |
+| `docker-compose.prod-test.yml` | Production image verification (real Dockerfile, no code mounts) |
 
 ## Bug Reproduction with Mock HA
 

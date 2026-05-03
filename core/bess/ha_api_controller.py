@@ -346,6 +346,41 @@ class HomeAssistantAPIController:
     # entities regardless of user renaming.  It then stores the entity_id because
     # that is what HA's REST/WebSocket APIs require for reading sensor values.
     # Re-running discovery after a rename will update the stored entity_id.
+    #
+    # ── BESS Sensor Key Mapping ───────────────────────────────────────────
+    # Each BESS key has a unique_id suffix per integration.  Discovery matches
+    # unique_id.endswith("_<suffix>") to resolve the entity.
+    #
+    # BESS key                       growatt_server suffix              solax_modbus suffix
+    # ─────────────────────────────  ─────────────────────────────────  ─────────────────────────────────
+    # battery_soc                    state_of_charge_soc                battery_capacity / battery_soc
+    # battery_charge_power           battery_1_charging_w               battery_power_charge / battery_charge_power
+    # battery_discharge_power        battery_1_discharging_w            battery_power_discharge / battery_discharge_power
+    # import_power                   import_power                       measured_power / total_forward_power
+    # export_power                   export_power                       grid_export / total_reverse_power
+    # local_load_power               local_load_power                   house_load / total_load_power
+    # pv_power                       internal_wattage                   pv_power_1
+    # grid_charge                    charge_from_grid                   charger_switch
+    # battery_charging_power_rate    battery_charge_power_limit         ems_charging_rate
+    # battery_discharging_power_rate battery_discharge_power_limit      ems_discharging_rate
+    # battery_charge_stop_soc        battery_charge_soc_limit           ems_charging_stop_soc
+    # battery_discharge_stop_soc     battery_discharge_soc_limit        ems_discharging_stop_soc
+    # lifetime_battery_charged       lifetime_total_all_batteries_charged  battery_input_energy_total / total_battery_input_energy
+    # lifetime_battery_discharged    lifetime_total_all_batteries_discharged  battery_output_energy_total / total_battery_output_energy
+    # lifetime_solar_energy          lifetime_total_solar_energy        total_solar_energy
+    # lifetime_export_to_grid        lifetime_total_export_to_grid      grid_export_total / total_grid_export
+    # lifetime_import_from_grid      lifetime_import_from_grid          grid_import_total / total_grid_import
+    # lifetime_load_consumption      lifetime_total_load_consumption    home_consumption_energy
+    # lifetime_system_production     lifetime_system_production         total_yield
+    # lifetime_self_consumption      lifetime_self_consumption          — (growatt_server only)
+    #
+    # SOLAX-ONLY (VPP control):
+    # solax_power_control_mode       —                                  remotecontrol_power_control
+    # solax_active_power             —                                  remotecontrol_active_power
+    # solax_autorepeat_duration      —                                  remotecontrol_autorepeat_duration
+    # solax_power_control_trigger    —                                  remotecontrol_trigger
+    # solax_battery_min_soc          —                                  battery_minimum_capacity
+    # solax_charger_use_mode         —                                  charger_use_mode (SolaX native only)
     # ───────────────────────────────────────────────────────────────────────────
 
     # Maps unique_id suffix → BESS sensor key for growatt_server entities.

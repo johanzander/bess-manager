@@ -301,7 +301,9 @@ class TestApplyDiscovered:
 
         assert store.get_section("electricity_price")["area"] == "SE3"
 
-    def test_bootstrap_default_area_overwritten_by_discovery(self, tmp_path, monkeypatch):
+    def test_bootstrap_default_area_overwritten_by_discovery(
+        self, tmp_path, monkeypatch
+    ):
         """Bootstrap default SE4 is replaced when discovery returns the real area.
 
         On first boot, _bootstrap_defaults writes SE4 as a placeholder.
@@ -316,7 +318,9 @@ class TestApplyDiscovered:
 
         assert store.get_section("electricity_price")["area"] == "SE3"
 
-    def test_user_customised_area_not_overwritten_by_discovery(self, tmp_path, monkeypatch):
+    def test_user_customised_area_not_overwritten_by_discovery(
+        self, tmp_path, monkeypatch
+    ):
         """An area the user explicitly set to a non-default value is preserved."""
         _patch_path(tmp_path, monkeypatch)
         store = SettingsStore()

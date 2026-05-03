@@ -4,6 +4,19 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.0.0b5] - 2026-05-03
+
+### Changed
+
+- Entity discovery now exclusively uses HA entity registry (unique_id + platform fields, both immutable) — removes fragile states-based fallback that broke when users renamed entities.
+- SolaX suffix map extended with Growatt-plugin EMS control entities (charging/discharging rate, stop SOC, charger switch).
+- Growatt device_id lookup improved: matches by device identifiers first (immutable), falls back to config_entry, then name.
+
+### Removed
+
+- States-based discovery methods (`discover_growatt_sensors`, `discover_solax_sensors`, `_extract_solax_device_prefix`) — replaced by registry-based discovery.
+- `solaxDevicePrefix` field from discovery API response (no longer needed).
+
 ## [9.0.0b4] - 2026-04-26
 
 ### Added

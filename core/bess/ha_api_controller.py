@@ -1436,11 +1436,19 @@ class HomeAssistantAPIController:
         devices_result = results[1]
         services_result: dict = results[2]
 
-        # Find nordpool config_entry_id
+        # Find nordpool config_entry_id and area.
+        # The official HA core integration stores the area in the config entry's
+        # options/data dict — there is no sensor.nordpool* entity to inspect.
         nordpool_config_entry_id: str | None = None
+        nordpool_area: str | None = None
         for entry in config_entries_result:
             if entry.get("domain") == "nordpool" and entry.get("state") == "loaded":
                 nordpool_config_entry_id = entry["entry_id"]
+                raw_area = entry.get("options", {}).get("area") or entry.get(
+                    "data", {}
+                ).get("area")
+                if raw_area:
+                    nordpool_area = str(raw_area).upper()
                 break
 
         # Find growatt device_id by matching device name to device_sn
@@ -1464,14 +1472,17 @@ class HomeAssistantAPIController:
             growatt_inverter_type = "SPH"
 
         logger.info(
-            "WS discovery: nordpool_config_entry_id=%s, growatt_device_id=%s, inverter_type=%s",
+            "WS discovery: nordpool_config_entry_id=%s, nordpool_area=%s, "
+            "growatt_device_id=%s, inverter_type=%s",
             nordpool_config_entry_id,
+            nordpool_area,
             growatt_device_id,
             growatt_inverter_type,
         )
         return {
             "growatt_device_id": growatt_device_id,
             "nordpool_config_entry_id": nordpool_config_entry_id,
+            "nordpool_area": nordpool_area,
             "growatt_inverter_type": growatt_inverter_type,
         }
 
@@ -1580,6 +1591,12 @@ class HomeAssistantAPIController:
             metadata = self.discover_ha_metadata(device_sn)
             result["growatt_device_id"] = metadata["growatt_device_id"]
             result["nordpool_config_entry_id"] = metadata["nordpool_config_entry_id"]
+            # Official HA core integration: no sensor.nordpool* entity exists,
+            # so mark found and read area from the config entry options/data.
+            if metadata["nordpool_config_entry_id"]:
+                result["nordpool_found"] = True
+            if not result["nordpool_area"] and metadata.get("nordpool_area"):
+                result["nordpool_area"] = metadata["nordpool_area"]
         except Exception:
             logger.warning(
                 "WebSocket discovery failed; growatt_device_id, "

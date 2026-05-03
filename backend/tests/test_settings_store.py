@@ -301,6 +301,32 @@ class TestApplyDiscovered:
 
         assert store.get_section("electricity_price")["area"] == "SE3"
 
+    def test_bootstrap_default_area_overwritten_by_discovery(self, tmp_path, monkeypatch):
+        """Bootstrap default SE4 is replaced when discovery returns the real area.
+
+        On first boot, _bootstrap_defaults writes SE4 as a placeholder.
+        apply_discovered must overwrite it with the actual area so that
+        nordpool_official users in other areas get the right configuration.
+        """
+        _patch_path(tmp_path, monkeypatch)
+        store = SettingsStore()
+        store.load({})  # bootstraps with SE4
+
+        store.apply_discovered(sensor_map={}, nordpool_area="SE3")
+
+        assert store.get_section("electricity_price")["area"] == "SE3"
+
+    def test_user_customised_area_not_overwritten_by_discovery(self, tmp_path, monkeypatch):
+        """An area the user explicitly set to a non-default value is preserved."""
+        _patch_path(tmp_path, monkeypatch)
+        store = SettingsStore()
+        store.load({})
+        store.save_section("electricity_price", {"area": "NO1"})
+
+        store.apply_discovered(sensor_map={}, nordpool_area="SE3")
+
+        assert store.get_section("electricity_price")["area"] == "NO1"
+
     def test_growatt_device_id_is_stored(self, tmp_path, monkeypatch):
         """Growatt device ID discovered during setup lands in the growatt section."""
         _patch_path(tmp_path, monkeypatch)

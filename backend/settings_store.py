@@ -147,8 +147,12 @@ class SettingsStore:
 
         # Nordpool area
         if nordpool_area:
+            from core.bess.settings import DEFAULT_AREA
+
             price = dict(self.data.get("electricity_price", {}))
-            if not price.get("area"):
+            # Overwrite if blank OR still the bootstrap default — the default is
+            # a placeholder that discovery must be allowed to correct.
+            if not price.get("area") or price.get("area") == DEFAULT_AREA:
                 price["area"] = nordpool_area
                 self.data["electricity_price"] = price
 

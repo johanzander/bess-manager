@@ -685,43 +685,41 @@ class GrowattScheduleManager:
             ) = self._calculate_power_rates_from_action(battery_action, intent)
 
             # Determine settings based on strategic intent
+            if intent not in self.INTENT_TO_MODE:
+                raise ValueError(f"Unknown strategic intent at hour {hour}: {intent}")
+
+            batt_mode = self.INTENT_TO_MODE[intent]
+
             if intent == "GRID_CHARGING":
                 grid_charge = True
                 discharge_rate = 0
                 # Always full power; power monitor caps to fuse headroom
                 charge_rate = 100
                 state = "charging"
-                batt_mode = "battery_first"
 
             elif intent == "SOLAR_STORAGE":
                 grid_charge = False
                 discharge_rate = 0
                 charge_rate = 100
                 state = "charging" if battery_action > 0.01 else "idle"
-                batt_mode = "battery_first"
 
             elif intent == "LOAD_SUPPORT":
                 grid_charge = False
                 discharge_rate = 100
                 charge_rate = 0
                 state = "discharging"
-                batt_mode = "load_first"
 
             elif intent == "EXPORT_ARBITRAGE":
                 grid_charge = False
                 discharge_rate = discharge_power_rate
                 charge_rate = 0
                 state = "grid_first"
-                batt_mode = "grid_first"
 
             elif intent == "IDLE":
                 grid_charge = False
                 discharge_rate = 0
                 charge_rate = 100
                 state = "idle"
-                batt_mode = self.INTENT_TO_MODE["IDLE"]
-            else:
-                raise ValueError(f"Unknown strategic intent at hour {hour}: {intent}")
 
             self.hourly_settings[hour] = {
                 "grid_charge": grid_charge,

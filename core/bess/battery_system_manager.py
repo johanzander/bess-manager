@@ -398,9 +398,18 @@ class BatterySystemManager:
             else:
                 # Update current schedule even when TOU doesn't change
                 self._current_schedule = temp_schedule
-                self._schedule_manager = (
-                    temp_growatt  # Update manager with new schedule
-                )
+                # Carry forward hardware TOU state so stale segment detection
+                # keeps working. temp_growatt has fresh schedule/intents/hourly
+                # settings but empty TOU intervals — without this, the in-memory
+                # record of what's on the inverter is erased every cycle.
+                temp_growatt.tou_intervals = self._schedule_manager.tou_intervals.copy()
+                # Growatt tracks active (hardware-written) intervals separately;
+                # SPH derives active_tou_intervals from tou_intervals via property.
+                if isinstance(self._schedule_manager, GrowattScheduleManager):
+                    temp_growatt.active_tou_intervals = (
+                        self._schedule_manager.active_tou_intervals.copy()
+                    )
+                self._schedule_manager = temp_growatt
 
             # Capture prediction snapshot after schedule is applied
             if not prepare_next_day:

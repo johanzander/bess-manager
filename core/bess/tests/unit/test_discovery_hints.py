@@ -197,31 +197,31 @@ class TestDiscoverHaMetadataNordpoolArea:
         # _ws_query returns [config_entries_result, devices_result, services_result]
         return lambda cmds: [entries, [], {}]
 
-    def test_area_read_from_options(self, monkeypatch):
-        """Area in config entry options is returned as nordpool_area."""
-        entry = {
-            "domain": "nordpool",
-            "state": "loaded",
-            "entry_id": "abc",
-            "options": {"area": "SE3"},
-            "data": {},
-        }
-        monkeypatch.setattr(self.ctrl, "_ws_query", self._ws_stub([entry]))
-        result = self.ctrl.discover_ha_metadata(None)
-        assert result["nordpool_area"] == "SE3"
-
-    def test_area_read_from_data_when_options_empty(self, monkeypatch):
-        """Area in config entry data is used when options has no area key."""
+    def test_areas_list_read_from_data(self, monkeypatch):
+        """Official HA integration stores areas as a list in config entry data."""
         entry = {
             "domain": "nordpool",
             "state": "loaded",
             "entry_id": "abc",
             "options": {},
-            "data": {"area": "NO1"},
+            "data": {"areas": ["SE3"]},
         }
         monkeypatch.setattr(self.ctrl, "_ws_query", self._ws_stub([entry]))
         result = self.ctrl.discover_ha_metadata(None)
-        assert result["nordpool_area"] == "NO1"
+        assert result["nordpool_area"] == "SE3"
+
+    def test_multiple_areas_uses_first(self, monkeypatch):
+        """When multiple areas are configured, the first one is used."""
+        entry = {
+            "domain": "nordpool",
+            "state": "loaded",
+            "entry_id": "abc",
+            "options": {},
+            "data": {"areas": ["SE3", "SE4"]},
+        }
+        monkeypatch.setattr(self.ctrl, "_ws_query", self._ws_stub([entry]))
+        result = self.ctrl.discover_ha_metadata(None)
+        assert result["nordpool_area"] == "SE3"
 
     def test_area_is_uppercased(self, monkeypatch):
         """Area codes are normalised to upper case regardless of source format."""
@@ -229,12 +229,25 @@ class TestDiscoverHaMetadataNordpoolArea:
             "domain": "nordpool",
             "state": "loaded",
             "entry_id": "abc",
-            "options": {"area": "se3"},
-            "data": {},
+            "options": {},
+            "data": {"areas": ["se3"]},
         }
         monkeypatch.setattr(self.ctrl, "_ws_query", self._ws_stub([entry]))
         result = self.ctrl.discover_ha_metadata(None)
         assert result["nordpool_area"] == "SE3"
+
+    def test_empty_areas_list_returns_none(self, monkeypatch):
+        """An empty areas list results in None nordpool_area."""
+        entry = {
+            "domain": "nordpool",
+            "state": "loaded",
+            "entry_id": "abc",
+            "options": {},
+            "data": {"areas": []},
+        }
+        monkeypatch.setattr(self.ctrl, "_ws_query", self._ws_stub([entry]))
+        result = self.ctrl.discover_ha_metadata(None)
+        assert result["nordpool_area"] is None
 
     def test_no_nordpool_entry_returns_none_area(self, monkeypatch):
         """nordpool_area is None when there is no loaded nordpool config entry."""
@@ -248,8 +261,8 @@ class TestDiscoverHaMetadataNordpoolArea:
             "domain": "nordpool",
             "state": "not_loaded",
             "entry_id": "abc",
-            "options": {"area": "SE3"},
-            "data": {},
+            "options": {},
+            "data": {"areas": ["SE3"]},
         }
         monkeypatch.setattr(self.ctrl, "_ws_query", self._ws_stub([entry]))
         result = self.ctrl.discover_ha_metadata(None)

@@ -1444,11 +1444,10 @@ class HomeAssistantAPIController:
         for entry in config_entries_result:
             if entry.get("domain") == "nordpool" and entry.get("state") == "loaded":
                 nordpool_config_entry_id = entry["entry_id"]
-                raw_area = entry.get("options", {}).get("area") or entry.get(
-                    "data", {}
-                ).get("area")
-                if raw_area:
-                    nordpool_area = str(raw_area).upper()
+                # Official HA integration stores areas as a list in config entry data
+                raw_areas = entry.get("data", {}).get("areas")
+                if isinstance(raw_areas, list) and raw_areas:
+                    nordpool_area = str(raw_areas[0]).upper()
                 break
 
         # Find growatt device_id by matching device name to device_sn

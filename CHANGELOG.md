@@ -4,6 +4,12 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [8.4.3] - 2026-05-07
+
+### Fixed
+
+- Nordpool area discovery now reads `data.areas` (list) matching the official HA integration format; previous `options.area`/`data.area` lookup never matched real config entries. ([#91](https://github.com/johanzander/bess-manager/issues/91))
+
 ## [8.4.2] - 2026-05-03
 
 ### Fixed

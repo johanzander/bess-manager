@@ -1,6 +1,6 @@
 # Test Framework Overhaul Plan
 
-> **Status**: Phase 4 — complete
+> **Status**: Phase 5 — complete
 > **Branch strategy**: Each phase is a separate branch merged to `main` before starting the next.
 
 ## Why
@@ -393,104 +393,60 @@ Create `core/bess/tests/helpers.py` with:
 
 ---
 
-## Phase 5: Deployment Verification (evaluate after Phase 4)
+## Phase 5: Docker Build & Boot Verification
 
-**Goal**: Automated deployment to real HA with smoke tests. Only pursue if
-mock HA E2E (Phase 3) proves insufficient.
+**Goal**: Verify the production Dockerfile builds correctly and the app starts.
+Catches missing files in the explicit COPY list without disrupting fast local
+dev iterations.
 
-### 5.1 Decision criteria
+### 5.1 Approach
 
-Proceed with Phase 5 if any of these are true:
-- Bugs slip through that mock HA E2E would not catch (HA ingress issues, supervisor lifecycle, real sensor failures)
-- The agent pipeline produces PRs that pass all tests but break in real HA
-- You want zero-touch releases (merge → deploy → verify → done)
+The production `Dockerfile` explicitly lists backend files to COPY (unlike
+`Dockerfile.dev` which copies everything). If a new file is added but not
+listed, the image builds but crashes at runtime. This CI job catches that.
 
-### 5.2 Option C1: Self-hosted runner
+- `docker-compose.ci.yml` is preserved for fast local dev (volume mounts)
+- `docker-compose.prod-test.yml` builds the production Dockerfile with
+  `BUILD_FROM=python:3.13-alpine` and verifies boot
 
-```
-Real HA (192.168.x.x)
-  ├── GitHub Actions self-hosted runner
-  ├── SMB share at /Volumes/addons/bess_manager
-  └── HA Supervisor API at :8123
+### 5.2 CI job: `docker-build-test`
 
-CI pipeline:
-  unit-tests → e2e-mock → deploy-verify (self-hosted runner only)
-    → package-addon.sh
-    → rsync to SMB (like deploy.sh)
-    → curl HA Supervisor API to restart add-on
-    → wait for /api/health to return 200
-    → run HTTP smoke tests against real HA ingress
-    → report pass/fail
-```
+Runs when `backend/`, `core/`, `frontend/`, `Dockerfile`, or compose files change:
 
-Infrastructure needed:
-- Self-hosted runner on HA network (can be the HA box itself or a Pi)
-- GitHub secrets: `HA_URL`, `HA_TOKEN`, `SMB_PATH`
-- New endpoint: `GET /api/health` returning `{ version, uptime, last_cycle }`
+1. `docker compose -f docker-compose.prod-test.yml up -d --build`
+2. Wait for `/api/system-health` to respond (timeout 120s)
+3. Smoke-test `/api/settings` and `/api/system-health` return valid JSON
+4. On failure: dump container logs
+5. Tear down
 
-### 5.3 Option C2: Container registry
+### Files modified
+- `docker-compose.prod-test.yml` (new)
+- `.github/workflows/ci.yml` (add `docker-build-test` job, update path filter)
 
-```
-CI pipeline:
-  unit-tests → e2e-mock → build-push → deploy-verify
-    → docker build + push to ghcr.io/johanzander/bess-manager:staging
-    → curl HA Supervisor API: update add-on to staging tag
-    → wait for add-on healthy
-    → run smoke tests
-```
-
-Infrastructure needed:
-- GHCR repository + push token
-- HA configured to pull from GHCR (custom repository URL)
-- GitHub secrets: `HA_URL`, `HA_TOKEN`, `GHCR_TOKEN`
-
-### 5.4 Smoke test suite
-
-```python
-# tests/smoke/test_ha_deployment.py
-def test_addon_starts():
-    r = requests.get(f"{HA_URL}/api/health")
-    assert r.status_code == 200
-    assert r.json()["version"] == expected_version
-
-def test_sensors_readable():
-    r = requests.get(f"{HA_URL}/api/dashboard")
-    assert r.status_code == 200
-    assert r.json()["summary"] is not None
-
-def test_optimization_cycle_completes():
-    # Wait up to 120s for a cycle
-    r = requests.get(f"{HA_URL}/api/system-health")
-    assert r.json()["scheduler"]["last_run"] is not None
-```
-
-### 5.5 Safety
-
-- Only run deploy-verify on merges to `main`, not on every PR
-- Add rollback: if smoke tests fail, redeploy previous version from git tag
-- Consider a dedicated staging HA instance to avoid disrupting production
-
-### Files modified (when pursued)
-- `backend/api.py` (add `/api/health` endpoint)
-- `.github/workflows/ci.yml` (add deploy-verify job)
-- `tests/smoke/` (new — deployment smoke tests)
-- Self-hosted runner setup or GHCR configuration
+### Done
+- [x] Production Dockerfile builds in CI
+- [x] App boots and responds to health checks
+- [x] Fast local dev workflow unaffected
 
 ---
 
 ## Verification Checklist (end state)
 
-After all phases, the test pipeline should look like:
+After all phases, the CI pipeline on every PR:
 
 ```
 PR opened
-  → CI: pytest (34+ files)              [Phase 1]
-  → CI: frontend vitest (10+ files)      [Phase 2]
-  → CI: Playwright E2E vs mock HA        [Phase 3]
-  → CI: behavioral scenario assertions   [Phase 4]
-  → (on merge) deploy to HA + smoke test [Phase 5]
+  → CI: fast pytest (-m "not slow", ~3s)         [Phase 1]
+  → CI: algorithm pytest (-m slow, ~30min)        [Phase 1, if core/bess/ changed]
+  → CI: frontend vitest + type-check + lint       [Phase 2, if frontend/ changed]
+  → CI: behavioral scenario assertions            [Phase 4, part of pytest]
+  → CI: Docker build & boot smoke test            [Phase 5, if backend/frontend/Dockerfile changed]
+  → CI: Black + Ruff code quality                 [always]
 ```
 
+Playwright E2E (Phase 3) is scaffolded in CI but disabled pending further
+docker-compose CI infra work.
+
 The agent pipeline (issue → analyze → fix → PR) runs `quality-check.sh`
-which includes pytest + frontend tests, and CI blocks merge if E2E fails.
-No human intervention needed for routine fixes.
+which includes fast pytest + frontend tests + linting. CI blocks merge if
+any job fails. No human intervention needed for routine fixes.

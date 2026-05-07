@@ -26,8 +26,9 @@ interface for managing battery schedules and monitoring energy flows.
 
 ```bash
 pip install -r backend/requirements.txt
+pytest -m "not slow"           # fast tests (~3s, recommended)
+pytest -m slow                 # algorithm/integration tests (~30min)
 pytest                         # run all tests
-pytest core/bess/tests/unit/   # unit tests only
 black . && ruff check --fix .  # format and lint
 ./scripts/quality-check.sh     # full quality gate
 ```
@@ -46,7 +47,9 @@ npm run generate-api # regenerate API client from OpenAPI spec
 ### Docker Development
 
 ```bash
-docker-compose up -d           # backend + frontend
+docker-compose up -d                                          # backend + frontend (dev)
+docker compose -f docker-compose.ci.yml up -d                 # E2E dev with mock-HA (fast, volume mounts)
+docker compose -f docker-compose.prod-test.yml up -d --build  # production image smoke test
 docker-compose logs -f
 ```
 

@@ -25,10 +25,13 @@
     "consumption_strategy": "fixed",
     "power_monitoring_enabled": false
   },
-  "energy_provider": "nordpool",
-  "growatt": {
-    "config_entry_id": "mock_config_entry"
+  "energy_provider": {
+    "provider": "nordpool_official",
+    "nordpool_official": {
+      "config_entry_id": "mock_config_entry"
+    }
   },
+  "growatt": {},
   "sensors": {
     "battery_soc": "sensor.growatt_battery_soc",
     "battery_charge_power": "sensor.growatt_battery_charge_power",

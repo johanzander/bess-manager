@@ -178,78 +178,76 @@ class TestPhaseCountDetection:
 
 
 # ---------------------------------------------------------------------------
-# discover_ha_metadata — nordpool area extraction from config entry
+# discover_ha_metadata — nordpool area extraction from entity registry
 # ---------------------------------------------------------------------------
 
 
 class TestDiscoverHaMetadataNordpoolArea:
-    """Area is read from the nordpool config entry options/data, not entity states.
+    """Area is extracted from nordpool entity unique_ids in the entity registry.
 
-    The official HA core integration (nordpool_official) never exposes a
-    sensor.nordpool* entity, so the area must come from the config entry.
+    HA's config_entries/get WS command does not return data/options fields,
+    so the area must be read from the entity registry. The official HA
+    nordpool integration creates entities with unique_id format
+    "{AREA}-{key}" (e.g. "SE4-current_price").
     """
 
     def setup_method(self):
         self.ctrl = _make_controller()
 
-    def _ws_stub(self, entries: list[dict]):
-        """Return a _ws_query replacement that yields the given config entries."""
-        # _ws_query returns [config_entries_result, devices_result, services_result]
-        return lambda cmds: [entries, [], {}]
+    def _ws_stub(
+        self,
+        config_entries: list[dict],
+        entity_registry: list[dict] | None = None,
+    ):
+        """Return a _ws_query replacement with config entries and entity registry."""
+        # _ws_query returns [config_entries, devices, services, entity_registry]
+        return lambda cmds: [
+            config_entries,
+            [],
+            {},
+            entity_registry or [],
+        ]
 
-    def test_areas_list_read_from_data(self, monkeypatch):
-        """Official HA integration stores areas as a list in config entry data."""
-        entry = {
-            "domain": "nordpool",
-            "state": "loaded",
-            "entry_id": "abc",
-            "options": {},
-            "data": {"areas": ["SE3"]},
+    def _nordpool_entity(self, unique_id: str, config_entry_id: str = "abc"):
+        return {
+            "platform": "nordpool",
+            "config_entry_id": config_entry_id,
+            "unique_id": unique_id,
+            "entity_id": f"sensor.nord_pool_{unique_id.lower().replace('-', '_')}",
         }
-        monkeypatch.setattr(self.ctrl, "_ws_query", self._ws_stub([entry]))
-        result = self.ctrl.discover_ha_metadata(None)
-        assert result["nordpool_area"] == "SE3"
 
-    def test_multiple_areas_uses_first(self, monkeypatch):
-        """When multiple areas are configured, the first one is used."""
-        entry = {
-            "domain": "nordpool",
-            "state": "loaded",
-            "entry_id": "abc",
-            "options": {},
-            "data": {"areas": ["SE3", "SE4"]},
-        }
-        monkeypatch.setattr(self.ctrl, "_ws_query", self._ws_stub([entry]))
+    def test_area_extracted_from_entity_unique_id(self, monkeypatch):
+        """Area is parsed from the first matching nordpool entity unique_id."""
+        entry = {"domain": "nordpool", "state": "loaded", "entry_id": "abc"}
+        entities = [self._nordpool_entity("SE3-current_price")]
+        monkeypatch.setattr(self.ctrl, "_ws_query", self._ws_stub([entry], entities))
         result = self.ctrl.discover_ha_metadata(None)
         assert result["nordpool_area"] == "SE3"
 
     def test_area_is_uppercased(self, monkeypatch):
-        """Area codes are normalised to upper case regardless of source format."""
-        entry = {
-            "domain": "nordpool",
-            "state": "loaded",
-            "entry_id": "abc",
-            "options": {},
-            "data": {"areas": ["se3"]},
-        }
-        monkeypatch.setattr(self.ctrl, "_ws_query", self._ws_stub([entry]))
+        """Area codes are normalised to upper case."""
+        entry = {"domain": "nordpool", "state": "loaded", "entry_id": "abc"}
+        entities = [self._nordpool_entity("se3-current_price")]
+        monkeypatch.setattr(self.ctrl, "_ws_query", self._ws_stub([entry], entities))
         result = self.ctrl.discover_ha_metadata(None)
         assert result["nordpool_area"] == "SE3"
 
-    def test_empty_areas_list_returns_none(self, monkeypatch):
-        """An empty areas list results in None nordpool_area."""
-        entry = {
-            "domain": "nordpool",
-            "state": "loaded",
-            "entry_id": "abc",
-            "options": {},
-            "data": {"areas": []},
-        }
-        monkeypatch.setattr(self.ctrl, "_ws_query", self._ws_stub([entry]))
+    def test_non_matching_config_entry_ignored(self, monkeypatch):
+        """Entities for a different config entry are not used."""
+        entry = {"domain": "nordpool", "state": "loaded", "entry_id": "abc"}
+        entities = [self._nordpool_entity("SE3-current_price", config_entry_id="other")]
+        monkeypatch.setattr(self.ctrl, "_ws_query", self._ws_stub([entry], entities))
         result = self.ctrl.discover_ha_metadata(None)
         assert result["nordpool_area"] is None
 
-    def test_no_nordpool_entry_returns_none_area(self, monkeypatch):
+    def test_no_nordpool_entities_returns_none(self, monkeypatch):
+        """nordpool_area is None when no matching entities exist."""
+        entry = {"domain": "nordpool", "state": "loaded", "entry_id": "abc"}
+        monkeypatch.setattr(self.ctrl, "_ws_query", self._ws_stub([entry], []))
+        result = self.ctrl.discover_ha_metadata(None)
+        assert result["nordpool_area"] is None
+
+    def test_no_nordpool_config_entry_returns_none(self, monkeypatch):
         """nordpool_area is None when there is no loaded nordpool config entry."""
         monkeypatch.setattr(self.ctrl, "_ws_query", self._ws_stub([]))
         result = self.ctrl.discover_ha_metadata(None)
@@ -257,13 +255,8 @@ class TestDiscoverHaMetadataNordpoolArea:
 
     def test_unloaded_entry_is_ignored(self, monkeypatch):
         """Config entries that are not in 'loaded' state are skipped."""
-        entry = {
-            "domain": "nordpool",
-            "state": "not_loaded",
-            "entry_id": "abc",
-            "options": {},
-            "data": {"areas": ["SE3"]},
-        }
-        monkeypatch.setattr(self.ctrl, "_ws_query", self._ws_stub([entry]))
+        entry = {"domain": "nordpool", "state": "not_loaded", "entry_id": "abc"}
+        entities = [self._nordpool_entity("SE3-current_price")]
+        monkeypatch.setattr(self.ctrl, "_ws_query", self._ws_stub([entry], entities))
         result = self.ctrl.discover_ha_metadata(None)
         assert result["nordpool_area"] is None

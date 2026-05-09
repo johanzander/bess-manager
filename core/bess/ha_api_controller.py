@@ -1429,26 +1429,38 @@ class HomeAssistantAPIController:
             {"type": "config_entries/get"},
             {"type": "config/device_registry/list"},
             {"type": "get_services"},
+            {"type": "config/entity_registry/list"},
         ]
 
         results = self._ws_query(commands)
         config_entries_result = results[0]
         devices_result = results[1]
         services_result: dict = results[2]
+        entity_registry_result = results[3]
 
-        # Find nordpool config_entry_id and area.
-        # The official HA core integration stores the area in the config entry's
-        # options/data dict — there is no sensor.nordpool* entity to inspect.
+        # Find nordpool config_entry_id from config entries.
         nordpool_config_entry_id: str | None = None
-        nordpool_area: str | None = None
         for entry in config_entries_result:
             if entry.get("domain") == "nordpool" and entry.get("state") == "loaded":
                 nordpool_config_entry_id = entry["entry_id"]
-                # Official HA integration stores areas as a list in config entry data
-                raw_areas = entry.get("data", {}).get("areas")
-                if isinstance(raw_areas, list) and raw_areas:
-                    nordpool_area = str(raw_areas[0]).upper()
                 break
+
+        # Extract nordpool area from entity registry unique_ids.
+        # The official HA nordpool integration creates entities with
+        # unique_id format "{AREA}-{key}" (e.g. "SE4-current_price").
+        # config_entries/get does NOT return data/options, so the area
+        # must be read from entity unique_ids instead.
+        nordpool_area: str | None = None
+        if nordpool_config_entry_id:
+            for entity in entity_registry_result:
+                if (
+                    entity.get("platform") == "nordpool"
+                    and entity.get("config_entry_id") == nordpool_config_entry_id
+                ):
+                    unique_id = entity.get("unique_id", "")
+                    if "-" in unique_id:
+                        nordpool_area = unique_id.split("-", 1)[0].upper()
+                        break
 
         # Find growatt device_id by matching device name to device_sn
         growatt_device_id: str | None = None
@@ -1568,21 +1580,9 @@ class HomeAssistantAPIController:
             if entity_id.startswith("sensor.nordpool"):
                 result["nordpool_found"] = True
                 if not result["nordpool_area"]:
-                    attrs = state.get("attributes", {})
-                    area = (
-                        attrs.get("price_area")
-                        or attrs.get("area")
-                        or attrs.get("deliveryArea")
-                        or attrs.get("delivery_area")
-                    )
-                    if area:
-                        result["nordpool_area"] = str(area)
-                    else:
-                        parsed_area = self._parse_nordpool_area_from_entity_id(
-                            entity_id
-                        )
-                        if parsed_area:
-                            result["nordpool_area"] = parsed_area
+                    parsed_area = self._parse_nordpool_area_from_entity_id(entity_id)
+                    if parsed_area:
+                        result["nordpool_area"] = parsed_area
 
         # Fetch HA-internal IDs via WebSocket
         metadata: dict = {}
@@ -1590,12 +1590,13 @@ class HomeAssistantAPIController:
             metadata = self.discover_ha_metadata(device_sn)
             result["growatt_device_id"] = metadata["growatt_device_id"]
             result["nordpool_config_entry_id"] = metadata["nordpool_config_entry_id"]
-            # Official HA core integration: no sensor.nordpool* entity exists,
-            # so mark found and read area from the config entry options/data.
+            # Official HA core integration: area comes from entity registry
+            # unique_ids (e.g. "SE4-current_price"), resolved in
+            # discover_ha_metadata.
             if metadata["nordpool_config_entry_id"]:
                 result["nordpool_found"] = True
-            if not result["nordpool_area"] and metadata.get("nordpool_area"):
-                result["nordpool_area"] = metadata["nordpool_area"]
+                if not result["nordpool_area"] and metadata.get("nordpool_area"):
+                    result["nordpool_area"] = metadata["nordpool_area"]
         except Exception:
             logger.warning(
                 "WebSocket discovery failed; growatt_device_id, "

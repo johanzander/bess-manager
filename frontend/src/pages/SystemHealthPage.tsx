@@ -1,51 +1,12 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Download, Zap } from 'lucide-react';
+import { AlertCircle, Zap } from 'lucide-react';
 import SystemHealthComponent from '../components/SystemHealth';
-import api from '../lib/api';
+import { useReportProblem } from '../components/ReportProblemContext';
 
 const SystemHealthPage: React.FC = () => {
   const navigate = useNavigate();
-  const [isExporting, setIsExporting] = useState(false);
-  const [exportError, setExportError] = useState<string | null>(null);
-
-  const handleExportDebugData = async () => {
-    setIsExporting(true);
-    setExportError(null);
-
-    try {
-      const response = await api.get('/api/export-debug-data', {
-        responseType: 'blob',
-      });
-
-      // Extract filename from Content-Disposition header
-      const contentDisposition = response.headers['content-disposition'];
-      let filename = 'bess-debug.md';
-
-      if (contentDisposition) {
-        const filenameMatch = contentDisposition.match(/filename=(.+)/);
-        if (filenameMatch) {
-          filename = filenameMatch[1].replace(/"/g, '');
-        }
-      }
-
-      // Download file
-      const blob = new Blob([response.data], { type: 'text/markdown' });
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
-    } catch (error) {
-      console.error('Failed to export debug data:', error);
-      setExportError('Failed to export debug data. Please check the logs.');
-    } finally {
-      setIsExporting(false);
-    }
-  };
+  const { openReportProblem } = useReportProblem();
 
   return (
     <div className="p-6 space-y-6 bg-gray-50 dark:bg-gray-900 min-h-screen">
@@ -68,22 +29,15 @@ const SystemHealthPage: React.FC = () => {
           </button>
 
           <button
-            onClick={handleExportDebugData}
-            disabled={isExporting}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-medium transition-colors"
-            title="Export all system data, logs, and settings for debugging"
+            onClick={() => openReportProblem()}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium transition-colors"
+            title="Report a problem — generates a debug bundle and opens a GitHub issue"
           >
-            <Download className="w-4 h-4" />
-            {isExporting ? 'Exporting...' : 'Export Debug Data'}
+            <AlertCircle className="w-4 h-4" />
+            Report a Problem
           </button>
         </div>
       </div>
-
-      {exportError && (
-        <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
-          <p className="text-red-800 dark:text-red-200">{exportError}</p>
-        </div>
-      )}
       
       <div className="mb-6">
         <SystemHealthComponent />

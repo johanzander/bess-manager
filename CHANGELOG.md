@@ -4,6 +4,13 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [8.5.0] - 2026-05-09
+
+### Added
+
+- "Report a Problem" button in the header that downloads the debug bundle and opens a pre-filled GitHub issue, with inline shortcuts on runtime failure alerts and the global alert banner. ([#94](https://github.com/johanzander/bess-manager/pull/94))
+- Raw HA WebSocket discovery dump (nordpool and growatt config entries, scrubbed for secrets and identifiers) in the debug export. ([#94](https://github.com/johanzander/bess-manager/pull/94))
+
 ## [8.4.3] - 2026-05-07
 
 ### Fixed

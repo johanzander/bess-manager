@@ -31,6 +31,7 @@ class DebugReportFormatter:
                 self._format_system_info(export),
                 self._format_health_status(export),
                 self._format_settings(export),
+                self._format_ha_ws_discovery(export),
                 self._format_addon_options(export),
                 self._format_entity_snapshot(export),
                 self._format_inverter_tou(export),
@@ -166,6 +167,59 @@ class DebugReportFormatter:
 ```json
 {energy_provider}
 ```"""
+
+    def _format_ha_ws_discovery(self, export: DebugDataExport) -> str:
+        """Format the raw HA WebSocket discovery dump.
+
+        Placed adjacent to Energy Provider Configuration so the relationship
+        between *configured* area and *discovered* area is visually obvious
+        at a glance during triage.
+        """
+        ws = export.ha_ws_discovery or {}
+
+        if "error" in ws:
+            return f"""## HA Discovery (raw WebSocket)
+
+*Could not capture: {ws["error"]}*"""
+
+        config_entries = ws.get("config_entries", [])
+        resolved = ws.get("resolved", {})
+
+        nordpool_entries = [e for e in config_entries if e.get("domain") == "nordpool"]
+        growatt_entries = [
+            e for e in config_entries if e.get("domain", "").startswith("growatt")
+        ]
+
+        summary_lines = [
+            f"**Nordpool config entries**: {len(nordpool_entries)}",
+            f"**Growatt config entries**: {len(growatt_entries)}",
+            f"**Growatt devices**: {len(ws.get('devices', []))}",
+        ]
+
+        return f"""## HA Discovery (raw WebSocket)
+
+{chr(10).join(summary_lines)}
+
+### Resolved by BESS
+
+```json
+{self._format_json(resolved)}
+```
+
+### Raw config entries (scrubbed)
+
+```json
+{self._format_json(config_entries)}
+```
+
+<details>
+<summary>Devices and services (click to expand)</summary>
+
+```json
+{self._format_json({"devices": ws.get("devices", []), "services": ws.get("services", {})})}
+```
+
+</details>"""
 
     def _format_addon_options(self, export: DebugDataExport) -> str:
         return f"""## BESS Configuration

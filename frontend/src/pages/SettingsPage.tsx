@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Activity, Battery, Download, Home, RefreshCw, Settings, Sun, Zap } from 'lucide-react';
+import { Activity, Battery, Home, Settings, Sun, Zap } from 'lucide-react';
 import api from '../lib/api';
 import SystemHealthComponent from '../components/SystemHealth';
 import type { HealthStatus } from '../types';
@@ -98,12 +98,6 @@ const SettingsPage: React.FC = () => {
   // ── health status map (sensor_key → status) ────────────────────────────
   const [sensorStatus, setSensorStatus] = useState<Record<string, HealthStatus>>({});
 
-  // ── health tab state ──────────────────────────────────────────────────
-  const [healthKey, setHealthKey] = useState(0);
-
-  // ── export debug data ─────────────────────────────────────────────────
-  const [isExporting, setIsExporting] = useState(false);
-  const [exportError, setExportError] = useState<string | null>(null);
 
   // ── sensor group expand state ─────────────────────────────────────────
 
@@ -303,34 +297,6 @@ const SettingsPage: React.FC = () => {
       }
     } catch { /* non-fatal */ }
     return [];
-  };
-
-  // ── export debug data ─────────────────────────────────────────────────
-  const handleExportDebugData = async () => {
-    setIsExporting(true);
-    setExportError(null);
-    try {
-      const response = await api.get('/api/export-debug-data', { responseType: 'blob' });
-      const contentDisposition = response.headers['content-disposition'];
-      let filename = 'bess-debug.md';
-      if (contentDisposition) {
-        const m = contentDisposition.match(/filename=(.+)/);
-        if (m) filename = m[1].replace(/"/g, '');
-      }
-      const blob = new Blob([response.data], { type: 'text/markdown' });
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
-    } catch {
-      setExportError('Failed to export debug data. Please check the logs.');
-    } finally {
-      setIsExporting(false);
-    }
   };
 
   // ── save handlers ─────────────────────────────────────────────────────
@@ -614,31 +580,7 @@ const SettingsPage: React.FC = () => {
           {/* ── Health ───────────────────────────────────────────────────── */}
           {tab === 'health' && (
             <div className="space-y-4">
-              <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 px-5 py-4 flex flex-wrap items-center gap-3">
-                <button
-                  onClick={() => setHealthKey(k => k + 1)}
-                  className="flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-                >
-                  <RefreshCw className="h-4 w-4" />
-                  Refresh
-                </button>
-                <button
-                  onClick={handleExportDebugData}
-                  disabled={isExporting}
-                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
-                >
-                  <Download className="h-4 w-4" />
-                  {isExporting ? 'Exporting…' : 'Export Debug Data'}
-                </button>
-              </div>
-
-              {exportError && (
-                <div className="px-4 py-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-800 dark:text-red-200">
-                  {exportError}
-                </div>
-              )}
-
-              <SystemHealthComponent key={healthKey} />
+              <SystemHealthComponent />
 
               <div className="bg-gray-100 dark:bg-gray-800/50 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
                 <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Status Indicators</h3>

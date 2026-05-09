@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { AlertTriangle, X, CheckCircle } from 'lucide-react';
+import { AlertTriangle, X, CheckCircle, AlertCircle } from 'lucide-react';
+import { useReportProblem } from './ReportProblemContext';
 
 interface RuntimeFailure {
   id: string;
@@ -23,6 +24,7 @@ export const RuntimeFailureAlerts: React.FC<RuntimeFailureAlertsProps> = ({
   onDismissAll,
 }) => {
   const [expandedFailures, setExpandedFailures] = useState<Set<string>>(new Set());
+  const { openReportProblem } = useReportProblem();
 
   const toggleExpanded = (failureId: string) => {
     const newExpanded = new Set(expandedFailures);
@@ -113,6 +115,19 @@ export const RuntimeFailureAlerts: React.FC<RuntimeFailureAlertsProps> = ({
               </div>
 
               <div className="flex items-center gap-2 ml-4">
+                <button
+                  onClick={() =>
+                    openReportProblem({
+                      title: `Runtime error: ${failure.operation}`,
+                      description: `Operation: ${failure.operation}\nCategory: ${failure.category}\nError type: ${failure.error_type}\nTime: ${formatTimestamp(failure.timestamp)}\n\n${failure.error_message}`,
+                    })
+                  }
+                  className="flex items-center gap-1 text-gray-600 hover:text-blue-700 p-1 text-xs"
+                  title="Report this problem"
+                >
+                  <AlertCircle className="h-4 w-4" />
+                  <span className="hidden sm:inline">Report</span>
+                </button>
                 <button
                   onClick={() => toggleExpanded(failure.id)}
                   className="text-gray-500 hover:text-gray-700 p-1"

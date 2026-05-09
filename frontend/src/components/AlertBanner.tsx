@@ -1,6 +1,7 @@
 import React from 'react';
 import { AlertTriangle, AlertCircle, X, ExternalLink } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { useReportProblem } from './ReportProblemContext';
 
 interface CriticalIssue {
   component: string;
@@ -25,6 +26,7 @@ const AlertBanner: React.FC<AlertBannerProps> = ({
   className = ''
 }) => {
   const navigate = useNavigate();
+  const { openReportProblem } = useReportProblem();
 
   if (!hasCriticalErrors && !hasWarnings) {
     return null;
@@ -35,6 +37,18 @@ const AlertBanner: React.FC<AlertBannerProps> = ({
 
   const handleViewDetails = () => {
     navigate('/system-health');
+  };
+
+  const handleReport = () => {
+    const issueLines = criticalIssues
+      .map(i => `- ${i.component} [${i.status}]: ${i.description}`)
+      .join('\n');
+    openReportProblem({
+      title: hasCriticalErrors
+        ? 'Critical system issues detected'
+        : 'Sensor configuration warnings',
+      description: `The system reported the following issues:\n\n${issueLines}`,
+    });
   };
 
   if (hasCriticalErrors) {
@@ -102,6 +116,13 @@ const AlertBanner: React.FC<AlertBannerProps> = ({
               >
                 <ExternalLink className="h-3.5 w-3.5 mr-1" />
                 View Details & Fix
+              </button>
+              <button
+                onClick={handleReport}
+                className="inline-flex items-center px-3 py-1.5 text-sm font-medium text-red-800 dark:text-red-300 bg-red-100 dark:bg-red-800/30 hover:bg-red-200 dark:hover:bg-red-800/50 rounded-md transition-colors duration-200"
+              >
+                <AlertCircle className="h-3.5 w-3.5 mr-1" />
+                Report Problem
               </button>
             </div>
           </div>

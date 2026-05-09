@@ -44,19 +44,133 @@ compact=False — raw full dump; complete log, all schedules, all snapshots as J
                 use when a specific field not present in compact mode is needed.
 """
 
+import json
 import logging
 import os
 import re
 import sys
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from . import time_utils
 from .battery_system_manager import BatterySystemManager
 from .health_check import run_system_health_checks
 
 logger = logging.getLogger(__name__)
+
+# Substrings (case-insensitive) that mark a dict key as carrying a secret.
+# Values for any matching key are replaced with the redaction sentinel below,
+# regardless of how deeply nested the key appears.
+_SECRET_KEY_FRAGMENTS = (
+    "password",
+    "api_key",
+    "apikey",
+    "token",
+    "secret",
+    "authorization",
+    "private_key",
+    "client_id",
+)
+_REDACTED = "<redacted>"
+
+# Per-domain allowlist applied to the `data` and `options` dicts of a HA
+# config entry. Only keys here are kept verbatim; everything else is dropped.
+# Domains absent from this map are dropped entirely (size summary kept for
+# debugging). Keep this list intentionally tight — config-entry data dicts
+# are the most likely place for secrets to leak into a debug export.
+_CONFIG_ENTRY_DATA_ALLOWLIST: dict[str, frozenset[str]] = {
+    "nordpool": frozenset({"area", "areas", "currency", "vat", "country", "name"}),
+    "growatt_server": frozenset({"name", "plant_id", "url"}),
+    "growatt": frozenset({"name", "plant_id", "url"}),
+}
+
+# Domains whose config entries are captured in the WS discovery dump.
+_WS_TARGET_DOMAINS = frozenset({"nordpool", "growatt", "growatt_server"})
+
+
+def _is_secret_key(key: str) -> bool:
+    """True if a dict key name suggests its value is a credential."""
+    k = key.lower()
+    return any(frag in k for frag in _SECRET_KEY_FRAGMENTS)
+
+
+def _redact_secrets(obj: Any) -> Any:
+    """Recursively redact values of any secret-named dict keys.
+
+    Used as a defence-in-depth pass after structural filtering — catches
+    secrets that appear under unexpected key paths (e.g. nested config).
+    """
+    if isinstance(obj, dict):
+        return {
+            k: (_REDACTED if _is_secret_key(k) else _redact_secrets(v))
+            for k, v in obj.items()
+        }
+    if isinstance(obj, list):
+        return [_redact_secrets(v) for v in obj]
+    return obj
+
+
+def _redact_identifier_value(value: Any) -> str:
+    """Replace a device identifier (often a serial or MAC) with last-4 only."""
+    s = str(value)
+    return f"***{s[-4:]}" if len(s) > 4 else "***"
+
+
+def _redact_identifiers(identifiers: Any) -> list:
+    """Last-4 redaction for HA device-registry identifiers."""
+    if not isinstance(identifiers, list):
+        return []
+    out: list = []
+    for ident in identifiers:
+        if isinstance(ident, list | tuple) and len(ident) == 2:
+            domain, value = ident
+            out.append([domain, _redact_identifier_value(value)])
+    return out
+
+
+def _scrub_config_entry(entry: dict) -> dict:
+    """Filter a HA config entry to a minimal, secret-free shape.
+
+    Keeps only fields we use for discovery diagnosis. The `data` and
+    `options` dicts are passed through a per-domain allowlist; unknown
+    domains have their data replaced with a key-count summary so we still
+    know an entry exists without leaking its contents.
+    """
+    domain = entry.get("domain", "")
+    allowed = _CONFIG_ENTRY_DATA_ALLOWLIST.get(domain)
+
+    def _filter(d: Any) -> dict:
+        if not isinstance(d, dict):
+            return {}
+        if allowed is None:
+            return {"<filtered>": f"{len(d)} keys (domain not allowlisted)"}
+        return {k: v for k, v in d.items() if k in allowed}
+
+    return _redact_secrets(
+        {
+            "entry_id": entry.get("entry_id"),
+            "domain": entry.get("domain"),
+            "title": entry.get("title"),
+            "state": entry.get("state"),
+            "version": entry.get("version"),
+            "options": _filter(entry.get("options", {})),
+            "data": _filter(entry.get("data", {})),
+        }
+    )
+
+
+def _scrub_device(device: dict) -> dict:
+    """Filter a device-registry entry to a minimal, identifier-redacted shape."""
+    return {
+        "id": device.get("id"),
+        "name": device.get("name"),
+        "manufacturer": device.get("manufacturer"),
+        "model": device.get("model"),
+        "identifiers": _redact_identifiers(device.get("identifiers")),
+    }
+
 
 # Patterns that identify actionable log lines worth including in compact exports.
 # These cover: errors/warnings, hardware commands, key decisions, feature-specific
@@ -103,6 +217,7 @@ class DebugDataExport:
     snapshots_summary: dict
     todays_log_content: str
     log_file_info: dict
+    ha_ws_discovery: dict = field(default_factory=dict)
     compact: bool = True
 
 
@@ -179,6 +294,7 @@ class DebugDataAggregator:
             snapshots_summary=self._summarize_snapshots(),
             todays_log_content=self._read_todays_log(compact=compact),
             log_file_info=self._get_log_file_info(),
+            ha_ws_discovery=self._serialize_ha_ws_discovery(),
             compact=compact,
         )
 
@@ -307,6 +423,71 @@ class DebugDataAggregator:
         except Exception as e:
             logger.warning("Failed to serialize addon options: %s", e)
             return {}
+
+    def _serialize_ha_ws_discovery(self) -> dict:
+        """Capture raw WS responses BESS uses for discovery.
+
+        The official HA Nordpool integration stores the price area inside its
+        config entry — invisible from the REST API. Discovery bugs (e.g. issue
+        #91, where SE3 users get SE4) require seeing the actual config-entry
+        shape that HA returns, because BESS has no other way to learn it.
+
+        Captures only nordpool/growatt config entries and growatt-tagged
+        devices; scrubs secrets via key-name pattern and per-domain data
+        allowlist; redacts device identifiers to last-4 of any serial/MAC.
+        """
+        controller = self.system._controller
+        if controller is None:
+            return {"error": "controller not initialized"}
+
+        try:
+            results = controller._ws_query(
+                [
+                    {"type": "config_entries/get"},
+                    {"type": "config/device_registry/list"},
+                    {"type": "get_services"},
+                ]
+            )
+        except Exception as e:
+            logger.warning("WS discovery dump failed: %s", e)
+            return {"error": f"WS query failed: {e}"}
+
+        config_entries_raw = results[0] if len(results) > 0 else []
+        devices_raw = results[1] if len(results) > 1 else []
+        services_raw = results[2] if len(results) > 2 else {}
+
+        config_entries = [
+            _scrub_config_entry(e)
+            for e in config_entries_raw
+            if isinstance(e, dict) and e.get("domain") in _WS_TARGET_DOMAINS
+        ]
+
+        devices: list[dict] = []
+        for d in devices_raw:
+            if not isinstance(d, dict):
+                continue
+            ident_str = json.dumps(d.get("identifiers", [])).lower()
+            if "growatt" in ident_str:
+                devices.append(_scrub_device(d))
+
+        services: dict[str, list[str]] = {}
+        if isinstance(services_raw, dict):
+            for domain in ("nordpool", "growatt", "growatt_server"):
+                domain_svcs = services_raw.get(domain)
+                if isinstance(domain_svcs, dict):
+                    services[domain] = sorted(domain_svcs.keys())
+
+        try:
+            resolved = controller.discover_ha_metadata(device_sn=None)
+        except Exception as e:
+            resolved = {"error": str(e)}
+
+        return {
+            "config_entries": config_entries,
+            "devices": devices,
+            "services": services,
+            "resolved": resolved,
+        }
 
     # HA state response fields that carry no value for any of the three debug
     # use cases (replay, AI analysis, drift analysis).  Stripping them reduces

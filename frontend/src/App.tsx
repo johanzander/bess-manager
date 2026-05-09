@@ -9,6 +9,8 @@ import SettingsPage from './pages/SettingsPage';
 import { useSettings } from './hooks/useSettings';
 import { Home, TrendingUp, Brain, Zap, Sun, Moon, Settings } from 'lucide-react';
 import api from './lib/api';
+import { ReportProblemProvider } from './components/ReportProblemContext';
+import ReportProblemButton from './components/ReportProblemButton';
 
 // An ErrorBoundary component to catch rendering errors
 class ErrorBoundary extends React.Component<
@@ -238,6 +240,7 @@ function App() {
     // Main app render
     return (
       <Router>
+        <ReportProblemProvider>
         <div className="min-h-screen flex flex-col bg-gray-50 dark:bg-gray-900">
           <header className="bg-white dark:bg-gray-800 shadow sticky top-0 z-10">
             <div className="max-w-7xl mx-auto py-2 px-4 sm:px-6 lg:px-8">
@@ -245,10 +248,13 @@ function App() {
                 <div className="flex items-center space-x-4">
                   <h1 className="text-2xl font-bold text-gray-900 dark:text-white">BESS</h1>
                 </div>
-                <div className="flex items-center space-x-4">                  
+                <div className="flex items-center space-x-4">
                   {/* Navigation Menu */}
                   <Navigation />
-                  
+
+                  {/* Report a Problem */}
+                  <ReportProblemButton />
+
                   {/* Dark Mode Toggle Button */}
                   <button
                     onClick={toggleDarkMode}
@@ -304,6 +310,7 @@ function App() {
             </ErrorBoundary>
           </main>
         </div>
+        </ReportProblemProvider>
       </Router>
     );
   } catch (err) {

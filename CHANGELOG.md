@@ -11,6 +11,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - "Report a Problem" button in the header that downloads the debug bundle and opens a pre-filled GitHub issue, with inline shortcuts on runtime failure alerts and the global alert banner. ([#94](https://github.com/johanzander/bess-manager/pull/94))
 - Raw HA WebSocket discovery dump (nordpool and growatt config entries, scrubbed for secrets and identifiers) in the debug export. ([#94](https://github.com/johanzander/bess-manager/pull/94))
 
+### Fixed
+
+- Nordpool area discovery now extracts the area from entity registry unique_ids (e.g. `SE4-current_price`) instead of config entry data, which HA's WebSocket API does not return. Removes broken attribute-guessing fallbacks for HACS nordpool sensors. ([#91](https://github.com/johanzander/bess-manager/issues/91))
+
 ## [8.4.3] - 2026-05-07
 
 ### Fixed

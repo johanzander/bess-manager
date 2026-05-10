@@ -239,6 +239,27 @@ class MockHomeAssistantController(HomeAssistantAPIController):
         """Read current TOU segments from inverter."""
         return []
 
+    # Growatt solax_modbus TOU entity methods (used by GrowattSolaxModbusController)
+
+    def set_tou_segment_via_entities(
+        self, segment_id, batt_mode, start_time, end_time, enabled, **kwargs
+    ):
+        """Set TOU time segment via solax_modbus entity writes."""
+        self.calls["tou_segments"].append(
+            {
+                "segment_id": segment_id,
+                "batt_mode": batt_mode,
+                "start_time": start_time,
+                "end_time": end_time,
+                "enabled": enabled,
+            }
+        )
+        return None
+
+    def read_tou_segments_from_entities(self):
+        """Read TOU segments from solax_modbus entity states."""
+        return []
+
     # SPH methods (used by GrowattSphController)
 
     def write_ac_charge_times(
@@ -717,11 +738,11 @@ def battery_system_with_arbitrage(mock_controller, arbitrage_prices, monkeypatch
     return system
 
 
-@pytest.fixture(params=["growatt_min", "growatt_sph", "solax"])
+@pytest.fixture(params=["growatt_min", "growatt_solax_modbus", "growatt_sph", "solax"])
 def platform_system(request, mock_controller, arbitrage_prices, monkeypatch):
     """Create BatterySystemManager parametrized across all inverter platforms.
 
-    Each test using this fixture runs 3 times — once per platform.
+    Each test using this fixture runs 4 times — once per platform.
     Uses the production code path via addon_options["inverter"]["platform"].
     """
     from core.bess.price_manager import MockSource

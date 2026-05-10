@@ -70,24 +70,28 @@ def _generate_entity_registry(inverter_type: str) -> list[dict]:
         "min": "growatt_server",
         "sph": "growatt_server",
         "solax": "solax_modbus",
+        "growatt_modbus": "solax_modbus",
     }
     inverter_platform = platform_map.get(inverter_type, "growatt_server")
 
+    # Known non-inverter platforms — everything else is assumed to belong to
+    # the inverter integration for auto-detection purposes.
+    _NON_INVERTER = {"nordpool", "solcast_solar", "weather"}
+
     entries: list[dict] = []
     for entity_id in _sensors:
-        # Determine platform from entity_id prefix patterns
-        platform = "homeassistant"
+        # Determine platform from entity_id patterns
+        platform = inverter_platform  # default: assume inverter entity
         if "nordpool" in entity_id:
             platform = "nordpool"
         elif "solcast" in entity_id:
             platform = "solcast_solar"
-        elif "solax" in entity_id.split(".", 1)[-1]:
-            platform = "solax_modbus"
-        elif any(
-            prefix in entity_id
-            for prefix in ("sensor.rkm", "number.rkm", "switch.rkm", "select.rkm")
-        ):
-            platform = inverter_platform
+        elif "weather." in entity_id:
+            platform = "weather"
+        elif entity_id.startswith("sensor.current_l"):
+            platform = "homeassistant"
+        elif entity_id.startswith("sensor.48h_"):
+            platform = "homeassistant"
 
         entries.append(
             {
@@ -125,7 +129,7 @@ def _generate_config_entries(scenario: dict) -> list[dict]:
                 "state": "loaded",
             }
         )
-    elif inverter_type == "solax":
+    elif inverter_type in ("solax", "growatt_modbus"):
         entries.append(
             {
                 "entry_id": "mock_solax_config_entry",
@@ -154,6 +158,10 @@ def _generate_services(inverter_type: str) -> dict:
             growatt_services["write_ac_discharge_times"] = {}
             growatt_services["read_ac_discharge_times"] = {}
         services["growatt_server"] = growatt_services
+
+    # growatt_modbus and solax use entity-based control — no
+    # growatt_server services needed. Detection relies on entity
+    # registry suffixes (TOU time_1_enabled vs VPP remotecontrol_*).
 
     return services
 
@@ -368,6 +376,41 @@ async def call_service(domain: str, service: str, request: Request) -> JSONRespo
             return JSONResponse({"service_response": _ac_charge_times})
         if service in ("read_ac_discharge_times", "read_ac_discharge_time"):
             return JSONResponse({"service_response": _ac_discharge_times})
+
+    # State-mutating service calls — update _sensors so subsequent reads
+    # reflect the change (needed for entity-based TOU and EMS control).
+    if domain == "select" and service == "select_option":
+        entity_id = body.get("entity_id", "")
+        option = body.get("option", "")
+        if entity_id in _sensors:
+            if isinstance(_sensors[entity_id], dict):
+                _sensors[entity_id]["state"] = option
+            else:
+                _sensors[entity_id] = {"state": option, "attributes": {}}
+        else:
+            _sensors[entity_id] = {"state": option, "attributes": {}}
+
+    elif domain == "number" and service == "set_value":
+        entity_id = body.get("entity_id", "")
+        value = body.get("value", 0)
+        if entity_id in _sensors:
+            if isinstance(_sensors[entity_id], dict):
+                _sensors[entity_id]["state"] = str(value)
+            else:
+                _sensors[entity_id] = {"state": str(value), "attributes": {}}
+        else:
+            _sensors[entity_id] = {"state": str(value), "attributes": {}}
+
+    elif domain == "switch" and service in ("turn_on", "turn_off"):
+        entity_id = body.get("entity_id", "")
+        state = "on" if service == "turn_on" else "off"
+        if entity_id in _sensors:
+            if isinstance(_sensors[entity_id], dict):
+                _sensors[entity_id]["state"] = state
+            else:
+                _sensors[entity_id] = {"state": state, "attributes": {}}
+        else:
+            _sensors[entity_id] = {"state": state, "attributes": {}}
 
     # All write operations: record and acknowledge
     return JSONResponse({})

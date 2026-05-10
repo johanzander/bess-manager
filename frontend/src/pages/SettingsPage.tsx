@@ -228,7 +228,7 @@ const SettingsPage: React.FC = () => {
 
       if (d.inverterType) {
         // Map backend discovery values to UI inverter type values (uppercase)
-        const platformToType: Record<string, string> = { solax: 'SOLAX', MIN: 'MIN', SPH: 'SPH' };
+        const platformToType: Record<string, string> = { solax: 'SOLAX', MIN: 'MIN', SPH: 'SPH', GROWATT_MODBUS: 'GROWATT_MODBUS' };
         const uiType = platformToType[d.inverterType] ?? d.inverterType.toUpperCase();
         setInverterForm(f => ({ ...f, inverterType: uiType }));
       }
@@ -387,7 +387,7 @@ const SettingsPage: React.FC = () => {
           deviceId: inverterForm.deviceId,
         },
         inverter: {
-          platform: { MIN: 'growatt_min', SPH: 'growatt_sph', SOLAX: 'solax' }[inverterForm.inverterType],
+          platform: { MIN: 'growatt_min', SPH: 'growatt_sph', GROWATT_MODBUS: 'growatt_solax_modbus', SOLAX: 'solax' }[inverterForm.inverterType],
         },
       });
       savedBattery.current = JSON.stringify(batteryForm);

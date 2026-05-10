@@ -123,6 +123,33 @@ def _solax_growatt_registry() -> list[dict]:
     ]
 
 
+def _solax_growatt_tou_registry() -> list[dict]:
+    """Entity registry for a Growatt inverter via solax_modbus with TOU time slots.
+
+    Extends the base Growatt-via-solax entities with TOU time slot entities,
+    which are the definitive marker for the growatt_solax_modbus platform.
+    """
+    base = _solax_growatt_registry()
+    tou_entities = []
+    for slot in range(1, 10):
+        for suffix in ("enabled", "begin", "end", "mode"):
+            tou_entities.append(
+                _entity(
+                    f"select.growatt_inverter_solax_time_{slot}_{suffix}",
+                    "solax_modbus",
+                    f"solax_time_{slot}_{suffix}",
+                )
+            )
+        tou_entities.append(
+            _entity(
+                f"button.growatt_inverter_solax_time_{slot}_update",
+                "solax_modbus",
+                f"solax_time_{slot}_update",
+            )
+        )
+    return base + tou_entities
+
+
 # ---------------------------------------------------------------------------
 # User-renamed entities: entity_id changed, unique_id unchanged
 # ---------------------------------------------------------------------------
@@ -268,6 +295,18 @@ class TestDiscoverSensorsFromRegistry:
         assert len(sensors["solax"]) == 18
         assert sensors["solax"]["battery_soc"] == "sensor.growatt_inverter_solax_battery_soc"
         assert sensors["solax"]["import_power"] == "sensor.growatt_inverter_solax_total_forward_power"
+
+    def test_solax_growatt_with_tou(self):
+        """Growatt with TOU entities detected as growatt_modbus platform."""
+        sensors, platform = self.ctrl.discover_sensors_from_registry(
+            _solax_growatt_tou_registry()
+        )
+        assert platform == "growatt_modbus"
+        assert "growatt_modbus" in sensors
+        # Base sensors (18) + TOU entities (9 slots × 5 = 45)
+        assert len(sensors["growatt_modbus"]) == 63
+        assert sensors["growatt_modbus"]["battery_soc"] == "sensor.growatt_inverter_solax_battery_soc"
+        assert sensors["growatt_modbus"]["tou_time_1_enabled"] == "select.growatt_inverter_solax_time_1_enabled"
 
     def test_both_growatt_and_solax_present(self):
         """When both integrations exist, both are mapped; growatt is primary."""

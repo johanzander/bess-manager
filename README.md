@@ -42,7 +42,8 @@ The BESS Manager provides a comprehensive web interface organized into focused p
 
 ### Supported Battery Systems
 
-- ✅ **Growatt MIC/MIN/MOD/MID** — TOU schedule control via Growatt Server integration (token auth required)
+- ✅ **Growatt MIC/MIN/MOD/MID** — TOU schedule control via Growatt Server integration (cloud)
+- ✅ **Growatt MIC/MIN/MOD/MID** — TOU schedule control via homeassistant-solax-modbus Growatt plugin (local Modbus)
 - ✅ **Growatt SPH** — Charge/discharge period control via Growatt Server integration
 - ✅ **SolaX** — VPP active-power control via homeassistant-solax-modbus integration
 

@@ -231,9 +231,11 @@ async def patch_settings(updates: dict):
                     )
 
             elif store_key == "sensors":
-                bess_controller.ha_controller.sensors.update(
-                    {k: v for k, v in section.items() if v}
-                )
+                # Full replace so unmapping a sensor (setting to "") takes
+                # effect immediately without requiring a restart.
+                bess_controller.ha_controller.sensors = {
+                    k: v for k, v in section.items() if v
+                }
 
         _refresh_health(bess_controller)
         return await get_settings()
@@ -2464,7 +2466,7 @@ async def run_setup_discovery():
                 ha.ENTITY_SUFFIX_MAP
                 if detected_platform == "growatt"
                 else ha.SOLAX_ENTITY_SUFFIX_MAP
-            )
+            )  # growatt_modbus also uses SOLAX_ENTITY_SUFFIX_MAP
             all_bess_keys = list(set(suffix_map.values()))
             missing_sensors = [k for k in all_bess_keys if k not in sensors]
 
@@ -2652,9 +2654,13 @@ async def setup_complete(payload: APISetupCompletePayload):
             sections["electricity_price"] = elec
 
         # --- energy provider ---
-        if payload.provider is not None:
+        # Always include energy_provider in sections when discovery provided
+        # a config_entry_id (so the live price source picks it up), or when
+        # the wizard explicitly set a provider.
+        if payload.provider is not None or payload.nordpoolConfigEntryId:
             ep = bess_controller.settings_store.get_section("energy_provider")
-            ep["provider"] = payload.provider
+            if payload.provider is not None:
+                ep["provider"] = payload.provider
             sections["energy_provider"] = ep
 
         # --- inverter ---
@@ -2663,6 +2669,7 @@ async def setup_complete(payload: APISetupCompletePayload):
             _platform_map = {
                 "MIN": "growatt_min",
                 "SPH": "growatt_sph",
+                "GROWATT_MODBUS": "growatt_solax_modbus",
                 "SOLAX": "solax",
             }
             _platform = _platform_map.get(payload.inverterType.upper(), "growatt_min")
@@ -2691,9 +2698,11 @@ async def setup_complete(payload: APISetupCompletePayload):
         # Apply settings to live system so BESS starts immediately
         # without requiring a restart.
         if payload.sensors:
-            bess_controller.ha_controller.sensors.update(
-                {k: v for k, v in payload.sensors.items() if v}
-            )
+            # Full replace (not merge) so stale sensors from a previous
+            # platform don't remain in memory after the wizard completes.
+            bess_controller.ha_controller.sensors = {
+                k: v for k, v in payload.sensors.items() if v
+            }
         if payload.growattDeviceId:
             bess_controller.ha_controller.growatt_device_id = payload.growattDeviceId
 
@@ -2739,6 +2748,13 @@ async def setup_complete(payload: APISetupCompletePayload):
             )
         if live_updates:
             bess_controller.system.update_settings(live_updates)
+
+        # Apply energy_provider live so the price source uses the discovered
+        # config_entry_id (not the stale/mock value from the initial settings).
+        if "energy_provider" in sections:
+            bess_controller.system.update_settings(
+                {"energy_provider": sections["energy_provider"]}
+            )
 
         # Backfill historical data in the background (may take many seconds for 20+
         # InfluxDB queries), then build the schedule with correct historical context.

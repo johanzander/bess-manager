@@ -23,6 +23,7 @@ from .exceptions import (
     SystemConfigurationError,
 )
 from .growatt_min_controller import GrowattMinController
+from .growatt_solax_modbus_controller import GrowattSolaxModbusController
 from .growatt_sph_controller import GrowattSphController
 from .ha_api_controller import HomeAssistantAPIController
 from .health_check import run_system_health_checks
@@ -170,10 +171,16 @@ class BatterySystemManager:
             raise RuntimeError("Controller not initialized - system not started")
         return self._controller
 
-    VALID_PLATFORMS: ClassVar[set[str]] = {"growatt_min", "growatt_sph", "solax"}
+    VALID_PLATFORMS: ClassVar[set[str]] = {
+        "growatt_min",
+        "growatt_solax_modbus",
+        "growatt_sph",
+        "solax",
+    }
 
     _INVERTER_TYPE_TO_PLATFORM: ClassVar[dict[str, str]] = {
         "MIN": "growatt_min",
+        "GROWATT_MODBUS": "growatt_solax_modbus",
         "SPH": "growatt_sph",
         "SOLAX": "solax",
     }
@@ -218,6 +225,10 @@ class BatterySystemManager:
             return GrowattSphController(battery_settings=self.battery_settings)
         if self.inverter_platform == "solax":
             return SolaxController(battery_settings=self.battery_settings)
+        if self.inverter_platform == "growatt_solax_modbus":
+            return GrowattSolaxModbusController(
+                battery_settings=self.battery_settings
+            )
         return GrowattMinController(battery_settings=self.battery_settings)
 
     def switch_inverter_platform(self, platform: str) -> None:
@@ -227,7 +238,7 @@ class BatterySystemManager:
         Recreates the inverter controller if the platform actually changed.
 
         Args:
-            platform: Target platform string ("growatt_min", "growatt_sph", or "solax")
+            platform: Target platform string (one of VALID_PLATFORMS)
 
         Raises:
             SystemConfigurationError: If platform is not a recognised value.

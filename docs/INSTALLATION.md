@@ -10,20 +10,32 @@ Complete guide for installing and configuring BESS Battery Manager for Home Assi
 
 ### Inverter (Required — one of the following)
 
-**Growatt (MIC/MIN/MOD/MID or SPH)**
+**Growatt MIC/MIN/MOD/MID via Growatt Server (cloud)**
 
-- A Growatt inverter with battery storage
-  - **MIC/MIN/MOD/MID inverter**: fully supported — 9-slot TOU schedule control
-  - **SPH inverter**: supported — charge/discharge period control
+- A Growatt AC-coupled inverter with battery storage
 - The [Growatt Server integration](https://www.home-assistant.io/integrations/growatt_server/) installed in Home Assistant
 - **⚠️ Token authentication is required.** The integration supports both username/password and token-based auth, but BESS needs the `number.*` and `switch.*` entities and service calls that are only available with token auth. Username/password auth will not expose these, and BESS will not work correctly without them.
 
-**SolaX**
+**Growatt SPH via Growatt Server (cloud)**
+
+- A Growatt SPH (DC-coupled) inverter with battery storage
+- The [Growatt Server integration](https://www.home-assistant.io/integrations/growatt_server/) with token auth
+
+**Growatt MIC/MIN/MOD/MID via solax_modbus (local Modbus)**
+
+- A Growatt AC-coupled inverter with battery storage
+- The [homeassistant-solax-modbus](https://github.com/wills106/homeassistant-solax-modbus) HACS integration with the **Growatt plugin** enabled
+- Provides local Modbus control — no cloud dependency
+- Requires growatt plugin with TOU time slot entities (`select.solax_time_1_enabled`, etc.)
+
+**SolaX via solax_modbus (local Modbus)**
 
 - A SolaX inverter with battery storage
 - The [homeassistant-solax-modbus](https://github.com/wills106/homeassistant-solax-modbus) integration (available via HACS) installed in Home Assistant
 - BESS controls the inverter via VPP active-power commands
-- Auto-detection requires **native entity names** — entities must use the `solax_` prefix (e.g. `sensor.solax_battery_capacity`, `select.solax_remotecontrol_power_control`). Detection scans all HA domains (`sensor`, `select`, `number`, `button`). Manually renamed entities will not be detected; use the setup wizard to map them manually
+- Auto-detection uses the HA entity registry (`platform` and `unique_id` fields), which are immutable and unaffected by entity renaming. If you have renamed entity IDs and removed the original suffixes, use the setup wizard to map them manually
+
+For detailed entity requirements per platform, see [docs/INVERTER_PLATFORMS.md](INVERTER_PLATFORMS.md).
 
 ### Electricity Price Integration (Required)
 

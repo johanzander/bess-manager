@@ -290,8 +290,8 @@ class TestApplyDiscovered:
 
         assert store.get_section("electricity_price").get("area") == "SE4"
 
-    def test_nordpool_area_not_overwritten(self, tmp_path, monkeypatch):
-        """Existing nordpool area is not overwritten by later discovery."""
+    def test_nordpool_area_overwritten_by_discovery(self, tmp_path, monkeypatch):
+        """Discovery always updates the area with the authoritative value from HA."""
         _patch_path(tmp_path, monkeypatch)
         store = SettingsStore()
         store.load({})
@@ -299,7 +299,7 @@ class TestApplyDiscovered:
 
         store.apply_discovered(sensor_map={}, nordpool_area="SE4")
 
-        assert store.get_section("electricity_price")["area"] == "SE3"
+        assert store.get_section("electricity_price")["area"] == "SE4"
 
     def test_bootstrap_default_area_overwritten_by_discovery(
         self, tmp_path, monkeypatch
@@ -318,10 +318,10 @@ class TestApplyDiscovered:
 
         assert store.get_section("electricity_price")["area"] == "SE3"
 
-    def test_user_customised_area_not_overwritten_by_discovery(
+    def test_discovery_area_overwrites_user_area(
         self, tmp_path, monkeypatch
     ):
-        """An area the user explicitly set to a non-default value is preserved."""
+        """Discovery area is authoritative — it reflects the actual HA installation."""
         _patch_path(tmp_path, monkeypatch)
         store = SettingsStore()
         store.load({})
@@ -329,7 +329,7 @@ class TestApplyDiscovered:
 
         store.apply_discovered(sensor_map={}, nordpool_area="SE3")
 
-        assert store.get_section("electricity_price")["area"] == "NO1"
+        assert store.get_section("electricity_price")["area"] == "SE3"
 
     def test_growatt_device_id_is_stored(self, tmp_path, monkeypatch):
         """Growatt device ID discovered during setup lands in the growatt section."""

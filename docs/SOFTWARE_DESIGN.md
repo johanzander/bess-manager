@@ -160,17 +160,20 @@ class StoredSchedule:
 
 **Purpose**: Converts optimization results to inverter-specific commands.
 
-**Base class** `InverterController` provides shared intent-to-control mapping, hourly settings aggregation, and the abstract schedule interface. Three subclasses implement hardware-specific logic:
+**Base class** `InverterController` provides shared intent-to-control mapping, hourly settings aggregation, and the abstract schedule interface. Four subclasses implement hardware-specific logic:
 
-- **GrowattMinController** — Growatt MIN/MID/MOD (AC-coupled). Groups quarterly periods into TOU intervals (max 9 segments). Only creates segments for battery-first/grid-first; idle periods use load-first default.
-- **GrowattSphController** — Growatt SPH (DC-coupled). Uses separate charge/discharge period lists (max 3 each) with global power and SOC settings per write call.
+- **GrowattMinController** — Growatt MIN/MID/MOD (AC-coupled, cloud). Groups quarterly periods into TOU intervals (max 9 segments). Only creates segments for battery-first/grid-first; idle periods use load-first default. Writes via `growatt_server.update_time_segment` service call.
+- **GrowattSolaxModbusController** — Growatt MIN/MID/MOD (AC-coupled, local Modbus). Subclasses `GrowattMinController` — identical scheduling algorithm. Overrides only the I/O layer: writes via `select.select_option` (4 per slot) + `button.press` (1 per slot). Reads via entity state queries.
+- **GrowattSphController** — Growatt SPH (DC-coupled). Uses separate charge/discharge period lists (max 3 each) with global power and SOC settings per write call. Writes via `growatt_server.write_ac_charge_times` / `write_ac_discharge_times`.
 - **SolaxController** — SolaX (Modbus VPP). Issues per-period active-power commands instead of storing a persistent TOU schedule. Idle/solar periods disable VPP; charge/discharge periods set a watt target with autorepeat.
 
-**Hardware Integration**:
+**Per-period control** (shared across all platforms): At each 15-minute period boundary, `_write_period_to_hardware()` issues generic HA entity calls:
+- `switch.turn_on` / `switch.turn_off` — grid charge enable/disable
+- `number.set_value` — charge/discharge power rate
 
-- Each subclass formats schedules for its inverter's API
-- Handles inverter-specific constraints and capabilities
-- Manages schedule deployment and updates
+These resolve to platform-specific entities via the sensor config (e.g. `grid_charge` → `switch.rkm…_charge_from_grid` on Growatt cloud, or `switch.solax_charger_switch` on solax_modbus).
+
+**Entity suffix maps** (`ENTITY_SUFFIX_MAP` and `SOLAX_ENTITY_SUFFIX_MAP` in `ha_api_controller.py`) define the full mapping from unique_id suffixes to BESS sensor keys. See `docs/INVERTER_PLATFORMS.md` for the user-facing entity reference.
 
 ### PriceManager
 
@@ -364,9 +367,18 @@ All other settings are stored in this file and managed via the settings API. Top
 
 ### Platform Selection
 
-The system supports multiple inverter platforms, each with a dedicated controller subclass. The active platform is stored in `inverter.platform` as one of `"growatt_min"`, `"growatt_sph"`, or `"solax"`.
+The system supports multiple inverter platforms, each with a dedicated controller subclass:
 
-Switching platform at runtime calls `BatterySystemManager.switch_inverter_platform()`, which destroys the current `InverterController` and creates the correct subclass (`GrowattMinController`, `GrowattSphController`, or `SolaxController`). No restart is required.
+| Platform ID | Inverter | HA Integration | Control Method | Controller Class |
+|---|---|---|---|---|
+| `growatt_min` | Growatt MIC/MIN/MOD/MID | `growatt_server` (cloud) | TOU service calls | `GrowattMinController` |
+| `growatt_solax_modbus` | Growatt MIC/MIN/MOD/MID | `solax_modbus` (local Modbus) | TOU entity writes | `GrowattSolaxModbusController` |
+| `growatt_sph` | Growatt SPH | `growatt_server` (cloud) | AC charge/discharge periods | `GrowattSphController` |
+| `solax` | SolaX | `solax_modbus` (local Modbus) | VPP active-power commands | `SolaxController` |
+
+The active platform is stored in `inverter.platform`. Switching platform at runtime calls `BatterySystemManager.switch_inverter_platform()`, which destroys the current `InverterController` and creates the correct subclass. No restart is required.
+
+`GrowattSolaxModbusController` subclasses `GrowattMinController` — the scheduling algorithm (9 TOU slots, differential updates, corruption recovery) is identical. Only the hardware I/O differs: `growatt_server` uses a single service call per slot, while `solax_modbus` uses 4 entity writes (`select.select_option`) plus a button press per slot.
 
 ### Auto-Detection and Integration Discovery
 
@@ -378,38 +390,70 @@ The HA WebSocket API (`config/entity_registry/list`) returns every registered en
 
 Detected integrations:
 
-| Category  |   HA Platform    | Detected As |
-|-----------|------------------|-------------|
-| Inverter  | `growatt_server` | Growatt     |
-| Inverter  | `solax_modbus`   | SolaX       |
-| Price     | `nordpool`       | Nordpool    |
-| Price     | `octopus_energy` | Octopus Energy |
-| Forecast  | `solcast_solar`  | Solcast solar forecast |
-| Forecast  | `weather`        | Weather (temperature derating) |
+| Category  |   HA Platform       | Detected As |
+|-----------|---------------------|-------------|
+| Inverter  | `growatt_server`    | Growatt     |
+| Inverter  | `solax_modbus`      | SolaX       |
+| Price     | `nordpool`          | Nordpool    |
+| Price     | `octopus_energy`    | Octopus Energy |
+| Forecast  | `solcast_solar`     | Solcast solar forecast |
+| Forecast  | `weather`           | Weather (temperature derating) |
 
-#### Stage 2 — Device Identifier Extraction
+**Nordpool: official vs HACS custom**
 
-The HA REST API `/api/states` provides entity IDs and current values. The system uses naming patterns to extract device identifiers needed for service calls:
+Both the official HA Nordpool integration and the older HACS custom component (`custom_components/nordpool`) register entities under the `nordpool` platform domain, so Stage 1 detection cannot distinguish them. The distinction is made as follows:
 
-- **Growatt device SN**: Extracted from SOC sensor anchor entities matching `sensor.<sn>_state_of_charge_soc` or `sensor.<sn>_statement_of_charge_soc`
-- **Nordpool area**: Extracted from the Nordpool entity ID or attributes
+1. **Stage 3** checks `config_entries/get` for a loaded `nordpool` config entry. If found, the official integration is available and its `config_entry_id` is stored.
+2. **The user selects** which provider to use in the Setup Wizard or Settings page (radio button: "Nord Pool (official HA integration)" vs "Nord Pool (HACS custom sensor)").
+3. **At runtime**, the selected provider determines how prices are fetched:
+   - `nordpool_official`: Calls `nordpool.get_prices_for_date` service action (requires `config_entry_id`)
+   - `nordpool`: Reads hourly prices from sensor entity attributes (`today`/`tomorrow` lists on a single entity)
+
+#### Stage 2 — Intermediate Identifiers from Entity IDs
+
+The HA REST API `/api/states` provides all entity IDs and current values. BESS extracts intermediate identifiers from entity naming patterns — these are NOT the final IDs used in service calls, but are needed to look up the actual HA-internal IDs in Stage 3.
+
+- **Growatt device serial number (SN)**: The `growatt_server` integration creates entity IDs with the inverter serial number as a prefix (e.g. `sensor.rkm0d7n04x_state_of_charge_soc`). BESS extracts this SN (`rkm0d7n04x`) via `_extract_growatt_device_sn()`. The SN is used in Stage 3 as a lookup key into the HA device registry to find the actual `device_id` (a hex string like `fbafceb07a1cc74c351ef4310fa430a0`) required by service calls.
+- **Nordpool area**: Parsed from Nordpool entity IDs (e.g. `sensor.nordpool_kwh_se4_sek_...` → `SE4`)
 - **Phase count**: Detected from phase current sensor entities (L1/L2/L3)
 
 #### Stage 3 — WebSocket Metadata Query
 
-The HA WebSocket API provides internal IDs not available through REST:
+`discover_ha_metadata()` queries the HA WebSocket API to resolve the actual identifiers needed for service calls. These IDs are HA-internal and not available via the REST API. Four WebSocket commands are batched in a single connection:
 
-- **Nordpool `config_entry_id`**: Required for the `nordpool.get_prices_for_date` service call
-- **Growatt `device_id`**: Required for service calls like `growatt_server.update_time_segment`
-- **Inverter type detection** (MIN vs SPH): Determined by which services are registered:
-  - MIN: `growatt_server.update_time_segment`
-  - SPH: `growatt_server.write_ac_charge_times`
+| Command | Purpose |
+|---------|---------|
+| `config_entries/get` | Find config entry IDs by integration domain |
+| `config/device_registry/list` | Resolve device SN → HA `device_id` |
+| `get_services` | Detect inverter type from registered services |
+| `config/entity_registry/list` | Extract Nordpool area from `unique_id` |
+
+Resolved identifiers:
+
+- **Growatt `device_id`** (e.g. `fbafceb07a1cc74c351ef4310fa430a0`): The HA device registry ID. All `growatt_server` service calls (e.g. `update_time_segment`) require this as their `device_id` parameter. Resolution strategy (first match wins):
+  1. Match the SN from Stage 2 against device `identifiers` tuples (most reliable)
+  2. Match by `config_entry_id` belonging to the `growatt_server` integration
+  3. Match by device `name` equal to SN (legacy fallback)
+- **Nordpool `config_entry_id`**: Required for `nordpool.get_prices_for_date` service calls. Found by scanning config entries for `domain == "nordpool"` with `state == "loaded"`.
+- **Nordpool area** (fallback): If not resolved in Stage 2, extracted from entity registry `unique_id` values (format `"SE4-current_price"`).
+- **Inverter type**: Determined from registered services and entity markers:
+  - MIN: `growatt_server.update_time_segment` service present
+  - SPH: `growatt_server.write_ac_charge_times` service present
+  - GROWATT_MODBUS: `solax_modbus` entities with TOU time slot marker (`time_1_enabled` unique_id suffix)
+  - SOLAX: `solax_modbus` entities with VPP marker (`remotecontrol_power_control`)
 
 #### Stage 4 — Sensor Mapping via Entity Registry
 
-`discover_sensors_from_registry()` maps entity registry entries to BESS sensor keys. It filters entities by `platform` field (e.g. `growatt_server`), then matches the entity ID suffix against `ENTITY_SUFFIX_MAP` (Growatt) or `SOLAX_ENTITY_SUFFIX_MAP` (SolaX).
+`discover_sensors_from_registry()` maps entity registry entries to BESS sensor keys **for each detected inverter integration**. It runs separately for each platform found in Stage 1 (e.g. `growatt_server` entities are mapped using `ENTITY_SUFFIX_MAP`, `solax_modbus` entities using `SOLAX_ENTITY_SUFFIX_MAP`). If both are detected, both sets are returned and the user selects which platform to use.
 
-This approach uses two layers of filtering: first the `platform` field (immutable — set by HA core when the integration creates the entity), then suffix matching on the `entity_id`. Platform filtering ensures only genuine integration entities are considered, regardless of naming. Suffix matching works as long as the entity ID retains the original suffix (e.g. `_state_of_charge_soc`). Changing the friendly name/label in HA does not affect the entity ID, so discovery is unaffected. However, if a user changes the actual entity ID to remove the suffix, manual mapping via the wizard is required.
+The mapping uses two layers of filtering:
+
+1. **Platform field** (immutable — set by HA core when the integration creates the entity). Only entities belonging to the target integration are considered.
+2. **`unique_id` suffix matching**. The `unique_id` is assigned by the integration at entity creation and never changes regardless of user renames. BESS matches suffixes like `_state_of_charge_soc` or `_battery_soc` against the suffix map to determine the BESS sensor key.
+
+The result maps each BESS sensor key (e.g. `battery_soc`) to the corresponding HA `entity_id` (e.g. `sensor.rkm0d7n04x_state_of_charge_soc`). This entity_id is what the REST API uses to read state values at runtime.
+
+Renaming entities in the HA UI (friendly name/label) does not affect discovery. However, if a user changes the actual entity_id and removes the original suffix, the `unique_id` still matches — so discovery still works. Only if the integration itself changes its `unique_id` scheme (across versions) would manual remapping via the wizard be needed.
 
 #### Derived Hints
 
@@ -417,7 +461,7 @@ After discovery, the system derives additional configuration hints:
 
 - **Currency and VAT**: From the Nordpool area code prefix (SE → SEK/1.25, NO → NOK/1.25, DK → DKK/1.25, FI → EUR/1.255, etc.)
 - **Phase count**: From detected phase current sensors
-- **Inverter type**: From WebSocket service inspection (Growatt) or entity registry platform (SolaX)
+- **Inverter type**: From WebSocket service inspection (Growatt MIN/SPH), entity registry TOU marker (Growatt via solax_modbus), or entity registry platform (SolaX)
 
 #### Optional Sensor Discovery
 
@@ -456,7 +500,7 @@ The setup wizard is a 6-step flow for first-time configuration. It is triggered 
 The complete endpoint performs a single atomic operation that:
 
 1. Saves all 6 settings sections (`sensors`, `battery`, `home`, `electricity_price`, `energy_provider`, `inverter`/`growatt`) to `bess_settings.json` using read-modify-write to preserve non-wizard fields
-2. Maps the UI inverter type (MIN/SPH/SOLAX) to canonical platform names and calls `switch_inverter_platform()`
+2. Maps the UI inverter type (MIN/GROWATT_MODBUS/SPH/SOLAX) to canonical platform names and calls `switch_inverter_platform()`
 3. Applies live updates to all running components (sensors, battery settings, home settings, price settings)
 4. Spawns a background thread that backfills historical data from InfluxDB, builds the daily schedule, and re-runs the health check
 

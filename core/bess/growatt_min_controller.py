@@ -1250,6 +1250,28 @@ class GrowattMinController(InverterController):
         controller.set_grid_charge(grid_charge)
         controller.set_discharging_power_rate(discharge_rate)
 
+    def _send_segment_to_hardware(self, controller, segment: dict) -> None:
+        """Write a single TOU segment to inverter hardware.
+
+        Subclasses can override to use different write mechanisms
+        (e.g. entity-based writes for solax_modbus).
+        """
+        controller.set_inverter_time_segment(
+            segment_id=segment["segment_id"],
+            batt_mode=segment["batt_mode"],
+            start_time=segment["start_time"],
+            end_time=segment["end_time"],
+            enabled=segment["enabled"],
+        )
+
+    def _read_segments_from_hardware(self, controller) -> list[dict]:
+        """Read current TOU segments from inverter hardware.
+
+        Subclasses can override to use different read mechanisms
+        (e.g. entity state reads for solax_modbus).
+        """
+        return controller.read_inverter_time_segments()
+
     def write_schedule_to_hardware(
         self,
         controller,
@@ -1426,13 +1448,7 @@ class GrowattMinController(InverterController):
                         segment["end_time"],
                         segment["batt_mode"],
                     )
-                    controller.set_inverter_time_segment(
-                        segment_id=segment["segment_id"],
-                        batt_mode=segment["batt_mode"],
-                        start_time=segment["start_time"],
-                        end_time=segment["end_time"],
-                        enabled=segment["enabled"],
-                    )
+                    self._send_segment_to_hardware(controller, segment)
                     disables += 1
                     logger.debug("SUCCESS: Segment disabled")
                 except Exception as e:
@@ -1458,13 +1474,7 @@ class GrowattMinController(InverterController):
                         segment["end_time"],
                         segment["batt_mode"],
                     )
-                    controller.set_inverter_time_segment(
-                        segment_id=segment["segment_id"],
-                        batt_mode=segment["batt_mode"],
-                        start_time=segment["start_time"],
-                        end_time=segment["end_time"],
-                        enabled=segment["enabled"],
-                    )
+                    self._send_segment_to_hardware(controller, segment)
                     writes += 1
                     logger.debug("SUCCESS: Segment updated")
                 except Exception as e:
@@ -1523,7 +1533,7 @@ class GrowattMinController(InverterController):
             controller: HomeAssistantAPIController instance
             current_hour: Current hour (0-23)
         """
-        inverter_segments = controller.read_inverter_time_segments()
+        inverter_segments = self._read_segments_from_hardware(controller)
         self.initialize_from_tou_segments(inverter_segments, current_hour)
 
     def check_health(self, controller) -> list:

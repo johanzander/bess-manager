@@ -288,6 +288,7 @@ class BESSController:
             self.ha_controller.growatt_device_id = growatt_device_id
         if nordpool_area:
             self.system.price_manager.area = nordpool_area
+            self.system.price_manager.clear_cache()
         if nordpool_config_entry_id:
             from core.bess.official_nordpool_source import OfficialNordpoolSource
 

@@ -1,8 +1,9 @@
 """Cross-platform integration tests for all inverter types.
 
 Verifies that the optimization → schedule → hardware write pipeline works
-correctly for Growatt MIN, Growatt SPH, and SolaX platforms. Each test runs
-3 times (once per platform) via the parametrized ``platform_system`` fixture.
+correctly for Growatt MIN, Growatt MIN via solax_modbus, Growatt SPH, and
+SolaX platforms. Each test runs 4 times (once per platform) via the
+parametrized ``platform_system`` fixture.
 
 Tests verify BEHAVIOR (what the system does) not IMPLEMENTATION (how it does it).
 """

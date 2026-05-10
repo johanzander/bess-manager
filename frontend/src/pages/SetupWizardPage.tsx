@@ -100,7 +100,7 @@ const SetupWizardPage: React.FC = () => {
       }));
       if (d.inverterType) {
         // Map backend platform keys to UI inverter type values
-        const platformToType: Record<string, string> = { solax: 'SOLAX', MIN: 'MIN', SPH: 'SPH' };
+        const platformToType: Record<string, string> = { solax: 'SOLAX', MIN: 'MIN', SPH: 'SPH', GROWATT_MODBUS: 'GROWATT_MODBUS' };
         const uiType = platformToType[d.inverterType] ?? d.inverterType.toUpperCase();
         setInverterForm(f => ({ ...f, inverterType: uiType }));
       }
@@ -183,7 +183,7 @@ const SetupWizardPage: React.FC = () => {
       }));
       // Restore inverter type from new inverter.platform or legacy growatt.inverter_type
       const invNew = s.inverter ?? {};
-      const platformToType: Record<string, string> = { growatt_min: 'MIN', growatt_sph: 'SPH', solax: 'SOLAX' };
+      const platformToType: Record<string, string> = { growatt_min: 'MIN', growatt_sph: 'SPH', growatt_solax_modbus: 'GROWATT_MODBUS', solax: 'SOLAX' };
       if (invNew.platform && platformToType[invNew.platform]) {
         setInverterForm(f => ({ ...f, inverterType: platformToType[invNew.platform] }));
       } else if (inv.inverterType) {

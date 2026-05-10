@@ -115,7 +115,7 @@ function healthDot(
 // ---------------------------------------------------------------------------
 
 // IDs of inverter integrations — only one should be visible at a time.
-const INVERTER_IDS = new Set(['growatt', 'solax']);
+const INVERTER_IDS = new Set(['growatt', 'growatt_modbus', 'solax']);
 
 interface Props {
   sensors: Record<string, string>;
@@ -147,17 +147,22 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
 
   // Derive active inverter integration from the selected type
   const activeInverterIntegrationId = INVERTER_INTEGRATION_IDS[inverterForm.inverterType] ?? 'growatt';
-  const isGrowatt = activeInverterIntegrationId === 'growatt';
+  const isGrowatt = activeInverterIntegrationId === 'growatt' || activeInverterIntegrationId === 'growatt_modbus';
 
   // Detection flags for disabling platform options.
   // In wizard mode, use discovery results. In settings mode, derive from
   // configured sensors — if SolaX VPP entities are mapped, SolaX is available;
   // if Growatt control entities are mapped, Growatt is available.
+  // Growatt-via-solax (GROWATT_MODBUS) is detected when solax_modbus entities
+  // include TOU time slot entities instead of VPP entities.
   const growattDetected = wizardMode
     ? discovery.growattFound
     : Boolean(sensors['battery_charging_power_rate'] || sensors['grid_charge']);
+  const growattModbusDetected = wizardMode
+    ? discovery.inverterType === 'GROWATT_MODBUS'
+    : Boolean(sensors['tou_time_1_enabled']);
   const solaxDetected = wizardMode
-    ? discovery.solaxFound
+    ? (discovery.solaxFound && discovery.inverterType !== 'GROWATT_MODBUS')
     : Boolean(sensors['solax_power_control_mode'] || sensors['solax_active_power']);
 
   const handlePlatformChange = (platform: 'growatt' | 'solax') => {
@@ -165,7 +170,9 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
       onInverterChange({ ...inverterForm, inverterType: 'SOLAX' });
     } else {
       // When switching to Growatt, default to MIN unless already a Growatt type
-      const currentIsGrowatt = inverterForm.inverterType === 'MIN' || inverterForm.inverterType === 'SPH';
+      const currentIsGrowatt = inverterForm.inverterType === 'MIN'
+        || inverterForm.inverterType === 'SPH'
+        || inverterForm.inverterType === 'GROWATT_MODBUS';
       onInverterChange({
         ...inverterForm,
         inverterType: currentIsGrowatt ? inverterForm.inverterType : 'MIN',
@@ -198,10 +205,10 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
         {/* Platform radio: Growatt vs SolaX */}
         <div className="flex flex-wrap gap-x-6 gap-y-2">
           {([
-            { platform: 'growatt' as const, label: 'Growatt', detected: growattDetected },
+            { platform: 'growatt' as const, label: 'Growatt', detected: growattDetected || growattModbusDetected },
             { platform: 'solax' as const, label: 'SolaX Modbus', detected: solaxDetected },
           ]).map(opt => {
-            const isSelected = activeInverterIntegrationId === opt.platform;
+            const isSelected = opt.platform === 'growatt' ? isGrowatt : activeInverterIntegrationId === opt.platform;
             return (
               <label
                 key={opt.platform}
@@ -229,7 +236,7 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
           })}
         </div>
 
-        {/* Growatt sub-options: MIN/SPH + device ID */}
+        {/* Growatt sub-options: MIN/SPH + connection + device ID */}
         {isGrowatt && (
           <div className="mt-3 ml-6 pl-3 border-l-2 border-gray-200 dark:border-gray-600 space-y-2">
             <div className="flex flex-wrap gap-x-5 gap-y-1">
@@ -239,7 +246,12 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
               ]).map(opt => {
                 // In wizard mode, disable the subtype that doesn't match auto-detection
                 const detectedType = discovery?.inverterType?.toUpperCase();
-                const subtypeDetected = !wizardMode || !detectedType || detectedType === opt.value;
+                // GROWATT_MODBUS is a MIN variant, so treat it as matching MIN
+                const normalizedDetected = detectedType === 'GROWATT_MODBUS' ? 'MIN' : detectedType;
+                const subtypeDetected = !wizardMode || !normalizedDetected || normalizedDetected === opt.value;
+                // MIN or GROWATT_MODBUS both select the MIN radio
+                const isMinVariant = inverterForm.inverterType === 'MIN' || inverterForm.inverterType === 'GROWATT_MODBUS';
+                const isChecked = opt.value === 'MIN' ? isMinVariant : inverterForm.inverterType === opt.value;
                 return (
                   <label
                     key={opt.value}
@@ -248,7 +260,7 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
                     <input
                       type="radio"
                       name="growatt-type"
-                      checked={inverterForm.inverterType === opt.value}
+                      checked={isChecked}
                       disabled={!subtypeDetected}
                       onChange={() => onInverterChange({ ...inverterForm, inverterType: opt.value })}
                       className="text-blue-500"
@@ -258,16 +270,48 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
                 );
               })}
             </div>
-            <label className="block">
-              <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Device ID</span>
-              <input
-                type="text"
-                value={inverterForm.deviceId}
-                placeholder="Growatt device serial number"
-                onChange={e => onInverterChange({ ...inverterForm, deviceId: e.target.value })}
-                className="mt-0.5 block w-full sm:w-72 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-1.5 text-sm font-mono text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
-              />
-            </label>
+
+            {/* Connection selector: only shown for MIN inverters */}
+            {(inverterForm.inverterType === 'MIN' || inverterForm.inverterType === 'GROWATT_MODBUS') && (
+              <div className="ml-4 pl-3 border-l-2 border-gray-200 dark:border-gray-600">
+                <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">Connection</p>
+                <div className="flex flex-wrap gap-x-5 gap-y-1">
+                  {([
+                    { value: 'MIN' as const, label: 'Growatt Server (Cloud)', detected: growattDetected },
+                    { value: 'GROWATT_MODBUS' as const, label: 'SolaX Modbus (Local)', detected: growattModbusDetected },
+                  ]).map(opt => (
+                    <label
+                      key={opt.value}
+                      className={`flex items-center gap-2 ${!wizardMode || opt.detected ? 'cursor-pointer' : 'opacity-40 cursor-not-allowed'}`}
+                    >
+                      <input
+                        type="radio"
+                        name="growatt-connection"
+                        checked={inverterForm.inverterType === opt.value}
+                        disabled={wizardMode && !opt.detected}
+                        onChange={() => onInverterChange({ ...inverterForm, inverterType: opt.value })}
+                        className="text-blue-500"
+                      />
+                      <span className="text-sm text-gray-600 dark:text-gray-300">{opt.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Device ID: only for cloud connection (growatt_server) */}
+            {inverterForm.inverterType !== 'GROWATT_MODBUS' && (
+              <label className="block">
+                <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Device ID</span>
+                <input
+                  type="text"
+                  value={inverterForm.deviceId}
+                  placeholder="Growatt device serial number"
+                  onChange={e => onInverterChange({ ...inverterForm, deviceId: e.target.value })}
+                  className="mt-0.5 block w-full sm:w-72 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-1.5 text-sm font-mono text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                />
+              </label>
+            )}
           </div>
         )}
       </div>

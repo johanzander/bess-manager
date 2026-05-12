@@ -62,19 +62,44 @@ interface SingleChartProps {
   xAxisTicks: number[];
   isDarkMode: boolean;
   colors: { text: string; gridLines: string };
+  minYDomain?: number;
 }
+
+const generateYTicks = (min: number, max: number): number[] => {
+  const range = max - min;
+  let step = 0.1;
+  if (range > 2) step = 0.5;
+  else if (range > 1) step = 0.2;
+
+  const ticks: number[] = [];
+  const start = Math.floor(min / step) * step;
+  for (let v = start; v <= max + step * 0.001; v += step) {
+    ticks.push(Math.round(v * 100) / 100);
+  }
+  return ticks;
+};
 
 const SingleChart: React.FC<SingleChartProps> = ({
   data, title, subtitle, color, actualKey, predictedKey, gradientId, label,
-  xAxisTicks, isDarkMode, colors,
+  xAxisTicks, isDarkMode, colors, minYDomain = 0.1,
 }) => {
-  const maxVal = Math.max(
+  const rawMin = Math.min(
+    ...data.map(d => Math.min(
+      d[actualKey as keyof ChartDataPoint] as number,
+      d[predictedKey as keyof ChartDataPoint] as number,
+    )),
+  );
+  const rawMax = Math.max(
     ...data.map(d => Math.max(
       d[actualKey as keyof ChartDataPoint] as number,
       d[predictedKey as keyof ChartDataPoint] as number,
     )),
-    0.1,
+    minYDomain,
   );
+  // Always include 0 in the range
+  const yMin = Math.floor(Math.min(rawMin, 0) * 10) / 10;
+  const yMax = Math.ceil(Math.max(rawMax, 0) * 10) / 10;
+  const yTicks = generateYTicks(yMin, yMax);
   const predictedLabel = label === 'forecast' ? 'Predicted' : 'Planned';
 
   return (
@@ -104,9 +129,11 @@ const SingleChart: React.FC<SingleChartProps> = ({
             />
             <YAxis
               width={50}
-              domain={[0, Math.ceil(maxVal * 10) / 10]}
+              domain={[yMin, yMax]}
+              ticks={yTicks}
               stroke={colors.text}
               tick={{ fill: colors.text, fontSize: 11 }}
+              tickFormatter={(v: number) => v.toFixed(1)}
               label={{ value: 'kWh', angle: -90, position: 'insideLeft', style: { textAnchor: 'middle', fill: colors.text }, fontSize: 12 }}
             />
             <Tooltip content={<ComparisonTooltip color={color} actualKey={actualKey} predictedKey={predictedKey} label={label} />} />
@@ -194,12 +221,14 @@ const ForecastComparisonCharts: React.FC<ForecastComparisonChartsProps> = ({ com
           color="#fbbf24" actualKey="actualSolar" predictedKey="predictedSolar"
           gradientId="solarActualFill" label="forecast"
           xAxisTicks={xAxisTicks} isDarkMode={isDarkMode} colors={colors}
+          minYDomain={0.3}
         />
         <SingleChart
           data={chartData} title="Home Consumption" subtitle="Predicted vs actual consumption"
           color="#ef4444" actualKey="actualConsumption" predictedKey="predictedConsumption"
           gradientId="consumptionActualFill" label="forecast"
           xAxisTicks={xAxisTicks} isDarkMode={isDarkMode} colors={colors}
+          minYDomain={0.3}
         />
       </div>
 
@@ -212,18 +241,21 @@ const ForecastComparisonCharts: React.FC<ForecastComparisonChartsProps> = ({ com
             color="#10b981" actualKey="actualBattery" predictedKey="predictedBattery"
             gradientId="batteryActualFill" label="schedule"
             xAxisTicks={xAxisTicks} isDarkMode={isDarkMode} colors={colors}
+            minYDomain={0.3}
           />
           <SingleChart
             data={chartData} title="Grid Import" subtitle="Planned vs actual grid import"
             color="#3b82f6" actualKey="actualGridImport" predictedKey="predictedGridImport"
             gradientId="gridImportActualFill" label="schedule"
             xAxisTicks={xAxisTicks} isDarkMode={isDarkMode} colors={colors}
+            minYDomain={0.3}
           />
           <SingleChart
             data={chartData} title="Grid Export" subtitle="Planned vs actual grid export"
             color="#60a5fa" actualKey="actualGridExport" predictedKey="predictedGridExport"
             gradientId="gridExportActualFill" label="schedule"
             xAxisTicks={xAxisTicks} isDarkMode={isDarkMode} colors={colors}
+            minYDomain={0.3}
           />
         </div>
       </div>

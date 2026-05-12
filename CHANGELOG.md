@@ -4,6 +4,12 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [8.5.1] - 2026-05-12
+
+### Fixed
+
+- Schedule deviation charts Y-axis now always includes zero, fixing missing zero reference on battery charge/discharge chart and duplicate tick labels on small-range charts like grid export.
+
 ## [8.5.0] - 2026-05-09
 
 ### Added

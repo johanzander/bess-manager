@@ -78,11 +78,14 @@ export TZ=${TZ:-Europe/Stockholm}
 echo "Stopping any existing containers..."
 docker-compose down --remove-orphans
 
-echo "Removing any existing containers to force rebuild..."
-docker-compose rm -f
-
-echo "Building frontend..."
-(cd frontend && npm run build)
+# Only rebuild frontend if source files changed since last build
+FRONTEND_BUILD="frontend/dist"
+if [ ! -d "$FRONTEND_BUILD" ] || [ -n "$(find frontend/src frontend/index.html frontend/vite.config.ts frontend/package.json -newer "$FRONTEND_BUILD" 2>/dev/null)" ]; then
+  echo "Building frontend (changes detected)..."
+  (cd frontend && npm run build)
+else
+  echo "Frontend unchanged, skipping build."
+fi
 
 echo "Building and starting development container with Python 3.10..."
 docker-compose up --build -d

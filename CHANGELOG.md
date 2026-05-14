@@ -4,6 +4,14 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [8.6.0] - 2026-05-14
+
+### Added
+
+- **HA Statistics consumption forecast strategy** — new `ha_statistics` option that builds a time-of-day consumption profile from the past 7 days of Home Assistant Recorder long-term statistics. Captures daily patterns (morning/evening peaks, overnight baseline) using a trimmed mean that filters out outlier spikes like EV charging. No extra integrations needed — works with the built-in HA Recorder.
+- **Consumption Forecast Comparison** view on the Insights page — collapsible chart comparing all available forecast strategies (sensor, fixed, InfluxDB, HA Statistics) against actual consumption, with MAE accuracy metrics to show which strategy performs best.
+- HA Recorder WebSocket API methods (`get_statistics_during_period`, `list_statistic_ids`, `find_statistic_id`) for querying long-term energy statistics.
+
 ## [8.5.1] - 2026-05-12
 
 ### Fixed

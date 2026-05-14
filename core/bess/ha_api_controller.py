@@ -1412,6 +1412,87 @@ class HomeAssistantAPIController:
         finally:
             ws.close()
 
+    def get_statistics_during_period(
+        self,
+        statistic_ids: list[str],
+        start_time: str,
+        end_time: str | None = None,
+        period: str = "hour",
+        types: list[str] | None = None,
+    ) -> dict[str, list[dict]]:
+        """Query HA Recorder long-term/short-term statistics via WebSocket.
+
+        Uses the recorder/statistics_during_period WebSocket command to fetch
+        pre-aggregated statistics from Home Assistant's recorder database.
+
+        Args:
+            statistic_ids: Statistic IDs to query (typically entity_ids for
+                HA-native sensors, e.g. ["sensor.load_consumption_total"]).
+            start_time: ISO 8601 timestamp for range start.
+            end_time: ISO 8601 timestamp for range end (None = now).
+            period: Aggregation period — "5minute" or "hour".
+            types: Statistics types to return. For total_increasing sensors
+                (energy): ["change"]. For measurement sensors (power, SOC):
+                ["mean"]. Defaults to ["change"].
+
+        Returns:
+            Dict keyed by statistic_id, each value a list of period dicts
+            with keys like start, end, change, sum, mean depending on types.
+        """
+        cmd = {
+            "type": "recorder/statistics_during_period",
+            "start_time": start_time,
+            "statistic_ids": statistic_ids,
+            "period": period,
+            "types": types or ["change"],
+        }
+        if end_time is not None:
+            cmd["end_time"] = end_time
+
+        results = self._ws_query([cmd])
+        return results[0]
+
+    def list_statistic_ids(
+        self,
+        statistic_type: str | None = None,
+    ) -> list[dict]:
+        """List all statistic IDs known to the HA Recorder.
+
+        Useful for discovering the correct statistic_id for a given entity,
+        since external integrations may use IDs that differ from entity_ids.
+
+        Args:
+            statistic_type: Optional filter — "mean" for measurement sensors,
+                "sum" for total/total_increasing sensors.
+
+        Returns:
+            List of dicts with keys: statistic_id, display_unit_of_measurement,
+            has_mean, has_sum, name, source, statistics_unit_of_measurement, etc.
+        """
+        cmd: dict = {"type": "recorder/list_statistic_ids"}
+        if statistic_type is not None:
+            cmd["statistic_type"] = statistic_type
+
+        results = self._ws_query([cmd])
+        return results[0]
+
+    def find_statistic_id(self, entity_id: str) -> str | None:
+        """Find the statistic_id that matches a given entity_id.
+
+        HA-native entities use the entity_id as statistic_id, but external
+        integrations may differ (e.g. ``sensor:entity`` vs ``sensor.entity``).
+        This queries the recorder for an exact match only to avoid false
+        positives from partial substring matches.
+
+        Returns:
+            The matching statistic_id, or None if not found.
+        """
+        all_stats = self.list_statistic_ids()
+        for stat in all_stats:
+            if stat.get("statistic_id") == entity_id:
+                return entity_id
+        return None
+
     def discover_ha_metadata(self, device_sn: str | None) -> dict:
         """Discover HA-internal IDs via the WebSocket API.
 

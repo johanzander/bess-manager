@@ -35,3 +35,10 @@ class SystemConfigurationError(BESSException):
                 message = "System configuration error"
         super().__init__(message)
         self.component = component
+
+
+class HAStatisticsUnavailableError(BESSException):
+    """Raised when HA Statistics API is unavailable or returns no data."""
+
+    def __init__(self, message: str | None = None):
+        super().__init__(message or "HA Statistics data is not available")

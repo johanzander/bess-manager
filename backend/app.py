@@ -231,7 +231,7 @@ class BESSController:
         """
         options_json = "/data/options.json"
 
-        if os.path.exists(options_json):
+        if os.path.isfile(options_json):
             try:
                 with open(options_json, encoding="utf-8") as f:
                     options = json.load(f)
@@ -242,10 +242,10 @@ class BESSController:
                     f"Failed to load configuration from {options_json}. " f"Error: {e}"
                 ) from e
         else:
-            raise RuntimeError(
-                f"Configuration file not found at {options_json}. "
-                f"In development, ensure dev-run.sh has extracted options from config.yaml."
+            logger.info(
+                f"No configuration file at {options_json}, starting with defaults"
             )
+            options = {}
 
         return options
 

@@ -14,9 +14,11 @@ export interface HomeForm {
 interface Props {
   form: HomeForm;
   onChange: (f: HomeForm) => void;
+  sensors?: Record<string, string>;
 }
 
-export function HomeFormSection({ form, onChange }: Props) {
+export function HomeFormSection({ form, onChange, sensors }: Props) {
+  const haStatsSensorConfigured = Boolean(sensors?.['lifetime_load_consumption']);
   return (
     <div className="space-y-3">
       <SectionCard
@@ -29,9 +31,16 @@ export function HomeFormSection({ form, onChange }: Props) {
             { value: 'fixed', label: 'Fixed value' },
             { value: 'sensor', label: 'Home Assistant sensor' },
             { value: 'influxdb_7d_avg', label: 'InfluxDB (requires InfluxDB integration)' },
+            { value: 'ha_statistics', label: 'HA Statistics (7-day hourly profile)', disabled: !haStatsSensorConfigured },
           ],
           form.consumptionStrategy,
           v => onChange({ ...form, consumptionStrategy: v }),
+        )}
+        {!haStatsSensorConfigured && (
+          <p className="text-xs text-amber-600 dark:text-amber-400 pt-1">
+            HA Statistics requires the <strong>Lifetime Load Consumption</strong> sensor to be
+            configured in the <strong>Sensors</strong> tab.
+          </p>
         )}
         {form.consumptionStrategy === 'fixed' && (
           <div className="pt-1">
@@ -52,6 +61,14 @@ export function HomeFormSection({ form, onChange }: Props) {
             Queries InfluxDB directly for the past 7 days of local load power and uses the hourly average
             profile. Requires the InfluxDB integration to be configured.
             Configure the local load power sensor entity ID in the <strong>Sensors</strong> tab under Growatt Server.
+          </p>
+        )}
+        {form.consumptionStrategy === 'ha_statistics' && (
+          <p className="text-xs text-gray-500 dark:text-gray-400 pt-1">
+            Uses Home Assistant's built-in long-term statistics to build a time-of-day consumption profile
+            from the past 7 days. Captures daily patterns (morning/evening peaks, overnight baseline) using
+            a trimmed average that filters out outlier spikes like EV charging. No extra integrations needed.
+            Configure the load consumption sensor in the <strong>Sensors</strong> tab under Consumption Forecast.
           </p>
         )}
       </SectionCard>

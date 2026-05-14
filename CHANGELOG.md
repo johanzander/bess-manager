@@ -4,6 +4,32 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.0.0b7] - 2026-05-14
+
+### Fixed
+
+- Growatt TOU detection skipped when both growatt_server (cloud) and solax_modbus (local) integrations are installed — `discover_integrations` used `if/elif` so the TOU entity check was never reached, locking out the "SolaX Modbus (Local)" connection option in the wizard.
+- Wizard no longer locks out SolaX Modbus (Local) when TOU auto-detection is inconclusive — both connection options are selectable when solax_modbus is detected, auto-detection pre-selects but does not lock out.
+- Top-level "SolaX Modbus" inverter platform renamed to "SolaX (Native)" with clarified description to prevent confusion with Growatt-via-solax_modbus.
+
+### Added
+
+- `solaxHasGrowattTou` field in discovery API response — frontend can distinguish native SolaX from Growatt-via-solax even when growatt_server is also present.
+- Logging in `_has_growatt_tou_entities` to diagnose detection failures.
+
+## [9.0.0b6] - 2026-05-10
+
+### Added
+
+- Growatt MIN inverter support via solax_modbus HACS integration (local Modbus, TOU entity writes).
+
+### Fixed
+
+- Wizard sensors merged instead of replaced after setup, leaving stale entities active until restart.
+- Discovery config_entry_id/device_id blocked by stale values from previous runs.
+- Energy provider not applied live after wizard completion.
+- Price cache not cleared after Nordpool area update in discovery path.
+
 ## [9.0.0b5] - 2026-05-03
 
 ### Changed

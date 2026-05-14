@@ -326,3 +326,11 @@ class TestDiscoverSensorsFromRegistry:
         assert platform == "growatt"
         assert sensors["growatt"]["battery_soc"] == "sensor.my_battery_soc"
         assert sensors["growatt"]["pv_power"] == "sensor.solar_production"
+
+    def test_growatt_tou_not_detected_for_native_solax(self):
+        """Native SolaX entities (no TOU) correctly return False."""
+        entities = [
+            _entity("sensor.inv_battery_capacity", "solax_modbus", "inv_battery_capacity"),
+            _entity("select.inv_remotecontrol_power_control", "solax_modbus", "inv_remotecontrol_power_control"),
+        ]
+        assert self.ctrl._has_growatt_tou_entities(entities) is False

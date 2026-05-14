@@ -22,6 +22,7 @@ export interface DiscoveryResult {
   deviceSn: string | null;
   growattDeviceId: string | null;
   solaxFound: boolean;
+  solaxHasGrowattTou: boolean;
   nordpoolFound: boolean;
   nordpoolArea: string | null;
   nordpoolConfigEntryId: string | null;
@@ -44,6 +45,7 @@ function isIntegrationFound(
   sensors: Record<string, string>,
 ): boolean {
   if (id === 'growatt') return discovery.growattFound;
+  if (id === 'growatt_modbus') return discovery.solaxHasGrowattTou;
   if (id === 'solax') return discovery.solaxFound;
   if (id === 'nordpool') return discovery.nordpoolFound;
   if (id === 'phase_current') {
@@ -153,16 +155,17 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
   // In wizard mode, use discovery results. In settings mode, derive from
   // configured sensors — if SolaX VPP entities are mapped, SolaX is available;
   // if Growatt control entities are mapped, Growatt is available.
-  // Growatt-via-solax (GROWATT_MODBUS) is detected when solax_modbus entities
-  // include TOU time slot entities instead of VPP entities.
+  // When solax_modbus is found, both SolaX (Native) and Growatt (Local) are
+  // offered — auto-detection pre-selects but never locks out the other,
+  // because the TOU-vs-VPP heuristic can fail on some plugin versions.
   const growattDetected = wizardMode
     ? discovery.growattFound
     : Boolean(sensors['battery_charging_power_rate'] || sensors['grid_charge']);
   const growattModbusDetected = wizardMode
-    ? discovery.inverterType === 'GROWATT_MODBUS'
+    ? Boolean(discovery.solaxFound)
     : Boolean(sensors['tou_time_1_enabled']);
   const solaxDetected = wizardMode
-    ? (discovery.solaxFound && discovery.inverterType !== 'GROWATT_MODBUS')
+    ? Boolean(discovery.solaxFound)
     : Boolean(sensors['solax_power_control_mode'] || sensors['solax_active_power']);
 
   const handlePlatformChange = (platform: 'growatt' | 'solax') => {
@@ -206,7 +209,7 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
         <div className="flex flex-wrap gap-x-6 gap-y-2">
           {([
             { platform: 'growatt' as const, label: 'Growatt', detected: growattDetected || growattModbusDetected },
-            { platform: 'solax' as const, label: 'SolaX Modbus', detected: solaxDetected },
+            { platform: 'solax' as const, label: 'SolaX (Native)', detected: solaxDetected },
           ]).map(opt => {
             const isSelected = opt.platform === 'growatt' ? isGrowatt : activeInverterIntegrationId === opt.platform;
             return (

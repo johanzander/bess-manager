@@ -74,9 +74,9 @@ export const INTEGRATIONS: IntegrationDef[] = [
   },
   {
     id: 'solax',
-    name: 'SolaX Modbus',
+    name: 'SolaX (Native)',
     required: true,
-    description: 'Battery inverter — SolaX inverter controlled via the homeassistant-solax-modbus integration (VPP active-power commands)',
+    description: 'Native SolaX inverter controlled via VPP active-power commands (not for Growatt inverters — use Growatt → SolaX Modbus Local instead)',
     sensorGroups: [
       {
         name: 'Battery Monitoring',

@@ -2026,14 +2026,19 @@ class HomeAssistantAPIController:
         # SolaX is detected from the entity registry platform field.
         # When solax_modbus is found, we further distinguish SolaX-native
         # (VPP entities) from Growatt-via-solax (TOU entities).
-        # Growatt (cloud) takes priority when both are present.
+        # Determine inverter type.  When both growatt_server (cloud) and
+        # solax_modbus (local) are present, cloud takes priority for the
+        # auto-selected type, but we still check for TOU entities so the
+        # frontend knows the Local option is available.
         if result["growatt_found"]:
             result["inverter_type"] = metadata.get("growatt_inverter_type")
-        elif result["solax_found"]:
-            if self._has_growatt_tou_entities(registry):
-                result["inverter_type"] = "GROWATT_MODBUS"
-            else:
-                result["inverter_type"] = "solax"
+        if result["solax_found"]:
+            has_tou = self._has_growatt_tou_entities(registry)
+            result["solax_has_growatt_tou"] = has_tou
+            if not result["growatt_found"]:
+                result["inverter_type"] = (
+                    "GROWATT_MODBUS" if has_tou else "solax"
+                )
 
         # Currency & VAT from Nordpool area
         area_hints = self._hints_from_nordpool_area(result.get("nordpool_area"))
@@ -2264,12 +2269,21 @@ class HomeAssistantAPIController:
         via the solax_modbus Growatt plugin (as opposed to a native SolaX).
         """
         solax_platforms = {"solax_modbus", "solax"}
+        solax_count = 0
         for entity in entities:
             if entity.get("platform") not in solax_platforms:
                 continue
+            solax_count += 1
             unique_id = str(entity.get("unique_id", ""))
             if unique_id.endswith(f"_{self._GROWATT_TOU_MARKER_SUFFIX}"):
+                logger.info(
+                    "Growatt TOU marker found: unique_id=%s", unique_id
+                )
                 return True
+        logger.info(
+            "No Growatt TOU marker found among %d solax_modbus entities",
+            solax_count,
+        )
         return False
 
     def detect_inverter_integrations(

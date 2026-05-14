@@ -281,7 +281,7 @@ For Octopus Energy, prices are already final (VAT-inclusive, GBP/kWh). Markup, V
 
 ### Consumption Prediction
 
-BESS needs a forecast of your home consumption to plan the battery schedule. Three strategies are available, configured via `home.consumption_strategy` in your add-on settings:
+BESS needs a forecast of your home consumption to plan the battery schedule. Four strategies are available, configured via `home.consumption_strategy` in your add-on settings:
 
 #### Strategy 1: `sensor` (default)
 
@@ -309,6 +309,25 @@ Queries InfluxDB for the past 7 days of your local load power sensor and builds 
 Requires `local_load_power` sensor configured in your add-on sensor settings and InfluxDB access.
 
 This should give the best prediction of the three options, but require an influxdb to be set up.
+
+#### Strategy 4: `ha_statistics`
+
+Uses Home Assistant's built-in Recorder long-term statistics to build a 96-period time-of-day consumption profile from the past 7 days. Like `influxdb_7d_avg`, this produces a shaped forecast — higher during evening peaks, lower overnight — but without requiring an external database.
+
+Requires the `lifetime_load_consumption` sensor configured in the **Sensors** tab (under Consumption Forecast). This should be a cumulative energy sensor (kWh) tracked by HA's long-term statistics — for example `sensor.load_energy_total` from your inverter integration.
+
+**How it works**: BESS queries the HA Recorder for hourly `change` statistics over the past 7 days, groups them by hour-of-day, and computes a trimmed mean (dropping the highest and lowest values) for each hour. This filters out outlier spikes like occasional EV charging sessions while preserving the true daily consumption shape. The hourly averages are then split into 15-minute periods.
+
+**Safeguards**:
+
+- The option is **greyed out** in Settings if the required sensor is not configured.
+- If the sensor is configured but HA has not yet accumulated enough history (fewer than 12 hours of data), BESS automatically **falls back to the fixed profile** and shows a warning on the dashboard. Once HA accumulates sufficient data (typically within 12-24 hours of first configuring the sensor), the system self-heals and the warning auto-dismisses.
+
+This is the recommended strategy for most users — it adapts to your actual usage patterns with no extra integrations or configuration beyond a cumulative load sensor.
+
+#### Comparing Strategies
+
+The **Insights** page includes a **Consumption Forecast Comparison** section that evaluates all available strategies against your actual consumption. Each strategy shows its hourly profile overlaid on actual data, along with a Mean Absolute Error (MAE) metric. Use this to verify which strategy best matches your real consumption patterns before committing to one.
 
 ### EV Charging and Discharge Inhibit
 

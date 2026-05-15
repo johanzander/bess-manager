@@ -925,6 +925,29 @@ class APIRealTimePower:
 _ENTITY_ID_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_]*\.[a-zA-Z0-9_-]+$")
 
 
+@dataclass
+class APIStrategyForecast:
+    """API representation of a single consumption forecast strategy."""
+
+    name: str
+    isActive: bool
+    available: bool
+    error: str | None
+    totalKwh: FormattedValue | None
+    hourlyProfile: list[FormattedValue]
+    mae: FormattedValue | None
+
+
+@dataclass
+class APIConsumptionForecastComparison:
+    """API representation of consumption forecast comparison across strategies."""
+
+    activeStrategy: str
+    strategies: list[APIStrategyForecast]
+    actualHourlyProfile: list[FormattedValue | None]
+    actualHoursAvailable: int
+
+
 class APISensorsPayload(BaseModel):
     """Request/response body for sensor entity ID mappings."""
 

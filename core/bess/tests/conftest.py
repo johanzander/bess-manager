@@ -28,8 +28,10 @@ logger = logging.getLogger(__name__)
 
 class MockHomeAssistantController(HomeAssistantAPIController):
     def _resolve_entity_id(self, sensor_key: str):
-        """Mock entity ID resolution: returns a dummy entity_id for any sensor_key."""
-        # For testing, just return 'sensor.' + sensor_key (simulate real entity IDs)
+        """Mock entity ID resolution: use configured sensors, fall back to dummy ID."""
+        entity_id = self.sensors.get(sensor_key)
+        if entity_id:
+            return entity_id, "configured"
         return f"sensor.{sensor_key}", "mock"
 
     """Mock Home Assistant controller for testing."""
@@ -67,6 +69,12 @@ class MockHomeAssistantController(HomeAssistantAPIController):
         self.consumption_forecast = [1.125] * 96
         self.solar_forecast = [0.0] * 96
         self.solar_forecast_tomorrow = [0.0] * 96
+
+        # Sensor config (matches real controller's self.sensors)
+        self.sensors: dict = {}
+
+        # Configurable response for HA Statistics API mock
+        self._statistics_response: dict = {}
 
         # Call tracking for integration tests
         self.calls = {
@@ -186,6 +194,16 @@ class MockHomeAssistantController(HomeAssistantAPIController):
     def read_inverter_time_segments(self):
         """Read current TOU segments from inverter."""
         return []
+
+    def get_statistics_during_period(
+        self, statistic_ids, start_time, end_time=None, period="hour", types=None
+    ):
+        """Mock HA Statistics API — returns configurable data or empty."""
+        return self._statistics_response
+
+    def find_statistic_id(self, entity_id):
+        """Mock statistic_id discovery — returns entity_id unchanged."""
+        return entity_id
 
 
 class MockSensorCollector:

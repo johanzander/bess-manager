@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { ComposedChart, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { SnapshotComparison } from '../types';
+import { niceYAxis } from '../utils/chartUtils';
 
 interface ForecastComparisonChartsProps {
   comparison: SnapshotComparison;
@@ -65,20 +66,6 @@ interface SingleChartProps {
   minYDomain?: number;
 }
 
-const generateYTicks = (min: number, max: number): number[] => {
-  const range = max - min;
-  let step = 0.1;
-  if (range > 2) step = 0.5;
-  else if (range > 1) step = 0.2;
-
-  const ticks: number[] = [];
-  const start = Math.floor(min / step) * step;
-  for (let v = start; v <= max + step * 0.001; v += step) {
-    ticks.push(Math.round(v * 100) / 100);
-  }
-  return ticks;
-};
-
 const SingleChart: React.FC<SingleChartProps> = ({
   data, title, subtitle, color, actualKey, predictedKey, gradientId, label,
   xAxisTicks, isDarkMode, colors, minYDomain = 0.1,
@@ -97,9 +84,10 @@ const SingleChart: React.FC<SingleChartProps> = ({
     minYDomain,
   );
   // Always include 0 in the range
-  const yMin = Math.floor(Math.min(rawMin, 0) * 10) / 10;
-  const yMax = Math.ceil(Math.max(rawMax, 0) * 10) / 10;
-  const yTicks = generateYTicks(yMin, yMax);
+  const { yMin, yMax, ticks: yTicks } = niceYAxis(
+    Math.min(rawMin, 0),
+    Math.max(rawMax, 0),
+  );
   const predictedLabel = label === 'forecast' ? 'Predicted' : 'Planned';
 
   return (
@@ -194,20 +182,34 @@ const ForecastComparisonCharts: React.FC<ForecastComparisonChartsProps> = ({ com
   };
 
   const chartData: ChartDataPoint[] = useMemo(() => {
-    return comparison.periodDeviations.map((dev) => ({
-      hour: (dev.period + 0.5) / 4,
-      periodNum: dev.period,
-      actualSolar: dev.actualSolar.value,
-      predictedSolar: dev.predictedSolar.value,
-      actualConsumption: dev.actualConsumption.value,
-      predictedConsumption: dev.predictedConsumption.value,
-      actualBattery: dev.actualBatteryAction.value,
-      predictedBattery: dev.predictedBatteryAction.value,
-      actualGridImport: dev.actualGridImport.value,
-      predictedGridImport: dev.predictedGridImport.value,
-      actualGridExport: dev.actualGridExport.value,
-      predictedGridExport: dev.predictedGridExport.value,
-    }));
+    // Group sparse 15-min periods by hour and sum to hourly values
+    const hourlyBuckets: Record<number, ChartDataPoint> = {};
+    for (const dev of comparison.periodDeviations) {
+      const hour = Math.floor(dev.period / 4);
+      if (!hourlyBuckets[hour]) {
+        hourlyBuckets[hour] = {
+          hour: hour + 0.5,
+          periodNum: hour,
+          actualSolar: 0, predictedSolar: 0,
+          actualConsumption: 0, predictedConsumption: 0,
+          actualBattery: 0, predictedBattery: 0,
+          actualGridImport: 0, predictedGridImport: 0,
+          actualGridExport: 0, predictedGridExport: 0,
+        };
+      }
+      const b = hourlyBuckets[hour];
+      b.actualSolar += dev.actualSolar.value;
+      b.predictedSolar += dev.predictedSolar.value;
+      b.actualConsumption += dev.actualConsumption.value;
+      b.predictedConsumption += dev.predictedConsumption.value;
+      b.actualBattery += dev.actualBatteryAction.value;
+      b.predictedBattery += dev.predictedBatteryAction.value;
+      b.actualGridImport += dev.actualGridImport.value;
+      b.predictedGridImport += dev.predictedGridImport.value;
+      b.actualGridExport += dev.actualGridExport.value;
+      b.predictedGridExport += dev.predictedGridExport.value;
+    }
+    return Object.values(hourlyBuckets).sort((a, b) => a.hour - b.hour);
   }, [comparison.periodDeviations]);
 
   const xAxisTicks = Array.from({ length: 25 }, (_, i) => i);

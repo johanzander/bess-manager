@@ -24,7 +24,7 @@ services:
       - ./backend:/app/backend:ro
       - ./core:/app/core:ro
       - ./frontend/dist:/app/frontend:ro
-      - ./e2e/ci-options.json:/data/options.json:ro
+      - ${BESS_OPTIONS:-./e2e/ci-options.json}:/data/options.json:ro
       - ${BESS_SETTINGS:-./e2e/ci-bess-settings.json}:/data/bess_settings.json
     command: ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8080"]
     depends_on:

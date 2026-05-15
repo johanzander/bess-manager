@@ -20,6 +20,7 @@ from .dp_battery_algorithm import (
 )
 from .dp_schedule import DPSchedule
 from .exceptions import (
+    HAStatisticsUnavailableError,
     SystemConfigurationError,
 )
 from .growatt_min_controller import GrowattMinController
@@ -800,6 +801,114 @@ class BatterySystemManager:
         except Exception as e:
             logger.warning(f"Failed to fetch predictions: {e}")
 
+        # Parallel evaluation: compare HA statistics forecast with primary strategy
+        strategy = self.home_settings.consumption_strategy
+        if strategy != "ha_statistics" and self._consumption_predictions:
+            try:
+                ha_stats_forecast = self._get_ha_statistics_forecast()
+                primary_total = sum(self._consumption_predictions)
+                ha_stats_total = sum(ha_stats_forecast)
+                logger.info(
+                    "Consumption forecast comparison — %s: %.1f kWh/day, "
+                    "ha_statistics: %.1f kWh/day",
+                    strategy,
+                    primary_total,
+                    ha_stats_total,
+                )
+                for label, period in [
+                    ("02:00", 8),
+                    ("08:00", 32),
+                    ("14:00", 56),
+                    ("20:00", 80),
+                ]:
+                    primary_val = sum(
+                        self._consumption_predictions[period : period + 4]
+                    )
+                    ha_stats_val = sum(ha_stats_forecast[period : period + 4])
+                    logger.info(
+                        "  %s — %s: %.2f kWh/h, ha_statistics: %.2f kWh/h",
+                        label,
+                        strategy,
+                        primary_val,
+                        ha_stats_val,
+                    )
+            except Exception as e:
+                logger.debug("HA statistics comparison unavailable: %s", e)
+
+    def get_consumption_forecast_comparison(self) -> dict:
+        """Return forecasts from ALL available strategies plus actual consumption.
+
+        Returns:
+            Dict with keys: active_strategy, strategies, actual_hourly,
+            actual_hours_available. Each strategy entry has: name, forecast
+            (96 floats or None), total_kwh, available, error, is_active.
+            actual_hourly is a 24-element list (kWh per hour, None for
+            hours without complete actual data).
+        """
+        active_strategy = self.home_settings.consumption_strategy
+        strategy_names = ["sensor", "fixed", "influxdb_7d_avg", "ha_statistics"]
+        results = []
+
+        for name in strategy_names:
+            entry: dict = {
+                "name": name,
+                "forecast": None,
+                "total_kwh": None,
+                "available": False,
+                "error": None,
+                "is_active": name == active_strategy,
+            }
+            try:
+                if name == "sensor":
+                    forecast = self.controller.get_estimated_consumption()
+                elif name == "fixed":
+                    quarterly = self.home_settings.default_hourly / 4.0
+                    forecast = [quarterly] * 96
+                elif name == "influxdb_7d_avg":
+                    forecast = self._get_influxdb_7d_avg_forecast()
+                elif name == "ha_statistics":
+                    forecast = self._get_ha_statistics_forecast()
+                else:
+                    continue
+
+                entry["forecast"] = forecast
+                entry["total_kwh"] = sum(forecast)
+                entry["available"] = True
+            except Exception as e:
+                entry["error"] = str(e)
+
+            results.append(entry)
+
+        # Get today's actual consumption from the daily view
+        actual_hourly: list[float | None] = [None] * 24
+        actual_hours = 0
+        try:
+            daily_view = self.get_current_daily_view()
+            for hour in range(24):
+                base = hour * 4
+                # Only include hours where all 4 quarter-periods have actual data
+                periods = [
+                    daily_view.periods[base + q]
+                    for q in range(4)
+                    if base + q < len(daily_view.periods)
+                ]
+                if len(periods) == 4 and all(
+                    p.data_source == "actual" for p in periods
+                ):
+                    actual_hourly[hour] = sum(
+                        p.energy.home_consumption for p in periods
+                    )
+                    actual_hours += 1
+        except Exception as e:
+            logger.warning("Failed to fetch actual consumption data: %s", e)
+
+        return {
+            "active_strategy": active_strategy,
+            "strategies": results,
+            "actual_hourly": actual_hourly,
+            "actual_hours_available": actual_hours,
+        }
+
     def _get_consumption_forecast(self) -> list[float]:
         """Get consumption forecast based on the configured strategy.
 
@@ -820,6 +929,47 @@ class BatterySystemManager:
 
         if strategy == "influxdb_7d_avg":
             return self._get_influxdb_7d_avg_forecast()
+
+        if strategy == "ha_statistics":
+            # Sensor must be configured — this is a permanent config error,
+            # not a transient data issue, so let it propagate.
+            try:
+                self._controller._resolve_entity_id("lifetime_load_consumption")
+            except ValueError as e:
+                raise HAStatisticsUnavailableError(
+                    "ha_statistics strategy requires 'lifetime_load_consumption' "
+                    "sensor configured in the Sensors tab"
+                ) from e
+
+            # Data-insufficiency errors are transient (HA hasn't accumulated
+            # enough history yet) — fall back to fixed until data arrives.
+            try:
+                result = self._get_ha_statistics_forecast()
+                self._runtime_failure_tracker.dismiss_by_category(
+                    "HA_STATISTICS_FALLBACK"
+                )
+                return result
+            except HAStatisticsUnavailableError as e:
+                quarterly = self.home_settings.default_hourly / 4.0
+                logger.warning(
+                    "HA statistics unavailable (%s), falling back to fixed "
+                    "profile (%.1f kWh/h) until sufficient data accumulates",
+                    e,
+                    self.home_settings.default_hourly,
+                )
+                if not self._runtime_failure_tracker.has_active_failure(
+                    "HA_STATISTICS_FALLBACK"
+                ):
+                    self._runtime_failure_tracker.record_failure(
+                        category="HA_STATISTICS_FALLBACK",
+                        operation=(
+                            "Consumption forecast using HA Statistics — "
+                            "falling back to fixed profile until HA "
+                            "accumulates sufficient data"
+                        ),
+                        error=e,
+                    )
+                return [quarterly] * 96
 
         raise ValueError(f"Unknown consumption_strategy: '{strategy}'")
 
@@ -887,6 +1037,136 @@ class BatterySystemManager:
         )
 
         return avg_profile
+
+    def _get_ha_statistics_forecast(self) -> list[float]:
+        """Get consumption forecast from HA Recorder long-term statistics.
+
+        Queries the last 7 days of hourly energy statistics for the load
+        consumption sensor and builds a time-of-day-shaped profile. Unlike
+        the flat "sensor" strategy, this captures intra-day variation
+        (morning/evening peaks, overnight baseline).
+        """
+        from datetime import datetime, time, timezone
+
+        # Resolve entity_id via controller's canonical resolution path
+        try:
+            target_sensor, _ = self._controller._resolve_entity_id(
+                "lifetime_load_consumption"
+            )
+        except ValueError as e:
+            raise HAStatisticsUnavailableError(
+                "ha_statistics strategy requires 'lifetime_load_consumption' sensor "
+                "configured in the Sensors tab"
+            ) from e
+
+        # HA statistic_ids use the full entity_id with 'sensor.' prefix
+        if not target_sensor.startswith("sensor."):
+            target_sensor = f"sensor.{target_sensor}"
+
+        today_date = time_utils.today()
+        start_date = today_date - timedelta(days=7)
+        tz = time_utils.TIMEZONE
+
+        start_dt = datetime.combine(start_date, time(0, 0), tzinfo=tz)
+        end_dt = datetime.combine(today_date, time(0, 0), tzinfo=tz)
+
+        # Try direct entity_id first, then discover the correct statistic_id
+        # (external integrations may register statistics under a different ID)
+        statistic_id = target_sensor
+        result = self._controller.get_statistics_during_period(
+            statistic_ids=[statistic_id],
+            start_time=start_dt.isoformat(),
+            end_time=end_dt.isoformat(),
+            period="hour",
+            types=["change"],
+        )
+
+        stats = result.get(statistic_id, [])
+        if not stats:
+            # Entity_id didn't match — discover the correct statistic_id
+            discovered_id = self._controller.find_statistic_id(target_sensor)
+            if discovered_id and discovered_id != statistic_id:
+                logger.info(
+                    "Statistic ID for %s is %s (differs from entity_id)",
+                    target_sensor,
+                    discovered_id,
+                )
+                statistic_id = discovered_id
+                result = self._controller.get_statistics_during_period(
+                    statistic_ids=[statistic_id],
+                    start_time=start_dt.isoformat(),
+                    end_time=end_dt.isoformat(),
+                    period="hour",
+                    types=["change"],
+                )
+                stats = result.get(statistic_id, [])
+
+        if not stats:
+            raise HAStatisticsUnavailableError(
+                f"No statistics data returned for {target_sensor} "
+                f"(statistic_id: {statistic_id}) in the past 7 days"
+            )
+
+        # Group hourly change values by hour-of-day (0-23)
+        hourly_buckets: dict[int, list[float]] = {h: [] for h in range(24)}
+        for entry in stats:
+            change = entry.get("change")
+            if change is None:
+                continue
+            start_val = entry.get("start")
+            if start_val is None:
+                continue
+            try:
+                if isinstance(start_val, (int, float)):
+                    # HA returns millisecond epoch timestamps
+                    ts = start_val / 1000 if start_val > 1e12 else start_val
+                    dt = datetime.fromtimestamp(ts, tz=timezone.utc).astimezone(tz)
+                else:
+                    dt = datetime.fromisoformat(str(start_val)).astimezone(tz)
+                hourly_buckets[dt.hour].append(float(change))
+            except (ValueError, TypeError, OverflowError):
+                continue
+
+        # Compute per-hour-of-day averages using trimmed mean for outlier
+        # robustness (e.g. EV charging spikes).  Drop the min and max when
+        # there are enough samples; with fewer samples, drop only the max
+        # (spikes are the main concern).
+        hourly_avg = [0.0] * 24
+        hours_with_data = 0
+        for hour in range(24):
+            values = hourly_buckets[hour]
+            if values:
+                if len(values) >= 5:
+                    trimmed = sorted(values)[1:-1]  # drop min and max
+                elif len(values) >= 3:
+                    trimmed = sorted(values)[:-1]  # drop max only
+                else:
+                    trimmed = values
+                hourly_avg[hour] = sum(trimmed) / len(trimmed)
+                hours_with_data += 1
+
+        if hours_with_data < 12:
+            raise HAStatisticsUnavailableError(
+                f"Insufficient statistics data: only {hours_with_data}/24 hours "
+                f"have data for {target_sensor}"
+            )
+
+        # Expand 24 hourly values to 96 quarter-hourly values
+        quarterly_profile = []
+        for hour_kwh in hourly_avg:
+            quarter_kwh = hour_kwh / 4.0
+            quarterly_profile.extend([quarter_kwh] * 4)
+
+        total_kwh = sum(quarterly_profile)
+        logger.info(
+            "HA statistics profile: %.1f kWh/day from %d hours of data "
+            "across 7 days (%s)",
+            total_kwh,
+            hours_with_data,
+            target_sensor,
+        )
+
+        return quarterly_profile
 
     def _handle_special_cases(self, period: int, prepare_next_day: bool) -> None:
         """Handle special cases like midnight transition."""

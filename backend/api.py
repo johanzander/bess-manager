@@ -10,11 +10,14 @@ from datetime import datetime, timedelta
 from api_conversion import convert_keys_to_camel_case, convert_keys_to_snake_case
 from api_dataclasses import (
     _ENTITY_ID_RE,
+    APIConsumptionForecastComparison,
     APIDashboardHourlyData,
     APIDashboardResponse,
     APIPredictionSnapshot,
     APISetupCompletePayload,
     APISnapshotComparison,
+    APIStrategyForecast,
+    FormattedValue,
     create_formatted_value,
 )
 from fastapi import APIRouter, HTTPException, Query
@@ -2252,6 +2255,92 @@ async def compare_two_snapshots(
         raise
     except Exception as e:
         logger.error(f"Error comparing snapshots: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.get("/api/consumption-forecast-comparison")
+async def get_consumption_forecast_comparison():
+    """Compare ALL consumption forecast strategies against actual consumption.
+
+    Returns each strategy's hourly profile, actual consumption, and accuracy
+    metrics (MAE) so the frontend can visualise which strategy performs best.
+    """
+    from app import bess_controller
+
+    try:
+        comparison = bess_controller.system.get_consumption_forecast_comparison()
+        currency = bess_controller.system.home_settings.currency
+        actual_hourly = comparison["actual_hourly"]
+
+        strategies_response = []
+        for strat in comparison["strategies"]:
+            forecast = strat["forecast"]
+            hourly_profile: list[FormattedValue] = []
+            if forecast:
+                for hour in range(24):
+                    base = hour * 4
+                    hourly_kwh = sum(forecast[base : base + 4])
+                    hourly_profile.append(
+                        create_formatted_value(hourly_kwh, "energy_kwh_only", currency)
+                    )
+
+            # Compute MAE against actual for hours with data
+            mae = None
+            if forecast and comparison["actual_hours_available"] > 0:
+                errors = []
+                for hour in range(24):
+                    actual = actual_hourly[hour]
+                    if actual is not None:
+                        base = hour * 4
+                        predicted = sum(forecast[base : base + 4])
+                        errors.append(abs(predicted - actual))
+                if errors:
+                    mae = sum(errors) / len(errors)
+
+            strategies_response.append(
+                APIStrategyForecast(
+                    name=strat["name"],
+                    isActive=strat["is_active"],
+                    available=strat["available"],
+                    error=strat["error"],
+                    totalKwh=(
+                        create_formatted_value(
+                            strat["total_kwh"], "energy_kwh_only", currency
+                        )
+                        if strat["total_kwh"] is not None
+                        else None
+                    ),
+                    hourlyProfile=hourly_profile,
+                    mae=(
+                        create_formatted_value(mae, "energy_kwh_only", currency)
+                        if mae is not None
+                        else None
+                    ),
+                )
+            )
+
+        # Build actual hourly profile for frontend chart
+        actual_profile: list[FormattedValue | None] = []
+        for hour in range(24):
+            val = actual_hourly[hour]
+            if val is not None:
+                actual_profile.append(
+                    create_formatted_value(val, "energy_kwh_only", currency)
+                )
+            else:
+                actual_profile.append(None)
+
+        response = APIConsumptionForecastComparison(
+            activeStrategy=comparison["active_strategy"],
+            strategies=strategies_response,
+            actualHourlyProfile=actual_profile,
+            actualHoursAvailable=comparison["actual_hours_available"],
+        )
+
+        return convert_keys_to_camel_case(dataclasses.asdict(response))
+
+    except Exception as e:
+        logger.error(f"Error fetching consumption forecast comparison: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 

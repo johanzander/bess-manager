@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { ComposedChart, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { SnapshotComparison } from '../types';
+import { niceYAxis } from '../utils/chartUtils';
 
 interface ForecastComparisonChartsProps {
   comparison: SnapshotComparison;
@@ -62,18 +63,30 @@ interface SingleChartProps {
   xAxisTicks: number[];
   isDarkMode: boolean;
   colors: { text: string; gridLines: string };
+  minYDomain?: number;
 }
 
 const SingleChart: React.FC<SingleChartProps> = ({
   data, title, subtitle, color, actualKey, predictedKey, gradientId, label,
-  xAxisTicks, isDarkMode, colors,
+  xAxisTicks, isDarkMode, colors, minYDomain = 0.1,
 }) => {
-  const maxVal = Math.max(
+  const rawMin = Math.min(
+    ...data.map(d => Math.min(
+      d[actualKey as keyof ChartDataPoint] as number,
+      d[predictedKey as keyof ChartDataPoint] as number,
+    )),
+  );
+  const rawMax = Math.max(
     ...data.map(d => Math.max(
       d[actualKey as keyof ChartDataPoint] as number,
       d[predictedKey as keyof ChartDataPoint] as number,
     )),
-    0.1,
+    minYDomain,
+  );
+  // Always include 0 in the range
+  const { yMin, yMax, ticks: yTicks } = niceYAxis(
+    Math.min(rawMin, 0),
+    Math.max(rawMax, 0),
   );
   const predictedLabel = label === 'forecast' ? 'Predicted' : 'Planned';
 
@@ -104,9 +117,11 @@ const SingleChart: React.FC<SingleChartProps> = ({
             />
             <YAxis
               width={50}
-              domain={[0, Math.ceil(maxVal * 10) / 10]}
+              domain={[yMin, yMax]}
+              ticks={yTicks}
               stroke={colors.text}
               tick={{ fill: colors.text, fontSize: 11 }}
+              tickFormatter={(v: number) => v.toFixed(1)}
               label={{ value: 'kWh', angle: -90, position: 'insideLeft', style: { textAnchor: 'middle', fill: colors.text }, fontSize: 12 }}
             />
             <Tooltip content={<ComparisonTooltip color={color} actualKey={actualKey} predictedKey={predictedKey} label={label} />} />
@@ -167,20 +182,34 @@ const ForecastComparisonCharts: React.FC<ForecastComparisonChartsProps> = ({ com
   };
 
   const chartData: ChartDataPoint[] = useMemo(() => {
-    return comparison.periodDeviations.map((dev) => ({
-      hour: (dev.period + 0.5) / 4,
-      periodNum: dev.period,
-      actualSolar: dev.actualSolar.value,
-      predictedSolar: dev.predictedSolar.value,
-      actualConsumption: dev.actualConsumption.value,
-      predictedConsumption: dev.predictedConsumption.value,
-      actualBattery: dev.actualBatteryAction.value,
-      predictedBattery: dev.predictedBatteryAction.value,
-      actualGridImport: dev.actualGridImport.value,
-      predictedGridImport: dev.predictedGridImport.value,
-      actualGridExport: dev.actualGridExport.value,
-      predictedGridExport: dev.predictedGridExport.value,
-    }));
+    // Group sparse 15-min periods by hour and sum to hourly values
+    const hourlyBuckets: Record<number, ChartDataPoint> = {};
+    for (const dev of comparison.periodDeviations) {
+      const hour = Math.floor(dev.period / 4);
+      if (!hourlyBuckets[hour]) {
+        hourlyBuckets[hour] = {
+          hour: hour + 0.5,
+          periodNum: hour,
+          actualSolar: 0, predictedSolar: 0,
+          actualConsumption: 0, predictedConsumption: 0,
+          actualBattery: 0, predictedBattery: 0,
+          actualGridImport: 0, predictedGridImport: 0,
+          actualGridExport: 0, predictedGridExport: 0,
+        };
+      }
+      const b = hourlyBuckets[hour];
+      b.actualSolar += dev.actualSolar.value;
+      b.predictedSolar += dev.predictedSolar.value;
+      b.actualConsumption += dev.actualConsumption.value;
+      b.predictedConsumption += dev.predictedConsumption.value;
+      b.actualBattery += dev.actualBatteryAction.value;
+      b.predictedBattery += dev.predictedBatteryAction.value;
+      b.actualGridImport += dev.actualGridImport.value;
+      b.predictedGridImport += dev.predictedGridImport.value;
+      b.actualGridExport += dev.actualGridExport.value;
+      b.predictedGridExport += dev.predictedGridExport.value;
+    }
+    return Object.values(hourlyBuckets).sort((a, b) => a.hour - b.hour);
   }, [comparison.periodDeviations]);
 
   const xAxisTicks = Array.from({ length: 25 }, (_, i) => i);
@@ -194,12 +223,14 @@ const ForecastComparisonCharts: React.FC<ForecastComparisonChartsProps> = ({ com
           color="#fbbf24" actualKey="actualSolar" predictedKey="predictedSolar"
           gradientId="solarActualFill" label="forecast"
           xAxisTicks={xAxisTicks} isDarkMode={isDarkMode} colors={colors}
+          minYDomain={0.3}
         />
         <SingleChart
           data={chartData} title="Home Consumption" subtitle="Predicted vs actual consumption"
           color="#ef4444" actualKey="actualConsumption" predictedKey="predictedConsumption"
           gradientId="consumptionActualFill" label="forecast"
           xAxisTicks={xAxisTicks} isDarkMode={isDarkMode} colors={colors}
+          minYDomain={0.3}
         />
       </div>
 
@@ -212,18 +243,21 @@ const ForecastComparisonCharts: React.FC<ForecastComparisonChartsProps> = ({ com
             color="#10b981" actualKey="actualBattery" predictedKey="predictedBattery"
             gradientId="batteryActualFill" label="schedule"
             xAxisTicks={xAxisTicks} isDarkMode={isDarkMode} colors={colors}
+            minYDomain={0.3}
           />
           <SingleChart
             data={chartData} title="Grid Import" subtitle="Planned vs actual grid import"
             color="#3b82f6" actualKey="actualGridImport" predictedKey="predictedGridImport"
             gradientId="gridImportActualFill" label="schedule"
             xAxisTicks={xAxisTicks} isDarkMode={isDarkMode} colors={colors}
+            minYDomain={0.3}
           />
           <SingleChart
             data={chartData} title="Grid Export" subtitle="Planned vs actual grid export"
             color="#60a5fa" actualKey="actualGridExport" predictedKey="predictedGridExport"
             gradientId="gridExportActualFill" label="schedule"
             xAxisTicks={xAxisTicks} isDarkMode={isDarkMode} colors={colors}
+            minYDomain={0.3}
           />
         </div>
       </div>

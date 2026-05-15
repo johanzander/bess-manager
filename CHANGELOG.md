@@ -115,6 +115,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Setup wizard failed to auto-detect `battery_discharge_soc_limit_on_grid` entity on Growatt models that expose separate on-grid/off-grid SOC limit entities.
 - MIN inverter returned 500 errors when the TOU schedule exceeded 9 slots on price-volatile days. Hardware writes now use only the active (capped) intervals with content-aware slot assignment to avoid evicting still-needed segments. (thanks [@pookey](https://github.com/pookey))
 
+## [8.6.0] - 2026-05-14
+
+### Added
+
+- **HA Statistics consumption forecast strategy** — new `ha_statistics` option that builds a time-of-day consumption profile from the past 7 days of Home Assistant Recorder long-term statistics. Captures daily patterns (morning/evening peaks, overnight baseline) using a trimmed mean that filters out outlier spikes like EV charging. No extra integrations needed — works with the built-in HA Recorder.
+- **Consumption Forecast Comparison** view on the Insights page — collapsible chart comparing all available forecast strategies (sensor, fixed, InfluxDB, HA Statistics) against actual consumption, with MAE accuracy metrics to show which strategy performs best.
+- HA Recorder WebSocket API methods (`get_statistics_during_period`, `list_statistic_ids`, `find_statistic_id`) for querying long-term energy statistics.
+
+## [8.5.1] - 2026-05-12
+
+### Fixed
+
+- Schedule deviation charts Y-axis now always includes zero, fixing missing zero reference on battery charge/discharge chart and duplicate tick labels on small-range charts like grid export.
+
 ## [8.5.0] - 2026-05-09
 
 ### Added

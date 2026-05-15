@@ -30,8 +30,10 @@ class MockHomeAssistantController(HomeAssistantAPIController):
     """Mock Home Assistant controller for testing."""
 
     def _resolve_entity_id(self, sensor_key: str):
-        """Mock entity ID resolution: returns a dummy entity_id for any sensor_key."""
-        # For testing, just return 'sensor.' + sensor_key (simulate real entity IDs)
+        """Mock entity ID resolution: use configured sensors, fall back to dummy ID."""
+        entity_id = self.sensors.get(sensor_key)
+        if entity_id:
+            return entity_id, "configured"
         return f"sensor.{sensor_key}", "mock"
 
     def validate_methods_sensors(self, method_list: list) -> list:
@@ -100,6 +102,9 @@ class MockHomeAssistantController(HomeAssistantAPIController):
                 "solax_battery_min_soc": "number.solax_battery_minimum_capacity",
             }
         )
+
+        # Configurable response for HA Statistics API mock
+        self._statistics_response: dict = {}
 
         # Call tracking for integration tests
         self.calls = {
@@ -328,6 +333,16 @@ class MockHomeAssistantController(HomeAssistantAPIController):
     def get_solax_power_control_mode(self) -> str | None:
         """Return mock power control mode."""
         return "Self Use Mode"
+
+    def get_statistics_during_period(
+        self, statistic_ids, start_time, end_time=None, period="hour", types=None
+    ):
+        """Mock HA Statistics API — returns configurable data or empty."""
+        return self._statistics_response
+
+    def find_statistic_id(self, entity_id):
+        """Mock statistic_id discovery — returns entity_id unchanged."""
+        return entity_id
 
 
 class MockSensorCollector:

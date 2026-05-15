@@ -120,6 +120,30 @@ class RuntimeFailureTracker:
 
         raise ValueError(f"Failure not found: {failure_id}")
 
+    def has_active_failure(self, category: str) -> bool:
+        """Check if an active (non-dismissed) failure exists for a category."""
+        with self._lock:
+            return any(
+                not f.dismissed and f.category == category for f in self._failures
+            )
+
+    def dismiss_by_category(self, category: str) -> int:
+        """Dismiss all active failures matching a category.
+
+        Args:
+            category: Category to match
+
+        Returns:
+            Number of failures dismissed
+        """
+        with self._lock:
+            count = 0
+            for failure in self._failures:
+                if not failure.dismissed and failure.category == category:
+                    failure.dismissed = True
+                    count += 1
+            return count
+
     def dismiss_all(self) -> int:
         """Dismiss all active failures.
 

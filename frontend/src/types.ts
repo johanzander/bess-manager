@@ -246,6 +246,23 @@ export interface SnapshotToSnapshotComparison {
   growattScheduleB: any[];
 }
 
+export interface StrategyForecast {
+  name: string;
+  isActive: boolean;
+  available: boolean;
+  error: string | null;
+  totalKwh: FormattedValue | null;
+  hourlyProfile: FormattedValue[];
+  mae: FormattedValue | null;
+}
+
+export interface ConsumptionForecastComparison {
+  activeStrategy: string;
+  strategies: StrategyForecast[];
+  actualHourlyProfile: (FormattedValue | null)[];
+  actualHoursAvailable: number;
+}
+
 export interface RuntimeFailure {
   id: string;
   timestamp: string;

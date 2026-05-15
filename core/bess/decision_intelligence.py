@@ -10,6 +10,12 @@ maintaining compatibility with the existing software architecture.
 
 from core.bess.models import DecisionData, EnergyData
 
+# Minimum absolute power (kW) for the main charge/discharge branches.
+# The DP uses POWER_STEP_KW=0.2, so active actions are always ≥0.2 kW.
+# This threshold filters noise while the fallthroughs below catch passive
+# solar charging (battery_charged > 0) and small residual discharge.
+_POWER_THRESHOLD_KW = 0.1
+
 
 def generate_advanced_flow_pattern_name(energy_data: EnergyData) -> str:
     """
@@ -411,6 +417,10 @@ def classify_strategic_intent(power: float, energy_data: EnergyData) -> str:
     Intent controls hardware behavior via the Growatt TOU schedule and is displayed
     to the user in the UI. Must accurately reflect the actual action.
 
+    The main branches use ``_POWER_THRESHOLD_KW`` (0.1 kW) to filter noise.
+    Fallthrough branches catch passive solar charging and small residual
+    discharge that fall below the threshold.
+
     Args:
         power: Battery power action (+ charge, - discharge) in kW.
         energy_data: Complete energy flow data for the period.
@@ -418,16 +428,18 @@ def classify_strategic_intent(power: float, energy_data: EnergyData) -> str:
     Returns:
         One of: GRID_CHARGING, SOLAR_STORAGE, LOAD_SUPPORT, EXPORT_ARBITRAGE, IDLE.
     """
-    if power < -0.1:  # Discharging
+    if power < -_POWER_THRESHOLD_KW:  # Discharging
         if energy_data.battery_to_grid > 0.1:
             return "EXPORT_ARBITRAGE"
         return "LOAD_SUPPORT"
-    elif power > 0.1:  # Charging
+    elif power > _POWER_THRESHOLD_KW:  # Charging
         if energy_data.grid_to_battery >= 0.1:
             return "GRID_CHARGING"
         return "SOLAR_STORAGE"
     elif energy_data.battery_charged > 0.01:
         return "SOLAR_STORAGE"
+    elif energy_data.battery_discharged > 0.01:
+        return "LOAD_SUPPORT"
     return "IDLE"
 
 

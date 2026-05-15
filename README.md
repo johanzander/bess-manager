@@ -20,6 +20,8 @@ The system requires the Growatt, a price source (Nordpool or Octopus Energy), an
 
 **Continuous Re-optimization**: Recalculates the optimal schedule every 15 minutes for as long as electricity prices are available, updating as predicted values become actual.
 
+**Adaptive Consumption Forecasting**: Builds a time-of-day consumption profile directly from Home Assistant's built-in Recorder statistics — captures your daily patterns (morning/evening peaks, overnight baseline) using a trimmed mean that filters out outlier spikes like EV charging. No external database required. Also supports InfluxDB, live sensor, and fixed-value strategies with a built-in comparison view to see which strategy best matches your actual usage.
+
 **Comprehensive Energy Tracking**: Tracks all energy flows (solar production, grid import/export, battery charge/discharge, home consumption) with detailed cost analysis and savings calculations.
 
 **Power Monitoring & Fuse Protection**: Monitors grid current to prevent overloading electrical fuses by limiting battery charging when household consumption is high.

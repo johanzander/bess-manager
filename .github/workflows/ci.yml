@@ -121,20 +121,34 @@ jobs:
         run: cd frontend && npm ci && npm run build
       - name: Install Playwright
         run: cd e2e && npm ci && npx playwright install chromium --with-deps
-      - name: Start mock HA environment
+
+      # Phase 1: Smoke / navigation / dashboard tests (pre-configured system)
+      - name: "E2E: Start environment (normal day)"
         run: |
           SCENARIO=ci-normal-day docker compose -f docker-compose.ci.yml up -d
           timeout 120 bash -c 'until curl -sf http://localhost:8080/api/settings > /dev/null 2>&1; do sleep 2; done'
-      - name: Run Playwright tests
-        run: cd e2e && npx playwright test
+      - name: "E2E: Run smoke & navigation tests"
+        run: cd e2e && npx playwright test --project=chromium
+      - name: "E2E: Stop environment"
+        if: always()
+        run: docker compose -f docker-compose.ci.yml down
+
+      # Phase 2: Setup wizard tests (empty settings, wizard scenario)
+      - name: "E2E: Start environment (wizard)"
+        run: |
+          SCENARIO=ci-wizard-nordpool-min BESS_SETTINGS=./e2e/ci-wizard-settings.json docker compose -f docker-compose.ci.yml up -d
+          timeout 120 bash -c 'until curl -sf http://localhost:8080/api/setup/status > /dev/null 2>&1; do sleep 2; done'
+      - name: "E2E: Run wizard tests"
+        run: cd e2e && npx playwright test --project=wizard
+      - name: "E2E: Stop environment"
+        if: always()
+        run: docker compose -f docker-compose.ci.yml down
+
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
           name: playwright-report
           path: e2e/playwright-report/
-      - name: Stop environment
-        if: always()
-        run: docker compose -f docker-compose.ci.yml down
 
   # ── Quality gate: linting + formatting ──────────────────────────
   quality:

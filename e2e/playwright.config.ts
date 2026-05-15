@@ -14,6 +14,12 @@ export default defineConfig({
     {
       name: 'chromium',
       use: { browserName: 'chromium' },
+      testIgnore: /setup-wizard/,
+    },
+    {
+      name: 'wizard',
+      use: { browserName: 'chromium' },
+      testMatch: /setup-wizard/,
     },
   ],
 });

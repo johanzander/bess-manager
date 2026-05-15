@@ -8,7 +8,7 @@ test.describe('Dashboard', () => {
     await expect(page.getByText('Loading settings...')).not.toBeVisible({ timeout: 15_000 });
 
     // Should show the BESS header
-    await expect(page.locator('h1')).toContainText('BESS');
+    await expect(page.getByRole('heading', { name: 'BESS', level: 1 })).toBeVisible();
 
     // Should not show error boundary
     await expect(page.getByText('Something went wrong')).not.toBeVisible();

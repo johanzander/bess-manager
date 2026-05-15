@@ -299,14 +299,21 @@ async def ha_websocket(ws: WebSocket) -> None:
                 await ws.send_json(
                     {"id": cmd_id, "type": "result", "success": True, "result": result}
                 )
-                logger.info("WS %-40s → %d entries", cmd_type, len(result) if isinstance(result, list) else len(result.keys()))
+                logger.info(
+                    "WS %-40s → %d entries",
+                    cmd_type,
+                    len(result) if isinstance(result, list) else len(result.keys()),
+                )
             else:
                 await ws.send_json(
                     {
                         "id": cmd_id,
                         "type": "result",
                         "success": False,
-                        "error": {"code": "not_found", "message": f"Unknown command: {cmd_type}"},
+                        "error": {
+                            "code": "not_found",
+                            "message": f"Unknown command: {cmd_type}",
+                        },
                     }
                 )
                 logger.warning("WS unknown command: %s", cmd_type)

@@ -7,7 +7,7 @@ test.describe('Mock HA Integration', () => {
     const res = await request.get(`${MOCK_HA}/mock/sensors`);
     expect(res.status()).toBe(200);
     const sensors = await res.json();
-    expect(sensors).toHaveProperty('sensor.growatt_battery_soc');
+    expect(sensors).toHaveProperty(['sensor.growatt_battery_soc']);
   });
 
   test('mock HA service log is accessible', async ({ request }) => {

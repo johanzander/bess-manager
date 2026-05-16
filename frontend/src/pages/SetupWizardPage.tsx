@@ -97,7 +97,6 @@ const SetupWizardPage: React.FC = () => {
         : d.nordpoolFound
           ? 'nordpool_official' as const
           : undefined;
-      const octopus = (d as Record<string, unknown>).octopusEntities as Record<string, string> | undefined;
       setPricingForm(f => ({
         ...f,
         ...(autoProvider ? { provider: autoProvider } : {}),
@@ -105,10 +104,10 @@ const SetupWizardPage: React.FC = () => {
         ...(d.nordpoolArea ? { area: d.nordpoolArea } : {}),
         ...(d.vatMultiplier ? { vatMultiplier: d.vatMultiplier } : {}),
         ...(d.nordpoolConfigEntryId ? { nordpoolConfigEntryId: d.nordpoolConfigEntryId } : {}),
-        ...(octopus?.importToday ? { octopusImportTodayEntity: octopus.importToday } : {}),
-        ...(octopus?.importTomorrow ? { octopusImportTomorrowEntity: octopus.importTomorrow } : {}),
-        ...(octopus?.exportToday ? { octopusExportTodayEntity: octopus.exportToday } : {}),
-        ...(octopus?.exportTomorrow ? { octopusExportTomorrowEntity: octopus.exportTomorrow } : {}),
+        ...(d.octopusEntities?.importToday ? { octopusImportTodayEntity: d.octopusEntities.importToday } : {}),
+        ...(d.octopusEntities?.importTomorrow ? { octopusImportTomorrowEntity: d.octopusEntities.importTomorrow } : {}),
+        ...(d.octopusEntities?.exportToday ? { octopusExportTodayEntity: d.octopusEntities.exportToday } : {}),
+        ...(d.octopusEntities?.exportTomorrow ? { octopusExportTomorrowEntity: d.octopusEntities.exportTomorrow } : {}),
       }));
       if (d.inverterType) {
         setInverterForm(f => ({ ...f, inverterType: d.inverterType! }));

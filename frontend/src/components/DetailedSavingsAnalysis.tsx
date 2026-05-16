@@ -24,11 +24,11 @@ export const DetailedSavingsAnalysis: React.FC<DetailedSavingsAnalysisProps> = (
     );
   }
 
-  if (error || !dashboardData) {
+  if (error || !dashboardData || !dashboardData.hourlyData) {
     return (
       <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
         <div className="text-center text-red-600 dark:text-red-400">
-          Error loading analysis data: {error}
+          {error ? `Error loading analysis data: ${error}` : 'No schedule data available'}
         </div>
       </div>
     );

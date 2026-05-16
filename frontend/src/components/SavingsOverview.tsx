@@ -81,7 +81,7 @@ export const SavingsOverview: React.FC<SavingsOverviewProps> = ({ resolution }) 
     );
   }
 
-  if (!dashboardData) {
+  if (!dashboardData || !dashboardData.hourlyData) {
     return (
       <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
         <div className="text-center text-gray-500 dark:text-gray-400">No schedule data available</div>

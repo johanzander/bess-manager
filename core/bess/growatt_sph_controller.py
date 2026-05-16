@@ -556,35 +556,6 @@ class GrowattSphController(InverterController):
 
     # ── Period settings ─────────────────────────────────────────────────────
 
-    def get_period_settings(self, period: int) -> dict:
-        """Get control settings for a specific 15-minute period.
-
-        Args:
-            period: Period index (0-95 normally, varies during DST)
-
-        Returns:
-            Dict with grid_charge, charge_rate, discharge_rate,
-            strategic_intent, batt_mode
-        """
-        if not self.strategic_intents:
-            raise ValueError("No strategic intents available")
-        if period < 0 or period >= len(self.strategic_intents):
-            raise ValueError(
-                f"Period {period} out of range [0, {len(self.strategic_intents)})"
-            )
-
-        intent = self.strategic_intents[period]
-        control = self.INTENT_TO_CONTROL[intent]
-        mode = self.INTENT_TO_MODE[intent]
-
-        return {
-            "grid_charge": control["grid_charge"],
-            "charge_rate": control["charge_rate"],
-            "discharge_rate": control["discharge_rate"],
-            "strategic_intent": intent,
-            "batt_mode": mode,
-        }
-
     # ── TOU display ───────────────────────────────────────────────────────────
 
     def get_daily_TOU_settings(self) -> list[dict]:

@@ -19,7 +19,7 @@ services:
       - TZ=Europe/Stockholm
       - PYTHONPATH=/app/backend:/app
     ports:
-      - "8080:8080"
+      - "${BESS_PORT:-8080}:8080"
     volumes:
       - ./backend:/app/backend:ro
       - ./core:/app/core:ro

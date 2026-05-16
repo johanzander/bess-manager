@@ -1,5 +1,7 @@
 import { defineConfig } from '@playwright/test';
 
+const baseURL = process.env.BASE_URL || `http://localhost:${process.env.BESS_PORT || '8080'}`;
+
 export default defineConfig({
   testDir: './tests',
   timeout: 30_000,
@@ -7,7 +9,7 @@ export default defineConfig({
   retries: 1,
   reporter: [['html', { open: 'never' }], ['list']],
   use: {
-    baseURL: 'http://localhost:8080',
+    baseURL,
     trace: 'on-first-retry',
   },
   projects: [

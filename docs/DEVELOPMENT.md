@@ -217,8 +217,22 @@ cd e2e && npx playwright test --project=wizard
 docker compose -f docker-compose.ci.yml down
 ```
 
-Use `BESS_PORT=8081` if port 8080 is in use locally. The Playwright config
-uses `http://localhost:8080` as the base URL by default.
+**Running multiple worktrees without port conflicts:**
+
+```bash
+# Automatic — finds free ports and isolates containers per-worktree
+./e2e/run-e2e.sh                       # all tests
+./e2e/run-e2e.sh --project=chromium    # smoke only
+./e2e/run-e2e.sh --project=wizard      # wizard only
+
+# Manual — pick a port to avoid collisions with other worktrees
+BESS_PORT=8085 MOCK_HA_PORT=8185 docker compose -p my-branch -f docker-compose.ci.yml up -d
+BESS_PORT=8085 npx playwright test --project=chromium
+```
+
+The `BESS_PORT` env var is used by both `docker-compose.ci.yml` (host port mapping)
+and `playwright.config.ts` (base URL). The `-p` flag gives each environment its own
+container namespace so names don't collide.
 
 **E2E test structure:**
 

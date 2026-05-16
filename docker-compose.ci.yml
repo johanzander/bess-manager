@@ -38,7 +38,7 @@ services:
     environment:
       - SCENARIO=${SCENARIO:-ci-normal-day}
     ports:
-      - "8123:8123"
+      - "${MOCK_HA_PORT:-8123}:8123"
     volumes:
       - ./scripts/mock_ha/scenarios:/scenarios:ro
     healthcheck:

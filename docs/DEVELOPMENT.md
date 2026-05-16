@@ -180,14 +180,59 @@ pytest
 # Run specific categories
 pytest core/bess/tests/unit/
 pytest core/bess/tests/integration/
+pytest backend/tests/
 
 # Run with coverage
 pytest --cov=core.bess
+
+# Frontend unit tests
+cd frontend && npm test
+
+# E2E tests (requires docker-compose environment running)
+cd e2e && npx playwright test --project=chromium
 ```
 
 Tests are split using `pytest.mark.slow`. The fast set covers backend API and
 non-optimizer unit tests. The slow set runs the full DP algorithm and integration
 scenarios.
+
+### E2E Tests (Playwright)
+
+End-to-end tests run a full browser against the backend + mock HA stack:
+
+```bash
+# Start the test environment
+SCENARIO=ci-normal-day docker compose -f docker-compose.ci.yml up -d
+
+# Wait for BESS to be ready
+until curl -sf http://localhost:8080/api/settings > /dev/null; do sleep 2; done
+
+# Run all E2E tests (smoke + pages + API contracts)
+cd e2e && npx playwright test --project=chromium
+
+# Run only wizard tests (requires wizard scenario)
+cd e2e && npx playwright test --project=wizard
+
+# Stop environment
+docker compose -f docker-compose.ci.yml down
+```
+
+Use `BESS_PORT=8081` if port 8080 is in use locally. The Playwright config
+uses `http://localhost:8080` as the base URL by default.
+
+**E2E test structure:**
+
+| Spec file | What it tests |
+|-----------|---------------|
+| `api-smoke.spec.ts` | All API endpoints return 200 |
+| `api-contracts.spec.ts` | Response shapes the frontend depends on |
+| `dashboard.spec.ts` | Dashboard loading, content, resolution selector |
+| `navigation.spec.ts` | All routes load without errors |
+| `settings-page.spec.ts` | Tab navigation, form editing, save persistence |
+| `inverter-page.spec.ts` | Schedule overview, TOU intervals, intents |
+| `savings-page.spec.ts` | View modes, resolution, cost display |
+| `mock-ha.spec.ts` | Mock HA connectivity and inverter commands |
+| `setup-wizard.spec.ts` | Full wizard flow with auto-discovery |
 
 ### Docker Build Verification
 
@@ -207,11 +252,14 @@ and boots it with mock-HA. Catches missing files that would cause runtime
 
 CI runs on every PR (`.github/workflows/ci.yml`):
 
-- **Fast tests** — `pytest -m "not slow"` (when backend/core changes)
-- **Algorithm tests** — `pytest -m slow` (when `core/bess/` changes)
-- **Frontend checks** — `npm test`, type-check, lint (when `frontend/` changes)
-- **Code quality** — Black + Ruff (always)
-- **Docker build & boot** — production image smoke test (when backend/frontend/Dockerfile changes)
+| Job | Trigger | What it runs |
+|-----|---------|-------------|
+| **Fast tests** | `backend/` or `core/` changed | `pytest -m "not slow"` (~3s, 333 tests) |
+| **Algorithm tests** | `core/bess/` changed | `pytest -m slow` (~30min, 116 tests) |
+| **Frontend checks** | `frontend/` changed | `npm test` + type-check + lint |
+| **E2E tests** | backend/frontend/e2e/docker changed | Playwright against docker-compose mock HA (2 phases: smoke + wizard) |
+| **Code quality** | Always | Black + Ruff formatting/linting |
+| **Docker build & boot** | backend/frontend/Dockerfile changed | Production image boots and responds |
 
 The quality gate script (`scripts/quality-check.sh`) runs fast tests + linting
 and is used by the automated issue-fix bot.

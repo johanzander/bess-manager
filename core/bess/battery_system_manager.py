@@ -1046,7 +1046,7 @@ class BatterySystemManager:
         the flat "sensor" strategy, this captures intra-day variation
         (morning/evening peaks, overnight baseline).
         """
-        from datetime import datetime, time, timezone
+        from datetime import time, timezone
 
         # Resolve entity_id via controller's canonical resolution path
         try:

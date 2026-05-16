@@ -25,7 +25,6 @@ from loguru import logger
 from pydantic import BaseModel, field_validator
 
 from core.bess import time_utils
-from core.bess.exceptions import SystemConfigurationError
 from core.bess.health_check import run_system_health_checks
 from core.bess.settings import BatterySettings as _BatterySettings
 from core.bess.time_utils import get_period_count

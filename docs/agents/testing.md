@@ -76,11 +76,17 @@ CI runs automatically on every PR and push to `main` (`.github/workflows/ci.yml`
 
 | Job | Trigger | What it runs |
 |-----|---------|-------------|
-| **Fast tests** | `backend/` or `core/` changed | `pytest -m "not slow"` (~3s) |
-| **Algorithm tests** | `core/bess/` changed | `pytest -m slow` (~30min) |
+| **Fast tests** | `backend/` or `core/` changed | `pytest -m "not slow"` (~3s, 333 tests) |
+| **Algorithm tests** | `core/bess/` changed | `pytest -m slow` (~30min, 116 tests) |
 | **Frontend checks** | `frontend/` changed | `npm test` + type-check + lint |
+| **E2E tests** | backend/frontend/e2e/docker changed | Playwright: 2 phases (smoke + wizard) against docker-compose mock HA |
 | **Code quality** | Always | Black + Ruff formatting/linting |
 | **Docker build & boot** | `backend/`, `core/`, `frontend/`, or `Dockerfile` changed | Builds production Dockerfile, boots with mock-HA, smoke-tests endpoints |
+
+The E2E job runs 60 Playwright tests covering API contract validation, page-level
+rendering, and the setup wizard flow. It starts in two phases:
+1. Normal day scenario — tests all pages, API contracts, and navigation
+2. Wizard scenario — tests the setup wizard with empty settings + mock HA discovery
 
 The Docker build & boot job catches a common failure mode: the production
 `Dockerfile` explicitly lists backend files in its `COPY` command. If a new
@@ -94,7 +100,7 @@ an `ImportError`. This job verifies the app actually starts.
 | File | Purpose |
 |------|---------|
 | `docker-compose.yml` | Local dev with hot-reload |
-| `docker-compose.ci.yml` | Fast E2E dev/test (Dockerfile.dev + volume mounts) |
+| `docker-compose.ci.yml` | E2E testing: Dockerfile.dev + volume mounts, configurable via `SCENARIO`, `BESS_PORT`, `BESS_SETTINGS`, `BESS_OPTIONS` |
 | `docker-compose.prod-test.yml` | Production image verification (real Dockerfile, no code mounts) |
 
 ## Bug Reproduction with Mock HA

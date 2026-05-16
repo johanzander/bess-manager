@@ -3,6 +3,22 @@
 
 echo "==== BESS Manager Development Environment Setup ===="
 
+# Derive a unique project name from the directory so multiple worktrees
+# can run side-by-side without container name conflicts.
+export COMPOSE_PROJECT_NAME="bess-$(basename "$(pwd)")"
+echo "Docker Compose project: $COMPOSE_PROJECT_NAME"
+
+# Derive stable ports from the directory name so each worktree gets a
+# predictable, unique port.  The hash maps any directory name into the
+# 8080-8179 range (backend) with frontend at +1000.
+# Override via BESS_DEV_PORT / BESS_FRONTEND_PORT in .env if needed.
+if [ -z "$BESS_DEV_PORT" ]; then
+  _hash=$(printf '%s' "$(basename "$(pwd)")" | cksum | awk '{print $1}')
+  export BESS_DEV_PORT=$(( 8080 + _hash % 100 ))
+  export BESS_FRONTEND_PORT=$(( BESS_DEV_PORT + 1000 ))
+fi
+export BESS_FRONTEND_PORT="${BESS_FRONTEND_PORT:-$(( BESS_DEV_PORT + 1000 ))}"
+
 # Verify Docker is running
 if ! docker info > /dev/null 2>&1; then
   echo "Error: Docker is not running."
@@ -75,8 +91,8 @@ fi
 # Pass host timezone to containers so log timestamps use local time
 export TZ=${TZ:-Europe/Stockholm}
 
-echo "Stopping any existing containers..."
-docker-compose down --remove-orphans
+echo "Stopping any existing containers for this project..."
+docker compose down --remove-orphans 2>/dev/null
 
 # Only rebuild frontend if source files changed since last build
 FRONTEND_BUILD="frontend/dist"
@@ -87,21 +103,25 @@ else
   echo "Frontend unchanged, skipping build."
 fi
 
-echo "Building and starting development container with Python 3.10..."
-docker-compose up --build -d
+echo "Building and starting development container..."
+docker compose up --build -d
 
-# Wait a moment for container to be ready
-echo "Waiting for container to start..."
-sleep 5
+echo "Waiting for BESS to start (following logs)..."
+echo ""
 
-echo -e "\n==== CHECKING PYTHON VERSION IN CONTAINER ===="
-docker-compose exec bess-dev python --version
+print_banner() {
+  echo ""
+  echo "========================================================"
+  echo "  BESS Manager running at: http://localhost:${BESS_DEV_PORT}"
+  echo "========================================================"
+  echo ""
+}
+trap 'print_banner; exit 0' INT
 
-echo -e "\n==== INITIAL CONTAINER LOGS ===="
-docker-compose logs --no-log-prefix
-
-echo -e "\nAccess the web interface at http://localhost:8080 once the app is running correctly."
-echo -e "Following container logs now... (Press Ctrl+C to stop)\n"
-
-# Follow the logs continuously
-docker-compose logs -f --no-log-prefix
+# Stream logs; print the banner once BESS is fully started (Uvicorn ready).
+docker compose logs -f --no-log-prefix 2>&1 | while IFS= read -r line; do
+    echo "$line"
+    if [[ "$line" == *"Uvicorn running on"* ]]; then
+      print_banner
+    fi
+  done

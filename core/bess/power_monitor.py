@@ -117,7 +117,6 @@ class HomePowerMonitor:
             is_required=False,
             controller=self.controller,
             all_methods=all_methods,
-            required_methods=[],
         )
 
         return [health_check]

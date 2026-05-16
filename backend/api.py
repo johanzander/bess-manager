@@ -33,6 +33,39 @@ from core.bess.time_utils import get_period_count
 router = APIRouter()
 
 
+def _get_hourly_settings_from_periods(schedule_manager, hour: int) -> dict:
+    """Build hourly settings from period-level data.
+
+    Compatibility layer for API endpoints that return hourly data to the
+    frontend.  Picks the dominant intent (majority vote, alphabetical
+    tie-break) from the 4 quarterly periods of the given hour and returns
+    the corresponding control settings.
+    """
+    intents = schedule_manager.strategic_intents
+    if not intents:
+        raise ValueError("No strategic intents available")
+
+    num_periods = len(intents)
+    start_p = hour * 4
+    end_p = min(start_p + 4, num_periods)
+    if start_p >= num_periods:
+        raise ValueError(f"Hour {hour} out of range")
+
+    period_intents = intents[start_p:end_p]
+    counts: dict[str, int] = {}
+    for i in period_intents:
+        counts[i] = counts.get(i, 0) + 1
+    max_count = max(counts.values())
+    dominant = min(i for i, c in counts.items() if c == max_count)
+
+    # Find a period with the dominant intent and return its settings
+    for p in range(start_p, end_p):
+        if intents[p] == dominant:
+            return schedule_manager.get_period_settings(p)
+
+    return schedule_manager.get_period_settings(start_p)
+
+
 def _deep_merge(base: dict, updates: dict) -> dict:
     """Recursively merge *updates* into *base*, preserving nested dict values.
 
@@ -1295,10 +1328,11 @@ async def get_inverter_status():
         # Get current battery mode from schedule for current hour
         current_battery_mode = "load_first"  # Default
         try:
-            current_hour = time_utils.now().hour
+            now = time_utils.now()
             schedule_manager = bess_controller.system._inverter_controller
-            hourly_settings = schedule_manager.get_hourly_settings(current_hour)
-            current_battery_mode = hourly_settings.get("batt_mode", "load_first")
+            current_period = now.hour * 4 + now.minute // 15
+            period_settings = schedule_manager.get_period_settings(current_period)
+            current_battery_mode = period_settings.get("batt_mode", "load_first")
         except Exception as e:
             logger.warning(f"Failed to get current battery mode: {e}")
 
@@ -1371,7 +1405,9 @@ async def get_growatt_detailed_schedule():
 
         for hour in range(24):
             try:
-                hourly_settings = schedule_manager.get_hourly_settings(hour)
+                hourly_settings = _get_hourly_settings_from_periods(
+                    schedule_manager, hour
+                )
                 battery_mode = hourly_settings.get("batt_mode", "load_first")
                 mode_distribution[battery_mode] = (
                     mode_distribution.get(battery_mode, 0) + 1
@@ -1408,16 +1444,10 @@ async def get_growatt_detailed_schedule():
                 except Exception as e:
                     logger.warning(f"Failed to get price for hour {hour}: {e}")
 
-                # Calculate or default battery-related values
-                battery_action = hourly_settings.get("battery_action", 0.0)
-                battery_charged = max(0, battery_action) if battery_action > 0 else 0
-                battery_discharged = (
-                    abs(min(0, battery_action)) if battery_action < 0 else 0
-                )
                 schedule_data.append(
                     {
                         "hour": hour,
-                        "mode": hourly_settings.get("state", "idle"),
+                        "mode": "idle",
                         "batt_mode": battery_mode,
                         "batteryMode": battery_mode,
                         "grid_charge": hourly_settings.get("grid_charge", False),
@@ -1432,12 +1462,10 @@ async def get_growatt_detailed_schedule():
                         ),
                         "action": action,
                         "action_color": action_color,
-                        "battery_action": battery_action,
-                        "battery_action_kw": hourly_settings.get(
-                            "battery_action_kw", 0.0
-                        ),
-                        "batteryCharged": battery_charged,
-                        "batteryDischarged": battery_discharged,
+                        "battery_action": 0.0,
+                        "battery_action_kw": 0.0,
+                        "batteryCharged": 0,
+                        "batteryDischarged": 0,
                         "price": price,
                         "electricity_price": price,
                         "grid_power": 0,
@@ -1604,7 +1632,9 @@ async def get_tou_settings():
             enhanced_interval = interval.copy()
             start_hour = int(interval["start_time"].split(":")[0])
             try:
-                settings = schedule_manager.get_hourly_settings(start_hour)
+                settings = _get_hourly_settings_from_periods(
+                    schedule_manager, start_hour
+                )
                 enhanced_interval["grid_charge"] = settings.get("grid_charge", False)
                 enhanced_interval["discharge_rate"] = settings.get(
                     "discharge_rate", 100
@@ -1669,7 +1699,7 @@ async def get_strategic_intents():
         hourly_intents = []
         for hour in range(24):
             try:
-                settings = schedule_manager.get_hourly_settings(hour)
+                settings = _get_hourly_settings_from_periods(schedule_manager, hour)
                 intent = settings.get("strategic_intent", "IDLE")
                 description = schedule_manager._get_intent_description(intent)
 
@@ -1678,7 +1708,7 @@ async def get_strategic_intents():
                         "hour": hour,
                         "intent": intent,
                         "description": description,
-                        "battery_action": settings.get("battery_action", 0.0),
+                        "battery_action": 0.0,
                         "grid_charge": settings.get("grid_charge", False),
                         "discharge_rate": settings.get("discharge_rate", 100),
                         "is_current": hour == time_utils.now().hour,
@@ -2570,6 +2600,9 @@ async def run_setup_discovery():
             if key not in sensors:
                 sensors[key] = entity_id
 
+        # Discover Octopus Energy entity IDs for pricing form auto-fill
+        octopus_entities = ha.discover_octopus_entities(states)
+
         # Convert top-level keys to camelCase but preserve sensor keys as
         # snake_case since they are BESS config keys, not API field names.
         detected_phase_count = (
@@ -2586,6 +2619,7 @@ async def run_setup_discovery():
                 "nordpool_found": integrations["nordpool_found"],
                 "nordpool_area": integrations["nordpool_area"],
                 "nordpool_config_entry_id": integrations["nordpool_config_entry_id"],
+                "octopus_found": integrations["octopus_found"],
                 "missing_sensors": missing_sensors,
                 # Auto-detected hints
                 "inverter_type": integrations["inverter_type"],
@@ -2597,6 +2631,9 @@ async def run_setup_discovery():
         # Attach sensor dicts without key conversion
         result["sensors"] = sensors
         result["platformSensors"] = platform_sensors
+        # Attach Octopus entities for pricing form auto-fill
+        if octopus_entities:
+            result["octopusEntities"] = octopus_entities
         return result
     except Exception as e:
         logger.error(f"Error during setup discovery: {e}")

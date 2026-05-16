@@ -56,21 +56,19 @@ def format_sensor_value_with_unit(value, method_name: str, controller) -> str:
 def determine_health_status(
     health_check_results: list,
     working_sensors: int,
-    required_methods: list | None = None,
+    required_methods: list[str],
 ) -> str:
-    """Generic method to determine health check status based on required vs optional sensors.
+    """Determine health check status based on required vs optional sensors.
 
     Args:
         health_check_results: List of health check results (after method calls)
         working_sensors: Count of working sensors (unused, kept for compatibility)
-        required_methods: List of method names that are required (optional sensors are non-required)
+        required_methods: List of method names that are required.
+            Methods not in this list are treated as optional.
 
     Returns:
         Status string: "OK", "WARNING", or "ERROR"
     """
-    if not required_methods:
-        # If no required methods specified, all methods are optional
-        required_methods = []
 
     # Count required vs optional sensors that are actually working
     required_working = 0
@@ -117,21 +115,26 @@ def perform_health_check(
     is_required: bool,
     controller,
     all_methods: list[str],
-    required_methods: list[str] | None = None,
 ) -> dict:
     """Generic health check function that can be used by any component.
+
+    Severity is derived from ``is_required``:
+    - ``is_required=True``  → all methods are required → failure → ERROR
+    - ``is_required=False`` → all methods are optional  → failure → WARNING
 
     Args:
         component_name: Name of the component being checked
         description: Description of what the component does
-        is_required: Whether this component is required for system operation
+        is_required: Whether this component is required for system operation.
+            Also controls severity: required components show ERROR on failure,
+            optional components show WARNING.
         controller: The controller instance with validate_methods_sensors method
         all_methods: List of all method names this component uses
-        required_methods: List of method names that are required (None = all required)
 
     Returns:
         Health check result dictionary
     """
+    required_methods = all_methods if is_required else []
     health_check = {
         "name": component_name,
         "description": description,
@@ -353,7 +356,6 @@ def run_system_health_checks(system_manager):
             is_required=False,
             controller=system_manager._controller,
             all_methods=["get_discharge_inhibit_active"],
-            required_methods=[],
         )
         all_component_checks.append(discharge_check)
 

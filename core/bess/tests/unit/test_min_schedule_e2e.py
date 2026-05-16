@@ -21,7 +21,7 @@ import pytest
 
 from core.bess.dp_battery_algorithm import optimize_battery_schedule
 from core.bess.dp_schedule import DPSchedule
-from core.bess.growatt_schedule import GrowattScheduleManager
+from core.bess.growatt_min_controller import GrowattMinController as GrowattScheduleManager
 from core.bess.price_manager import MockSource, PriceManager
 from core.bess.settings import BatterySettings
 
@@ -203,127 +203,108 @@ class TestEndToEndIntentExecution:
 
 
 class TestEndToEndChargeDischargeRates:
-    """Verify charge/discharge rates are set correctly for each strategic intent."""
+    """Verify charge/discharge rates are set correctly for each strategic intent (period-level)."""
 
     @pytest.mark.parametrize("scenario_name", _get_realworld_scenarios())
-    def test_grid_charging_hours_have_correct_rates(self, scenario_name):
+    def test_grid_charging_periods_have_correct_rates(self, scenario_name):
         """GRID_CHARGING: grid_charge=True, charge_rate=100%, discharge_rate=0%."""
         scenario = _load_scenario(scenario_name)
         scheduler, _ = _run_and_build_schedule(scenario)
 
-        for hour in range(24):
-            if hour not in scheduler.hourly_settings:
-                continue
-            settings = scheduler.hourly_settings[hour]
+        for period in range(len(scheduler.strategic_intents)):
+            settings = scheduler.get_period_settings(period)
             if settings["strategic_intent"] == "GRID_CHARGING":
                 assert (
                     settings["grid_charge"] is True
-                ), f"{scenario_name} hour {hour}: GRID_CHARGING must have grid_charge=True"
+                ), f"{scenario_name} period {period}: GRID_CHARGING must have grid_charge=True"
                 assert (
                     settings["charge_rate"] == 100
-                ), f"{scenario_name} hour {hour}: GRID_CHARGING charge_rate={settings['charge_rate']}, expected 100"
+                ), f"{scenario_name} period {period}: GRID_CHARGING charge_rate={settings['charge_rate']}, expected 100"
                 assert (
                     settings["discharge_rate"] == 0
-                ), f"{scenario_name} hour {hour}: GRID_CHARGING discharge_rate={settings['discharge_rate']}, expected 0"
+                ), f"{scenario_name} period {period}: GRID_CHARGING discharge_rate={settings['discharge_rate']}, expected 0"
 
     @pytest.mark.parametrize("scenario_name", _get_realworld_scenarios())
-    def test_export_arbitrage_hours_have_correct_rates(self, scenario_name):
-        """EXPORT_ARBITRAGE: grid_charge=False, charge_rate=0%.
-
-        discharge_rate is calculated from actual battery action — it can be 0%
-        when the optimizer labels an hour as EXPORT_ARBITRAGE but the net action
-        is near-zero or slightly positive (e.g. marginal export opportunity).
-        """
+    def test_export_arbitrage_periods_have_correct_rates(self, scenario_name):
+        """EXPORT_ARBITRAGE: grid_charge=False, charge_rate=0%, discharge_rate=100%."""
         scenario = _load_scenario(scenario_name)
         scheduler, _ = _run_and_build_schedule(scenario)
 
-        for hour in range(24):
-            if hour not in scheduler.hourly_settings:
-                continue
-            settings = scheduler.hourly_settings[hour]
+        for period in range(len(scheduler.strategic_intents)):
+            settings = scheduler.get_period_settings(period)
             if settings["strategic_intent"] == "EXPORT_ARBITRAGE":
                 assert (
                     settings["grid_charge"] is False
-                ), f"{scenario_name} hour {hour}: EXPORT_ARBITRAGE must have grid_charge=False"
+                ), f"{scenario_name} period {period}: EXPORT_ARBITRAGE must have grid_charge=False"
                 assert (
                     settings["charge_rate"] == 0
-                ), f"{scenario_name} hour {hour}: EXPORT_ARBITRAGE charge_rate={settings['charge_rate']}, expected 0"
+                ), f"{scenario_name} period {period}: EXPORT_ARBITRAGE charge_rate={settings['charge_rate']}, expected 0"
                 assert (
-                    settings["discharge_rate"] >= 0
-                ), f"{scenario_name} hour {hour}: EXPORT_ARBITRAGE discharge_rate={settings['discharge_rate']}, expected >=0"
+                    settings["discharge_rate"] == 100
+                ), f"{scenario_name} period {period}: EXPORT_ARBITRAGE discharge_rate={settings['discharge_rate']}, expected 100"
 
     @pytest.mark.parametrize("scenario_name", _get_realworld_scenarios())
-    def test_idle_hours_have_correct_rates(self, scenario_name):
+    def test_idle_periods_have_correct_rates(self, scenario_name):
         """IDLE: grid_charge=False, discharge_rate=0%."""
         scenario = _load_scenario(scenario_name)
         scheduler, _ = _run_and_build_schedule(scenario)
 
-        for hour in range(24):
-            if hour not in scheduler.hourly_settings:
-                continue
-            settings = scheduler.hourly_settings[hour]
+        for period in range(len(scheduler.strategic_intents)):
+            settings = scheduler.get_period_settings(period)
             if settings["strategic_intent"] == "IDLE":
                 assert (
                     settings["grid_charge"] is False
-                ), f"{scenario_name} hour {hour}: IDLE must have grid_charge=False"
+                ), f"{scenario_name} period {period}: IDLE must have grid_charge=False"
                 assert (
                     settings["discharge_rate"] == 0
-                ), f"{scenario_name} hour {hour}: IDLE discharge_rate={settings['discharge_rate']}, expected 0"
+                ), f"{scenario_name} period {period}: IDLE discharge_rate={settings['discharge_rate']}, expected 0"
 
     @pytest.mark.parametrize("scenario_name", _get_realworld_scenarios())
-    def test_solar_storage_hours_have_correct_rates(self, scenario_name):
+    def test_solar_storage_periods_have_correct_rates(self, scenario_name):
         """SOLAR_STORAGE: grid_charge=False, charge_rate=100%, discharge_rate=0%."""
         scenario = _load_scenario(scenario_name)
         scheduler, _ = _run_and_build_schedule(scenario)
 
-        for hour in range(24):
-            if hour not in scheduler.hourly_settings:
-                continue
-            settings = scheduler.hourly_settings[hour]
+        for period in range(len(scheduler.strategic_intents)):
+            settings = scheduler.get_period_settings(period)
             if settings["strategic_intent"] == "SOLAR_STORAGE":
                 assert (
                     settings["grid_charge"] is False
-                ), f"{scenario_name} hour {hour}: SOLAR_STORAGE must have grid_charge=False"
+                ), f"{scenario_name} period {period}: SOLAR_STORAGE must have grid_charge=False"
                 assert (
                     settings["charge_rate"] == 100
-                ), f"{scenario_name} hour {hour}: SOLAR_STORAGE charge_rate={settings['charge_rate']}, expected 100"
+                ), f"{scenario_name} period {period}: SOLAR_STORAGE charge_rate={settings['charge_rate']}, expected 100"
                 assert (
                     settings["discharge_rate"] == 0
-                ), f"{scenario_name} hour {hour}: SOLAR_STORAGE discharge_rate={settings['discharge_rate']}, expected 0"
+                ), f"{scenario_name} period {period}: SOLAR_STORAGE discharge_rate={settings['discharge_rate']}, expected 0"
 
     @pytest.mark.parametrize("scenario_name", _get_realworld_scenarios())
-    def test_load_support_hours_have_correct_rates(self, scenario_name):
+    def test_load_support_periods_have_correct_rates(self, scenario_name):
         """LOAD_SUPPORT: grid_charge=False, charge_rate=0%, discharge_rate=100%."""
         scenario = _load_scenario(scenario_name)
         scheduler, _ = _run_and_build_schedule(scenario)
 
-        for hour in range(24):
-            if hour not in scheduler.hourly_settings:
-                continue
-            settings = scheduler.hourly_settings[hour]
+        for period in range(len(scheduler.strategic_intents)):
+            settings = scheduler.get_period_settings(period)
             if settings["strategic_intent"] == "LOAD_SUPPORT":
                 assert (
                     settings["grid_charge"] is False
-                ), f"{scenario_name} hour {hour}: LOAD_SUPPORT must have grid_charge=False"
+                ), f"{scenario_name} period {period}: LOAD_SUPPORT must have grid_charge=False"
                 assert (
                     settings["charge_rate"] == 0
-                ), f"{scenario_name} hour {hour}: LOAD_SUPPORT charge_rate={settings['charge_rate']}, expected 0"
+                ), f"{scenario_name} period {period}: LOAD_SUPPORT charge_rate={settings['charge_rate']}, expected 0"
                 assert (
                     settings["discharge_rate"] == 100
-                ), f"{scenario_name} hour {hour}: LOAD_SUPPORT discharge_rate={settings['discharge_rate']}, expected 100"
+                ), f"{scenario_name} period {period}: LOAD_SUPPORT discharge_rate={settings['discharge_rate']}, expected 100"
 
     @pytest.mark.parametrize("scenario_name", _get_realworld_scenarios())
-    def test_all_hours_have_settings(self, scenario_name):
-        """Every hour within the scenario horizon must have hourly_settings."""
+    def test_all_periods_have_settings(self, scenario_name):
+        """Every period must return valid settings via get_period_settings."""
         scenario = _load_scenario(scenario_name)
         scheduler, intents = _run_and_build_schedule(scenario)
 
-        num_hours = (len(intents) + 3) // 4
-        for hour in range(min(num_hours, 24)):
-            assert (
-                hour in scheduler.hourly_settings
-            ), f"{scenario_name}: no hourly_settings for hour {hour}"
-            settings = scheduler.hourly_settings[hour]
+        for period in range(len(intents)):
+            settings = scheduler.get_period_settings(period)
             assert "charge_rate" in settings
             assert "discharge_rate" in settings
             assert "grid_charge" in settings

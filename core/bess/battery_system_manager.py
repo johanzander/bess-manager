@@ -2516,10 +2516,10 @@ class BatterySystemManager:
             return
 
         try:
-            # Get current hour settings to ensure power monitor uses the correct target
-            current_hour = time_utils.now().hour
-            settings = self._inverter_controller.get_hourly_settings(current_hour)
-            charge_rate = settings.get("charge_rate", 0)
+            now = time_utils.now()
+            current_period = now.hour * 4 + now.minute // 15
+            settings = self._inverter_controller.get_period_settings(current_period)
+            charge_rate = settings["charge_rate"]
 
             if self._power_monitor:
                 self._power_monitor.update_target_charging_power(charge_rate)

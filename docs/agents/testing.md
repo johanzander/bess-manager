@@ -83,10 +83,37 @@ CI runs automatically on every PR and push to `main` (`.github/workflows/ci.yml`
 | **Code quality** | Always | Black + Ruff formatting/linting |
 | **Docker build & boot** | `backend/`, `core/`, `frontend/`, or `Dockerfile` changed | Builds production Dockerfile, boots with mock-HA, smoke-tests endpoints |
 
-The E2E job runs 60 Playwright tests covering API contract validation, page-level
+The E2E job runs Playwright tests covering API contract validation, page-level
 rendering, and the setup wizard flow. It starts in two phases:
-1. Normal day scenario — tests all pages, API contracts, and navigation
-2. Wizard scenario — tests the setup wizard with empty settings + mock HA discovery
+1. **Normal day** — tests all pages, API contracts, and navigation
+2. **Wizard** — runs the setup wizard against 7 scenario combinations
+
+### Wizard Scenario Matrix
+
+Each scenario boots a fresh mock-HA + BESS stack with different integrations
+installed, validating that discovery, auto-selection, and the full wizard flow
+work for every supported configuration.
+
+| # | Scenario | Pricing | Inverter | Phase | Solcast | Cons.F | Disch.Inhib | Weather |
+|---|----------|---------|----------|-------|---------|--------|-------------|---------|
+| 1 | `ci-wizard-nordpool-min` | Nordpool Official | MIN | 3 | - | - | - | - |
+| 2 | `ci-wizard-nordpool-sph` | Nordpool Official | SPH | 3 | - | - | - | - |
+| 3 | `ci-wizard-octopus` | Octopus | MIN | - | - | - | - | - |
+| 4 | `ci-wizard-full` | Nordpool Official | MIN | 3 | YES | YES | YES | YES |
+| 5 | `ci-wizard-nordpool-hacs` | Nordpool HACS | MIN | 1 | YES | - | - | YES |
+| 6 | `ci-wizard-octopus-sph` | Octopus | SPH | 3 | - | YES | YES | - |
+| 7 | `ci-wizard-both-providers` | Nordpool + Octopus | MIN | 1 | - | - | YES | YES |
+
+**What each test validates per scenario:**
+- Correct pricing provider auto-selected (Nordpool vs Octopus)
+- Correct inverter type auto-detected (MIN vs SPH)
+- Optional integrations shown as found/not-found with correct status
+- Provider-specific fields shown/hidden correctly
+- Can switch between providers when both are available (scenario 7)
+- Full wizard completion end-to-end
+
+Scenario expectations are defined in `e2e/tests/wizard-expectations.ts`.
+Scenario data files live in `scripts/mock_ha/scenarios/ci-wizard-*.json`.
 
 The Docker build & boot job catches a common failure mode: the production
 `Dockerfile` explicitly lists backend files in its `COPY` command. If a new

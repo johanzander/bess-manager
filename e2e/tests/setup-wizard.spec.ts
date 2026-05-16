@@ -38,13 +38,17 @@ test.describe('Setup Wizard', () => {
     await expect(page).toHaveURL('/setup', { timeout: 15_000 });
   });
 
-  test('discovers Growatt integration and sensors', async ({ page }) => {
+  test('discovers inverter integration and sensors', async ({ page }) => {
     await page.goto('/setup');
     await expectActiveStep(page, 1);
     await expect(page.getByRole('heading', { name: 'Review Sensors' })).toBeVisible();
 
-    // Growatt should always be found in our scenarios
-    await expect(page.getByText('Growatt Server').first()).toBeVisible();
+    // Verify the correct inverter platform is detected
+    if (expected.solaxFound) {
+      await expect(page.getByText('SolaX (Native)').first()).toBeVisible();
+    } else {
+      await expect(page.getByText('Growatt Server').first()).toBeVisible();
+    }
   });
 
   test('auto-selects correct pricing provider', async ({ page }) => {
@@ -67,16 +71,23 @@ test.describe('Setup Wizard', () => {
     await page.goto('/setup');
     await expectActiveStep(page, 1);
 
-    // Navigate to battery step
-    await page.getByRole('button', { name: /Next: Electricity Pricing/i }).click();
-    await page.getByRole('button', { name: /Next: Battery/i }).click();
-    await expectActiveStep(page, 3);
-
-    // Verify inverter type radio
-    if (expected.inverterType === 'SPH') {
-      await expect(radioByLabel(page, 'SPH (DC-coupled)')).toBeChecked();
+    // Verify inverter platform radio on sensor step
+    if (expected.inverterType === 'SOLAX') {
+      // SolaX platform should be selected
+      await expect(radioByLabel(page, 'SolaX (Native)')).toBeChecked();
     } else {
-      await expect(radioByLabel(page, 'MIN (AC-coupled)')).toBeChecked();
+      // Growatt platform — navigate to battery step for sub-type
+      await expect(radioByLabel(page, 'Growatt')).toBeChecked();
+
+      await page.getByRole('button', { name: /Next: Electricity Pricing/i }).click();
+      await page.getByRole('button', { name: /Next: Battery/i }).click();
+      await expectActiveStep(page, 3);
+
+      if (expected.inverterType === 'SPH') {
+        await expect(radioByLabel(page, 'SPH (DC-coupled)')).toBeChecked();
+      } else {
+        await expect(radioByLabel(page, 'MIN (AC-coupled)')).toBeChecked();
+      }
     }
   });
 

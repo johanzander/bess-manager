@@ -9,7 +9,8 @@
 export interface WizardExpectation {
   // Mandatory integrations
   growattFound: boolean;
-  inverterType: 'MIN' | 'SPH';
+  solaxFound: boolean;
+  inverterType: 'MIN' | 'SPH' | 'SOLAX';
   nordpoolFound: boolean;
   octopusFound: boolean;
   /** Which provider radio should be auto-selected after discovery */
@@ -26,6 +27,7 @@ export interface WizardExpectation {
 export const EXPECTATIONS: Record<string, WizardExpectation> = {
   'ci-wizard-nordpool-min': {
     growattFound: true,
+    solaxFound: false,
     inverterType: 'MIN',
     nordpoolFound: true,
     octopusFound: false,
@@ -38,6 +40,7 @@ export const EXPECTATIONS: Record<string, WizardExpectation> = {
   },
   'ci-wizard-nordpool-sph': {
     growattFound: true,
+    solaxFound: false,
     inverterType: 'SPH',
     nordpoolFound: true,
     octopusFound: false,
@@ -50,6 +53,7 @@ export const EXPECTATIONS: Record<string, WizardExpectation> = {
   },
   'ci-wizard-octopus': {
     growattFound: true,
+    solaxFound: false,
     inverterType: 'MIN',
     nordpoolFound: false,
     octopusFound: true,
@@ -62,6 +66,7 @@ export const EXPECTATIONS: Record<string, WizardExpectation> = {
   },
   'ci-wizard-full': {
     growattFound: true,
+    solaxFound: false,
     inverterType: 'MIN',
     nordpoolFound: true,
     octopusFound: false,
@@ -74,6 +79,7 @@ export const EXPECTATIONS: Record<string, WizardExpectation> = {
   },
   'ci-wizard-nordpool-hacs': {
     growattFound: true,
+    solaxFound: false,
     inverterType: 'MIN',
     nordpoolFound: true,
     octopusFound: false,
@@ -86,6 +92,7 @@ export const EXPECTATIONS: Record<string, WizardExpectation> = {
   },
   'ci-wizard-octopus-sph': {
     growattFound: true,
+    solaxFound: false,
     inverterType: 'SPH',
     nordpoolFound: false,
     octopusFound: true,
@@ -98,6 +105,7 @@ export const EXPECTATIONS: Record<string, WizardExpectation> = {
   },
   'ci-wizard-both-providers': {
     growattFound: true,
+    solaxFound: false,
     inverterType: 'MIN',
     nordpoolFound: true,
     octopusFound: true,
@@ -107,5 +115,18 @@ export const EXPECTATIONS: Record<string, WizardExpectation> = {
     consumptionForecastFound: false,
     dischargeInhibitFound: true,
     weatherFound: true,
+  },
+  'ci-wizard-nordpool-solax': {
+    growattFound: false,
+    solaxFound: true,
+    inverterType: 'SOLAX',
+    nordpoolFound: true,
+    octopusFound: false,
+    autoSelectedProvider: 'nordpool_official',
+    phaseCount: null,
+    solcastFound: false,
+    consumptionForecastFound: false,
+    dischargeInhibitFound: false,
+    weatherFound: false,
   },
 };

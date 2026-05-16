@@ -77,6 +77,7 @@ if [ "$RUN_WIZARD" = true ]; then
   WIZARD_SCENARIOS=(
     "ci-wizard-nordpool-min"
     "ci-wizard-nordpool-sph"
+    "ci-wizard-nordpool-solax"
     "ci-wizard-octopus"
     "ci-wizard-full"
     "ci-wizard-nordpool-hacs"

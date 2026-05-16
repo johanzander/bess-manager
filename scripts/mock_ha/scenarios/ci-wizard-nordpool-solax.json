@@ -1,0 +1,173 @@
+{
+  "name": "CI Wizard: Nordpool + SolaX (Native) inverter",
+  "description": "Setup wizard scenario — Swedish user, Nordpool Official, native SolaX inverter via solax_modbus with VPP control.",
+  "mock_time": "@2025-01-15 08:30:00",
+  "timezone": "Europe/Stockholm",
+  "inverter_type": "solax",
+  "sensors": {
+    "sensor.solax_battery_capacity": {
+      "state": "65",
+      "attributes": { "unit_of_measurement": "%", "friendly_name": "SolaX Battery Capacity" }
+    },
+    "sensor.solax_battery_power_charge": {
+      "state": "0",
+      "attributes": { "unit_of_measurement": "W", "friendly_name": "SolaX Battery Charge Power" }
+    },
+    "sensor.solax_battery_power_discharge": {
+      "state": "800",
+      "attributes": { "unit_of_measurement": "W", "friendly_name": "SolaX Battery Discharge Power" }
+    },
+    "sensor.solax_measured_power": {
+      "state": "-200",
+      "attributes": { "unit_of_measurement": "W", "friendly_name": "SolaX Measured Power (Grid)" }
+    },
+    "sensor.solax_grid_export": {
+      "state": "200",
+      "attributes": { "unit_of_measurement": "W", "friendly_name": "SolaX Grid Export" }
+    },
+    "sensor.solax_pv_power_1": {
+      "state": "1200",
+      "attributes": { "unit_of_measurement": "W", "friendly_name": "SolaX PV Power" }
+    },
+    "sensor.solax_house_load": {
+      "state": "1400",
+      "attributes": { "unit_of_measurement": "W", "friendly_name": "SolaX House Load" }
+    },
+    "select.solax_remotecontrol_power_control": {
+      "state": "Enabled - Remote Control",
+      "attributes": { "options": ["Disabled", "Enabled - Remote Control", "Enabled - External EMS"] }
+    },
+    "number.solax_remotecontrol_active_power": {
+      "state": "0",
+      "attributes": { "unit_of_measurement": "W", "min": -6000, "max": 6000 }
+    },
+    "number.solax_remotecontrol_autorepeat_duration": {
+      "state": "1200",
+      "attributes": { "unit_of_measurement": "s", "min": 0, "max": 3600 }
+    },
+    "button.solax_remotecontrol_trigger": {
+      "state": "unknown",
+      "attributes": {}
+    },
+    "number.solax_battery_minimum_capacity": {
+      "state": "15",
+      "attributes": { "unit_of_measurement": "%", "min": 0, "max": 100 }
+    },
+    "sensor.nordpool_kwh_se4_sek_3_10_025": {
+      "state": "0.85",
+      "attributes": {
+        "unit_of_measurement": "SEK/kWh",
+        "today": [0.50, 0.40, 0.30, 0.25, 0.25, 0.40, 0.70, 0.90, 1.10, 1.20, 1.30, 1.40, 1.30, 1.20, 1.10, 1.30, 1.40, 1.50, 1.60, 1.50, 1.30, 0.90, 0.70, 0.60],
+        "tomorrow": [0.45, 0.35, 0.28, 0.22, 0.20, 0.35, 0.65, 0.85, 1.05, 1.15, 1.25, 1.35, 1.25, 1.15, 1.05, 1.25, 1.35, 1.45, 1.55, 1.45, 1.25, 0.85, 0.65, 0.55]
+      }
+    }
+  },
+  "config_entries": [
+    {
+      "entry_id": "mock_nordpool_config_entry",
+      "domain": "nordpool",
+      "title": "Nordpool",
+      "state": "loaded"
+    },
+    {
+      "entry_id": "mock_solax_config_entry",
+      "domain": "solax_modbus",
+      "title": "SolaX Modbus",
+      "state": "loaded"
+    }
+  ],
+  "devices": [
+    {
+      "id": "mock_solax_device_001",
+      "name": "SolaX X1-Hybrid",
+      "manufacturer": "SolaX Power",
+      "model": "X1-Hybrid-6.0"
+    }
+  ],
+  "services": {},
+  "entity_registry": [
+    {
+      "entity_id": "sensor.nordpool_kwh_se4_sek_3_10_025",
+      "platform": "nordpool",
+      "config_entry_id": "mock_nordpool_config_entry",
+      "unique_id": "SE4-current_price"
+    },
+    {
+      "entity_id": "sensor.solax_battery_capacity",
+      "platform": "solax_modbus",
+      "config_entry_id": "mock_solax_config_entry",
+      "unique_id": "solax_battery_capacity"
+    },
+    {
+      "entity_id": "sensor.solax_battery_power_charge",
+      "platform": "solax_modbus",
+      "config_entry_id": "mock_solax_config_entry",
+      "unique_id": "solax_battery_power_charge"
+    },
+    {
+      "entity_id": "sensor.solax_battery_power_discharge",
+      "platform": "solax_modbus",
+      "config_entry_id": "mock_solax_config_entry",
+      "unique_id": "solax_battery_power_discharge"
+    },
+    {
+      "entity_id": "sensor.solax_measured_power",
+      "platform": "solax_modbus",
+      "config_entry_id": "mock_solax_config_entry",
+      "unique_id": "solax_measured_power"
+    },
+    {
+      "entity_id": "sensor.solax_grid_export",
+      "platform": "solax_modbus",
+      "config_entry_id": "mock_solax_config_entry",
+      "unique_id": "solax_grid_export"
+    },
+    {
+      "entity_id": "sensor.solax_pv_power_1",
+      "platform": "solax_modbus",
+      "config_entry_id": "mock_solax_config_entry",
+      "unique_id": "solax_pv_power_1"
+    },
+    {
+      "entity_id": "sensor.solax_house_load",
+      "platform": "solax_modbus",
+      "config_entry_id": "mock_solax_config_entry",
+      "unique_id": "solax_house_load"
+    },
+    {
+      "entity_id": "select.solax_remotecontrol_power_control",
+      "platform": "solax_modbus",
+      "config_entry_id": "mock_solax_config_entry",
+      "unique_id": "solax_remotecontrol_power_control"
+    },
+    {
+      "entity_id": "number.solax_remotecontrol_active_power",
+      "platform": "solax_modbus",
+      "config_entry_id": "mock_solax_config_entry",
+      "unique_id": "solax_remotecontrol_active_power"
+    },
+    {
+      "entity_id": "number.solax_remotecontrol_autorepeat_duration",
+      "platform": "solax_modbus",
+      "config_entry_id": "mock_solax_config_entry",
+      "unique_id": "solax_remotecontrol_autorepeat_duration"
+    },
+    {
+      "entity_id": "button.solax_remotecontrol_trigger",
+      "platform": "solax_modbus",
+      "config_entry_id": "mock_solax_config_entry",
+      "unique_id": "solax_remotecontrol_trigger"
+    },
+    {
+      "entity_id": "number.solax_battery_minimum_capacity",
+      "platform": "solax_modbus",
+      "config_entry_id": "mock_solax_config_entry",
+      "unique_id": "solax_battery_minimum_capacity"
+    }
+  ],
+  "time_segments": [],
+  "price_data": {
+    "today": [0.50, 0.40, 0.30, 0.25, 0.25, 0.40, 0.70, 0.90, 1.10, 1.20, 1.30, 1.40, 1.30, 1.20, 1.10, 1.30, 1.40, 1.50, 1.60, 1.50, 1.30, 0.90, 0.70, 0.60],
+    "tomorrow": [0.45, 0.35, 0.28, 0.22, 0.20, 0.35, 0.65, 0.85, 1.05, 1.15, 1.25, 1.35, 1.25, 1.15, 1.05, 1.25, 1.35, 1.45, 1.55, 1.45, 1.25, 0.85, 0.65, 0.55]
+  }
+}

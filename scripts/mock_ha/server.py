@@ -56,7 +56,7 @@ _timezone: str = "UTC"
 # WebSocket registry data — populated from scenario or auto-generated from sensors
 _entity_registry: list[dict] = []
 _config_entries: list[dict] = []
-_device_registry: list[dict] = []
+_devices: list[dict] = []
 _services: dict[str, Any] = {}
 
 
@@ -73,10 +73,6 @@ def _generate_entity_registry(inverter_type: str) -> list[dict]:
         "growatt_modbus": "solax_modbus",
     }
     inverter_platform = platform_map.get(inverter_type, "growatt_server")
-
-    # Known non-inverter platforms — everything else is assumed to belong to
-    # the inverter integration for auto-detection purposes.
-    _NON_INVERTER = {"nordpool", "solcast_solar", "weather"}
 
     entries: list[dict] = []
     for entity_id in _sensors:
@@ -243,7 +239,7 @@ def _load_scenario() -> None:
     # WebSocket registry data — used by setup wizard auto-discovery
     _entity_registry.extend(scenario.get("entity_registry", []))
     _config_entries.extend(scenario.get("config_entries", []))
-    _device_registry.extend(scenario.get("device_registry", []))
+    _devices.extend(scenario.get("devices", []))
     _services.update(scenario.get("services", {}))
 
     # Auto-generate entity registry from sensors if not provided
@@ -417,86 +413,69 @@ async def call_service(domain: str, service: str, request: Request) -> JSONRespo
 
 
 # ---------------------------------------------------------------------------
-# WebSocket API (entity registry, config entries, device registry, services)
+# Home Assistant WebSocket API (used by setup discovery)
 # ---------------------------------------------------------------------------
 
 
 @app.websocket("/api/websocket")
-async def websocket_endpoint(ws: WebSocket) -> None:
-    """Mock Home Assistant WebSocket API for auto-discovery.
+async def ha_websocket(ws: WebSocket) -> None:
+    """Mock the HA WebSocket API used by BESS setup discovery.
 
-    Handles the HA auth handshake and responds to registry queries used
-    by BESS setup wizard auto-discovery.
+    Implements the auth handshake and responds to the four command types
+    that discover_ha_metadata sends:
+      - config_entries/get
+      - config/device_registry/list
+      - get_services
+      - config/entity_registry/list
     """
     await ws.accept()
     try:
-        # Phase 1: Auth handshake
-        await ws.send_json({"type": "auth_required", "ha_version": "2024.1.0"})
+        # Phase 1: Authentication
+        await ws.send_json({"type": "auth_required", "ha_version": "2025.1.0"})
         auth_msg = await ws.receive_json()
         if auth_msg.get("type") != "auth":
-            await ws.close(code=1008)
+            await ws.close(1008, "Expected auth message")
             return
-        await ws.send_json({"type": "auth_ok", "ha_version": "2024.1.0"})
+        await ws.send_json({"type": "auth_ok", "ha_version": "2025.1.0"})
 
         # Phase 2: Handle commands
         while True:
             msg = await ws.receive_json()
-            msg_id = msg.get("id", 0)
-            msg_type = msg.get("type", "")
+            cmd_type = msg.get("type", "")
+            cmd_id = msg.get("id", 0)
 
-            if msg_type == "config/entity_registry/list":
+            _WS_HANDLERS = {
+                "config_entries/get": _config_entries,
+                "config/device_registry/list": _devices,
+                "get_services": _services,
+                "config/entity_registry/list": _entity_registry,
+            }
+
+            result = _WS_HANDLERS.get(cmd_type)
+            if result is not None:
                 await ws.send_json(
-                    {
-                        "id": msg_id,
-                        "type": "result",
-                        "success": True,
-                        "result": _entity_registry,
-                    }
+                    {"id": cmd_id, "type": "result", "success": True, "result": result}
                 )
-            elif msg_type == "config_entries/get":
-                await ws.send_json(
-                    {
-                        "id": msg_id,
-                        "type": "result",
-                        "success": True,
-                        "result": _config_entries,
-                    }
-                )
-            elif msg_type == "config/device_registry/list":
-                await ws.send_json(
-                    {
-                        "id": msg_id,
-                        "type": "result",
-                        "success": True,
-                        "result": _device_registry,
-                    }
-                )
-            elif msg_type == "get_services":
-                await ws.send_json(
-                    {
-                        "id": msg_id,
-                        "type": "result",
-                        "success": True,
-                        "result": _services,
-                    }
+                logger.info(
+                    "WS %-40s → %d entries",
+                    cmd_type,
+                    len(result) if isinstance(result, list) else len(result.keys()),
                 )
             else:
-                logger.warning("Unknown WS command: %s", msg_type)
                 await ws.send_json(
                     {
-                        "id": msg_id,
+                        "id": cmd_id,
                         "type": "result",
                         "success": False,
                         "error": {
-                            "code": "unknown_command",
-                            "message": f"Unknown: {msg_type}",
+                            "code": "not_found",
+                            "message": f"Unknown command: {cmd_type}",
                         },
                     }
                 )
+                logger.warning("WS unknown command: %s", cmd_type)
     except WebSocketDisconnect:
         pass
-    except Exception as e:
-        logger.warning("WebSocket error: %s", e)
 
 
 # ---------------------------------------------------------------------------

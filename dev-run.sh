@@ -92,7 +92,7 @@ fi
 export TZ=${TZ:-Europe/Stockholm}
 
 echo "Stopping any existing containers for this project..."
-docker-compose down --remove-orphans 2>/dev/null
+docker compose down --remove-orphans 2>/dev/null
 
 # Also remove any stale container with the target name (e.g. left over
 # from a previous run or an older compose config without project naming).
@@ -111,8 +111,8 @@ else
   echo "Frontend unchanged, skipping build."
 fi
 
-echo "Building and starting development container with Python 3.10..."
-docker-compose up --build -d
+echo "Building and starting development container..."
+docker compose up --build -d
 
 echo "Waiting for BESS to start (following logs)..."
 echo ""
@@ -127,7 +127,7 @@ print_banner() {
 trap 'print_banner; exit 0' INT
 
 # Stream logs; print the banner once BESS is fully started (Uvicorn ready).
-docker-compose logs -f --no-log-prefix 2>&1 | while IFS= read -r line; do
+docker compose logs -f --no-log-prefix 2>&1 | while IFS= read -r line; do
     echo "$line"
     if [[ "$line" == *"Uvicorn running on"* ]]; then
       print_banner

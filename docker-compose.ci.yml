@@ -19,13 +19,13 @@ services:
       - TZ=Europe/Stockholm
       - PYTHONPATH=/app/backend:/app
     ports:
-      - "8080:8080"
+      - "${BESS_PORT:-8080}:8080"
     volumes:
       - ./backend:/app/backend:ro
       - ./core:/app/core:ro
       - ./frontend/dist:/app/frontend:ro
-      - ./e2e/ci-options.json:/data/options.json:ro
-      - ./e2e/ci-bess-settings.json:/data/bess_settings.json
+      - ${BESS_OPTIONS:-./e2e/ci-options.json}:/data/options.json:ro
+      - ${BESS_SETTINGS:-./e2e/ci-bess-settings.json}:/data/bess_settings.json
     command: ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8080"]
     depends_on:
       mock-ha:
@@ -38,7 +38,7 @@ services:
     environment:
       - SCENARIO=${SCENARIO:-ci-normal-day}
     ports:
-      - "8123:8123"
+      - "${MOCK_HA_PORT:-8123}:8123"
     volumes:
       - ./scripts/mock_ha/scenarios:/scenarios:ro
     healthcheck:

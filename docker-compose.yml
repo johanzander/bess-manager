@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile.dev
-    container_name: ${COMPOSE_PROJECT_NAME:-bess}-dev
+    # Container name is derived from COMPOSE_PROJECT_NAME automatically
     volumes:
       - ./backend:/app/backend:delegated
       - ./core:/app/core:delegated

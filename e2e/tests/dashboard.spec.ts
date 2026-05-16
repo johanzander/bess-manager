@@ -8,7 +8,7 @@ test.describe('Dashboard', () => {
     await expect(page.getByText('Loading settings...')).not.toBeVisible({ timeout: 15_000 });
 
     // Should show the BESS header
-    await expect(page.locator('h1')).toContainText('BESS');
+    await expect(page.getByRole('heading', { name: 'BESS', level: 1 })).toBeVisible();
 
     // Should not show error boundary
     await expect(page.getByText('Something went wrong')).not.toBeVisible();
@@ -19,5 +19,47 @@ test.describe('Dashboard', () => {
     // With a properly configured scenario, we should stay on dashboard, not redirect to /setup
     await page.waitForTimeout(2000);
     expect(page.url()).not.toContain('/setup');
+  });
+
+  test('shows Dashboard heading with last-updated time', async ({ page }) => {
+    await page.goto('/');
+
+    await expect(
+      page.getByRole('heading', { name: 'Dashboard', exact: true })
+    ).toBeVisible({ timeout: 15_000 });
+
+    // Should show last updated timestamp
+    await expect(page.getByText(/Last updated/i)).toBeVisible();
+  });
+
+  test('shows system overview, initializing, or no-data state', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.getByRole('heading', { name: 'Dashboard', exact: true })).toBeVisible({ timeout: 15_000 });
+
+    // Dashboard shows one of: data loaded, initializing, or no data yet
+    const hasData = await page.getByText('System Overview').isVisible().catch(() => false);
+    const isInitializing = await page.getByText('Initializing system').isVisible().catch(() => false);
+    const noData = await page.getByText('No Dashboard Data').isVisible().catch(() => false);
+    expect(hasData || isInitializing || noData).toBe(true);
+  });
+
+  test('shows energy flow section when data is available', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.getByRole('heading', { name: 'Dashboard', exact: true })).toBeVisible({ timeout: 15_000 });
+
+    // If data is available, energy flows section shows
+    const hasData = await page.getByText('System Overview').isVisible().catch(() => false);
+    if (hasData) {
+      await expect(page.getByText(/Energy Flows/i)).toBeVisible();
+    }
+  });
+
+  test('shows resolution selector', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.getByRole('heading', { name: 'Dashboard', exact: true })).toBeVisible({ timeout: 15_000 });
+
+    // Resolution buttons are always visible
+    await expect(page.getByRole('button', { name: '60 min' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '15 min' })).toBeVisible();
   });
 });

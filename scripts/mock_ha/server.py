@@ -242,13 +242,19 @@ def _load_scenario() -> None:
     _devices.extend(scenario.get("devices", []))
     _services.update(scenario.get("services", {}))
 
-    # Auto-generate entity registry from sensors if not provided
-    if not _entity_registry:
-        inverter_type = scenario.get("inverter_type", "min")
-        _entity_registry.extend(_generate_entity_registry(inverter_type))
+    # Auto-generate entity registry for sensors not already covered
+    existing_entity_ids = {e["entity_id"] for e in _entity_registry}
+    inverter_type = scenario.get("inverter_type", "min")
+    auto_entries = [
+        e
+        for e in _generate_entity_registry(inverter_type)
+        if e["entity_id"] not in existing_entity_ids
+    ]
+    if auto_entries:
+        _entity_registry.extend(auto_entries)
         logger.info(
-            "Auto-generated entity registry (%d entries) for inverter_type=%s",
-            len(_entity_registry),
+            "Auto-generated %d entity registry entries for inverter_type=%s",
+            len(auto_entries),
             inverter_type,
         )
 

@@ -15,6 +15,13 @@ export interface DiscoveryResult {
   nordpoolFound: boolean;
   nordpoolArea: string | null;
   nordpoolConfigEntryId: string | null;
+  octopusFound: boolean;
+  octopusEntities?: {
+    importToday?: string;
+    importTomorrow?: string;
+    exportToday?: string;
+    exportTomorrow?: string;
+  };
   sensors: Record<string, string>;
   missingSensors: string[];
   inverterType: string | null;

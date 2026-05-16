@@ -72,20 +72,35 @@ if [ "$RUN_CHROMIUM" = true ]; then
   docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.ci.yml down
 fi
 
-# --- Phase 2: Wizard tests ---
+# --- Phase 2: Wizard tests (all scenario combinations) ---
 if [ "$RUN_WIZARD" = true ]; then
-  echo "==> Phase 2: Starting environment (ci-wizard-nordpool-min)..."
-  SCENARIO=ci-wizard-nordpool-min \
-    BESS_SETTINGS=./e2e/ci-wizard-settings.json \
-    BESS_OPTIONS=./e2e/ci-wizard-options.json \
-    docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.ci.yml up -d
-  echo "==> Waiting for BESS on port ${BESS_PORT}..."
-  timeout 120 bash -c "until curl -sf http://localhost:${BESS_PORT}/api/setup/status > /dev/null 2>&1; do sleep 2; done"
+  WIZARD_SCENARIOS=(
+    "ci-wizard-nordpool-min"
+    "ci-wizard-nordpool-sph"
+    "ci-wizard-octopus"
+    "ci-wizard-full"
+    "ci-wizard-nordpool-hacs"
+    "ci-wizard-octopus-sph"
+    "ci-wizard-both-providers"
+  )
 
-  echo "==> Running wizard tests..."
-  (cd e2e && BESS_PORT="$BESS_PORT" npx playwright test --project=wizard)
+  for scenario in "${WIZARD_SCENARIOS[@]}"; do
+    # Reset settings to empty so wizard triggers fresh each time
+    echo '{}' > ./e2e/ci-wizard-settings.json
 
-  docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.ci.yml down
+    echo "==> Phase 2: Starting environment (${scenario})..."
+    SCENARIO="$scenario" \
+      BESS_SETTINGS=./e2e/ci-wizard-settings.json \
+      BESS_OPTIONS=./e2e/ci-wizard-options.json \
+      docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.ci.yml up -d
+    echo "==> Waiting for BESS on port ${BESS_PORT}..."
+    timeout 120 bash -c "until curl -sf http://localhost:${BESS_PORT}/api/setup/status > /dev/null 2>&1; do sleep 2; done"
+
+    echo "==> Running wizard tests (${scenario})..."
+    (cd e2e && BESS_PORT="$BESS_PORT" SCENARIO="$scenario" npx playwright test --project=wizard)
+
+    docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.ci.yml down
+  done
 fi
 
 echo ""

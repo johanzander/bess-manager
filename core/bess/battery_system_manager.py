@@ -2421,10 +2421,10 @@ class BatterySystemManager:
     def adjust_charging_power(self) -> None:
         """Adjust charging power based on house consumption."""
         try:
-            # Get current hour settings to ensure power monitor uses the correct target
-            current_hour = time_utils.now().hour
-            settings = self._schedule_manager.get_hourly_settings(current_hour)
-            charge_rate = settings.get("charge_rate", 0)
+            now = time_utils.now()
+            current_period = now.hour * 4 + now.minute // 15
+            settings = self._schedule_manager.get_period_settings(current_period)
+            charge_rate = settings["charge_rate"]
 
             if self._power_monitor:
                 self._power_monitor.update_target_charging_power(charge_rate)

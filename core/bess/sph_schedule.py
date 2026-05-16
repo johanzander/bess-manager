@@ -53,7 +53,7 @@ class SphScheduleManager:
         "IDLE": "load_first",
     }
 
-    # Map strategic intents to inverter control settings (used for hourly_settings)
+    # Map strategic intents to inverter control settings
     INTENT_TO_CONTROL: ClassVar[dict[str, dict[str, bool | int]]] = {
         "GRID_CHARGING": {"grid_charge": True, "charge_rate": 100, "discharge_rate": 0},
         "SOLAR_STORAGE": {
@@ -82,7 +82,6 @@ class SphScheduleManager:
         self.current_schedule: DPSchedule | None = None
         self.strategic_intents: list[str] = []
         self.tou_intervals: list[dict] = []
-        self.hourly_settings: dict[int, dict] = {}
 
         # SPH always does a full rewrite — no corruption concept
         self.corruption_detected: bool = False
@@ -269,59 +268,6 @@ class SphScheduleManager:
         for p in self._discharge_periods:
             logger.info("  Discharge: %s-%s", p["start_time"], p["end_time"])
 
-    def _calculate_hourly_settings(self) -> None:
-        """Pre-calculate hourly settings from strategic intents."""
-        self.hourly_settings = {}
-
-        if not self.strategic_intents:
-            raise ValueError(
-                "Missing strategic intents for hourly settings calculation"
-            )
-
-        num_periods = len(self.strategic_intents)
-        num_hours = (num_periods + 3) // 4
-
-        for hour in range(num_hours):
-            # Dominant intent for this hour
-            start_p = hour * 4
-            end_p = min(start_p + 4, num_periods)
-            period_intents = [self.strategic_intents[p] for p in range(start_p, end_p)]
-
-            intent_counts: dict[str, int] = {}
-            for intent in period_intents:
-                intent_counts[intent] = intent_counts.get(intent, 0) + 1
-            max_count = max(intent_counts.values())
-            candidates = [i for i, c in intent_counts.items() if c == max_count]
-            dominant_intent = min(candidates)
-
-            control = self.INTENT_TO_CONTROL[dominant_intent]
-
-            self.hourly_settings[hour] = {
-                "grid_charge": control["grid_charge"],
-                "charge_rate": control["charge_rate"],
-                "discharge_rate": control["discharge_rate"],
-                "strategic_intent": dominant_intent,
-                "state": (
-                    "charging"
-                    if dominant_intent in ("GRID_CHARGING", "SOLAR_STORAGE")
-                    else (
-                        "discharging"
-                        if dominant_intent in ("LOAD_SUPPORT", "EXPORT_ARBITRAGE")
-                        else "idle"
-                    )
-                ),
-                "batt_mode": (
-                    "battery_first"
-                    if dominant_intent in ("GRID_CHARGING", "SOLAR_STORAGE")
-                    else (
-                        "grid_first"
-                        if dominant_intent == "EXPORT_ARBITRAGE"
-                        else "load_first"
-                    )
-                ),
-                "battery_action_kw": 0.0,
-            }
-
     def create_schedule(
         self,
         schedule: DPSchedule,
@@ -344,7 +290,6 @@ class SphScheduleManager:
         )
 
         self._build_sph_periods()
-        self._calculate_hourly_settings()
 
         logger.info(
             "SPH schedule created: %d charge period(s), %d discharge period(s), "
@@ -623,27 +568,36 @@ class SphScheduleManager:
         logger.info("DECISION: SPH schedules match")
         return False, ""
 
-    # ── Hourly settings ───────────────────────────────────────────────────────
+    # ── Period settings ─────────────────────────────────────────────────────
 
-    def get_hourly_settings(self, hour: int) -> dict:
-        """Get pre-calculated settings for a specific hour.
+    def get_period_settings(self, period: int) -> dict:
+        """Get control settings for a specific 15-minute period.
 
         Args:
-            hour: Hour (0-23)
+            period: Period index (0-95 normally, varies during DST)
 
         Returns:
-            Dict with grid_charge, charge_rate, discharge_rate, state, batt_mode, etc.
-
-        Raises:
-            ValueError: If hourly settings not calculated yet for this hour
+            Dict with grid_charge, charge_rate, discharge_rate,
+            strategic_intent, batt_mode
         """
-        if hour not in self.hourly_settings:
+        if not self.strategic_intents:
+            raise ValueError("No strategic intents available")
+        if period < 0 or period >= len(self.strategic_intents):
             raise ValueError(
-                f"No hourly settings for hour {hour}. "
-                f"Strategic intents: {len(self.strategic_intents)}, "
-                f"Settings calculated: {len(self.hourly_settings)}"
+                f"Period {period} out of range [0, {len(self.strategic_intents)})"
             )
-        return self.hourly_settings[hour]
+
+        intent = self.strategic_intents[period]
+        control = self.INTENT_TO_CONTROL[intent]
+        mode = self.INTENT_TO_MODE[intent]
+
+        return {
+            "grid_charge": control["grid_charge"],
+            "charge_rate": control["charge_rate"],
+            "discharge_rate": control["discharge_rate"],
+            "strategic_intent": intent,
+            "batt_mode": mode,
+        }
 
     # ── TOU display ───────────────────────────────────────────────────────────
 
@@ -748,7 +702,11 @@ class SphScheduleManager:
         return list(self.tou_intervals)
 
     def get_strategic_intent_summary(self) -> dict:
-        """Get a summary of strategic intents for the day (aggregated from quarterly periods)."""
+        """Get a summary of strategic intents for the day.
+
+        Aggregates quarterly periods into hourly dominant intents via majority
+        vote (alphabetical tie-break), then groups hours by intent.
+        """
         if not self.strategic_intents:
             return {}
 
@@ -759,30 +717,21 @@ class SphScheduleManager:
         for hour in range(num_hours):
             start_p = hour * 4
             end_p = min(start_p + 4, num_periods)
-            period_intents = [self.strategic_intents[p] for p in range(start_p, end_p)]
+            period_intents = self.strategic_intents[start_p:end_p]
 
-            intent_counts: dict[str, int] = {}
-            for intent in period_intents:
-                intent_counts[intent] = intent_counts.get(intent, 0) + 1
-            max_count = max(intent_counts.values())
-            dominant = min(i for i, c in intent_counts.items() if c == max_count)
+            counts: dict[str, int] = {}
+            for i in period_intents:
+                counts[i] = counts.get(i, 0) + 1
+            max_count = max(counts.values())
+            dominant = min(i for i, c in counts.items() if c == max_count)
 
-            if dominant not in intent_hours:
-                intent_hours[dominant] = []
-            intent_hours[dominant].append(hour)
+            intent_hours.setdefault(dominant, []).append(hour)
 
-        descriptions = {
-            "GRID_CHARGING": "Storing cheap grid energy for later use",
-            "SOLAR_STORAGE": "Storing excess solar energy for evening/night",
-            "LOAD_SUPPORT": "Using battery to support home consumption",
-            "EXPORT_ARBITRAGE": "Selling stored energy to grid for profit",
-            "IDLE": "No significant battery activity",
-        }
         return {
             intent: {
                 "hours": hours,
                 "count": len(hours),
-                "description": descriptions.get(intent, "Unknown intent"),
+                "description": self._get_intent_description(intent),
             }
             for intent, hours in intent_hours.items()
         }

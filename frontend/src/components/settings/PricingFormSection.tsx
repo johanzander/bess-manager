@@ -26,6 +26,16 @@ export function PricingFormSection({ form, onChange }: Props) {
   const isOctopus = form.provider === 'octopus';
   const currency = isOctopus ? 'GBP' : form.currency;
 
+  const handleChange = (next: PricingForm) => {
+    // When switching TO Octopus, reset fields that are hidden but still sent to
+    // the backend.  Octopus rates are already all-in (VAT-inclusive, GBP/kWh),
+    // so markup / VAT / additional costs must be zero / neutral.
+    if (next.provider === 'octopus' && form.provider !== 'octopus') {
+      next = { ...next, markupRate: 0, vatMultiplier: 1, additionalCosts: 0 };
+    }
+    onChange(next);
+  };
+
   const previewSpot = 1.0;
   const previewBuy = Number(
     ((previewSpot + form.markupRate) * form.vatMultiplier + form.additionalCosts).toFixed(4),
@@ -46,7 +56,7 @@ export function PricingFormSection({ form, onChange }: Props) {
             { value: 'octopus', label: 'Octopus Energy' },
           ],
           form.provider,
-          v => onChange({ ...form, provider: v }),
+          v => handleChange({ ...form, provider: v }),
         )}
 
         {form.provider === 'nordpool_official' && (

@@ -149,6 +149,62 @@ test.describe('API Contracts: /api/dashboard', () => {
 
     expect(body.hourlyData.length).toBe(24);
   });
+
+  test('savings totals are consistent between resolutions', async ({ request }) => {
+    const [hourlyRes, quarterRes] = await Promise.all([
+      request.get('/api/dashboard?resolution=hourly'),
+      request.get('/api/dashboard?resolution=quarter-hourly'),
+    ]);
+    const hourly = await hourlyRes.json();
+    const quarter = await quarterRes.json();
+    if (hourly.error === 'initializing' || quarter.error === 'initializing') return;
+
+    // Summary totals must be the same regardless of resolution — they cover the
+    // same time range, just sliced differently.
+    const hSummary = hourly.summary;
+    const qSummary = quarter.summary;
+
+    // totalSavings should match (both are FormattedValue with .value)
+    expect(hSummary.totalSavings.value).toBeCloseTo(qSummary.totalSavings.value, 1);
+    expect(hSummary.gridOnlyCost.value).toBeCloseTo(qSummary.gridOnlyCost.value, 1);
+    expect(hSummary.optimizedCost.value).toBeCloseTo(qSummary.optimizedCost.value, 1);
+
+    // costAndSavings should also be consistent
+    expect(hourly.costAndSavings.todaysCost.value).toBeCloseTo(
+      quarter.costAndSavings.todaysCost.value, 1
+    );
+    expect(hourly.costAndSavings.todaysSavings.value).toBeCloseTo(
+      quarter.costAndSavings.todaysSavings.value, 1
+    );
+  });
+
+  test('hourly period values sum to match summary totals', async ({ request }) => {
+    const res = await request.get('/api/dashboard?resolution=hourly');
+    const body = await res.json();
+    if (body.error === 'initializing') return;
+
+    // Sum individual period costs and compare to summary
+    const sumCost = body.hourlyData.reduce(
+      (acc: number, h: any) => acc + (h.hourlyCost?.value ?? 0), 0
+    );
+    const summaryOptimizedCost = body.summary.optimizedCost.value;
+
+    // Allow small floating point drift (within 0.5 currency units)
+    expect(Math.abs(sumCost - summaryOptimizedCost)).toBeLessThan(0.5);
+  });
+
+  test('quarter-hourly period values sum to match summary totals', async ({ request }) => {
+    const res = await request.get('/api/dashboard?resolution=quarter-hourly');
+    const body = await res.json();
+    if (body.error === 'initializing') return;
+
+    const sumCost = body.hourlyData.reduce(
+      (acc: number, h: any) => acc + (h.hourlyCost?.value ?? 0), 0
+    );
+    const summaryOptimizedCost = body.summary.optimizedCost.value;
+
+    expect(Math.abs(sumCost - summaryOptimizedCost)).toBeLessThan(0.5);
+  });
 });
 
 test.describe('API Contracts: /api/growatt/inverter_status', () => {

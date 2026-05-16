@@ -17,7 +17,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 
 logging.basicConfig(
@@ -53,6 +53,11 @@ _service_log: list[dict] = []
 _nordpool_prices: dict[str, list[float]] = {}
 # IANA timezone name for this scenario (e.g. "Europe/Stockholm")
 _timezone: str = "UTC"
+# WebSocket discovery data — loaded from scenario JSON
+_config_entries: list[dict] = []
+_devices: list[dict] = []
+_services: dict[str, Any] = {}
+_entity_registry: list[dict] = []
 
 
 def _load_scenario() -> None:
@@ -79,6 +84,11 @@ def _load_scenario() -> None:
     _ac_charge_times.extend(scenario.get("ac_charge_times", []))
     _ac_discharge_times.extend(scenario.get("ac_discharge_times", []))
     _timezone = scenario.get("timezone", "UTC")
+    # WebSocket discovery data (optional — used by setup wizard)
+    _config_entries.extend(scenario.get("config_entries", []))
+    _devices.extend(scenario.get("devices", []))
+    _services.update(scenario.get("services", {}))
+    _entity_registry.extend(scenario.get("entity_registry", []))
 
     # Build nordpool prices lookup for the mock get_prices_for_date service call.
     # Prices can come from two sources:
@@ -243,6 +253,72 @@ async def call_service(domain: str, service: str, request: Request) -> JSONRespo
 
     # All write operations: record and acknowledge
     return JSONResponse({})
+
+
+# ---------------------------------------------------------------------------
+# Home Assistant WebSocket API (used by setup discovery)
+# ---------------------------------------------------------------------------
+
+
+@app.websocket("/api/websocket")
+async def ha_websocket(ws: WebSocket) -> None:
+    """Mock the HA WebSocket API used by BESS setup discovery.
+
+    Implements the auth handshake and responds to the four command types
+    that discover_ha_metadata sends:
+      - config_entries/get
+      - config/device_registry/list
+      - get_services
+      - config/entity_registry/list
+    """
+    await ws.accept()
+    try:
+        # Phase 1: Authentication
+        await ws.send_json({"type": "auth_required", "ha_version": "2025.1.0"})
+        auth_msg = await ws.receive_json()
+        if auth_msg.get("type") != "auth":
+            await ws.close(1008, "Expected auth message")
+            return
+        await ws.send_json({"type": "auth_ok", "ha_version": "2025.1.0"})
+
+        # Phase 2: Handle commands
+        while True:
+            msg = await ws.receive_json()
+            cmd_type = msg.get("type", "")
+            cmd_id = msg.get("id", 0)
+
+            _WS_HANDLERS = {
+                "config_entries/get": _config_entries,
+                "config/device_registry/list": _devices,
+                "get_services": _services,
+                "config/entity_registry/list": _entity_registry,
+            }
+
+            result = _WS_HANDLERS.get(cmd_type)
+            if result is not None:
+                await ws.send_json(
+                    {"id": cmd_id, "type": "result", "success": True, "result": result}
+                )
+                logger.info(
+                    "WS %-40s → %d entries",
+                    cmd_type,
+                    len(result) if isinstance(result, list) else len(result.keys()),
+                )
+            else:
+                await ws.send_json(
+                    {
+                        "id": cmd_id,
+                        "type": "result",
+                        "success": False,
+                        "error": {
+                            "code": "not_found",
+                            "message": f"Unknown command: {cmd_type}",
+                        },
+                    }
+                )
+                logger.warning("WS unknown command: %s", cmd_type)
+    except WebSocketDisconnect:
+        pass
 
 
 # ---------------------------------------------------------------------------

@@ -26,6 +26,7 @@ Intent-to-power mapping:
 
 import logging
 from datetime import datetime
+from typing import ClassVar
 
 from . import time_utils
 from .dp_schedule import DPSchedule
@@ -331,7 +332,7 @@ class SolaxController(InverterController):
     # ── Health check ──────────────────────────────────────────────────────────
 
     # VPP entities required for battery control.
-    _VPP_ENTITIES: list[tuple[str, str]] = [
+    _VPP_ENTITIES: ClassVar[list[tuple[str, str]]] = [
         ("solax_power_control_mode", "Power Control Mode"),
         ("solax_active_power", "Active Power"),
         ("solax_autorepeat_duration", "Autorepeat Duration"),

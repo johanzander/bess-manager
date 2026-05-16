@@ -16,9 +16,9 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../..
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from core.bess.battery_system_manager import BatterySystemManager
-from core.bess.price_manager import MockSource
-from core.bess.tests.conftest import MockHomeAssistantController
+from core.bess.battery_system_manager import BatterySystemManager  # noqa: E402
+from core.bess.price_manager import MockSource  # noqa: E402
+from core.bess.tests.conftest import MockHomeAssistantController  # noqa: E402
 
 
 class TestFreshInstallStartup:

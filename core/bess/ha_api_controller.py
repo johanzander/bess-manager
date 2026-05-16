@@ -1197,7 +1197,7 @@ class HomeAssistantAPIController:
     # ── solax_modbus entity-based TOU segment control (Growatt plugin) ────
 
     # Maps BESS internal batt_mode to solax_modbus select option strings
-    _MODBUS_MODE_OPTIONS: dict[str, str] = {
+    _MODBUS_MODE_OPTIONS: ClassVar[dict[str, str]] = {
         "battery_first": "Battery First",
         "load_first": "Load First",
         "grid_first": "Grid First",
@@ -1949,7 +1949,7 @@ class HomeAssistantAPIController:
         if device_sn:
             sn_upper = device_sn.upper()
             for device in devices_result:
-                for domain, identifier in device.get("identifiers", []):
+                for _domain, identifier in device.get("identifiers", []):
                     if str(identifier).upper() == sn_upper:
                         growatt_device_id = device["id"]
                         break

@@ -521,7 +521,7 @@ class TestDiscoverSensorsFromRegistry:
         )
         assert platform == "growatt_modbus"
         assert "growatt_modbus" in sensors
-        # Base sensors (18) + TOU entities (9 slots × 5 = 45)
+        # Base sensors (18) + TOU entities (9 slots x 5 = 45)
         assert len(sensors["growatt_modbus"]) == 63
         assert (
             sensors["growatt_modbus"]["battery_soc"]

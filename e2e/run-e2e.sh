@@ -85,6 +85,9 @@ if [ "$RUN_WIZARD" = true ]; then
   )
 
   for scenario in "${WIZARD_SCENARIOS[@]}"; do
+    # Reset settings to empty so wizard triggers fresh each time
+    echo '{}' > ./e2e/ci-wizard-settings.json
+
     echo "==> Phase 2: Starting environment (${scenario})..."
     SCENARIO="$scenario" \
       BESS_SETTINGS=./e2e/ci-wizard-settings.json \

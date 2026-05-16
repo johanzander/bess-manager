@@ -2504,6 +2504,9 @@ async def run_setup_discovery():
             if key not in sensors:
                 sensors[key] = entity_id
 
+        # Discover Octopus Energy entity IDs for pricing form auto-fill
+        octopus_entities = ha.discover_octopus_entities(states)
+
         # Convert top-level keys to camelCase but preserve sensor keys as
         # snake_case since they are BESS config keys, not API field names.
         detected_phase_count = (
@@ -2518,6 +2521,7 @@ async def run_setup_discovery():
                 "nordpool_found": integrations["nordpool_found"],
                 "nordpool_area": integrations["nordpool_area"],
                 "nordpool_config_entry_id": integrations["nordpool_config_entry_id"],
+                "octopus_found": integrations["octopus_found"],
                 "missing_sensors": missing_sensors,
                 # Auto-detected hints
                 "inverter_type": integrations["inverter_type"],
@@ -2528,6 +2532,9 @@ async def run_setup_discovery():
         )
         # Attach sensors dict without key conversion
         result["sensors"] = sensors
+        # Attach Octopus entities for pricing form auto-fill
+        if octopus_entities:
+            result["octopusEntities"] = octopus_entities
         return result
     except Exception as e:
         logger.error(f"Error during setup discovery: {e}")

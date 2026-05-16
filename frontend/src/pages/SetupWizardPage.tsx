@@ -91,12 +91,24 @@ const SetupWizardPage: React.FC = () => {
       if (d.detectedPhaseCount) {
         setHomeForm(f => ({ ...f, phaseCount: d.detectedPhaseCount! }));
       }
+      // Auto-select pricing provider based on discovered integrations
+      const autoProvider = d.octopusFound && !d.nordpoolFound
+        ? 'octopus' as const
+        : d.nordpoolFound
+          ? 'nordpool_official' as const
+          : undefined;
+      const octopus = (d as Record<string, unknown>).octopusEntities as Record<string, string> | undefined;
       setPricingForm(f => ({
         ...f,
+        ...(autoProvider ? { provider: autoProvider } : {}),
         ...(d.currency ? { currency: d.currency } : {}),
         ...(d.nordpoolArea ? { area: d.nordpoolArea } : {}),
         ...(d.vatMultiplier ? { vatMultiplier: d.vatMultiplier } : {}),
         ...(d.nordpoolConfigEntryId ? { nordpoolConfigEntryId: d.nordpoolConfigEntryId } : {}),
+        ...(octopus?.importToday ? { octopusImportTodayEntity: octopus.importToday } : {}),
+        ...(octopus?.importTomorrow ? { octopusImportTomorrowEntity: octopus.importTomorrow } : {}),
+        ...(octopus?.exportToday ? { octopusExportTodayEntity: octopus.exportToday } : {}),
+        ...(octopus?.exportTomorrow ? { octopusExportTomorrowEntity: octopus.exportTomorrow } : {}),
       }));
       if (d.inverterType) {
         setInverterForm(f => ({ ...f, inverterType: d.inverterType! }));

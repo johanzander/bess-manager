@@ -1521,10 +1521,15 @@ class HomeAssistantAPIController:
 
         # Find nordpool config_entry_id from config entries.
         nordpool_config_entry_id: str | None = None
+        octopus_found = False
         for entry in config_entries_result:
             if entry.get("domain") == "nordpool" and entry.get("state") == "loaded":
                 nordpool_config_entry_id = entry["entry_id"]
-                break
+            if (
+                entry.get("domain") == "octopus_energy"
+                and entry.get("state") == "loaded"
+            ):
+                octopus_found = True
 
         # Extract nordpool area from entity registry unique_ids.
         # The official HA nordpool integration creates entities with
@@ -1565,17 +1570,19 @@ class HomeAssistantAPIController:
 
         logger.info(
             "WS discovery: nordpool_config_entry_id=%s, nordpool_area=%s, "
-            "growatt_device_id=%s, inverter_type=%s",
+            "growatt_device_id=%s, inverter_type=%s, octopus_found=%s",
             nordpool_config_entry_id,
             nordpool_area,
             growatt_device_id,
             growatt_inverter_type,
+            octopus_found,
         )
         return {
             "growatt_device_id": growatt_device_id,
             "nordpool_config_entry_id": nordpool_config_entry_id,
             "nordpool_area": nordpool_area,
             "growatt_inverter_type": growatt_inverter_type,
+            "octopus_found": octopus_found,
         }
 
     def _fetch_all_states(self) -> list[dict]:
@@ -1632,7 +1639,8 @@ class HomeAssistantAPIController:
             Tuple of (result_dict, states) where result_dict has keys:
             growatt_found, device_sn, growatt_device_id,
             nordpool_found, nordpool_area, nordpool_config_entry_id,
-            inverter_type, detected_phase_count, currency, vat_multiplier.
+            octopus_found, inverter_type, detected_phase_count,
+            currency, vat_multiplier.
             states is the raw list from /api/states for reuse by callers.
         """
         result: dict = {
@@ -1642,6 +1650,7 @@ class HomeAssistantAPIController:
             "nordpool_found": False,
             "nordpool_area": None,
             "nordpool_config_entry_id": None,
+            "octopus_found": False,
             # Auto-detected hints (None = could not determine)
             "inverter_type": None,
             "detected_phase_count": None,
@@ -1664,6 +1673,9 @@ class HomeAssistantAPIController:
                     parsed_area = self._parse_nordpool_area_from_entity_id(entity_id)
                     if parsed_area:
                         result["nordpool_area"] = parsed_area
+            # Detect Octopus Energy from event entities
+            if "octopus_energy" in entity_id and "rate" in entity_id:
+                result["octopus_found"] = True
 
         # Fetch HA-internal IDs via WebSocket
         metadata: dict = {}
@@ -1678,6 +1690,9 @@ class HomeAssistantAPIController:
                 result["nordpool_found"] = True
                 if not result["nordpool_area"] and metadata.get("nordpool_area"):
                     result["nordpool_area"] = metadata["nordpool_area"]
+            # Octopus also detected from config_entries domain
+            if metadata.get("octopus_found"):
+                result["octopus_found"] = True
         except Exception:
             logger.warning(
                 "WebSocket discovery failed; growatt_device_id, "
@@ -1691,10 +1706,14 @@ class HomeAssistantAPIController:
         if result["growatt_found"]:
             result["inverter_type"] = metadata.get("growatt_inverter_type")
 
-        # Currency & VAT from Nordpool area
+        # Currency & VAT from Nordpool area or Octopus defaults
         area_hints = self._hints_from_nordpool_area(result.get("nordpool_area"))
-        result["currency"] = area_hints.get("currency")
-        result["vat_multiplier"] = area_hints.get("vat_multiplier")
+        if area_hints:
+            result["currency"] = area_hints.get("currency")
+            result["vat_multiplier"] = area_hints.get("vat_multiplier")
+        elif result["octopus_found"] and not result["nordpool_found"]:
+            result["currency"] = "GBP"
+            result["vat_multiplier"] = 1.0
 
         return result, states
 
@@ -1849,6 +1868,36 @@ class HomeAssistantAPIController:
                 return "discharge_inhibit", entity_id
 
         return None
+
+    def discover_octopus_entities(self, states: list[dict]) -> dict[str, str]:
+        """Discover Octopus Energy pricing entity IDs.
+
+        Scans entity states for Octopus Energy event entities that provide
+        half-hourly rate data. These map to the 4 pricing form fields:
+        importToday, importTomorrow, exportToday, exportTomorrow.
+
+        Args:
+            states: List of state dicts from /api/states
+
+        Returns:
+            dict mapping form field keys to entity_ids, empty if not found
+        """
+        result: dict[str, str] = {}
+        for state in states:
+            entity_id = str(state.get("entity_id", ""))
+            lower_id = entity_id.lower()
+            if "octopus_energy" not in lower_id:
+                continue
+            if "export" in lower_id:
+                if "next_day" in lower_id:
+                    result["exportTomorrow"] = entity_id
+                elif "current_day" in lower_id:
+                    result["exportToday"] = entity_id
+            elif "next_day" in lower_id and "rate" in lower_id:
+                result["importTomorrow"] = entity_id
+            elif "current_day" in lower_id and "rate" in lower_id:
+                result["importToday"] = entity_id
+        return result
 
     def discover_optional_sensors(self, states: list[dict]) -> dict[str, str]:
         """Discover optional integration sensors from entity states.

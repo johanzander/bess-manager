@@ -146,6 +146,7 @@ jobs:
         run: docker compose -f docker-compose.ci.yml down
 
       - name: "E2E: Wizard — Nordpool + SPH"
+        if: always()
         run: |
           echo '{}' > ./e2e/ci-wizard-settings.json
           SCENARIO=ci-wizard-nordpool-sph BESS_SETTINGS=./e2e/ci-wizard-settings.json BESS_OPTIONS=./e2e/ci-wizard-options.json docker compose -f docker-compose.ci.yml up -d
@@ -156,6 +157,7 @@ jobs:
         run: docker compose -f docker-compose.ci.yml down
 
       - name: "E2E: Wizard — Octopus + MIN"
+        if: always()
         run: |
           echo '{}' > ./e2e/ci-wizard-settings.json
           SCENARIO=ci-wizard-octopus BESS_SETTINGS=./e2e/ci-wizard-settings.json BESS_OPTIONS=./e2e/ci-wizard-options.json docker compose -f docker-compose.ci.yml up -d
@@ -166,6 +168,7 @@ jobs:
         run: docker compose -f docker-compose.ci.yml down
 
       - name: "E2E: Wizard — Full integrations"
+        if: always()
         run: |
           echo '{}' > ./e2e/ci-wizard-settings.json
           SCENARIO=ci-wizard-full BESS_SETTINGS=./e2e/ci-wizard-settings.json BESS_OPTIONS=./e2e/ci-wizard-options.json docker compose -f docker-compose.ci.yml up -d
@@ -176,6 +179,7 @@ jobs:
         run: docker compose -f docker-compose.ci.yml down
 
       - name: "E2E: Wizard — Nordpool HACS"
+        if: always()
         run: |
           echo '{}' > ./e2e/ci-wizard-settings.json
           SCENARIO=ci-wizard-nordpool-hacs BESS_SETTINGS=./e2e/ci-wizard-settings.json BESS_OPTIONS=./e2e/ci-wizard-options.json docker compose -f docker-compose.ci.yml up -d
@@ -186,6 +190,7 @@ jobs:
         run: docker compose -f docker-compose.ci.yml down
 
       - name: "E2E: Wizard — Octopus + SPH"
+        if: always()
         run: |
           echo '{}' > ./e2e/ci-wizard-settings.json
           SCENARIO=ci-wizard-octopus-sph BESS_SETTINGS=./e2e/ci-wizard-settings.json BESS_OPTIONS=./e2e/ci-wizard-options.json docker compose -f docker-compose.ci.yml up -d
@@ -196,6 +201,7 @@ jobs:
         run: docker compose -f docker-compose.ci.yml down
 
       - name: "E2E: Wizard — Both providers"
+        if: always()
         run: |
           echo '{}' > ./e2e/ci-wizard-settings.json
           SCENARIO=ci-wizard-both-providers BESS_SETTINGS=./e2e/ci-wizard-settings.json BESS_OPTIONS=./e2e/ci-wizard-options.json docker compose -f docker-compose.ci.yml up -d

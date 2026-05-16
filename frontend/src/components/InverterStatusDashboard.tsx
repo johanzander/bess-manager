@@ -432,7 +432,7 @@ const InverterStatusDashboard: React.FC = () => {
   // Merge dashboard data with schedule data to get correct strategic intents
   const getMergedHourData = (hour: number) => {
     const scheduleHour = inverterSchedule?.scheduleData?.find(h => h.hour === hour);
-    const dashboardHour = dashboardData?.hourlyData?.find(h => h.period === hour);
+    const dashboardHour = dashboardData?.hourlyData?.find(h => h.hour === hour);
 
     if (!scheduleHour && !dashboardHour) return null;
     

@@ -351,15 +351,17 @@ class SolaxController(InverterController):
         for sensor_key, display_name in self._VPP_ENTITIES:
             entity_id = controller.sensors.get(sensor_key, "")
             if not entity_id:
-                checks.append({
-                    "name": display_name,
-                    "key": sensor_key,
-                    "entity_id": "Not configured",
-                    "status": "ERROR",
-                    "rawValue": None,
-                    "displayValue": "N/A",
-                    "error": f"Entity not configured — set {sensor_key} in sensor config",
-                })
+                checks.append(
+                    {
+                        "name": display_name,
+                        "key": sensor_key,
+                        "entity_id": "Not configured",
+                        "status": "ERROR",
+                        "rawValue": None,
+                        "displayValue": "N/A",
+                        "error": f"Entity not configured — set {sensor_key} in sensor config",
+                    }
+                )
                 has_error = True
                 continue
 
@@ -368,47 +370,55 @@ class SolaxController(InverterController):
                 try:
                     mode = controller.get_solax_power_control_mode()
                     if mode is not None:
-                        checks.append({
-                            "name": display_name,
-                            "key": sensor_key,
-                            "entity_id": entity_id,
-                            "status": "OK",
-                            "rawValue": mode,
-                            "displayValue": str(mode),
-                            "error": None,
-                        })
+                        checks.append(
+                            {
+                                "name": display_name,
+                                "key": sensor_key,
+                                "entity_id": entity_id,
+                                "status": "OK",
+                                "rawValue": mode,
+                                "displayValue": str(mode),
+                                "error": None,
+                            }
+                        )
                     else:
-                        checks.append({
+                        checks.append(
+                            {
+                                "name": display_name,
+                                "key": sensor_key,
+                                "entity_id": entity_id,
+                                "status": "ERROR",
+                                "rawValue": None,
+                                "displayValue": "N/A",
+                                "error": "Entity returned None — check sensor config",
+                            }
+                        )
+                        has_error = True
+                except Exception as e:
+                    checks.append(
+                        {
                             "name": display_name,
                             "key": sensor_key,
                             "entity_id": entity_id,
                             "status": "ERROR",
                             "rawValue": None,
                             "displayValue": "N/A",
-                            "error": "Entity returned None — check sensor config",
-                        })
-                        has_error = True
-                except Exception as e:
-                    checks.append({
+                            "error": f"Read failed: {e}",
+                        }
+                    )
+                    has_error = True
+            else:
+                checks.append(
+                    {
                         "name": display_name,
                         "key": sensor_key,
                         "entity_id": entity_id,
-                        "status": "ERROR",
+                        "status": "OK",
                         "rawValue": None,
-                        "displayValue": "N/A",
-                        "error": f"Read failed: {e}",
-                    })
-                    has_error = True
-            else:
-                checks.append({
-                    "name": display_name,
-                    "key": sensor_key,
-                    "entity_id": entity_id,
-                    "status": "OK",
-                    "rawValue": None,
-                    "displayValue": "Configured",
-                    "error": None,
-                })
+                        "displayValue": "Configured",
+                        "error": None,
+                    }
+                )
 
         health_check = {
             "name": "Battery Control (SolaX)",

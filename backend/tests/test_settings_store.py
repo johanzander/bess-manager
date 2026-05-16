@@ -318,9 +318,7 @@ class TestApplyDiscovered:
 
         assert store.get_section("electricity_price")["area"] == "SE3"
 
-    def test_discovery_area_overwrites_user_area(
-        self, tmp_path, monkeypatch
-    ):
+    def test_discovery_area_overwrites_user_area(self, tmp_path, monkeypatch):
         """Discovery area is authoritative — it reflects the actual HA installation."""
         _patch_path(tmp_path, monkeypatch)
         store = SettingsStore()

@@ -44,9 +44,7 @@ class TestFreshInstallStartup:
     def test_empty_growatt_section_does_not_crash(self):
         """Reproduces the exact crash from the bug report: growatt section
         exists but inverter_type is an empty string."""
-        system = self._make_system(
-            addon_options={"growatt": {"inverter_type": ""}}
-        )
+        system = self._make_system(addon_options={"growatt": {"inverter_type": ""}})
         assert not system.is_configured
 
     def test_missing_growatt_section_does_not_crash(self):
@@ -84,9 +82,7 @@ class TestFreshInstallStartup:
 
     def test_legacy_inverter_type_creates_configured_system(self):
         """Legacy growatt.inverter_type still works for existing users."""
-        system = self._make_system(
-            addon_options={"growatt": {"inverter_type": "SPH"}}
-        )
+        system = self._make_system(addon_options={"growatt": {"inverter_type": "SPH"}})
         assert system.is_configured
         assert system.inverter_platform == "growatt_sph"
 
@@ -108,13 +104,9 @@ class TestFreshInstallStartup:
     def test_invalid_inverter_type_raises(self):
         """A non-empty but invalid inverter_type must still raise."""
         with pytest.raises(AssertionError, match="Unknown inverter_type"):
-            self._make_system(
-                addon_options={"growatt": {"inverter_type": "BOGUS"}}
-            )
+            self._make_system(addon_options={"growatt": {"inverter_type": "BOGUS"}})
 
     def test_invalid_platform_raises(self):
         """A non-empty but invalid platform must still raise."""
         with pytest.raises(AssertionError, match="Unknown inverter platform"):
-            self._make_system(
-                addon_options={"inverter": {"platform": "bogus"}}
-            )
+            self._make_system(addon_options={"inverter": {"platform": "bogus"}})

@@ -21,7 +21,9 @@ import pytest
 
 from core.bess.dp_battery_algorithm import optimize_battery_schedule
 from core.bess.dp_schedule import DPSchedule
-from core.bess.growatt_min_controller import GrowattMinController as GrowattScheduleManager
+from core.bess.growatt_min_controller import (
+    GrowattMinController as GrowattScheduleManager,
+)
 from core.bess.price_manager import MockSource, PriceManager
 from core.bess.settings import BatterySettings
 

@@ -1288,13 +1288,15 @@ class HomeAssistantAPIController:
                     mode_state.get("state", "Load First"), "load_first"
                 )
 
-                segments.append({
-                    "segment_id": slot,
-                    "start_time": begin_state.get("state", "00:00"),
-                    "end_time": end_state.get("state", "00:00"),
-                    "batt_mode": batt_mode,
-                    "enabled": enabled_val == "Enabled",
-                })
+                segments.append(
+                    {
+                        "segment_id": slot,
+                        "start_time": begin_state.get("state", "00:00"),
+                        "end_time": end_state.get("state", "00:00"),
+                        "batt_mode": batt_mode,
+                        "enabled": enabled_val == "Enabled",
+                    }
+                )
             except Exception as e:
                 logger.warning("Failed to read TOU slot %d: %s", slot, e)
 
@@ -1929,7 +1931,10 @@ class HomeAssistantAPIController:
         # Find growatt config_entry_id for device matching
         growatt_config_entry_id: str | None = None
         for entry in config_entries_result:
-            if entry.get("domain") == "growatt_server" and entry.get("state") == "loaded":
+            if (
+                entry.get("domain") == "growatt_server"
+                and entry.get("state") == "loaded"
+            ):
                 growatt_config_entry_id = entry["entry_id"]
                 break
 
@@ -2132,9 +2137,7 @@ class HomeAssistantAPIController:
             has_tou = self._has_growatt_tou_entities(registry)
             result["solax_has_growatt_tou"] = has_tou
             if not result["growatt_found"]:
-                result["inverter_type"] = (
-                    "GROWATT_MODBUS" if has_tou else "solax"
-                )
+                result["inverter_type"] = "GROWATT_MODBUS" if has_tou else "solax"
 
         # Currency & VAT from Nordpool area or Octopus defaults
         area_hints = self._hints_from_nordpool_area(result.get("nordpool_area"))
@@ -2196,7 +2199,6 @@ class HomeAssistantAPIController:
                 return object_id.split("_", 1)[0]
 
         return None
-
 
     def discover_current_sensors(self, states: list[dict]) -> dict[str, str]:
         """Discover phase current sensor entity IDs.
@@ -2406,9 +2408,7 @@ class HomeAssistantAPIController:
             solax_count += 1
             unique_id = str(entity.get("unique_id", ""))
             if unique_id.endswith(f"_{self._GROWATT_TOU_MARKER_SUFFIX}"):
-                logger.info(
-                    "Growatt TOU marker found: unique_id=%s", unique_id
-                )
+                logger.info("Growatt TOU marker found: unique_id=%s", unique_id)
                 return True
         logger.info(
             "No Growatt TOU marker found among %d solax_modbus entities",
@@ -2491,7 +2491,9 @@ class HomeAssistantAPIController:
         if inverter_detected.get("solax"):
             solax_platforms = ["solax_modbus", "solax"]
             solax_sensors = self._map_registry_entities(
-                entities, solax_platforms, self.SOLAX_ENTITY_SUFFIX_MAP,
+                entities,
+                solax_platforms,
+                self.SOLAX_ENTITY_SUFFIX_MAP,
             )
             if self._has_growatt_tou_entities(entities):
                 platform_sensors["growatt_modbus"] = solax_sensors
@@ -2530,7 +2532,9 @@ class HomeAssistantAPIController:
 
         # Sort suffixes longest-first so "total_grid_import" matches before
         # the shorter "grid_import" when both are in the map.
-        sorted_suffixes = sorted(suffix_map.items(), key=lambda x: len(x[0]), reverse=True)
+        sorted_suffixes = sorted(
+            suffix_map.items(), key=lambda x: len(x[0]), reverse=True
+        )
 
         for entity in entities:
             if entity.get("platform") not in platform_set:

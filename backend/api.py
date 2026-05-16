@@ -2576,8 +2576,8 @@ async def run_setup_discovery():
 
         # Registry-based discovery (robust against entity renaming)
         registry = ha.fetch_entity_registry()
-        platform_sensors, detected_platform = (
-            ha.discover_sensors_from_registry(registry)
+        platform_sensors, detected_platform = ha.discover_sensors_from_registry(
+            registry
         )
         if platform_sensors:
             sensors = dict(platform_sensors.get(detected_platform, {}))
@@ -2615,7 +2615,9 @@ async def run_setup_discovery():
                 "device_sn": integrations["device_sn"],
                 "growatt_device_id": integrations["growatt_device_id"],
                 "solax_found": integrations["solax_found"],
-                "solax_has_growatt_tou": integrations.get("solax_has_growatt_tou", False),
+                "solax_has_growatt_tou": integrations.get(
+                    "solax_has_growatt_tou", False
+                ),
                 "nordpool_found": integrations["nordpool_found"],
                 "nordpool_area": integrations["nordpool_area"],
                 "nordpool_config_entry_id": integrations["nordpool_config_entry_id"],

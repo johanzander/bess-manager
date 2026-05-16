@@ -192,7 +192,6 @@ class GrowattMinController(InverterController):
 
         return charge_rate, discharge_rate
 
-
     def _group_periods_by_mode(self, start_period: int = 0) -> list[dict]:
         """Group consecutive 15-min periods by their battery mode.
 

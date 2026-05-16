@@ -227,9 +227,7 @@ class BatterySystemManager:
         if self.inverter_platform == "solax":
             return SolaxController(battery_settings=self.battery_settings)
         if self.inverter_platform == "growatt_solax_modbus":
-            return GrowattSolaxModbusController(
-                battery_settings=self.battery_settings
-            )
+            return GrowattSolaxModbusController(battery_settings=self.battery_settings)
         return GrowattMinController(battery_settings=self.battery_settings)
 
     def switch_inverter_platform(self, platform: str) -> None:
@@ -520,7 +518,9 @@ class BatterySystemManager:
                 # keeps working. temp_growatt has fresh schedule/intents/hourly
                 # settings but empty TOU intervals — without this, the in-memory
                 # record of what's on the inverter is erased every cycle.
-                temp_growatt.tou_intervals = self._inverter_controller.tou_intervals.copy()
+                temp_growatt.tou_intervals = (
+                    self._inverter_controller.tou_intervals.copy()
+                )
                 if isinstance(self._inverter_controller, GrowattMinController):
                     temp_growatt._active_tou_intervals = (
                         self._inverter_controller._active_tou_intervals.copy()

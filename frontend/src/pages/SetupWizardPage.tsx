@@ -281,22 +281,35 @@ const SetupWizardPage: React.FC = () => {
     }
   };
 
-  // When the user switches inverter platform, fill empty sensor fields from
-  // the new platform's auto-detected values.  User-entered values are preserved.
+  // When the user switches inverter platform, replace all inverter-integration
+  // sensor fields with the new platform's discovered values.  Non-inverter
+  // sensors (Solcast, consumption forecast, phase current, etc.) are preserved.
+  // Nothing is saved until the user presses Save — this is purely in-memory.
   const handleInverterChange = (newForm: InverterForm) => {
     setInverterForm(newForm);
     if (!discovery?.platformSensors) return;
 
     const newPlatform = INVERTER_INTEGRATION_IDS[newForm.inverterType] ?? 'growatt';
-    const platformMap = discovery.platformSensors[newPlatform];
-    if (!platformMap) return;
+    const platformMap = discovery.platformSensors[newPlatform] ?? {};
+
+    // Collect all sensor keys belonging to any inverter integration
+    const inverterIntegrationIds = new Set(Object.values(INVERTER_INTEGRATION_IDS));
+    const inverterKeys = new Set<string>();
+    for (const intg of INTEGRATIONS) {
+      if (inverterIntegrationIds.has(intg.id)) {
+        for (const group of intg.sensorGroups) {
+          for (const s of group.sensors) {
+            inverterKeys.add(s.key);
+          }
+        }
+      }
+    }
 
     setSensors(prev => {
       const next = { ...prev };
-      for (const [key, entityId] of Object.entries(platformMap)) {
-        if (!next[key]) {
-          next[key] = entityId;
-        }
+      // Clear all inverter keys, then fill from the new platform's discovery
+      for (const key of inverterKeys) {
+        next[key] = platformMap[key] ?? '';
       }
       return next;
     });

@@ -8,7 +8,7 @@ test.describe('Settings Page', () => {
     await expect(page.getByText('Loading settings')).not.toBeVisible({ timeout: 15_000 });
 
     // Settings page has tabbed navigation (exact match to avoid sensor group buttons)
-    await expect(page.getByRole('button', { name: 'Sensors', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Integrations', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Electricity Pricing', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Battery', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Home', exact: true })).toBeVisible();
@@ -23,14 +23,12 @@ test.describe('Settings Page', () => {
     await expect(page.getByText(/Growatt Server/i).first()).toBeVisible();
   });
 
-  test('battery tab shows capacity and inverter type', async ({ page }) => {
+  test('battery tab shows capacity fields', async ({ page }) => {
     await page.goto('/settings');
     await expect(page.getByText('Loading settings')).not.toBeVisible({ timeout: 15_000 });
 
     await page.getByRole('button', { name: 'Battery', exact: true }).click();
 
-    // Should show inverter type selection (MIN or SPH)
-    await expect(page.getByText(/MIN|SPH/).first()).toBeVisible();
     // Should show capacity field
     await expect(page.getByText(/Total Capacity/i)).toBeVisible();
   });

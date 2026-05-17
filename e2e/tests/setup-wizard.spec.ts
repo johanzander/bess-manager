@@ -76,17 +76,14 @@ test.describe('Setup Wizard', () => {
       // SolaX platform should be selected
       await expect(radioByLabel(page, 'SolaX (Native)')).toBeChecked();
     } else {
-      // Growatt platform — navigate to battery step for sub-type
-      await expect(radioByLabel(page, 'Growatt')).toBeChecked();
+      // Growatt platform — use exact role match to avoid "Growatt Server (Cloud)" ambiguity
+      await expect(page.getByRole('radio', { name: 'Growatt', exact: true })).toBeChecked();
 
-      await page.getByRole('button', { name: /Next: Electricity Pricing/i }).click();
-      await page.getByRole('button', { name: /Next: Battery/i }).click();
-      await expectActiveStep(page, 3);
-
+      // Sub-type radios are on the sensor/integrations step (step 1)
       if (expected.inverterType === 'SPH') {
         await expect(radioByLabel(page, 'SPH (DC-coupled)')).toBeChecked();
       } else {
-        await expect(radioByLabel(page, 'MIN (AC-coupled)')).toBeChecked();
+        await expect(radioByLabel(page, 'MIC/MIN/MOD/MID (AC-coupled)')).toBeChecked();
       }
     }
   });

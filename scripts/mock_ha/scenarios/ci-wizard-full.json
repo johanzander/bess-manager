@@ -92,6 +92,30 @@
     "weather.home": {
       "state": "cloudy",
       "attributes": { "temperature": 3.5, "temperature_unit": "°C", "friendly_name": "Home" }
+    },
+    "sensor.abc1234567_lifetime_total_all_batteries_charged": {
+      "state": "5234.5",
+      "attributes": { "unit_of_measurement": "kWh", "device_class": "energy", "state_class": "total_increasing" }
+    },
+    "sensor.abc1234567_lifetime_total_all_batteries_discharged": {
+      "state": "4812.3",
+      "attributes": { "unit_of_measurement": "kWh", "device_class": "energy", "state_class": "total_increasing" }
+    },
+    "sensor.abc1234567_lifetime_total_solar_energy": {
+      "state": "12450.7",
+      "attributes": { "unit_of_measurement": "kWh", "device_class": "energy", "state_class": "total_increasing" }
+    },
+    "sensor.abc1234567_lifetime_total_export_to_grid": {
+      "state": "3120.4",
+      "attributes": { "unit_of_measurement": "kWh", "device_class": "energy", "state_class": "total_increasing" }
+    },
+    "sensor.abc1234567_lifetime_import_from_grid": {
+      "state": "8540.2",
+      "attributes": { "unit_of_measurement": "kWh", "device_class": "energy", "state_class": "total_increasing" }
+    },
+    "sensor.abc1234567_lifetime_total_load_consumption": {
+      "state": "15230.1",
+      "attributes": { "unit_of_measurement": "kWh", "device_class": "energy", "state_class": "total_increasing" }
     }
   },
   "config_entries": [

@@ -4,6 +4,12 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.0.0b10] - 2026-05-17
+
+### Fixed
+
+- Switching inverter platform in wizard now replaces all inverter sensor fields with the new platform's discovered values instead of only filling empty fields — fixes stale Growatt Server entity IDs persisting after switching to SolaX Modbus (Local).
+
 ## [9.0.0b9] - 2026-05-17
 
 ### Added

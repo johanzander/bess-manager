@@ -265,6 +265,11 @@ const SetupWizardPage: React.FC = () => {
         vatMultiplier: pricingForm.vatMultiplier,
         additionalCosts: pricingForm.additionalCosts,
         taxReduction: pricingForm.taxReduction,
+        // Octopus Energy entity IDs
+        octopusImportTodayEntity: pricingForm.octopusImportTodayEntity || undefined,
+        octopusImportTomorrowEntity: pricingForm.octopusImportTomorrowEntity || undefined,
+        octopusExportTodayEntity: pricingForm.octopusExportTodayEntity || undefined,
+        octopusExportTomorrowEntity: pricingForm.octopusExportTomorrowEntity || undefined,
         // Inverter
         inverterType: inverterForm.inverterType,
       });

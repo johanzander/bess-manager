@@ -2398,8 +2398,6 @@ async def export_debug_data(compact: bool = True):
     from fastapi.responses import PlainTextResponse
 
     from app import bess_controller
-
-    _require_configured_system(bess_controller)
     from core.bess.debug_data_exporter import DebugDataAggregator
     from core.bess.debug_report_formatter import DebugReportFormatter
 
@@ -2789,6 +2787,14 @@ async def setup_complete(payload: APISetupCompletePayload):
             ep = bess_controller.settings_store.get_section("energy_provider")
             if payload.provider is not None:
                 ep["provider"] = payload.provider
+            # Persist Octopus entity IDs when provider is octopus
+            if payload.provider == "octopus" and payload.octopusImportTodayEntity:
+                ep["octopus"] = {
+                    "import_today_entity": payload.octopusImportTodayEntity,
+                    "import_tomorrow_entity": payload.octopusImportTomorrowEntity,
+                    "export_today_entity": payload.octopusExportTodayEntity,
+                    "export_tomorrow_entity": payload.octopusExportTomorrowEntity,
+                }
             sections["energy_provider"] = ep
 
         # --- inverter ---

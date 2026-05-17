@@ -439,8 +439,8 @@ Resolved identifiers:
 - **Inverter type**: Determined from registered services and entity markers:
   - MIN: `growatt_server.update_time_segment` service present
   - SPH: `growatt_server.write_ac_charge_times` service present
-  - GROWATT_MODBUS: `solax_modbus` entities with TOU time slot marker (`time_1_enabled` unique_id suffix)
-  - SOLAX: `solax_modbus` entities with VPP marker (`remotecontrol_power_control`)
+  - GROWATT_MODBUS: `solax_modbus` entities with TOU time slot marker (`time_1_enabled` unique_id suffix — note: the entity_id contains `time_1_active` from the display name, but detection matches on unique_id)
+  - SOLAX: `solax_modbus` entities with VPP marker (`remotecontrol_power_control` unique_id suffix)
 
 #### Stage 4 — Sensor Mapping via Entity Registry
 

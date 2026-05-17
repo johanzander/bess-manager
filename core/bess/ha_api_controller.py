@@ -383,6 +383,10 @@ class HomeAssistantAPIController:
     # solax_charger_use_mode         —                                  charger_use_mode (SolaX native only)
     #
     # GROWATT-VIA-SOLAX-ONLY (TOU time slots — Growatt MIN via solax_modbus):
+    # Note: plugin key="time_N_enabled" (used in unique_id) but
+    # name="Time N Active" (used in entity_id → *_time_N_active).
+    # Detection and mapping match on unique_id, so the suffix is "enabled".
+    # Slots 4-9 are disabled by default in HA entity registry.
     # tou_time_N_enabled             —                                  time_N_enabled  (N=1..9)
     # tou_time_N_begin               —                                  time_N_begin
     # tou_time_N_end                 —                                  time_N_end
@@ -1215,6 +1219,11 @@ class HomeAssistantAPIController:
 
         Uses select.select_option for mode/time/enabled, then button.press
         to commit the slot to the inverter.
+
+        The enabled entity's plugin key is ``time_N_enabled`` (used in
+        unique_id and BESS sensor key) while its HA entity_id contains
+        ``time_N_active`` (from the display name "Time N Active"). The
+        option values are "Enabled"/"Disabled" regardless.
 
         Args:
             segment_id: Slot number (1-9)
@@ -2391,6 +2400,9 @@ class HomeAssistantAPIController:
     # TOU entity suffix used to distinguish Growatt-via-solax from SolaX-native.
     # If a solax_modbus entity has a unique_id ending with this suffix,
     # the inverter is a Growatt MIN using the solax_modbus Growatt plugin.
+    # Note: the plugin uses key="time_1_enabled" (→ unique_id) but
+    # name="Time 1 Active" (→ entity_id contains "time_1_active").
+    # We match on unique_id, so the suffix is "enabled".
     _GROWATT_TOU_MARKER_SUFFIX: ClassVar[str] = "time_1_enabled"
 
     def _has_growatt_tou_entities(self, entities: list[dict]) -> bool:

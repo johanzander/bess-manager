@@ -8,6 +8,8 @@ is identical to GrowattMinController. Only the hardware I/O differs:
 
 - growatt_server: single service call ``growatt_server.update_time_segment``
 - solax_modbus: 4 entity writes (``select.select_option`` x4) + 1 button press per slot
+  Entity keys: ``time_N_enabled`` (unique_id) / ``time_N_active`` (entity_id),
+  ``time_N_begin``, ``time_N_end``, ``time_N_mode``, ``time_N_update``
 
 Per-period control (``set_grid_charge``, ``set_discharging_power_rate``) already uses
 generic HA service calls that resolve entity IDs from sensor config, so no override

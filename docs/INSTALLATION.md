@@ -26,7 +26,7 @@ Complete guide for installing and configuring BESS Battery Manager for Home Assi
 - A Growatt AC-coupled inverter with battery storage
 - The [homeassistant-solax-modbus](https://github.com/wills106/homeassistant-solax-modbus) HACS integration with the **Growatt plugin** enabled
 - Provides local Modbus control — no cloud dependency
-- Requires growatt plugin with TOU time slot entities (`select.solax_time_1_enabled`, etc.)
+- Requires Growatt plugin with TOU time slot entities (entity_id: `select.*_time_1_active`, unique_id suffix: `time_1_enabled`). Slots 4-9 are disabled by default in HA and must be enabled manually.
 
 **SolaX via solax_modbus (local Modbus)**
 

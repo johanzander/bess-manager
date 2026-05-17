@@ -45,6 +45,17 @@ select.select_option(entity: time_N_mode, option: "Battery First"/"Load First"/"
 button.press(entity: time_N_update)
 ```
 
+> **Entity ID vs unique_id naming:** The solax_modbus Growatt plugin uses
+> `key="time_N_enabled"` internally but `name="Time N Active"` for display.
+> HA generates the `entity_id` from the name (e.g.
+> `select.growatt_inverter_time_1_active`), while the `unique_id` uses the key
+> (e.g. `growatt_inverter_time_1_enabled`). BESS auto-detection matches on
+> `unique_id`, which is immutable.
+
+> **Slot availability:** Slots 1-3 are enabled by default in the HA entity
+> registry. Slots 4-9 are disabled by default and must be manually enabled in
+> HA (Settings → Devices → entity toggle) before BESS can use them.
+
 **Per-period control:** Same generic calls as cloud variant:
 - Grid charge: `switch.turn_on` / `switch.turn_off` on charger_switch entity
 - Charge/discharge rate: `number.set_value` on EMS rate entities
@@ -132,15 +143,25 @@ button.press(trigger)
 
 **TOU time slot control (9 slots x 5 entities = 45 entities):**
 
-| BESS Sensor Key | Entity Type | solax_modbus Suffix | Purpose |
-|-----------------|-------------|---------------------|---------|
-| `tou_time_N_enabled` | select | `time_N_enabled` | Slot active (Enabled/Disabled) |
-| `tou_time_N_begin` | select | `time_N_begin` | Start time (HH:MM) |
-| `tou_time_N_end` | select | `time_N_end` | End time (HH:MM) |
-| `tou_time_N_mode` | select | `time_N_mode` | Battery First/Load First/Grid First |
-| `tou_time_N_update` | button | `time_N_update` | Commit slot changes |
+| BESS Sensor Key | Entity Type | solax_modbus Key (unique_id) | HA Entity ID Contains | Purpose |
+|-----------------|-------------|------------------------------|----------------------|---------|
+| `tou_time_N_enabled` | select | `time_N_enabled` | `time_N_active` | Slot active (Enabled/Disabled) |
+| `tou_time_N_begin` | select | `time_N_begin` | `time_N_begin` | Start time (HH:MM) |
+| `tou_time_N_end` | select | `time_N_end` | `time_N_end` | End time (HH:MM) |
+| `tou_time_N_mode` | select | `time_N_mode` | `time_N_mode` | Battery First/Load First/Grid First |
+| `tou_time_N_update` | button | `time_N_update` | `time_N_update` | Commit slot changes |
 
-Where N = 1 through 9.
+Where N = 1 through 9. A `time_N_clear` button also exists in the plugin
+(zeros out the slot) but is not used by BESS.
+
+> **Note:** The `entity_id` for the enabled/disabled entity contains `active`
+> (from the plugin's display name "Time N Active") while the `unique_id`
+> contains `enabled` (from the plugin's internal key). BESS matches on
+> `unique_id`, so the suffix map uses `time_N_enabled`.
+>
+> **Slot availability:** Slots 1-3 are enabled by default in HA. Slots 4-9
+> are disabled by default in the entity registry and must be manually enabled
+> in HA before BESS can discover or use them.
 
 **Lifetime energy (optional):**
 
@@ -189,8 +210,13 @@ registry:
    - If `growatt_server.write_ac_charge_times` service exists → **Growatt SPH**
 
 2. **solax_modbus detected** (`platform: solax_modbus`):
-   - If TOU entities present (`time_1_enabled` suffix) → **Growatt MIN (Local)**
-   - If VPP entities present (`remotecontrol_power_control` suffix) → **SolaX**
+   - If TOU entities present (`time_1_enabled` unique_id suffix) → **Growatt MIN (Local)**
+   - If VPP entities present (`remotecontrol_power_control` unique_id suffix) → **SolaX**
+
+   Detection uses `unique_id` (built from the plugin's internal `key` field),
+   not `entity_id` (built from display `name`). For Growatt TOU entities the
+   unique_id ends with `time_1_enabled` even though the entity_id contains
+   `time_1_active`.
 
 If multiple platforms are detected (e.g. both Growatt and SolaX entities
 exist), the Settings page under Integrations & Sensors → Inverter Platform

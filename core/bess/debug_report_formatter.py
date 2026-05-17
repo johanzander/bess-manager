@@ -189,11 +189,17 @@ class DebugReportFormatter:
         growatt_entries = [
             e for e in config_entries if e.get("domain", "").startswith("growatt")
         ]
+        solax_entries = [
+            e for e in config_entries if e.get("domain", "").startswith("solax")
+        ]
+        entity_registry = ws.get("entity_registry", [])
 
         summary_lines = [
             f"**Nordpool config entries**: {len(nordpool_entries)}",
             f"**Growatt config entries**: {len(growatt_entries)}",
-            f"**Growatt devices**: {len(ws.get('devices', []))}",
+            f"**SolaX config entries**: {len(solax_entries)}",
+            f"**Devices**: {len(ws.get('devices', []))}",
+            f"**Entity registry entries**: {len(entity_registry)}",
         ]
 
         return f"""## HA Discovery (raw WebSocket)
@@ -211,6 +217,15 @@ class DebugReportFormatter:
 ```json
 {self._format_json(config_entries)}
 ```
+
+<details>
+<summary>Entity registry ({len(entity_registry)} entities, click to expand)</summary>
+
+```json
+{self._format_json(entity_registry)}
+```
+
+</details>
 
 <details>
 <summary>Devices and services (click to expand)</summary>

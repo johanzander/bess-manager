@@ -4,6 +4,19 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.0.0b9] - 2026-05-17
+
+### Added
+
+- Debug export now includes HA entity registry (entity_id, unique_id, platform, device_id, original_name, disabled_by, hidden_by, capabilities) for diagnosing Growatt-via-SolaX-Modbus detection failures.
+- Debug export captures solax_modbus/solax config entries, devices, and services (previously only growatt/nordpool).
+- Keyword fallback matching in debug export — entities are captured even if registered under unexpected platform names.
+
+### Fixed
+
+- Documentation corrected: solax_modbus Growatt plugin entity_id contains `time_N_active` (from display name) while unique_id contains `time_N_enabled` (from plugin key); BESS matches on unique_id.
+- Documented that TOU slots 4-9 are disabled by default in HA entity registry and must be manually enabled.
+
 ## [9.0.0b8] - 2026-05-15
 
 ### Fixed

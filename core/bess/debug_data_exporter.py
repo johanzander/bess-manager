@@ -223,7 +223,9 @@ def _scrub_entity_registry_entry(entity: dict) -> dict:
                 # Find the longest suffix that a human can use to identify
                 # the entity type without leaking the full hub name/serial.
                 parts = raw_uid.rsplit("_", 4)
-                out["unique_id_suffix"] = "_".join(parts[-4:]) if len(parts) > 4 else raw_uid
+                out["unique_id_suffix"] = (
+                    "_".join(parts[-4:]) if len(parts) > 4 else raw_uid
+                )
             else:
                 out["unique_id_suffix"] = raw_uid
         else:
@@ -539,11 +541,14 @@ class DebugDataAggregator:
         config_entries = [
             _scrub_config_entry(e)
             for e in config_entries_raw
-            if isinstance(e, dict) and (
+            if isinstance(e, dict)
+            and (
                 e.get("domain") in _WS_TARGET_DOMAINS
-                or any(kw in str(e.get("domain", "")).lower()
-                       or kw in str(e.get("title", "")).lower()
-                       for kw in _ENTITY_REGISTRY_KEYWORDS)
+                or any(
+                    kw in str(e.get("domain", "")).lower()
+                    or kw in str(e.get("title", "")).lower()
+                    for kw in _ENTITY_REGISTRY_KEYWORDS
+                )
             )
         ]
 
@@ -558,9 +563,8 @@ class DebugDataAggregator:
         services: dict[str, list[str]] = {}
         if isinstance(services_raw, dict):
             for domain in sorted(services_raw.keys()):
-                if (
-                    domain in _WS_TARGET_DOMAINS
-                    or any(kw in domain.lower() for kw in _ENTITY_REGISTRY_KEYWORDS)
+                if domain in _WS_TARGET_DOMAINS or any(
+                    kw in domain.lower() for kw in _ENTITY_REGISTRY_KEYWORDS
                 ):
                     domain_svcs = services_raw[domain]
                     if isinstance(domain_svcs, dict):

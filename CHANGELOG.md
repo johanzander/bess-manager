@@ -4,6 +4,21 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.0.0b11] - 2026-05-18
+
+### Fixed
+
+- Settings page now clears stale inverter sensor entity IDs when switching platform — previously only the wizard handled this, leaving old Growatt sensors active after switching to SolaX on the settings page.
+- Advanced battery settings (efficiency, charging rate, temperature derating) hidden in wizard mode to reduce setup complexity.
+
+### Changed
+
+- Consolidated three duplicated inverter platform maps (wizard, settings page, backend) into shared `sensorDefinitions.ts` and `api_conversion.py` — single source of truth for UI type ↔ platform mapping.
+
+### Added
+
+- 29 unit tests for `POST /api/setup/complete` covering persistence, live system updates, sensor handling, scheduler lifecycle, and validation.
+
 ## [9.0.0b10] - 2026-05-17
 
 ### Fixed

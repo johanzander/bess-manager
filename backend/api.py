@@ -7,7 +7,11 @@ import dataclasses
 import threading
 from datetime import datetime, timedelta
 
-from api_conversion import convert_keys_to_camel_case, convert_keys_to_snake_case
+from api_conversion import (
+    UI_TYPE_TO_PLATFORM,
+    convert_keys_to_camel_case,
+    convert_keys_to_snake_case,
+)
 from api_dataclasses import (
     _ENTITY_ID_RE,
     APIConsumptionForecastComparison,
@@ -2799,14 +2803,9 @@ async def setup_complete(payload: APISetupCompletePayload):
 
         # --- inverter ---
         if payload.inverterType is not None:
-            # Map UI inverter type values to canonical inverter.platform keys
-            _platform_map = {
-                "MIN": "growatt_min",
-                "SPH": "growatt_sph",
-                "GROWATT_MODBUS": "growatt_solax_modbus",
-                "SOLAX": "solax",
-            }
-            _platform = _platform_map.get(payload.inverterType.upper(), "growatt_min")
+            _platform = UI_TYPE_TO_PLATFORM.get(
+                payload.inverterType.upper(), "growatt_min"
+            )
             inv_section = bess_controller.settings_store.get_section("inverter")
             inv_section["platform"] = _platform
             sections["inverter"] = inv_section

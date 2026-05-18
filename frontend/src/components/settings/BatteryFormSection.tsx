@@ -19,10 +19,12 @@ interface Props {
   onChange: (f: BatteryForm) => void;
   currency?: string;
   weatherEntity?: string;
+  /** Hide the advanced settings section (efficiency, derating). Used by the wizard. */
+  hideAdvanced?: boolean;
 }
 
 export function BatteryFormSection({
-  form, onChange, currency = '', weatherEntity = '',
+  form, onChange, currency = '', weatherEntity = '', hideAdvanced = false,
 }: Props) {
   const [effOpen, setEffOpen] = useState(false);
 
@@ -52,8 +54,9 @@ export function BatteryFormSection({
         </div>
       </SectionCard>
 
-      {/* Advanced settings collapsible */}
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
+      {/* Advanced settings collapsible — hidden in wizard mode since these
+          fields are not sent by the wizard completion payload */}
+      {!hideAdvanced && <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
         <button
           type="button"
           onClick={() => setEffOpen(o => !o)}
@@ -130,7 +133,7 @@ export function BatteryFormSection({
             )}
           </div>
         )}
-      </div>
+      </div>}
     </div>
   );
 }

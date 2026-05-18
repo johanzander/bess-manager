@@ -28,6 +28,72 @@ export const INVERTER_INTEGRATION_IDS: Record<string, string> = {
   SOLAX: 'solax',
 };
 
+// ---------------------------------------------------------------------------
+// Platform maps — single source of truth for UI ↔ backend conversion
+// ---------------------------------------------------------------------------
+
+/** Map UI inverter type → backend platform key (for saving to store). */
+export const UI_TYPE_TO_PLATFORM: Record<string, string> = {
+  MIN: 'growatt_min',
+  SPH: 'growatt_sph',
+  GROWATT_MODBUS: 'growatt_solax_modbus',
+  SOLAX: 'solax',
+};
+
+/** Map backend platform key → UI inverter type (for loading from store). */
+export const PLATFORM_TO_UI_TYPE: Record<string, string> = Object.fromEntries(
+  Object.entries(UI_TYPE_TO_PLATFORM).map(([uiType, platform]) => [platform, uiType]),
+);
+
+/** Normalize a discovery inverterType value to a UI type string. */
+export function discoveryTypeToUiType(discoveryType: string): string {
+  // Discovery returns mixed-case values (e.g. 'solax', 'MIN', 'SPH').
+  // UI types are always uppercase.
+  return UI_TYPE_TO_PLATFORM[discoveryType.toUpperCase()] ? discoveryType.toUpperCase() : discoveryType.toUpperCase();
+}
+
+// ---------------------------------------------------------------------------
+// Sensor swap helper — clears inverter-specific sensor keys when switching
+// platform and optionally fills from discovered values.
+// ---------------------------------------------------------------------------
+
+/** All sensor keys that belong to any inverter integration. */
+function getInverterSensorKeys(): Set<string> {
+  const inverterIntegrationIds = new Set(Object.values(INVERTER_INTEGRATION_IDS));
+  const keys = new Set<string>();
+  for (const intg of INTEGRATIONS) {
+    if (inverterIntegrationIds.has(intg.id)) {
+      for (const group of intg.sensorGroups) {
+        for (const s of group.sensors) {
+          keys.add(s.key);
+        }
+      }
+    }
+  }
+  return keys;
+}
+
+/**
+ * Build a new sensors map after switching inverter platform.
+ * Clears all inverter-specific keys and fills from platformSensors if available.
+ * Non-inverter sensors (Solcast, weather, phase current, etc.) are preserved.
+ */
+export function swapInverterSensors(
+  currentSensors: Record<string, string>,
+  newInverterType: string,
+  platformSensors?: Record<string, Record<string, string>>,
+): Record<string, string> {
+  const newPlatform = INVERTER_INTEGRATION_IDS[newInverterType] ?? 'growatt';
+  const platformMap = platformSensors?.[newPlatform] ?? {};
+  const inverterKeys = getInverterSensorKeys();
+
+  const next = { ...currentSensors };
+  for (const key of inverterKeys) {
+    next[key] = platformMap[key] ?? '';
+  }
+  return next;
+}
+
 export const INTEGRATIONS: IntegrationDef[] = [
   {
     id: 'growatt',

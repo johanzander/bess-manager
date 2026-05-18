@@ -12,6 +12,7 @@ import { BatteryFormSection } from '../components/settings/BatteryFormSection';
 import type { BatteryForm } from '../components/settings/BatteryFormSection';
 import { SensorConfigSection } from '../components/settings/SensorConfigSection';
 import type { InverterForm } from '../components/settings/SensorConfigSection';
+import { PLATFORM_TO_UI_TYPE, UI_TYPE_TO_PLATFORM, discoveryTypeToUiType, swapInverterSensors } from '../lib/sensorDefinitions';
 
 // ---------------------------------------------------------------------------
 // Local types
@@ -177,8 +178,13 @@ const SettingsPage: React.FC = () => {
       setPricingForm(p);
       savedPricing.current = JSON.stringify(p);
 
+      // Prefer inverter.platform (canonical); fall back to legacy growatt.inverterType
+      const invNew = s.inverter ?? {};
+      const uiType = (invNew.platform && PLATFORM_TO_UI_TYPE[invNew.platform])
+        ? PLATFORM_TO_UI_TYPE[invNew.platform]
+        : (growatt_s.inverterType ?? 'MIN');
       const inv: InverterForm = {
-        inverterType: growatt_s.inverterType ?? 'MIN',
+        inverterType: uiType,
         deviceId: growatt_s.deviceId ?? '',
       };
       setInverterForm(inv);
@@ -227,10 +233,7 @@ const SettingsPage: React.FC = () => {
       }
 
       if (d.inverterType) {
-        // Map backend discovery values to UI inverter type values (uppercase)
-        const platformToType: Record<string, string> = { solax: 'SOLAX', MIN: 'MIN', SPH: 'SPH', GROWATT_MODBUS: 'GROWATT_MODBUS' };
-        const uiType = platformToType[d.inverterType] ?? d.inverterType.toUpperCase();
-        setInverterForm(f => ({ ...f, inverterType: uiType }));
+        setInverterForm(f => ({ ...f, inverterType: discoveryTypeToUiType(d.inverterType) }));
       }
       if (d.growattDeviceId) {
         setInverterForm(f => ({ ...f, deviceId: d.growattDeviceId }));
@@ -387,7 +390,7 @@ const SettingsPage: React.FC = () => {
           deviceId: inverterForm.deviceId,
         },
         inverter: {
-          platform: { MIN: 'growatt_min', SPH: 'growatt_sph', GROWATT_MODBUS: 'growatt_solax_modbus', SOLAX: 'solax' }[inverterForm.inverterType],
+          platform: UI_TYPE_TO_PLATFORM[inverterForm.inverterType],
         },
       });
       savedBattery.current = JSON.stringify(batteryForm);
@@ -577,7 +580,11 @@ const SettingsPage: React.FC = () => {
                 sensors={sensors}
                 onChange={setSensors}
                 inverterForm={inverterForm}
-                onInverterChange={setInverterForm}
+                onInverterChange={(newForm) => {
+                  setInverterForm(newForm);
+                  // Clear stale inverter sensor keys when switching platform
+                  setSensors(prev => swapInverterSensors(prev, newForm.inverterType));
+                }}
                 sensorStatus={sensorStatus}
               />
             </div>

@@ -10,16 +10,20 @@
     "power_monitoring_enabled": false
   },
   "battery": {
-    "total_capacity": 10.0,
+    "total_capacity": 10,
     "min_soc": 10,
     "max_soc": 100,
-    "max_charge_power_kw": 5.0,
-    "max_discharge_power_kw": 5.0,
+    "max_charge_power_kw": 5,
+    "max_discharge_power_kw": 5,
     "cycle_cost_per_kwh": 0.4,
-    "min_action_profit_threshold": 0.0,
+    "min_action_profit_threshold": 0,
     "charging_power_rate": 40,
     "efficiency_charge": 0.97,
-    "efficiency_discharge": 0.95
+    "efficiency_discharge": 0.95,
+    "temperature_derating": {
+      "enabled": false,
+      "weather_entity": ""
+    }
   },
   "electricity_price": {
     "area": "SE4",
@@ -37,7 +41,10 @@
   "inverter": {
     "platform": "growatt_min"
   },
-  "growatt": {},
+  "growatt": {
+    "inverter_type": "MIN",
+    "device_id": ""
+  },
   "sensors": {
     "battery_soc": "sensor.growatt_battery_soc",
     "battery_charge_power": "sensor.growatt_battery_charge_power",

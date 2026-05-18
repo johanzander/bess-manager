@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CheckCircle, ChevronRight, ChevronLeft, Zap } from 'lucide-react';
 import api from '../lib/api';
-import { INTEGRATIONS, INVERTER_INTEGRATION_IDS } from '../lib/sensorDefinitions';
+import { INTEGRATIONS, INVERTER_INTEGRATION_IDS, PLATFORM_TO_UI_TYPE, discoveryTypeToUiType, swapInverterSensors } from '../lib/sensorDefinitions';
 import { HomeFormSection } from '../components/settings/HomeFormSection';
 import type { HomeForm } from '../components/settings/HomeFormSection';
 import { PricingFormSection } from '../components/settings/PricingFormSection';
@@ -110,10 +110,7 @@ const SetupWizardPage: React.FC = () => {
         ...(d.octopusEntities?.exportTomorrow ? { octopusExportTomorrowEntity: d.octopusEntities.exportTomorrow } : {}),
       }));
       if (d.inverterType) {
-        // Map backend platform keys to UI inverter type values
-        const platformToType: Record<string, string> = { solax: 'SOLAX', MIN: 'MIN', SPH: 'SPH', GROWATT_MODBUS: 'GROWATT_MODBUS' };
-        const uiType = platformToType[d.inverterType] ?? d.inverterType.toUpperCase();
-        setInverterForm(f => ({ ...f, inverterType: uiType }));
+        setInverterForm(f => ({ ...f, inverterType: discoveryTypeToUiType(d.inverterType) }));
       }
       if (d.growattDeviceId) {
         setInverterForm(f => ({ ...f, deviceId: d.growattDeviceId! }));
@@ -194,9 +191,8 @@ const SetupWizardPage: React.FC = () => {
       }));
       // Restore inverter type from new inverter.platform or legacy growatt.inverter_type
       const invNew = s.inverter ?? {};
-      const platformToType: Record<string, string> = { growatt_min: 'MIN', growatt_sph: 'SPH', growatt_solax_modbus: 'GROWATT_MODBUS', solax: 'SOLAX' };
-      if (invNew.platform && platformToType[invNew.platform]) {
-        setInverterForm(f => ({ ...f, inverterType: platformToType[invNew.platform] }));
+      if (invNew.platform && PLATFORM_TO_UI_TYPE[invNew.platform]) {
+        setInverterForm(f => ({ ...f, inverterType: PLATFORM_TO_UI_TYPE[invNew.platform] }));
       } else if (inv.inverterType) {
         setInverterForm(f => ({ ...f, inverterType: inv.inverterType }));
       }
@@ -287,32 +283,7 @@ const SetupWizardPage: React.FC = () => {
   // Nothing is saved until the user presses Save — this is purely in-memory.
   const handleInverterChange = (newForm: InverterForm) => {
     setInverterForm(newForm);
-    if (!discovery?.platformSensors) return;
-
-    const newPlatform = INVERTER_INTEGRATION_IDS[newForm.inverterType] ?? 'growatt';
-    const platformMap = discovery.platformSensors[newPlatform] ?? {};
-
-    // Collect all sensor keys belonging to any inverter integration
-    const inverterIntegrationIds = new Set(Object.values(INVERTER_INTEGRATION_IDS));
-    const inverterKeys = new Set<string>();
-    for (const intg of INTEGRATIONS) {
-      if (inverterIntegrationIds.has(intg.id)) {
-        for (const group of intg.sensorGroups) {
-          for (const s of group.sensors) {
-            inverterKeys.add(s.key);
-          }
-        }
-      }
-    }
-
-    setSensors(prev => {
-      const next = { ...prev };
-      // Clear all inverter keys, then fill from the new platform's discovery
-      for (const key of inverterKeys) {
-        next[key] = platformMap[key] ?? '';
-      }
-      return next;
-    });
+    setSensors(prev => swapInverterSensors(prev, newForm.inverterType, discovery?.platformSensors ?? undefined));
   };
 
   const activeInverterIntegrationId = INVERTER_INTEGRATION_IDS[inverterForm.inverterType] ?? 'growatt';
@@ -487,6 +458,7 @@ const SetupWizardPage: React.FC = () => {
               onChange={setBatteryForm}
               currency={pricingForm.currency}
               weatherEntity={sensors['weather_entity']}
+              hideAdvanced
             />
 
             <div className="flex justify-between pt-2">

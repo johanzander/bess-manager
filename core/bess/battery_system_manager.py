@@ -175,6 +175,7 @@ class BatterySystemManager:
     VALID_PLATFORMS: ClassVar[set[str]] = {
         "growatt_min",
         "growatt_solax_modbus",
+        "growatt_solax_modbus_gen3",
         "growatt_sph",
         "solax",
     }
@@ -182,6 +183,7 @@ class BatterySystemManager:
     _INVERTER_TYPE_TO_PLATFORM: ClassVar[dict[str, str]] = {
         "MIN": "growatt_min",
         "GROWATT_MODBUS": "growatt_solax_modbus",
+        "SPH_MODBUS": "growatt_solax_modbus_gen3",
         "SPH": "growatt_sph",
         "SOLAX": "solax",
     }
@@ -226,7 +228,10 @@ class BatterySystemManager:
             return GrowattSphController(battery_settings=self.battery_settings)
         if self.inverter_platform == "solax":
             return SolaxController(battery_settings=self.battery_settings)
-        if self.inverter_platform == "growatt_solax_modbus":
+        if self.inverter_platform in (
+            "growatt_solax_modbus",
+            "growatt_solax_modbus_gen3",
+        ):
             return GrowattSolaxModbusController(battery_settings=self.battery_settings)
         return GrowattMinController(battery_settings=self.battery_settings)
 

@@ -6,12 +6,18 @@ communication.
 
 ## Supported Platforms
 
-| Platform | Inverter | HA Integration | Connection | Control Method |
-|----------|----------|----------------|------------|----------------|
-| Growatt MIN (Cloud) | Growatt MIC/MIN/MOD/MID | [Growatt Server](https://www.home-assistant.io/integrations/growatt_server/) | Cloud API | TOU service calls |
-| Growatt MIN (Local) | Growatt MIC/MIN/MOD/MID | [solax_modbus](https://github.com/wills106/homeassistant-solax-modbus) Growatt plugin | Local Modbus | TOU entity writes |
-| Growatt SPH | Growatt SPH | [Growatt Server](https://www.home-assistant.io/integrations/growatt_server/) | Cloud API | AC charge/discharge periods |
-| SolaX | SolaX hybrid | [solax_modbus](https://github.com/wills106/homeassistant-solax-modbus) | Local Modbus | VPP active-power commands |
+| Platform | Inverter | HA Integration | Connection | Control Method | solax_modbus Gen |
+|----------|----------|----------------|------------|----------------|-----------------|
+| Growatt MIN (Cloud) | Growatt MIC/MIN/MOD/MID | [Growatt Server](https://www.home-assistant.io/integrations/growatt_server/) | Cloud API | TOU service calls | — |
+| Growatt MIN (Local) | Growatt MIC/MIN/MOD/MID | [solax_modbus](https://github.com/wills106/homeassistant-solax-modbus) Growatt plugin | Local Modbus | TOU entity writes | GEN4 |
+| Growatt SPH (Cloud) | Growatt SPH | [Growatt Server](https://www.home-assistant.io/integrations/growatt_server/) | Cloud API | AC charge/discharge periods | — |
+| Growatt MIX/SPH (Local) | Growatt MIX/SPA/SPH | [solax_modbus](https://github.com/wills106/homeassistant-solax-modbus) Growatt plugin | Local Modbus | Mode-specific time slots | GEN3 |
+| SolaX | SolaX hybrid | [solax_modbus](https://github.com/wills106/homeassistant-solax-modbus) | Local Modbus | VPP active-power commands | — |
+
+> **solax_modbus generation mapping:** The `wills106/homeassistant-solax-modbus`
+> Growatt plugin classifies inverters by generation. GEN4 = MIN/MOD/MID/TL-X
+> (AC-coupled, numbered TOU slots). GEN3 = MIX/SPA/SPH (DC-coupled, mode-specific
+> time slots). BESS detects the generation automatically from entity markers.
 
 ## How BESS Controls Each Platform
 
@@ -30,11 +36,12 @@ growatt_server.update_time_segment(segment_id, start_time, end_time, mode, enabl
 - Grid charge enable/disable: `switch.turn_on` / `switch.turn_off`
 - Charge/discharge rate: `number.set_value`
 
-### Growatt MIN (Local) — `growatt_solax_modbus`
+### Growatt MIN (Local) — `growatt_solax_modbus` (GEN4)
 
 Identical scheduling algorithm to Growatt MIN (Cloud) — same 9-slot TOU
 management with differential updates and corruption recovery. Only the
-hardware I/O layer differs.
+hardware I/O layer differs. Uses **GEN4** entities from the solax_modbus
+Growatt plugin (MIN/MOD/MID/TL-X models).
 
 **Schedule writes:** 5 HA service calls per slot:
 ```
@@ -60,7 +67,34 @@ button.press(entity: time_N_update)
 - Grid charge: `switch.turn_on` / `switch.turn_off` on charger_switch entity
 - Charge/discharge rate: `number.set_value` on EMS rate entities
 
-### Growatt SPH — `growatt_sph`
+**Lifetime energy notes (GEN4):** GEN4 has no native load consumption
+register (`total_load` is GEN3, `home_consumption_energy` is SPF). BESS
+derives `lifetime_load_consumption` as `solar + grid_import − grid_export`.
+`total_yield` maps to `lifetime_system_production`.
+
+### Growatt MIX/SPH (Local) — `growatt_solax_modbus_gen3` (GEN3)
+
+GEN3 models (MIX/SPA/SPH) connected via the solax_modbus Growatt plugin.
+These use **mode-specific time slots** rather than numbered TOU slots:
+`battery_first_time_N`, `grid_first_time_N`, `load_first_time_N`.
+
+> **Status:** Monitoring and dashboards are fully supported. Schedule control
+> requires a dedicated controller (not yet implemented — the GEN3 time slot
+> architecture differs from GEN4).
+
+**EMS entities (GEN3-specific):**
+| Entity Key | BESS Sensor Key | Purpose |
+|-----------|-----------------|---------|
+| `battery_first_charge_rate` | `battery_charging_power_rate` | Charge rate in battery-first mode |
+| `grid_first_discharge_rate` | `battery_discharging_power_rate` | Discharge rate in grid-first mode |
+| `battery_first_maximum_soc` | `battery_charge_stop_soc` | Max SOC target |
+| `load_first_battery_minimum_soc` | `battery_discharge_stop_soc` | Min SOC target |
+
+**Lifetime energy notes (GEN3):** GEN3 has `total_load` (register 1062) for
+load consumption but no `total_yield`. BESS derives
+`lifetime_system_production` from `lifetime_solar_energy`.
+
+### Growatt SPH (Cloud) — `growatt_sph`
 
 SPH inverters use separate charge and discharge period lists (max 3 each)
 rather than TOU slots. Each write sets all periods at once with global power
@@ -122,9 +156,9 @@ button.press(trigger)
 | `lifetime_import_from_grid` | `lifetime_import_from_grid` |
 | `lifetime_load_consumption` | `lifetime_total_load_consumption` |
 
-### Growatt MIN (Local) — `solax_modbus` Growatt plugin
+### Growatt MIN (Local) — GEN4 — `solax_modbus` Growatt plugin
 
-**Monitoring and EMS control:**
+**Monitoring and EMS control (GEN4):**
 
 | BESS Sensor Key | Entity Type | solax_modbus Suffix | Purpose |
 |-----------------|-------------|---------------------|---------|
@@ -163,16 +197,48 @@ Where N = 1 through 9. A `time_N_clear` button also exists in the plugin
 > are disabled by default in the entity registry and must be manually enabled
 > in HA before BESS can discover or use them.
 
-**Lifetime energy (optional):**
+**Lifetime energy (GEN4, optional):**
 
-| BESS Sensor Key | solax_modbus Suffix |
-|-----------------|---------------------|
-| `lifetime_battery_charged` | `total_battery_input_energy` |
-| `lifetime_battery_discharged` | `total_battery_output_energy` |
-| `lifetime_solar_energy` | `total_solar_energy` |
-| `lifetime_import_from_grid` | `total_grid_import` |
-| `lifetime_export_to_grid` | `total_grid_export` |
-| `lifetime_load_consumption` | `home_consumption_energy` |
+| BESS Sensor Key | solax_modbus Suffix | Notes |
+|-----------------|---------------------|-------|
+| `lifetime_battery_charged` | `total_battery_input_energy` | |
+| `lifetime_battery_discharged` | `total_battery_output_energy` | |
+| `lifetime_solar_energy` | `total_solar_energy` | |
+| `lifetime_import_from_grid` | `total_grid_import` | |
+| `lifetime_export_to_grid` | `total_grid_export` | |
+| `lifetime_system_production` | `total_yield` | GEN4 register 3077 |
+| `lifetime_load_consumption` | — | **No native register.** BESS derives: solar + grid_import − grid_export |
+
+### Growatt MIX/SPH (Local) — GEN3 — `solax_modbus` Growatt plugin
+
+**Monitoring and EMS control (GEN3):**
+
+| BESS Sensor Key | Entity Type | solax_modbus Suffix | Purpose |
+|-----------------|-------------|---------------------|---------|
+| `battery_soc` | sensor | `battery_soc` | Current battery level |
+| `battery_charge_power` | sensor | `battery_charge_power` | Charge power (W) |
+| `battery_discharge_power` | sensor | `battery_discharge_power` | Discharge power (W) |
+| `import_power` | sensor | `total_forward_power` | Grid import (W) |
+| `export_power` | sensor | `total_reverse_power` | Grid export (W) |
+| `pv_power` | sensor | `pv_power_1` | Solar production (W) |
+| `local_load_power` | sensor | `total_load_power` | Home consumption (W) |
+| `grid_charge` | switch | `charger_switch` | Grid charge enable |
+| `battery_charging_power_rate` | number | `battery_first_charge_rate` | Charge rate (battery-first mode) |
+| `battery_discharging_power_rate` | number | `grid_first_discharge_rate` | Discharge rate (grid-first mode) |
+| `battery_charge_stop_soc` | number | `battery_first_maximum_soc` | Max SOC target |
+| `battery_discharge_stop_soc` | number | `load_first_battery_minimum_soc` | Min SOC target |
+
+**Lifetime energy (GEN3, optional):**
+
+| BESS Sensor Key | solax_modbus Suffix | Notes |
+|-----------------|---------------------|-------|
+| `lifetime_battery_charged` | `total_battery_input_energy` | Register 1058 |
+| `lifetime_battery_discharged` | `total_battery_output_energy` | Register 1054 |
+| `lifetime_solar_energy` | `total_solar_energy` | |
+| `lifetime_import_from_grid` | `total_grid_import` | Register 1046 |
+| `lifetime_export_to_grid` | `total_grid_export` | Register 1050 |
+| `lifetime_load_consumption` | `total_load` | Register 1062 |
+| `lifetime_system_production` | — | **No native register.** BESS derives from `lifetime_solar_energy` |
 
 ### SolaX — `solax_modbus` integration (native)
 
@@ -207,11 +273,12 @@ registry:
 
 1. **Growatt Server detected** (`platform: growatt_server`):
    - If `growatt_server.update_time_segment` service exists → **Growatt MIN (Cloud)**
-   - If `growatt_server.write_ac_charge_times` service exists → **Growatt SPH**
+   - If `growatt_server.write_ac_charge_times` service exists → **Growatt SPH (Cloud)**
 
 2. **solax_modbus detected** (`platform: solax_modbus`):
-   - If TOU entities present (`time_1_enabled` unique_id suffix) → **Growatt MIN (Local)**
-   - If VPP entities present (`remotecontrol_power_control` unique_id suffix) → **SolaX**
+   - If `time_1_enabled` unique_id suffix found → **Growatt MIN (Local) — GEN4**
+   - Else if `load_first_battery_minimum_soc` unique_id suffix found → **Growatt MIX/SPH (Local) — GEN3**
+   - Else if VPP entities present (`remotecontrol_power_control`) → **SolaX**
 
    Detection uses `unique_id` (built from the plugin's internal `key` field),
    not `entity_id` (built from display `name`). For Growatt TOU entities the

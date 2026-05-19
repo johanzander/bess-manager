@@ -296,7 +296,7 @@ def _solax_growatt_tou_registry() -> list[dict]:
     """Entity registry for a Growatt inverter via solax_modbus with TOU time slots.
 
     Extends the base Growatt-via-solax entities with TOU time slot entities,
-    which are the definitive marker for the growatt_solax_modbus platform.
+    which are the definitive marker for the growatt_solax_modbus platform (GEN4).
     """
     base = _solax_growatt_registry()
     tou_entities = []
@@ -317,6 +317,110 @@ def _solax_growatt_tou_registry() -> list[dict]:
             )
         )
     return base + tou_entities
+
+
+def _solax_growatt_gen3_registry() -> list[dict]:
+    """Entity registry for a GEN3 Growatt (MIX/SPA/SPH) via solax_modbus.
+
+    Contains the GEN3 marker entity (load_first_battery_minimum_soc) and
+    GEN3-specific EMS entities instead of GEN4 numbered TOU slots.
+    """
+    return [
+        # Monitoring sensors (same suffixes as GEN4)
+        _entity(
+            "sensor.growatt_sph_solax_battery_soc",
+            "solax_modbus",
+            "solax_battery_soc",
+        ),
+        _entity(
+            "sensor.growatt_sph_solax_battery_charge_power",
+            "solax_modbus",
+            "solax_battery_charge_power",
+        ),
+        _entity(
+            "sensor.growatt_sph_solax_battery_discharge_power",
+            "solax_modbus",
+            "solax_battery_discharge_power",
+        ),
+        _entity(
+            "sensor.growatt_sph_solax_total_forward_power",
+            "solax_modbus",
+            "solax_total_forward_power",
+        ),
+        _entity(
+            "sensor.growatt_sph_solax_total_reverse_power",
+            "solax_modbus",
+            "solax_total_reverse_power",
+        ),
+        _entity(
+            "sensor.growatt_sph_solax_pv_power_1",
+            "solax_modbus",
+            "solax_pv_power_1",
+        ),
+        _entity(
+            "sensor.growatt_sph_solax_total_load_power",
+            "solax_modbus",
+            "solax_total_load_power",
+        ),
+        # Lifetime energy (GEN3 has total_load, not total_yield)
+        _entity(
+            "sensor.growatt_sph_solax_total_battery_input_energy",
+            "solax_modbus",
+            "solax_total_battery_input_energy",
+        ),
+        _entity(
+            "sensor.growatt_sph_solax_total_battery_output_energy",
+            "solax_modbus",
+            "solax_total_battery_output_energy",
+        ),
+        _entity(
+            "sensor.growatt_sph_solax_total_solar_energy",
+            "solax_modbus",
+            "solax_total_solar_energy",
+        ),
+        _entity(
+            "sensor.growatt_sph_solax_total_grid_import",
+            "solax_modbus",
+            "solax_total_grid_import",
+        ),
+        _entity(
+            "sensor.growatt_sph_solax_total_grid_export",
+            "solax_modbus",
+            "solax_total_grid_export",
+        ),
+        _entity(
+            "sensor.growatt_sph_solax_total_load",
+            "solax_modbus",
+            "solax_total_load",
+        ),
+        # GEN3 EMS control entities
+        _entity(
+            "number.growatt_sph_solax_battery_first_charge_rate",
+            "solax_modbus",
+            "solax_battery_first_charge_rate",
+        ),
+        _entity(
+            "number.growatt_sph_solax_grid_first_discharge_rate",
+            "solax_modbus",
+            "solax_grid_first_discharge_rate",
+        ),
+        _entity(
+            "number.growatt_sph_solax_battery_first_maximum_soc",
+            "solax_modbus",
+            "solax_battery_first_maximum_soc",
+        ),
+        # GEN3 marker entity
+        _entity(
+            "number.growatt_sph_solax_load_first_battery_minimum_soc",
+            "solax_modbus",
+            "solax_load_first_battery_minimum_soc",
+        ),
+        _entity(
+            "switch.growatt_sph_solax_charger_switch",
+            "solax_modbus",
+            "solax_charger_switch",
+        ),
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -550,6 +654,42 @@ class TestDiscoverSensorsFromRegistry:
         assert platform == "growatt"
         assert sensors["growatt"]["battery_soc"] == "sensor.my_battery_soc"
         assert sensors["growatt"]["pv_power"] == "sensor.solar_production"
+
+    def test_solax_growatt_gen3(self):
+        """GEN3 Growatt (MIX/SPA/SPH) detected as growatt_modbus_gen3 platform."""
+        sensors, platform = self.ctrl.discover_sensors_from_registry(
+            _solax_growatt_gen3_registry()
+        )
+        assert platform == "growatt_modbus_gen3"
+        assert "growatt_modbus_gen3" in sensors
+        assert (
+            sensors["growatt_modbus_gen3"]["battery_soc"]
+            == "sensor.growatt_sph_solax_battery_soc"
+        )
+        # GEN3-specific EMS mapping
+        assert (
+            sensors["growatt_modbus_gen3"]["battery_charging_power_rate"]
+            == "number.growatt_sph_solax_battery_first_charge_rate"
+        )
+        assert (
+            sensors["growatt_modbus_gen3"]["battery_discharging_power_rate"]
+            == "number.growatt_sph_solax_grid_first_discharge_rate"
+        )
+        # GEN3 has total_load → lifetime_load_consumption
+        assert (
+            sensors["growatt_modbus_gen3"]["lifetime_load_consumption"]
+            == "sensor.growatt_sph_solax_total_load"
+        )
+
+    def test_gen3_marker_not_detected_for_gen4(self):
+        """GEN4 entities (TOU slots) do not trigger GEN3 detection."""
+        entities = _solax_growatt_tou_registry()
+        assert self.ctrl._has_growatt_gen3_entities(entities) is False
+
+    def test_gen4_marker_not_detected_for_gen3(self):
+        """GEN3 entities do not trigger GEN4 TOU detection."""
+        entities = _solax_growatt_gen3_registry()
+        assert self.ctrl._has_growatt_tou_entities(entities) is False
 
     def test_growatt_tou_not_detected_for_native_solax(self):
         """Native SolaX entities (no TOU) correctly return False."""

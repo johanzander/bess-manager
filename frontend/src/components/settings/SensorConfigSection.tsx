@@ -23,6 +23,7 @@ export interface DiscoveryResult {
   growattDeviceId: string | null;
   solaxFound: boolean;
   solaxHasGrowattTou: boolean;
+  solaxHasGrowattGen3: boolean;
   nordpoolFound: boolean;
   nordpoolArea: string | null;
   nordpoolConfigEntryId: string | null;
@@ -53,6 +54,7 @@ function isIntegrationFound(
 ): boolean {
   if (id === 'growatt') return discovery.growattFound;
   if (id === 'growatt_modbus') return discovery.solaxHasGrowattTou;
+  if (id === 'growatt_modbus_gen3') return discovery.solaxHasGrowattGen3;
   if (id === 'solax') return discovery.solaxFound;
   if (id === 'nordpool') return discovery.nordpoolFound;
   if (id === 'phase_current') {
@@ -124,7 +126,7 @@ function healthDot(
 // ---------------------------------------------------------------------------
 
 // IDs of inverter integrations — only one should be visible at a time.
-const INVERTER_IDS = new Set(['growatt', 'growatt_modbus', 'solax']);
+const INVERTER_IDS = new Set(['growatt', 'growatt_modbus', 'growatt_modbus_gen3', 'solax']);
 
 interface Props {
   sensors: Record<string, string>;
@@ -156,7 +158,9 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
 
   // Derive active inverter integration from the selected type
   const activeInverterIntegrationId = INVERTER_INTEGRATION_IDS[inverterForm.inverterType] ?? 'growatt';
-  const isGrowatt = activeInverterIntegrationId === 'growatt' || activeInverterIntegrationId === 'growatt_modbus';
+  const isGrowatt = activeInverterIntegrationId === 'growatt'
+    || activeInverterIntegrationId === 'growatt_modbus'
+    || activeInverterIntegrationId === 'growatt_modbus_gen3';
 
   // Detection flags for disabling platform options.
   // In wizard mode, use discovery results. In settings mode, derive from
@@ -169,8 +173,11 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
     ? discovery.growattFound
     : Boolean(sensors['battery_charging_power_rate'] || sensors['grid_charge']);
   const growattModbusDetected = wizardMode
-    ? Boolean(discovery.solaxFound)
+    ? Boolean(discovery.solaxFound && discovery.solaxHasGrowattTou)
     : Boolean(sensors['tou_time_1_enabled']);
+  const growattModbusGen3Detected = wizardMode
+    ? Boolean(discovery.solaxFound && discovery.solaxHasGrowattGen3)
+    : Boolean(sensors['battery_charging_power_rate'] && !sensors['tou_time_1_enabled']);
   const solaxDetected = wizardMode
     ? Boolean(discovery.solaxFound)
     : Boolean(sensors['solax_power_control_mode'] || sensors['solax_active_power']);
@@ -182,7 +189,8 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
       // When switching to Growatt, default to MIN unless already a Growatt type
       const currentIsGrowatt = inverterForm.inverterType === 'MIN'
         || inverterForm.inverterType === 'SPH'
-        || inverterForm.inverterType === 'GROWATT_MODBUS';
+        || inverterForm.inverterType === 'GROWATT_MODBUS'
+        || inverterForm.inverterType === 'SPH_MODBUS';
       onInverterChange({
         ...inverterForm,
         inverterType: currentIsGrowatt ? inverterForm.inverterType : 'MIN',
@@ -252,16 +260,19 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
             <div className="flex flex-wrap gap-x-5 gap-y-1">
               {([
                 { value: 'MIN', label: 'MIC/MIN/MOD/MID (AC-coupled)' },
-                { value: 'SPH', label: 'SPH (DC-coupled)' },
+                { value: 'SPH', label: 'MIX/SPA/SPH (DC-coupled)' },
               ]).map(opt => {
                 // In wizard mode, disable the subtype that doesn't match auto-detection
                 const detectedType = discovery?.inverterType?.toUpperCase();
-                // GROWATT_MODBUS is a MIN variant, so treat it as matching MIN
-                const normalizedDetected = detectedType === 'GROWATT_MODBUS' ? 'MIN' : detectedType;
+                // GROWATT_MODBUS is a MIN variant, SPH_MODBUS is an SPH variant
+                const normalizedDetected = detectedType === 'GROWATT_MODBUS' ? 'MIN'
+                  : detectedType === 'SPH_MODBUS' ? 'SPH'
+                    : detectedType;
                 const subtypeDetected = !wizardMode || !normalizedDetected || normalizedDetected === opt.value;
-                // MIN or GROWATT_MODBUS both select the MIN radio
+                // MIN or GROWATT_MODBUS both select the MIN radio; SPH or SPH_MODBUS select SPH
                 const isMinVariant = inverterForm.inverterType === 'MIN' || inverterForm.inverterType === 'GROWATT_MODBUS';
-                const isChecked = opt.value === 'MIN' ? isMinVariant : inverterForm.inverterType === opt.value;
+                const isSphVariant = inverterForm.inverterType === 'SPH' || inverterForm.inverterType === 'SPH_MODBUS';
+                const isChecked = opt.value === 'MIN' ? isMinVariant : isSphVariant;
                 return (
                   <label
                     key={opt.value}
@@ -281,36 +292,49 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
               })}
             </div>
 
-            {/* Connection selector: only shown for MIN inverters */}
-            {(inverterForm.inverterType === 'MIN' || inverterForm.inverterType === 'GROWATT_MODBUS') && (
-              <div className="ml-4 pl-3 border-l-2 border-gray-200 dark:border-gray-600">
-                <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">Connection</p>
-                <div className="flex flex-wrap gap-x-5 gap-y-1">
-                  {([
+            {/* Connection selector: shown for both MIN and SPH */}
+            {(() => {
+              const isMinVariant = inverterForm.inverterType === 'MIN' || inverterForm.inverterType === 'GROWATT_MODBUS';
+              const isSphVariant = inverterForm.inverterType === 'SPH' || inverterForm.inverterType === 'SPH_MODBUS';
+              const connectionOptions = isMinVariant
+                ? [
                     { value: 'MIN' as const, label: 'Growatt Server (Cloud)', detected: growattDetected },
                     { value: 'GROWATT_MODBUS' as const, label: 'SolaX Modbus (Local)', detected: growattModbusDetected },
-                  ]).map(opt => (
-                    <label
-                      key={opt.value}
-                      className={`flex items-center gap-2 ${!wizardMode || opt.detected ? 'cursor-pointer' : 'opacity-40 cursor-not-allowed'}`}
-                    >
-                      <input
-                        type="radio"
-                        name="growatt-connection"
-                        checked={inverterForm.inverterType === opt.value}
-                        disabled={wizardMode && !opt.detected}
-                        onChange={() => onInverterChange({ ...inverterForm, inverterType: opt.value })}
-                        className="text-blue-500"
-                      />
-                      <span className="text-sm text-gray-600 dark:text-gray-300">{opt.label}</span>
-                    </label>
-                  ))}
+                  ]
+                : isSphVariant
+                  ? [
+                      { value: 'SPH' as const, label: 'Growatt Server (Cloud)', detected: growattDetected },
+                      { value: 'SPH_MODBUS' as const, label: 'SolaX Modbus (Local)', detected: growattModbusGen3Detected },
+                    ]
+                  : null;
+              if (!connectionOptions) return null;
+              return (
+                <div className="ml-4 pl-3 border-l-2 border-gray-200 dark:border-gray-600">
+                  <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">Connection</p>
+                  <div className="flex flex-wrap gap-x-5 gap-y-1">
+                    {connectionOptions.map(opt => (
+                      <label
+                        key={opt.value}
+                        className={`flex items-center gap-2 ${!wizardMode || opt.detected ? 'cursor-pointer' : 'opacity-40 cursor-not-allowed'}`}
+                      >
+                        <input
+                          type="radio"
+                          name="growatt-connection"
+                          checked={inverterForm.inverterType === opt.value}
+                          disabled={wizardMode && !opt.detected}
+                          onChange={() => onInverterChange({ ...inverterForm, inverterType: opt.value })}
+                          className="text-blue-500"
+                        />
+                        <span className="text-sm text-gray-600 dark:text-gray-300">{opt.label}</span>
+                      </label>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {/* Device ID: only for cloud connection (growatt_server) */}
-            {inverterForm.inverterType !== 'GROWATT_MODBUS' && (
+            {inverterForm.inverterType !== 'GROWATT_MODBUS' && inverterForm.inverterType !== 'SPH_MODBUS' && (
               <label className="block">
                 <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Device ID</span>
                 <input

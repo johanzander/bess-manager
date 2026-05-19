@@ -370,8 +370,12 @@ class HomeAssistantAPIController:
     # lifetime_solar_energy          lifetime_total_solar_energy        total_solar_energy
     # lifetime_export_to_grid        lifetime_total_export_to_grid      grid_export_total / total_grid_export
     # lifetime_import_from_grid      lifetime_import_from_grid          grid_import_total / total_grid_import
-    # lifetime_load_consumption      lifetime_total_load_consumption    home_consumption_energy
-    # lifetime_system_production     lifetime_system_production         total_yield
+    # lifetime_load_consumption      lifetime_total_load_consumption    total_load (GEN3) / home_consumption_energy (SPF only)
+    # lifetime_system_production     lifetime_system_production         total_yield (GEN4 only)
+    #
+    # GEN3-only EMS entities (MIX/SPA/SPH via solax_modbus):
+    # battery_charging_power_rate    —                                  battery_first_charge_rate
+    # battery_discharging_power_rate —                                  grid_first_discharge_rate
     # lifetime_self_consumption      lifetime_self_consumption          — (growatt_server only)
     #
     # SOLAX-ONLY (VPP control — native SolaX inverters):
@@ -500,10 +504,11 @@ class HomeAssistantAPIController:
         "total_grid_import": "lifetime_import_from_grid",
         "grid_export_total": "lifetime_export_to_grid",
         "total_grid_export": "lifetime_export_to_grid",
-        # Load consumption (Riemann sum of house_load power)
-        "home_consumption_energy": "lifetime_load_consumption",
+        # Load consumption — multiple naming variants across generations
+        "home_consumption_energy": "lifetime_load_consumption",  # SPF only
+        "total_load": "lifetime_load_consumption",  # GEN3 (MIX/SPA/SPH)
         # System production / yield
-        "total_yield": "lifetime_system_production",
+        "total_yield": "lifetime_system_production",  # GEN4 (MIN/MOD/MID)
         # ── VPP control entities (select/number/button.<prefix>_<suffix>) ─
         "remotecontrol_power_control": "solax_power_control_mode",
         "remotecontrol_active_power": "solax_active_power",
@@ -514,10 +519,17 @@ class HomeAssistantAPIController:
         # ── Charger use mode (select entity) ─────────────────────────────
         "charger_use_mode": "solax_charger_use_mode",
         # ── Growatt inverter: EMS charge/discharge rate control ───────────
+        # GEN4 (MIN/MOD/MID) EMS entities:
         "ems_charging_rate": "battery_charging_power_rate",
         "ems_discharging_rate": "battery_discharging_power_rate",
         "ems_charging_stop_soc": "battery_charge_stop_soc",
         "ems_discharging_stop_soc": "battery_discharge_stop_soc",
+        # GEN3 (MIX/SPA/SPH) EMS entities — different names, same BESS keys:
+        "battery_first_charge_rate": "battery_charging_power_rate",
+        "grid_first_discharge_rate": "battery_discharging_power_rate",
+        "battery_first_maximum_soc": "battery_charge_stop_soc",
+        "load_first_battery_minimum_soc": "battery_discharge_stop_soc",
+        # Grid charge switch (both generations):
         "charger_switch": "grid_charge",
         # ── Growatt inverter: TOU time slot entities (9 slots) ───────────
         "time_1_enabled": "tou_time_1_enabled",
@@ -1736,12 +1748,35 @@ class HomeAssistantAPIController:
         return self._get_sensor_value("lifetime_export_to_grid")
 
     def get_load_consumption_lifetime(self):
-        """Get lifetime total load consumption energy in kWh."""
-        return self._get_sensor_value("lifetime_load_consumption")
+        """Get lifetime total load consumption energy in kWh.
+
+        If no direct sensor is configured (e.g. GEN4 Growatt inverters lack a
+        native load consumption register), derives the value from:
+            load = solar + grid_import - grid_export
+        """
+        direct = self._get_sensor_value("lifetime_load_consumption")
+        if direct is not None:
+            return direct
+
+        # Derive from other lifetime sensors when direct sensor unavailable
+        solar = self._get_sensor_value("lifetime_solar_energy")
+        grid_import = self._get_sensor_value("lifetime_import_from_grid")
+        grid_export = self._get_sensor_value("lifetime_export_to_grid")
+        if solar is not None and grid_import is not None and grid_export is not None:
+            derived = solar + grid_import - grid_export
+            return max(derived, 0.0)  # Guard against small negative rounding
+        return None
 
     def get_system_production_lifetime(self):
-        """Get lifetime total system production energy in kWh."""
-        return self._get_sensor_value("lifetime_system_production")
+        """Get lifetime total system production energy in kWh.
+
+        If no direct sensor is configured (e.g. GEN3 Growatt inverters lack
+        a ``total_yield`` register), falls back to ``lifetime_solar_energy``.
+        """
+        direct = self._get_sensor_value("lifetime_system_production")
+        if direct is not None:
+            return direct
+        return self._get_sensor_value("lifetime_solar_energy")
 
     def get_self_consumption_lifetime(self):
         """Get lifetime total self consumption energy in kWh."""
@@ -2144,9 +2179,16 @@ class HomeAssistantAPIController:
             result["inverter_type"] = metadata.get("growatt_inverter_type")
         if result["solax_found"]:
             has_tou = self._has_growatt_tou_entities(registry)
+            has_gen3 = self._has_growatt_gen3_entities(registry)
             result["solax_has_growatt_tou"] = has_tou
+            result["solax_has_growatt_gen3"] = has_gen3
             if not result["growatt_found"]:
-                result["inverter_type"] = "GROWATT_MODBUS" if has_tou else "solax"
+                if has_tou:
+                    result["inverter_type"] = "GROWATT_MODBUS"
+                elif has_gen3:
+                    result["inverter_type"] = "SPH_MODBUS"
+                else:
+                    result["inverter_type"] = "solax"
 
         # Currency & VAT from Nordpool area or Octopus defaults
         area_hints = self._hints_from_nordpool_area(result.get("nordpool_area"))
@@ -2397,36 +2439,44 @@ class HomeAssistantAPIController:
             )
         return detected
 
-    # TOU entity suffix used to distinguish Growatt-via-solax from SolaX-native.
-    # If a solax_modbus entity has a unique_id ending with this suffix,
-    # the inverter is a Growatt MIN using the solax_modbus Growatt plugin.
-    # Note: the plugin uses key="time_1_enabled" (→ unique_id) but
-    # name="Time 1 Active" (→ entity_id contains "time_1_active").
-    # We match on unique_id, so the suffix is "enabled".
-    _GROWATT_TOU_MARKER_SUFFIX: ClassVar[str] = "time_1_enabled"
+    # ── Growatt generation markers for solax_modbus platform detection ──
+    # GEN4 (MIN/MOD/MID/TL-X): uses numbered TOU time slots (time_N_enabled).
+    # GEN3 (MIX/SPA/SPH): uses mode-specific time slots and distinct EMS entities.
+    # If neither marker is found, the inverter is assumed to be native SolaX.
+    _GROWATT_TOU_MARKER_SUFFIX: ClassVar[str] = "time_1_enabled"  # GEN4
+    _GROWATT_GEN3_MARKER_SUFFIX: ClassVar[str] = (
+        "load_first_battery_minimum_soc"  # GEN3
+    )
+
+    _SOLAX_PLATFORMS: ClassVar[set[str]] = {"solax_modbus", "solax"}
+
+    def _has_solax_entity_suffix(
+        self, entities: list[dict], suffix: str, label: str
+    ) -> bool:
+        """Check whether any solax_modbus entity has a unique_id ending with the suffix."""
+        count = 0
+        for entity in entities:
+            if entity.get("platform") not in self._SOLAX_PLATFORMS:
+                continue
+            count += 1
+            unique_id = str(entity.get("unique_id", ""))
+            if unique_id.endswith(f"_{suffix}"):
+                logger.info("%s marker found: unique_id=%s", label, unique_id)
+                return True
+        logger.info("No %s marker found among %d solax_modbus entities", label, count)
+        return False
 
     def _has_growatt_tou_entities(self, entities: list[dict]) -> bool:
-        """Check whether the entity registry contains Growatt TOU entities.
-
-        Returns True if any solax_modbus entity has a unique_id ending with
-        the TOU time slot marker, indicating a Growatt MIN inverter connected
-        via the solax_modbus Growatt plugin (as opposed to a native SolaX).
-        """
-        solax_platforms = {"solax_modbus", "solax"}
-        solax_count = 0
-        for entity in entities:
-            if entity.get("platform") not in solax_platforms:
-                continue
-            solax_count += 1
-            unique_id = str(entity.get("unique_id", ""))
-            if unique_id.endswith(f"_{self._GROWATT_TOU_MARKER_SUFFIX}"):
-                logger.info("Growatt TOU marker found: unique_id=%s", unique_id)
-                return True
-        logger.info(
-            "No Growatt TOU marker found among %d solax_modbus entities",
-            solax_count,
+        """Check for GEN4 Growatt (MIN/MOD/MID) TOU entities via solax_modbus."""
+        return self._has_solax_entity_suffix(
+            entities, self._GROWATT_TOU_MARKER_SUFFIX, "Growatt GEN4 TOU"
         )
-        return False
+
+    def _has_growatt_gen3_entities(self, entities: list[dict]) -> bool:
+        """Check for GEN3 Growatt (MIX/SPA/SPH) entities via solax_modbus."""
+        return self._has_solax_entity_suffix(
+            entities, self._GROWATT_GEN3_MARKER_SUFFIX, "Growatt GEN3"
+        )
 
     def detect_inverter_integrations(
         self, entities: list[dict] | None = None
@@ -2508,9 +2558,15 @@ class HomeAssistantAPIController:
                 self.SOLAX_ENTITY_SUFFIX_MAP,
             )
             if self._has_growatt_tou_entities(entities):
+                # GEN4: Growatt MIN/MOD/MID with numbered TOU slots
                 platform_sensors["growatt_modbus"] = solax_sensors
                 if not detected_platform:
                     detected_platform = "growatt_modbus"
+            elif self._has_growatt_gen3_entities(entities):
+                # GEN3: Growatt MIX/SPA/SPH with mode-specific time slots
+                platform_sensors["growatt_modbus_gen3"] = solax_sensors
+                if not detected_platform:
+                    detected_platform = "growatt_modbus_gen3"
             else:
                 platform_sensors["solax"] = solax_sensors
                 if not detected_platform:

@@ -57,6 +57,7 @@ UI_TYPE_TO_PLATFORM: dict[str, str] = {
     "MIN": "growatt_min",
     "SPH": "growatt_sph",
     "GROWATT_MODBUS": "growatt_solax_modbus",
+    "SPH_MODBUS": "growatt_solax_modbus_gen3",
     "SOLAX": "solax",
 }
 

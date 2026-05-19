@@ -2586,7 +2586,7 @@ async def run_setup_discovery():
                 ha.ENTITY_SUFFIX_MAP
                 if detected_platform == "growatt"
                 else ha.SOLAX_ENTITY_SUFFIX_MAP
-            )  # growatt_modbus also uses SOLAX_ENTITY_SUFFIX_MAP
+            )  # growatt_modbus and growatt_modbus_gen3 also use SOLAX_ENTITY_SUFFIX_MAP
             all_bess_keys = list(set(suffix_map.values()))
             missing_sensors = [k for k in all_bess_keys if k not in sensors]
 
@@ -2618,6 +2618,9 @@ async def run_setup_discovery():
                 "solax_found": integrations["solax_found"],
                 "solax_has_growatt_tou": integrations.get(
                     "solax_has_growatt_tou", False
+                ),
+                "solax_has_growatt_gen3": integrations.get(
+                    "solax_has_growatt_gen3", False
                 ),
                 "nordpool_found": integrations["nordpool_found"],
                 "nordpool_area": integrations["nordpool_area"],

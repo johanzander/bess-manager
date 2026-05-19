@@ -349,6 +349,14 @@ class TestSetupComplete:
         call_args = complete_controller.settings_store.save_all.call_args[0][0]
         assert call_args["inverter"]["platform"] == "growatt_solax_modbus"
 
+    def test_inverter_platform_set_for_sph_modbus(self, complete_controller):
+        _client.post(
+            "/api/setup/complete",
+            json=_full_wizard_payload(inverterType="SPH_MODBUS"),
+        )
+        call_args = complete_controller.settings_store.save_all.call_args[0][0]
+        assert call_args["inverter"]["platform"] == "growatt_solax_modbus_gen3"
+
     def test_legacy_growatt_section_updated_for_growatt_platforms(
         self, complete_controller
     ):

@@ -4,7 +4,10 @@ Tests cover:
 - _map_registry_entities: unique_id-based suffix matching
 - discover_sensors_from_registry: single suffix map per platform
 - Robustness against user entity renaming (unique_id is immutable)
+- Derived lifetime sensor fallbacks (GEN3/GEN4)
 """
+
+from unittest.mock import patch
 
 from core.bess.ha_api_controller import HomeAssistantAPIController
 
@@ -704,3 +707,71 @@ class TestDiscoverSensorsFromRegistry:
             ),
         ]
         assert self.ctrl._has_growatt_tou_entities(entities) is False
+
+
+# ---------------------------------------------------------------------------
+# Tests: Derived lifetime sensor fallbacks
+# ---------------------------------------------------------------------------
+
+
+class TestDerivedLifetimeSensors:
+    """Test that lifetime sensors are derived when no direct sensor exists."""
+
+    def setup_method(self):
+        self.ctrl = _make_controller()
+        self.ctrl.sensors = {}
+
+    def _mock_sensor(self, values: dict):
+        """Return a patcher that makes _get_sensor_value return from the dict."""
+
+        def fake_get(key):
+            return values.get(key)
+
+        return patch.object(self.ctrl, "_get_sensor_value", side_effect=fake_get)
+
+    def test_load_consumption_direct_sensor(self):
+        """Direct sensor is returned when available."""
+        with self._mock_sensor({"lifetime_load_consumption": 1234.5}):
+            assert self.ctrl.get_load_consumption_lifetime() == 1234.5
+
+    def test_load_consumption_derived_for_gen4(self):
+        """When no direct sensor, derive from solar + import - export."""
+        with self._mock_sensor(
+            {
+                "lifetime_solar_energy": 5000.0,
+                "lifetime_import_from_grid": 3000.0,
+                "lifetime_export_to_grid": 1500.0,
+            }
+        ):
+            assert self.ctrl.get_load_consumption_lifetime() == 6500.0
+
+    def test_load_consumption_none_when_missing_sources(self):
+        """Returns None when derivation sources are incomplete."""
+        with self._mock_sensor({"lifetime_solar_energy": 5000.0}):
+            assert self.ctrl.get_load_consumption_lifetime() is None
+
+    def test_load_consumption_clamps_negative(self):
+        """Derived value is clamped to 0 to guard against rounding."""
+        with self._mock_sensor(
+            {
+                "lifetime_solar_energy": 100.0,
+                "lifetime_import_from_grid": 50.0,
+                "lifetime_export_to_grid": 200.0,
+            }
+        ):
+            assert self.ctrl.get_load_consumption_lifetime() == 0.0
+
+    def test_system_production_direct_sensor(self):
+        """Direct sensor is returned when available."""
+        with self._mock_sensor({"lifetime_system_production": 9999.0}):
+            assert self.ctrl.get_system_production_lifetime() == 9999.0
+
+    def test_system_production_falls_back_to_solar(self):
+        """When no direct sensor (GEN3), falls back to solar energy."""
+        with self._mock_sensor({"lifetime_solar_energy": 7777.0}):
+            assert self.ctrl.get_system_production_lifetime() == 7777.0
+
+    def test_system_production_none_when_nothing_available(self):
+        """Returns None when neither direct nor fallback is available."""
+        with self._mock_sensor({}):
+            assert self.ctrl.get_system_production_lifetime() is None

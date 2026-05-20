@@ -97,6 +97,12 @@
     "total_charged": 44.8,
     "total_discharged": 44.8
   },
+  "price_data": {
+    "markup_rate": 0.08,
+    "vat_multiplier": 1.25,
+    "additional_costs": 1.03,
+    "tax_reduction": 0.0
+  },
   "expected_behavior": {
     "description": "High price spread without solar: should grid-charge at night lows and discharge during evening peaks",
     "intents_present": ["GRID_CHARGING", "LOAD_SUPPORT"],

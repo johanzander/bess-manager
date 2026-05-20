@@ -26,6 +26,7 @@ OWNED_SECTIONS = (
     "electricity_price",
     "energy_provider",
     "growatt",
+    "inverter",
     "sensors",
 )
 
@@ -145,32 +146,26 @@ class SettingsStore:
                 sensors[key] = entity_id
         self.data["sensors"] = sensors
 
-        # Nordpool area
+        # Nordpool area — always update when discovery provides a value
         if nordpool_area:
-            from core.bess.settings import DEFAULT_AREA
-
             price = dict(self.data.get("electricity_price", {}))
-            # Overwrite if blank OR still the bootstrap default — the default is
-            # a placeholder that discovery must be allowed to correct.
-            if not price.get("area") or price.get("area") == DEFAULT_AREA:
-                price["area"] = nordpool_area
-                self.data["electricity_price"] = price
+            price["area"] = nordpool_area
+            self.data["electricity_price"] = price
 
-        # Nordpool config_entry_id
+        # Nordpool config_entry_id — always update when discovery provides a value
+        # (previous guard blocked updates when a stale/mock value existed)
         if nordpool_config_entry_id:
             ep = dict(self.data.get("energy_provider", {}))
             nordpool_official = dict(ep.get("nordpool_official", {}))
-            if not nordpool_official.get("config_entry_id"):
-                nordpool_official["config_entry_id"] = nordpool_config_entry_id
-                ep["nordpool_official"] = nordpool_official
-                self.data["energy_provider"] = ep
+            nordpool_official["config_entry_id"] = nordpool_config_entry_id
+            ep["nordpool_official"] = nordpool_official
+            self.data["energy_provider"] = ep
 
-        # Growatt device_id
+        # Growatt device_id — always update when discovery provides a value
         if growatt_device_id:
             growatt = dict(self.data.get("growatt", {}))
-            if not growatt.get("device_id"):
-                growatt["device_id"] = growatt_device_id
-                self.data["growatt"] = growatt
+            growatt["device_id"] = growatt_device_id
+            self.data["growatt"] = growatt
 
         self._write(self.data)
         logger.info("Persisted discovered config (%d sensors)", len(sensor_map))
@@ -319,6 +314,7 @@ class SettingsStore:
                 "octopus": {},
             },
             "growatt": {"inverter_type": "", "device_id": ""},
+            "inverter": {"platform": "", "device_id": ""},
             "sensors": {},
         }
 
@@ -418,6 +414,29 @@ class SettingsStore:
                     ep["nordpool"] = nordpool
                     self.data["energy_provider"] = ep
                     changed = True
+
+        growatt = self.data.get("growatt")
+        if isinstance(growatt, dict):
+            from api_conversion import UI_TYPE_TO_PLATFORM
+
+            old_type = growatt.get("inverter_type", "")
+            inverter = dict(self.data.get("inverter", {}))
+            if (
+                old_type
+                and not inverter.get("platform")
+                and old_type in UI_TYPE_TO_PLATFORM
+            ):
+                platform = UI_TYPE_TO_PLATFORM[old_type]
+                inverter["platform"] = platform
+                if not inverter.get("device_id") and growatt.get("device_id"):
+                    inverter["device_id"] = growatt["device_id"]
+                self.data["inverter"] = inverter
+                logger.info(
+                    "Schema migration: growatt.inverter_type=%s → inverter.platform=%s",
+                    old_type,
+                    platform,
+                )
+                changed = True
 
         if changed:
             self._write(self.data)

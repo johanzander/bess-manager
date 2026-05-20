@@ -19,6 +19,83 @@ export interface IntegrationDef {
   sensorGroups: SensorGroup[];
 }
 
+// Map inverter type UI values to their integration IDs.
+// Used by the wizard to show only the relevant inverter integration.
+export const INVERTER_INTEGRATION_IDS: Record<string, string> = {
+  MIN: 'growatt',
+  GROWATT_MODBUS: 'growatt_modbus',
+  SPH: 'growatt',
+  SPH_MODBUS: 'growatt_modbus_gen3',
+  SOLAX: 'solax',
+};
+
+// ---------------------------------------------------------------------------
+// Platform maps — single source of truth for UI ↔ backend conversion
+// ---------------------------------------------------------------------------
+
+/** Map UI inverter type → backend platform key (for saving to store). */
+export const UI_TYPE_TO_PLATFORM: Record<string, string> = {
+  MIN: 'growatt_min',
+  SPH: 'growatt_sph',
+  GROWATT_MODBUS: 'growatt_solax_modbus',
+  SPH_MODBUS: 'growatt_solax_modbus_gen3',
+  SOLAX: 'solax',
+};
+
+/** Map backend platform key → UI inverter type (for loading from store). */
+export const PLATFORM_TO_UI_TYPE: Record<string, string> = Object.fromEntries(
+  Object.entries(UI_TYPE_TO_PLATFORM).map(([uiType, platform]) => [platform, uiType]),
+);
+
+/** Normalize a discovery inverterType value to a UI type string. */
+export function discoveryTypeToUiType(discoveryType: string): string {
+  // Discovery returns mixed-case values (e.g. 'solax', 'MIN', 'SPH').
+  // UI types are always uppercase.
+  return UI_TYPE_TO_PLATFORM[discoveryType.toUpperCase()] ? discoveryType.toUpperCase() : discoveryType.toUpperCase();
+}
+
+// ---------------------------------------------------------------------------
+// Sensor swap helper — clears inverter-specific sensor keys when switching
+// platform and optionally fills from discovered values.
+// ---------------------------------------------------------------------------
+
+/** All sensor keys that belong to any inverter integration. */
+function getInverterSensorKeys(): Set<string> {
+  const inverterIntegrationIds = new Set(Object.values(INVERTER_INTEGRATION_IDS));
+  const keys = new Set<string>();
+  for (const intg of INTEGRATIONS) {
+    if (inverterIntegrationIds.has(intg.id)) {
+      for (const group of intg.sensorGroups) {
+        for (const s of group.sensors) {
+          keys.add(s.key);
+        }
+      }
+    }
+  }
+  return keys;
+}
+
+/**
+ * Build a new sensors map after switching inverter platform.
+ * Clears all inverter-specific keys and fills from platformSensors if available.
+ * Non-inverter sensors (Solcast, weather, phase current, etc.) are preserved.
+ */
+export function swapInverterSensors(
+  currentSensors: Record<string, string>,
+  newInverterType: string,
+  platformSensors?: Record<string, Record<string, string>>,
+): Record<string, string> {
+  const newPlatform = INVERTER_INTEGRATION_IDS[newInverterType] ?? 'growatt';
+  const platformMap = platformSensors?.[newPlatform] ?? {};
+  const inverterKeys = getInverterSensorKeys();
+
+  const next = { ...currentSensors };
+  for (const key of inverterKeys) {
+    next[key] = platformMap[key] ?? '';
+  }
+  return next;
+}
+
 export const INTEGRATIONS: IntegrationDef[] = [
   {
     id: 'growatt',
@@ -59,6 +136,142 @@ export const INTEGRATIONS: IntegrationDef[] = [
           { key: 'lifetime_load_consumption', label: 'Total Load Consumption', required: true },
           { key: 'lifetime_system_production', label: 'Total System Production', required: false },
           { key: 'lifetime_self_consumption', label: 'Total Self Consumption', required: false },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'solax',
+    name: 'SolaX (Native)',
+    required: true,
+    description: 'Native SolaX inverter controlled via VPP active-power commands (not for Growatt inverters — use Growatt → SolaX Modbus Local instead)',
+    sensorGroups: [
+      {
+        name: 'Battery Monitoring',
+        sensors: [
+          { key: 'battery_soc', label: 'Battery Capacity (SOC)', required: true },
+          { key: 'battery_charge_power', label: 'Battery Charge Power', required: true },
+          { key: 'battery_discharge_power', label: 'Battery Discharge Power', required: true },
+        ],
+      },
+      {
+        name: 'Power Monitoring',
+        sensors: [
+          { key: 'pv_power', label: 'PV Power', required: false },
+          { key: 'local_load_power', label: 'House Load', required: false },
+          { key: 'import_power', label: 'Measured Power (Grid)', required: false },
+          { key: 'export_power', label: 'Grid Export Power', required: false },
+        ],
+      },
+      {
+        name: 'Lifetime Energy',
+        sensors: [
+          { key: 'lifetime_battery_charged', label: 'Battery Input Energy Total', required: false },
+          { key: 'lifetime_battery_discharged', label: 'Battery Output Energy Total', required: false },
+          { key: 'lifetime_solar_energy', label: 'Total Solar Energy', required: false },
+          { key: 'lifetime_import_from_grid', label: 'Grid Import Total', required: false },
+          { key: 'lifetime_export_to_grid', label: 'Grid Export Total', required: false },
+          { key: 'lifetime_load_consumption', label: 'Home Consumption Energy', required: false },
+          { key: 'lifetime_system_production', label: 'Total Yield', required: false },
+        ],
+      },
+      {
+        name: 'VPP Control',
+        sensors: [
+          { key: 'solax_power_control_mode', label: 'Power Control Mode', required: true },
+          { key: 'solax_active_power', label: 'Active Power Target', required: true },
+          { key: 'solax_autorepeat_duration', label: 'Autorepeat Duration', required: true },
+          { key: 'solax_power_control_trigger', label: 'Power Control Trigger', required: true },
+          { key: 'solax_battery_min_soc', label: 'Battery Minimum SOC', required: true },
+          { key: 'solax_charger_use_mode', label: 'Charger Use Mode', required: false },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'growatt_modbus',
+    name: 'SolaX Modbus (Growatt)',
+    required: true,
+    description: 'Growatt MIN inverter controlled via the homeassistant-solax-modbus Growatt plugin (local Modbus, TOU entity writes)',
+    sensorGroups: [
+      {
+        name: 'Battery Monitoring',
+        sensors: [
+          { key: 'battery_soc', label: 'Battery Capacity (SOC)', required: true },
+          { key: 'battery_charge_power', label: 'Battery Charge Power', required: true },
+          { key: 'battery_discharge_power', label: 'Battery Discharge Power', required: true },
+        ],
+      },
+      {
+        name: 'EMS Control',
+        sensors: [
+          { key: 'battery_charging_power_rate', label: 'EMS Charging Rate', required: true },
+          { key: 'battery_discharging_power_rate', label: 'EMS Discharging Rate', required: true },
+          { key: 'grid_charge', label: 'Grid Charge Switch', required: true },
+        ],
+      },
+      {
+        name: 'Power Monitoring',
+        sensors: [
+          { key: 'pv_power', label: 'PV Power', required: false },
+          { key: 'local_load_power', label: 'House Load', required: false },
+          { key: 'import_power', label: 'Measured Power (Grid)', required: false },
+          { key: 'export_power', label: 'Grid Export Power', required: false },
+        ],
+      },
+      {
+        name: 'Lifetime Energy',
+        sensors: [
+          { key: 'lifetime_battery_charged', label: 'Battery Input Energy Total', required: false },
+          { key: 'lifetime_battery_discharged', label: 'Battery Output Energy Total', required: false },
+          { key: 'lifetime_solar_energy', label: 'Total Solar Energy', required: false },
+          { key: 'lifetime_import_from_grid', label: 'Grid Import Total', required: false },
+          { key: 'lifetime_export_to_grid', label: 'Grid Export Total', required: false },
+          { key: 'lifetime_system_production', label: 'Total Yield', required: false },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'growatt_modbus_gen3',
+    name: 'SolaX Modbus (Growatt MIX/SPH)',
+    required: true,
+    description: 'Growatt MIX/SPA/SPH inverter (GEN3) controlled via the homeassistant-solax-modbus Growatt plugin (local Modbus)',
+    sensorGroups: [
+      {
+        name: 'Battery Monitoring',
+        sensors: [
+          { key: 'battery_soc', label: 'Battery Capacity (SOC)', required: true },
+          { key: 'battery_charge_power', label: 'Battery Charge Power', required: true },
+          { key: 'battery_discharge_power', label: 'Battery Discharge Power', required: true },
+        ],
+      },
+      {
+        name: 'EMS Control',
+        sensors: [
+          { key: 'battery_charging_power_rate', label: 'Battery First Charge Rate', required: true },
+          { key: 'battery_discharging_power_rate', label: 'Grid First Discharge Rate', required: true },
+          { key: 'grid_charge', label: 'Grid Charge Switch', required: true },
+        ],
+      },
+      {
+        name: 'Power Monitoring',
+        sensors: [
+          { key: 'pv_power', label: 'PV Power', required: false },
+          { key: 'local_load_power', label: 'House Load', required: false },
+          { key: 'import_power', label: 'Measured Power (Grid)', required: false },
+          { key: 'export_power', label: 'Grid Export Power', required: false },
+        ],
+      },
+      {
+        name: 'Lifetime Energy',
+        sensors: [
+          { key: 'lifetime_battery_charged', label: 'Battery Input Energy Total', required: false },
+          { key: 'lifetime_battery_discharged', label: 'Battery Output Energy Total', required: false },
+          { key: 'lifetime_solar_energy', label: 'Total Solar Energy', required: false },
+          { key: 'lifetime_import_from_grid', label: 'Grid Import Total', required: false },
+          { key: 'lifetime_export_to_grid', label: 'Grid Export Total', required: false },
+          { key: 'lifetime_load_consumption', label: 'Total Load', required: false },
         ],
       },
     ],

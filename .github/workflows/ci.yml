@@ -133,14 +133,92 @@ jobs:
         if: always()
         run: docker compose -f docker-compose.ci.yml down
 
-      # Phase 2: Setup wizard tests (empty settings, wizard scenario)
-      - name: "E2E: Start environment (wizard)"
+      # Phase 2: Setup wizard tests (all scenario combinations)
+      # Each step resets bess_settings.json to empty so the wizard triggers fresh.
+      - name: "E2E: Wizard — Nordpool + MIN"
         run: |
+          echo '{}' > ./e2e/ci-wizard-settings.json
           SCENARIO=ci-wizard-nordpool-min BESS_SETTINGS=./e2e/ci-wizard-settings.json BESS_OPTIONS=./e2e/ci-wizard-options.json docker compose -f docker-compose.ci.yml up -d
           timeout 120 bash -c 'until curl -sf http://localhost:8080/api/setup/status > /dev/null 2>&1; do sleep 2; done'
-      - name: "E2E: Run wizard tests"
-        run: cd e2e && npx playwright test --project=wizard
-      - name: "E2E: Stop environment"
+          cd e2e && SCENARIO=ci-wizard-nordpool-min npx playwright test --project=wizard
+      - name: "E2E: Stop wizard (Nordpool + MIN)"
+        if: always()
+        run: docker compose -f docker-compose.ci.yml down
+
+      - name: "E2E: Wizard — Nordpool + SPH"
+        if: always()
+        run: |
+          echo '{}' > ./e2e/ci-wizard-settings.json
+          SCENARIO=ci-wizard-nordpool-sph BESS_SETTINGS=./e2e/ci-wizard-settings.json BESS_OPTIONS=./e2e/ci-wizard-options.json docker compose -f docker-compose.ci.yml up -d
+          timeout 120 bash -c 'until curl -sf http://localhost:8080/api/setup/status > /dev/null 2>&1; do sleep 2; done'
+          cd e2e && SCENARIO=ci-wizard-nordpool-sph npx playwright test --project=wizard
+      - name: "E2E: Stop wizard (Nordpool + SPH)"
+        if: always()
+        run: docker compose -f docker-compose.ci.yml down
+
+      - name: "E2E: Wizard — Nordpool + SolaX"
+        if: always()
+        run: |
+          echo '{}' > ./e2e/ci-wizard-settings.json
+          SCENARIO=ci-wizard-nordpool-solax BESS_SETTINGS=./e2e/ci-wizard-settings.json BESS_OPTIONS=./e2e/ci-wizard-options.json docker compose -f docker-compose.ci.yml up -d
+          timeout 120 bash -c 'until curl -sf http://localhost:8080/api/setup/status > /dev/null 2>&1; do sleep 2; done'
+          cd e2e && SCENARIO=ci-wizard-nordpool-solax npx playwright test --project=wizard
+      - name: "E2E: Stop wizard (Nordpool + SolaX)"
+        if: always()
+        run: docker compose -f docker-compose.ci.yml down
+
+      - name: "E2E: Wizard — Octopus + MIN"
+        if: always()
+        run: |
+          echo '{}' > ./e2e/ci-wizard-settings.json
+          SCENARIO=ci-wizard-octopus BESS_SETTINGS=./e2e/ci-wizard-settings.json BESS_OPTIONS=./e2e/ci-wizard-options.json docker compose -f docker-compose.ci.yml up -d
+          timeout 120 bash -c 'until curl -sf http://localhost:8080/api/setup/status > /dev/null 2>&1; do sleep 2; done'
+          cd e2e && SCENARIO=ci-wizard-octopus npx playwright test --project=wizard
+      - name: "E2E: Stop wizard (Octopus + MIN)"
+        if: always()
+        run: docker compose -f docker-compose.ci.yml down
+
+      - name: "E2E: Wizard — Full integrations"
+        if: always()
+        run: |
+          echo '{}' > ./e2e/ci-wizard-settings.json
+          SCENARIO=ci-wizard-full BESS_SETTINGS=./e2e/ci-wizard-settings.json BESS_OPTIONS=./e2e/ci-wizard-options.json docker compose -f docker-compose.ci.yml up -d
+          timeout 120 bash -c 'until curl -sf http://localhost:8080/api/setup/status > /dev/null 2>&1; do sleep 2; done'
+          cd e2e && SCENARIO=ci-wizard-full npx playwright test --project=wizard
+      - name: "E2E: Stop wizard (Full)"
+        if: always()
+        run: docker compose -f docker-compose.ci.yml down
+
+      - name: "E2E: Wizard — Nordpool HACS"
+        if: always()
+        run: |
+          echo '{}' > ./e2e/ci-wizard-settings.json
+          SCENARIO=ci-wizard-nordpool-hacs BESS_SETTINGS=./e2e/ci-wizard-settings.json BESS_OPTIONS=./e2e/ci-wizard-options.json docker compose -f docker-compose.ci.yml up -d
+          timeout 120 bash -c 'until curl -sf http://localhost:8080/api/setup/status > /dev/null 2>&1; do sleep 2; done'
+          cd e2e && SCENARIO=ci-wizard-nordpool-hacs npx playwright test --project=wizard
+      - name: "E2E: Stop wizard (Nordpool HACS)"
+        if: always()
+        run: docker compose -f docker-compose.ci.yml down
+
+      - name: "E2E: Wizard — Octopus + SPH"
+        if: always()
+        run: |
+          echo '{}' > ./e2e/ci-wizard-settings.json
+          SCENARIO=ci-wizard-octopus-sph BESS_SETTINGS=./e2e/ci-wizard-settings.json BESS_OPTIONS=./e2e/ci-wizard-options.json docker compose -f docker-compose.ci.yml up -d
+          timeout 120 bash -c 'until curl -sf http://localhost:8080/api/setup/status > /dev/null 2>&1; do sleep 2; done'
+          cd e2e && SCENARIO=ci-wizard-octopus-sph npx playwright test --project=wizard
+      - name: "E2E: Stop wizard (Octopus + SPH)"
+        if: always()
+        run: docker compose -f docker-compose.ci.yml down
+
+      - name: "E2E: Wizard — Both providers"
+        if: always()
+        run: |
+          echo '{}' > ./e2e/ci-wizard-settings.json
+          SCENARIO=ci-wizard-both-providers BESS_SETTINGS=./e2e/ci-wizard-settings.json BESS_OPTIONS=./e2e/ci-wizard-options.json docker compose -f docker-compose.ci.yml up -d
+          timeout 120 bash -c 'until curl -sf http://localhost:8080/api/setup/status > /dev/null 2>&1; do sleep 2; done'
+          cd e2e && SCENARIO=ci-wizard-both-providers npx playwright test --project=wizard
+      - name: "E2E: Stop wizard (Both providers)"
         if: always()
         run: docker compose -f docker-compose.ci.yml down
 

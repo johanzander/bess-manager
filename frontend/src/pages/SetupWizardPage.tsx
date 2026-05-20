@@ -2,15 +2,15 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CheckCircle, ChevronRight, ChevronLeft, Zap } from 'lucide-react';
 import api from '../lib/api';
-import { INTEGRATIONS } from '../lib/sensorDefinitions';
+import { INTEGRATIONS, INVERTER_INTEGRATION_IDS, PLATFORM_TO_UI_TYPE, discoveryTypeToUiType, swapInverterSensors } from '../lib/sensorDefinitions';
 import { HomeFormSection } from '../components/settings/HomeFormSection';
 import type { HomeForm } from '../components/settings/HomeFormSection';
 import { PricingFormSection } from '../components/settings/PricingFormSection';
 import type { PricingForm } from '../components/settings/PricingFormSection';
 import { BatteryFormSection } from '../components/settings/BatteryFormSection';
-import type { BatteryForm, InverterForm } from '../components/settings/BatteryFormSection';
+import type { BatteryForm } from '../components/settings/BatteryFormSection';
 import { SensorConfigSection } from '../components/settings/SensorConfigSection';
-import type { DiscoveryResult } from '../components/settings/SensorConfigSection';
+import type { DiscoveryResult, InverterForm } from '../components/settings/SensorConfigSection';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -91,15 +91,26 @@ const SetupWizardPage: React.FC = () => {
       if (d.detectedPhaseCount) {
         setHomeForm(f => ({ ...f, phaseCount: d.detectedPhaseCount! }));
       }
+      // Auto-select pricing provider based on discovered integrations
+      const autoProvider = d.octopusFound && !d.nordpoolFound
+        ? 'octopus' as const
+        : d.nordpoolFound
+          ? 'nordpool_official' as const
+          : undefined;
       setPricingForm(f => ({
         ...f,
+        ...(autoProvider ? { provider: autoProvider } : {}),
         ...(d.currency ? { currency: d.currency } : {}),
         ...(d.nordpoolArea ? { area: d.nordpoolArea } : {}),
         ...(d.vatMultiplier ? { vatMultiplier: d.vatMultiplier } : {}),
         ...(d.nordpoolConfigEntryId ? { nordpoolConfigEntryId: d.nordpoolConfigEntryId } : {}),
+        ...(d.octopusEntities?.importToday ? { octopusImportTodayEntity: d.octopusEntities.importToday } : {}),
+        ...(d.octopusEntities?.importTomorrow ? { octopusImportTomorrowEntity: d.octopusEntities.importTomorrow } : {}),
+        ...(d.octopusEntities?.exportToday ? { octopusExportTodayEntity: d.octopusEntities.exportToday } : {}),
+        ...(d.octopusEntities?.exportTomorrow ? { octopusExportTomorrowEntity: d.octopusEntities.exportTomorrow } : {}),
       }));
       if (d.inverterType) {
-        setInverterForm(f => ({ ...f, inverterType: d.inverterType! }));
+        setInverterForm(f => ({ ...f, inverterType: discoveryTypeToUiType(d.inverterType) }));
       }
       if (d.growattDeviceId) {
         setInverterForm(f => ({ ...f, deviceId: d.growattDeviceId! }));
@@ -178,7 +189,13 @@ const SetupWizardPage: React.FC = () => {
         nordpoolConfigEntryId: ep.nordpoolOfficial?.configEntryId ?? f.nordpoolConfigEntryId,
         nordpoolEntity:        ep.nordpool?.entity               ?? f.nordpoolEntity,
       }));
-      if (inv.inverterType) setInverterForm(f => ({ ...f, inverterType: inv.inverterType }));
+      // Restore inverter type from new inverter.platform or legacy growatt.inverter_type
+      const invNew = s.inverter ?? {};
+      if (invNew.platform && PLATFORM_TO_UI_TYPE[invNew.platform]) {
+        setInverterForm(f => ({ ...f, inverterType: PLATFORM_TO_UI_TYPE[invNew.platform] }));
+      } else if (inv.inverterType) {
+        setInverterForm(f => ({ ...f, inverterType: inv.inverterType }));
+      }
       if (inv.deviceId) setInverterForm(f => ({ ...f, deviceId: inv.deviceId }));
     }).catch((err: unknown) => {
       const status = (err as { response?: { status?: number } })?.response?.status;
@@ -244,6 +261,11 @@ const SetupWizardPage: React.FC = () => {
         vatMultiplier: pricingForm.vatMultiplier,
         additionalCosts: pricingForm.additionalCosts,
         taxReduction: pricingForm.taxReduction,
+        // Octopus Energy entity IDs
+        octopusImportTodayEntity: pricingForm.octopusImportTodayEntity || undefined,
+        octopusImportTomorrowEntity: pricingForm.octopusImportTomorrowEntity || undefined,
+        octopusExportTodayEntity: pricingForm.octopusExportTodayEntity || undefined,
+        octopusExportTomorrowEntity: pricingForm.octopusExportTomorrowEntity || undefined,
         // Inverter
         inverterType: inverterForm.inverterType,
       });
@@ -255,11 +277,25 @@ const SetupWizardPage: React.FC = () => {
     }
   };
 
-  const allRequiredFilled = INTEGRATIONS.every(integration =>
-    integration.sensorGroups.every(group =>
+  // When the user switches inverter platform, replace all inverter-integration
+  // sensor fields with the new platform's discovered values.  Non-inverter
+  // sensors (Solcast, consumption forecast, phase current, etc.) are preserved.
+  // Nothing is saved until the user presses Save — this is purely in-memory.
+  const handleInverterChange = (newForm: InverterForm) => {
+    setInverterForm(newForm);
+    setSensors(prev => swapInverterSensors(prev, newForm.inverterType, discovery?.platformSensors ?? undefined));
+  };
+
+  const activeInverterIntegrationId = INVERTER_INTEGRATION_IDS[inverterForm.inverterType] ?? 'growatt';
+  const inverterIntegrationIds = new Set(Object.values(INVERTER_INTEGRATION_IDS));
+
+  const allRequiredFilled = INTEGRATIONS.every(integration => {
+    // Skip inverter integrations that don't match the selected inverter type
+    if (inverterIntegrationIds.has(integration.id) && integration.id !== activeInverterIntegrationId) return true;
+    return integration.sensorGroups.every(group =>
       group.sensors.every(s => !s.required || !!sensors[s.key]),
-    ),
-  );
+    );
+  });
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col items-center justify-center p-6">
@@ -340,6 +376,8 @@ const SetupWizardPage: React.FC = () => {
             <SensorConfigSection
               sensors={sensors}
               onChange={setSensors}
+              inverterForm={inverterForm}
+              onInverterChange={handleInverterChange}
               discovery={discovery}
             />
 
@@ -359,7 +397,7 @@ const SetupWizardPage: React.FC = () => {
               </button>
               <button
                 onClick={handleConfirm}
-                disabled={confirming}
+                disabled={confirming || !allRequiredFilled}
                 className="flex items-center space-x-2 px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 font-medium disabled:opacity-60"
               >
                 {confirming && <div className="h-4 w-4 border-2 border-white rounded-full border-t-transparent animate-spin" />}
@@ -411,17 +449,16 @@ const SetupWizardPage: React.FC = () => {
             <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
               <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Battery</h2>
               <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                Your inverter model and battery hardware specifications. These values are used by the optimizer to plan charge and discharge schedules.
+                Battery hardware specifications. These values are used by the optimizer to plan charge and discharge schedules.
               </p>
             </div>
 
             <BatteryFormSection
               form={batteryForm}
               onChange={setBatteryForm}
-              inverterForm={inverterForm}
-              onInverterChange={setInverterForm}
               currency={pricingForm.currency}
               weatherEntity={sensors['weather_entity']}
+              hideAdvanced
             />
 
             <div className="flex justify-between pt-2">

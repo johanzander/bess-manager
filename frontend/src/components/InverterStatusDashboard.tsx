@@ -15,12 +15,11 @@ import {
 } from 'lucide-react';
 import api from '../lib/api';
 
-// FIXED: Updated interface to match actual API response
 interface InverterStatus {
   batterySoc: number;
   batterySoe: number;
-  batteryChargePower: number;    // ✅ Separate charge power (kW)
-  batteryDischargePower: number; // ✅ Separate discharge power (kW)
+  batteryChargePower: number;
+  batteryDischargePower: number;
   pvPower: number;
   consumption: number;
   gridPower: number;
@@ -33,6 +32,7 @@ interface InverterStatus {
   cycleCost: number;
   systemStatus: string;
   lastUpdated: string;
+  inverterPlatform?: string;
   // Formatted fields
   batterySoeCapacityFormatted?: string;
 }
@@ -82,8 +82,9 @@ interface PeriodGroup {
   gridCharge: boolean;
 }
 
-interface GrowattSchedule {
+interface InverterSchedule {
   currentHour: number;
+  inverterPlatform?: string;
   touIntervals: TOUInterval[];
   scheduleData: ScheduleHour[];
   periodGroups: PeriodGroup[];
@@ -274,7 +275,7 @@ interface DashboardData {
 
 const InverterStatusDashboard: React.FC = () => {
   const [inverterStatus, setInverterStatus] = useState<InverterStatus | null>(null);
-  const [growattSchedule, setGrowattSchedule] = useState<GrowattSchedule | null>(null);
+  const [inverterSchedule, setInverterSchedule] = useState<InverterSchedule | null>(null);
   const [batterySettings, setBatterySettings] = useState<BatterySettings | null>(null);
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -302,12 +303,12 @@ const InverterStatusDashboard: React.FC = () => {
   };
 
   const fetchInverterStatus = async (): Promise<InverterStatus> => {
-    const response = await api.get('/api/growatt/inverter_status');
+    const response = await api.get('/api/inverter/status');
     return response.data;
   };
 
-  const fetchGrowattSchedule = async (): Promise<GrowattSchedule> => {
-    const response = await api.get('/api/growatt/detailed_schedule');
+  const fetchInverterSchedule = async (): Promise<InverterSchedule> => {
+    const response = await api.get('/api/inverter/schedule');
     return response.data;
   };
 
@@ -332,7 +333,7 @@ const InverterStatusDashboard: React.FC = () => {
       
       const results = await Promise.allSettled([
         fetchInverterStatus(),
-        fetchGrowattSchedule(),
+        fetchInverterSchedule(),
         fetchBatterySettings(),
         fetchDashboardData()
       ]);
@@ -343,7 +344,7 @@ const InverterStatusDashboard: React.FC = () => {
         console.warn('Failed to fetch inverter status:', results[0].reason);
       }
       if (results[1].status === 'fulfilled') {
-        setGrowattSchedule(results[1].value);
+        setInverterSchedule(results[1].value);
       } else {
         console.warn('Failed to fetch schedule:', results[1].reason);
       }
@@ -412,10 +413,10 @@ const InverterStatusDashboard: React.FC = () => {
 
   // ✅ FIX 2: Get current battery mode from schedule data instead of inverter status
   const getCurrentBatteryMode = (): string => {
-    if (!growattSchedule?.scheduleData) return 'load_first';
+    if (!inverterSchedule?.scheduleData) return 'load_first';
     
     const currentHour = new Date().getHours();
-    const currentHourData = growattSchedule.scheduleData.find(h => h.hour === currentHour);
+    const currentHourData = inverterSchedule.scheduleData.find(h => h.hour === currentHour);
     return currentHourData?.batteryMode || 'load_first';
   };
 
@@ -430,7 +431,7 @@ const InverterStatusDashboard: React.FC = () => {
 
   // Merge dashboard data with schedule data to get correct strategic intents
   const getMergedHourData = (hour: number) => {
-    const scheduleHour = growattSchedule?.scheduleData?.find(h => h.hour === hour);
+    const scheduleHour = inverterSchedule?.scheduleData?.find(h => h.hour === hour);
     const dashboardHour = dashboardData?.hourlyData?.find(h => h.hour === hour);
 
     if (!scheduleHour && !dashboardHour) return null;
@@ -516,11 +517,11 @@ const InverterStatusDashboard: React.FC = () => {
 
   // Find current period group from 15-minute resolution data
   const getCurrentPeriodGroup = () => {
-    if (!growattSchedule?.periodGroups) return null;
+    if (!inverterSchedule?.periodGroups) return null;
     const now = new Date();
     const currentMinutes = now.getHours() * 60 + now.getMinutes();
 
-    for (const group of growattSchedule.periodGroups) {
+    for (const group of inverterSchedule.periodGroups) {
       const [startH, startM] = group.startTime.split(':').map(Number);
       const [endH, endM] = group.endTime.split(':').map(Number);
       const groupStartMinutes = startH * 60 + startM;
@@ -687,7 +688,7 @@ const InverterStatusDashboard: React.FC = () => {
             <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Schedule Overview (15-min Resolution)</h3>
           </div>
 
-          {growattSchedule?.periodGroups && growattSchedule.periodGroups.length > 0 ? (
+          {inverterSchedule?.periodGroups && inverterSchedule.periodGroups.length > 0 ? (
             <div className="overflow-x-auto bg-white dark:bg-gray-800 rounded-lg shadow">
               <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
                 <thead className="bg-gray-50 dark:bg-gray-700">
@@ -716,7 +717,7 @@ const InverterStatusDashboard: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                  {growattSchedule.periodGroups.map((group, index) => {
+                  {inverterSchedule.periodGroups.map((group, index) => {
                     // Check if current time falls within this period group
                     const now = new Date();
                     const currentMinutes = now.getHours() * 60 + now.getMinutes();
@@ -790,7 +791,7 @@ const InverterStatusDashboard: React.FC = () => {
                     );
                   })}
                 </tbody>
-                {growattSchedule.tomorrowPeriodGroups && growattSchedule.tomorrowPeriodGroups.length > 0 && (
+                {inverterSchedule.tomorrowPeriodGroups && inverterSchedule.tomorrowPeriodGroups.length > 0 && (
                   <>
                     <thead className="bg-indigo-50 dark:bg-indigo-900/30">
                       <tr>
@@ -800,7 +801,7 @@ const InverterStatusDashboard: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700 opacity-75">
-                      {growattSchedule.tomorrowPeriodGroups.map((group, index) => {
+                      {inverterSchedule.tomorrowPeriodGroups.map((group, index) => {
                         const formatDuration = (minutes: number): string => {
                           const hours = Math.floor(minutes / 60);
                           const mins = minutes % 60;
@@ -865,83 +866,100 @@ const InverterStatusDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* TOU Intervals - All 9 segments plus defaults in chronological order */}
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
-        <div className="p-6">
-          <div className="flex items-center mb-4">
-            <Clock className="h-5 w-5 text-blue-600 mr-2" />
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Time of Use (TOU) Intervals</h3>
-          </div>
-          {growattSchedule?.touIntervals ? (
-            <div className="space-y-2">
-              {growattSchedule.touIntervals.map((interval, index) => (
-                <div key={index} className={`flex justify-between items-center p-3 rounded-lg ${
-                  interval.isExpired
-                    ? 'bg-gray-50 dark:bg-gray-800/30 border border-gray-200 dark:border-gray-700 opacity-40'
-                    : interval.isDefault
-                    ? 'bg-gray-50 dark:bg-gray-800/30 border border-gray-200 dark:border-gray-700 opacity-50'
-                    : interval.isEmpty
-                    ? 'bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 opacity-60'
-                    : interval.enabled
-                    ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800'
-                    : 'bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800'
-                }`}>
-                  <div className="flex items-center space-x-4">
-                    <div className={`font-medium ${
-                      interval.isExpired
-                        ? 'text-gray-400 dark:text-gray-500'
-                        : 'text-gray-900 dark:text-white'
-                    }`}>
-                      {interval.isDefault
-                        ? 'Default'
-                        : `Segment #${interval.segmentId}`}
-                    </div>
-                    <div className={`text-sm ${
-                      interval.isExpired
-                        ? 'text-gray-400 dark:text-gray-500 line-through'
-                        : 'text-gray-600 dark:text-gray-400'
-                    }`}>
-                      {interval.isExpired
-                        ? `${interval.startTime} - ${interval.endTime}`
-                        : interval.isEmpty
-                        ? 'Not configured'
-                        : `${interval.startTime} - ${interval.endTime}`}
-                    </div>
-                  </div>
-                  <div className="flex items-center space-x-3">
-                    {!interval.isExpired && !interval.isEmpty && getBatteryModeDisplay(interval.battMode)}
-                    <span className={`px-2 py-1 rounded text-xs font-medium ${
-                      interval.isExpired
-                        ? 'bg-gray-100 text-gray-400 dark:bg-gray-700 dark:text-gray-500'
-                        : interval.pendingWrite
-                        ? 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-300'
-                        : interval.isDefault
-                        ? 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
-                        : interval.isEmpty
-                        ? 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
-                        : interval.enabled
-                        ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300'
-                        : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300'
-                    }`}>
-                      {interval.isExpired
-                        ? 'Expired'
-                        : interval.pendingWrite
-                        ? 'Pending Write'
-                        : interval.isDefault
-                        ? 'Load First'
-                        : interval.isEmpty
-                        ? 'Empty'
-                        : (interval.enabled ? 'Active' : 'Disabled')}
-                    </span>
-                  </div>
+      {/* Hardware Schedule Section — platform-aware */}
+      {(() => {
+        const platform = inverterSchedule?.inverterPlatform ?? inverterStatus?.inverterPlatform ?? 'growatt_min';
+        const isSolax = platform === 'solax';
+
+        return (
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center">
+                  <Clock className="h-5 w-5 text-blue-600 mr-2" />
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                    {isSolax ? 'VPP Control' : 'Time of Use (TOU) Intervals'}
+                  </h3>
                 </div>
-              ))}
+                <span className="text-xs px-2 py-1 rounded-full font-medium bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300">
+                  {platform === 'growatt_min' ? 'Growatt MIN' : platform === 'growatt_sph' ? 'Growatt SPH' : 'SolaX Modbus'}
+                </span>
+              </div>
+
+              {isSolax ? (
+                <div className="rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 p-4">
+                  <p className="text-sm font-medium text-blue-800 dark:text-blue-300 mb-1">Per-period VPP commands</p>
+                  <p className="text-sm text-blue-700 dark:text-blue-400">
+                    SolaX uses real-time power commands instead of a stored schedule.
+                    Commands are issued at each 15-minute period boundary and kept active
+                    via autorepeat. The strategic intent timeline above shows what the
+                    optimizer has planned.
+                  </p>
+                </div>
+              ) : (
+                inverterSchedule?.touIntervals ? (
+                  <div className="space-y-2">
+                    {inverterSchedule.touIntervals.map((interval, index) => (
+                      <div key={index} className={`flex justify-between items-center p-3 rounded-lg ${
+                        interval.isExpired
+                          ? 'bg-gray-50 dark:bg-gray-800/30 border border-gray-200 dark:border-gray-700 opacity-40'
+                          : interval.isDefault
+                          ? 'bg-gray-50 dark:bg-gray-800/30 border border-gray-200 dark:border-gray-700 opacity-50'
+                          : interval.isEmpty
+                          ? 'bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 opacity-60'
+                          : interval.enabled
+                          ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800'
+                          : 'bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800'
+                      }`}>
+                        <div className="flex items-center space-x-4">
+                          <div className={`font-medium ${
+                            interval.isExpired ? 'text-gray-400 dark:text-gray-500' : 'text-gray-900 dark:text-white'
+                          }`}>
+                            {interval.isDefault ? 'Default' : `Segment #${interval.segmentId}`}
+                          </div>
+                          <div className={`text-sm ${
+                            interval.isExpired ? 'text-gray-400 dark:text-gray-500 line-through' : 'text-gray-600 dark:text-gray-400'
+                          }`}>
+                            {interval.isExpired
+                              ? `${interval.startTime} - ${interval.endTime}`
+                              : interval.isEmpty
+                              ? 'Not configured'
+                              : `${interval.startTime} - ${interval.endTime}`}
+                          </div>
+                        </div>
+                        <div className="flex items-center space-x-3">
+                          {!interval.isExpired && !interval.isEmpty && getBatteryModeDisplay(interval.battMode)}
+                          <span className={`px-2 py-1 rounded text-xs font-medium ${
+                            interval.isExpired
+                              ? 'bg-gray-100 text-gray-400 dark:bg-gray-700 dark:text-gray-500'
+                              : interval.pendingWrite
+                              ? 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-300'
+                              : interval.isDefault
+                              ? 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
+                              : interval.isEmpty
+                              ? 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
+                              : interval.enabled
+                              ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300'
+                              : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300'
+                          }`}>
+                            {interval.isExpired ? 'Expired'
+                              : interval.pendingWrite ? 'Pending Write'
+                              : interval.isDefault ? 'Load First'
+                              : interval.isEmpty ? 'Empty'
+                              : (interval.enabled ? 'Active' : 'Disabled')}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-gray-500 dark:text-gray-400 text-sm">No TOU intervals configured</div>
+                )
+              )}
             </div>
-          ) : (
-            <div className="text-gray-500 dark:text-gray-400 text-sm">No TOU intervals configured</div>
-          )}
-        </div>
-      </div>
+          </div>
+        );
+      })()}
 
     </div>
   );

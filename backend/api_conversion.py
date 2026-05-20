@@ -50,6 +50,17 @@ PRICE_STORE_TO_API: dict[str, str] = {
     "tax_reduction": "taxReduction",
 }
 
+# Maps UI inverter type values to canonical inverter.platform store keys.
+# Single source of truth — used by setup_complete, settings_store migration,
+# and PATCH /api/settings.
+UI_TYPE_TO_PLATFORM: dict[str, str] = {
+    "MIN": "growatt_min",
+    "SPH": "growatt_sph",
+    "GROWATT_MODBUS": "growatt_solax_modbus",
+    "SPH_MODBUS": "growatt_solax_modbus_gen3",
+    "SOLAX": "solax",
+}
+
 
 def build_system_settings(options: dict) -> dict:
     """Validate settings options and return the camelCase dict for update_settings().

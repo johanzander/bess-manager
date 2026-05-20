@@ -993,6 +993,11 @@ class APISetupCompletePayload(BaseModel):
     taxReduction: float | None = None
     # Energy provider
     provider: str | None = None
+    # Octopus Energy entity IDs (required when provider == "octopus")
+    octopusImportTodayEntity: str | None = None
+    octopusImportTomorrowEntity: str | None = None
+    octopusExportTodayEntity: str | None = None
+    octopusExportTomorrowEntity: str | None = None
     # Inverter
     inverterType: str | None = None
 

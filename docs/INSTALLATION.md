@@ -8,13 +8,34 @@ Complete guide for installing and configuring BESS Battery Manager for Home Assi
 
 - Home Assistant OS, Container, or Supervised
 
-### Growatt Inverter (Required)
+### Inverter (Required — one of the following)
 
-- A Growatt inverter with battery storage
-  - **MIN inverter**: fully supported
-  - **SPH inverter**: experimental support
+**Growatt MIC/MIN/MOD/MID via Growatt Server (cloud)**
+
+- A Growatt AC-coupled inverter with battery storage
 - The [Growatt Server integration](https://www.home-assistant.io/integrations/growatt_server/) installed in Home Assistant
 - **⚠️ Token authentication is required.** The integration supports both username/password and token-based auth, but BESS needs the `number.*` and `switch.*` entities and service calls that are only available with token auth. Username/password auth will not expose these, and BESS will not work correctly without them.
+
+**Growatt SPH via Growatt Server (cloud)**
+
+- A Growatt SPH (DC-coupled) inverter with battery storage
+- The [Growatt Server integration](https://www.home-assistant.io/integrations/growatt_server/) with token auth
+
+**Growatt MIC/MIN/MOD/MID via solax_modbus (local Modbus)**
+
+- A Growatt AC-coupled inverter with battery storage
+- The [homeassistant-solax-modbus](https://github.com/wills106/homeassistant-solax-modbus) HACS integration with the **Growatt plugin** enabled
+- Provides local Modbus control — no cloud dependency
+- Requires Growatt plugin with TOU time slot entities (entity_id: `select.*_time_1_active`, unique_id suffix: `time_1_enabled`). Slots 4-9 are disabled by default in HA and must be enabled manually.
+
+**SolaX via solax_modbus (local Modbus)**
+
+- A SolaX inverter with battery storage
+- The [homeassistant-solax-modbus](https://github.com/wills106/homeassistant-solax-modbus) integration (available via HACS) installed in Home Assistant
+- BESS controls the inverter via VPP active-power commands
+- Auto-detection uses the HA entity registry (`platform` and `unique_id` fields), which are immutable and unaffected by entity renaming. If you have renamed entity IDs and removed the original suffixes, use the setup wizard to map them manually
+
+For detailed entity requirements per platform, see [docs/INVERTER_PLATFORMS.md](INVERTER_PLATFORMS.md).
 
 ### Electricity Price Integration (Required)
 
@@ -165,7 +186,7 @@ sensor:
       hours: 48
 ```
 
-> **Note:** Replace `rkm0d7n04x_battery_1_charging_w`, `rkm0d7n04x_battery_1_discharging_w`, and `rkm0d7n04x_import_power` with your actual sensor entity IDs from your Growatt integration.
+> **Note:** Replace `rkm0d7n04x_battery_1_charging_w`, `rkm0d7n04x_battery_1_discharging_w`, and `rkm0d7n04x_import_power` with your actual sensor entity IDs from your inverter integration.
 
 **Why filter?** When battery is active (>400W), the sensor holds its previous value instead of updating. This ensures the 48h average only includes periods of pure home consumption, excluding battery operations.
 
@@ -182,7 +203,7 @@ When you open the web interface for the first time, a **Setup Wizard** will laun
 It scans Home Assistant for connected integrations and fills in sensor entity IDs automatically.
 Walk through the wizard to:
 
-1. Auto-discover Growatt, Nordpool, Solcast and other integrations
+1. Auto-discover your inverter (Growatt or SolaX), Nordpool, Solcast and other integrations
 2. Review and adjust any detected sensor entity IDs
 3. Confirm the configuration — BESS applies it immediately without a restart
 
@@ -195,7 +216,7 @@ All settings are available under the **Settings** page in the top navigation. Th
 - **Home** — Consumption, currency, fuse size, voltage, phase count, safety margin
 - **Pricing** — Nordpool/Octopus provider, price area, VAT, markup, additional costs, tax reduction
 - **Battery** — Capacity, power limits, SOC range, cycle cost, min action profit threshold
-- **Sensors** — All sensor entity IDs grouped by integration (Growatt, Nordpool, Solcast, etc.)
+- **Sensors** — All sensor entity IDs grouped by integration (Growatt/SolaX, Nordpool, Solcast, etc.)
 - **Health** — Live component health check and debug export
 
 The sections below describe the key values you need to fill in.
@@ -350,8 +371,7 @@ The calculated value (0.083 EUR/kWh) is a good starting point, but you may want 
 
 **About Depth of Discharge (DoD):**
 
-The Min/Max SOC limits you set in **Settings → Battery** are the master values. BESS syncs them
-to the Growatt inverter on startup and the optimizer stays within this range.
+The Min/Max SOC limits you set in **Settings → Battery** are the master values. BESS syncs them to the inverter on startup and the optimizer stays within this range.
 
 - **You configure in Settings → Battery**: Set min/max SOC (e.g. 10–100% = 90% usable capacity)
 - **BESS syncs to inverter**: Limits are written to the inverter automatically

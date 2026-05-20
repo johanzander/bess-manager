@@ -8,8 +8,8 @@ from unittest.mock import MagicMock
 
 import pytest  # type: ignore
 
+from core.bess.growatt_sph_controller import GrowattSphController
 from core.bess.settings import BatterySettings
-from core.bess.sph_schedule import SphScheduleManager
 
 
 def make_intents(hourly: dict[int, str], default: str = "IDLE") -> list[str]:
@@ -41,8 +41,8 @@ def battery_settings() -> BatterySettings:
 
 
 @pytest.fixture
-def manager(battery_settings: BatterySettings) -> SphScheduleManager:
-    return SphScheduleManager(battery_settings=battery_settings)
+def manager(battery_settings: BatterySettings) -> GrowattSphController:
+    return GrowattSphController(battery_settings=battery_settings)
 
 
 # ── GRID_CHARGING → charge period ────────────────────────────────────────────
@@ -50,7 +50,7 @@ def manager(battery_settings: BatterySettings) -> SphScheduleManager:
 
 class TestGridChargingProducesChargePeriod:
     def test_grid_charging_hour_produces_one_charge_period(
-        self, manager: SphScheduleManager
+        self, manager: GrowattSphController
     ) -> None:
         intents = make_intents({2: "GRID_CHARGING", 3: "GRID_CHARGING"})
         manager.create_schedule(make_schedule_mock(intents))
@@ -58,7 +58,7 @@ class TestGridChargingProducesChargePeriod:
         assert len(manager._charge_periods) == 1
 
     def test_charge_period_time_matches_grid_charging_hours(
-        self, manager: SphScheduleManager
+        self, manager: GrowattSphController
     ) -> None:
         intents = make_intents({2: "GRID_CHARGING", 3: "GRID_CHARGING"})
         manager.create_schedule(make_schedule_mock(intents))
@@ -68,7 +68,7 @@ class TestGridChargingProducesChargePeriod:
         assert period["end_time"] == "03:59"
 
     def test_grid_charging_writes_charge_call_to_controller(
-        self, manager: SphScheduleManager
+        self, manager: GrowattSphController
     ) -> None:
         intents = make_intents({2: "GRID_CHARGING"})
         manager.create_schedule(make_schedule_mock(intents))
@@ -81,7 +81,7 @@ class TestGridChargingProducesChargePeriod:
         assert call_kwargs["mains_enabled"] is True
 
     def test_no_grid_charging_sets_mains_disabled(
-        self, manager: SphScheduleManager
+        self, manager: GrowattSphController
     ) -> None:
         intents = make_intents({})  # All IDLE
         manager.create_schedule(make_schedule_mock(intents))
@@ -98,7 +98,7 @@ class TestGridChargingProducesChargePeriod:
 
 class TestSolarStorageIsIdle:
     def test_solar_storage_produces_no_charge_periods(
-        self, manager: SphScheduleManager
+        self, manager: GrowattSphController
     ) -> None:
         intents = make_intents({10: "SOLAR_STORAGE", 11: "SOLAR_STORAGE"})
         manager.create_schedule(make_schedule_mock(intents))
@@ -106,7 +106,7 @@ class TestSolarStorageIsIdle:
         assert len(manager._charge_periods) == 0
 
     def test_solar_storage_produces_no_discharge_periods(
-        self, manager: SphScheduleManager
+        self, manager: GrowattSphController
     ) -> None:
         intents = make_intents({10: "SOLAR_STORAGE"})
         manager.create_schedule(make_schedule_mock(intents))
@@ -119,7 +119,7 @@ class TestSolarStorageIsIdle:
 
 class TestDischargeIntentsProduceDischargeperiod:
     def test_load_support_produces_discharge_period(
-        self, manager: SphScheduleManager
+        self, manager: GrowattSphController
     ) -> None:
         intents = make_intents({18: "LOAD_SUPPORT", 19: "LOAD_SUPPORT"})
         manager.create_schedule(make_schedule_mock(intents))
@@ -127,7 +127,7 @@ class TestDischargeIntentsProduceDischargeperiod:
         assert len(manager._discharge_periods) == 1
 
     def test_export_arbitrage_produces_discharge_period(
-        self, manager: SphScheduleManager
+        self, manager: GrowattSphController
     ) -> None:
         intents = make_intents({20: "EXPORT_ARBITRAGE"})
         manager.create_schedule(make_schedule_mock(intents))
@@ -135,7 +135,7 @@ class TestDischargeIntentsProduceDischargeperiod:
         assert len(manager._discharge_periods) == 1
 
     def test_consecutive_mixed_discharge_intents_merge_into_one_period(
-        self, manager: SphScheduleManager
+        self, manager: GrowattSphController
     ) -> None:
         # LOAD_SUPPORT followed immediately by EXPORT_ARBITRAGE → both are in
         # DISCHARGE_INTENTS, so they merge into a single continuous discharge period.
@@ -147,7 +147,7 @@ class TestDischargeIntentsProduceDischargeperiod:
         assert manager._discharge_periods[0]["end_time"] == "19:59"
 
     def test_discharge_period_writes_discharge_call_to_controller(
-        self, manager: SphScheduleManager
+        self, manager: GrowattSphController
     ) -> None:
         intents = make_intents({20: "EXPORT_ARBITRAGE"})
         manager.create_schedule(make_schedule_mock(intents))
@@ -162,14 +162,16 @@ class TestDischargeIntentsProduceDischargeperiod:
 
 
 class TestIdleOnlyDay:
-    def test_idle_day_has_no_charge_periods(self, manager: SphScheduleManager) -> None:
+    def test_idle_day_has_no_charge_periods(
+        self, manager: GrowattSphController
+    ) -> None:
         intents = ["IDLE"] * 96
         manager.create_schedule(make_schedule_mock(intents))
 
         assert len(manager._charge_periods) == 0
 
     def test_idle_day_has_no_discharge_periods(
-        self, manager: SphScheduleManager
+        self, manager: GrowattSphController
     ) -> None:
         intents = ["IDLE"] * 96
         manager.create_schedule(make_schedule_mock(intents))
@@ -177,7 +179,7 @@ class TestIdleOnlyDay:
         assert len(manager._discharge_periods) == 0
 
     def test_idle_day_always_writes_both_calls(
-        self, manager: SphScheduleManager
+        self, manager: GrowattSphController
     ) -> None:
         intents = ["IDLE"] * 96
         manager.create_schedule(make_schedule_mock(intents))
@@ -196,7 +198,7 @@ class TestIdleOnlyDay:
 
 class TestPeriodLimitEnforcement:
     def test_more_than_3_charge_blocks_capped_to_3(
-        self, manager: SphScheduleManager
+        self, manager: GrowattSphController
     ) -> None:
         # 4 non-consecutive GRID_CHARGING blocks
         intents = make_intents(
@@ -212,7 +214,7 @@ class TestPeriodLimitEnforcement:
         assert len(manager._charge_periods) <= 3
 
     def test_more_than_3_discharge_blocks_capped_to_3(
-        self, manager: SphScheduleManager
+        self, manager: GrowattSphController
     ) -> None:
         intents = make_intents(
             {
@@ -227,7 +229,7 @@ class TestPeriodLimitEnforcement:
         assert len(manager._discharge_periods) <= 3
 
     def test_period_limit_keeps_longest_blocks(
-        self, manager: SphScheduleManager
+        self, manager: GrowattSphController
     ) -> None:
         # 4 blocks of different durations: 4h, 1h, 1h, 1h → keep the 4h + 2 of the 1h blocks
         intents = ["IDLE"] * 96
@@ -261,27 +263,27 @@ class TestPeriodLimitEnforcement:
 
 class TestCompareSchedules:
     def test_identical_schedules_do_not_differ(
-        self, manager: SphScheduleManager, battery_settings: BatterySettings
+        self, manager: GrowattSphController, battery_settings: BatterySettings
     ) -> None:
         intents = make_intents({2: "GRID_CHARGING", 20: "LOAD_SUPPORT"})
         schedule = make_schedule_mock(intents)
         manager.create_schedule(schedule)
 
-        other = SphScheduleManager(battery_settings=battery_settings)
+        other = GrowattSphController(battery_settings=battery_settings)
         other.create_schedule(schedule)
 
         differ, _ = manager.compare_schedules(other)
         assert not differ
 
     def test_different_charge_periods_report_difference(
-        self, manager: SphScheduleManager, battery_settings: BatterySettings
+        self, manager: GrowattSphController, battery_settings: BatterySettings
     ) -> None:
         intents_a = make_intents({2: "GRID_CHARGING"})
         intents_b = make_intents({4: "GRID_CHARGING"})
 
         manager.create_schedule(make_schedule_mock(intents_a))
 
-        other = SphScheduleManager(battery_settings=battery_settings)
+        other = GrowattSphController(battery_settings=battery_settings)
         other.create_schedule(make_schedule_mock(intents_b))
 
         differ, reason = manager.compare_schedules(other)
@@ -289,14 +291,14 @@ class TestCompareSchedules:
         assert reason
 
     def test_different_discharge_periods_report_difference(
-        self, manager: SphScheduleManager, battery_settings: BatterySettings
+        self, manager: GrowattSphController, battery_settings: BatterySettings
     ) -> None:
         intents_a = make_intents({20: "LOAD_SUPPORT"})
         intents_b = make_intents({22: "LOAD_SUPPORT"})
 
         manager.create_schedule(make_schedule_mock(intents_a))
 
-        other = SphScheduleManager(battery_settings=battery_settings)
+        other = GrowattSphController(battery_settings=battery_settings)
         other.create_schedule(make_schedule_mock(intents_b))
 
         differ, reason = manager.compare_schedules(other)
@@ -304,11 +306,11 @@ class TestCompareSchedules:
         assert reason
 
     def test_empty_vs_nonempty_differs(
-        self, manager: SphScheduleManager, battery_settings: BatterySettings
+        self, manager: GrowattSphController, battery_settings: BatterySettings
     ) -> None:
         manager.create_schedule(make_schedule_mock(["IDLE"] * 96))
 
-        other = SphScheduleManager(battery_settings=battery_settings)
+        other = GrowattSphController(battery_settings=battery_settings)
         other.create_schedule(make_schedule_mock(make_intents({2: "GRID_CHARGING"})))
 
         differ, _ = manager.compare_schedules(other)
@@ -320,7 +322,7 @@ class TestCompareSchedules:
 
 class TestWriteScheduleToHardware:
     def test_always_returns_2_writes_0_disables(
-        self, manager: SphScheduleManager
+        self, manager: GrowattSphController
     ) -> None:
         manager.create_schedule(make_schedule_mock(make_intents({2: "GRID_CHARGING"})))
 
@@ -331,7 +333,7 @@ class TestWriteScheduleToHardware:
         assert disables == 0
 
     def test_calls_both_charge_and_discharge_methods(
-        self, manager: SphScheduleManager
+        self, manager: GrowattSphController
     ) -> None:
         manager.create_schedule(
             make_schedule_mock(make_intents({2: "GRID_CHARGING", 20: "LOAD_SUPPORT"}))
@@ -344,7 +346,7 @@ class TestWriteScheduleToHardware:
         controller.write_ac_discharge_times.assert_called_once()
 
     def test_charge_stop_soc_comes_from_battery_settings(
-        self, manager: SphScheduleManager, battery_settings: BatterySettings
+        self, manager: GrowattSphController, battery_settings: BatterySettings
     ) -> None:
         manager.create_schedule(make_schedule_mock(["IDLE"] * 96))
 
@@ -355,7 +357,7 @@ class TestWriteScheduleToHardware:
         assert call_kwargs["charge_stop_soc"] == int(battery_settings.max_soc)
 
     def test_discharge_stop_soc_comes_from_battery_settings(
-        self, manager: SphScheduleManager, battery_settings: BatterySettings
+        self, manager: GrowattSphController, battery_settings: BatterySettings
     ) -> None:
         manager.create_schedule(make_schedule_mock(["IDLE"] * 96))
 
@@ -366,7 +368,7 @@ class TestWriteScheduleToHardware:
         assert call_kwargs["discharge_stop_soc"] == int(battery_settings.min_soc)
 
     def test_unused_charge_periods_are_disabled(
-        self, manager: SphScheduleManager
+        self, manager: GrowattSphController
     ) -> None:
         # 1 charge period → period_2 and period_3 must be disabled
         intents = make_intents({2: "GRID_CHARGING"})

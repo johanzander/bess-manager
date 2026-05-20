@@ -163,6 +163,7 @@ class TestCostSavingsFlow:
         manager = BatterySystemManager(
             controller=MockHomeAssistantController(),
             price_source=MockSource([1.0] * 96),
+            addon_options={"inverter": {"platform": "growatt_min"}},
         )
 
         # Store optimization result
@@ -190,6 +191,7 @@ class TestCostSavingsFlow:
         manager = BatterySystemManager(
             controller=MockHomeAssistantController(),
             price_source=MockSource([1.0] * 96),
+            addon_options={"inverter": {"platform": "growatt_min"}},
         )
 
         # Store optimization result
@@ -250,6 +252,7 @@ class TestCostSavingsFlow:
         manager = BatterySystemManager(
             controller=MockHomeAssistantController(),
             price_source=MockSource([1.0] * 96),
+            addon_options={"inverter": {"platform": "growatt_min"}},
         )
 
         # Store optimization result
@@ -290,6 +293,7 @@ class TestCostSavingsFlow:
         manager = BatterySystemManager(
             controller=MockHomeAssistantController(),
             price_source=MockSource([1.0] * 96),
+            addon_options={"inverter": {"platform": "growatt_min"}},
         )
 
         # Store optimization result

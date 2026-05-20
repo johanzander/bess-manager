@@ -357,14 +357,11 @@ class TestPatchSettingsSensorValidation:
         )
         assert resp.status_code == 422
 
-    def test_empty_entity_id_not_stored(self, mock_controller):
-        """Empty strings clear intent — they must not overwrite configured sensors."""
+    def test_empty_entity_id_unmaps_sensor(self, mock_controller):
+        """Empty string in PATCH unmaps the sensor both on disk and in memory."""
         mock_controller.ha_controller.sensors = {"battery_soc": "sensor.existing"}
         _client.patch("/api/settings", json={"sensors": {"battery_soc": ""}})
-        assert (
-            mock_controller.ha_controller.sensors.get("battery_soc")
-            == "sensor.existing"
-        )
+        assert "battery_soc" not in mock_controller.ha_controller.sensors
 
     def test_multiple_valid_sensors_all_stored(self, mock_controller):
         payload = {

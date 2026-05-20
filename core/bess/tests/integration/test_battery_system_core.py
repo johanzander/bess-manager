@@ -30,8 +30,8 @@ class TestSystemInitialization:
             battery_system._price_manager is not None
         ), "Price manager should be initialized"
         assert (
-            battery_system._schedule_manager is not None
-        ), "Schedule manager should be initialized"
+            battery_system._inverter_controller is not None
+        ), "Inverter controller should be initialized"
 
     def test_battery_settings_accessible(self, battery_system):
         """Verify battery settings are accessible and have expected structure."""

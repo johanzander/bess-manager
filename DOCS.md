@@ -19,7 +19,7 @@ BESS Battery Manager is a comprehensive solution for optimizing battery energy s
 - **Real-Time Monitoring**: Live dashboard with energy flow visualization
 - **Decision Intelligence**: Detailed hourly strategy analysis and economic reasoning
 - **Savings Analysis**: Historical financial reports and performance tracking
-- **Auto-Configuration**: Setup wizard scans Home Assistant and detects Growatt, Nordpool, Solcast and other integrations automatically — no manual entity ID lookup required
+- **Auto-Configuration**: Setup wizard scans Home Assistant and detects Growatt, SolaX, Nordpool, Solcast and other integrations automatically — no manual entity ID lookup required
 - **System Health**: Comprehensive diagnostics and sensor validation in the Settings page
 
 ## Installation
@@ -55,9 +55,9 @@ influxdb:
 
 ### First-Time Setup
 
-On first launch, a **Setup Wizard** guides you through auto-discovering your Growatt, Nordpool,
-Solcast and other integrations. It fills in sensor entity IDs automatically. The wizard can be
-re-run at any time from **Settings → Sensors → Auto-Configure**.
+On first launch, a **Setup Wizard** guides you through auto-discovering your inverter (Growatt or
+SolaX), Nordpool, Solcast and other integrations. It fills in sensor entity IDs automatically. The
+wizard can be re-run at any time from **Settings → Sensors → Auto-Configure**.
 
 ### Settings Page
 
@@ -100,7 +100,7 @@ Access the BESS Manager dashboard via Settings → Add-ons → BESS Manager → 
 2. **Price Optimization**: Analyzes electricity prices from Nordpool or Octopus Energy (today + tomorrow)
 3. **Solar Forecast**: Integrates solar production predictions
 4. **Battery Optimization**: Dynamic programming algorithm generates optimal 24-hour schedule
-5. **Schedule Deployment**: Converts optimization results to Growatt TOU intervals
+5. **Schedule Deployment**: Sends optimization results to the inverter (Growatt TOU intervals or SolaX VPP commands)
 6. **Continuous Monitoring**: Hourly updates adapt to changing conditions
 
 ## Troubleshooting

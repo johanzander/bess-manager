@@ -105,6 +105,12 @@
     "total_charged": 6.0,
     "total_discharged": 5.2
   },
+  "price_data": {
+    "markup_rate": 0.08,
+    "vat_multiplier": 1.25,
+    "additional_costs": 1.03,
+    "tax_reduction": 0.0
+  },
   "expected_behavior": {
     "description": "Night lows without solar: small spread so mostly idle, some grid charging",
     "intents_present": [

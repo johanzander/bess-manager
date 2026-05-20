@@ -1,0 +1,454 @@
+"""Growatt MIN inverter controller using solax_modbus with single-segment TOU.
+
+This controller supports Growatt MIN inverters connected via the solax_modbus
+HACS integration (local Modbus) instead of the growatt_server cloud integration.
+
+Unlike the cloud controller (GrowattMinController) which pre-programs up to 9
+TOU segments, this controller uses a **single TOU segment** (slot 1) with a
+full-day time window (00:00-23:59).  The battery mode is updated per-period
+via ``apply_period`` — only when the mode actually changes — reducing the
+required entity count from 45 (9 slots x 5 entities) to just 5.
+
+This is analogous to how ``SolaxController`` applies per-period VPP commands
+with ``write_schedule_to_hardware`` as a near no-op.
+
+Per-period control (``set_grid_charge``, ``set_discharging_power_rate``) uses
+generic HA service calls that resolve entity IDs from sensor config, so no
+override is needed for those.
+
+Mode semantics:
+- ``load_first`` — inverter default when no TOU segment is active
+- ``battery_first`` — charge from grid + solar (GRID_CHARGING intent)
+- ``grid_first`` — export to grid (EXPORT_ARBITRAGE intent)
+"""
+
+import logging
+
+from . import time_utils
+from .dp_schedule import DPSchedule
+from .growatt_min_controller import GrowattMinController
+from .health_check import perform_health_check
+from .settings import BatterySettings
+
+logger = logging.getLogger(__name__)
+
+
+class GrowattSolaxModbusController(GrowattMinController):
+    """Growatt MIN controller using solax_modbus with single-segment TOU.
+
+    Instead of pre-programming 9 TOU segments, this controller manages a single
+    TOU segment (slot 1) and updates its mode each period when needed.
+    """
+
+    def __init__(self, battery_settings: BatterySettings) -> None:
+        """Initialize the Growatt solax_modbus controller."""
+        super().__init__(battery_settings)
+        self._last_written_tou_mode: str | None = None
+
+    # ── Abstract property ────────────────────────────────────────────────────
+
+    @property
+    def active_tou_intervals(self) -> list[dict]:
+        """Return the single TOU segment if active, else empty list."""
+        return self._active_tou_intervals
+
+    @active_tou_intervals.setter
+    def active_tou_intervals(self, value: list[dict]) -> None:
+        self._active_tou_intervals = value
+
+    # ── Schedule creation ────────────────────────────────────────────────────
+
+    def create_schedule(
+        self,
+        schedule: DPSchedule,
+        current_period: int = 0,
+        previous_tou_intervals: list[dict] | None = None,
+    ) -> None:
+        """Store strategic intents — TOU mode is applied per-period, no batch TOU needed.
+
+        Skips the parent's 9-segment TOU interval computation.  Strategic intents
+        are stored and hourly settings calculated for API/display consumption.
+
+        Args:
+            schedule: DPSchedule containing strategic_intent list.
+            current_period: Current 15-minute period (0-95).
+            previous_tou_intervals: Unused for single-segment approach.
+        """
+        logger.info("Creating Modbus single-segment schedule from strategic intents")
+
+        self.strategic_intents = schedule.original_dp_results["strategic_intent"]
+        self.current_schedule = schedule
+
+        logger.info(
+            "Modbus: %d strategic intents loaded (quarterly resolution)",
+            len(self.strategic_intents),
+        )
+
+        # Log intent transitions
+        for period in range(1, len(self.strategic_intents)):
+            if self.strategic_intents[period] != self.strategic_intents[period - 1]:
+                logger.info(
+                    "Intent transition at period %d: %s -> %s",
+                    period,
+                    self.strategic_intents[period - 1],
+                    self.strategic_intents[period],
+                )
+
+        self._calculate_hourly_settings()
+
+        # Build single-segment TOU state for API display
+        self._update_tou_display_state()
+
+    # ── Hardware interface ────────────────────────────────────────────────────
+
+    def apply_period(self, controller, grid_charge: bool, discharge_rate: int) -> None:
+        """Write period control settings, including TOU mode update when needed.
+
+        Derives the required TOU mode from the current period's strategic intent.
+        Only writes the TOU segment when the mode actually changes, minimising
+        inverter writes.
+
+        Args:
+            controller: HomeAssistantAPIController instance
+            grid_charge: Whether to enable grid charging
+            discharge_rate: Discharge power rate (0-100%), post-inhibit
+        """
+        now = time_utils.now()
+        current_period = now.hour * 4 + now.minute // 15
+
+        if current_period < len(self.strategic_intents):
+            intent = self.strategic_intents[current_period]
+            mode = self.INTENT_TO_MODE.get(intent, "load_first")
+
+            if mode != self._last_written_tou_mode:
+                enabled = mode != "load_first"
+                logger.info(
+                    "TOU segment 1 mode: %s -> %s (period %d, intent %s)",
+                    self._last_written_tou_mode,
+                    mode,
+                    current_period,
+                    intent,
+                )
+                controller.set_tou_segment_via_entities(
+                    segment_id=1,
+                    batt_mode=mode,
+                    start_time="00:00",
+                    end_time="23:59",
+                    enabled=enabled,
+                )
+                self._last_written_tou_mode = mode
+                self._update_tou_display_state()
+
+        # Set grid charge and discharge rate (same as parent)
+        self._write_period_to_hardware(controller, grid_charge, discharge_rate)
+
+    def _write_period_to_hardware(
+        self, controller, grid_charge: bool, discharge_rate: int
+    ) -> None:
+        """Write per-period grid charge and discharge settings to hardware.
+
+        TOU mode is handled by apply_period(); this only sets the per-period
+        parameters (same as parent GrowattMinController).
+
+        Args:
+            controller: HomeAssistantAPIController instance
+            grid_charge: Whether to enable grid charging
+            discharge_rate: Discharge power rate (0-100%)
+        """
+        controller.set_grid_charge(grid_charge)
+        controller.set_discharging_power_rate(discharge_rate)
+
+    def write_schedule_to_hardware(
+        self,
+        controller,
+        effective_period: int,
+        current_tou: list,
+    ) -> tuple[int, int]:
+        """Initialise single TOU segment on hardware.
+
+        Sets segment 1 to the current period's mode with a full-day window.
+        Legacy segments 2-9 are cleaned up at startup (read_and_initialize_from_hardware),
+        not here, to avoid repeated attempts on unconfigured entities.
+
+        Args:
+            controller: HomeAssistantAPIController instance
+            effective_period: Period (0-95) from which to start applying changes
+            current_tou: TOU intervals currently active on the inverter (unused)
+
+        Returns:
+            Tuple of (segments_updated, segments_disabled)
+        """
+        mode = "load_first"
+        if effective_period < len(self.strategic_intents):
+            intent = self.strategic_intents[effective_period]
+            mode = self.INTENT_TO_MODE.get(intent, "load_first")
+
+        enabled = mode != "load_first"
+        logger.info(
+            "Modbus: writing initial TOU segment 1 — mode=%s, enabled=%s",
+            mode,
+            enabled,
+        )
+
+        controller.set_tou_segment_via_entities(
+            segment_id=1,
+            batt_mode=mode,
+            start_time="00:00",
+            end_time="23:59",
+            enabled=enabled,
+        )
+        self._last_written_tou_mode = mode
+        self._update_tou_display_state()
+
+        return 1, 0
+
+    def read_and_initialize_from_hardware(self, controller, current_hour: int) -> None:
+        """Read TOU state from hardware, disable legacy segments 2-9, seed mode tracker.
+
+        On startup, reads all available TOU slots (1-9).  Any slot 2-9 that is
+        found and enabled gets disabled — this handles migration from the old
+        9-segment approach regardless of how many slots the user had enabled.
+
+        Args:
+            controller: HomeAssistantAPIController instance
+            current_hour: Current hour (0-23)
+        """
+        self.current_hour = current_hour
+        segments = controller.read_tou_segments_from_entities()
+
+        # Disable any legacy segments 2-9 that are still enabled
+        disabled_count = 0
+        for seg in segments:
+            if seg["segment_id"] >= 2 and seg.get("enabled", False):
+                logger.info(
+                    "Disabling legacy TOU slot %d (%s %s-%s) — "
+                    "single-segment mode active",
+                    seg["segment_id"],
+                    seg.get("batt_mode", "?"),
+                    seg.get("start_time", "?"),
+                    seg.get("end_time", "?"),
+                )
+                controller.set_tou_segment_via_entities(
+                    segment_id=seg["segment_id"],
+                    batt_mode="load_first",
+                    start_time="00:00",
+                    end_time="00:00",
+                    enabled=False,
+                )
+                disabled_count += 1
+
+        if disabled_count > 0:
+            logger.info("Migration: disabled %d legacy TOU slot(s)", disabled_count)
+
+        # Seed mode tracker from segment 1
+        seg1 = next((s for s in segments if s["segment_id"] == 1), None)
+        if seg1 and seg1.get("enabled"):
+            self._last_written_tou_mode = seg1["batt_mode"]
+            logger.info(
+                "Modbus: initialised from hardware — segment 1 mode=%s",
+                self._last_written_tou_mode,
+            )
+        else:
+            self._last_written_tou_mode = "load_first"
+            logger.info(
+                "Modbus: initialised from hardware — no active TOU segment, defaulting to load_first"
+            )
+
+        # Set display state
+        self._update_tou_display_state()
+
+    # ── Schedule comparison ──────────────────────────────────────────────────
+
+    def compare_schedules(
+        self,
+        other_schedule: "GrowattSolaxModbusController",
+        from_period: int = 0,
+    ) -> tuple[bool, str]:
+        """Compare schedules by strategic intent list (like SolaxController).
+
+        Two schedules differ when any period at or after ``from_period`` has a
+        different strategic intent.
+
+        Args:
+            other_schedule: Another controller to compare against.
+            from_period: First period to compare (earlier periods are ignored).
+
+        Returns:
+            Tuple of (schedules_differ, reason).
+        """
+        current = self.strategic_intents
+        new = other_schedule.strategic_intents
+
+        if not current and not new:
+            return False, ""
+
+        if len(current) != len(new):
+            return True, (f"Modbus intent count differs: {len(current)} vs {len(new)}")
+
+        for period in range(from_period, len(current)):
+            if current[period] != new[period]:
+                logger.info(
+                    "DECISION: Modbus intent differs at period %d — "
+                    "current=%s new=%s",
+                    period,
+                    current[period],
+                    new[period],
+                )
+                return True, (f"Modbus strategic intents differ from period {period}")
+
+        logger.info("DECISION: Modbus schedules match")
+        return False, ""
+
+    # ── SOC limits ───────────────────────────────────────────────────────────
+
+    def sync_soc_limits(self, controller) -> None:
+        """Sync SOC limits from config to inverter hardware via entity writes.
+
+        Inherited from GrowattMinController — no change needed.
+        """
+        super().sync_soc_limits(controller)
+
+    # ── TOU display ──────────────────────────────────────────────────────────
+
+    def _update_tou_display_state(self) -> None:
+        """Update internal TOU interval lists for API/display consumption."""
+        mode = self._last_written_tou_mode or "load_first"
+        enabled = mode != "load_first"
+
+        if enabled:
+            segment = {
+                "segment_id": 1,
+                "batt_mode": mode,
+                "start_time": "00:00",
+                "end_time": "23:59",
+                "enabled": True,
+            }
+            self.tou_intervals = [segment]
+            self._active_tou_intervals = [segment]
+        else:
+            self.tou_intervals = []
+            self._active_tou_intervals = []
+
+    def get_daily_TOU_settings(self) -> list[dict]:
+        """Return the single TOU segment if active."""
+        if not self.tou_intervals:
+            return []
+        return [seg.copy() for seg in self.tou_intervals]
+
+    def get_all_tou_segments(self, current_period: int | None = None):
+        """Return TOU segments with defaults for complete 24-hour coverage.
+
+        For the single-segment approach, returns the active segment (if any)
+        plus default load_first segments filling the gaps.
+        """
+        groups = self.get_detailed_period_groups()
+        if not groups:
+            return [
+                {
+                    "segment_id": 0,
+                    "start_time": "00:00",
+                    "end_time": "23:59",
+                    "batt_mode": "load_first",
+                    "enabled": False,
+                    "is_default": True,
+                }
+            ]
+
+        # Build display from intent groups (same approach as SolaxController)
+        now = time_utils.now()
+        current_p = now.hour * 4 + now.minute // 15
+
+        result = []
+        for group in groups:
+            mode = self.INTENT_TO_MODE.get(group["intent"], "load_first")
+            is_current = group["start_period"] <= current_p <= group["end_period"]
+            result.append(
+                {
+                    "segment_id": len(result) + 1,
+                    "start_time": group["start_time"],
+                    "end_time": group["end_time"],
+                    "batt_mode": mode,
+                    "enabled": mode != "load_first",
+                    "is_default": mode == "load_first",
+                    "is_current": is_current,
+                    "strategic_intent": group["intent"],
+                }
+            )
+        return result
+
+    def log_current_TOU_schedule(self, header=None) -> None:
+        """Log current single-segment TOU state."""
+        if header:
+            logger.info(header)
+
+        mode = self._last_written_tou_mode or "load_first"
+        if mode == "load_first":
+            logger.info("Modbus: TOU segment 1 disabled (load_first default)")
+        else:
+            logger.info("Modbus: TOU segment 1 = %s (00:00-23:59)", mode)
+
+    def log_detailed_schedule(self, header=None) -> None:
+        """Log detailed schedule with per-period strategic intents.
+
+        Delegates to the parent's implementation which uses
+        get_detailed_period_groups() from the base class.
+        """
+        if header:
+            logger.info(header)
+
+        groups = self.get_detailed_period_groups()
+        if not groups:
+            logger.info("Modbus: no schedule data available")
+            return
+
+        now = time_utils.now()
+        current_period = now.hour * 4 + now.minute // 15
+
+        lines = [
+            "\n╔═══════════════╦══════════╦══════════════════╦═══════════════╦═════════════╦═════════════╦═══════════════╗",
+            "║  Time Period  ║ Duration ║ Strategic Intent ║ Battery Mode  ║ Grid Charge ║ Charge Rate ║Discharge Rate ║",
+            "╠═══════════════╬══════════╬══════════════════╬═══════════════╬═════════════╬═════════════╬═══════════════╣",
+        ]
+
+        for group in groups:
+            time_range = f"{group['start_time']}-{group['end_time']}"
+
+            duration_mins = group["duration_minutes"]
+            if duration_mins >= 60:
+                duration = f"{duration_mins // 60}h{duration_mins % 60:02d}m"
+            else:
+                duration = f"{duration_mins}min"
+
+            is_current = group["start_period"] <= current_period <= group["end_period"]
+            marker = "*" if is_current else " "
+
+            row = (
+                f"║{marker}{time_range:13} ║ {duration:8} ║ {group['intent']:16} ║ {group['mode']:13} ║"
+                f" {group['grid_charge']!s:11} ║ {group['charge_rate']:11}% ║ {group['discharge_rate']:13}% ║"
+            )
+            lines.append(row)
+
+        lines.append(
+            "╚═══════════════╩══════════╩══════════════════╩═══════════════╩═════════════╩═════════════╩═══════════════╝"
+        )
+        lines.append("* indicates current period")
+        logger.info("\n".join(lines))
+
+    # ── Health check ─────────────────────────────────────────────────────────
+
+    def check_health(self, controller) -> list:
+        """Check battery control capabilities."""
+        health_check = perform_health_check(
+            component_name="Battery Control",
+            description="Controls battery charging and discharging schedule",
+            is_required=True,
+            controller=controller,
+            all_methods=[
+                "get_charging_power_rate",
+                "get_discharging_power_rate",
+                "grid_charge_enabled",
+                "get_charge_stop_soc",
+                "get_discharge_stop_soc",
+            ],
+        )
+        return [health_check]

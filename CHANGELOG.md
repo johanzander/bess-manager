@@ -4,6 +4,175 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.0.0b13] - 2026-05-20
+
+### Added
+
+- **Single-segment TOU for Growatt Modbus (GEN4)** — replaces the 9-slot TOU approach with a single TOU segment (slot 1) updated per-period. Reduces required HA entities from 45 to 5, removing the need to manually enable slots 4-9 in Home Assistant.
+- Auto-migration: on startup, any enabled legacy TOU slots 2-9 are automatically disabled.
+- GEN3/GEN4 platform split for Growatt Local Modbus — MIX/SPA/SPH (GEN3) and MIN/MOD/MID (GEN4) are now separate platforms with generation-specific sensor definitions, matching the existing MIN/SPH split for Growatt Cloud.
+- GEN3 auto-detection via `load_first_battery_minimum_soc` entity marker in solax_modbus registry.
+- SPH/MIX Connection selector — SPH sub-type now offers Cloud/Local Modbus connection choice (previously only MIN had this).
+- GEN3 EMS suffix mappings (`battery_first_charge_rate`, `grid_first_discharge_rate`, `battery_first_maximum_soc`, `load_first_battery_minimum_soc`).
+- Derived lifetime sensor fallbacks: GEN4 derives `lifetime_load_consumption` from solar + grid_import − grid_export; GEN3 derives `lifetime_system_production` from `lifetime_solar_energy`.
+- 23 unit tests for single-segment TOU controller (mode tracking, migration, schedule comparison).
+
+### Fixed
+
+- Growatt MIN (Local/GEN4) no longer shows "Home Consumption Energy" as "Not detected" — the sensor was SPF-only in solax_modbus and never existed on MIN hardware. Removed from GEN4 UI; value is derived internally.
+- Setup wizard no longer reports slots 2-9 as missing sensors for Growatt Modbus GEN4 platform.
+
+### Changed
+
+- `GrowattSolaxModbusController` rewritten from thin I/O subclass (55 lines) to full single-segment controller (~450 lines) with its own schedule creation, per-period mode management, and intent-based schedule comparison.
+- Refactored `_has_growatt_tou_entities()` into shared `_has_solax_entity_suffix()` helper for DRY generation detection.
+- Updated INVERTER_PLATFORMS.md with single-segment TOU documentation and migration notes.
+
+## [9.0.0b11] - 2026-05-18
+
+### Fixed
+
+- Settings page now clears stale inverter sensor entity IDs when switching platform — previously only the wizard handled this, leaving old Growatt sensors active after switching to SolaX on the settings page.
+- Advanced battery settings (efficiency, charging rate, temperature derating) hidden in wizard mode to reduce setup complexity.
+
+### Changed
+
+- Consolidated three duplicated inverter platform maps (wizard, settings page, backend) into shared `sensorDefinitions.ts` and `api_conversion.py` — single source of truth for UI type ↔ platform mapping.
+
+### Added
+
+- 29 unit tests for `POST /api/setup/complete` covering persistence, live system updates, sensor handling, scheduler lifecycle, and validation.
+
+## [9.0.0b10] - 2026-05-17
+
+### Fixed
+
+- Switching inverter platform in wizard now replaces all inverter sensor fields with the new platform's discovered values instead of only filling empty fields — fixes stale Growatt Server entity IDs persisting after switching to SolaX Modbus (Local).
+
+## [9.0.0b9] - 2026-05-17
+
+### Added
+
+- Debug export now includes HA entity registry (entity_id, unique_id, platform, device_id, original_name, disabled_by, hidden_by, capabilities) for diagnosing Growatt-via-SolaX-Modbus detection failures.
+- Debug export captures solax_modbus/solax config entries, devices, and services (previously only growatt/nordpool).
+- Keyword fallback matching in debug export — entities are captured even if registered under unexpected platform names.
+
+### Fixed
+
+- Documentation corrected: solax_modbus Growatt plugin entity_id contains `time_N_active` (from display name) while unique_id contains `time_N_enabled` (from plugin key); BESS matches on unique_id.
+- Documented that TOU slots 4-9 are disabled by default in HA entity registry and must be manually enabled.
+
+## [9.0.0b8] - 2026-05-15
+
+### Fixed
+
+- Growatt TOU detection skipped when both growatt_server (cloud) and solax_modbus (local) integrations are installed — `discover_integrations` used `if/elif` so the TOU entity check was never reached, locking out the "SolaX Modbus (Local)" connection option in the wizard.
+- Wizard no longer locks out SolaX Modbus (Local) when TOU auto-detection is inconclusive — both connection options are selectable when solax_modbus is detected, auto-detection pre-selects but does not lock out.
+- Top-level "SolaX Modbus" inverter platform renamed to "SolaX (Native)" with clarified description to prevent confusion with Growatt-via-solax_modbus.
+
+### Added
+
+- `solaxHasGrowattTou` field in discovery API response — frontend can distinguish native SolaX from Growatt-via-solax even when growatt_server is also present.
+- Logging in `_has_growatt_tou_entities` to diagnose detection failures.
+
+## [9.0.0b6] - 2026-05-10
+
+### Added
+
+- Growatt MIN inverter support via solax_modbus HACS integration (local Modbus, TOU entity writes).
+
+### Fixed
+
+- Wizard sensors merged instead of replaced after setup, leaving stale entities active until restart.
+- Discovery config_entry_id/device_id blocked by stale values from previous runs.
+- Energy provider not applied live after wizard completion.
+- Price cache not cleared after Nordpool area update in discovery path.
+
+## [9.0.0b5] - 2026-05-03
+
+### Changed
+
+- Entity discovery now exclusively uses HA entity registry (unique_id + platform fields, both immutable) — removes fragile states-based fallback that broke when users renamed entities.
+- SolaX suffix map extended with Growatt-plugin EMS control entities (charging/discharging rate, stop SOC, charger switch).
+- Growatt device_id lookup improved: matches by device identifiers first (immutable), falls back to config_entry, then name.
+
+### Removed
+
+- States-based discovery methods (`discover_growatt_sensors`, `discover_solax_sensors`, `_extract_solax_device_prefix`) — replaced by registry-based discovery.
+- `solaxDevicePrefix` field from discovery API response (no longer needed).
+
+## [9.0.0b4] - 2026-04-26
+
+### Added
+
+- Fresh install support — system starts in unconfigured mode when no inverter platform is configured, serving the web UI and setup wizard without crashing.
+- Regression tests for fresh install startup scenarios (empty options, missing sections, unconfigured platform).
+- Docker multi-worktree support — unique container names and stable port derivation per worktree directory.
+
+### Fixed
+
+- Startup crash on fresh install (`AssertionError: Unknown inverter_type ''`) — `_create_inverter_controller()` now returns `None` gracefully.
+- SolaX spurious `Failed to adjust charging power` errors — `adjust_charging_power()` is now a no-op for SolaX (VPP controls power directly).
+- Noisy WARNING for unconfigured optional sensors (e.g. `lifetime_self_consumption` on SolaX) downgraded to DEBUG.
+- Default `additional_costs` updated to 0.773 SEK/kWh and `tax_reduction` to 0.1988 SEK/kWh matching E.ON example rates.
+- `dev-run.sh` and `mock-run.sh` now print the access URL after startup completes (after Uvicorn ready), not before logs flood the terminal.
+- Operational API endpoints return HTTP 503 (not 500) when system is unconfigured, guiding users to the setup wizard.
+
+### Changed
+
+- Scenario test data files now include explicit `price_data` so expected results are independent of global default changes.
+
+## [9.0.0b3] - 2025-04-25
+
+### Added
+
+- Runtime inverter platform switching via `switch_inverter_platform()` — no restart required when changing between Growatt MIN, Growatt SPH, and SolaX.
+- Entity-registry-based auto-discovery with states-based fallback for older HA versions without WebSocket support.
+- Setup wizard returns all detected platform sensors (`platformSensors`), allowing sensor fields to auto-fill when switching inverter platform.
+- Cross-platform integration test suite validates optimization, hardware writes, SOC limits, and health checks across all three inverter platforms.
+- Mock HA server now supports WebSocket API (entity registry, config entries, device registry, services) for end-to-end setup wizard testing.
+
+### Fixed
+
+- Health check returned OK when required methods were specified but none were configured (now correctly returns ERROR).
+- Setup wizard confirm button was enabled even when required sensor fields were empty.
+- Growatt subtype radio buttons (MIN/SPH) no longer allow selecting a type that contradicts auto-detection results.
+- Settings page detection of available platforms now derives from configured sensors instead of requiring a fresh discovery scan.
+
+## [9.0.0b2] - 2026-04-24
+
+### Fixed
+
+- SolaX auto-detection now anchors on the `solax_` prefix across all HA domains (`sensor`, `select`, `number`, `button`) instead of generic battery suffixes, eliminating false positives from other integrations.
+- SolaX entity suffix map expanded to cover all sensors required for feature parity with Growatt: grid export power, lifetime energy counters, load consumption, and correct VPP control entity names (`remotecontrol_*`).
+- SolaX sensor settings UI now includes all entity fields: power monitoring (including grid export), lifetime energy counters, and charger use mode.
+- SolaX VPP disable command sent wrong option value (`"Disabled Battery Control"` → `"Disabled"`).
+- SolaX health check now verifies all 5 VPP control entities, not just power control mode.
+- Self-consumption energy flow is now derived from `load - grid_import` when no dedicated sensor exists, removing the requirement for a `lifetime_self_consumption` sensor on platforms that don't provide one.
+
+## [9.0.0b1] - 2026-04-18
+
+### Added
+
+- SolaX inverter support via homeassistant-solax-modbus integration (VPP active-power commands).
+- Setup wizard auto-detects SolaX entities and shows platform-specific sensor configuration.
+- Dashboard shows platform-aware hardware schedule section (TOU intervals for Growatt, VPP control info for SolaX).
+
+### Changed
+
+- Inverter scheduling refactored into an `InverterController` base class with `GrowattMinController`, `GrowattSphController`, and `SolaxController` subclasses.
+- Inverter platform configuration moved from `growatt.inverter_type` to `inverter.platform` (existing settings are migrated automatically).
+- API endpoints `/api/inverter/status` and `/api/inverter/schedule` added as canonical paths (legacy `/api/growatt/*` aliases preserved).
+
+### Fixed
+
+- Inverter status endpoint returned hardcoded `charge_stop_soc: 100%` instead of the configured `max_soc` from battery settings.
+- SOLAR_STORAGE intent now uses `load_first` mode instead of `battery_first` on Growatt MIN and SPH inverters. The previous `battery_first` mode routed solar to the battery first, causing unnecessary grid imports to serve the home even when excess solar was available for both.
+- DP optimizer no longer cycles charge/discharge during solar hours. The profitability check now accounts for the opportunity cost of stored energy: when sell > buy, discharge-for-export is blocked (round-trip losses make it unprofitable); when excess solar is available, the sell price is used as the cost basis floor (solar could have been exported instead). ([#73](https://github.com/johanzander/bess-manager/issues/73))
+- IDLE periods now correctly model passive solar charging with charge rate clamping, and are classified as SOLAR_STORAGE when the battery absorbs excess solar.
+- Setup wizard failed to auto-detect `battery_discharge_soc_limit_on_grid` entity on Growatt models that expose separate on-grid/off-grid SOC limit entities.
+- MIN inverter returned 500 errors when the TOU schedule exceeded 9 slots on price-volatile days. Hardware writes now use only the active (capped) intervals with content-aware slot assignment to avoid evicting still-needed segments. (thanks [@pookey](https://github.com/pookey))
+
 ## [8.6.0] - 2026-05-14
 
 ### Added

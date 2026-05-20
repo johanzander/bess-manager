@@ -8,7 +8,6 @@ schedule persistence using PeriodData structures.
 
 from unittest.mock import patch
 
-from core.bess.min_schedule import GrowattScheduleManager
 from core.bess.models import PeriodData
 
 
@@ -393,19 +392,13 @@ class TestChargeRateHardwareWrite:
 
     def _inject_intent(self, battery_system, intent: str, hour: int = 12) -> None:
         """Inject a single known intent for the given hour into the schedule manager."""
-        mgr = battery_system._schedule_manager
-        # 96 quarter-hour periods; fill all with intent, override the target hour
+        mgr = battery_system._inverter_controller
+        # 96 quarter-hour periods; fill all with IDLE, override the target hour
         num_periods = 96
         intents = ["IDLE"] * num_periods
         for p in range(hour * 4, (hour + 1) * 4):
             intents[p] = intent
         mgr.strategic_intents = intents
-
-        # Populate hourly_settings for the target hour (mirrors INTENT_TO_CONTROL)
-        control = GrowattScheduleManager.INTENT_TO_CONTROL.get(
-            intent, {"grid_charge": False, "charge_rate": 0, "discharge_rate": 0}
-        )
-        mgr.hourly_settings[hour] = dict(control)
 
     def test_solar_storage_writes_charge_rate_100_without_power_monitor(
         self, battery_system, mock_controller
@@ -420,6 +413,7 @@ class TestChargeRateHardwareWrite:
 
         with patch("core.bess.battery_system_manager.time_utils.now") as mock_now:
             mock_now.return_value.hour = 12
+            mock_now.return_value.minute = 0
             battery_system._apply_period_schedule(48)  # period 48 = hour 12
 
         assert mock_controller.calls[
@@ -440,6 +434,7 @@ class TestChargeRateHardwareWrite:
 
         with patch("core.bess.battery_system_manager.time_utils.now") as mock_now:
             mock_now.return_value.hour = 2
+            mock_now.return_value.minute = 0
             battery_system._apply_period_schedule(8)  # period 8 = hour 2
 
         assert mock_controller.calls[
@@ -458,6 +453,7 @@ class TestChargeRateHardwareWrite:
 
         with patch("core.bess.battery_system_manager.time_utils.now") as mock_now:
             mock_now.return_value.hour = 19
+            mock_now.return_value.minute = 0
             battery_system._apply_period_schedule(76)  # period 76 = hour 19
 
         assert mock_controller.calls[
@@ -482,6 +478,7 @@ class TestChargeRateHardwareWrite:
         self._inject_intent(battery_system, "LOAD_SUPPORT", hour=18)
         with patch("core.bess.battery_system_manager.time_utils.now") as mock_now:
             mock_now.return_value.hour = 18
+            mock_now.return_value.minute = 0
             battery_system._apply_period_schedule(72)
 
         charge_after_load_support = mock_controller.calls["charge_rate"][-1]
@@ -493,6 +490,7 @@ class TestChargeRateHardwareWrite:
 
         with patch("core.bess.battery_system_manager.time_utils.now") as mock_now:
             mock_now.return_value.hour = 12
+            mock_now.return_value.minute = 0
             battery_system._apply_period_schedule(48)
 
         assert mock_controller.calls[

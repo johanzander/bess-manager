@@ -697,79 +697,46 @@ class SensorCollector:
 
     def check_battery_health(self) -> dict:
         """Check battery monitoring health, with all sensors required for critical battery operation."""
-        # Define required methods
-        required_battery_methods = [
-            "get_battery_soc",
-            "get_battery_charge_power",
-            "get_battery_discharge_power",
-        ]
-
-        # Define optional methods
-        optional_battery_methods = []
-
-        # Combine all methods for health check
-        all_battery_methods = required_battery_methods + optional_battery_methods
-
         return perform_health_check(
             component_name="Battery Monitoring",
             description="Real-time battery state and power monitoring",
             is_required=True,
             controller=self.ha_controller,
-            all_methods=all_battery_methods,
-            required_methods=required_battery_methods,
+            all_methods=[
+                "get_battery_soc",
+                "get_battery_charge_power",
+                "get_battery_discharge_power",
+            ],
         )
 
     def check_energy_health(self) -> dict:
-        """Check energy monitoring health, with all sensors required except EV."""
-
-        # Define required methods (critical for energy flow calculations)
-        required_energy_methods = [
-            "get_grid_import_lifetime",
-            "get_grid_export_lifetime",
-            "get_solar_production_lifetime",
-            "get_load_consumption_lifetime",
-            "get_battery_charged_lifetime",
-            "get_battery_discharged_lifetime",
-        ]
-
-        # Define optional methods (nice-to-have but not critical)
-        optional_energy_methods: list[str] = []
-
-        # Combine all methods for health check
-        all_energy_methods = required_energy_methods + optional_energy_methods
-
+        """Check energy monitoring health, with all sensors required."""
         return perform_health_check(
             component_name="Energy Monitoring",
             description="Tracks energy flows and consumption patterns",
             is_required=True,
             controller=self.ha_controller,
-            all_methods=all_energy_methods,
-            required_methods=required_energy_methods,
+            all_methods=[
+                "get_grid_import_lifetime",
+                "get_grid_export_lifetime",
+                "get_solar_production_lifetime",
+                "get_load_consumption_lifetime",
+                "get_battery_charged_lifetime",
+                "get_battery_discharged_lifetime",
+            ],
         )
 
     def check_prediction_health(self) -> dict:
         """Check prediction health, with no sensors required (nice-to-have for optimization)."""
-        # Define required methods
-        required_prediction_methods = []
-
-        # Define optional methods
-        optional_prediction_methods = [
-            "get_estimated_consumption",
-            "get_solar_forecast",
-        ]
-
-        # Combine all methods for health check
-        all_prediction_methods = (
-            required_prediction_methods + optional_prediction_methods
-        )
-
         return perform_health_check(
             component_name="Energy Prediction",
             description="Solar and consumption forecasting for optimization",
             is_required=False,
             controller=self.ha_controller,
-            all_methods=all_prediction_methods,
-            required_methods=required_prediction_methods,
+            all_methods=[
+                "get_estimated_consumption",
+                "get_solar_forecast",
+            ],
         )
 
     def check_health(self) -> list:

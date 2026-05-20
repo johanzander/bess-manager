@@ -72,6 +72,30 @@
     "sensor.main_breaker_current_l3": {
       "state": "3.8",
       "attributes": { "unit_of_measurement": "A", "device_class": "current" }
+    },
+    "sensor.xyz9876543_lifetime_total_all_batteries_charged": {
+      "state": "5234.5",
+      "attributes": { "unit_of_measurement": "kWh", "device_class": "energy", "state_class": "total_increasing" }
+    },
+    "sensor.xyz9876543_lifetime_total_all_batteries_discharged": {
+      "state": "4812.3",
+      "attributes": { "unit_of_measurement": "kWh", "device_class": "energy", "state_class": "total_increasing" }
+    },
+    "sensor.xyz9876543_lifetime_total_solar_energy": {
+      "state": "12450.7",
+      "attributes": { "unit_of_measurement": "kWh", "device_class": "energy", "state_class": "total_increasing" }
+    },
+    "sensor.xyz9876543_lifetime_total_export_to_grid": {
+      "state": "3120.4",
+      "attributes": { "unit_of_measurement": "kWh", "device_class": "energy", "state_class": "total_increasing" }
+    },
+    "sensor.xyz9876543_lifetime_import_from_grid": {
+      "state": "8540.2",
+      "attributes": { "unit_of_measurement": "kWh", "device_class": "energy", "state_class": "total_increasing" }
+    },
+    "sensor.xyz9876543_lifetime_total_load_consumption": {
+      "state": "15230.1",
+      "attributes": { "unit_of_measurement": "kWh", "device_class": "energy", "state_class": "total_increasing" }
     }
   },
   "config_entries": [

@@ -174,8 +174,11 @@ class BESSController:
             }
         )
 
-        # Apply all settings to the system immediately
-        self._apply_settings(merged)
+        # Apply all settings to the system immediately (skip on fresh install
+        # where the system has no inverter configured — settings will be applied
+        # when the user completes the setup wizard).
+        if self.system.is_configured:
+            self._apply_settings(merged)
 
         logger.info("BESS Controller initialized with early settings loading")
 
@@ -285,6 +288,7 @@ class BESSController:
             self.ha_controller.growatt_device_id = growatt_device_id
         if nordpool_area:
             self.system.price_manager.area = nordpool_area
+            self.system.price_manager.clear_cache()
         if nordpool_config_entry_id:
             from core.bess.official_nordpool_source import OfficialNordpoolSource
 
@@ -306,6 +310,17 @@ class BESSController:
             nordpool_config_entry_id=nordpool_config_entry_id,
             growatt_device_id=growatt_device_id,
         )
+
+    def start_scheduler(self) -> None:
+        """Start the periodic scheduler if it is not already running.
+
+        Called from ``start()`` during normal startup and from the setup-wizard
+        endpoint on a fresh install once the system becomes configured.
+        """
+        if self.scheduler.running:
+            return
+        self._init_scheduler_jobs()
+        logger.info("Scheduler started")
 
     def _init_scheduler_jobs(self):
         """Configure scheduler jobs."""
@@ -386,13 +401,24 @@ class BESSController:
             ) from e
 
     def start(self):
-        """Start the scheduler."""
+        """Start the scheduler.
+
+        On a fresh install the system is unconfigured — the web server starts
+        but scheduling and hardware control are deferred until the user
+        completes the setup wizard.
+        """
         self.system.start()
+
+        if not self.system.is_configured:
+            logger.info(
+                "System unconfigured — scheduler deferred until setup is complete"
+            )
+            return
+
         now = time_utils.now()
         current_period = now.hour * 4 + now.minute // 15
         self.system.update_battery_schedule(current_period=current_period)
-        self._init_scheduler_jobs()
-        logger.info("Scheduler started successfully")
+        self.start_scheduler()
 
 
 # Global BESS controller instance

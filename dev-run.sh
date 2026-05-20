@@ -94,6 +94,14 @@ export TZ=${TZ:-Europe/Stockholm}
 echo "Stopping any existing containers for this project..."
 docker compose down --remove-orphans 2>/dev/null
 
+# Also remove any stale container with the target name (e.g. left over
+# from a previous run or an older compose config without project naming).
+CONTAINER_NAME="${COMPOSE_PROJECT_NAME}-dev"
+if docker ps -a --format '{{.Names}}' | grep -qx "$CONTAINER_NAME"; then
+  echo "Removing stale container: $CONTAINER_NAME"
+  docker rm -f "$CONTAINER_NAME" >/dev/null
+fi
+
 # Only rebuild frontend if source files changed since last build
 FRONTEND_BUILD="frontend/dist"
 if [ ! -d "$FRONTEND_BUILD" ] || [ -n "$(find frontend/src frontend/index.html frontend/vite.config.ts frontend/package.json -newer "$FRONTEND_BUILD" 2>/dev/null)" ]; then

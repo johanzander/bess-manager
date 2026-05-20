@@ -1,0 +1,4 @@
+- [Beta release workflow](project_beta_release_workflow.md) — Use version suffix `b1`/`b2` for beta releases, HA Supervisor handles channel filtering
+- [Beta releases go to beta remote](feedback_beta_remote.md) — Push beta branches/tags to `beta` remote, never `origin`
+- [Worktree sibling location](feedback_worktree_location.md) — Create worktrees as sibling folders, not inside .claude/worktrees/
+- [Parallel release train](feedback_parallel_release.md) — Use concurrent subagents for beta releases; check GitHub releases for version numbers

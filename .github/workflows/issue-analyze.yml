@@ -60,11 +60,27 @@ jobs:
             2. **Delegate the investigation to the `bess-analyst` sub-agent.**
                Use the Agent tool with `subagent_type: bess-analyst`. Pass it:
                  - The issue title and body
-                 - The debug log JSON (from issue body or comments)
-                 - This task: "Find the root cause of this bug. Read the
-                   design docs and source files listed in your agent
-                   definition. Report: file:line of the defect, code
-                   excerpt, why it produces the reported symptom."
+                 - The debug bundle (from issue body or attachments — download it)
+                 - This task: "Diagnose this issue independently. The reporter's
+                   explanation is a HYPOTHESIS — do not assume it is correct.
+
+                   Step 1: Triage the debug bundle FIRST. Check sensor
+                   availability, system health, connectivity errors, and whether
+                   the reporter's HA integration matches the code path BESS
+                   Manager uses. If sensors are unavailable or the system has
+                   fundamental issues, that is likely the real problem.
+
+                   Step 2: Only after triage, read the design docs and source
+                   files listed in your agent definition.
+
+                   Step 3: If the reporter claims a code bug, verify that
+                   (a) the error actually originates from BESS Manager code,
+                   (b) the behavior isn't intentional per the design docs, and
+                   (c) the debug bundle evidence supports the claim.
+
+                   Report: your independent diagnosis (which may differ from
+                   the reporter's), file:line references, and whether the
+                   debug bundle reveals a different root cause than claimed."
 
             3. After the sub-agent reports back, **independently verify** by
                reading the file:line locations it cited. Do not just trust

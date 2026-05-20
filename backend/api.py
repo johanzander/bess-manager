@@ -2588,6 +2588,13 @@ async def run_setup_discovery():
                 else ha.SOLAX_ENTITY_SUFFIX_MAP
             )  # growatt_modbus and growatt_modbus_gen3 also use SOLAX_ENTITY_SUFFIX_MAP
             all_bess_keys = list(set(suffix_map.values()))
+            # Single-segment TOU: Modbus GEN4 only needs slot 1 entities
+            if detected_platform == "growatt_modbus":
+                all_bess_keys = [
+                    k
+                    for k in all_bess_keys
+                    if not (k.startswith("tou_time_") and k[9:10] in "23456789")
+                ]
             missing_sensors = [k for k in all_bess_keys if k not in sensors]
 
         current_sensors = ha.discover_current_sensors(states)

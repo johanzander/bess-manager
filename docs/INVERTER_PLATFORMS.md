@@ -38,19 +38,25 @@ growatt_server.update_time_segment(segment_id, start_time, end_time, mode, enabl
 
 ### Growatt MIN (Local) — `growatt_solax_modbus` (GEN4)
 
-Identical scheduling algorithm to Growatt MIN (Cloud) — same 9-slot TOU
-management with differential updates and corruption recovery. Only the
-hardware I/O layer differs. Uses **GEN4** entities from the solax_modbus
-Growatt plugin (MIN/MOD/MID/TL-X models).
+Uses a **single TOU segment** (slot 1) with a full-day time window
+(`00:00-23:59`). The battery mode is updated per-period via `apply_period()`
+— only when the mode actually changes — instead of pre-programming up to 9
+slots. This reduces the required entity count from 45 (9 slots x 5 entities)
+to just **5 entities** (slot 1 only). Uses **GEN4** entities from the
+solax_modbus Growatt plugin (MIN/MOD/MID/TL-X models).
 
-**Schedule writes:** 5 HA service calls per slot:
+**Schedule writes:** 5 HA service calls when mode changes:
 ```
-select.select_option(entity: time_N_enabled, option: "Enabled"/"Disabled")
-select.select_option(entity: time_N_begin, option: "HH:MM")
-select.select_option(entity: time_N_end, option: "HH:MM")
-select.select_option(entity: time_N_mode, option: "Battery First"/"Load First"/"Grid First")
-button.press(entity: time_N_update)
+select.select_option(entity: time_1_enabled, option: "Enabled"/"Disabled")
+select.select_option(entity: time_1_begin, option: "00:00")
+select.select_option(entity: time_1_end, option: "23:59")
+select.select_option(entity: time_1_mode, option: "Battery First"/"Load First"/"Grid First")
+button.press(entity: time_1_update)
 ```
+
+When the mode is `load_first` (inverter default), segment 1 is disabled.
+When the mode is `battery_first` or `grid_first`, segment 1 is enabled with
+that mode. Writes only occur on mode transitions, not every period.
 
 > **Entity ID vs unique_id naming:** The solax_modbus Growatt plugin uses
 > `key="time_N_enabled"` internally but `name="Time N Active"` for display.
@@ -59,9 +65,9 @@ button.press(entity: time_N_update)
 > (e.g. `growatt_inverter_time_1_enabled`). BESS auto-detection matches on
 > `unique_id`, which is immutable.
 
-> **Slot availability:** Slots 1-3 are enabled by default in the HA entity
-> registry. Slots 4-9 are disabled by default and must be manually enabled in
-> HA (Settings → Devices → entity toggle) before BESS can use them.
+> **Migration from 9-slot mode:** On startup, BESS reads all available TOU
+> slots (1-9) and automatically disables any enabled slots 2-9. Users who
+> previously had slots 2-9 enabled do not need to take manual action.
 
 **Per-period control:** Same generic calls as cloud variant:
 - Grid charge: `switch.turn_on` / `switch.turn_off` on charger_switch entity
@@ -175,17 +181,19 @@ button.press(trigger)
 | `battery_charge_stop_soc` | number | `ems_charging_stop_soc` | Max SOC target |
 | `battery_discharge_stop_soc` | number | `ems_discharging_stop_soc` | Min SOC target |
 
-**TOU time slot control (9 slots x 5 entities = 45 entities):**
+**TOU time slot control (slot 1 only, 5 entities):**
 
 | BESS Sensor Key | Entity Type | solax_modbus Key (unique_id) | HA Entity ID Contains | Purpose |
 |-----------------|-------------|------------------------------|----------------------|---------|
-| `tou_time_N_enabled` | select | `time_N_enabled` | `time_N_active` | Slot active (Enabled/Disabled) |
-| `tou_time_N_begin` | select | `time_N_begin` | `time_N_begin` | Start time (HH:MM) |
-| `tou_time_N_end` | select | `time_N_end` | `time_N_end` | End time (HH:MM) |
-| `tou_time_N_mode` | select | `time_N_mode` | `time_N_mode` | Battery First/Load First/Grid First |
-| `tou_time_N_update` | button | `time_N_update` | `time_N_update` | Commit slot changes |
+| `tou_time_1_enabled` | select | `time_1_enabled` | `time_1_active` | Slot active (Enabled/Disabled) |
+| `tou_time_1_begin` | select | `time_1_begin` | `time_1_begin` | Start time (HH:MM) |
+| `tou_time_1_end` | select | `time_1_end` | `time_1_end` | End time (HH:MM) |
+| `tou_time_1_mode` | select | `time_1_mode` | `time_1_mode` | Battery First/Load First/Grid First |
+| `tou_time_1_update` | button | `time_1_update` | `time_1_update` | Commit slot changes |
 
-Where N = 1 through 9. A `time_N_clear` button also exists in the plugin
+Only slot 1 is required. Slots 2-9 entities still exist in the suffix map for
+backward compatibility (discovery will pick them up if enabled), but BESS only
+actively uses slot 1. A `time_N_clear` button also exists in the plugin
 (zeros out the slot) but is not used by BESS.
 
 > **Note:** The `entity_id` for the enabled/disabled entity contains `active`

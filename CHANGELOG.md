@@ -4,24 +4,29 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [9.0.0b12] - 2026-05-19
+## [9.0.0b12] - 2026-05-20
 
 ### Added
 
+- **Single-segment TOU for Growatt Modbus (GEN4)** — replaces the 9-slot TOU approach with a single TOU segment (slot 1) updated per-period. Reduces required HA entities from 45 to 5, removing the need to manually enable slots 4-9 in Home Assistant.
+- Auto-migration: on startup, any enabled legacy TOU slots 2-9 are automatically disabled.
 - GEN3/GEN4 platform split for Growatt Local Modbus — MIX/SPA/SPH (GEN3) and MIN/MOD/MID (GEN4) are now separate platforms with generation-specific sensor definitions, matching the existing MIN/SPH split for Growatt Cloud.
 - GEN3 auto-detection via `load_first_battery_minimum_soc` entity marker in solax_modbus registry.
 - SPH/MIX Connection selector — SPH sub-type now offers Cloud/Local Modbus connection choice (previously only MIN had this).
 - GEN3 EMS suffix mappings (`battery_first_charge_rate`, `grid_first_discharge_rate`, `battery_first_maximum_soc`, `load_first_battery_minimum_soc`).
 - Derived lifetime sensor fallbacks: GEN4 derives `lifetime_load_consumption` from solar + grid_import − grid_export; GEN3 derives `lifetime_system_production` from `lifetime_solar_energy`.
+- 23 unit tests for single-segment TOU controller (mode tracking, migration, schedule comparison).
 
 ### Fixed
 
 - Growatt MIN (Local/GEN4) no longer shows "Home Consumption Energy" as "Not detected" — the sensor was SPF-only in solax_modbus and never existed on MIN hardware. Removed from GEN4 UI; value is derived internally.
+- Setup wizard no longer reports slots 2-9 as missing sensors for Growatt Modbus GEN4 platform.
 
 ### Changed
 
+- `GrowattSolaxModbusController` rewritten from thin I/O subclass (55 lines) to full single-segment controller (~450 lines) with its own schedule creation, per-period mode management, and intent-based schedule comparison.
 - Refactored `_has_growatt_tou_entities()` into shared `_has_solax_entity_suffix()` helper for DRY generation detection.
-- Updated INVERTER_PLATFORMS.md with comprehensive GEN3/GEN4 entity tables, register numbers, and derivation documentation.
+- Updated INVERTER_PLATFORMS.md with single-segment TOU documentation and migration notes.
 
 ## [9.0.0b11] - 2026-05-18
 

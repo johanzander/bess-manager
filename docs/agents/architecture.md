@@ -67,13 +67,13 @@ Frontend mirrors these in `frontend/src/types.ts`.
 return perform_health_check(
     component_name="Battery Monitoring",
     description="Real-time battery state monitoring",
-    is_required=True,
+    is_required=True,            # True -> failure = ERROR, False -> failure = WARNING
     controller=self.ha_controller,
     all_methods=battery_methods,
-    required_methods=required_battery_methods,
 )
 ```
 
+Severity is derived from `is_required` — no separate `required_methods` parameter.
 Never implement custom health check logic — always use `perform_health_check()`.
 
 ## Settings

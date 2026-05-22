@@ -57,26 +57,53 @@ jobs:
             1. Get full issue context:
                  gh issue view ${{ github.event.issue.number }} --json title,body,labels,comments
 
-            2. **Delegate the investigation to the `bess-analyst` sub-agent.**
+            2. **Identify the CURRENT problem.** Long-running issues evolve.
+               Read ALL comments chronologically and determine:
+               - What is the user struggling with RIGHT NOW (latest comments)?
+               - What problems from the original report have already been
+                 resolved or are no longer relevant?
+               - What is the LATEST debug bundle? (Use that one, not older ones.)
+               - What version is the user running? Is it current?
+
+               If the issue has evolved significantly, the analysis MUST focus
+               on the current problem, not the original report.
+
+            3. **Delegate the investigation to the `bess-analyst` sub-agent.**
                Use the Agent tool with `subagent_type: bess-analyst`. Pass it:
                  - The issue title and body
-                 - The debug bundle (from issue body or attachments — download it)
+                 - A summary of how the issue has evolved (what's resolved,
+                   what the current problem is)
+                 - The LATEST debug bundle (from issue body or attachments —
+                   download it). If multiple bundles exist, use the most recent.
                  - This task: "Diagnose this issue independently. The reporter's
                    explanation is a HYPOTHESIS — do not assume it is correct.
 
-                   Step 1: Triage the debug bundle FIRST. Check sensor
+                   Step 1: Read ALL issue comments to understand what the user
+                   is struggling with NOW, not just the original report. Issues
+                   evolve — the current problem may be completely different.
+
+                   Step 2: Triage the LATEST debug bundle FIRST. Check sensor
                    availability, system health, connectivity errors, and whether
                    the reporter's HA integration matches the code path BESS
-                   Manager uses. If sensors are unavailable or the system has
-                   fundamental issues, that is likely the real problem.
+                   Manager uses. Check inverter type (MIN vs SPH vs SolaX) and
+                   whether the expected sensors exist. If sensors are unavailable
+                   or the system has fundamental issues, that is likely the real
+                   problem — not a subtle code bug.
 
-                   Step 2: Only after triage, read the design docs and source
-                   files listed in your agent definition.
+                   Step 3: Only after triage, read the design docs and source
+                   files relevant to what the triage revealed. Do NOT read the
+                   entire codebase — focus on the subsystem the debug bundle
+                   points to.
 
-                   Step 3: If the reporter claims a code bug, verify that
+                   Step 4: If the reporter claims a code bug, verify that
                    (a) the error actually originates from BESS Manager code,
                    (b) the behavior isn't intentional per the design docs, and
                    (c) the debug bundle evidence supports the claim.
+
+                   Step 5: Before finalizing, re-read the last 3-5 user
+                   comments and verify your analysis addresses what the user
+                   is actually asking about. If it doesn't, you analyzed a
+                   stale problem — go back and fix it.
 
                    Report: your independent diagnosis (which may differ from
                    the reporter's), file:line references, and whether the

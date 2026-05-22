@@ -2648,6 +2648,29 @@ async def setup_complete(payload: APISetupCompletePayload):
         if payload.provider is not None:
             ep = bess_controller.settings_store.get_section("energy_provider")
             ep["provider"] = payload.provider
+            # Persist Octopus Energy entity IDs when provider is octopus
+            if any(
+                [
+                    payload.octopusImportTodayEntity,
+                    payload.octopusImportTomorrowEntity,
+                    payload.octopusExportTodayEntity,
+                    payload.octopusExportTomorrowEntity,
+                ]
+            ):
+                octopus = ep.get("octopus", {})
+                if payload.octopusImportTodayEntity:
+                    octopus["import_today_entity"] = payload.octopusImportTodayEntity
+                if payload.octopusImportTomorrowEntity:
+                    octopus["import_tomorrow_entity"] = (
+                        payload.octopusImportTomorrowEntity
+                    )
+                if payload.octopusExportTodayEntity:
+                    octopus["export_today_entity"] = payload.octopusExportTodayEntity
+                if payload.octopusExportTomorrowEntity:
+                    octopus["export_tomorrow_entity"] = (
+                        payload.octopusExportTomorrowEntity
+                    )
+                ep["octopus"] = octopus
             sections["energy_provider"] = ep
 
         # --- inverter ---

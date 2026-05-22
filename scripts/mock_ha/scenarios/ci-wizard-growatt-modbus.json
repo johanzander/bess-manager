@@ -136,6 +136,10 @@
       "state": "20000",
       "attributes": {"unit_of_measurement": "kWh"}
     },
+    "sensor.growatt_inverter_solax_total_yield": {
+      "state": "25000",
+      "attributes": {"unit_of_measurement": "kWh"}
+    },
     "sensor.growatt_inverter_solax_grid_current_l1": {
       "state": "3.5",
       "attributes": {"unit_of_measurement": "A"}
@@ -257,6 +261,7 @@
     {"entity_id": "sensor.growatt_inverter_solax_total_grid_import", "platform": "solax_modbus", "unique_id": "solax_total_grid_import", "device_id": "dev-solax-001"},
     {"entity_id": "sensor.growatt_inverter_solax_total_grid_export", "platform": "solax_modbus", "unique_id": "solax_total_grid_export", "device_id": "dev-solax-001"},
     {"entity_id": "sensor.growatt_inverter_solax_total_load_energy", "platform": "solax_modbus", "unique_id": "solax_total_load_energy", "device_id": "dev-solax-001"},
+    {"entity_id": "sensor.growatt_inverter_solax_total_yield", "platform": "solax_modbus", "unique_id": "solax_total_yield", "device_id": "dev-solax-001"},
     {"entity_id": "sensor.growatt_inverter_solax_grid_current_l1", "platform": "solax_modbus", "unique_id": "solax_grid_current_l1", "device_id": "dev-solax-001"},
     {"entity_id": "sensor.growatt_inverter_solax_grid_current_l2", "platform": "solax_modbus", "unique_id": "solax_grid_current_l2", "device_id": "dev-solax-001"},
     {"entity_id": "sensor.growatt_inverter_solax_grid_current_l3", "platform": "solax_modbus", "unique_id": "solax_grid_current_l3", "device_id": "dev-solax-001"},
@@ -373,6 +378,7 @@
           "lifetime_import_from_grid": "sensor.growatt_inverter_solax_total_grid_import",
           "lifetime_export_to_grid": "sensor.growatt_inverter_solax_total_grid_export",
           "lifetime_load_consumption": "sensor.growatt_inverter_solax_total_load_energy",
+          "lifetime_system_production": "sensor.growatt_inverter_solax_total_yield",
           "current_l1": "sensor.growatt_inverter_solax_grid_current_l1",
           "current_l2": "sensor.growatt_inverter_solax_grid_current_l2",
           "current_l3": "sensor.growatt_inverter_solax_grid_current_l3"

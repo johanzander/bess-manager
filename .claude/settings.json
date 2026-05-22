@@ -8,19 +8,42 @@
       "Bash(python3 -m pytest:*)",
       "Bash(python -m pytest:*)",
       "Bash(./.venv/bin/pytest:*)",
-      "Bash(./.venv/bin/python -m pytest:*)"
+      "Bash(./.venv/bin/python -m pytest:*)",
+      "Bash(colima start *)",
+      "Bash(colima start)",
+      "Bash(colima stop *)",
+      "Bash(colima stop)"
     ],
-    "deny": [],
+    "deny": [
+      "Bash(colima delete *)",
+      "Bash(colima delete)"
+    ],
     "ask": [
       "Bash(git commit:*)",
       "Bash(git push:*)",
       "Bash(git reset:*)",
       "Bash(git rebase:*)",
       "Bash(git merge:*)",
-      "Bash(rm:*)"
+      "Bash(rm:*)",
+      "Bash(rm -rf *)",
+      "Bash(git push --force *)",
+      "Bash(git reset --hard *)"
     ]
   },
   "enabledPlugins": {
     "code-review@claude-plugins-official": true
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -c \"import sys,json,subprocess; d=json.load(sys.stdin); f=d.get('tool_response',{}).get('filePath') or d.get('tool_input',{}).get('file_path',''); sys.exit(0) if not f.endswith('.py') else None; r=subprocess.run(['ruff','check',f]); sys.exit(r.returncode)\""
+          }
+        ]
+      }
+    ]
   }
 }

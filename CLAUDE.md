@@ -4,6 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with
 this repository. Read `docs/agents/rules.md` first — those constraints are
 non-negotiable and apply to all agents.
 
+## Verification Before Action
+
+- ALWAYS run tests locally before pushing commits
+- ALWAYS verify against actual source code/repos before making assumptions about APIs, entity names, or naming patterns
+- NEVER speculate about file contents or behavior - read the file or run the code first
+
 ## Agent Documentation Index
 
 | File | When to Read |
@@ -13,6 +19,7 @@ non-negotiable and apply to all agents.
 | [`docs/agents/patterns.md`](docs/agents/patterns.md) | Before writing new code |
 | [`docs/agents/testing.md`](docs/agents/testing.md) | Before writing or changing tests |
 | [`docs/agents/workflow.md`](docs/agents/workflow.md) | Before any commit, PR, or release |
+| [`docs/agents/memory/`](docs/agents/memory/) | Project-specific memory (beta workflow, release train) |
 
 ## Project Overview
 
@@ -112,6 +119,22 @@ of `analyzed`.
   do not unsuspend it.
 - Stage 2 must invoke the `bess-analyst` sub-agent. Skipping that step is
   the failure mode the previous design suffered from.
+
+## Release Workflow
+
+- Always check the current published version before tagging (e.g., check GitHub releases) to avoid version collisions
+- Confirm the target remote and branch BEFORE pushing releases (beta vs main, origin vs beta remote)
+- Run the full test suite locally before any release tag or beta push
+
+## Scope Discipline
+
+- Do NOT modify, remove, or 'clean up' items the user hasn't asked you to change
+- When doing cleanup, list what you plan to change and confirm before editing
+- Do not revert intentional linter changes or simplifications without explicit instruction
+
+## Worktree Conventions
+
+- Create worktrees as sibling folders to the main repo (e.g., `../repo-feature/`), NOT inside `.claude/worktrees/`, so they open cleanly in VS Code
 
 ## Home Assistant Integration
 

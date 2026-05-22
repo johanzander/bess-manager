@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- **Nordpool HACS provider support** — setup wizard and settings page now properly handle three distinct pricing providers: `nordpool_official` (HA integration), `nordpool_hacs` (HACS custom sensor), and `octopus`. The HACS entity is auto-detected from discovery and persisted in settings.
 - **Scenario-driven wizard tests** — setup wizard completion tests now load from JSON scenario files (`scripts/mock_ha/scenarios/ci-*.json`), matching the pattern used for algorithm tests. Adding a new wizard regression test is now just adding a variant to the scenario JSON.
 - **CI scenario: Growatt Modbus** (`ci-wizard-growatt-modbus.json`) — tracked scenario with Growatt MIN + SolaX Modbus (GEN4 TOU) + official Nordpool SE3. Tests both local Modbus and cloud control paths.
 - **CI scenario: Growatt Cloud + Octopus Energy** (`ci-wizard-growatt-cloud-octopus.json`) — UK user with Growatt SPH cloud-only + Octopus Energy pricing. Based on issue #60 debug log.
@@ -23,6 +24,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- **Renamed `nordpool` provider to `nordpool_hacs`** throughout codebase to avoid confusion with the official HA Nordpool integration. Includes automatic migration of legacy settings.
 - Debug data exporter now includes device registry and entity registry in scrubbed output for better issue diagnostics.
 - Inverter type detection comment updated to reflect entity-registry-based approach.
 

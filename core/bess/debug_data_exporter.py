@@ -672,8 +672,8 @@ class DebugDataAggregator:
         config = self.system._energy_provider_config
         provider = config["provider"]
 
-        if provider == "nordpool":
-            nordpool_cfg = config["nordpool"]
+        if provider == "nordpool_hacs":
+            nordpool_cfg = config["nordpool_hacs"]
             entity_id = nordpool_cfg.get("entity")
             if entity_id:
                 try:

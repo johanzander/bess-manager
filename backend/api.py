@@ -2632,6 +2632,7 @@ async def run_setup_discovery():
                 "nordpool_found": integrations["nordpool_found"],
                 "nordpool_area": integrations["nordpool_area"],
                 "nordpool_custom_area": integrations.get("nordpool_custom_area"),
+                "nordpool_custom_entity": integrations.get("nordpool_custom_entity"),
                 "nordpool_config_entry_id": integrations["nordpool_config_entry_id"],
                 "octopus_found": integrations["octopus_found"],
                 "missing_sensors": missing_sensors,
@@ -2802,6 +2803,9 @@ async def setup_complete(payload: APISetupCompletePayload):
             ep = bess_controller.settings_store.get_section("energy_provider")
             if payload.provider is not None:
                 ep["provider"] = payload.provider
+            # Persist Nordpool HACS entity when provider is nordpool_hacs
+            if payload.provider == "nordpool_hacs" and payload.nordpoolEntity:
+                ep["nordpool_hacs"] = {"entity": payload.nordpoolEntity}
             # Persist Octopus entity IDs when provider is octopus
             if payload.provider == "octopus" and payload.octopusImportTodayEntity:
                 ep["octopus"] = {

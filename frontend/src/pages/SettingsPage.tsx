@@ -131,7 +131,7 @@ const SettingsPage: React.FC = () => {
       const prov_s = s.energyProvider ?? {};
       const growatt_s = s.growatt ?? {};
       const nordpool = prov_s.nordpoolOfficial ?? {};
-      const nordpoolCustom = prov_s.nordpool ?? {};
+      const nordpoolCustom = prov_s.nordpoolHacs ?? {};
       const octopus = prov_s.octopus ?? {};
 
       const bat: BatteryForm = {
@@ -351,7 +351,7 @@ const SettingsPage: React.FC = () => {
         energyProvider: {
           provider: pricingForm.provider,
           nordpoolOfficial: { configEntryId: pricingForm.nordpoolConfigEntryId },
-          nordpool: { entity: pricingForm.nordpoolEntity },
+          nordpoolHacs: { entity: pricingForm.nordpoolEntity },
           octopus: {
             importTodayEntity: pricingForm.octopusImportTodayEntity,
             importTomorrowEntity: pricingForm.octopusImportTomorrowEntity,
@@ -416,7 +416,7 @@ const SettingsPage: React.FC = () => {
         energyProvider: {
           provider: pricingForm.provider,
           nordpoolOfficial: { configEntryId: pricingForm.nordpoolConfigEntryId },
-          nordpool: { entity: pricingForm.nordpoolEntity },
+          nordpoolHacs: { entity: pricingForm.nordpoolEntity },
           octopus: {
             importTodayEntity: pricingForm.octopusImportTodayEntity,
             importTomorrowEntity: pricingForm.octopusImportTomorrowEntity,

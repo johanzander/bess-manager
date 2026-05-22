@@ -310,7 +310,7 @@ class SettingsStore:
             "energy_provider": {
                 "provider": "nordpool_official",
                 "nordpool_official": {"config_entry_id": ""},
-                "nordpool": {"entity": ""},
+                "nordpool_hacs": {"entity": ""},
                 "octopus": {},
             },
             "growatt": {"inverter_type": "", "device_id": ""},
@@ -401,6 +401,7 @@ class SettingsStore:
 
         ep = self.data.get("energy_provider")
         if isinstance(ep, dict):
+            # Migrate legacy "nordpool" key → "nordpool_hacs"
             nordpool = ep.get("nordpool")
             if isinstance(nordpool, dict):
                 # Rename: today_entity + tomorrow_entity → entity (single sensor)
@@ -411,9 +412,12 @@ class SettingsStore:
                         "Schema migration: renamed nordpool.today_entity → nordpool.entity = %s",
                         nordpool["entity"],
                     )
-                    ep["nordpool"] = nordpool
-                    self.data["energy_provider"] = ep
-                    changed = True
+                ep["nordpool_hacs"] = nordpool
+                del ep["nordpool"]
+                if ep.get("provider") == "nordpool":
+                    ep["provider"] = "nordpool_hacs"
+                self.data["energy_provider"] = ep
+                changed = True
 
         growatt = self.data.get("growatt")
         if isinstance(growatt, dict):

@@ -2121,6 +2121,7 @@ class HomeAssistantAPIController:
             "nordpool_found": False,
             "nordpool_area": None,
             "nordpool_custom_area": None,
+            "nordpool_custom_entity": None,
             "nordpool_config_entry_id": None,
             "octopus_found": False,
             # Auto-detected hints (None = could not determine)
@@ -2150,6 +2151,8 @@ class HomeAssistantAPIController:
             # (Official HA nordpool is detected via config entries below)
             if entity_id.startswith("sensor.nordpool_"):
                 result["nordpool_found"] = True
+                if not result["nordpool_custom_entity"]:
+                    result["nordpool_custom_entity"] = state.get("entity_id")
                 if not result["nordpool_custom_area"]:
                     parsed_area = self._parse_nordpool_area_from_entity_id(entity_id)
                     if parsed_area:

@@ -314,17 +314,17 @@ class BatterySystemManager:
             logger.info("Using official Home Assistant Nordpool integration")
             return price_source
 
-        if provider == "nordpool":
-            nordpool_config = config["nordpool"]
-            logger.info("Using legacy/custom Nordpool sensor integration")
+        if provider == "nordpool_hacs":
+            hacs_config = config["nordpool_hacs"]
+            logger.info("Using HACS custom Nordpool sensor integration")
             return HomeAssistantSource(
                 controller,
                 vat_multiplier=self.price_settings.vat_multiplier,
-                entity=nordpool_config["entity"],
+                entity=hacs_config["entity"],
             )
 
         raise SystemConfigurationError(
-            message=f"Unknown energy provider: {provider!r}. Must be 'nordpool', 'nordpool_official', or 'octopus'."
+            message=f"Unknown energy provider: {provider!r}. Must be 'nordpool_hacs', 'nordpool_official', or 'octopus'."
         )
 
     def _sync_soc_limits(self) -> None:

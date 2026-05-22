@@ -101,7 +101,7 @@ const SetupWizardPage: React.FC = () => {
         : hasOfficialNordpool
           ? 'nordpool_official' as const
           : hasCustomNordpool
-            ? 'nordpool' as const
+            ? 'nordpool_hacs' as const
             : undefined;
       // Use area from the matching integration — not mixed
       const autoArea = hasOfficialNordpool ? d.nordpoolArea : d.nordpoolCustomArea;
@@ -112,6 +112,7 @@ const SetupWizardPage: React.FC = () => {
         ...(autoArea ? { area: autoArea } : {}),
         ...(d.vatMultiplier ? { vatMultiplier: d.vatMultiplier } : {}),
         ...(d.nordpoolConfigEntryId ? { nordpoolConfigEntryId: d.nordpoolConfigEntryId } : {}),
+        ...(d.nordpoolCustomEntity ? { nordpoolEntity: d.nordpoolCustomEntity } : {}),
         ...(d.octopusEntities?.importToday ? { octopusImportTodayEntity: d.octopusEntities.importToday } : {}),
         ...(d.octopusEntities?.importTomorrow ? { octopusImportTomorrowEntity: d.octopusEntities.importTomorrow } : {}),
         ...(d.octopusEntities?.exportToday ? { octopusExportTodayEntity: d.octopusEntities.exportToday } : {}),
@@ -195,7 +196,7 @@ const SetupWizardPage: React.FC = () => {
         taxReduction:          elec.taxReduction                    ?? f.taxReduction,
         // Restore saved config entry IDs so manual entries survive a wizard re-run
         nordpoolConfigEntryId: ep.nordpoolOfficial?.configEntryId ?? f.nordpoolConfigEntryId,
-        nordpoolEntity:        ep.nordpool?.entity               ?? f.nordpoolEntity,
+        nordpoolEntity:        ep.nordpoolHacs?.entity           ?? f.nordpoolEntity,
       }));
       // Restore inverter type from new inverter.platform or legacy growatt.inverter_type
       const invNew = s.inverter ?? {};
@@ -269,6 +270,8 @@ const SetupWizardPage: React.FC = () => {
         vatMultiplier: pricingForm.vatMultiplier,
         additionalCosts: pricingForm.additionalCosts,
         taxReduction: pricingForm.taxReduction,
+        // Nordpool HACS entity
+        nordpoolEntity: pricingForm.nordpoolEntity || undefined,
         // Octopus Energy entity IDs
         octopusImportTodayEntity: pricingForm.octopusImportTodayEntity || undefined,
         octopusImportTomorrowEntity: pricingForm.octopusImportTomorrowEntity || undefined,

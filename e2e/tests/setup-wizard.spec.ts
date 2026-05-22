@@ -18,15 +18,22 @@ async function expectActiveStep(page: Page, stepIndex: number) {
   await expect(steps.nth(stepIndex)).toHaveClass(/bg-blue-500/, { timeout: 15_000 });
 }
 
-/** Get an input field by its label text. */
+/** Get an input field by its label text (excludes radio buttons). */
 function fieldByLabel(page: Page, label: string | RegExp) {
-  return page.locator('label').filter({ hasText: label }).locator('input');
+  return page.locator('label').filter({ hasText: label }).locator('input:not([type="radio"])');
 }
 
 /** Get a radio button by its visible label text. */
 function radioByLabel(page: Page, label: string) {
   return page.locator('label').filter({ hasText: label }).locator('input[type="radio"]');
 }
+
+/** Map provider key to its visible radio label. */
+const PROVIDER_LABEL: Record<string, string> = {
+  nordpool_official: 'Nord Pool (official HA integration)',
+  nordpool_hacs: 'Nord Pool (HACS custom sensor)',
+  octopus: 'Octopus Energy',
+};
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -60,11 +67,8 @@ test.describe('Setup Wizard', () => {
     await expectActiveStep(page, 2);
 
     // Verify the correct provider is auto-selected
-    if (expected.autoSelectedProvider === 'octopus') {
-      await expect(radioByLabel(page, 'Octopus Energy')).toBeChecked();
-    } else {
-      await expect(radioByLabel(page, 'Nord Pool (official HA integration)')).toBeChecked();
-    }
+    const providerLabel = PROVIDER_LABEL[expected.autoSelectedProvider];
+    await expect(radioByLabel(page, providerLabel)).toBeChecked();
   });
 
   test('auto-detects correct inverter type', async ({ page }) => {
@@ -123,10 +127,16 @@ test.describe('Setup Wizard', () => {
       await expect(fieldByLabel(page, 'Export tomorrow')).toBeVisible();
       // Nordpool fields should NOT be visible
       await expect(fieldByLabel(page, 'Config Entry ID')).not.toBeVisible();
+      await expect(fieldByLabel(page, 'Sensor')).not.toBeVisible();
+    } else if (expected.autoSelectedProvider === 'nordpool_hacs') {
+      // HACS Nordpool shows Sensor field, not Config Entry ID
+      await expect(fieldByLabel(page, 'Sensor')).toBeVisible();
+      await expect(fieldByLabel(page, 'Config Entry ID')).not.toBeVisible();
+      await expect(fieldByLabel(page, 'Import today')).not.toBeVisible();
     } else {
-      // Nordpool fields should be visible
+      // Official Nordpool shows Config Entry ID
       await expect(fieldByLabel(page, 'Config Entry ID')).toBeVisible();
-      // Octopus fields should NOT be visible
+      await expect(fieldByLabel(page, 'Sensor')).not.toBeVisible();
       await expect(fieldByLabel(page, 'Import today')).not.toBeVisible();
     }
   });
@@ -142,8 +152,9 @@ test.describe('Setup Wizard', () => {
     await page.getByRole('button', { name: /Next: Electricity Pricing/i }).click();
     await expectActiveStep(page, 2);
 
-    // Default should be nordpool_official when both are available
-    await expect(radioByLabel(page, 'Nord Pool (official HA integration)')).toBeChecked();
+    // Auto-selected provider should be checked
+    const defaultLabel = PROVIDER_LABEL[expected.autoSelectedProvider];
+    await expect(radioByLabel(page, defaultLabel)).toBeChecked();
 
     // Switch to Octopus
     await radioByLabel(page, 'Octopus Energy').click();
@@ -153,10 +164,9 @@ test.describe('Setup Wizard', () => {
     await expect(fieldByLabel(page, 'Import today')).toBeVisible();
     await expect(fieldByLabel(page, 'Config Entry ID')).not.toBeVisible();
 
-    // Switch back to Nordpool
-    await radioByLabel(page, 'Nord Pool (official HA integration)').click();
-    await expect(radioByLabel(page, 'Nord Pool (official HA integration)')).toBeChecked();
-    await expect(fieldByLabel(page, 'Config Entry ID')).toBeVisible();
+    // Switch back to the original provider
+    await radioByLabel(page, defaultLabel).click();
+    await expect(radioByLabel(page, defaultLabel)).toBeChecked();
     await expect(fieldByLabel(page, 'Import today')).not.toBeVisible();
   });
 
@@ -206,11 +216,8 @@ test.describe('Setup Wizard', () => {
     await page.getByRole('button', { name: /Next: Electricity Pricing/i }).click();
     await expectActiveStep(page, 2);
 
-    if (expected.autoSelectedProvider === 'octopus') {
-      await expect(radioByLabel(page, 'Octopus Energy')).toBeChecked();
-    } else {
-      await expect(radioByLabel(page, 'Nord Pool (official HA integration)')).toBeChecked();
-    }
+    const providerLabel2 = PROVIDER_LABEL[expected.autoSelectedProvider];
+    await expect(radioByLabel(page, providerLabel2)).toBeChecked();
   });
 
   test('edited battery values appear in summary', async ({ page }) => {

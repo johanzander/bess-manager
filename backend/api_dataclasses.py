@@ -993,6 +993,8 @@ class APISetupCompletePayload(BaseModel):
     taxReduction: float | None = None
     # Energy provider
     provider: str | None = None
+    # Nordpool HACS entity (required when provider == "nordpool_hacs")
+    nordpoolEntity: str | None = None
     # Octopus Energy entity IDs (required when provider == "octopus")
     octopusImportTodayEntity: str | None = None
     octopusImportTomorrowEntity: str | None = None

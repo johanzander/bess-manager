@@ -26,6 +26,10 @@ class EnergyFlowCalculator:
         self.ha_controller = ha_controller
         self.sensor_to_flow_map = self._build_sensor_flow_mapping()
 
+    def rebuild_sensor_mapping(self) -> None:
+        """Re-resolve sensor entity IDs after configuration changes."""
+        self.sensor_to_flow_map = self._build_sensor_flow_mapping()
+
     def _build_sensor_flow_mapping(self) -> dict[str, str]:
         """Build sensor to flow mapping using the abstraction layer.
 

@@ -14,7 +14,7 @@ export interface WizardExpectation {
   nordpoolFound: boolean;
   octopusFound: boolean;
   /** Which provider radio should be auto-selected after discovery */
-  autoSelectedProvider: 'nordpool_official' | 'octopus';
+  autoSelectedProvider: 'nordpool_official' | 'nordpool_hacs' | 'octopus';
 
   // Optional integrations (true = found/auto-filled)
   phaseCount: number | null; // null = no phase sensors
@@ -83,7 +83,7 @@ export const EXPECTATIONS: Record<string, WizardExpectation> = {
     inverterType: 'MIN',
     nordpoolFound: true,
     octopusFound: false,
-    autoSelectedProvider: 'nordpool_official',
+    autoSelectedProvider: 'nordpool_hacs',
     phaseCount: 1,
     solcastFound: true,
     consumptionForecastFound: false,

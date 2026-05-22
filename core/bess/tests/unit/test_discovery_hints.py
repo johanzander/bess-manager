@@ -88,57 +88,75 @@ class TestHintsFromNordpoolArea:
 
 
 class TestInverterTypeDetection:
-    """Tests for the MIN/SPH heuristic that runs inside discover_integrations."""
+    """Tests for the MIN/SPH heuristic in discover_ha_metadata.
 
-    def _run_detection(self, device_sn: str, states: list[dict]) -> str | None:
-        """Re-implement the minimal detection logic mirroring discover_integrations."""
-        _make_controller()
-        ac_charge_suffix = "ac_charge"
-        prefix = f"{device_sn}_"
+    Detection uses the entity registry: MIN creates a switch entity with
+    unique_id ending in '-ac_charge' on platform 'growatt_server'.  SPH does
+    not create this entity (SPH controls charging via service calls only).
+    """
+
+    def _run_detection(self, entity_registry: list[dict]) -> str | None:
+        """Mirror the detection logic in discover_ha_metadata."""
         has_ac_charge = any(
-            str(s.get("entity_id", "")).split(".", 1)[-1]
-            == f"{prefix}{ac_charge_suffix}"
-            for s in states
+            entry.get("platform") == "growatt_server"
+            and str(entry.get("unique_id", "")).endswith("-ac_charge")
+            for entry in entity_registry
         )
         return "MIN" if has_ac_charge else "SPH"
 
     def test_min_detected_when_ac_charge_present(self):
-        sn = "abc123"
-        states = [
-            _state(f"sensor.{sn}_statement_of_charge_soc"),
-            _state(f"switch.{sn}_ac_charge"),
-            _state(f"sensor.{sn}_battery_1_charging_w"),
+        registry = [
+            {
+                "entity_id": "sensor.abc123_soc",
+                "platform": "growatt_server",
+                "unique_id": "abc123-tlx_statement_of_charge",
+            },
+            {
+                "entity_id": "switch.abc123_ac_charge",
+                "platform": "growatt_server",
+                "unique_id": "abc123-ac_charge",
+            },
         ]
-        assert self._run_detection(sn, states) == "MIN"
+        assert self._run_detection(registry) == "MIN"
 
     def test_sph_detected_when_ac_charge_absent(self):
-        sn = "abc123"
-        states = [
-            _state(f"sensor.{sn}_statement_of_charge_soc"),
-            _state(f"sensor.{sn}_battery_1_charging_w"),
+        registry = [
+            {
+                "entity_id": "sensor.egm2h4l0g0_soc",
+                "platform": "growatt_server",
+                "unique_id": "EGM2H4L0G0-mix_statement_of_charge",
+            },
+            {
+                "entity_id": "sensor.egm2h4l0g0_battery_charge",
+                "platform": "growatt_server",
+                "unique_id": "EGM2H4L0G0-mix_battery_charge",
+            },
         ]
-        assert self._run_detection(sn, states) == "SPH"
+        assert self._run_detection(registry) == "SPH"
 
-    def test_ac_charge_from_different_device_does_not_match(self):
-        sn = "mydevice"
-        states = [
-            _state(f"sensor.{sn}_statement_of_charge_soc"),
-            _state("switch.otherdevice_ac_charge"),  # different SN
+    def test_ac_charge_from_different_platform_does_not_match(self):
+        registry = [
+            {
+                "entity_id": "switch.other_ac_charge",
+                "platform": "solax_modbus",
+                "unique_id": "other-ac_charge",
+            },
         ]
-        assert self._run_detection(sn, states) == "SPH"
+        assert self._run_detection(registry) == "SPH"
 
-    def test_sensor_prefix_not_switch_does_not_match(self):
-        sn = "dev1"
-        states = [
-            _state(f"sensor.{sn}_ac_charge"),  # wrong domain — sensor, not switch
+    def test_partial_suffix_does_not_match(self):
+        # unique_id "abc123-no_ac_charge_enabled" ends differently
+        registry = [
+            {
+                "entity_id": "switch.abc123_charge",
+                "platform": "growatt_server",
+                "unique_id": "abc123-no_ac_charge_enabled",
+            },
         ]
-        # The check only looks at entity_id after the dot, domain doesn't matter
-        # so sensor.dev1_ac_charge WOULD match; entity_id.split('.', 1)[-1] == 'dev1_ac_charge'
-        # This is correct: Growatt sometimes uses sensor domain for ac_charge
-        assert self._run_detection(sn, states) == "MIN"
+        assert self._run_detection(registry) == "SPH"
 
-    def test_empty_states_gives_sph(self):
-        assert self._run_detection("anydevice", []) == "SPH"
+    def test_empty_registry_gives_sph(self):
+        assert self._run_detection([]) == "SPH"
 
 
 # ---------------------------------------------------------------------------
@@ -183,12 +201,11 @@ class TestPhaseCountDetection:
 
 
 class TestDiscoverHaMetadataNordpoolArea:
-    """Area is extracted from nordpool entity unique_ids in the entity registry.
+    """Area is extracted from nordpool device identifiers in the device registry.
 
-    HA's config_entries/get WS command does not return data/options fields,
-    so the area must be read from the entity registry. The official HA
-    nordpool integration creates entities with unique_id format
-    "{AREA}-{key}" (e.g. "SE4-current_price").
+    The official HA nordpool integration creates a device with identifiers
+    [["nordpool", "SE3"]].  The area is read from there, keyed by the
+    config_entry_id.
     """
 
     def setup_method(self):
@@ -197,51 +214,52 @@ class TestDiscoverHaMetadataNordpoolArea:
     def _ws_stub(
         self,
         config_entries: list[dict],
-        entity_registry: list[dict] | None = None,
+        devices: list[dict] | None = None,
     ):
-        """Return a _ws_query replacement with config entries and entity registry."""
+        """Return a _ws_query replacement with config entries and devices."""
         # _ws_query returns [config_entries, devices, services, entity_registry]
         return lambda cmds: [
             config_entries,
-            [],
+            devices or [],
             {},
-            entity_registry or [],
+            [],
         ]
 
-    def _nordpool_entity(self, unique_id: str, config_entry_id: str = "abc"):
+    def _nordpool_device(self, area: str, config_entry_id: str = "abc"):
         return {
-            "platform": "nordpool",
-            "config_entry_id": config_entry_id,
-            "unique_id": unique_id,
-            "entity_id": f"sensor.nord_pool_{unique_id.lower().replace('-', '_')}",
+            "id": "dev-nordpool",
+            "name": f"Nord Pool {area}",
+            "manufacturer": "Nord Pool",
+            "identifiers": [["nordpool", area]],
+            "config_entries": [config_entry_id],
         }
 
-    def test_area_extracted_from_entity_unique_id(self, monkeypatch):
-        """Area is parsed from the first matching nordpool entity unique_id."""
+    def test_area_extracted_from_device_identifiers(self, monkeypatch):
+        """Area is parsed from the nordpool device identifiers."""
         entry = {"domain": "nordpool", "state": "loaded", "entry_id": "abc"}
-        entities = [self._nordpool_entity("SE3-current_price")]
-        monkeypatch.setattr(self.ctrl, "_ws_query", self._ws_stub([entry], entities))
+        devices = [self._nordpool_device("SE3")]
+        monkeypatch.setattr(self.ctrl, "_ws_query", self._ws_stub([entry], devices))
         result = self.ctrl.discover_ha_metadata(None)
         assert result["nordpool_area"] == "SE3"
 
     def test_area_is_uppercased(self, monkeypatch):
         """Area codes are normalised to upper case."""
         entry = {"domain": "nordpool", "state": "loaded", "entry_id": "abc"}
-        entities = [self._nordpool_entity("se3-current_price")]
-        monkeypatch.setattr(self.ctrl, "_ws_query", self._ws_stub([entry], entities))
+        devices = [self._nordpool_device("se3")]
+        monkeypatch.setattr(self.ctrl, "_ws_query", self._ws_stub([entry], devices))
         result = self.ctrl.discover_ha_metadata(None)
         assert result["nordpool_area"] == "SE3"
 
     def test_non_matching_config_entry_ignored(self, monkeypatch):
-        """Entities for a different config entry are not used."""
+        """Devices for a different config entry are not used."""
         entry = {"domain": "nordpool", "state": "loaded", "entry_id": "abc"}
-        entities = [self._nordpool_entity("SE3-current_price", config_entry_id="other")]
-        monkeypatch.setattr(self.ctrl, "_ws_query", self._ws_stub([entry], entities))
+        devices = [self._nordpool_device("SE3", config_entry_id="other")]
+        monkeypatch.setattr(self.ctrl, "_ws_query", self._ws_stub([entry], devices))
         result = self.ctrl.discover_ha_metadata(None)
         assert result["nordpool_area"] is None
 
-    def test_no_nordpool_entities_returns_none(self, monkeypatch):
-        """nordpool_area is None when no matching entities exist."""
+    def test_no_nordpool_devices_returns_none(self, monkeypatch):
+        """nordpool_area is None when no matching devices exist."""
         entry = {"domain": "nordpool", "state": "loaded", "entry_id": "abc"}
         monkeypatch.setattr(self.ctrl, "_ws_query", self._ws_stub([entry], []))
         result = self.ctrl.discover_ha_metadata(None)
@@ -256,7 +274,7 @@ class TestDiscoverHaMetadataNordpoolArea:
     def test_unloaded_entry_is_ignored(self, monkeypatch):
         """Config entries that are not in 'loaded' state are skipped."""
         entry = {"domain": "nordpool", "state": "not_loaded", "entry_id": "abc"}
-        entities = [self._nordpool_entity("SE3-current_price")]
-        monkeypatch.setattr(self.ctrl, "_ws_query", self._ws_stub([entry], entities))
+        devices = [self._nordpool_device("SE3")]
+        monkeypatch.setattr(self.ctrl, "_ws_query", self._ws_stub([entry], devices))
         result = self.ctrl.discover_ha_metadata(None)
         assert result["nordpool_area"] is None

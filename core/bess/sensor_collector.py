@@ -100,6 +100,7 @@ class SensorCollector:
         """
         self.cumulative_sensors = self._resolve_sensor_entity_ids()
         self.power_sensors = self._resolve_power_sensor_ids()
+        self.energy_flow_calculator.rebuild_sensor_mapping()
 
     def _resolve_power_sensor_ids(self) -> list[str]:
         """Resolve power sensor keys to entity IDs for InfluxDB.
@@ -412,10 +413,14 @@ class SensorCollector:
             if not data:
                 logger.warning(
                     "Batch data for %s returned no periods — InfluxDB query matched "
-                    "no sensor data (check sensor names, bucket, and time range). "
-                    "Not caching empty result so next period will retry.",
+                    "no sensor data (check sensor names, bucket, and time range).",
                     target_date.strftime("%Y-%m-%d"),
                 )
+                # Cache the empty result so we don't retry the same failing
+                # query for every period in the backfill loop.  The quarterly
+                # scheduler will naturally re-fetch once the cache expires.
+                self._batch_cache[target_date] = {}
+                self._batch_cache_loaded_on[target_date] = today
                 return False
             self._batch_cache[target_date] = data
             self._batch_cache_loaded_on[target_date] = today
@@ -432,6 +437,9 @@ class SensorCollector:
                 target_date.strftime("%Y-%m-%d"),
                 result.get("message", "Unknown error"),
             )
+            # Cache the failure so we don't hammer InfluxDB on every period.
+            self._batch_cache[target_date] = {}
+            self._batch_cache_loaded_on[target_date] = today
             return False
 
     def _ensure_power_batch_loaded(self, target_date) -> bool:

@@ -484,6 +484,28 @@ This eliminates the `required_methods` parameter entirely and makes the policy s
 
 **Resolution**: All `hasattr` guards and hardcoded fallback values removed from `api.py`. System now accesses `battery_settings`, `controller`, `price_manager`, `_schedule_manager`, and `has_critical_sensor_failures` directly. Added `_get_intent_description()` to `SphScheduleManager` to eliminate polymorphism-related `hasattr`.
 
+### Upstream PR: growatt_server should register services per device type
+
+**Impact**: Medium | **Effort**: Low | **Dependencies**: HA core `homeassistant/components/growatt_server/services.py`
+
+**Description**: The HA `growatt_server` integration unconditionally registers all 6 services (`update_time_segment`, `read_time_segments`, `write_ac_charge_times`, `read_ac_charge_times`, `write_ac_discharge_times`, `read_ac_discharge_times`) regardless of inverter type. At runtime the handlers check `device_type` and fail with "no devices configured" if the wrong type is called. This prevents external tools (like BESS) from using the service list to distinguish MIN from SPH.
+
+**Proposed upstream fix**: Only register `update_time_segment`/`read_time_segments` when a MIN coordinator exists, and `write_ac_charge_times`/`read_ac_charge_times`/`write_ac_discharge_times`/`read_ac_discharge_times` when an SPH coordinator exists. This is a small change in `async_setup_services()`.
+
+**After upstream fix lands**: Update our detection in `discover_ha_metadata()` to use services again (more robust than the current entity-registry `ac_charge` switch heuristic, which breaks if the user deletes the entity or if the HA integration changes entity creation).
+
+**Current workaround**: We detect MIN vs SPH by checking if a `growatt_server` entity with unique_id ending in `-ac_charge` exists in the entity registry (MIN creates `switch.*_ac_charge`, SPH does not).
+
+---
+
+### Clean up `ENTITY_SUFFIX_MAP` dead entries
+
+**Impact**: Low | **Effort**: Low | **Dependencies**: `ha_api_controller.py`
+
+**Description**: `ENTITY_SUFFIX_MAP` contains `battery_discharge_soc_limit_on_grid` which never matches any real `unique_id` suffix. The actual `growatt_server` unique_id for this entity uses the shorter suffix `soc_limit_on_grid` (added separately). Audit the full suffix map for other entries that exist only because they matched entity_id patterns but have no corresponding unique_id in any real integration. Discovery matches exclusively on `unique_id` via `_map_registry_entities`, so entity_id-shaped suffixes are dead code.
+
+**Files**: `core/bess/ha_api_controller.py` (`ENTITY_SUFFIX_MAP`, `SOLAX_ENTITY_SUFFIX_MAP`)
+
 ### Other Technical Debt
 
 - Refactor all API endpoints to use dataclass-based serialization (with robust mapping for all field variants) for consistent, type-safe, and future-proof API responses. Ensure all details and fields are preserved as in the original dict-based implementation.

@@ -159,6 +159,20 @@ def _redact_identifiers(identifiers: Any) -> list:
     return out
 
 
+def _collect_device_serials(devices: list) -> set[str]:
+    """Extract raw identifier values (serials, MACs) from device registry entries."""
+    serials: set[str] = set()
+    for d in devices:
+        if not isinstance(d, dict):
+            continue
+        for ident in d.get("identifiers") or []:
+            if isinstance(ident, list | tuple) and len(ident) == 2:
+                val = str(ident[1])
+                if len(val) >= 4:
+                    serials.add(val)
+    return serials
+
+
 def _scrub_config_entry(entry: dict) -> dict:
     """Filter a HA config entry to a minimal, secret-free shape.
 
@@ -181,7 +195,7 @@ def _scrub_config_entry(entry: dict) -> dict:
         {
             "entry_id": entry.get("entry_id"),
             "domain": entry.get("domain"),
-            "title": entry.get("title"),
+            "title": "***",
             "state": entry.get("state"),
             "version": entry.get("version"),
             "options": _filter(entry.get("options", {})),
@@ -201,13 +215,16 @@ def _scrub_device(device: dict) -> dict:
     }
 
 
-def _scrub_entity_registry_entry(entity: dict) -> dict:
+def _scrub_entity_registry_entry(
+    entity: dict, device_serials: set[str] | None = None
+) -> dict:
     """Filter an entity registry entry, redacting the unique_id.
 
-    The unique_id often contains the hub name or device serial (e.g.
-    ``growatt_inverter_time_1_enabled``). We keep the suffix (the part
-    after the last ``_`` that matches a known sensor key pattern) visible
-    and redact the prefix to last-4 characters for privacy.
+    The unique_id often contains a device serial or hub name as a prefix
+    (e.g. ``KMN0DYP037-tlx_battery_1_charge_w``).  We replace known
+    serials with ``***`` so the separator and key are preserved — making
+    the output directly usable for building test scenario ``unique_id``
+    values by plugging a serial back in.
     """
     raw_uid = str(entity.get("unique_id", ""))
     redacted_uid = _redact_identifier_value(raw_uid) if raw_uid else ""
@@ -215,19 +232,15 @@ def _scrub_entity_registry_entry(entity: dict) -> dict:
     out: dict[str, Any] = {}
     for field_name in _ENTITY_REGISTRY_FIELDS:
         if field_name == "unique_id":
-            # Show redacted prefix + full suffix so detection can be diagnosed.
-            # e.g. "***rter_time_1_enabled" — the suffix is what BESS matches on.
             out["unique_id"] = redacted_uid
-            # Also include the suffix portion for easy scanning
-            if "_" in raw_uid:
-                # Find the longest suffix that a human can use to identify
-                # the entity type without leaking the full hub name/serial.
-                parts = raw_uid.rsplit("_", 4)
-                out["unique_id_suffix"] = (
-                    "_".join(parts[-4:]) if len(parts) > 4 else raw_uid
-                )
-            else:
-                out["unique_id_suffix"] = raw_uid
+            # Replace known serials with *** to preserve separator and key.
+            scrubbed = raw_uid
+            if device_serials:
+                for serial in device_serials:
+                    if serial in scrubbed:
+                        scrubbed = scrubbed.replace(serial, "***")
+                        break
+            out["unique_id_suffix"] = scrubbed
         else:
             val = entity.get(field_name)
             if val is not None:
@@ -552,6 +565,10 @@ class DebugDataAggregator:
             )
         ]
 
+        # Collect raw serials from device identifiers before scrubbing,
+        # so we can replace them in unique_ids to preserve the full key format.
+        device_serials = _collect_device_serials(devices_raw)
+
         devices: list[dict] = []
         for d in devices_raw:
             if not isinstance(d, dict):
@@ -578,13 +595,17 @@ class DebugDataAggregator:
             if not isinstance(entity, dict):
                 continue
             if entity.get("platform") in _ENTITY_REGISTRY_DOMAINS:
-                entity_registry.append(_scrub_entity_registry_entry(entity))
+                entity_registry.append(
+                    _scrub_entity_registry_entry(entity, device_serials)
+                )
             else:
                 # Keyword fallback: check entity_id and unique_id
                 eid = str(entity.get("entity_id", "")).lower()
                 uid = str(entity.get("unique_id", "")).lower()
                 if any(kw in eid or kw in uid for kw in _ENTITY_REGISTRY_KEYWORDS):
-                    entity_registry.append(_scrub_entity_registry_entry(entity))
+                    entity_registry.append(
+                        _scrub_entity_registry_entry(entity, device_serials)
+                    )
 
         try:
             resolved = controller.discover_ha_metadata(device_sn=None)
@@ -651,8 +672,8 @@ class DebugDataAggregator:
         config = self.system._energy_provider_config
         provider = config["provider"]
 
-        if provider == "nordpool":
-            nordpool_cfg = config["nordpool"]
+        if provider == "nordpool_hacs":
+            nordpool_cfg = config["nordpool_hacs"]
             entity_id = nordpool_cfg.get("entity")
             if entity_id:
                 try:

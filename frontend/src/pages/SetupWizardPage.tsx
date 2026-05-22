@@ -91,19 +91,28 @@ const SetupWizardPage: React.FC = () => {
       if (d.detectedPhaseCount) {
         setHomeForm(f => ({ ...f, phaseCount: d.detectedPhaseCount! }));
       }
-      // Auto-select pricing provider based on discovered integrations
+      // Auto-select pricing provider based on discovered integrations.
+      // When the official HA Nordpool integration is present (has a
+      // config_entry_id), prefer it.  Otherwise fall back to HACS custom.
+      const hasOfficialNordpool = !!d.nordpoolConfigEntryId;
+      const hasCustomNordpool = !!d.nordpoolCustomArea;
       const autoProvider = d.octopusFound && !d.nordpoolFound
         ? 'octopus' as const
-        : d.nordpoolFound
+        : hasOfficialNordpool
           ? 'nordpool_official' as const
-          : undefined;
+          : hasCustomNordpool
+            ? 'nordpool_hacs' as const
+            : undefined;
+      // Use area from the matching integration — not mixed
+      const autoArea = hasOfficialNordpool ? d.nordpoolArea : d.nordpoolCustomArea;
       setPricingForm(f => ({
         ...f,
         ...(autoProvider ? { provider: autoProvider } : {}),
         ...(d.currency ? { currency: d.currency } : {}),
-        ...(d.nordpoolArea ? { area: d.nordpoolArea } : {}),
+        ...(autoArea ? { area: autoArea } : {}),
         ...(d.vatMultiplier ? { vatMultiplier: d.vatMultiplier } : {}),
         ...(d.nordpoolConfigEntryId ? { nordpoolConfigEntryId: d.nordpoolConfigEntryId } : {}),
+        ...(d.nordpoolCustomEntity ? { nordpoolEntity: d.nordpoolCustomEntity } : {}),
         ...(d.octopusEntities?.importToday ? { octopusImportTodayEntity: d.octopusEntities.importToday } : {}),
         ...(d.octopusEntities?.importTomorrow ? { octopusImportTomorrowEntity: d.octopusEntities.importTomorrow } : {}),
         ...(d.octopusEntities?.exportToday ? { octopusExportTodayEntity: d.octopusEntities.exportToday } : {}),
@@ -187,7 +196,7 @@ const SetupWizardPage: React.FC = () => {
         taxReduction:          elec.taxReduction                    ?? f.taxReduction,
         // Restore saved config entry IDs so manual entries survive a wizard re-run
         nordpoolConfigEntryId: ep.nordpoolOfficial?.configEntryId ?? f.nordpoolConfigEntryId,
-        nordpoolEntity:        ep.nordpool?.entity               ?? f.nordpoolEntity,
+        nordpoolEntity:        ep.nordpoolHacs?.entity           ?? f.nordpoolEntity,
       }));
       // Restore inverter type from new inverter.platform or legacy growatt.inverter_type
       const invNew = s.inverter ?? {};
@@ -261,6 +270,8 @@ const SetupWizardPage: React.FC = () => {
         vatMultiplier: pricingForm.vatMultiplier,
         additionalCosts: pricingForm.additionalCosts,
         taxReduction: pricingForm.taxReduction,
+        // Nordpool HACS entity
+        nordpoolEntity: pricingForm.nordpoolEntity || undefined,
         // Octopus Energy entity IDs
         octopusImportTodayEntity: pricingForm.octopusImportTodayEntity || undefined,
         octopusImportTomorrowEntity: pricingForm.octopusImportTomorrowEntity || undefined,

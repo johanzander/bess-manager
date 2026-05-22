@@ -1,0 +1,478 @@
+{
+  "name": "ci-wizard-growatt-cloud-octopus",
+  "description": "Fresh install with Growatt SPH cloud-only + Octopus Energy (UK). No SolaX Modbus, no Nordpool. Based on issue #60 debug log (bess-debug-2026-05-21-145209).",
+  "inverter_type": "growatt_cloud",
+  "mock_time": "@2026-05-21 14:52:07",
+  "timezone": "Europe/London",
+  "bess_config": {
+    "battery": {
+      "total_capacity": 30.0,
+      "min_soc": 10,
+      "max_soc": 100,
+      "max_charge_power_kw": 15.0,
+      "max_discharge_power_kw": 15.0,
+      "cycle_cost_per_kwh": 0.4,
+      "min_action_profit_threshold": 0.0,
+      "efficiency_charge": 0.97,
+      "efficiency_discharge": 0.95
+    },
+    "home": {
+      "default_hourly": 4.6,
+      "currency": "SEK",
+      "consumption_strategy": "fixed",
+      "max_fuse_current": 25,
+      "voltage": 230,
+      "safety_margin": 1.0,
+      "phase_count": 1,
+      "power_monitoring_enabled": false
+    },
+    "electricity_price": {
+      "markup_rate": 0.08,
+      "vat_multiplier": 1.25,
+      "additional_costs": 1.03,
+      "tax_reduction": 0.0,
+      "area": "SE4"
+    },
+    "energy_provider": {
+      "provider": "nordpool_official",
+      "nordpool_official": {"config_entry_id": ""},
+      "nordpool": {"entity": ""},
+      "octopus": {}
+    },
+    "growatt": {"inverter_type": "", "device_id": ""},
+    "inverter": {"platform": "", "device_id": ""},
+    "sensors": {}
+  },
+  "sensors": {
+    "sensor.egm2h4l0g0_state_of_charge_soc": {
+      "state": "72",
+      "attributes": {"unit_of_measurement": "%"}
+    },
+    "sensor.egm2h4l0g0_battery_1_charging_w": {
+      "state": "0",
+      "attributes": {"unit_of_measurement": "W"}
+    },
+    "sensor.egm2h4l0g0_battery_1_discharging_w": {
+      "state": "850",
+      "attributes": {"unit_of_measurement": "W"}
+    },
+    "sensor.egm2h4l0g0_import_power": {
+      "state": "1200",
+      "attributes": {"unit_of_measurement": "W"}
+    },
+    "sensor.egm2h4l0g0_export_power": {
+      "state": "0",
+      "attributes": {"unit_of_measurement": "W"}
+    },
+    "sensor.egm2h4l0g0_internal_wattage": {
+      "state": "1500",
+      "attributes": {"unit_of_measurement": "W"}
+    },
+    "sensor.egm2h4l0g0_local_load_power": {
+      "state": "3550",
+      "attributes": {"unit_of_measurement": "W"}
+    },
+    "sensor.egm2h4l0g0_lifetime_total_all_batteries_charged": {
+      "state": "8500",
+      "attributes": {"unit_of_measurement": "kWh"}
+    },
+    "sensor.egm2h4l0g0_lifetime_total_all_batteries_discharged": {
+      "state": "7800",
+      "attributes": {"unit_of_measurement": "kWh"}
+    },
+    "sensor.egm2h4l0g0_lifetime_total_solar_energy": {
+      "state": "12000",
+      "attributes": {"unit_of_measurement": "kWh"}
+    },
+    "sensor.egm2h4l0g0_lifetime_total_export_to_grid": {
+      "state": "4200",
+      "attributes": {"unit_of_measurement": "kWh"}
+    },
+    "sensor.egm2h4l0g0_lifetime_import_from_grid": {
+      "state": "18000",
+      "attributes": {"unit_of_measurement": "kWh"}
+    },
+    "sensor.egm2h4l0g0_lifetime_total_load_consumption": {
+      "state": "25000",
+      "attributes": {"unit_of_measurement": "kWh"}
+    },
+    "sensor.egm2h4l0g0_lifetime_system_production": {
+      "state": "12000",
+      "attributes": {"unit_of_measurement": "kWh"}
+    },
+    "sensor.egm2h4l0g0_lifetime_self_consumption": {
+      "state": "7800",
+      "attributes": {"unit_of_measurement": "kWh"}
+    },
+    "event.octopus_energy_electricity_21l4726831_2000023585834_current_day_rates": {
+      "state": "2026-05-21T14:30:00+01:00",
+      "attributes": {
+        "rates": [
+          {"start": "2026-05-21T00:00:00+01:00", "end": "2026-05-21T00:30:00+01:00", "value_inc_vat": 15.34},
+          {"start": "2026-05-21T00:30:00+01:00", "end": "2026-05-21T01:00:00+01:00", "value_inc_vat": 15.34},
+          {"start": "2026-05-21T01:00:00+01:00", "end": "2026-05-21T01:30:00+01:00", "value_inc_vat": 15.34},
+          {"start": "2026-05-21T01:30:00+01:00", "end": "2026-05-21T02:00:00+01:00", "value_inc_vat": 15.34},
+          {"start": "2026-05-21T02:00:00+01:00", "end": "2026-05-21T02:30:00+01:00", "value_inc_vat": 16.80},
+          {"start": "2026-05-21T02:30:00+01:00", "end": "2026-05-21T03:00:00+01:00", "value_inc_vat": 16.80},
+          {"start": "2026-05-21T03:00:00+01:00", "end": "2026-05-21T03:30:00+01:00", "value_inc_vat": 16.80},
+          {"start": "2026-05-21T03:30:00+01:00", "end": "2026-05-21T04:00:00+01:00", "value_inc_vat": 16.80},
+          {"start": "2026-05-21T04:00:00+01:00", "end": "2026-05-21T04:30:00+01:00", "value_inc_vat": 18.90},
+          {"start": "2026-05-21T04:30:00+01:00", "end": "2026-05-21T05:00:00+01:00", "value_inc_vat": 18.90},
+          {"start": "2026-05-21T05:00:00+01:00", "end": "2026-05-21T05:30:00+01:00", "value_inc_vat": 22.05},
+          {"start": "2026-05-21T05:30:00+01:00", "end": "2026-05-21T06:00:00+01:00", "value_inc_vat": 22.05},
+          {"start": "2026-05-21T06:00:00+01:00", "end": "2026-05-21T06:30:00+01:00", "value_inc_vat": 25.20},
+          {"start": "2026-05-21T06:30:00+01:00", "end": "2026-05-21T07:00:00+01:00", "value_inc_vat": 25.20},
+          {"start": "2026-05-21T07:00:00+01:00", "end": "2026-05-21T07:30:00+01:00", "value_inc_vat": 28.35},
+          {"start": "2026-05-21T07:30:00+01:00", "end": "2026-05-21T08:00:00+01:00", "value_inc_vat": 28.35},
+          {"start": "2026-05-21T08:00:00+01:00", "end": "2026-05-21T08:30:00+01:00", "value_inc_vat": 30.45},
+          {"start": "2026-05-21T08:30:00+01:00", "end": "2026-05-21T09:00:00+01:00", "value_inc_vat": 30.45},
+          {"start": "2026-05-21T09:00:00+01:00", "end": "2026-05-21T09:30:00+01:00", "value_inc_vat": 28.35},
+          {"start": "2026-05-21T09:30:00+01:00", "end": "2026-05-21T10:00:00+01:00", "value_inc_vat": 28.35},
+          {"start": "2026-05-21T10:00:00+01:00", "end": "2026-05-21T10:30:00+01:00", "value_inc_vat": 25.20},
+          {"start": "2026-05-21T10:30:00+01:00", "end": "2026-05-21T11:00:00+01:00", "value_inc_vat": 25.20},
+          {"start": "2026-05-21T11:00:00+01:00", "end": "2026-05-21T11:30:00+01:00", "value_inc_vat": 22.05},
+          {"start": "2026-05-21T11:30:00+01:00", "end": "2026-05-21T12:00:00+01:00", "value_inc_vat": 22.05},
+          {"start": "2026-05-21T12:00:00+01:00", "end": "2026-05-21T12:30:00+01:00", "value_inc_vat": 20.00},
+          {"start": "2026-05-21T12:30:00+01:00", "end": "2026-05-21T13:00:00+01:00", "value_inc_vat": 20.00},
+          {"start": "2026-05-21T13:00:00+01:00", "end": "2026-05-21T13:30:00+01:00", "value_inc_vat": 20.00},
+          {"start": "2026-05-21T13:30:00+01:00", "end": "2026-05-21T14:00:00+01:00", "value_inc_vat": 20.00},
+          {"start": "2026-05-21T14:00:00+01:00", "end": "2026-05-21T14:30:00+01:00", "value_inc_vat": 22.05},
+          {"start": "2026-05-21T14:30:00+01:00", "end": "2026-05-21T15:00:00+01:00", "value_inc_vat": 22.05},
+          {"start": "2026-05-21T15:00:00+01:00", "end": "2026-05-21T15:30:00+01:00", "value_inc_vat": 25.20},
+          {"start": "2026-05-21T15:30:00+01:00", "end": "2026-05-21T16:00:00+01:00", "value_inc_vat": 25.20},
+          {"start": "2026-05-21T16:00:00+01:00", "end": "2026-05-21T16:30:00+01:00", "value_inc_vat": 35.78},
+          {"start": "2026-05-21T16:30:00+01:00", "end": "2026-05-21T17:00:00+01:00", "value_inc_vat": 35.78},
+          {"start": "2026-05-21T17:00:00+01:00", "end": "2026-05-21T17:30:00+01:00", "value_inc_vat": 35.78},
+          {"start": "2026-05-21T17:30:00+01:00", "end": "2026-05-21T18:00:00+01:00", "value_inc_vat": 35.78},
+          {"start": "2026-05-21T18:00:00+01:00", "end": "2026-05-21T18:30:00+01:00", "value_inc_vat": 35.78},
+          {"start": "2026-05-21T18:30:00+01:00", "end": "2026-05-21T19:00:00+01:00", "value_inc_vat": 35.78},
+          {"start": "2026-05-21T19:00:00+01:00", "end": "2026-05-21T19:30:00+01:00", "value_inc_vat": 30.45},
+          {"start": "2026-05-21T19:30:00+01:00", "end": "2026-05-21T20:00:00+01:00", "value_inc_vat": 30.45},
+          {"start": "2026-05-21T20:00:00+01:00", "end": "2026-05-21T20:30:00+01:00", "value_inc_vat": 25.20},
+          {"start": "2026-05-21T20:30:00+01:00", "end": "2026-05-21T21:00:00+01:00", "value_inc_vat": 25.20},
+          {"start": "2026-05-21T21:00:00+01:00", "end": "2026-05-21T21:30:00+01:00", "value_inc_vat": 20.00},
+          {"start": "2026-05-21T21:30:00+01:00", "end": "2026-05-21T22:00:00+01:00", "value_inc_vat": 20.00},
+          {"start": "2026-05-21T22:00:00+01:00", "end": "2026-05-21T22:30:00+01:00", "value_inc_vat": 16.80},
+          {"start": "2026-05-21T22:30:00+01:00", "end": "2026-05-21T23:00:00+01:00", "value_inc_vat": 16.80},
+          {"start": "2026-05-21T23:00:00+01:00", "end": "2026-05-21T23:30:00+01:00", "value_inc_vat": 15.34},
+          {"start": "2026-05-21T23:30:00+01:00", "end": "2026-05-22T00:00:00+01:00", "value_inc_vat": 15.34}
+        ]
+      }
+    },
+    "event.octopus_energy_electricity_21l4726831_2000023585834_next_day_rates": {
+      "state": "2026-05-21T14:30:00+01:00",
+      "attributes": {
+        "rates": [
+          {"start": "2026-05-22T00:00:00+01:00", "end": "2026-05-22T00:30:00+01:00", "value_inc_vat": 14.70},
+          {"start": "2026-05-22T00:30:00+01:00", "end": "2026-05-22T01:00:00+01:00", "value_inc_vat": 14.70},
+          {"start": "2026-05-22T01:00:00+01:00", "end": "2026-05-22T01:30:00+01:00", "value_inc_vat": 14.70},
+          {"start": "2026-05-22T01:30:00+01:00", "end": "2026-05-22T02:00:00+01:00", "value_inc_vat": 14.70},
+          {"start": "2026-05-22T02:00:00+01:00", "end": "2026-05-22T02:30:00+01:00", "value_inc_vat": 15.34},
+          {"start": "2026-05-22T02:30:00+01:00", "end": "2026-05-22T03:00:00+01:00", "value_inc_vat": 15.34},
+          {"start": "2026-05-22T03:00:00+01:00", "end": "2026-05-22T03:30:00+01:00", "value_inc_vat": 16.80},
+          {"start": "2026-05-22T03:30:00+01:00", "end": "2026-05-22T04:00:00+01:00", "value_inc_vat": 16.80},
+          {"start": "2026-05-22T04:00:00+01:00", "end": "2026-05-22T04:30:00+01:00", "value_inc_vat": 18.90},
+          {"start": "2026-05-22T04:30:00+01:00", "end": "2026-05-22T05:00:00+01:00", "value_inc_vat": 18.90},
+          {"start": "2026-05-22T05:00:00+01:00", "end": "2026-05-22T05:30:00+01:00", "value_inc_vat": 22.05},
+          {"start": "2026-05-22T05:30:00+01:00", "end": "2026-05-22T06:00:00+01:00", "value_inc_vat": 22.05},
+          {"start": "2026-05-22T06:00:00+01:00", "end": "2026-05-22T06:30:00+01:00", "value_inc_vat": 25.20},
+          {"start": "2026-05-22T06:30:00+01:00", "end": "2026-05-22T07:00:00+01:00", "value_inc_vat": 25.20},
+          {"start": "2026-05-22T07:00:00+01:00", "end": "2026-05-22T07:30:00+01:00", "value_inc_vat": 30.45},
+          {"start": "2026-05-22T07:30:00+01:00", "end": "2026-05-22T08:00:00+01:00", "value_inc_vat": 30.45},
+          {"start": "2026-05-22T08:00:00+01:00", "end": "2026-05-22T08:30:00+01:00", "value_inc_vat": 32.55},
+          {"start": "2026-05-22T08:30:00+01:00", "end": "2026-05-22T09:00:00+01:00", "value_inc_vat": 32.55},
+          {"start": "2026-05-22T09:00:00+01:00", "end": "2026-05-22T09:30:00+01:00", "value_inc_vat": 28.35},
+          {"start": "2026-05-22T09:30:00+01:00", "end": "2026-05-22T10:00:00+01:00", "value_inc_vat": 28.35},
+          {"start": "2026-05-22T10:00:00+01:00", "end": "2026-05-22T10:30:00+01:00", "value_inc_vat": 25.20},
+          {"start": "2026-05-22T10:30:00+01:00", "end": "2026-05-22T11:00:00+01:00", "value_inc_vat": 25.20},
+          {"start": "2026-05-22T11:00:00+01:00", "end": "2026-05-22T11:30:00+01:00", "value_inc_vat": 22.05},
+          {"start": "2026-05-22T11:30:00+01:00", "end": "2026-05-22T12:00:00+01:00", "value_inc_vat": 22.05},
+          {"start": "2026-05-22T12:00:00+01:00", "end": "2026-05-22T12:30:00+01:00", "value_inc_vat": 20.00},
+          {"start": "2026-05-22T12:30:00+01:00", "end": "2026-05-22T13:00:00+01:00", "value_inc_vat": 20.00},
+          {"start": "2026-05-22T13:00:00+01:00", "end": "2026-05-22T13:30:00+01:00", "value_inc_vat": 20.00},
+          {"start": "2026-05-22T13:30:00+01:00", "end": "2026-05-22T14:00:00+01:00", "value_inc_vat": 20.00},
+          {"start": "2026-05-22T14:00:00+01:00", "end": "2026-05-22T14:30:00+01:00", "value_inc_vat": 22.05},
+          {"start": "2026-05-22T14:30:00+01:00", "end": "2026-05-22T15:00:00+01:00", "value_inc_vat": 22.05},
+          {"start": "2026-05-22T15:00:00+01:00", "end": "2026-05-22T15:30:00+01:00", "value_inc_vat": 25.20},
+          {"start": "2026-05-22T15:30:00+01:00", "end": "2026-05-22T16:00:00+01:00", "value_inc_vat": 25.20},
+          {"start": "2026-05-22T16:00:00+01:00", "end": "2026-05-22T16:30:00+01:00", "value_inc_vat": 33.60},
+          {"start": "2026-05-22T16:30:00+01:00", "end": "2026-05-22T17:00:00+01:00", "value_inc_vat": 33.60},
+          {"start": "2026-05-22T17:00:00+01:00", "end": "2026-05-22T17:30:00+01:00", "value_inc_vat": 33.60},
+          {"start": "2026-05-22T17:30:00+01:00", "end": "2026-05-22T18:00:00+01:00", "value_inc_vat": 33.60},
+          {"start": "2026-05-22T18:00:00+01:00", "end": "2026-05-22T18:30:00+01:00", "value_inc_vat": 33.60},
+          {"start": "2026-05-22T18:30:00+01:00", "end": "2026-05-22T19:00:00+01:00", "value_inc_vat": 33.60},
+          {"start": "2026-05-22T19:00:00+01:00", "end": "2026-05-22T19:30:00+01:00", "value_inc_vat": 28.35},
+          {"start": "2026-05-22T19:30:00+01:00", "end": "2026-05-22T20:00:00+01:00", "value_inc_vat": 28.35},
+          {"start": "2026-05-22T20:00:00+01:00", "end": "2026-05-22T20:30:00+01:00", "value_inc_vat": 22.05},
+          {"start": "2026-05-22T20:30:00+01:00", "end": "2026-05-22T21:00:00+01:00", "value_inc_vat": 22.05},
+          {"start": "2026-05-22T21:00:00+01:00", "end": "2026-05-22T21:30:00+01:00", "value_inc_vat": 18.90},
+          {"start": "2026-05-22T21:30:00+01:00", "end": "2026-05-22T22:00:00+01:00", "value_inc_vat": 18.90},
+          {"start": "2026-05-22T22:00:00+01:00", "end": "2026-05-22T22:30:00+01:00", "value_inc_vat": 15.34},
+          {"start": "2026-05-22T22:30:00+01:00", "end": "2026-05-22T23:00:00+01:00", "value_inc_vat": 15.34},
+          {"start": "2026-05-22T23:00:00+01:00", "end": "2026-05-22T23:30:00+01:00", "value_inc_vat": 14.70},
+          {"start": "2026-05-22T23:30:00+01:00", "end": "2026-05-23T00:00:00+01:00", "value_inc_vat": 14.70}
+        ]
+      }
+    },
+    "event.octopus_energy_electricity_21l4726831_2000023585834_export_current_day_rates": {
+      "state": "2026-05-21T14:30:00+01:00",
+      "attributes": {
+        "rates": [
+          {"start": "2026-05-21T00:00:00+01:00", "end": "2026-05-21T00:30:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-21T00:30:00+01:00", "end": "2026-05-21T01:00:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-21T01:00:00+01:00", "end": "2026-05-21T01:30:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-21T01:30:00+01:00", "end": "2026-05-21T02:00:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-21T02:00:00+01:00", "end": "2026-05-21T02:30:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-21T02:30:00+01:00", "end": "2026-05-21T03:00:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-21T03:00:00+01:00", "end": "2026-05-21T03:30:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-21T03:30:00+01:00", "end": "2026-05-21T04:00:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-21T04:00:00+01:00", "end": "2026-05-21T04:30:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-21T04:30:00+01:00", "end": "2026-05-21T05:00:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-21T05:00:00+01:00", "end": "2026-05-21T05:30:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-21T05:30:00+01:00", "end": "2026-05-21T06:00:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-21T06:00:00+01:00", "end": "2026-05-21T06:30:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-21T06:30:00+01:00", "end": "2026-05-21T07:00:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-21T07:00:00+01:00", "end": "2026-05-21T07:30:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-21T07:30:00+01:00", "end": "2026-05-21T08:00:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-21T08:00:00+01:00", "end": "2026-05-21T08:30:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-21T08:30:00+01:00", "end": "2026-05-21T09:00:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-21T09:00:00+01:00", "end": "2026-05-21T09:30:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-21T09:30:00+01:00", "end": "2026-05-21T10:00:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-21T10:00:00+01:00", "end": "2026-05-21T10:30:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-21T10:30:00+01:00", "end": "2026-05-21T11:00:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-21T11:00:00+01:00", "end": "2026-05-21T11:30:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-21T11:30:00+01:00", "end": "2026-05-21T12:00:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-21T12:00:00+01:00", "end": "2026-05-21T12:30:00+01:00", "value_inc_vat": 19.00},
+          {"start": "2026-05-21T12:30:00+01:00", "end": "2026-05-21T13:00:00+01:00", "value_inc_vat": 19.00},
+          {"start": "2026-05-21T13:00:00+01:00", "end": "2026-05-21T13:30:00+01:00", "value_inc_vat": 19.00},
+          {"start": "2026-05-21T13:30:00+01:00", "end": "2026-05-21T14:00:00+01:00", "value_inc_vat": 19.00},
+          {"start": "2026-05-21T14:00:00+01:00", "end": "2026-05-21T14:30:00+01:00", "value_inc_vat": 19.00},
+          {"start": "2026-05-21T14:30:00+01:00", "end": "2026-05-21T15:00:00+01:00", "value_inc_vat": 19.00},
+          {"start": "2026-05-21T15:00:00+01:00", "end": "2026-05-21T15:30:00+01:00", "value_inc_vat": 19.00},
+          {"start": "2026-05-21T15:30:00+01:00", "end": "2026-05-21T16:00:00+01:00", "value_inc_vat": 19.00},
+          {"start": "2026-05-21T16:00:00+01:00", "end": "2026-05-21T16:30:00+01:00", "value_inc_vat": 29.00},
+          {"start": "2026-05-21T16:30:00+01:00", "end": "2026-05-21T17:00:00+01:00", "value_inc_vat": 29.00},
+          {"start": "2026-05-21T17:00:00+01:00", "end": "2026-05-21T17:30:00+01:00", "value_inc_vat": 29.00},
+          {"start": "2026-05-21T17:30:00+01:00", "end": "2026-05-21T18:00:00+01:00", "value_inc_vat": 29.00},
+          {"start": "2026-05-21T18:00:00+01:00", "end": "2026-05-21T18:30:00+01:00", "value_inc_vat": 29.00},
+          {"start": "2026-05-21T18:30:00+01:00", "end": "2026-05-21T19:00:00+01:00", "value_inc_vat": 29.00},
+          {"start": "2026-05-21T19:00:00+01:00", "end": "2026-05-21T19:30:00+01:00", "value_inc_vat": 19.00},
+          {"start": "2026-05-21T19:30:00+01:00", "end": "2026-05-21T20:00:00+01:00", "value_inc_vat": 19.00},
+          {"start": "2026-05-21T20:00:00+01:00", "end": "2026-05-21T20:30:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-21T20:30:00+01:00", "end": "2026-05-21T21:00:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-21T21:00:00+01:00", "end": "2026-05-21T21:30:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-21T21:30:00+01:00", "end": "2026-05-21T22:00:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-21T22:00:00+01:00", "end": "2026-05-21T22:30:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-21T22:30:00+01:00", "end": "2026-05-21T23:00:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-21T23:00:00+01:00", "end": "2026-05-21T23:30:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-21T23:30:00+01:00", "end": "2026-05-22T00:00:00+01:00", "value_inc_vat": 4.74}
+        ]
+      }
+    },
+    "event.octopus_energy_electricity_21l4726831_2000023585834_export_next_day_rates": {
+      "state": "2026-05-21T14:30:00+01:00",
+      "attributes": {
+        "rates": [
+          {"start": "2026-05-22T00:00:00+01:00", "end": "2026-05-22T00:30:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-22T00:30:00+01:00", "end": "2026-05-22T01:00:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-22T01:00:00+01:00", "end": "2026-05-22T01:30:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-22T01:30:00+01:00", "end": "2026-05-22T02:00:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-22T02:00:00+01:00", "end": "2026-05-22T02:30:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-22T02:30:00+01:00", "end": "2026-05-22T03:00:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-22T03:00:00+01:00", "end": "2026-05-22T03:30:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-22T03:30:00+01:00", "end": "2026-05-22T04:00:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-22T04:00:00+01:00", "end": "2026-05-22T04:30:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-22T04:30:00+01:00", "end": "2026-05-22T05:00:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-22T05:00:00+01:00", "end": "2026-05-22T05:30:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-22T05:30:00+01:00", "end": "2026-05-22T06:00:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-22T06:00:00+01:00", "end": "2026-05-22T06:30:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-22T06:30:00+01:00", "end": "2026-05-22T07:00:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-22T07:00:00+01:00", "end": "2026-05-22T07:30:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-22T07:30:00+01:00", "end": "2026-05-22T08:00:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-22T08:00:00+01:00", "end": "2026-05-22T08:30:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-22T08:30:00+01:00", "end": "2026-05-22T09:00:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-22T09:00:00+01:00", "end": "2026-05-22T09:30:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-22T09:30:00+01:00", "end": "2026-05-22T10:00:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-22T10:00:00+01:00", "end": "2026-05-22T10:30:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-22T10:30:00+01:00", "end": "2026-05-22T11:00:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-22T11:00:00+01:00", "end": "2026-05-22T11:30:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-22T11:30:00+01:00", "end": "2026-05-22T12:00:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-22T12:00:00+01:00", "end": "2026-05-22T12:30:00+01:00", "value_inc_vat": 19.00},
+          {"start": "2026-05-22T12:30:00+01:00", "end": "2026-05-22T13:00:00+01:00", "value_inc_vat": 19.00},
+          {"start": "2026-05-22T13:00:00+01:00", "end": "2026-05-22T13:30:00+01:00", "value_inc_vat": 19.00},
+          {"start": "2026-05-22T13:30:00+01:00", "end": "2026-05-22T14:00:00+01:00", "value_inc_vat": 19.00},
+          {"start": "2026-05-22T14:00:00+01:00", "end": "2026-05-22T14:30:00+01:00", "value_inc_vat": 19.00},
+          {"start": "2026-05-22T14:30:00+01:00", "end": "2026-05-22T15:00:00+01:00", "value_inc_vat": 19.00},
+          {"start": "2026-05-22T15:00:00+01:00", "end": "2026-05-22T15:30:00+01:00", "value_inc_vat": 19.00},
+          {"start": "2026-05-22T15:30:00+01:00", "end": "2026-05-22T16:00:00+01:00", "value_inc_vat": 19.00},
+          {"start": "2026-05-22T16:00:00+01:00", "end": "2026-05-22T16:30:00+01:00", "value_inc_vat": 29.00},
+          {"start": "2026-05-22T16:30:00+01:00", "end": "2026-05-22T17:00:00+01:00", "value_inc_vat": 29.00},
+          {"start": "2026-05-22T17:00:00+01:00", "end": "2026-05-22T17:30:00+01:00", "value_inc_vat": 29.00},
+          {"start": "2026-05-22T17:30:00+01:00", "end": "2026-05-22T18:00:00+01:00", "value_inc_vat": 29.00},
+          {"start": "2026-05-22T18:00:00+01:00", "end": "2026-05-22T18:30:00+01:00", "value_inc_vat": 29.00},
+          {"start": "2026-05-22T18:30:00+01:00", "end": "2026-05-22T19:00:00+01:00", "value_inc_vat": 29.00},
+          {"start": "2026-05-22T19:00:00+01:00", "end": "2026-05-22T19:30:00+01:00", "value_inc_vat": 19.00},
+          {"start": "2026-05-22T19:30:00+01:00", "end": "2026-05-22T20:00:00+01:00", "value_inc_vat": 19.00},
+          {"start": "2026-05-22T20:00:00+01:00", "end": "2026-05-22T20:30:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-22T20:30:00+01:00", "end": "2026-05-22T21:00:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-22T21:00:00+01:00", "end": "2026-05-22T21:30:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-22T21:30:00+01:00", "end": "2026-05-22T22:00:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-22T22:00:00+01:00", "end": "2026-05-22T22:30:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-22T22:30:00+01:00", "end": "2026-05-22T23:00:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-22T23:00:00+01:00", "end": "2026-05-22T23:30:00+01:00", "value_inc_vat": 4.74},
+          {"start": "2026-05-22T23:30:00+01:00", "end": "2026-05-23T00:00:00+01:00", "value_inc_vat": 4.74}
+        ]
+      }
+    }
+  },
+  "entity_registry": [
+    {"entity_id": "sensor.egm2h4l0g0_state_of_charge_soc", "platform": "growatt_server", "unique_id": "EGM2H4L0G0-tlx_statement_of_charge", "device_id": "dev-growatt-001"},
+    {"entity_id": "sensor.egm2h4l0g0_battery_1_charging_w", "platform": "growatt_server", "unique_id": "EGM2H4L0G0-tlx_battery_1_charge_w", "device_id": "dev-growatt-001"},
+    {"entity_id": "sensor.egm2h4l0g0_battery_1_discharging_w", "platform": "growatt_server", "unique_id": "EGM2H4L0G0-tlx_battery_1_discharge_w", "device_id": "dev-growatt-001"},
+    {"entity_id": "sensor.egm2h4l0g0_import_power", "platform": "growatt_server", "unique_id": "EGM2H4L0G0-tlx_pac_to_user_total", "device_id": "dev-growatt-001"},
+    {"entity_id": "sensor.egm2h4l0g0_export_power", "platform": "growatt_server", "unique_id": "EGM2H4L0G0-tlx_pac_to_grid_total", "device_id": "dev-growatt-001"},
+    {"entity_id": "sensor.egm2h4l0g0_internal_wattage", "platform": "growatt_server", "unique_id": "EGM2H4L0G0-tlx_internal_wattage", "device_id": "dev-growatt-001"},
+    {"entity_id": "sensor.egm2h4l0g0_local_load_power", "platform": "growatt_server", "unique_id": "EGM2H4L0G0-tlx_pac_to_local_load", "device_id": "dev-growatt-001"},
+    {"entity_id": "sensor.egm2h4l0g0_lifetime_total_all_batteries_charged", "platform": "growatt_server", "unique_id": "EGM2H4L0G0-tlx_all_batteries_charge_total", "device_id": "dev-growatt-001"},
+    {"entity_id": "sensor.egm2h4l0g0_lifetime_total_all_batteries_discharged", "platform": "growatt_server", "unique_id": "EGM2H4L0G0-tlx_all_batteries_discharge_total", "device_id": "dev-growatt-001"},
+    {"entity_id": "sensor.egm2h4l0g0_lifetime_total_solar_energy", "platform": "growatt_server", "unique_id": "EGM2H4L0G0-tlx_solar_generation_total", "device_id": "dev-growatt-001"},
+    {"entity_id": "sensor.egm2h4l0g0_lifetime_total_export_to_grid", "platform": "growatt_server", "unique_id": "EGM2H4L0G0-tlx_export_to_grid_total", "device_id": "dev-growatt-001"},
+    {"entity_id": "sensor.egm2h4l0g0_lifetime_import_from_grid", "platform": "growatt_server", "unique_id": "EGM2H4L0G0-tlx_import_from_grid_total", "device_id": "dev-growatt-001"},
+    {"entity_id": "sensor.egm2h4l0g0_lifetime_total_load_consumption", "platform": "growatt_server", "unique_id": "EGM2H4L0G0-mix_load_consumption_total", "device_id": "dev-growatt-001"},
+    {"entity_id": "sensor.egm2h4l0g0_lifetime_system_production", "platform": "growatt_server", "unique_id": "EGM2H4L0G0-tlx_system_production_total", "device_id": "dev-growatt-001"},
+    {"entity_id": "sensor.egm2h4l0g0_lifetime_self_consumption", "platform": "growatt_server", "unique_id": "EGM2H4L0G0-tlx_self_consumption_total", "device_id": "dev-growatt-001"},
+    {"entity_id": "event.octopus_energy_electricity_21l4726831_2000023585834_current_day_rates", "platform": "octopus_energy", "unique_id": "octopus_energy_electricity_21l4726831_2000023585834_current_day_rates", "device_id": "dev-octopus-001"},
+    {"entity_id": "event.octopus_energy_electricity_21l4726831_2000023585834_next_day_rates", "platform": "octopus_energy", "unique_id": "octopus_energy_electricity_21l4726831_2000023585834_next_day_rates", "device_id": "dev-octopus-001"},
+    {"entity_id": "event.octopus_energy_electricity_21l4726831_2000023585834_export_current_day_rates", "platform": "octopus_energy", "unique_id": "octopus_energy_electricity_21l4726831_2000023585834_export_current_day_rates", "device_id": "dev-octopus-001"},
+    {"entity_id": "event.octopus_energy_electricity_21l4726831_2000023585834_export_next_day_rates", "platform": "octopus_energy", "unique_id": "octopus_energy_electricity_21l4726831_2000023585834_export_next_day_rates", "device_id": "dev-octopus-001"}
+  ],
+  "config_entries": [
+    {"entry_id": "entry-growatt-001", "domain": "growatt_server", "title": "Home", "state": "loaded"},
+    {"entry_id": "entry-octopus-001", "domain": "octopus_energy", "title": "Octopus Energy", "state": "loaded"}
+  ],
+  "devices": [
+    {
+      "id": "dev-growatt-001",
+      "name": "EGM2H4L0G0",
+      "manufacturer": "Growatt",
+      "model": null,
+      "identifiers": [["growatt_server", "EGM2H4L0G0"]],
+      "config_entries": ["entry-growatt-001"]
+    },
+    {
+      "id": "dev-growatt-plant-001",
+      "name": "Home Total",
+      "manufacturer": "Growatt",
+      "model": null,
+      "identifiers": [["growatt_server", "PLANT0598"]],
+      "config_entries": ["entry-growatt-001"]
+    },
+    {
+      "id": "dev-octopus-001",
+      "name": "Octopus Energy Electricity",
+      "manufacturer": "Octopus Energy",
+      "model": null,
+      "identifiers": [["octopus_energy", "21l4726831_2000023585834"]],
+      "config_entries": ["entry-octopus-001"]
+    }
+  ],
+  "services": {
+    "growatt_server": {
+      "read_ac_charge_times": {},
+      "read_ac_discharge_times": {},
+      "write_ac_charge_times": {},
+      "write_ac_discharge_times": {}
+    }
+  },
+  "price_data": {
+    "today": [],
+    "tomorrow": []
+  },
+  "time_segments": [],
+  "expected_discovery": {
+    "growatt_found": true,
+    "solax_found": false,
+    "nordpool_found": false,
+    "nordpool_area": null,
+    "nordpool_custom_area": null,
+    "nordpool_config_entry_id": null,
+    "octopus_found": true,
+    "inverter_type": "SPH",
+    "currency": "GBP",
+    "vat_multiplier": 1.0,
+    "detected_platform": "growatt"
+  },
+  "expected_wizard": {
+    "growatt_cloud": {
+      "_comment": "Growatt SPH via cloud (growatt_server) + Octopus Energy pricing. UK single-phase user from issue #60.",
+      "payload": {
+        "sensors": {
+          "battery_soc": "sensor.egm2h4l0g0_state_of_charge_soc",
+          "battery_charge_power": "sensor.egm2h4l0g0_battery_1_charging_w",
+          "battery_discharge_power": "sensor.egm2h4l0g0_battery_1_discharging_w",
+          "import_power": "sensor.egm2h4l0g0_import_power",
+          "export_power": "sensor.egm2h4l0g0_export_power",
+          "pv_power": "sensor.egm2h4l0g0_internal_wattage",
+          "local_load_power": "sensor.egm2h4l0g0_local_load_power",
+          "lifetime_battery_charged": "sensor.egm2h4l0g0_lifetime_total_all_batteries_charged",
+          "lifetime_battery_discharged": "sensor.egm2h4l0g0_lifetime_total_all_batteries_discharged",
+          "lifetime_solar_energy": "sensor.egm2h4l0g0_lifetime_total_solar_energy",
+          "lifetime_import_from_grid": "sensor.egm2h4l0g0_lifetime_import_from_grid",
+          "lifetime_export_to_grid": "sensor.egm2h4l0g0_lifetime_total_export_to_grid",
+          "lifetime_load_consumption": "sensor.egm2h4l0g0_lifetime_total_load_consumption"
+        },
+        "growattDeviceId": "dev-growatt-001",
+        "totalCapacity": 30.0,
+        "minSoc": 10.0,
+        "maxSoc": 100.0,
+        "maxChargeDischargePower": 15.0,
+        "cycleCost": 0.4,
+        "minActionProfitThreshold": 0.0,
+        "currency": "GBP",
+        "consumption": 4.6,
+        "consumptionStrategy": "fixed",
+        "maxFuseCurrent": 25,
+        "voltage": 230,
+        "safetyMarginFactor": 1.0,
+        "phaseCount": 1,
+        "powerMonitoringEnabled": false,
+        "markupRate": 0.0,
+        "vatMultiplier": 1.0,
+        "additionalCosts": 0.0,
+        "taxReduction": 0.0,
+        "provider": "octopus",
+        "octopusImportTodayEntity": "event.octopus_energy_electricity_21l4726831_2000023585834_current_day_rates",
+        "octopusImportTomorrowEntity": "event.octopus_energy_electricity_21l4726831_2000023585834_next_day_rates",
+        "octopusExportTodayEntity": "event.octopus_energy_electricity_21l4726831_2000023585834_export_current_day_rates",
+        "octopusExportTomorrowEntity": "event.octopus_energy_electricity_21l4726831_2000023585834_export_next_day_rates",
+        "inverterType": "SPH"
+      },
+      "expected_saved": {
+        "inverter": {"platform": "growatt_sph"},
+        "growatt": {"inverter_type": "SPH", "device_id": "dev-growatt-001"},
+        "battery": {"total_capacity": 30.0, "max_charge_power_kw": 15.0, "max_discharge_power_kw": 15.0},
+        "home": {"currency": "GBP", "phase_count": 1},
+        "electricity_price": {"vat_multiplier": 1.0, "additional_costs": 0.0, "tax_reduction": 0.0},
+        "energy_provider": {
+          "provider": "octopus",
+          "octopus": {
+            "import_today_entity": "event.octopus_energy_electricity_21l4726831_2000023585834_current_day_rates",
+            "import_tomorrow_entity": "event.octopus_energy_electricity_21l4726831_2000023585834_next_day_rates",
+            "export_today_entity": "event.octopus_energy_electricity_21l4726831_2000023585834_export_current_day_rates",
+            "export_tomorrow_entity": "event.octopus_energy_electricity_21l4726831_2000023585834_export_next_day_rates"
+          }
+        },
+        "sensors": {
+          "battery_soc": "sensor.egm2h4l0g0_state_of_charge_soc",
+          "pv_power": "sensor.egm2h4l0g0_internal_wattage"
+        }
+      },
+      "expected_absent_sections": [],
+      "expected_live": {
+        "growatt_device_id": "dev-growatt-001",
+        "switch_inverter_platform": "growatt_sph"
+      },
+      "no_tou_slots": true
+    }
+  }
+}

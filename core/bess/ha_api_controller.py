@@ -439,6 +439,7 @@ class HomeAssistantAPIController:
         "battery_charge_soc_limit": "battery_charge_stop_soc",
         "battery_discharge_soc_limit": "battery_discharge_stop_soc",
         "battery_discharge_soc_limit_on_grid": "battery_discharge_stop_soc",
+        "soc_limit_on_grid": "battery_discharge_stop_soc",
         # ── Lifetime energy sensors ──────────────────────────────────────
         "lifetime_total_all_batteries_charged": "lifetime_battery_charged",
         "tlx_all_batteries_charge_total": "lifetime_battery_charged",
@@ -482,12 +483,15 @@ class HomeAssistantAPIController:
         "battery_discharge_power": "battery_discharge_power",  # Growatt inverter
         # Grid power
         "measured_power": "import_power",  # SolaX native
-        "total_forward_power": "import_power",  # Growatt inverter
+        "total_forward_power": "import_power",  # Growatt GEN2/3
+        "total_import_power": "import_power",  # Growatt GEN4 (MIN/MOD/MID)
         "grid_export": "export_power",  # SolaX native
         "grid_import": "import_power",  # SolaX native alternative
-        "total_reverse_power": "export_power",  # Growatt inverter
+        "total_reverse_power": "export_power",  # Growatt GEN2/3
+        "total_export_power": "export_power",  # Growatt GEN4 (MIN/MOD/MID)
         # Solar power
-        "pv_power_1": "pv_power",
+        "pv_power_1": "pv_power",  # SolaX native / single string
+        "total_pv_power": "pv_power",  # Growatt GEN4 (MIN/MOD/MID)
         # Load power
         "house_load": "local_load_power",  # SolaX native
         "total_load_power": "local_load_power",  # Growatt inverter
@@ -507,8 +511,10 @@ class HomeAssistantAPIController:
         # Load consumption — multiple naming variants across generations
         "home_consumption_energy": "lifetime_load_consumption",  # SPF only
         "total_load": "lifetime_load_consumption",  # GEN3 (MIX/SPA/SPH)
-        # System production / yield
-        "total_yield": "lifetime_system_production",  # GEN4 (MIN/MOD/MID)
+        "total_load_energy": "lifetime_load_consumption",  # GEN4 (MIN/MOD/MID)
+        # GEN4 (MIN/MOD/MID): register 3077 is load consumption despite the
+        # misleading "yield" key name in the solax_modbus integration.
+        "total_yield": "lifetime_load_consumption",  # GEN4 (MIN/MOD/MID)
         # ── VPP control entities (select/number/button.<prefix>_<suffix>) ─
         "remotecontrol_power_control": "solax_power_control_mode",
         "remotecontrol_active_power": "solax_active_power",
@@ -1940,7 +1946,7 @@ class HomeAssistantAPIController:
         results = self._ws_query(commands)
         config_entries_result = results[0]
         devices_result = results[1]
-        services_result: dict = results[2]
+        # results[2] is services — no longer used for inverter type detection
         entity_registry_result = results[3]
 
         # Find nordpool config_entry_id from config entries.
@@ -1955,21 +1961,23 @@ class HomeAssistantAPIController:
             ):
                 octopus_found = True
 
-        # Extract nordpool area from entity registry unique_ids.
-        # The official HA nordpool integration creates entities with
-        # unique_id format "{AREA}-{key}" (e.g. "SE4-current_price").
-        # config_entries/get does NOT return data/options, so the area
-        # must be read from entity unique_ids instead.
+        # Extract nordpool area from device registry identifiers.
+        # The official HA nordpool integration creates a device with
+        # identifiers [["nordpool", "SE3"]].  This is more robust than
+        # parsing entity unique_ids or entity_id patterns.
         nordpool_area: str | None = None
         if nordpool_config_entry_id:
-            for entity in entity_registry_result:
-                if (
-                    entity.get("platform") == "nordpool"
-                    and entity.get("config_entry_id") == nordpool_config_entry_id
-                ):
-                    unique_id = entity.get("unique_id", "")
-                    if "-" in unique_id:
-                        nordpool_area = unique_id.split("-", 1)[0].upper()
+            for device in devices_result:
+                if nordpool_config_entry_id in device.get("config_entries", []):
+                    for ident in device.get("identifiers", []):
+                        if (
+                            isinstance(ident, (list, tuple))
+                            and len(ident) == 2
+                            and str(ident[0]).lower() == "nordpool"
+                        ):
+                            nordpool_area = str(ident[1]).upper()
+                            break
+                    if nordpool_area:
                         break
 
         # Find growatt config_entry_id for device matching
@@ -2014,15 +2022,20 @@ class HomeAssistantAPIController:
                     growatt_device_id = device["id"]
                     break
 
-        # Determine inverter type from registered growatt_server services:
-        # MIN registers update_time_segment / read_time_segments
-        # SPH registers write_ac_charge_times / read_ac_charge_times
+        # Determine inverter type from entity registry.
+        # The growatt_server integration registers all services unconditionally
+        # (both MIN and SPH services are always present), so we cannot
+        # distinguish by service alone.  Instead, check for the ac_charge
+        # switch entity: MIN creates switch.*_ac_charge, SPH does not (SPH
+        # controls charging via write_ac_charge_times service calls only).
         growatt_inverter_type: str | None = None
-        growatt_services = services_result.get("growatt_server", {})
-        if "update_time_segment" in growatt_services:
-            growatt_inverter_type = "MIN"
-        elif "write_ac_charge_times" in growatt_services:
-            growatt_inverter_type = "SPH"
+        if growatt_config_entry_id:
+            has_ac_charge = any(
+                entry.get("platform") == "growatt_server"
+                and str(entry.get("unique_id", "")).endswith("-ac_charge")
+                for entry in entity_registry_result
+            )
+            growatt_inverter_type = "MIN" if has_ac_charge else "SPH"
 
         logger.info(
             "WS discovery: nordpool_config_entry_id=%s, nordpool_area=%s, "
@@ -2108,6 +2121,7 @@ class HomeAssistantAPIController:
             "solax_found": False,
             "nordpool_found": False,
             "nordpool_area": None,
+            "nordpool_custom_area": None,
             "nordpool_config_entry_id": None,
             "octopus_found": False,
             # Auto-detected hints (None = could not determine)
@@ -2133,12 +2147,14 @@ class HomeAssistantAPIController:
 
         for state in states:
             entity_id = str(state.get("entity_id", "")).lower()
-            if entity_id.startswith("sensor.nordpool"):
+            # HACS custom nordpool: sensor.nordpool_kwh_se3_sek_*
+            # (Official HA nordpool is detected via config entries below)
+            if entity_id.startswith("sensor.nordpool_"):
                 result["nordpool_found"] = True
-                if not result["nordpool_area"]:
+                if not result["nordpool_custom_area"]:
                     parsed_area = self._parse_nordpool_area_from_entity_id(entity_id)
                     if parsed_area:
-                        result["nordpool_area"] = parsed_area
+                        result["nordpool_custom_area"] = parsed_area
             # Detect Octopus Energy from event entities
             if "octopus_energy" in entity_id and "rate" in entity_id:
                 result["octopus_found"] = True
@@ -2150,11 +2166,11 @@ class HomeAssistantAPIController:
             result["growatt_device_id"] = metadata["growatt_device_id"]
             result["nordpool_config_entry_id"] = metadata["nordpool_config_entry_id"]
             # Official HA core integration: area comes from entity registry
-            # unique_ids (e.g. "SE4-current_price"), resolved in
+            # unique_ids (e.g. "SE3-current_price"), resolved in
             # discover_ha_metadata.
             if metadata["nordpool_config_entry_id"]:
                 result["nordpool_found"] = True
-                if not result["nordpool_area"] and metadata.get("nordpool_area"):
+                if metadata.get("nordpool_area"):
                     result["nordpool_area"] = metadata["nordpool_area"]
             # Octopus also detected from config_entries domain
             if metadata.get("octopus_found"):
@@ -2166,8 +2182,8 @@ class HomeAssistantAPIController:
             )
 
         # ── Auto-detected hints ───────────────────────────────────────────
-        # Inverter type: Growatt is determined from registered growatt_server
-        # services (MIN: update_time_segment, SPH: write_ac_charge_times).
+        # Inverter type: Growatt cloud is determined from entity registry
+        # (MIN has switch.*_ac_charge entity, SPH does not).
         # SolaX is detected from the entity registry platform field.
         # When solax_modbus is found, we further distinguish SolaX-native
         # (VPP entities) from Growatt-via-solax (TOU entities).
@@ -2191,7 +2207,9 @@ class HomeAssistantAPIController:
                     result["inverter_type"] = "solax"
 
         # Currency & VAT from Nordpool area or Octopus defaults
-        area_hints = self._hints_from_nordpool_area(result.get("nordpool_area"))
+        area_hints = self._hints_from_nordpool_area(
+            result.get("nordpool_area") or result.get("nordpool_custom_area")
+        )
         if area_hints:
             result["currency"] = area_hints.get("currency")
             result["vat_multiplier"] = area_hints.get("vat_multiplier")
@@ -2205,8 +2223,9 @@ class HomeAssistantAPIController:
         """Parse Nordpool area code from an entity_id.
 
         Examples:
-        - sensor.nordpool_kwh_se4_sek_2_10_025 -> SE4
-        - sensor.nordpool_kwh_no1_nok_3_10_025 -> NO1
+        - sensor.nordpool_kwh_se4_sek_2_10_025 -> SE4  (custom integration)
+        - sensor.nordpool_kwh_no1_nok_3_10_025 -> NO1  (custom integration)
+        - sensor.nord_pool_se3_current_price    -> SE3  (official HA)
         """
         match = re.search(
             r"(?:^|_)(se[1-4]|no[1-5]|dk[12]|fi|ee|lt|lv)(?:_|$)", entity_id

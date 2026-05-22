@@ -4,6 +4,27 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.0.0b14] - 2026-05-22
+
+### Added
+
+- **Scenario-driven wizard tests** — setup wizard completion tests now load from JSON scenario files (`scripts/mock_ha/scenarios/ci-*.json`), matching the pattern used for algorithm tests. Adding a new wizard regression test is now just adding a variant to the scenario JSON.
+- **CI scenario: Growatt Modbus** (`ci-wizard-growatt-modbus.json`) — tracked scenario with Growatt MIN + SolaX Modbus (GEN4 TOU) + official Nordpool SE3. Tests both local Modbus and cloud control paths.
+- **CI scenario: Growatt Cloud + Octopus Energy** (`ci-wizard-growatt-cloud-octopus.json`) — UK user with Growatt SPH cloud-only + Octopus Energy pricing. Based on issue #60 debug log.
+- **Scenario-driven discovery tests** (`test_scenario_discovery.py`) — auto-discovers scenarios with `expected_discovery` sections and validates integration flags, platform detection, and sensor entity IDs.
+- Nordpool area detection now uses device registry identifiers (`[["nordpool", "SE3"]]`) instead of parsing entity unique_ids — more robust against HA naming changes.
+- `EnergyFlowCalculator.rebuild_sensor_mapping()` public method replaces external access to private `_build_sensor_flow_mapping()`.
+
+### Fixed
+
+- **Growatt MIN/SPH detection was broken** — the HA `growatt_server` integration registers all services unconditionally (both MIN and SPH), so service-based detection always returned MIN. Now uses entity registry: MIN creates `switch.*_ac_charge`, SPH does not.
+- **GEN4 SolaX Modbus sensor discovery** — four sensor suffixes missing from `SOLAX_ENTITY_SUFFIX_MAP`: `total_import_power` (import), `total_export_power` (export), `total_pv_power` (solar), `total_load_energy` (lifetime load). These are the actual GEN4 unique_id suffixes from real installations.
+
+### Changed
+
+- Debug data exporter now includes device registry and entity registry in scrubbed output for better issue diagnostics.
+- Inverter type detection comment updated to reflect entity-registry-based approach.
+
 ## [9.0.0b13] - 2026-05-20
 
 ### Added

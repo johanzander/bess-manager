@@ -242,14 +242,19 @@ const SettingsPage: React.FC = () => {
       // Only update discovery fields that actually changed.
       // Never overwrite user-configured price calculation fields
       // (vatMultiplier, markupRate, additionalCosts, taxReduction).
+      // Use area from matching integration: official if available,
+      // otherwise HACS custom — never mix the two.
+      const discoveredArea = d.nordpoolConfigEntryId
+        ? d.nordpoolArea : d.nordpoolCustomArea;
+
       setPricingForm(f => {
         const next = { ...f };
         let changed = false;
         if (d.nordpoolConfigEntryId && d.nordpoolConfigEntryId !== f.nordpoolConfigEntryId) {
           next.nordpoolConfigEntryId = d.nordpoolConfigEntryId; changed = true;
         }
-        if (d.nordpoolArea && d.nordpoolArea !== f.area) {
-          next.area = d.nordpoolArea; changed = true;
+        if (discoveredArea && discoveredArea !== f.area) {
+          next.area = discoveredArea; changed = true;
         }
         if (d.currency && d.currency !== f.currency) {
           next.currency = d.currency; changed = true;
@@ -265,7 +270,7 @@ const SettingsPage: React.FC = () => {
       const sensorCount = d.sensors ? Object.keys(d.sensors).filter(k => d.sensors[k]).length : 0;
       setToast({
         type: 'success',
-        message: `Auto-configure found ${sensorCount} sensors${d.inverterType ? `, ${d.inverterType} inverter` : ''}${d.nordpoolArea ? `, area ${d.nordpoolArea}` : ''}. Review and save.`,
+        message: `Auto-configure found ${sensorCount} sensors${d.inverterType ? `, ${d.inverterType} inverter` : ''}${discoveredArea ? `, area ${discoveredArea}` : ''}. Review and save.`,
       });
 
       const healthRes = await api.get('/api/system-health').catch(() => ({ data: null }));

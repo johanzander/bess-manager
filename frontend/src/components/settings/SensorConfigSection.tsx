@@ -26,6 +26,7 @@ export interface DiscoveryResult {
   solaxHasGrowattGen3: boolean;
   nordpoolFound: boolean;
   nordpoolArea: string | null;
+  nordpoolCustomArea: string | null;
   nordpoolConfigEntryId: string | null;
   octopusFound: boolean;
   octopusEntities?: {
@@ -178,8 +179,12 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
   const growattModbusGen3Detected = wizardMode
     ? Boolean(discovery.solaxFound && discovery.solaxHasGrowattGen3)
     : Boolean(sensors['battery_charging_power_rate'] && !sensors['tou_time_1_enabled']);
+  // SolaX Native is only valid when solax_modbus is found and it does NOT
+  // look like a Growatt inverter (no TOU or gen3 entities).  When TOU/gen3
+  // entities are present the solax_modbus plugin is serving a Growatt inverter
+  // and the user should pick Growatt + Local instead.
   const solaxDetected = wizardMode
-    ? Boolean(discovery.solaxFound)
+    ? Boolean(discovery.solaxFound && !discovery.solaxHasGrowattTou && !discovery.solaxHasGrowattGen3)
     : Boolean(sensors['solax_power_control_mode'] || sensors['solax_active_power']);
 
   const handlePlatformChange = (platform: 'growatt' | 'solax') => {

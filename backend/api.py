@@ -2631,6 +2631,7 @@ async def run_setup_discovery():
                 ),
                 "nordpool_found": integrations["nordpool_found"],
                 "nordpool_area": integrations["nordpool_area"],
+                "nordpool_custom_area": integrations.get("nordpool_custom_area"),
                 "nordpool_config_entry_id": integrations["nordpool_config_entry_id"],
                 "octopus_found": integrations["octopus_found"],
                 "missing_sensors": missing_sensors,

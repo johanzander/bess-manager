@@ -177,6 +177,11 @@ const SetupWizardPage: React.FC = () => {
         // Restore saved config entry IDs so manual entries survive a wizard re-run
         nordpoolConfigEntryId: ep.nordpoolOfficial?.configEntryId ?? f.nordpoolConfigEntryId,
         nordpoolEntity:        ep.nordpool?.entity               ?? f.nordpoolEntity,
+        // Restore Octopus Energy entity IDs
+        octopusImportTodayEntity:    ep.octopus?.importTodayEntity    ?? f.octopusImportTodayEntity,
+        octopusImportTomorrowEntity: ep.octopus?.importTomorrowEntity ?? f.octopusImportTomorrowEntity,
+        octopusExportTodayEntity:    ep.octopus?.exportTodayEntity    ?? f.octopusExportTodayEntity,
+        octopusExportTomorrowEntity: ep.octopus?.exportTomorrowEntity ?? f.octopusExportTomorrowEntity,
       }));
       if (inv.inverterType) setInverterForm(f => ({ ...f, inverterType: inv.inverterType }));
       if (inv.deviceId) setInverterForm(f => ({ ...f, deviceId: inv.deviceId }));
@@ -244,6 +249,11 @@ const SetupWizardPage: React.FC = () => {
         vatMultiplier: pricingForm.vatMultiplier,
         additionalCosts: pricingForm.additionalCosts,
         taxReduction: pricingForm.taxReduction,
+        // Octopus Energy entity IDs
+        octopusImportTodayEntity: pricingForm.octopusImportTodayEntity || undefined,
+        octopusImportTomorrowEntity: pricingForm.octopusImportTomorrowEntity || undefined,
+        octopusExportTodayEntity: pricingForm.octopusExportTodayEntity || undefined,
+        octopusExportTomorrowEntity: pricingForm.octopusExportTomorrowEntity || undefined,
         // Inverter
         inverterType: inverterForm.inverterType,
       });

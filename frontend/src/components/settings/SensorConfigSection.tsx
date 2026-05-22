@@ -27,6 +27,7 @@ export interface DiscoveryResult {
   nordpoolFound: boolean;
   nordpoolArea: string | null;
   nordpoolCustomArea: string | null;
+  nordpoolCustomEntity: string | null;
   nordpoolConfigEntryId: string | null;
   octopusFound: boolean;
   octopusEntities?: {

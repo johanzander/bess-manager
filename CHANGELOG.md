@@ -19,6 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 - **Growatt MIN/SPH detection was broken** — the HA `growatt_server` integration registers all services unconditionally (both MIN and SPH), so service-based detection always returned MIN. Now uses entity registry: MIN creates `switch.*_ac_charge`, SPH does not.
 - **GEN4 SolaX Modbus sensor discovery** — four sensor suffixes missing from `SOLAX_ENTITY_SUFFIX_MAP`: `total_import_power` (import), `total_export_power` (export), `total_pv_power` (solar), `total_load_energy` (lifetime load). These are the actual GEN4 unique_id suffixes from real installations.
+- **GEN4 `total_yield` mapped to wrong BESS key** — was mapped to `lifetime_load_consumption` instead of `lifetime_system_production` (Total Yield). This caused the sensor to not appear in the setup wizard.
 
 ### Changed
 

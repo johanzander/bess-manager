@@ -512,9 +512,8 @@ class HomeAssistantAPIController:
         "home_consumption_energy": "lifetime_load_consumption",  # SPF only
         "total_load": "lifetime_load_consumption",  # GEN3 (MIX/SPA/SPH)
         "total_load_energy": "lifetime_load_consumption",  # GEN4 (MIN/MOD/MID)
-        # GEN4 (MIN/MOD/MID): register 3077 is load consumption despite the
-        # misleading "yield" key name in the solax_modbus integration.
-        "total_yield": "lifetime_load_consumption",  # GEN4 (MIN/MOD/MID)
+        # GEN4 (MIN/MOD/MID): register 3077 — total system production
+        "total_yield": "lifetime_system_production",  # GEN4 (MIN/MOD/MID)
         # ── VPP control entities (select/number/button.<prefix>_<suffix>) ─
         "remotecontrol_power_control": "solax_power_control_mode",
         "remotecontrol_active_power": "solax_active_power",

@@ -127,8 +127,18 @@ class EnergyFlowCalculator:
         return self._calculate_derived_flows(flows)
 
     def _calculate_derived_flows(self, flows: dict[str, float]) -> dict[str, float]:
-        """Calculate derived flows"""
+        """Calculate derived flows from the 5 core sensors all platforms provide.
 
+        Every platform provides these lifetime sensors:
+          battery_charged, battery_discharged, solar_production,
+          import_from_grid, export_to_grid
+
+        Everything else is derived via energy balance so the calculation
+        is platform-independent:
+          load  = solar + import - export
+          system_production = solar  (fallback when no direct sensor)
+          self_consumption  = load - import  (energy consumed from own production)
+        """
         solar_production = flows.get("solar_production", 0)
         battery_charged = flows.get("battery_charged", 0)
         battery_discharged = flows.get("battery_discharged", 0)
@@ -136,11 +146,25 @@ class EnergyFlowCalculator:
         load_consumption = flows.get("load_consumption", 0)
         import_from_grid = flows.get("import_from_grid", 0)
 
-        # Derive self_consumption (locally generated energy consumed by home)
-        # from sensor if available, otherwise compute from load - grid import.
+        # Derive load_consumption when no direct sensor is available.
+        # GEN4 Growatt Modbus and SolaX Native lack a native register.
+        if load_consumption == 0 and (solar_production > 0 or import_from_grid > 0):
+            load_consumption = max(
+                0, solar_production + import_from_grid - export_to_grid
+            )
+            flows["load_consumption"] = load_consumption
+
+        # Derive system_production when no direct sensor is available.
+        # GEN3 Growatt and SolaX Native lack a total_yield register.
+        system_production = flows.get("system_production", 0)
+        if system_production == 0 and solar_production > 0:
+            flows["system_production"] = solar_production
+
+        # Derive self_consumption: energy consumed from own production.
         self_consumption = flows.get("self_consumption", 0)
         if self_consumption == 0 and load_consumption > 0:
             self_consumption = max(0, load_consumption - import_from_grid)
+            flows["self_consumption"] = self_consumption
 
         solar_to_battery = max(
             0,
@@ -150,15 +174,6 @@ class EnergyFlowCalculator:
 
         flows["solar_to_battery"] = solar_to_battery
         flows["grid_to_battery"] = max(0, battery_charged - solar_to_battery)
-
-        logger.debug(
-            "Solar to battery = %.2f kWh (from new sensors)",
-            flows["solar_to_battery"],
-        )
-        logger.debug(
-            "Grid to battery = %.2f kWh (from new sensors)",
-            flows["grid_to_battery"],
-        )
 
         flows["aux_load"] = flows.get("aux_load", 0.0)
         return flows

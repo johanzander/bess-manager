@@ -437,7 +437,7 @@ class GrowattSolaxModbusController(GrowattMinController):
     # ── Health check ─────────────────────────────────────────────────────────
 
     def check_health(self, controller) -> list:
-        """Check battery control capabilities."""
+        """Check battery control capabilities including TOU schedule entities."""
         health_check = perform_health_check(
             component_name="Battery Control",
             description="Controls battery charging and discharging schedule",
@@ -451,4 +451,40 @@ class GrowattSolaxModbusController(GrowattMinController):
                 "get_discharge_stop_soc",
             ],
         )
+
+        # Verify TOU schedule entities are configured (required for schedule application)
+        tou_keys = [
+            "tou_time_1_enabled",
+            "tou_time_1_begin",
+            "tou_time_1_end",
+            "tou_time_1_mode",
+            "tou_time_1_update",
+        ]
+        for key in tou_keys:
+            entity_id = controller.sensors.get(key, "")
+            if entity_id:
+                status, error = "OK", None
+            else:
+                status, error = "ERROR", "Not configured — re-run setup wizard"
+            health_check["checks"].append(
+                {
+                    "name": f"TOU Entity: {key}",
+                    "key": key,
+                    "method_name": None,
+                    "entity_id": entity_id or "Not configured",
+                    "status": status,
+                    "rawValue": None,
+                    "displayValue": entity_id or "Not configured",
+                    "error": error,
+                }
+            )
+
+        # Re-evaluate overall status including TOU checks
+        has_error = any(c["status"] == "ERROR" for c in health_check["checks"])
+        has_warning = any(c["status"] == "WARNING" for c in health_check["checks"])
+        if has_error:
+            health_check["status"] = "ERROR"
+        elif has_warning:
+            health_check["status"] = "WARNING"
+
         return [health_check]

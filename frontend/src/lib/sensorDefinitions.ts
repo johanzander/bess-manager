@@ -230,6 +230,16 @@ export const INTEGRATIONS: IntegrationDef[] = [
           { key: 'lifetime_system_production', label: 'Total Yield', required: false },
         ],
       },
+      {
+        name: 'TOU Schedule',
+        sensors: [
+          { key: 'tou_time_1_enabled', label: 'Time Slot 1 Enabled', required: true },
+          { key: 'tou_time_1_begin', label: 'Time Slot 1 Begin', required: true },
+          { key: 'tou_time_1_end', label: 'Time Slot 1 End', required: true },
+          { key: 'tou_time_1_mode', label: 'Time Slot 1 Mode', required: true },
+          { key: 'tou_time_1_update', label: 'Time Slot 1 Update', required: true },
+        ],
+      },
     ],
   },
   {

@@ -2579,15 +2579,16 @@ class HomeAssistantAPIController:
                 self.SOLAX_ENTITY_SUFFIX_MAP,
             )
             if self._has_growatt_tou_entities(entities):
-                # GEN4: Growatt MIN/MOD/MID with numbered TOU slots
+                # GEN4: Growatt MIN/MOD/MID with numbered TOU slots.
+                # Modbus takes priority over growatt_server because it
+                # provides the TOU entities needed to write schedules.
                 platform_sensors["growatt_modbus"] = solax_sensors
-                if not detected_platform:
-                    detected_platform = "growatt_modbus"
+                detected_platform = "growatt_modbus"
             elif self._has_growatt_gen3_entities(entities):
-                # GEN3: Growatt MIX/SPA/SPH with mode-specific time slots
+                # GEN3: Growatt MIX/SPA/SPH with mode-specific time slots.
+                # Same priority logic as GEN4.
                 platform_sensors["growatt_modbus_gen3"] = solax_sensors
-                if not detected_platform:
-                    detected_platform = "growatt_modbus_gen3"
+                detected_platform = "growatt_modbus_gen3"
             else:
                 platform_sensors["solax"] = solax_sensors
                 if not detected_platform:

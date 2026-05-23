@@ -936,18 +936,10 @@ class BatterySystemManager:
             return self._get_influxdb_7d_avg_forecast()
 
         if strategy == "ha_statistics":
-            # Sensor must be configured — this is a permanent config error,
-            # not a transient data issue, so let it propagate.
-            try:
-                self._controller._resolve_entity_id("lifetime_load_consumption")
-            except ValueError as e:
-                raise HAStatisticsUnavailableError(
-                    "ha_statistics strategy requires 'lifetime_load_consumption' "
-                    "sensor configured in the Sensors tab"
-                ) from e
-
-            # Data-insufficiency errors are transient (HA hasn't accumulated
-            # enough history yet) — fall back to fixed until data arrives.
+            # Data-insufficiency or missing-sensor errors are handled the same
+            # way: fall back to fixed until the situation resolves.
+            # TODO: derive load from solar+import-export so this works on all
+            # platforms (see TODO.md "ha_statistics on all platforms").
             try:
                 result = self._get_ha_statistics_forecast()
                 self._runtime_failure_tracker.dismiss_by_category(

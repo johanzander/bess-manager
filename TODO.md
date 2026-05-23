@@ -236,6 +236,16 @@ But at noon every day we get tomorrows schedule. We could use this information t
 
 **Resolution**: The DP optimizer now considers up to 192 periods (2 days) when tomorrow's prices are available (PR #21). Dashboard charts (PR #22) and inverter schedule overview (PR #23) display the extended horizon. TOU deployment remains today-only due to Growatt hardware limitations.
 
+### **Make ha_statistics consumption forecast work on all platforms**
+
+**Impact**: Medium | **Effort**: Medium | **Dependencies**: `battery_system_manager.py`, `ha_api_controller.py`
+
+**Description**: The `ha_statistics` consumption forecast strategy currently requires a native `lifetime_load_consumption` HA entity to query HA Recorder statistics. Platforms without this entity (GEN4 Growatt Modbus, SolaX Native) fall back to the `fixed` profile, losing the time-of-day shaped consumption forecast.
+
+**Fix**: Instead of querying a single load consumption entity, query the 3 universal sensors (`lifetime_solar_energy`, `lifetime_import_from_grid`, `lifetime_export_to_grid`) and derive load per hour: `load = solar_change + import_change - export_change`. Same physics, works on every platform.
+
+**Files**: `core/bess/battery_system_manager.py` (`_get_ha_statistics_forecast`)
+
 ## 🔵 **ROBUSTNESS IMPROVEMENTS** (System Observability)
 
 ### ~~**Complete or Remove EV Energy Meter Integration**~~ ✅ Completed (v8.0.0)

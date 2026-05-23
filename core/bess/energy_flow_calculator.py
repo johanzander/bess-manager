@@ -35,16 +35,15 @@ class EnergyFlowCalculator:
 
         Returns mapping of entity IDs (without 'sensor.' prefix) to flow field names.
         """
-        # Define mapping using sensor keys
+        # Only the 5 core energy sensors are mapped here.
+        # load_consumption, system_production, and self_consumption
+        # are derived in _calculate_derived_flows().
         sensor_key_to_flow = {
             "lifetime_battery_charged": "battery_charged",
             "lifetime_battery_discharged": "battery_discharged",
             "lifetime_solar_energy": "solar_production",
             "lifetime_import_from_grid": "import_from_grid",
             "lifetime_export_to_grid": "export_to_grid",
-            "lifetime_load_consumption": "load_consumption",
-            "lifetime_system_production": "system_production",
-            "lifetime_self_consumption": "self_consumption",
         }
         # Resolve to actual entity IDs
         resolved_mapping = {}

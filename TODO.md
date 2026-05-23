@@ -508,6 +508,22 @@ This eliminates the `required_methods` parameter entirely and makes the policy s
 
 ---
 
+### Remove non-required derived sensors from discovery and config
+
+**Impact**: Low | **Effort**: Low | **Dependencies**: `ha_api_controller.py`, `sensorDefinitions.ts`
+
+**Description**: Several sensors are discovered and stored in `bess_settings.json` but are never consumed — they are always derived from the 5 core energy sensors by `EnergyFlowCalculator`:
+
+- `lifetime_system_production` (mapped from `total_yield`) — derived as `solar_production` when missing
+- `lifetime_self_consumption` — derived as `load - import` when missing
+- `lifetime_load_consumption` — derived as `solar + import - export` when missing
+
+These sensors remain in `ENTITY_SUFFIX_MAP` / `SOLAX_ENTITY_SUFFIX_MAP`, get discovered, appear in the wizard sensor list, and are saved to config, but nothing reads them at runtime. Remove them from the suffix maps and `sensorDefinitions.ts` to reduce wizard clutter and avoid confusion about which sensors actually matter.
+
+**Files**: `core/bess/ha_api_controller.py` (`ENTITY_SUFFIX_MAP`, `SOLAX_ENTITY_SUFFIX_MAP`), `frontend/src/lib/sensorDefinitions.ts`
+
+---
+
 ### Clean up `ENTITY_SUFFIX_MAP` dead entries
 
 **Impact**: Low | **Effort**: Low | **Dependencies**: `ha_api_controller.py`

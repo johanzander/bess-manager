@@ -4,6 +4,19 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.0.0b16] - 2026-05-24
+
+### Fixed
+
+- **SOLAR_STORAGE batt_mode mapping** — `_calculate_hourly_settings()` mapped SOLAR_STORAGE to `battery_first` instead of `load_first`, disagreeing with `INTENT_TO_MODE`. Moot because the entire hourly settings abstraction was dead code (API uses period-level settings), so removed it entirely.
+- **Double entity registry fetch** — `discover_integrations` fetched the entity registry via `fetch_entity_registry()`, then `discover_ha_metadata()` fetched it again via WebSocket. Now passes the already-fetched registry, saving one full WS round-trip.
+- **Unused `get_services` WebSocket query** — `discover_ha_metadata` queried HA for all service definitions but never used the result. Removed.
+
+### Changed
+
+- **Dead code removed** — deleted 3 uncalled methods from `GrowattMinController` (`_calculate_power_rates_from_action`, `_strategic_intent_to_battery_mode`, `_consolidate_and_convert_fallback`) and the unused `_calculate_hourly_settings` / `get_hourly_settings` / `hourly_settings` abstraction from `InverterController`.
+- **Duplicate overrides removed** — `get_strategic_intent_summary()`, `_get_intent_description()`, `INTENT_TO_MODE`, `log_detailed_schedule()`, and `_write_period_to_hardware()` were overridden with identical implementations in subclasses. Removed overrides; `_write_period_to_hardware` promoted from abstract to concrete default on `InverterController`.
+
 ## [9.0.0b15] - 2026-05-23
 
 ### Fixed

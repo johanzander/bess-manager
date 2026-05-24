@@ -84,6 +84,20 @@ You are a BESS (Battery Energy Storage System) analyst. Your role is to analyze 
 3. Trace the cost basis tracking through charge/discharge
 4. Verify price data fed to optimizer
 
+### Debugging Discovery & Integration Issues
+
+1. Read `ha_api_controller.py` — focus on:
+   - `discover_integrations()` (line ~2099) — integration detection
+   - `discover_sensors_from_registry()` (line ~2539) — entity suffix matching
+   - `SOLAX_ENTITY_SUFFIX_MAP` — maps unique_id suffixes to BESS sensor keys
+   - `_GROWATT_TOU_MARKER_SUFFIX` / `_GROWATT_GEN3_MARKER_SUFFIX` — platform detection
+2. Read the relevant scenario fixture in `scripts/mock_ha/scenarios/`
+3. Check entity registry data: does the `unique_id` suffix match a map entry?
+4. Check platform detection: does the entity's `platform` field match `_SOLAX_PLATFORMS`?
+5. **Blast radius**: list all consumers of `discover_sensors_from_registry` output
+   (setup wizard API, health checks, settings save) and verify none break
+6. Run `pytest core/bess/tests/unit/test_scenario_discovery.py -v` to verify
+
 ### Debugging Schedule Issues
 
 1. Read `growatt_schedule.py` TOU conversion logic

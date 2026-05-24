@@ -88,8 +88,6 @@ class SolaxController(InverterController):
             len(self.strategic_intents),
         )
 
-        self._calculate_hourly_settings()
-
     # ── Hardware interface ────────────────────────────────────────────────────
 
     def _write_period_to_hardware(

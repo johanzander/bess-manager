@@ -1922,7 +1922,11 @@ class HomeAssistantAPIController:
                 return entity_id
         return None
 
-    def discover_ha_metadata(self, device_sn: str | None) -> dict:
+    def discover_ha_metadata(
+        self,
+        device_sn: str | None,
+        entity_registry: list[dict] | None = None,
+    ) -> dict:
         """Discover HA-internal IDs via the WebSocket API.
 
         Queries the config entry and device registries to find:
@@ -1931,6 +1935,7 @@ class HomeAssistantAPIController:
 
         Args:
             device_sn: Growatt device serial number to match, or None
+            entity_registry: Pre-fetched entity registry list, or None to fetch.
 
         Returns:
             dict with keys: growatt_device_id, nordpool_config_entry_id
@@ -1938,15 +1943,16 @@ class HomeAssistantAPIController:
         commands = [
             {"type": "config_entries/get"},
             {"type": "config/device_registry/list"},
-            {"type": "get_services"},
-            {"type": "config/entity_registry/list"},
         ]
+        if entity_registry is None:
+            commands.append({"type": "config/entity_registry/list"})
 
         results = self._ws_query(commands)
         config_entries_result = results[0]
         devices_result = results[1]
-        # results[2] is services — no longer used for inverter type detection
-        entity_registry_result = results[3]
+        entity_registry_result = (
+            entity_registry if entity_registry is not None else results[2]
+        )
 
         # Find nordpool config_entry_id from config entries.
         nordpool_config_entry_id: str | None = None
@@ -2164,7 +2170,7 @@ class HomeAssistantAPIController:
         # ── WebSocket: HA-internal IDs ────────────────────────────────────
         metadata: dict = {}
         try:
-            metadata = self.discover_ha_metadata(device_sn)
+            metadata = self.discover_ha_metadata(device_sn, entity_registry=registry)
             result["growatt_device_id"] = metadata["growatt_device_id"]
             result["nordpool_config_entry_id"] = metadata["nordpool_config_entry_id"]
             # Official HA core integration: area comes from entity registry

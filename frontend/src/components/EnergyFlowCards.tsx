@@ -108,7 +108,7 @@ const EnergyFlowCardView: React.FC<{ card: EnergyFlowCard }> = ({ card }) => {
                       <span className="text-gray-600 dark:text-gray-300">{item.label}</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="text-gray-500 dark:text-gray-400">
+                      <span className="text-gray-500 dark:text-gray-400 w-10 text-right">
                         {item.percentageFormatted}%
                       </span>
                       <span className="font-medium text-gray-900 dark:text-gray-100">

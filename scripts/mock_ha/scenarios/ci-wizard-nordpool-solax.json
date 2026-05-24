@@ -1,49 +1,84 @@
 {
   "name": "CI Wizard: Nordpool + SolaX (Native) inverter",
-  "description": "Setup wizard scenario — Swedish user, Nordpool Official, native SolaX inverter via solax_modbus with VPP control.",
+  "description": "Setup wizard scenario \u2014 Swedish user, Nordpool Official, native SolaX inverter via solax_modbus with VPP control.",
   "mock_time": "@2025-01-15 08:30:00",
   "timezone": "Europe/Stockholm",
   "inverter_type": "solax",
   "sensors": {
     "sensor.solax_battery_capacity": {
       "state": "65",
-      "attributes": { "unit_of_measurement": "%", "friendly_name": "SolaX Battery Capacity" }
+      "attributes": {
+        "unit_of_measurement": "%",
+        "friendly_name": "SolaX Battery Capacity"
+      }
     },
     "sensor.solax_battery_power_charge": {
       "state": "0",
-      "attributes": { "unit_of_measurement": "W", "friendly_name": "SolaX Battery Charge Power" }
+      "attributes": {
+        "unit_of_measurement": "W",
+        "friendly_name": "SolaX Battery Charge Power"
+      }
     },
     "sensor.solax_battery_power_discharge": {
       "state": "800",
-      "attributes": { "unit_of_measurement": "W", "friendly_name": "SolaX Battery Discharge Power" }
+      "attributes": {
+        "unit_of_measurement": "W",
+        "friendly_name": "SolaX Battery Discharge Power"
+      }
     },
     "sensor.solax_measured_power": {
       "state": "-200",
-      "attributes": { "unit_of_measurement": "W", "friendly_name": "SolaX Measured Power (Grid)" }
+      "attributes": {
+        "unit_of_measurement": "W",
+        "friendly_name": "SolaX Measured Power (Grid)"
+      }
     },
     "sensor.solax_grid_export": {
       "state": "200",
-      "attributes": { "unit_of_measurement": "W", "friendly_name": "SolaX Grid Export" }
+      "attributes": {
+        "unit_of_measurement": "W",
+        "friendly_name": "SolaX Grid Export"
+      }
     },
     "sensor.solax_pv_power_1": {
       "state": "1200",
-      "attributes": { "unit_of_measurement": "W", "friendly_name": "SolaX PV Power" }
+      "attributes": {
+        "unit_of_measurement": "W",
+        "friendly_name": "SolaX PV Power"
+      }
     },
     "sensor.solax_house_load": {
       "state": "1400",
-      "attributes": { "unit_of_measurement": "W", "friendly_name": "SolaX House Load" }
+      "attributes": {
+        "unit_of_measurement": "W",
+        "friendly_name": "SolaX House Load"
+      }
     },
     "select.solax_remotecontrol_power_control": {
       "state": "Enabled - Remote Control",
-      "attributes": { "options": ["Disabled", "Enabled - Remote Control", "Enabled - External EMS"] }
+      "attributes": {
+        "options": [
+          "Disabled",
+          "Enabled - Remote Control",
+          "Enabled - External EMS"
+        ]
+      }
     },
     "number.solax_remotecontrol_active_power": {
       "state": "0",
-      "attributes": { "unit_of_measurement": "W", "min": -6000, "max": 6000 }
+      "attributes": {
+        "unit_of_measurement": "W",
+        "min": -6000,
+        "max": 6000
+      }
     },
     "number.solax_remotecontrol_autorepeat_duration": {
       "state": "1200",
-      "attributes": { "unit_of_measurement": "s", "min": 0, "max": 3600 }
+      "attributes": {
+        "unit_of_measurement": "s",
+        "min": 0,
+        "max": 3600
+      }
     },
     "button.solax_remotecontrol_trigger": {
       "state": "unknown",
@@ -51,14 +86,68 @@
     },
     "number.solax_battery_minimum_capacity": {
       "state": "15",
-      "attributes": { "unit_of_measurement": "%", "min": 0, "max": 100 }
+      "attributes": {
+        "unit_of_measurement": "%",
+        "min": 0,
+        "max": 100
+      }
     },
     "sensor.nordpool_kwh_se4_sek_3_10_025": {
       "state": "0.85",
       "attributes": {
         "unit_of_measurement": "SEK/kWh",
-        "today": [0.50, 0.40, 0.30, 0.25, 0.25, 0.40, 0.70, 0.90, 1.10, 1.20, 1.30, 1.40, 1.30, 1.20, 1.10, 1.30, 1.40, 1.50, 1.60, 1.50, 1.30, 0.90, 0.70, 0.60],
-        "tomorrow": [0.45, 0.35, 0.28, 0.22, 0.20, 0.35, 0.65, 0.85, 1.05, 1.15, 1.25, 1.35, 1.25, 1.15, 1.05, 1.25, 1.35, 1.45, 1.55, 1.45, 1.25, 0.85, 0.65, 0.55]
+        "today": [
+          0.5,
+          0.4,
+          0.3,
+          0.25,
+          0.25,
+          0.4,
+          0.7,
+          0.9,
+          1.1,
+          1.2,
+          1.3,
+          1.4,
+          1.3,
+          1.2,
+          1.1,
+          1.3,
+          1.4,
+          1.5,
+          1.6,
+          1.5,
+          1.3,
+          0.9,
+          0.7,
+          0.6
+        ],
+        "tomorrow": [
+          0.45,
+          0.35,
+          0.28,
+          0.22,
+          0.2,
+          0.35,
+          0.65,
+          0.85,
+          1.05,
+          1.15,
+          1.25,
+          1.35,
+          1.25,
+          1.15,
+          1.05,
+          1.25,
+          1.35,
+          1.45,
+          1.55,
+          1.45,
+          1.25,
+          0.85,
+          0.65,
+          0.55
+        ]
       }
     }
   },
@@ -167,7 +256,86 @@
   ],
   "time_segments": [],
   "price_data": {
-    "today": [0.50, 0.40, 0.30, 0.25, 0.25, 0.40, 0.70, 0.90, 1.10, 1.20, 1.30, 1.40, 1.30, 1.20, 1.10, 1.30, 1.40, 1.50, 1.60, 1.50, 1.30, 0.90, 0.70, 0.60],
-    "tomorrow": [0.45, 0.35, 0.28, 0.22, 0.20, 0.35, 0.65, 0.85, 1.05, 1.15, 1.25, 1.35, 1.25, 1.15, 1.05, 1.25, 1.35, 1.45, 1.55, 1.45, 1.25, 0.85, 0.65, 0.55]
+    "today": [
+      0.5,
+      0.4,
+      0.3,
+      0.25,
+      0.25,
+      0.4,
+      0.7,
+      0.9,
+      1.1,
+      1.2,
+      1.3,
+      1.4,
+      1.3,
+      1.2,
+      1.1,
+      1.3,
+      1.4,
+      1.5,
+      1.6,
+      1.5,
+      1.3,
+      0.9,
+      0.7,
+      0.6
+    ],
+    "tomorrow": [
+      0.45,
+      0.35,
+      0.28,
+      0.22,
+      0.2,
+      0.35,
+      0.65,
+      0.85,
+      1.05,
+      1.15,
+      1.25,
+      1.35,
+      1.25,
+      1.15,
+      1.05,
+      1.25,
+      1.35,
+      1.45,
+      1.55,
+      1.45,
+      1.25,
+      0.85,
+      0.65,
+      0.55
+    ]
+  },
+  "expected_discovery": {
+    "growatt_found": false,
+    "solax_found": true,
+    "solax_has_growatt_tou": false,
+    "solax_has_growatt_gen3": false,
+    "nordpool_found": true,
+    "nordpool_area": null,
+    "nordpool_custom_area": "SE4",
+    "nordpool_config_entry_id": "mock_nordpool_config_entry",
+    "octopus_found": false,
+    "inverter_type": "solax",
+    "currency": "SEK",
+    "vat_multiplier": 1.25,
+    "detected_platform": "solax",
+    "required_sensors": [
+      "battery_charge_power",
+      "battery_discharge_power",
+      "battery_soc",
+      "export_power",
+      "import_power",
+      "local_load_power",
+      "pv_power",
+      "solax_active_power",
+      "solax_autorepeat_duration",
+      "solax_battery_min_soc",
+      "solax_power_control_mode",
+      "solax_power_control_trigger"
+    ]
   }
 }

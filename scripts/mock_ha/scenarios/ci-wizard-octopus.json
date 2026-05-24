@@ -746,5 +746,21 @@
     }
   ],
   "time_segments": [],
-  "price_data": {}
+  "price_data": {},
+  "expected_discovery": {
+    "growatt_found": true,
+    "solax_found": false,
+    "nordpool_found": false,
+    "nordpool_area": null,
+    "nordpool_custom_area": null,
+    "nordpool_config_entry_id": null,
+    "octopus_found": true,
+    "inverter_type": "MIN",
+    "currency": "GBP",
+    "vat_multiplier": 1.0,
+    "detected_platform": "growatt",
+    "required_sensors": [
+      "grid_charge"
+    ]
+  }
 }

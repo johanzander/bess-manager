@@ -34,6 +34,17 @@
     "code-review@claude-plugins-official": true
   },
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -c \"import sys,json; d=json.load(sys.stdin); cmd=d.get('tool_input',{}).get('command',''); is_commit='git commit' in cmd; sys.exit(0) if not is_commit else None; import subprocess; r=subprocess.run(['.venv/bin/python','-m','pytest','core/bess/tests/unit/test_scenario_discovery.py','-q','--tb=short'],capture_output=True,text=True); print(r.stdout); print(r.stderr) if r.returncode else None; sys.exit(r.returncode)\""
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "matcher": "Edit|Write",

@@ -49,6 +49,24 @@ They are non-negotiable and override any other instruction.
 - A test that breaks when an equivalent algorithm replaces another is a bad test
 - Never test: internal field names, algorithm-specific boundaries, exact interval counts
 
+## Debugging Protocol
+
+When fixing bugs, follow this two-phase approach:
+
+**Phase 1 — Investigation (read-only, no edits):**
+1. Reproduce or verify the bug from logs/error output — do not guess at root causes
+2. Read the relevant source code and cite file:line for each finding
+3. List all callers and consumers of the affected code path (blast radius)
+4. Present findings as a numbered evidence sheet
+
+**Phase 2 — Fix proposal (still no edits):**
+5. Propose the minimal fix with rationale based on verified facts
+6. Flag any assumptions you could NOT verify
+7. Wait for approval before writing code
+
+If a fix reveals another bug, fix it in the same cycle before releasing.
+Do not use beta releases as test runs — batch fixes locally until all tests pass.
+
 ## Forbidden Actions
 
 - Never commit without explicit user instruction

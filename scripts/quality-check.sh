@@ -123,6 +123,30 @@ else
 fi
 
 echo ""
+echo "📋 Checking scenario discovery coverage..."
+echo "-------------------------------------------"
+
+SCENARIO_DIR="scripts/mock_ha/scenarios"
+MISSING_DISCOVERY=0
+if [ -d "$SCENARIO_DIR" ]; then
+    for f in "$SCENARIO_DIR"/ci-wizard-*.json; do
+        name=$(basename "$f")
+        if ! python3 -c "import json,sys; sys.exit(0 if 'expected_discovery' in json.load(open('$f')) else 1)" 2>/dev/null; then
+            echo "❌ $name is missing expected_discovery section"
+            MISSING_DISCOVERY=$((MISSING_DISCOVERY + 1))
+        fi
+    done
+    if [ $MISSING_DISCOVERY -eq 0 ]; then
+        echo "✅ All ci-wizard-* scenarios have expected_discovery"
+    else
+        echo "❌ $MISSING_DISCOVERY scenario(s) missing expected_discovery — add assertions before releasing"
+        ERRORS=$((ERRORS + 1))
+    fi
+else
+    echo "ℹ️  No scenario directory found"
+fi
+
+echo ""
 echo "📋 Checking Markdown files..."
 echo "------------------------------"
 

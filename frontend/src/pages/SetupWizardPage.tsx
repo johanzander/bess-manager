@@ -189,7 +189,8 @@ const SetupWizardPage: React.FC = () => {
         ...f,
         provider:              ep.provider                           ?? f.provider,
         currency:              home.currency                        ?? f.currency,
-        area:                  elec.area                            ?? f.area,
+        // area is read-only / auto-detected — never restore from saved settings;
+        // discovery (handleScan) is the single source of truth for price area.
         markupRate:            elec.markupRate                      ?? f.markupRate,
         vatMultiplier:         elec.vatMultiplier                   ?? f.vatMultiplier,
         additionalCosts:       elec.additionalCosts                 ?? f.additionalCosts,
@@ -243,7 +244,8 @@ const SetupWizardPage: React.FC = () => {
     try {
       await api.post('/api/setup/complete', {
         sensors,
-        nordpoolArea: pricingForm.area || discovery.nordpoolArea,
+        // Area is read-only / auto-detected — prefer discovery over stale saved value
+        nordpoolArea: discovery.nordpoolArea || discovery.nordpoolCustomArea || pricingForm.area,
         // Prefer the user-entered form value; fall back to auto-detected value
         nordpoolConfigEntryId: pricingForm.nordpoolConfigEntryId || discovery.nordpoolConfigEntryId,
         growattDeviceId: inverterForm.deviceId || discovery.growattDeviceId,
@@ -264,7 +266,7 @@ const SetupWizardPage: React.FC = () => {
         phaseCount: homeForm.phaseCount,
         powerMonitoringEnabled: homeForm.powerMonitoringEnabled,
         // Electricity
-        area: pricingForm.area || discovery.nordpoolArea,
+        area: discovery.nordpoolArea || discovery.nordpoolCustomArea || pricingForm.area,
         provider: pricingForm.provider,
         markupRate: pricingForm.markupRate,
         vatMultiplier: pricingForm.vatMultiplier,

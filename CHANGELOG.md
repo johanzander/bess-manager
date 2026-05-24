@@ -4,6 +4,22 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.0.0b15] - 2026-05-23
+
+### Fixed
+
+- **TOU schedule entities not saved to config** — setup wizard filtered out `tou_time_1_*` sensor keys because they weren't in the frontend `INTEGRATIONS` definition. The Growatt Modbus (GEN4) controller then failed at schedule application with "No entity ID configured for sensor 'tou_time_1_enabled'". TOU Schedule sensor group now included in the wizard UI.
+- **TOU health check added** — Growatt Modbus controller now verifies TOU schedule entities are configured during health check, surfacing "Not configured — re-run setup wizard" instead of failing silently at schedule time.
+- **Derived sensors removed from InfluxDB collection** — `lifetime_load_consumption`, `lifetime_system_production`, and `lifetime_self_consumption` are always derived from the 5 core energy sensors by `EnergyFlowCalculator`. Removed from InfluxDB collection and critical-sensor validation to eliminate false "Missing critical sensors" warnings.
+- **Energy flow derivation unified across platforms** — `EnergyFlowCalculator` now derives `load_consumption` (solar + import - export), `system_production` (fallback to solar), and `self_consumption` (load - import) from core sensors. Platforms without native registers (GEN4 Modbus, SolaX Native) no longer show zero values.
+- **Discovery preselection restored** — Growatt Server is preselected when both cloud and local Modbus integrations are present, matching the original behavior. Local Modbus remains available as an option in the wizard.
+- **Nordpool area no longer overwritten by stale settings** — wizard settings load excluded `area` from restoration, ensuring discovery-detected area (e.g. SE3) is not clobbered by a previously saved value (e.g. SE4).
+
+### Added
+
+- TOU Schedule sensor group visible in setup wizard sensor config UI for Growatt Modbus platform.
+- `total_yield` entity added to growatt-modbus mock scenario for correct wizard display.
+
 ## [9.0.0b14] - 2026-05-22
 
 ### Added

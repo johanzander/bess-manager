@@ -40,17 +40,16 @@ class SensorCollector:
         # Simple cache: last known cumulative sensor readings (for current - previous = delta)
         self._last_readings: dict[str, float] | None = None
 
-        # Cumulative sensors we track from InfluxDB
-        # Use sensor keys instead of hardcoded entity IDs
+        # Cumulative sensors we track from InfluxDB.
+        # Only the 5 core energy sensors + battery_soc are collected.
+        # load_consumption, system_production, and self_consumption are
+        # derived by EnergyFlowCalculator from these 5 core sensors.
         self.cumulative_sensor_keys = [
             "lifetime_battery_charged",
             "lifetime_battery_discharged",
             "lifetime_solar_energy",
-            "lifetime_load_consumption",
             "lifetime_import_from_grid",
             "lifetime_export_to_grid",
-            "lifetime_system_production",
-            "lifetime_self_consumption",
             "battery_soc",
         ]
 
@@ -597,16 +596,13 @@ class SensorCollector:
         """
         readings = {}
 
-        # Map sensor keys to ha_controller methods
+        # Map sensor keys to ha_controller methods (only core sensors)
         sensor_method_map = {
             "lifetime_battery_charged": "get_battery_charged_lifetime",
             "lifetime_battery_discharged": "get_battery_discharged_lifetime",
             "lifetime_solar_energy": "get_solar_production_lifetime",
-            "lifetime_load_consumption": "get_load_consumption_lifetime",
             "lifetime_import_from_grid": "get_grid_import_lifetime",
             "lifetime_export_to_grid": "get_grid_export_lifetime",
-            "lifetime_system_production": "get_system_production_lifetime",
-            "lifetime_self_consumption": "get_self_consumption_lifetime",
             "battery_soc": "get_battery_soc",
         }
 
@@ -685,7 +681,7 @@ class SensorCollector:
         # Validate that we have the minimum required sensors
         # Check for required sensors using resolved entity IDs
         required_sensors = []
-        required_keys = ["battery_soc", "lifetime_load_consumption"]
+        required_keys = ["battery_soc"]
         for key in required_keys:
             entity_id = self.ha_controller.resolve_sensor_for_influxdb(key)
             if entity_id:

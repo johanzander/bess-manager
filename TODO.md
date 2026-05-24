@@ -236,6 +236,16 @@ But at noon every day we get tomorrows schedule. We could use this information t
 
 **Resolution**: The DP optimizer now considers up to 192 periods (2 days) when tomorrow's prices are available (PR #21). Dashboard charts (PR #22) and inverter schedule overview (PR #23) display the extended horizon. TOU deployment remains today-only due to Growatt hardware limitations.
 
+### **Make ha_statistics consumption forecast work on all platforms**
+
+**Impact**: Medium | **Effort**: Medium | **Dependencies**: `battery_system_manager.py`, `ha_api_controller.py`
+
+**Description**: The `ha_statistics` consumption forecast strategy currently requires a native `lifetime_load_consumption` HA entity to query HA Recorder statistics. Platforms without this entity (GEN4 Growatt Modbus, SolaX Native) fall back to the `fixed` profile, losing the time-of-day shaped consumption forecast.
+
+**Fix**: Instead of querying a single load consumption entity, query the 3 universal sensors (`lifetime_solar_energy`, `lifetime_import_from_grid`, `lifetime_export_to_grid`) and derive load per hour: `load = solar_change + import_change - export_change`. Same physics, works on every platform.
+
+**Files**: `core/bess/battery_system_manager.py` (`_get_ha_statistics_forecast`)
+
 ## 🔵 **ROBUSTNESS IMPROVEMENTS** (System Observability)
 
 ### ~~**Complete or Remove EV Energy Meter Integration**~~ ✅ Completed (v8.0.0)
@@ -495,6 +505,22 @@ This eliminates the `required_methods` parameter entirely and makes the policy s
 **After upstream fix lands**: Update our detection in `discover_ha_metadata()` to use services again (more robust than the current entity-registry `ac_charge` switch heuristic, which breaks if the user deletes the entity or if the HA integration changes entity creation).
 
 **Current workaround**: We detect MIN vs SPH by checking if a `growatt_server` entity with unique_id ending in `-ac_charge` exists in the entity registry (MIN creates `switch.*_ac_charge`, SPH does not).
+
+---
+
+### Remove non-required derived sensors from discovery and config
+
+**Impact**: Low | **Effort**: Low | **Dependencies**: `ha_api_controller.py`, `sensorDefinitions.ts`
+
+**Description**: Several sensors are discovered and stored in `bess_settings.json` but are never consumed — they are always derived from the 5 core energy sensors by `EnergyFlowCalculator`:
+
+- `lifetime_system_production` (mapped from `total_yield`) — derived as `solar_production` when missing
+- `lifetime_self_consumption` — derived as `load - import` when missing
+- `lifetime_load_consumption` — derived as `solar + import - export` when missing
+
+These sensors remain in `ENTITY_SUFFIX_MAP` / `SOLAX_ENTITY_SUFFIX_MAP`, get discovered, appear in the wizard sensor list, and are saved to config, but nothing reads them at runtime. Remove them from the suffix maps and `sensorDefinitions.ts` to reduce wizard clutter and avoid confusion about which sensors actually matter.
+
+**Files**: `core/bess/ha_api_controller.py` (`ENTITY_SUFFIX_MAP`, `SOLAX_ENTITY_SUFFIX_MAP`), `frontend/src/lib/sensorDefinitions.ts`
 
 ---
 

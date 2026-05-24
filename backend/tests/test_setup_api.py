@@ -70,7 +70,7 @@ _PRE_EXISTING_STORE: dict = {
         "nordpool_official": {"config_entry_id": "old-entry"},
     },
     "growatt": {"inverter_type": "MIN", "device_id": "old-dev"},
-    "inverter": {"platform": "growatt_min"},
+    "inverter": {"platform": "growatt_server_min"},
     "sensors": {"battery_soc": "sensor.old_soc"},
 }
 
@@ -127,7 +127,7 @@ def _full_wizard_payload(**overrides) -> dict:
         "additionalCosts": 0.77,
         "taxReduction": 0.20,
         "provider": "nordpool_official",
-        "inverterType": "MIN",
+        "inverterType": "growatt_server_min",
     }
     base.update(overrides)
     return base
@@ -322,54 +322,61 @@ class TestSetupComplete:
 
     def test_inverter_platform_set_for_min(self, complete_controller):
         _client.post(
-            "/api/setup/complete", json=_full_wizard_payload(inverterType="MIN")
+            "/api/setup/complete",
+            json=_full_wizard_payload(inverterType="growatt_server_min"),
         )
         call_args = complete_controller.settings_store.save_all.call_args[0][0]
-        assert call_args["inverter"]["platform"] == "growatt_min"
+        assert call_args["inverter"]["platform"] == "growatt_server_min"
 
     def test_inverter_platform_set_for_sph(self, complete_controller):
         _client.post(
-            "/api/setup/complete", json=_full_wizard_payload(inverterType="SPH")
+            "/api/setup/complete",
+            json=_full_wizard_payload(inverterType="growatt_server_sph"),
         )
         call_args = complete_controller.settings_store.save_all.call_args[0][0]
-        assert call_args["inverter"]["platform"] == "growatt_sph"
+        assert call_args["inverter"]["platform"] == "growatt_server_sph"
 
     def test_inverter_platform_set_for_solax(self, complete_controller):
         _client.post(
-            "/api/setup/complete", json=_full_wizard_payload(inverterType="SOLAX")
+            "/api/setup/complete",
+            json=_full_wizard_payload(inverterType="solax_modbus_native"),
         )
         call_args = complete_controller.settings_store.save_all.call_args[0][0]
-        assert call_args["inverter"]["platform"] == "solax"
+        assert call_args["inverter"]["platform"] == "solax_modbus_native"
 
-    def test_inverter_platform_set_for_growatt_modbus(self, complete_controller):
+    def test_inverter_platform_set_for_solax_modbus_growatt_min(
+        self, complete_controller
+    ):
         _client.post(
             "/api/setup/complete",
-            json=_full_wizard_payload(inverterType="GROWATT_MODBUS"),
+            json=_full_wizard_payload(inverterType="solax_modbus_growatt_min"),
         )
         call_args = complete_controller.settings_store.save_all.call_args[0][0]
-        assert call_args["inverter"]["platform"] == "growatt_solax_modbus"
+        assert call_args["inverter"]["platform"] == "solax_modbus_growatt_min"
 
     def test_inverter_platform_set_for_sph_modbus(self, complete_controller):
         _client.post(
             "/api/setup/complete",
-            json=_full_wizard_payload(inverterType="SPH_MODBUS"),
+            json=_full_wizard_payload(inverterType="solax_modbus_growatt_sph"),
         )
         call_args = complete_controller.settings_store.save_all.call_args[0][0]
-        assert call_args["inverter"]["platform"] == "growatt_solax_modbus_gen3"
+        assert call_args["inverter"]["platform"] == "solax_modbus_growatt_sph"
 
     def test_legacy_growatt_section_updated_for_growatt_platforms(
         self, complete_controller
     ):
         """MIN and SPH should also write the legacy growatt section."""
         _client.post(
-            "/api/setup/complete", json=_full_wizard_payload(inverterType="SPH")
+            "/api/setup/complete",
+            json=_full_wizard_payload(inverterType="growatt_server_sph"),
         )
         call_args = complete_controller.settings_store.save_all.call_args[0][0]
         assert call_args["growatt"]["inverter_type"] == "SPH"
 
     def test_legacy_growatt_section_not_written_for_solax(self, complete_controller):
         _client.post(
-            "/api/setup/complete", json=_full_wizard_payload(inverterType="SOLAX")
+            "/api/setup/complete",
+            json=_full_wizard_payload(inverterType="solax_modbus_native"),
         )
         call_args = complete_controller.settings_store.save_all.call_args[0][0]
         assert "growatt" not in call_args
@@ -422,10 +429,11 @@ class TestSetupComplete:
 
     def test_inverter_platform_switched_live(self, complete_controller):
         _client.post(
-            "/api/setup/complete", json=_full_wizard_payload(inverterType="SPH")
+            "/api/setup/complete",
+            json=_full_wizard_payload(inverterType="growatt_server_sph"),
         )
         complete_controller.system.switch_inverter_platform.assert_called_once_with(
-            "growatt_sph"
+            "growatt_server_sph"
         )
 
     def test_sensors_applied_to_ha_controller(self, complete_controller):

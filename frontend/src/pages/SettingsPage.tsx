@@ -12,7 +12,7 @@ import { BatteryFormSection } from '../components/settings/BatteryFormSection';
 import type { BatteryForm } from '../components/settings/BatteryFormSection';
 import { SensorConfigSection } from '../components/settings/SensorConfigSection';
 import type { InverterForm } from '../components/settings/SensorConfigSection';
-import { PLATFORM_TO_UI_TYPE, UI_TYPE_TO_PLATFORM, discoveryTypeToUiType, swapInverterSensors } from '../lib/sensorDefinitions';
+import { swapInverterSensors } from '../lib/sensorDefinitions';
 
 // ---------------------------------------------------------------------------
 // Local types
@@ -180,9 +180,7 @@ const SettingsPage: React.FC = () => {
 
       // Prefer inverter.platform (canonical); fall back to legacy growatt.inverterType
       const invNew = s.inverter ?? {};
-      const uiType = (invNew.platform && PLATFORM_TO_UI_TYPE[invNew.platform])
-        ? PLATFORM_TO_UI_TYPE[invNew.platform]
-        : (growatt_s.inverterType ?? 'MIN');
+      const uiType = invNew.platform ?? growatt_s.inverterType ?? 'growatt_server_min';
       const inv: InverterForm = {
         inverterType: uiType,
         deviceId: growatt_s.deviceId ?? '',
@@ -233,7 +231,7 @@ const SettingsPage: React.FC = () => {
       }
 
       if (d.inverterType) {
-        setInverterForm(f => ({ ...f, inverterType: discoveryTypeToUiType(d.inverterType) }));
+        setInverterForm(f => ({ ...f, inverterType: d.inverterType }));
       }
       if (d.growattDeviceId) {
         setInverterForm(f => ({ ...f, deviceId: d.growattDeviceId }));
@@ -395,7 +393,7 @@ const SettingsPage: React.FC = () => {
           deviceId: inverterForm.deviceId,
         },
         inverter: {
-          platform: UI_TYPE_TO_PLATFORM[inverterForm.inverterType],
+          platform: inverterForm.inverterType,
         },
       });
       savedBattery.current = JSON.stringify(batteryForm);

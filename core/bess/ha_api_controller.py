@@ -1968,8 +1968,10 @@ class HomeAssistantAPIController:
 
         # Extract nordpool area from device registry identifiers.
         # The official HA nordpool integration creates a device with
-        # identifiers [["nordpool", "SE3"]].  This is more robust than
-        # parsing entity unique_ids or entity_id patterns.
+        # identifiers [["nordpool", "SE3"]].  The HACS custom integration
+        # uses long identifiers like [["nordpool", "nordpool_kwh_se2_sek_2_10_025"]].
+        # We normalise both forms to a short area code (e.g. "SE2") using
+        # the same regex that parses entity_ids.
         nordpool_area: str | None = None
         if nordpool_config_entry_id:
             for device in devices_result:
@@ -1980,7 +1982,11 @@ class HomeAssistantAPIController:
                             and len(ident) == 2
                             and str(ident[0]).lower() == "nordpool"
                         ):
-                            nordpool_area = str(ident[1]).upper()
+                            raw = str(ident[1])
+                            nordpool_area = (
+                                self._parse_nordpool_area_from_entity_id(raw)
+                                or raw.upper()
+                            )
                             break
                     if nordpool_area:
                         break
@@ -2027,20 +2033,23 @@ class HomeAssistantAPIController:
                     growatt_device_id = device["id"]
                     break
 
-        # Determine inverter type from entity registry.
-        # The growatt_server integration registers all services unconditionally
-        # (both MIN and SPH services are always present), so we cannot
-        # distinguish by service alone.  Instead, check for the ac_charge
-        # switch entity: MIN creates switch.*_ac_charge, SPH does not (SPH
-        # controls charging via write_ac_charge_times service calls only).
+        # Determine inverter type from entity registry unique_id prefixes.
+        # The HA growatt_server integration uses different sensor key prefixes
+        # depending on the Growatt Cloud device_type:
+        #   "min"/"tlx" (AC-coupled) → sensors from tlx.py → unique_id "{SN}-tlx_*"
+        #   "mix"       (DC-coupled) → sensors from mix.py → unique_id "{SN}-mix_*"
+        #   "sph"       (DC-coupled) → sensors from sph.py → unique_id "{SN}-mix_*"/"{SN}-sph_*"
+        # We check for "-tlx_" as the positive MIN signal.
         growatt_inverter_type: str | None = None
         if growatt_config_entry_id:
-            has_ac_charge = any(
+            has_tlx = any(
                 entry.get("platform") == "growatt_server"
-                and str(entry.get("unique_id", "")).endswith("-ac_charge")
+                and "-tlx_" in str(entry.get("unique_id", ""))
                 for entry in entity_registry_result
             )
-            growatt_inverter_type = "MIN" if has_ac_charge else "SPH"
+            growatt_inverter_type = (
+                "growatt_server_min" if has_tlx else "growatt_server_sph"
+            )
 
         logger.info(
             "WS discovery: nordpool_config_entry_id=%s, nordpool_area=%s, "
@@ -2190,15 +2199,10 @@ class HomeAssistantAPIController:
             )
 
         # ── Auto-detected hints ───────────────────────────────────────────
-        # Inverter type: Growatt cloud is determined from entity registry
-        # (MIN has switch.*_ac_charge entity, SPH does not).
-        # SolaX is detected from the entity registry platform field.
-        # When solax_modbus is found, we further distinguish SolaX-native
-        # (VPP entities) from Growatt-via-solax (TOU entities).
-        # Determine inverter type.  When both growatt_server (cloud) and
-        # solax_modbus (local) are present, cloud takes priority for the
-        # auto-selected type, but we still check for TOU entities so the
-        # frontend knows the Local option is available.
+        # Inverter type: both growatt_server (cloud) and solax_modbus (local)
+        # can control the inverter.  When both are present and solax_modbus
+        # has TOU/GEN3 markers, prefer modbus — the user explicitly set up
+        # local control, which is faster and doesn't depend on cloud.
         if result["growatt_found"]:
             result["inverter_type"] = metadata.get("growatt_inverter_type")
         if result["solax_found"]:
@@ -2206,13 +2210,12 @@ class HomeAssistantAPIController:
             has_gen3 = self._has_growatt_gen3_entities(registry)
             result["solax_has_growatt_tou"] = has_tou
             result["solax_has_growatt_gen3"] = has_gen3
-            if not result["growatt_found"]:
-                if has_tou:
-                    result["inverter_type"] = "GROWATT_MODBUS"
-                elif has_gen3:
-                    result["inverter_type"] = "SPH_MODBUS"
-                else:
-                    result["inverter_type"] = "solax"
+            if has_tou:
+                result["inverter_type"] = "solax_modbus_growatt_min"
+            elif has_gen3:
+                result["inverter_type"] = "solax_modbus_growatt_sph"
+            elif not result["growatt_found"]:
+                result["inverter_type"] = "solax_modbus_native"
 
         # Currency & VAT from Nordpool area or Octopus defaults
         area_hints = self._hints_from_nordpool_area(
@@ -2586,18 +2589,18 @@ class HomeAssistantAPIController:
             )
             if self._has_growatt_tou_entities(entities):
                 # GEN4: Growatt MIN/MOD/MID with numbered TOU slots
-                platform_sensors["growatt_modbus"] = solax_sensors
+                platform_sensors["solax_modbus_growatt_min"] = solax_sensors
                 if not detected_platform:
-                    detected_platform = "growatt_modbus"
+                    detected_platform = "solax_modbus_growatt_min"
             elif self._has_growatt_gen3_entities(entities):
                 # GEN3: Growatt MIX/SPA/SPH with mode-specific time slots
-                platform_sensors["growatt_modbus_gen3"] = solax_sensors
+                platform_sensors["solax_modbus_growatt_sph"] = solax_sensors
                 if not detected_platform:
-                    detected_platform = "growatt_modbus_gen3"
+                    detected_platform = "solax_modbus_growatt_sph"
             else:
-                platform_sensors["solax"] = solax_sensors
+                platform_sensors["solax_modbus_native"] = solax_sensors
                 if not detected_platform:
-                    detected_platform = "solax"
+                    detected_platform = "solax_modbus_native"
 
         return platform_sensors, detected_platform
 

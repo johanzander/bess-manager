@@ -54,11 +54,15 @@ PRICE_STORE_TO_API: dict[str, str] = {
 # Single source of truth — used by setup_complete, settings_store migration,
 # and PATCH /api/settings.
 UI_TYPE_TO_PLATFORM: dict[str, str] = {
-    "MIN": "growatt_min",
-    "SPH": "growatt_sph",
-    "GROWATT_MODBUS": "growatt_solax_modbus",
-    "SPH_MODBUS": "growatt_solax_modbus_gen3",
-    "SOLAX": "solax",
+    "growatt_server_min": "growatt_server_min",
+    "growatt_server_sph": "growatt_server_sph",
+    "solax_modbus_growatt_min": "solax_modbus_growatt_min",
+    "solax_modbus_growatt_sph": "solax_modbus_growatt_sph",
+    "solax_modbus_native": "solax_modbus_native",
+    # Legacy values stored in growatt.inverter_type — used by settings_store
+    # migration to map old configs to new platform names.
+    "MIN": "growatt_server_min",
+    "SPH": "growatt_server_sph",
 }
 
 

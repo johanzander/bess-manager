@@ -3,7 +3,7 @@
   "description": "Synthetic scenario for CI E2E tests. Winter day, SE4, moderate price spread, no solar.",
   "mock_time": "@2025-01-15 08:30:00",
   "timezone": "Europe/Stockholm",
-  "inverter_type": "sph",
+  "inverter_type": "growatt_server_sph",
   "sensors": {
     "sensor.growatt_battery_soc": {
       "state": "50",

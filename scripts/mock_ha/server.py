@@ -67,10 +67,11 @@ def _generate_entity_registry(inverter_type: str) -> list[dict]:
     entity IDs so that BESS auto-discovery can detect the integration.
     """
     platform_map = {
-        "min": "growatt_server",
-        "sph": "growatt_server",
-        "solax": "solax_modbus",
-        "growatt_modbus": "solax_modbus",
+        "growatt_server_min": "growatt_server",
+        "growatt_server_sph": "growatt_server",
+        "solax_modbus_growatt_min": "solax_modbus",
+        "solax_modbus_growatt_sph": "solax_modbus",
+        "solax_modbus_native": "solax_modbus",
     }
     inverter_platform = platform_map.get(inverter_type, "growatt_server")
 
@@ -116,7 +117,7 @@ def _generate_config_entries(scenario: dict) -> list[dict]:
         )
 
     # Inverter config entry
-    if inverter_type in ("min", "sph"):
+    if inverter_type in ("growatt_server_min", "growatt_server_sph"):
         entries.append(
             {
                 "entry_id": "mock_growatt_config_entry",
@@ -125,7 +126,11 @@ def _generate_config_entries(scenario: dict) -> list[dict]:
                 "state": "loaded",
             }
         )
-    elif inverter_type in ("solax", "growatt_modbus"):
+    elif inverter_type in (
+        "solax_modbus_growatt_min",
+        "solax_modbus_growatt_sph",
+        "solax_modbus_native",
+    ):
         entries.append(
             {
                 "entry_id": "mock_solax_config_entry",
@@ -142,10 +147,10 @@ def _generate_services(inverter_type: str) -> dict:
     """Generate synthetic service list for inverter type detection."""
     services: dict[str, Any] = {}
 
-    if inverter_type in ("min", "sph"):
+    if inverter_type in ("growatt_server_min", "growatt_server_sph"):
         growatt_services: dict[str, Any] = {}
         # MIN uses update_time_segment, SPH uses write_ac_charge_times
-        if inverter_type == "min":
+        if inverter_type == "growatt_server_min":
             growatt_services["update_time_segment"] = {}
             growatt_services["read_time_segments"] = {}
         else:
@@ -155,7 +160,7 @@ def _generate_services(inverter_type: str) -> dict:
             growatt_services["read_ac_discharge_times"] = {}
         services["growatt_server"] = growatt_services
 
-    # growatt_modbus and solax use entity-based control — no
+    # solax_modbus platforms use entity-based control — no
     # growatt_server services needed. Detection relies on entity
     # registry suffixes (TOU time_1_enabled vs VPP remotecontrol_*).
 

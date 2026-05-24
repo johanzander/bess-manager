@@ -1,7 +1,7 @@
 {
   "name": "synthetic-growatt-min",
   "description": "Synthetic Growatt MIN (cloud/growatt_server) scenario with Nordpool SE2 for E2E testing",
-  "inverter_type": "min",
+  "inverter_type": "growatt_server_min",
   "mock_time": "@2026-05-10 08:00:00",
   "timezone": "Europe/Stockholm",
   "bess_config": {
@@ -41,7 +41,7 @@
       }
     },
     "inverter": {
-      "platform": "growatt_min"
+      "platform": "growatt_server_min"
     },
     "growatt": {
       "inverter_type": "MIN",

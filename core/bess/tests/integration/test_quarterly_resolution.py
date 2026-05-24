@@ -86,7 +86,7 @@ class TestQuarterlyOptimization:
         manager = BatterySystemManager(
             controller=MockHomeAssistantController(),
             price_source=MockSource([1.0] * 96),
-            addon_options={"inverter": {"platform": "growatt_min"}},
+            addon_options={"inverter": {"platform": "growatt_server_min"}},
         )
         battery_settings = BatterySettings()
         data = quarterly_test_scenario

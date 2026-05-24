@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CheckCircle, ChevronRight, ChevronLeft, Zap } from 'lucide-react';
 import api from '../lib/api';
-import { INTEGRATIONS, INVERTER_INTEGRATION_IDS, PLATFORM_TO_UI_TYPE, discoveryTypeToUiType, swapInverterSensors } from '../lib/sensorDefinitions';
+import { INTEGRATIONS, INVERTER_INTEGRATION_IDS, swapInverterSensors } from '../lib/sensorDefinitions';
 import { HomeFormSection } from '../components/settings/HomeFormSection';
 import type { HomeForm } from '../components/settings/HomeFormSection';
 import { PricingFormSection } from '../components/settings/PricingFormSection';
@@ -119,7 +119,7 @@ const SetupWizardPage: React.FC = () => {
         ...(d.octopusEntities?.exportTomorrow ? { octopusExportTomorrowEntity: d.octopusEntities.exportTomorrow } : {}),
       }));
       if (d.inverterType) {
-        setInverterForm(f => ({ ...f, inverterType: discoveryTypeToUiType(d.inverterType) }));
+        setInverterForm(f => ({ ...f, inverterType: d.inverterType }));
       }
       if (d.growattDeviceId) {
         setInverterForm(f => ({ ...f, deviceId: d.growattDeviceId! }));
@@ -201,8 +201,8 @@ const SetupWizardPage: React.FC = () => {
       }));
       // Restore inverter type from new inverter.platform or legacy growatt.inverter_type
       const invNew = s.inverter ?? {};
-      if (invNew.platform && PLATFORM_TO_UI_TYPE[invNew.platform]) {
-        setInverterForm(f => ({ ...f, inverterType: PLATFORM_TO_UI_TYPE[invNew.platform] }));
+      if (invNew.platform) {
+        setInverterForm(f => ({ ...f, inverterType: invNew.platform }));
       } else if (inv.inverterType) {
         setInverterForm(f => ({ ...f, inverterType: inv.inverterType }));
       }

@@ -78,6 +78,13 @@ class TestHintsFromNordpoolArea:
         # prefix is uppercased inside the method
         assert hints.get("currency") == "SEK"
 
+    def test_long_hacs_identifier_returns_correct_currency(self):
+        # HACS custom Nordpool uses long identifiers like "NORDPOOL_KWH_SE2_SEK_2_10_025"
+        # which should NOT match "NO" — the area must be parsed first.
+        # This is a regression test for issue #105.
+        hints = self.ctrl._hints_from_nordpool_area("SE2")
+        assert hints == {"currency": "SEK", "vat_multiplier": 1.25}
+
 
 # ---------------------------------------------------------------------------
 # Inverter type detection (MIN vs SPH)
@@ -90,36 +97,44 @@ class TestHintsFromNordpoolArea:
 class TestInverterTypeDetection:
     """Tests for the MIN/SPH heuristic in discover_ha_metadata.
 
-    Detection uses the entity registry: MIN creates a switch entity with
-    unique_id ending in '-ac_charge' on platform 'growatt_server'.  SPH does
-    not create this entity (SPH controls charging via service calls only).
+    Detection uses entity registry unique_id prefixes:
+      - tlx_ prefix → MIN (AC-coupled)
+      - mix_ prefix (without tlx_) → SPH (DC-coupled)
+    Note: mix_load_consumption_total appears on both types, so tlx_ is
+    the positive MIN signal.
     """
 
     def _run_detection(self, entity_registry: list[dict]) -> str | None:
         """Mirror the detection logic in discover_ha_metadata."""
-        has_ac_charge = any(
+        has_tlx = any(
             entry.get("platform") == "growatt_server"
-            and str(entry.get("unique_id", "")).endswith("-ac_charge")
+            and "-tlx_" in str(entry.get("unique_id", ""))
             for entry in entity_registry
         )
-        return "MIN" if has_ac_charge else "SPH"
+        return "MIN" if has_tlx else "SPH"
 
-    def test_min_detected_when_ac_charge_present(self):
+    def test_min_detected_with_tlx_entities(self):
         registry = [
             {
                 "entity_id": "sensor.abc123_soc",
                 "platform": "growatt_server",
                 "unique_id": "abc123-tlx_statement_of_charge",
             },
+        ]
+        assert self._run_detection(registry) == "MIN"
+
+    def test_min_detected_even_without_ac_charge(self):
+        """Issue #105: MIN without ac_charge entity — tlx_ prefix is enough."""
+        registry = [
             {
-                "entity_id": "switch.abc123_ac_charge",
+                "entity_id": "sensor.abc123_soc",
                 "platform": "growatt_server",
-                "unique_id": "abc123-ac_charge",
+                "unique_id": "ABC1234567-tlx_statement_of_charge",
             },
         ]
         assert self._run_detection(registry) == "MIN"
 
-    def test_sph_detected_when_ac_charge_absent(self):
+    def test_sph_detected_with_mix_entities(self):
         registry = [
             {
                 "entity_id": "sensor.egm2h4l0g0_soc",
@@ -134,23 +149,39 @@ class TestInverterTypeDetection:
         ]
         assert self._run_detection(registry) == "SPH"
 
-    def test_ac_charge_from_different_platform_does_not_match(self):
+    def test_mix_load_consumption_alone_gives_sph(self):
+        """mix_load_consumption_total appears on both types — not a MIN signal."""
         registry = [
             {
-                "entity_id": "switch.other_ac_charge",
-                "platform": "solax_modbus",
-                "unique_id": "other-ac_charge",
+                "entity_id": "sensor.abc123_load",
+                "platform": "growatt_server",
+                "unique_id": "abc123-mix_load_consumption_total",
             },
         ]
         assert self._run_detection(registry) == "SPH"
 
-    def test_partial_suffix_does_not_match(self):
-        # unique_id "abc123-no_ac_charge_enabled" ends differently
+    def test_tlx_plus_mix_load_gives_min(self):
+        """MIN has tlx_ entities and one mix_load_consumption_total."""
         registry = [
             {
-                "entity_id": "switch.abc123_charge",
+                "entity_id": "sensor.abc123_soc",
                 "platform": "growatt_server",
-                "unique_id": "abc123-no_ac_charge_enabled",
+                "unique_id": "abc123-tlx_statement_of_charge",
+            },
+            {
+                "entity_id": "sensor.abc123_load",
+                "platform": "growatt_server",
+                "unique_id": "abc123-mix_load_consumption_total",
+            },
+        ]
+        assert self._run_detection(registry) == "MIN"
+
+    def test_tlx_from_different_platform_does_not_match(self):
+        registry = [
+            {
+                "entity_id": "sensor.other_soc",
+                "platform": "solax_modbus",
+                "unique_id": "other-tlx_statement_of_charge",
             },
         ]
         assert self._run_detection(registry) == "SPH"
@@ -249,6 +280,22 @@ class TestDiscoverHaMetadataNordpoolArea:
         monkeypatch.setattr(self.ctrl, "_ws_query", self._ws_stub([entry], devices))
         result = self.ctrl.discover_ha_metadata(None)
         assert result["nordpool_area"] == "SE3"
+
+    def test_hacs_long_identifier_normalised(self, monkeypatch):
+        """Issue #105: HACS identifier 'nordpool_kwh_se2_sek_2_10_025' → 'SE2'."""
+        entry = {"domain": "nordpool", "state": "loaded", "entry_id": "abc"}
+        devices = [self._nordpool_device("nordpool_kwh_se2_sek_2_10_025")]
+        monkeypatch.setattr(self.ctrl, "_ws_query", self._ws_stub([entry], devices))
+        result = self.ctrl.discover_ha_metadata(None)
+        assert result["nordpool_area"] == "SE2"
+
+    def test_hacs_norwegian_identifier_normalised(self, monkeypatch):
+        """HACS identifier 'nordpool_kwh_no1_nok_3_10_025' → 'NO1' (not 'NO')."""
+        entry = {"domain": "nordpool", "state": "loaded", "entry_id": "abc"}
+        devices = [self._nordpool_device("nordpool_kwh_no1_nok_3_10_025")]
+        monkeypatch.setattr(self.ctrl, "_ws_query", self._ws_stub([entry], devices))
+        result = self.ctrl.discover_ha_metadata(None)
+        assert result["nordpool_area"] == "NO1"
 
     def test_non_matching_config_entry_ignored(self, monkeypatch):
         """Devices for a different config entry are not used."""

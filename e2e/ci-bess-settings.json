@@ -39,7 +39,7 @@
     }
   },
   "inverter": {
-    "platform": "growatt_min"
+    "platform": "growatt_server_min"
   },
   "growatt": {
     "inverter_type": "MIN",

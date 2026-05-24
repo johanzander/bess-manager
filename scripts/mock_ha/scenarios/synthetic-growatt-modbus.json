@@ -1,7 +1,7 @@
 {
   "name": "synthetic-growatt-modbus",
   "description": "Synthetic Growatt MIN via solax_modbus (local Modbus) scenario with Nordpool SE2 for E2E testing",
-  "inverter_type": "growatt_modbus",
+  "inverter_type": "solax_modbus_growatt_min",
   "mock_time": "@2026-05-10 08:00:00",
   "timezone": "Europe/Stockholm",
   "bess_config": {
@@ -41,10 +41,10 @@
       }
     },
     "inverter": {
-      "platform": "growatt_solax_modbus"
+      "platform": "solax_modbus_growatt_min"
     },
     "growatt": {
-      "inverter_type": "GROWATT_MODBUS",
+      "inverter_type": "solax_modbus_growatt_min",
       "device_id": ""
     },
     "sensors": {

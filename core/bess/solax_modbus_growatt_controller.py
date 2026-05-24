@@ -33,7 +33,7 @@ from .settings import BatterySettings
 logger = logging.getLogger(__name__)
 
 
-class GrowattSolaxModbusController(GrowattMinController):
+class SolaxModbusGrowattController(GrowattMinController):
     """Growatt MIN controller using solax_modbus with single-segment TOU.
 
     Instead of pre-programming 9 TOU segments, this controller manages a single
@@ -243,7 +243,7 @@ class GrowattSolaxModbusController(GrowattMinController):
 
     def compare_schedules(
         self,
-        other_schedule: "GrowattSolaxModbusController",
+        other_schedule: "SolaxModbusGrowattController",
         from_period: int = 0,
     ) -> tuple[bool, str]:
         """Compare schedules by strategic intent list (like SolaxController).

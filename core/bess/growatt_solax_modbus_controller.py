@@ -94,8 +94,6 @@ class GrowattSolaxModbusController(GrowattMinController):
                     self.strategic_intents[period],
                 )
 
-        self._calculate_hourly_settings()
-
         # Build single-segment TOU state for API display
         self._update_tou_display_state()
 
@@ -141,22 +139,6 @@ class GrowattSolaxModbusController(GrowattMinController):
 
         # Set grid charge and discharge rate (same as parent)
         self._write_period_to_hardware(controller, grid_charge, discharge_rate)
-
-    def _write_period_to_hardware(
-        self, controller, grid_charge: bool, discharge_rate: int
-    ) -> None:
-        """Write per-period grid charge and discharge settings to hardware.
-
-        TOU mode is handled by apply_period(); this only sets the per-period
-        parameters (same as parent GrowattMinController).
-
-        Args:
-            controller: HomeAssistantAPIController instance
-            grid_charge: Whether to enable grid charging
-            discharge_rate: Discharge power rate (0-100%)
-        """
-        controller.set_grid_charge(grid_charge)
-        controller.set_discharging_power_rate(discharge_rate)
 
     def write_schedule_to_hardware(
         self,
@@ -386,53 +368,6 @@ class GrowattSolaxModbusController(GrowattMinController):
             logger.info("Modbus: TOU segment 1 disabled (load_first default)")
         else:
             logger.info("Modbus: TOU segment 1 = %s (00:00-23:59)", mode)
-
-    def log_detailed_schedule(self, header=None) -> None:
-        """Log detailed schedule with per-period strategic intents.
-
-        Delegates to the parent's implementation which uses
-        get_detailed_period_groups() from the base class.
-        """
-        if header:
-            logger.info(header)
-
-        groups = self.get_detailed_period_groups()
-        if not groups:
-            logger.info("Modbus: no schedule data available")
-            return
-
-        now = time_utils.now()
-        current_period = now.hour * 4 + now.minute // 15
-
-        lines = [
-            "\n╔═══════════════╦══════════╦══════════════════╦═══════════════╦═════════════╦═════════════╦═══════════════╗",
-            "║  Time Period  ║ Duration ║ Strategic Intent ║ Battery Mode  ║ Grid Charge ║ Charge Rate ║Discharge Rate ║",
-            "╠═══════════════╬══════════╬══════════════════╬═══════════════╬═════════════╬═════════════╬═══════════════╣",
-        ]
-
-        for group in groups:
-            time_range = f"{group['start_time']}-{group['end_time']}"
-
-            duration_mins = group["duration_minutes"]
-            if duration_mins >= 60:
-                duration = f"{duration_mins // 60}h{duration_mins % 60:02d}m"
-            else:
-                duration = f"{duration_mins}min"
-
-            is_current = group["start_period"] <= current_period <= group["end_period"]
-            marker = "*" if is_current else " "
-
-            row = (
-                f"║{marker}{time_range:13} ║ {duration:8} ║ {group['intent']:16} ║ {group['mode']:13} ║"
-                f" {group['grid_charge']!s:11} ║ {group['charge_rate']:11}% ║ {group['discharge_rate']:13}% ║"
-            )
-            lines.append(row)
-
-        lines.append(
-            "╚═══════════════╩══════════╩══════════════════╩═══════════════╩═════════════╩═════════════╩═══════════════╝"
-        )
-        lines.append("* indicates current period")
-        logger.info("\n".join(lines))
 
     # ── Health check ─────────────────────────────────────────────────────────
 

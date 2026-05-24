@@ -72,15 +72,6 @@ class TestCreateSchedule:
         assert controller.strategic_intents == intents
         assert controller.current_schedule is schedule
 
-    def test_computes_hourly_settings(self, controller):
-        intents = hourly_to_quarterly({2: "GRID_CHARGING"})
-        schedule = make_schedule(intents)
-
-        controller.create_schedule(schedule, current_period=0)
-
-        assert controller.hourly_settings is not None
-        assert 2 in controller.hourly_settings
-
     def test_no_9_segment_tou_computation(self, controller):
         """Single-segment controller should NOT build 9-segment TOU intervals."""
         intents = hourly_to_quarterly(

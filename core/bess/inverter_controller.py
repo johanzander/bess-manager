@@ -76,7 +76,6 @@ class InverterController(ABC):
         self.current_schedule: DPSchedule | None = None
         self.strategic_intents: list[str] = []
         self.tou_intervals: list[dict] = []
-        self.hourly_settings: dict[int, dict] = {}
         self.corruption_detected: bool = False
 
     # ── Period utility ────────────────────────────────────────────────────────
@@ -153,84 +152,6 @@ class InverterController(ABC):
             discharge_rate: Discharge power rate (0-100%), post-inhibit
         """
         self._write_period_to_hardware(controller, grid_charge, discharge_rate)
-
-    # ── Shared hourly settings ────────────────────────────────────────────────
-
-    def _calculate_hourly_settings(self) -> None:
-        """Pre-calculate hourly settings from strategic intents.
-
-        Aggregates quarterly strategic intents (96 periods) into hourly settings
-        (24 hours). Each hour uses the dominant (most-common) intent among its
-        four quarterly periods; alphabetical order breaks ties deterministically.
-        """
-        self.hourly_settings = {}
-
-        if not self.strategic_intents:
-            raise ValueError(
-                "Missing strategic intents for hourly settings calculation"
-            )
-
-        num_periods = len(self.strategic_intents)
-        num_hours = (num_periods + 3) // 4
-
-        for hour in range(num_hours):
-            start_p = hour * 4
-            end_p = min(start_p + 4, num_periods)
-            period_intents = [self.strategic_intents[p] for p in range(start_p, end_p)]
-
-            intent_counts: dict[str, int] = {}
-            for intent in period_intents:
-                intent_counts[intent] = intent_counts.get(intent, 0) + 1
-            max_count = max(intent_counts.values())
-            dominant_intent = min(i for i, c in intent_counts.items() if c == max_count)
-
-            control = self.INTENT_TO_CONTROL[dominant_intent]
-
-            self.hourly_settings[hour] = {
-                "grid_charge": control["grid_charge"],
-                "charge_rate": control["charge_rate"],
-                "discharge_rate": control["discharge_rate"],
-                "strategic_intent": dominant_intent,
-                "state": (
-                    "charging"
-                    if dominant_intent in ("GRID_CHARGING", "SOLAR_STORAGE")
-                    else (
-                        "discharging"
-                        if dominant_intent in ("LOAD_SUPPORT", "EXPORT_ARBITRAGE")
-                        else "idle"
-                    )
-                ),
-                "batt_mode": (
-                    "battery_first"
-                    if dominant_intent in ("GRID_CHARGING", "SOLAR_STORAGE")
-                    else (
-                        "grid_first"
-                        if dominant_intent == "EXPORT_ARBITRAGE"
-                        else "load_first"
-                    )
-                ),
-                "battery_action_kw": 0.0,
-            }
-
-    def get_hourly_settings(self, hour: int) -> dict:
-        """Get pre-calculated settings for a specific hour.
-
-        Args:
-            hour: Hour (0-23)
-
-        Returns:
-            Dict with grid_charge, charge_rate, discharge_rate, state, batt_mode, etc.
-
-        Raises:
-            ValueError: If hourly settings not calculated yet for this hour
-        """
-        if hour not in self.hourly_settings:
-            raise ValueError(
-                f"No hourly settings for hour {hour}. "
-                f"Strategic intents: {len(self.strategic_intents)}, "
-                f"Settings calculated: {len(self.hourly_settings)}"
-            )
-        return self.hourly_settings[hour]
 
     def get_period_settings(self, period: int) -> dict:
         """Get control settings for a specific 15-minute period.
@@ -436,17 +357,21 @@ class InverterController(ABC):
     def sync_soc_limits(self, controller) -> None:
         """Sync SOC limits from config to inverter hardware."""
 
-    @abstractmethod
     def _write_period_to_hardware(
         self, controller, grid_charge: bool, discharge_rate: int
     ) -> None:
-        """Write per-period control settings to hardware (inverter-specific).
+        """Write per-period control settings to hardware.
+
+        Default implementation uses Growatt register interface (grid_charge +
+        discharge_rate). SolaX overrides with VPP commands.
 
         Args:
             controller: HomeAssistantAPIController instance
             grid_charge: Whether to enable grid charging
             discharge_rate: Discharge power rate (0-100%)
         """
+        controller.set_grid_charge(grid_charge)
+        controller.set_discharging_power_rate(discharge_rate)
 
     @abstractmethod
     def get_all_tou_segments(self) -> list[dict]:

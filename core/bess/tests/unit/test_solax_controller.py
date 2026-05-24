@@ -74,14 +74,6 @@ class TestCreateSchedule:
 
         assert controller.strategic_intents == intents
 
-    def test_hourly_settings_populated_after_create_schedule(
-        self, controller: SolaxController
-    ) -> None:
-        intents = ["IDLE"] * 96
-        controller.create_schedule(make_schedule_mock(intents))
-
-        assert len(controller.hourly_settings) == 24
-
     def test_current_schedule_stored_after_create_schedule(
         self, controller: SolaxController
     ) -> None:

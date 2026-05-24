@@ -3,7 +3,8 @@
 ## Beta Release (`release beta`)
 
 1. **Determine next version**: Run `git fetch beta main` then check `git show beta/main:config.yaml | grep '^version:'` to see the version **currently on beta/main**. Also check `gh release list -L 5 -R johanzander/bess-manager-beta` for published releases. The new version MUST be higher than both. Increment the beta number (e.g. `9.0.0b12` → `9.0.0b13`). **CRITICAL: If local config.yaml already matches beta/main, you MUST still bump — same version = HA won't detect the update.**
-2. **Run tests locally** — ALL of these must pass before proceeding:
+2. **Sync with target branch** — `git fetch beta main && git merge beta/main`. Resolve any conflicts locally. Never push a branch that is behind the target.
+3. **Run tests locally** — ALL of these must pass before proceeding:
    - `pytest -m "not slow"` (includes scenario discovery regression tests)
    - `pytest core/bess/tests/unit/test_scenario_discovery.py -v` (show individual scenario results)
    - `npx vitest run` (frontend tests)

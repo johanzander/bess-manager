@@ -46,14 +46,6 @@ class GrowattSphController(InverterController):
         {"LOAD_SUPPORT", "EXPORT_ARBITRAGE"}
     )
 
-    INTENT_TO_MODE: ClassVar[dict[str, str]] = {
-        "GRID_CHARGING": "battery_first",
-        "SOLAR_STORAGE": "load_first",
-        "LOAD_SUPPORT": "load_first",
-        "EXPORT_ARBITRAGE": "grid_first",
-        "IDLE": "load_first",
-    }
-
     def __init__(self, battery_settings: BatterySettings) -> None:
         """Initialize the SPH controller."""
         super().__init__(battery_settings)
@@ -271,21 +263,6 @@ class GrowattSphController(InverterController):
         )
 
     # ── Hardware interface ────────────────────────────────────────────────────
-
-    def _write_period_to_hardware(
-        self, controller, grid_charge: bool, discharge_rate: int
-    ) -> None:
-        """Write per-period grid charge and discharge settings to Growatt SPH hardware.
-
-        SPH uses the same Growatt register interface as MIN for per-period control.
-
-        Args:
-            controller: HomeAssistantAPIController instance
-            grid_charge: Whether to enable grid charging
-            discharge_rate: Discharge power rate (0-100%)
-        """
-        controller.set_grid_charge(grid_charge)
-        controller.set_discharging_power_rate(discharge_rate)
 
     def write_schedule_to_hardware(
         self,

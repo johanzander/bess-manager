@@ -72,19 +72,19 @@
         "unit_of_measurement": "W"
       }
     },
-    "sensor.growatt_mix_solax_total_import_power": {
+    "sensor.growatt_mix_solax_ac_power_to_user": {
       "state": "1500",
       "attributes": {
         "unit_of_measurement": "W"
       }
     },
-    "sensor.growatt_mix_solax_total_export_power": {
+    "sensor.growatt_mix_solax_ac_power_to_grid": {
       "state": "0",
       "attributes": {
         "unit_of_measurement": "W"
       }
     },
-    "sensor.growatt_mix_solax_total_pv_power": {
+    "sensor.growatt_mix_solax_pv_power_total": {
       "state": "2000",
       "attributes": {
         "unit_of_measurement": "W"
@@ -193,21 +193,21 @@
       "device_id": "dev-solax-gen3-001"
     },
     {
-      "entity_id": "sensor.growatt_mix_solax_total_import_power",
+      "entity_id": "sensor.growatt_mix_solax_ac_power_to_user",
       "platform": "solax_modbus",
-      "unique_id": "solax_total_import_power",
+      "unique_id": "solax_ac_power_to_user",
       "device_id": "dev-solax-gen3-001"
     },
     {
-      "entity_id": "sensor.growatt_mix_solax_total_export_power",
+      "entity_id": "sensor.growatt_mix_solax_ac_power_to_grid",
       "platform": "solax_modbus",
-      "unique_id": "solax_total_export_power",
+      "unique_id": "solax_ac_power_to_grid",
       "device_id": "dev-solax-gen3-001"
     },
     {
-      "entity_id": "sensor.growatt_mix_solax_total_pv_power",
+      "entity_id": "sensor.growatt_mix_solax_pv_power_total",
       "platform": "solax_modbus",
-      "unique_id": "solax_total_pv_power",
+      "unique_id": "solax_pv_power_total",
       "device_id": "dev-solax-gen3-001"
     },
     {

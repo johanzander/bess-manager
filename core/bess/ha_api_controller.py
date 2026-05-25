@@ -356,10 +356,10 @@ class HomeAssistantAPIController:
     # battery_soc                    state_of_charge_soc                battery_capacity / battery_soc
     # battery_charge_power           battery_1_charging_w               battery_power_charge / battery_charge_power
     # battery_discharge_power        battery_1_discharging_w            battery_power_discharge / battery_discharge_power
-    # import_power                   import_power                       measured_power / total_forward_power
-    # export_power                   export_power                       grid_export / total_reverse_power
+    # import_power                   import_power                       measured_power / total_forward_power / ac_power_to_user
+    # export_power                   export_power                       grid_export / total_reverse_power / ac_power_to_grid
     # local_load_power               local_load_power                   house_load / total_load_power
-    # pv_power                       internal_wattage                   pv_power_1
+    # pv_power                       internal_wattage                   pv_power_1 / pv_power_total / total_pv_power
     # grid_charge                    charge_from_grid                   charger_switch
     # battery_charging_power_rate    battery_charge_power_limit         ems_charging_rate
     # battery_discharging_power_rate battery_discharge_power_limit      ems_discharging_rate
@@ -483,15 +483,16 @@ class HomeAssistantAPIController:
         "battery_discharge_power": "battery_discharge_power",  # Growatt inverter
         # Grid power
         "measured_power": "import_power",  # SolaX native
-        "total_forward_power": "import_power",  # Growatt GEN2/3
-        "total_import_power": "import_power",  # Growatt GEN4 (MIN/MOD/MID)
+        "total_forward_power": "import_power",  # Growatt GEN4 (MIN/MOD/MID) — register 3041
+        "ac_power_to_user": "import_power",  # Growatt GEN3 (MIX/SPA/SPH) — register 1015
         "grid_export": "export_power",  # SolaX native
         "grid_import": "import_power",  # SolaX native alternative
-        "total_reverse_power": "export_power",  # Growatt GEN2/3
-        "total_export_power": "export_power",  # Growatt GEN4 (MIN/MOD/MID)
+        "total_reverse_power": "export_power",  # Growatt GEN4 (MIN/MOD/MID) — register 3043
+        "ac_power_to_grid": "export_power",  # Growatt GEN3 (MIX/SPA/SPH) — register 1023
         # Solar power
         "pv_power_1": "pv_power",  # SolaX native / single string
-        "total_pv_power": "pv_power",  # Growatt GEN4 (MIN/MOD/MID)
+        "pv_power_total": "pv_power",  # Growatt (all generations) — register 1, enabled by default
+        "total_pv_power": "pv_power",  # Growatt GEN4 (disabled by default)
         # Load power
         "house_load": "local_load_power",  # SolaX native
         "total_load_power": "local_load_power",  # Growatt inverter
@@ -511,9 +512,9 @@ class HomeAssistantAPIController:
         # Load consumption — multiple naming variants across generations
         "home_consumption_energy": "lifetime_load_consumption",  # SPF only
         "total_load": "lifetime_load_consumption",  # GEN3 (MIX/SPA/SPH)
-        "total_load_energy": "lifetime_load_consumption",  # GEN4 (MIN/MOD/MID)
-        # GEN4 (MIN/MOD/MID): register 3077 — total system production
-        "total_yield": "lifetime_system_production",  # GEN4 (MIN/MOD/MID)
+        "total_yield": "lifetime_load_consumption",  # GEN4 (MIN/MOD/MID) — register 3077, name="Total Load Energy"
+        # System production
+        "total_power_generation": "lifetime_system_production",  # GEN4 (MIN/MOD/MID) — register 3051
         # ── VPP control entities (select/number/button.<prefix>_<suffix>) ─
         "remotecontrol_power_control": "solax_power_control_mode",
         "remotecontrol_active_power": "solax_active_power",
@@ -2617,6 +2618,10 @@ class HomeAssistantAPIController:
         is assigned by the integration and never changes regardless of
         user entity renaming — this is the only reliable matching strategy.
 
+        Enabled entities are preferred over disabled ones.  If the only
+        match for a sensor key is a disabled entity, it is still returned
+        (the caller can read its state) but a warning is logged.
+
         Args:
             entities: Full entity registry list.
             platforms: HA platform names to filter by (e.g. ["solax_modbus"]).
@@ -2626,6 +2631,7 @@ class HomeAssistantAPIController:
             dict mapping bess_sensor_key -> entity_id.
         """
         result: dict[str, str] = {}
+        disabled_matches: dict[str, str] = {}
         platform_set = set(platforms)
 
         # Sort suffixes longest-first so "total_grid_import" matches before
@@ -2642,6 +2648,7 @@ class HomeAssistantAPIController:
                 continue
 
             unique_id = str(entity.get("unique_id", ""))
+            is_disabled = bool(entity.get("disabled_by"))
 
             for suffix, bess_key in sorted_suffixes:
                 if (
@@ -2650,8 +2657,24 @@ class HomeAssistantAPIController:
                     or unique_id == suffix
                 ):
                     if bess_key not in result:
-                        result[bess_key] = entity_id
+                        if is_disabled:
+                            # Defer — an enabled entity may appear later
+                            if bess_key not in disabled_matches:
+                                disabled_matches[bess_key] = entity_id
+                        else:
+                            result[bess_key] = entity_id
                     break
+
+        # Fill gaps with disabled entities and warn
+        for bess_key, entity_id in disabled_matches.items():
+            if bess_key not in result:
+                result[bess_key] = entity_id
+                logger.warning(
+                    "Sensor '%s' mapped to disabled entity %s — "
+                    "enable it in Home Assistant for reliable operation",
+                    bess_key,
+                    entity_id,
+                )
 
         logger.info(
             "Mapped %d entities from registry (platforms=%s)",

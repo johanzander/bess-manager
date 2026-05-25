@@ -84,7 +84,7 @@
         "unit_of_measurement": "W"
       }
     },
-    "sensor.growatt_inverter_solax_total_pv_power": {
+    "sensor.growatt_inverter_solax_pv_power_total": {
       "state": "800",
       "attributes": {
         "unit_of_measurement": "W"
@@ -196,7 +196,7 @@
         "unit_of_measurement": "kWh"
       }
     },
-    "sensor.growatt_inverter_solax_total_yield": {
+    "sensor.growatt_inverter_solax_total_power_generation": {
       "state": "25000",
       "attributes": {
         "unit_of_measurement": "kWh"
@@ -368,19 +368,19 @@
     {
       "entity_id": "sensor.growatt_inverter_solax_total_import_power",
       "platform": "solax_modbus",
-      "unique_id": "solax_total_import_power",
+      "unique_id": "solax_total_forward_power",
       "device_id": "dev-solax-001"
     },
     {
       "entity_id": "sensor.growatt_inverter_solax_total_export_power",
       "platform": "solax_modbus",
-      "unique_id": "solax_total_export_power",
+      "unique_id": "solax_total_reverse_power",
       "device_id": "dev-solax-001"
     },
     {
-      "entity_id": "sensor.growatt_inverter_solax_total_pv_power",
+      "entity_id": "sensor.growatt_inverter_solax_pv_power_total",
       "platform": "solax_modbus",
-      "unique_id": "solax_total_pv_power",
+      "unique_id": "solax_pv_power_total",
       "device_id": "dev-solax-001"
     },
     {
@@ -482,13 +482,13 @@
     {
       "entity_id": "sensor.growatt_inverter_solax_total_load_energy",
       "platform": "solax_modbus",
-      "unique_id": "solax_total_load_energy",
+      "unique_id": "solax_total_yield",
       "device_id": "dev-solax-001"
     },
     {
-      "entity_id": "sensor.growatt_inverter_solax_total_yield",
+      "entity_id": "sensor.growatt_inverter_solax_total_power_generation",
       "platform": "solax_modbus",
-      "unique_id": "solax_total_yield",
+      "unique_id": "solax_total_power_generation",
       "device_id": "dev-solax-001"
     },
     {
@@ -838,7 +838,7 @@
           "battery_discharge_power": "sensor.growatt_inverter_solax_battery_discharge_power",
           "import_power": "sensor.growatt_inverter_solax_total_import_power",
           "export_power": "sensor.growatt_inverter_solax_total_export_power",
-          "pv_power": "sensor.growatt_inverter_solax_total_pv_power",
+          "pv_power": "sensor.growatt_inverter_solax_pv_power_total",
           "local_load_power": "sensor.growatt_inverter_solax_total_load_power",
           "battery_charging_power_rate": "number.growatt_inverter_solax_inverter_ems_charging_rate",
           "battery_discharging_power_rate": "number.growatt_inverter_solax_inverter_ems_discharging_rate",
@@ -856,7 +856,7 @@
           "lifetime_import_from_grid": "sensor.growatt_inverter_solax_total_grid_import",
           "lifetime_export_to_grid": "sensor.growatt_inverter_solax_total_grid_export",
           "lifetime_load_consumption": "sensor.growatt_inverter_solax_total_load_energy",
-          "lifetime_system_production": "sensor.growatt_inverter_solax_total_yield",
+          "lifetime_system_production": "sensor.growatt_inverter_solax_total_power_generation",
           "current_l1": "sensor.growatt_inverter_solax_grid_current_l1",
           "current_l2": "sensor.growatt_inverter_solax_grid_current_l2",
           "current_l3": "sensor.growatt_inverter_solax_grid_current_l3"

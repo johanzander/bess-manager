@@ -4,6 +4,15 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.0.0b18] - 2026-05-25
+
+### Fixed
+
+- **Sensor discovery used hallucinated unique_id suffixes** — verified all SOLAX_ENTITY_SUFFIX_MAP entries against the real `wills106/homeassistant-solax-modbus` plugin_growatt.py source code and real user debug logs. Removed `total_import_power`, `total_export_power`, `total_load_energy` (don't exist in the integration); added correct suffixes `ac_power_to_user`/`ac_power_to_grid` (GEN3), `pv_power_total` (all generations), `total_power_generation` (GEN4 system production).
+- **`total_yield` mapped to wrong BESS key** — was `lifetime_system_production` but register 3077 is actually "Total Load Energy" (confirmed from integration source and Niklas's debug log showing `unique_id_suffix: solax_total_yield` on entity named "Total Load Energy"). Now correctly maps to `lifetime_load_consumption`. Added `total_power_generation` (register 3051) for `lifetime_system_production`.
+- **Discovery could map to disabled entities** — `_map_registry_entities` now prefers enabled entities; only falls back to disabled ones (with a warning log) when no enabled match exists. Fixes PV power discovery mapping to the disabled `total_pv_power` entity instead of the enabled `pv_power_total`.
+- **Fixed comments** — `total_forward_power`/`total_reverse_power` are GEN4 (register 3041/3043), not "GEN2/3" as previously documented.
+
 ## [9.0.0b17] - 2026-05-24
 
 ### Fixed

@@ -48,7 +48,7 @@ const SetupWizardPage: React.FC = () => {
   });
 
   const [inverterForm, setInverterForm] = useState<InverterForm>({
-    inverterType: 'MIN',
+    inverterType: 'growatt_server_min',
     deviceId: '',
   });
 

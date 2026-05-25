@@ -231,7 +231,7 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
             { platform: 'growatt' as const, label: 'Growatt', detected: growattDetected || growattModbusDetected },
             { platform: 'solax' as const, label: 'SolaX (Native)', detected: solaxDetected },
           ]).map(opt => {
-            const isSelected = opt.platform === 'growatt' ? isGrowatt : activeInverterIntegrationId === opt.platform;
+            const isSelected = opt.platform === 'growatt' ? isGrowatt : activeInverterIntegrationId === 'solax_modbus_native';
             return (
               <label
                 key={opt.platform}

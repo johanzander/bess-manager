@@ -50,7 +50,7 @@ const EMPTY_PRICING: PricingForm = {
   area: '', markupRate: 0, vatMultiplier: 1.25, additionalCosts: 0,
   taxReduction: 0,
 };
-const EMPTY_INVERTER: InverterForm = { inverterType: 'MIN', deviceId: '' };
+const EMPTY_INVERTER: InverterForm = { inverterType: 'growatt_server_min', deviceId: '' };
 
 // ---------------------------------------------------------------------------
 // Component

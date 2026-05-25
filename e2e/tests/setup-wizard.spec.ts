@@ -76,7 +76,7 @@ test.describe('Setup Wizard', () => {
     await expectActiveStep(page, 1);
 
     // Verify inverter platform radio on sensor step
-    if (expected.inverterType === 'SOLAX') {
+    if (expected.inverterType === 'solax_modbus_native') {
       // SolaX platform should be selected
       await expect(radioByLabel(page, 'SolaX (Native)')).toBeChecked();
     } else {
@@ -84,7 +84,7 @@ test.describe('Setup Wizard', () => {
       await expect(page.getByRole('radio', { name: 'Growatt', exact: true })).toBeChecked();
 
       // Sub-type radios are on the sensor/integrations step (step 1)
-      if (expected.inverterType === 'SPH') {
+      if (expected.inverterType === 'growatt_server_sph' || expected.inverterType === 'solax_modbus_growatt_sph') {
         await expect(radioByLabel(page, 'SPH (DC-coupled)')).toBeChecked();
       } else {
         await expect(radioByLabel(page, 'MIC/MIN/MOD/MID (AC-coupled)')).toBeChecked();

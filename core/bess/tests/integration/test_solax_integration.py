@@ -53,7 +53,7 @@ def _make_bsm_solax(
     bsm = BatterySystemManager(
         controller=controller,
         price_source=price_source,
-        addon_options={"inverter": {"platform": "solax"}},
+        addon_options={"inverter": {"platform": "solax_modbus_native"}},
     )
 
     return bsm, controller

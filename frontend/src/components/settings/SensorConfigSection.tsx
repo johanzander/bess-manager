@@ -54,10 +54,11 @@ function isIntegrationFound(
   discovery: DiscoveryResult,
   sensors: Record<string, string>,
 ): boolean {
-  if (id === 'growatt') return discovery.growattFound;
-  if (id === 'growatt_modbus') return discovery.solaxHasGrowattTou;
-  if (id === 'growatt_modbus_gen3') return discovery.solaxHasGrowattGen3;
-  if (id === 'solax') return discovery.solaxFound;
+  if (id === 'growatt_server_min') return discovery.growattFound;
+  if (id === 'growatt_server_sph') return discovery.growattFound;
+  if (id === 'solax_modbus_growatt_min') return discovery.solaxHasGrowattTou;
+  if (id === 'solax_modbus_growatt_sph') return discovery.solaxHasGrowattGen3;
+  if (id === 'solax_modbus_native') return discovery.solaxFound;
   if (id === 'nordpool') return discovery.nordpoolFound;
   if (id === 'phase_current') {
     return !!(sensors['current_l1'] || sensors['current_l2'] || sensors['current_l3']);
@@ -128,7 +129,7 @@ function healthDot(
 // ---------------------------------------------------------------------------
 
 // IDs of inverter integrations — only one should be visible at a time.
-const INVERTER_IDS = new Set(['growatt', 'growatt_modbus', 'growatt_modbus_gen3', 'solax']);
+const INVERTER_IDS = new Set(['growatt_server_min', 'growatt_server_sph', 'solax_modbus_growatt_min', 'solax_modbus_growatt_sph', 'solax_modbus_native']);
 
 interface Props {
   sensors: Record<string, string>;
@@ -159,10 +160,11 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
   };
 
   // Derive active inverter integration from the selected type
-  const activeInverterIntegrationId = INVERTER_INTEGRATION_IDS[inverterForm.inverterType] ?? 'growatt';
-  const isGrowatt = activeInverterIntegrationId === 'growatt'
-    || activeInverterIntegrationId === 'growatt_modbus'
-    || activeInverterIntegrationId === 'growatt_modbus_gen3';
+  const activeInverterIntegrationId = INVERTER_INTEGRATION_IDS[inverterForm.inverterType] ?? 'growatt_server_min';
+  const isGrowatt = activeInverterIntegrationId === 'growatt_server_min'
+    || activeInverterIntegrationId === 'growatt_server_sph'
+    || activeInverterIntegrationId === 'solax_modbus_growatt_min'
+    || activeInverterIntegrationId === 'solax_modbus_growatt_sph';
 
   // Detection flags for disabling platform options.
   // In wizard mode, use discovery results. In settings mode, derive from
@@ -190,16 +192,13 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
 
   const handlePlatformChange = (platform: 'growatt' | 'solax') => {
     if (platform === 'solax') {
-      onInverterChange({ ...inverterForm, inverterType: 'SOLAX' });
+      onInverterChange({ ...inverterForm, inverterType: 'solax_modbus_native' });
     } else {
-      // When switching to Growatt, default to MIN unless already a Growatt type
-      const currentIsGrowatt = inverterForm.inverterType === 'MIN'
-        || inverterForm.inverterType === 'SPH'
-        || inverterForm.inverterType === 'GROWATT_MODBUS'
-        || inverterForm.inverterType === 'SPH_MODBUS';
+      // When switching to Growatt, default to cloud MIN unless already a Growatt type
+      const currentIsGrowatt = isGrowatt;
       onInverterChange({
         ...inverterForm,
-        inverterType: currentIsGrowatt ? inverterForm.inverterType : 'MIN',
+        inverterType: currentIsGrowatt ? inverterForm.inverterType : 'growatt_server_min',
       });
     }
   };
@@ -232,7 +231,7 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
             { platform: 'growatt' as const, label: 'Growatt', detected: growattDetected || growattModbusDetected },
             { platform: 'solax' as const, label: 'SolaX (Native)', detected: solaxDetected },
           ]).map(opt => {
-            const isSelected = opt.platform === 'growatt' ? isGrowatt : activeInverterIntegrationId === opt.platform;
+            const isSelected = opt.platform === 'growatt' ? isGrowatt : activeInverterIntegrationId === 'solax_modbus_native';
             return (
               <label
                 key={opt.platform}
@@ -265,20 +264,18 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
           <div className="mt-3 ml-6 pl-3 border-l-2 border-gray-200 dark:border-gray-600 space-y-2">
             <div className="flex flex-wrap gap-x-5 gap-y-1">
               {([
-                { value: 'MIN', label: 'MIC/MIN/MOD/MID (AC-coupled)' },
-                { value: 'SPH', label: 'MIX/SPA/SPH (DC-coupled)' },
+                { value: 'min' as const, label: 'MIC/MIN/MOD/MID (AC-coupled)' },
+                { value: 'sph' as const, label: 'MIX/SPA/SPH (DC-coupled)' },
               ]).map(opt => {
                 // In wizard mode, disable the subtype that doesn't match auto-detection
-                const detectedType = discovery?.inverterType?.toUpperCase();
-                // GROWATT_MODBUS is a MIN variant, SPH_MODBUS is an SPH variant
-                const normalizedDetected = detectedType === 'GROWATT_MODBUS' ? 'MIN'
-                  : detectedType === 'SPH_MODBUS' ? 'SPH'
-                    : detectedType;
+                const detectedType = discovery?.inverterType;
+                const isMinType = detectedType?.includes('_min');
+                const isSphType = detectedType?.includes('_sph');
+                const normalizedDetected = isMinType ? 'min' : isSphType ? 'sph' : undefined;
                 const subtypeDetected = !wizardMode || !normalizedDetected || normalizedDetected === opt.value;
-                // MIN or GROWATT_MODBUS both select the MIN radio; SPH or SPH_MODBUS select SPH
-                const isMinVariant = inverterForm.inverterType === 'MIN' || inverterForm.inverterType === 'GROWATT_MODBUS';
-                const isSphVariant = inverterForm.inverterType === 'SPH' || inverterForm.inverterType === 'SPH_MODBUS';
-                const isChecked = opt.value === 'MIN' ? isMinVariant : isSphVariant;
+                const isMinVariant = inverterForm.inverterType === 'growatt_server_min' || inverterForm.inverterType === 'solax_modbus_growatt_min';
+                const isSphVariant = inverterForm.inverterType === 'growatt_server_sph' || inverterForm.inverterType === 'solax_modbus_growatt_sph';
+                const isChecked = opt.value === 'min' ? isMinVariant : isSphVariant;
                 return (
                   <label
                     key={opt.value}
@@ -289,7 +286,7 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
                       name="growatt-type"
                       checked={isChecked}
                       disabled={!subtypeDetected}
-                      onChange={() => onInverterChange({ ...inverterForm, inverterType: opt.value })}
+                      onChange={() => onInverterChange({ ...inverterForm, inverterType: opt.value === 'min' ? 'growatt_server_min' : 'growatt_server_sph' })}
                       className="text-blue-500"
                     />
                     <span className="text-sm text-gray-600 dark:text-gray-300">{opt.label}</span>
@@ -300,17 +297,17 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
 
             {/* Connection selector: shown for both MIN and SPH */}
             {(() => {
-              const isMinVariant = inverterForm.inverterType === 'MIN' || inverterForm.inverterType === 'GROWATT_MODBUS';
-              const isSphVariant = inverterForm.inverterType === 'SPH' || inverterForm.inverterType === 'SPH_MODBUS';
+              const isMinVariant = inverterForm.inverterType === 'growatt_server_min' || inverterForm.inverterType === 'solax_modbus_growatt_min';
+              const isSphVariant = inverterForm.inverterType === 'growatt_server_sph' || inverterForm.inverterType === 'solax_modbus_growatt_sph';
               const connectionOptions = isMinVariant
                 ? [
-                    { value: 'MIN' as const, label: 'Growatt Server (Cloud)', detected: growattDetected },
-                    { value: 'GROWATT_MODBUS' as const, label: 'SolaX Modbus (Local)', detected: growattModbusDetected },
+                    { value: 'growatt_server_min' as const, label: 'Growatt Cloud (MIN)', detected: growattDetected },
+                    { value: 'solax_modbus_growatt_min' as const, label: 'SolaX Modbus (Local)', detected: growattModbusDetected },
                   ]
                 : isSphVariant
                   ? [
-                      { value: 'SPH' as const, label: 'Growatt Server (Cloud)', detected: growattDetected },
-                      { value: 'SPH_MODBUS' as const, label: 'SolaX Modbus (Local)', detected: growattModbusGen3Detected },
+                      { value: 'growatt_server_sph' as const, label: 'Growatt Cloud (SPH)', detected: growattDetected },
+                      { value: 'solax_modbus_growatt_sph' as const, label: 'SolaX Modbus (Local)', detected: growattModbusGen3Detected },
                     ]
                   : null;
               if (!connectionOptions) return null;
@@ -340,7 +337,7 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
             })()}
 
             {/* Device ID: only for cloud connection (growatt_server) */}
-            {inverterForm.inverterType !== 'GROWATT_MODBUS' && inverterForm.inverterType !== 'SPH_MODBUS' && (
+            {inverterForm.inverterType !== 'solax_modbus_growatt_min' && inverterForm.inverterType !== 'solax_modbus_growatt_sph' && (
               <label className="block">
                 <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Device ID</span>
                 <input

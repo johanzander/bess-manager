@@ -6,7 +6,7 @@ correct settings are persisted and live system calls are made.
 
 Any scenario file that contains an ``expected_wizard`` section is
 automatically included.  Each key under ``expected_wizard`` is a wizard
-variant (e.g. "growatt_modbus", "growatt_cloud") that is tested
+variant (e.g. "solax_modbus_growatt_min", "growatt_server_min") that is tested
 independently.  Adding a new regression test is just adding a variant
 to the scenario JSON.
 """

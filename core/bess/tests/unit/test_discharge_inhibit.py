@@ -36,7 +36,7 @@ def _make_bsm(
     bsm = BatterySystemManager(
         controller=controller,
         price_source=MockSource([1.0] * 96),
-        addon_options={"inverter": {"platform": "growatt_min"}},
+        addon_options={"inverter": {"platform": "growatt_server_min"}},
     )
     return bsm, controller
 

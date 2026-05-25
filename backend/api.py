@@ -2581,15 +2581,28 @@ async def run_setup_discovery():
             registry
         )
         if platform_sensors:
-            sensors = dict(platform_sensors.get(detected_platform, {}))
+            # When local modbus is detected alongside cloud, use modbus as
+            # the primary sensor source (it provides TOU control entities).
+            effective_platform = detected_platform
+            if (
+                detected_platform == "growatt"
+                and "solax_modbus_growatt_min" in platform_sensors
+            ):
+                effective_platform = "solax_modbus_growatt_min"
+            elif (
+                detected_platform == "growatt"
+                and "solax_modbus_growatt_sph" in platform_sensors
+            ):
+                effective_platform = "solax_modbus_growatt_sph"
+            sensors = dict(platform_sensors.get(effective_platform, {}))
             suffix_map = (
                 ha.ENTITY_SUFFIX_MAP
-                if detected_platform == "growatt"
+                if effective_platform == "growatt"
                 else ha.SOLAX_ENTITY_SUFFIX_MAP
-            )  # growatt_modbus and growatt_modbus_gen3 also use SOLAX_ENTITY_SUFFIX_MAP
+            )
             all_bess_keys = list(set(suffix_map.values()))
             # Single-segment TOU: Modbus GEN4 only needs slot 1 entities
-            if detected_platform == "growatt_modbus":
+            if effective_platform == "solax_modbus_growatt_min":
                 all_bess_keys = [
                     k
                     for k in all_bess_keys
@@ -2819,15 +2832,17 @@ async def setup_complete(payload: APISetupCompletePayload):
         # --- inverter ---
         if payload.inverterType is not None:
             _platform = UI_TYPE_TO_PLATFORM.get(
-                payload.inverterType.upper(), "growatt_min"
+                payload.inverterType, "growatt_server_min"
             )
             inv_section = bess_controller.settings_store.get_section("inverter")
             inv_section["platform"] = _platform
             sections["inverter"] = inv_section
-            # Keep legacy growatt section updated for backward compat
-            if _platform in ("growatt_min", "growatt_sph"):
+            # Keep legacy growatt section updated for cloud platforms
+            if _platform in ("growatt_server_min", "growatt_server_sph"):
                 growatt_section = bess_controller.settings_store.get_section("growatt")
-                growatt_section["inverter_type"] = payload.inverterType.upper()
+                growatt_section["inverter_type"] = (
+                    "MIN" if "min" in _platform else "SPH"
+                )
                 if payload.growattDeviceId:
                     growatt_section["device_id"] = payload.growattDeviceId
                 sections["growatt"] = growatt_section

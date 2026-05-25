@@ -1,9 +1,9 @@
 {
   "name": "CI Wizard: Octopus Energy + MIN inverter",
-  "description": "Setup wizard scenario \u2014 UK user, Octopus Energy Agile tariff, MIN (AC-coupled) inverter, single-phase.",
+  "description": "Setup wizard scenario — UK user, Octopus Energy Agile tariff, MIN (AC-coupled) inverter, single-phase.",
   "mock_time": "@2025-01-15 08:30:00",
   "timezone": "Europe/London",
-  "inverter_type": "min",
+  "inverter_type": "growatt_server_min",
   "sensors": {
     "sensor.abc1234567_state_of_charge_soc": {
       "state": "45",
@@ -739,6 +739,12 @@
       "unique_id": "octopus-export-tomorrow"
     },
     {
+      "entity_id": "sensor.mock_inverter_soc",
+      "platform": "growatt_server",
+      "config_entry_id": "mock_growatt_config_entry",
+      "unique_id": "MOCK_SN-tlx_statement_of_charge"
+    },
+    {
       "entity_id": "switch.mock_inverter_ac_charge",
       "platform": "growatt_server",
       "config_entry_id": "mock_growatt_config_entry",
@@ -755,7 +761,7 @@
     "nordpool_custom_area": null,
     "nordpool_config_entry_id": null,
     "octopus_found": true,
-    "inverter_type": "MIN",
+    "inverter_type": "growatt_server_min",
     "currency": "GBP",
     "vat_multiplier": 1.0,
     "detected_platform": "growatt",

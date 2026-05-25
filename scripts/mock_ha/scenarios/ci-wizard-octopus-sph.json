@@ -3,7 +3,7 @@
   "description": "Setup wizard scenario \u2014 UK user, Octopus Energy, SPH (DC-coupled) inverter, 3-phase, with consumption forecast and discharge inhibit.",
   "mock_time": "@2025-01-15 08:30:00",
   "timezone": "Europe/London",
-  "inverter_type": "sph",
+  "inverter_type": "growatt_server_sph",
   "sensors": {
     "sensor.xyz9876543_state_of_charge_soc": {
       "state": "60",
@@ -360,7 +360,7 @@
     "nordpool_custom_area": null,
     "nordpool_config_entry_id": null,
     "octopus_found": true,
-    "inverter_type": "SPH",
+    "inverter_type": "growatt_server_sph",
     "currency": "GBP",
     "vat_multiplier": 1.0,
     "detected_platform": null

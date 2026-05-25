@@ -4,6 +4,24 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.0.0b17] - 2026-05-24
+
+### Fixed
+
+- **TOU entity auto-discovery for dual-platform installations** — when both Growatt Cloud and SolaX Modbus integrations are present, discovery now correctly prefers the modbus platform (which provides TOU control entities). Previously, the cloud platform was auto-selected, causing TOU entities to be missing from the wizard.
+- **Hardware write retry** — when `write_schedule_to_hardware` fails (e.g. Modbus timeout, missing entity mappings), the system now retries the write on the next quarterly cycle instead of silently running with stale inverter settings.
+
+### Changed
+
+- **Platform identifiers renamed** — all inverter platform strings now follow a consistent `<plugin>_<inverter>` convention used at every layer (backend, frontend, API, discovery):
+  - `growatt_min` → `growatt_server_min`
+  - `growatt_sph` → `growatt_server_sph`
+  - `growatt_solax_modbus` → `solax_modbus_growatt_min`
+  - `growatt_solax_modbus_gen3` → `solax_modbus_growatt_sph`
+  - `solax` → `solax_modbus_native`
+- **Controller file renamed** — `growatt_solax_modbus_controller.py` → `solax_modbus_growatt_controller.py`
+- **Mock server simplified** — only accepts the 5 canonical platform names, no legacy aliases
+
 ## [9.0.0b16] - 2026-05-24
 
 ### Fixed

@@ -43,7 +43,7 @@ def _make_system(
     system = BatterySystemManager(
         controller=controller,
         price_source=price_source,
-        addon_options={"inverter": {"platform": "growatt_min"}},
+        addon_options={"inverter": {"platform": "growatt_server_min"}},
     )
     return system
 

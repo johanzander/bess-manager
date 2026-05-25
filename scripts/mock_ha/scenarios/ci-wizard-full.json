@@ -1,9 +1,9 @@
 {
   "name": "CI Wizard: Full integrations (Nordpool + MIN + all optional)",
-  "description": "Setup wizard scenario \u2014 all optional integrations present: Solcast, consumption forecast, phase current, discharge inhibit, weather.",
+  "description": "Setup wizard scenario — all optional integrations present: Solcast, consumption forecast, phase current, discharge inhibit, weather.",
   "mock_time": "@2025-01-15 08:30:00",
   "timezone": "Europe/Stockholm",
-  "inverter_type": "min",
+  "inverter_type": "growatt_server_min",
   "sensors": {
     "sensor.abc1234567_state_of_charge_soc": {
       "state": "50",
@@ -194,7 +194,7 @@
       "state": "cloudy",
       "attributes": {
         "temperature": 3.5,
-        "temperature_unit": "\u00b0C",
+        "temperature_unit": "°C",
         "friendly_name": "Home"
       }
     },
@@ -283,6 +283,12 @@
       "unique_id": "SE4-current_price"
     },
     {
+      "entity_id": "sensor.mock_inverter_soc",
+      "platform": "growatt_server",
+      "config_entry_id": "mock_growatt_config_entry",
+      "unique_id": "MOCK_SN-tlx_statement_of_charge"
+    },
+    {
       "entity_id": "switch.mock_inverter_ac_charge",
       "platform": "growatt_server",
       "config_entry_id": "mock_growatt_config_entry",
@@ -352,7 +358,7 @@
     "nordpool_custom_area": "SE4",
     "nordpool_config_entry_id": "mock_nordpool_config_entry",
     "octopus_found": false,
-    "inverter_type": "MIN",
+    "inverter_type": "growatt_server_min",
     "currency": "SEK",
     "vat_multiplier": 1.25,
     "detected_platform": "growatt",

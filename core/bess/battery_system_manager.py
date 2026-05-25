@@ -24,7 +24,6 @@ from .exceptions import (
     SystemConfigurationError,
 )
 from .growatt_min_controller import GrowattMinController
-from .growatt_solax_modbus_controller import GrowattSolaxModbusController
 from .growatt_sph_controller import GrowattSphController
 from .ha_api_controller import HomeAssistantAPIController
 from .health_check import run_system_health_checks
@@ -54,6 +53,7 @@ from .settings import (
     apply_temperature_derating,
 )
 from .solax_controller import SolaxController
+from .solax_modbus_growatt_controller import SolaxModbusGrowattController
 from .time_utils import (
     format_period,
     get_period_count,
@@ -152,6 +152,9 @@ class BatterySystemManager:
         # Critical sensor failure tracking for graceful degradation
         self._critical_sensor_failures = []
 
+        # Hardware write retry: when a write fails, force re-apply next cycle
+        self._hardware_write_pending = False
+
         self._runtime_failure_tracker = RuntimeFailureTracker()
 
         # Inject failure tracker into controller if available
@@ -173,19 +176,22 @@ class BatterySystemManager:
         return self._controller
 
     VALID_PLATFORMS: ClassVar[set[str]] = {
-        "growatt_min",
-        "growatt_solax_modbus",
-        "growatt_solax_modbus_gen3",
-        "growatt_sph",
-        "solax",
+        "growatt_server_min",
+        "growatt_server_sph",
+        "solax_modbus_growatt_min",
+        "solax_modbus_growatt_sph",
+        "solax_modbus_native",
     }
 
     _INVERTER_TYPE_TO_PLATFORM: ClassVar[dict[str, str]] = {
-        "MIN": "growatt_min",
-        "GROWATT_MODBUS": "growatt_solax_modbus",
-        "SPH_MODBUS": "growatt_solax_modbus_gen3",
-        "SPH": "growatt_sph",
-        "SOLAX": "solax",
+        "growatt_server_min": "growatt_server_min",
+        "solax_modbus_growatt_min": "solax_modbus_growatt_min",
+        "solax_modbus_growatt_sph": "solax_modbus_growatt_sph",
+        "growatt_server_sph": "growatt_server_sph",
+        "solax_modbus_native": "solax_modbus_native",
+        # Legacy values stored in growatt.inverter_type
+        "MIN": "growatt_server_min",
+        "SPH": "growatt_server_sph",
     }
 
     def _create_inverter_controller(self) -> InverterController | None:
@@ -224,15 +230,15 @@ class BatterySystemManager:
 
         self.inverter_platform = platform
 
-        if self.inverter_platform == "growatt_sph":
+        if self.inverter_platform == "growatt_server_sph":
             return GrowattSphController(battery_settings=self.battery_settings)
-        if self.inverter_platform == "solax":
+        if self.inverter_platform == "solax_modbus_native":
             return SolaxController(battery_settings=self.battery_settings)
         if self.inverter_platform in (
-            "growatt_solax_modbus",
-            "growatt_solax_modbus_gen3",
+            "solax_modbus_growatt_min",
+            "solax_modbus_growatt_sph",
         ):
-            return GrowattSolaxModbusController(battery_settings=self.battery_settings)
+            return SolaxModbusGrowattController(battery_settings=self.battery_settings)
         return GrowattMinController(battery_settings=self.battery_settings)
 
     def switch_inverter_platform(self, platform: str) -> None:
@@ -2049,6 +2055,13 @@ class BatterySystemManager:
 
         logger.info("Evaluating whether to apply new schedule at period %d", period)
 
+        # Retry failed hardware write from previous cycle
+        if self._hardware_write_pending:
+            logger.info(
+                "DECISION: Apply schedule - retrying previously failed hardware write"
+            )
+            return True, "Retry failed hardware write"
+
         # Special case: preparing next day (runs at 23:55 for 00:00 start)
         if prepare_next_day:
             # Compare full day TOU settings for tomorrow (from start of day)
@@ -2104,8 +2117,15 @@ class BatterySystemManager:
         logger.info("Schedule update required: %s", reason)
         self._current_schedule = temp_schedule
 
+        # Adopt the new controller BEFORE the hardware write so that
+        # strategic intents, period settings, and TOU state are available
+        # even when the write fails (e.g. missing TOU entity mappings,
+        # Modbus timeout).  The _hardware_write_pending flag ensures the
+        # write is retried on the next quarterly cycle.
+        current_tou = self._inverter_controller.active_tou_intervals
+        self._inverter_controller = temp_growatt
+
         try:
-            current_tou = self._inverter_controller.active_tou_intervals
             effective_period = 0 if prepare_next_day else period
 
             if self._controller is None:
@@ -2115,9 +2135,6 @@ class BatterySystemManager:
                     self._controller, effective_period, current_tou
                 )
 
-            # Update schedule manager
-            self._inverter_controller = temp_growatt
-
             # Clear corruption flag after successful hardware write
             if temp_growatt.corruption_detected:
                 logger.info(
@@ -2125,15 +2142,16 @@ class BatterySystemManager:
                 )
                 temp_growatt.corruption_detected = False
 
-            # Apply current period settings
-            if not prepare_next_day:
-                self._apply_period_schedule(period)
-
+            self._hardware_write_pending = False
             logger.info("Schedule applied successfully")
 
         except Exception as e:
-            logger.error("Failed to apply schedule: %s", e)
-            raise
+            self._hardware_write_pending = True
+            logger.error(
+                "Hardware write failed: %s — strategic intents are active, "
+                "hardware will be retried next cycle",
+                e,
+            )
 
     def _apply_period_schedule(self, period: int) -> None:
         """Apply period settings with proper charge/discharge power rates.

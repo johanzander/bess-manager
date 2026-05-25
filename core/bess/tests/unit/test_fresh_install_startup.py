@@ -74,17 +74,17 @@ class TestFreshInstallStartup:
     def test_valid_platform_creates_configured_system(self):
         """A valid inverter.platform produces a configured system."""
         system = self._make_system(
-            addon_options={"inverter": {"platform": "growatt_min"}}
+            addon_options={"inverter": {"platform": "growatt_server_min"}}
         )
         assert system.is_configured
-        assert system.inverter_platform == "growatt_min"
+        assert system.inverter_platform == "growatt_server_min"
         assert system._inverter_controller is not None
 
     def test_legacy_inverter_type_creates_configured_system(self):
         """Legacy growatt.inverter_type still works for existing users."""
         system = self._make_system(addon_options={"growatt": {"inverter_type": "SPH"}})
         assert system.is_configured
-        assert system.inverter_platform == "growatt_sph"
+        assert system.inverter_platform == "growatt_server_sph"
 
     # --- Transition from unconfigured to configured ---
 
@@ -94,9 +94,9 @@ class TestFreshInstallStartup:
         system = self._make_system(addon_options={})
         assert not system.is_configured
 
-        system.switch_inverter_platform("solax")
+        system.switch_inverter_platform("solax_modbus_native")
         assert system.is_configured
-        assert system.inverter_platform == "solax"
+        assert system.inverter_platform == "solax_modbus_native"
         assert system._inverter_controller is not None
 
     # --- Invalid config still fails explicitly ---
@@ -110,3 +110,31 @@ class TestFreshInstallStartup:
         """A non-empty but invalid platform must still raise."""
         with pytest.raises(AssertionError, match="Unknown inverter platform"):
             self._make_system(addon_options={"inverter": {"platform": "bogus"}})
+
+    # --- Hardware write retry ---
+
+    def test_hardware_write_pending_forces_reapply(self):
+        """When hardware write fails, next cycle must retry even if schedule unchanged."""
+        system = self._make_system(
+            addon_options={"inverter": {"platform": "growatt_server_min"}}
+        )
+        assert system._hardware_write_pending is False
+
+        # Simulate a failed write
+        system._hardware_write_pending = True
+
+        from unittest.mock import MagicMock
+
+        temp_growatt = MagicMock()
+        temp_schedule = MagicMock()
+
+        should_apply, reason = system._should_apply_schedule(
+            is_first_run=False,
+            period=10,
+            prepare_next_day=False,
+            temp_growatt=temp_growatt,
+            optimization_period=10,
+            temp_schedule=temp_schedule,
+        )
+        assert should_apply is True
+        assert "retry" in reason.lower()

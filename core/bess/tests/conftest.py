@@ -244,7 +244,7 @@ class MockHomeAssistantController(HomeAssistantAPIController):
         """Read current TOU segments from inverter."""
         return []
 
-    # Growatt solax_modbus TOU entity methods (used by GrowattSolaxModbusController)
+    # Growatt solax_modbus TOU entity methods (used by SolaxModbusGrowattController)
 
     def set_tou_segment_via_entities(
         self, segment_id, batt_mode, start_time, end_time, enabled, **kwargs
@@ -592,7 +592,7 @@ def sample_solar_data():
 
 
 # SYSTEM CONFIGURATION FIXTURES
-_DEFAULT_TEST_ADDON_OPTIONS: dict = {"inverter": {"platform": "growatt_min"}}
+_DEFAULT_TEST_ADDON_OPTIONS: dict = {"inverter": {"platform": "growatt_server_min"}}
 
 
 @pytest.fixture
@@ -753,7 +753,14 @@ def battery_system_with_arbitrage(mock_controller, arbitrage_prices, monkeypatch
     return system
 
 
-@pytest.fixture(params=["growatt_min", "growatt_solax_modbus", "growatt_sph", "solax"])
+@pytest.fixture(
+    params=[
+        "growatt_server_min",
+        "solax_modbus_growatt_min",
+        "growatt_server_sph",
+        "solax_modbus_native",
+    ]
+)
 def platform_system(request, mock_controller, arbitrage_prices, monkeypatch):
     """Create BatterySystemManager parametrized across all inverter platforms.
 

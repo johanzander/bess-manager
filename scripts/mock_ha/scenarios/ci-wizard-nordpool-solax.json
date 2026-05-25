@@ -3,7 +3,7 @@
   "description": "Setup wizard scenario \u2014 Swedish user, Nordpool Official, native SolaX inverter via solax_modbus with VPP control.",
   "mock_time": "@2025-01-15 08:30:00",
   "timezone": "Europe/Stockholm",
-  "inverter_type": "solax",
+  "inverter_type": "solax_modbus_native",
   "sensors": {
     "sensor.solax_battery_capacity": {
       "state": "65",
@@ -319,10 +319,10 @@
     "nordpool_custom_area": "SE4",
     "nordpool_config_entry_id": "mock_nordpool_config_entry",
     "octopus_found": false,
-    "inverter_type": "solax",
+    "inverter_type": "solax_modbus_native",
     "currency": "SEK",
     "vat_multiplier": 1.25,
-    "detected_platform": "solax",
+    "detected_platform": "solax_modbus_native",
     "required_sensors": [
       "battery_charge_power",
       "battery_discharge_power",

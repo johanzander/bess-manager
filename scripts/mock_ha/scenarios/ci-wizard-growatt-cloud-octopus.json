@@ -1,7 +1,7 @@
 {
   "name": "ci-wizard-growatt-cloud-octopus",
-  "description": "Fresh install with Growatt SPH cloud-only + Octopus Energy (UK). No SolaX Modbus, no Nordpool. Based on issue #60 debug log (bess-debug-2026-05-21-145209).",
-  "inverter_type": "growatt_cloud",
+  "description": "Fresh install with Growatt SPH cloud-only + Octopus Energy (UK). No SolaX Modbus, no Nordpool. Based on issue #60 debug log (bess-debug-2026-05-21-145209). Entity registry uses mix_/sph_ sensor keys (SPH device type). Services include SPH-specific ac_charge_times/ac_discharge_times.",
+  "inverter_type": "growatt_server_sph",
   "mock_time": "@2026-05-21 14:52:07",
   "timezone": "Europe/London",
   "bess_config": {
@@ -326,21 +326,18 @@
     }
   },
   "entity_registry": [
-    {"entity_id": "sensor.egm2h4l0g0_state_of_charge_soc", "platform": "growatt_server", "unique_id": "EGM2H4L0G0-tlx_statement_of_charge", "device_id": "dev-growatt-001"},
-    {"entity_id": "sensor.egm2h4l0g0_battery_1_charging_w", "platform": "growatt_server", "unique_id": "EGM2H4L0G0-tlx_battery_1_charge_w", "device_id": "dev-growatt-001"},
-    {"entity_id": "sensor.egm2h4l0g0_battery_1_discharging_w", "platform": "growatt_server", "unique_id": "EGM2H4L0G0-tlx_battery_1_discharge_w", "device_id": "dev-growatt-001"},
-    {"entity_id": "sensor.egm2h4l0g0_import_power", "platform": "growatt_server", "unique_id": "EGM2H4L0G0-tlx_pac_to_user_total", "device_id": "dev-growatt-001"},
-    {"entity_id": "sensor.egm2h4l0g0_export_power", "platform": "growatt_server", "unique_id": "EGM2H4L0G0-tlx_pac_to_grid_total", "device_id": "dev-growatt-001"},
-    {"entity_id": "sensor.egm2h4l0g0_internal_wattage", "platform": "growatt_server", "unique_id": "EGM2H4L0G0-tlx_internal_wattage", "device_id": "dev-growatt-001"},
-    {"entity_id": "sensor.egm2h4l0g0_local_load_power", "platform": "growatt_server", "unique_id": "EGM2H4L0G0-tlx_pac_to_local_load", "device_id": "dev-growatt-001"},
-    {"entity_id": "sensor.egm2h4l0g0_lifetime_total_all_batteries_charged", "platform": "growatt_server", "unique_id": "EGM2H4L0G0-tlx_all_batteries_charge_total", "device_id": "dev-growatt-001"},
-    {"entity_id": "sensor.egm2h4l0g0_lifetime_total_all_batteries_discharged", "platform": "growatt_server", "unique_id": "EGM2H4L0G0-tlx_all_batteries_discharge_total", "device_id": "dev-growatt-001"},
-    {"entity_id": "sensor.egm2h4l0g0_lifetime_total_solar_energy", "platform": "growatt_server", "unique_id": "EGM2H4L0G0-tlx_solar_generation_total", "device_id": "dev-growatt-001"},
-    {"entity_id": "sensor.egm2h4l0g0_lifetime_total_export_to_grid", "platform": "growatt_server", "unique_id": "EGM2H4L0G0-tlx_export_to_grid_total", "device_id": "dev-growatt-001"},
-    {"entity_id": "sensor.egm2h4l0g0_lifetime_import_from_grid", "platform": "growatt_server", "unique_id": "EGM2H4L0G0-tlx_import_from_grid_total", "device_id": "dev-growatt-001"},
-    {"entity_id": "sensor.egm2h4l0g0_lifetime_total_load_consumption", "platform": "growatt_server", "unique_id": "EGM2H4L0G0-mix_load_consumption_total", "device_id": "dev-growatt-001"},
-    {"entity_id": "sensor.egm2h4l0g0_lifetime_system_production", "platform": "growatt_server", "unique_id": "EGM2H4L0G0-tlx_system_production_total", "device_id": "dev-growatt-001"},
-    {"entity_id": "sensor.egm2h4l0g0_lifetime_self_consumption", "platform": "growatt_server", "unique_id": "EGM2H4L0G0-tlx_self_consumption_total", "device_id": "dev-growatt-001"},
+    {"entity_id": "sensor.egm2h4l0g0_state_of_charge_soc", "platform": "growatt_server", "unique_id": "EGM2H4L0G0-mix_statement_of_charge", "device_id": "dev-growatt-001"},
+    {"entity_id": "sensor.egm2h4l0g0_battery_charge", "platform": "growatt_server", "unique_id": "EGM2H4L0G0-mix_battery_charge", "device_id": "dev-growatt-001"},
+    {"entity_id": "sensor.egm2h4l0g0_battery_discharge", "platform": "growatt_server", "unique_id": "EGM2H4L0G0-mix_battery_discharge_w", "device_id": "dev-growatt-001"},
+    {"entity_id": "sensor.egm2h4l0g0_import_from_grid", "platform": "growatt_server", "unique_id": "EGM2H4L0G0-mix_import_from_grid", "device_id": "dev-growatt-001"},
+    {"entity_id": "sensor.egm2h4l0g0_export_to_grid", "platform": "growatt_server", "unique_id": "EGM2H4L0G0-mix_export_to_grid", "device_id": "dev-growatt-001"},
+    {"entity_id": "sensor.egm2h4l0g0_wattage_pv_all", "platform": "growatt_server", "unique_id": "EGM2H4L0G0-mix_wattage_pv_all", "device_id": "dev-growatt-001"},
+    {"entity_id": "sensor.egm2h4l0g0_battery_charge_lifetime", "platform": "growatt_server", "unique_id": "EGM2H4L0G0-mix_battery_charge_lifetime", "device_id": "dev-growatt-001"},
+    {"entity_id": "sensor.egm2h4l0g0_battery_discharge_lifetime", "platform": "growatt_server", "unique_id": "EGM2H4L0G0-mix_battery_discharge_lifetime", "device_id": "dev-growatt-001"},
+    {"entity_id": "sensor.egm2h4l0g0_solar_generation_lifetime", "platform": "growatt_server", "unique_id": "EGM2H4L0G0-mix_solar_generation_lifetime", "device_id": "dev-growatt-001"},
+    {"entity_id": "sensor.egm2h4l0g0_export_to_grid_lifetime", "platform": "growatt_server", "unique_id": "EGM2H4L0G0-mix_export_to_grid_lifetime", "device_id": "dev-growatt-001"},
+    {"entity_id": "sensor.egm2h4l0g0_load_consumption_lifetime", "platform": "growatt_server", "unique_id": "EGM2H4L0G0-mix_load_consumption_lifetime", "device_id": "dev-growatt-001"},
+    {"entity_id": "sensor.egm2h4l0g0_grid_frequency", "platform": "growatt_server", "unique_id": "EGM2H4L0G0-sph_grid_frequency", "device_id": "dev-growatt-001"},
     {"entity_id": "event.octopus_energy_electricity_21l4726831_2000023585834_current_day_rates", "platform": "octopus_energy", "unique_id": "octopus_energy_electricity_21l4726831_2000023585834_current_day_rates", "device_id": "dev-octopus-001"},
     {"entity_id": "event.octopus_energy_electricity_21l4726831_2000023585834_next_day_rates", "platform": "octopus_energy", "unique_id": "octopus_energy_electricity_21l4726831_2000023585834_next_day_rates", "device_id": "dev-octopus-001"},
     {"entity_id": "event.octopus_energy_electricity_21l4726831_2000023585834_export_current_day_rates", "platform": "octopus_energy", "unique_id": "octopus_energy_electricity_21l4726831_2000023585834_export_current_day_rates", "device_id": "dev-octopus-001"},
@@ -397,7 +394,7 @@
     "nordpool_custom_area": null,
     "nordpool_config_entry_id": null,
     "octopus_found": true,
-    "inverter_type": "SPH",
+    "inverter_type": "growatt_server_sph",
     "currency": "GBP",
     "vat_multiplier": 1.0,
     "detected_platform": "growatt"
@@ -445,10 +442,10 @@
         "octopusImportTomorrowEntity": "event.octopus_energy_electricity_21l4726831_2000023585834_next_day_rates",
         "octopusExportTodayEntity": "event.octopus_energy_electricity_21l4726831_2000023585834_export_current_day_rates",
         "octopusExportTomorrowEntity": "event.octopus_energy_electricity_21l4726831_2000023585834_export_next_day_rates",
-        "inverterType": "SPH"
+        "inverterType": "growatt_server_sph"
       },
       "expected_saved": {
-        "inverter": {"platform": "growatt_sph"},
+        "inverter": {"platform": "growatt_server_sph"},
         "growatt": {"inverter_type": "SPH", "device_id": "dev-growatt-001"},
         "battery": {"total_capacity": 30.0, "max_charge_power_kw": 15.0, "max_discharge_power_kw": 15.0},
         "home": {"currency": "GBP", "phase_count": 1},
@@ -470,7 +467,7 @@
       "expected_absent_sections": [],
       "expected_live": {
         "growatt_device_id": "dev-growatt-001",
-        "switch_inverter_platform": "growatt_sph"
+        "switch_inverter_platform": "growatt_server_sph"
       },
       "no_tou_slots": true
     }

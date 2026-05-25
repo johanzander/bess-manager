@@ -1,4 +1,4 @@
-"""Tests for GrowattSolaxModbusController single-segment TOU approach.
+"""Tests for SolaxModbusGrowattController single-segment TOU approach.
 
 Verifies that the Modbus controller:
 - Uses a single TOU segment (slot 1) instead of 9
@@ -12,8 +12,8 @@ from unittest.mock import patch
 import pytest  # type: ignore
 
 from core.bess.dp_schedule import DPSchedule
-from core.bess.growatt_solax_modbus_controller import GrowattSolaxModbusController
 from core.bess.settings import BatterySettings
+from core.bess.solax_modbus_growatt_controller import SolaxModbusGrowattController
 from core.bess.tests.conftest import MockHomeAssistantController
 
 
@@ -52,7 +52,7 @@ def battery_settings():
 
 @pytest.fixture
 def controller(battery_settings):
-    return GrowattSolaxModbusController(battery_settings)
+    return SolaxModbusGrowattController(battery_settings)
 
 
 @pytest.fixture
@@ -96,7 +96,7 @@ class TestApplyPeriod:
         hour = period // 4
         minute = (period % 4) * 15
 
-        with patch("core.bess.growatt_solax_modbus_controller.time_utils") as mock_time:
+        with patch("core.bess.solax_modbus_growatt_controller.time_utils") as mock_time:
             mock_time.now.return_value = datetime(2026, 5, 20, hour, minute, 0)
             grid_charge, discharge_rate = controller.compute_rates_for_period(
                 period, 0.0
@@ -359,7 +359,7 @@ class TestCompareSchedules:
     """Test schedule comparison by strategic intents."""
 
     def test_identical_schedules(self, controller, battery_settings):
-        other = GrowattSolaxModbusController(battery_settings)
+        other = SolaxModbusGrowattController(battery_settings)
         intents = hourly_to_quarterly({2: "GRID_CHARGING"})
 
         controller.strategic_intents = intents
@@ -369,7 +369,7 @@ class TestCompareSchedules:
         assert not differs
 
     def test_different_schedules(self, controller, battery_settings):
-        other = GrowattSolaxModbusController(battery_settings)
+        other = SolaxModbusGrowattController(battery_settings)
 
         controller.strategic_intents = hourly_to_quarterly({2: "GRID_CHARGING"})
         other.strategic_intents = hourly_to_quarterly(
@@ -380,7 +380,7 @@ class TestCompareSchedules:
         assert differs
 
     def test_respects_from_period(self, controller, battery_settings):
-        other = GrowattSolaxModbusController(battery_settings)
+        other = SolaxModbusGrowattController(battery_settings)
 
         # Different at period 0-3 (hour 0), same from period 8 onwards
         controller.strategic_intents = hourly_to_quarterly(

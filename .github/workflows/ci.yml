@@ -21,8 +21,23 @@ jobs:
         id: filter
         with:
           filters: |
+            # Algorithm tests (~75 min) only run when optimizer-relevant
+            # source files change.  Uses exclusion pattern so new files
+            # trigger the suite by default (safe-by-default).
+            # Excluded: I/O-only files whose changes are fully mocked
+            # in the slow test suite.
             algorithm:
               - 'core/bess/**'
+              - '!core/bess/ha_api_controller.py'
+              - '!core/bess/sensor_collector.py'
+              - '!core/bess/weather.py'
+              - '!core/bess/octopus_energy_source.py'
+              - '!core/bess/official_nordpool_source.py'
+              - '!core/bess/debug_data_exporter.py'
+              - '!core/bess/debug_report_formatter.py'
+              - '!core/bess/health_check.py'
+              - '!core/bess/influxdb_helper.py'
+              - '!core/bess/prediction_analyzer.py'
             backend:
               - 'backend/**'
               - 'core/bess/**'

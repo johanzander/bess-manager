@@ -576,6 +576,45 @@ class TestMapRegistryEntities:
         )
         assert result == {}
 
+    def test_export_limiter_select_does_not_steal_export_power(self):
+        """Regression: select.limit_grid_export must not match export_power.
+
+        The solax_modbus integration has both:
+        - sensor with unique_id suffix "solax_total_reverse_power" (export power sensor)
+        - select with unique_id suffix "solax_limit_grid_export" (export limiter config)
+
+        The old short suffix "grid_export" matched the select entity because
+        "solax_limit_grid_export" ends with "_grid_export".  With exact
+        "solax_" prefixed suffixes, only the correct sensor should match.
+        """
+        # Place the select BEFORE the sensor to reproduce the original bug
+        # (first-writer-wins with old short suffixes)
+        entities = [
+            _entity(
+                "select.growatt_inverter_solax_inverter_limit_grid_export",
+                "solax_modbus",
+                "solax_limit_grid_export",
+            ),
+            _entity(
+                "sensor.growatt_inverter_solax_total_export_power",
+                "solax_modbus",
+                "solax_total_reverse_power",
+            ),
+        ]
+        result = self.ctrl._map_registry_entities(
+            entities,
+            ["solax_modbus"],
+            self.ctrl.SOLAX_ENTITY_SUFFIX_MAP,
+        )
+        assert result["export_power"] == (
+            "sensor.growatt_inverter_solax_total_export_power"
+        )
+        # The select entity must NOT appear anywhere in the result
+        assert (
+            "select.growatt_inverter_solax_inverter_limit_grid_export"
+            not in result.values()
+        )
+
 
 # ---------------------------------------------------------------------------
 # Tests: discover_sensors_from_registry

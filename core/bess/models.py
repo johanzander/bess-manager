@@ -43,12 +43,12 @@ def infer_intent_from_flows(power: float, energy_data: "EnergyData") -> str:
         Inferred strategic intent string based on observed flows
     """
     if power > 0.1:  # CHARGING
-        if energy_data.grid_to_battery > 0.1:  # ANY grid charging needs capability
-            return "GRID_CHARGING"  # Enable grid charging capability
+        if energy_data.grid_imported > energy_data.home_consumption + 0.1:
+            return "GRID_CHARGING"  # Grid import exceeds home needs → deliberate grid charge
         elif energy_data.solar_to_battery > 0.1 or energy_data.solar_production > 0.1:
-            return "SOLAR_STORAGE"  # Solar charging (check both flows and production)
+            return "SOLAR_STORAGE"  # Solar charging, grid only covers home shortfall
         else:
-            # Small amounts of charging from unclear source - default to grid
+            # No solar, no significant grid excess — default to grid
             return "GRID_CHARGING"
     elif power < -0.1:  # DISCHARGING
         if energy_data.battery_to_grid > 0.1:  # ANY export needs capability

@@ -134,7 +134,7 @@ class EnergyFlowCalculator:
 
         Everything else is derived via energy balance so the calculation
         is platform-independent:
-          load  = solar + import - export
+          load  = solar + import + battery_out - battery_in - export
           system_production = solar  (fallback when no direct sensor)
           self_consumption  = load - import  (energy consumed from own production)
         """
@@ -147,9 +147,17 @@ class EnergyFlowCalculator:
 
         # Derive load_consumption when no direct sensor is available.
         # GEN4 Growatt Modbus and SolaX Native lack a native register.
-        if load_consumption == 0 and (solar_production > 0 or import_from_grid > 0):
+        # Energy balance: load = solar + import + battery_out - battery_in - export
+        if load_consumption == 0 and (
+            solar_production > 0 or import_from_grid > 0 or battery_discharged > 0
+        ):
             load_consumption = max(
-                0, solar_production + import_from_grid - export_to_grid
+                0,
+                solar_production
+                + import_from_grid
+                + battery_discharged
+                - battery_charged
+                - export_to_grid,
             )
             flows["load_consumption"] = load_consumption
 

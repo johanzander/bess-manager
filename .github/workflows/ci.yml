@@ -21,8 +21,31 @@ jobs:
         id: filter
         with:
           filters: |
+            # Algorithm tests (~75 min) only run when optimizer-relevant
+            # source files change.  I/O-only files (ha_api_controller,
+            # sensor_collector, weather, price sources, debug exporters,
+            # solax/modbus controllers) are excluded because the slow
+            # tests mock the I/O layer.
             algorithm:
-              - 'core/bess/**'
+              - 'core/bess/dp_battery_algorithm.py'
+              - 'core/bess/dp_schedule.py'
+              - 'core/bess/models.py'
+              - 'core/bess/settings.py'
+              - 'core/bess/price_manager.py'
+              - 'core/bess/time_utils.py'
+              - 'core/bess/decision_intelligence.py'
+              - 'core/bess/energy_flow_calculator.py'
+              - 'core/bess/power_monitor.py'
+              - 'core/bess/prediction_snapshot.py'
+              - 'core/bess/battery_system_manager.py'
+              - 'core/bess/daily_view_builder.py'
+              - 'core/bess/growatt_min_controller.py'
+              - 'core/bess/growatt_sph_controller.py'
+              - 'core/bess/inverter_controller.py'
+              - 'core/bess/schedule_store.py'
+              - 'core/bess/historical_data_store.py'
+              - 'core/bess/exceptions.py'
+              - 'core/bess/tests/**'
             backend:
               - 'backend/**'
               - 'core/bess/**'

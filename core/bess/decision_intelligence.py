@@ -433,7 +433,7 @@ def classify_strategic_intent(power: float, energy_data: EnergyData) -> str:
             return "EXPORT_ARBITRAGE"
         return "LOAD_SUPPORT"
     elif power > _POWER_THRESHOLD_KW:  # Charging
-        if energy_data.grid_imported > energy_data.home_consumption + 0.1:
+        if energy_data.grid_to_battery > 0.01:
             return "GRID_CHARGING"
         return "SOLAR_STORAGE"
     elif energy_data.battery_charged > 0.01:

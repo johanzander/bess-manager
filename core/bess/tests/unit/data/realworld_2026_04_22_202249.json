@@ -370,8 +370,7 @@
     "intents_present": [
       "EXPORT_ARBITRAGE",
       "GRID_CHARGING",
-      "IDLE",
-      "SOLAR_STORAGE"
+      "IDLE"
     ],
     "savings_positive": true,
     "constraints": {

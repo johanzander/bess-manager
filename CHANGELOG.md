@@ -4,6 +4,12 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.0.0b20] - 2026-05-27
+
+### Fixed
+
+- **Intent classification used flawed heuristic** — `classify_strategic_intent()` and `infer_intent_from_flows()` compared `grid_imported` vs `home_consumption` to distinguish GRID_CHARGING from SOLAR_STORAGE. This misclassified periods as SOLAR_STORAGE when solar partially covered home load but the battery charged entirely from grid. Now checks `grid_to_battery > 0.01` which directly maps to the hardware question: does `grid_charge` need to be ON?
+
 ## [9.0.0b19] - 2026-05-26
 
 ### Fixed

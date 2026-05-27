@@ -30,7 +30,7 @@ def _camel_to_snake(name: str) -> str:
 
 
 # Price settings defaults
-DEFAULT_AREA = "SE4"
+DEFAULT_AREA = ""
 MARKUP_RATE = 0.08  # per kWh in configured currency
 VAT_MULTIPLIER = 1.25  # 25% VAT
 ADDITIONAL_COSTS = (

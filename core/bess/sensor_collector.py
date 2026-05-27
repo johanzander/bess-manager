@@ -396,7 +396,18 @@ class SensorCollector:
                 else:
                     return True
             else:
-                return True
+                # For today, invalidate empty caches so we retry after
+                # transient InfluxDB failures (e.g. first boot).
+                if not self._batch_cache.get(target_date):
+                    logger.info(
+                        "Invalidating empty batch cache for today %s",
+                        target_date.strftime("%Y-%m-%d"),
+                    )
+                    del self._batch_cache[target_date]
+                    if target_date in self._batch_cache_loaded_on:
+                        del self._batch_cache_loaded_on[target_date]
+                else:
+                    return True
 
         # Fetch batch data
         logger.info(

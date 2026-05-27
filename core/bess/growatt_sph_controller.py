@@ -293,6 +293,8 @@ class GrowattSphController(InverterController):
         discharge_params = self._build_discharge_params()
         mains_enabled = len(self._charge_periods) > 0
 
+        writes = 0
+
         logger.info(
             "SPH HARDWARE: Writing charge periods (power=%d%%, stop_soc=%d%%, mains=%s): %s",
             charge_power,
@@ -300,12 +302,23 @@ class GrowattSphController(InverterController):
             mains_enabled,
             self._charge_periods,
         )
-        controller.write_ac_charge_times(
-            charge_power=charge_power,
-            charge_stop_soc=charge_stop_soc,
-            mains_enabled=mains_enabled,
-            **charge_params,
-        )
+        try:
+            controller.write_ac_charge_times(
+                charge_power=charge_power,
+                charge_stop_soc=charge_stop_soc,
+                mains_enabled=mains_enabled,
+                **charge_params,
+            )
+            writes += 1
+        except Exception as e:
+            logger.error("FAILED: write_ac_charge_times: %s", e)
+            if controller.failure_tracker:
+                controller.failure_tracker.record_failure(
+                    category="inverter_control",
+                    operation="Write SPH charge periods",
+                    error=e,
+                    context={"periods": self._charge_periods},
+                )
 
         logger.info(
             "SPH HARDWARE: Writing discharge periods (power=%d%%, stop_soc=%d%%): %s",
@@ -313,13 +326,24 @@ class GrowattSphController(InverterController):
             discharge_stop_soc,
             self._discharge_periods,
         )
-        controller.write_ac_discharge_times(
-            discharge_power=discharge_power,
-            discharge_stop_soc=discharge_stop_soc,
-            **discharge_params,
-        )
+        try:
+            controller.write_ac_discharge_times(
+                discharge_power=discharge_power,
+                discharge_stop_soc=discharge_stop_soc,
+                **discharge_params,
+            )
+            writes += 1
+        except Exception as e:
+            logger.error("FAILED: write_ac_discharge_times: %s", e)
+            if controller.failure_tracker:
+                controller.failure_tracker.record_failure(
+                    category="inverter_control",
+                    operation="Write SPH discharge periods",
+                    error=e,
+                    context={"periods": self._discharge_periods},
+                )
 
-        return 2, 0
+        return writes, 0
 
     def _build_charge_params(self) -> dict[str, object]:
         """Build flat charge period params for write_ac_charge_times."""

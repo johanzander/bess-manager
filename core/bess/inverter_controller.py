@@ -370,8 +370,29 @@ class InverterController(ABC):
             grid_charge: Whether to enable grid charging
             discharge_rate: Discharge power rate (0-100%)
         """
-        controller.set_grid_charge(grid_charge)
-        controller.set_discharging_power_rate(discharge_rate)
+        try:
+            controller.set_grid_charge(grid_charge)
+        except Exception as e:
+            logger.error("FAILED: set_grid_charge(%s): %s", grid_charge, e)
+            if controller.failure_tracker:
+                controller.failure_tracker.record_failure(
+                    category="inverter_control",
+                    operation=f"Set grid charge to {grid_charge}",
+                    error=e,
+                )
+
+        try:
+            controller.set_discharging_power_rate(discharge_rate)
+        except Exception as e:
+            logger.error(
+                "FAILED: set_discharging_power_rate(%s): %s", discharge_rate, e
+            )
+            if controller.failure_tracker:
+                controller.failure_tracker.record_failure(
+                    category="inverter_control",
+                    operation=f"Set discharge rate to {discharge_rate}%",
+                    error=e,
+                )
 
     @abstractmethod
     def get_all_tou_segments(self) -> list[dict]:

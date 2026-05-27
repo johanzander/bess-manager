@@ -4,6 +4,24 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.0.0b19] - 2026-05-26
+
+### Fixed
+
+- **Export power sensor mismatch** — SolaX entity suffix map now uses full `solax_` prefixed suffixes (e.g. `solax_grid_export` instead of `grid_export`) to prevent ambiguous `endswith` matching. Previously `grid_export` matched the `select.limit_grid_export` config entity instead of the actual export power sensor.
+- **SE4 hardcoded as default area** — `DEFAULT_AREA` changed from `"SE4"` to `""` so non-Swedish users aren't silently assigned a wrong price area.
+- **WebSocket double-connection in discovery** — `discover_integrations()` now sends all three WS queries (entity registry, config entries, device registry) over a single connection. Previously the second connection could fail during HA startup, silently losing `nordpool_config_entry_id` and area.
+- **Energy balance ignored battery flows** — derived `load_consumption` formula corrected from `solar + import - export` to `solar + import + battery_out - battery_in - export` for platforms lacking a native load register.
+- **Stale empty InfluxDB cache** — empty batch cache for today is now invalidated on the next check so transient InfluxDB failures don't permanently return zero values.
+- **Removed `_reconcile_discovered_config()` workaround** — band-aid removed now that root causes (WebSocket race, suffix ambiguity) are fixed.
+- **Inverter command failures now visible in dashboard** — `GrowattSphController.write_schedule_to_hardware()` and `InverterController._write_period_to_hardware()` now record failures to `RuntimeFailureTracker`, surfacing them in the dashboard banner instead of only in logs.
+
+### Changed
+
+- **CI algorithm test filter** — switched from brittle allowlist to exclusion-based pattern (`core/bess/**` minus I/O-only files). New files trigger the suite by default; only explicitly excluded I/O files skip it.
+- **Removed WebSocket fallback in discovery** — if the single WS connection fails, the error propagates instead of silently producing incomplete configuration.
+- **E2E wizard settings** — `ci-wizard-settings.json` now contains a full Nordpool + Growatt MIN fixture instead of empty `{}`.
+
 ## [9.0.0b18] - 2026-05-25
 
 ### Fixed

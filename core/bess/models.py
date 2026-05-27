@@ -44,7 +44,9 @@ def infer_intent_from_flows(power: float, energy_data: "EnergyData") -> str:
     """
     if power > 0.1:  # CHARGING
         if energy_data.grid_to_battery > 0.01:
-            return "GRID_CHARGING"  # Grid must participate → battery_first, grid_charge=ON
+            return (
+                "GRID_CHARGING"  # Grid must participate → battery_first, grid_charge=ON
+            )
         else:
             return "SOLAR_STORAGE"  # Solar surplus covers it → load_first
     elif power < -0.1:  # DISCHARGING

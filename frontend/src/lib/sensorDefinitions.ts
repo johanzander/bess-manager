@@ -48,6 +48,7 @@ export type PlatformId = typeof VALID_PLATFORMS[number];
  * just changes the `platform` field — no clearing or swapping.
  */
 export interface PerPlatformSensors {
+  [key: string]: string | Record<string, string>;
   platform: string;
   growatt_server_min: Record<string, string>;
   growatt_server_sph: Record<string, string>;

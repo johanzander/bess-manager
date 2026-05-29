@@ -574,7 +574,7 @@ const SettingsPage: React.FC = () => {
 
           {/* ── Home ─────────────────────────────────────────────────────── */}
           {tab === 'home' && (
-            <HomeFormSection form={homeForm} onChange={setHomeForm} sensors={sensors} />
+            <HomeFormSection form={homeForm} onChange={setHomeForm} sensors={getActiveSensorsFlat(sensors)} />
           )}
 
           {/* ── Electricity Pricing ──────────────────────────────────────── */}

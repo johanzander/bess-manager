@@ -122,8 +122,10 @@ class BESSController:
         for section, value in self.settings_store.data.items():
             merged[section] = value
 
-        # Initialize Home Assistant API Controller with sensor config from options
-        sensor_config = merged.get("sensors", {})
+        # Initialize Home Assistant API Controller with flat sensor config.
+        # The store holds per-platform structure; get_active_sensors() merges
+        # the active platform + shared into a flat dict for the controller.
+        sensor_config = self.settings_store.get_active_sensors()
         growatt_config = merged.get("growatt", {})
         growatt_device_id = growatt_config.get("device_id")
         self.ha_controller = self._init_ha_controller(sensor_config, growatt_device_id)

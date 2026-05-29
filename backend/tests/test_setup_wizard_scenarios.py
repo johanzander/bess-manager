@@ -91,8 +91,23 @@ class TestWizardComplete:
             for key, val in data.items():
                 store_data[key] = dict(val)
 
+        def _get_active_sensors() -> dict:
+            sensors = store_data.get("sensors", {})
+            if "platform" not in sensors:
+                return {k: v for k, v in sensors.items() if isinstance(v, str)}
+            platform = sensors.get("platform", "")
+            platform_sensors = sensors.get(platform, {})
+            shared_sensors = sensors.get("shared", {})
+            result = {}
+            if isinstance(shared_sensors, dict):
+                result.update(shared_sensors)
+            if isinstance(platform_sensors, dict):
+                result.update(platform_sensors)
+            return result
+
         ctrl.settings_store.get_section.side_effect = _get_section
         ctrl.settings_store.save_all.side_effect = _save_all
+        ctrl.settings_store.get_active_sensors.side_effect = _get_active_sensors
         sys.modules["app"].bess_controller = ctrl
 
         # POST the wizard payload

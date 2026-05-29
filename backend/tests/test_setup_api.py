@@ -90,8 +90,18 @@ def complete_controller():
         for key, val in data.items():
             store_data[key] = dict(val)
 
+    def _get_active_sensors() -> dict:
+        sensors = store_data.get("sensors", {})
+        if "platform" not in sensors:
+            return {k: v for k, v in sensors.items() if isinstance(v, str)}
+        platform = sensors.get("platform", "")
+        result = dict(sensors.get("shared", {}))
+        result.update(sensors.get(platform, {}))
+        return result
+
     ctrl.settings_store.get_section.side_effect = _get_section
     ctrl.settings_store.save_all.side_effect = _save_all
+    ctrl.settings_store.get_active_sensors.side_effect = _get_active_sensors
 
     sys.modules["app"].bess_controller = ctrl
     return ctrl
@@ -101,8 +111,16 @@ def _full_wizard_payload(**overrides) -> dict:
     """A realistic wizard completion payload (mirrors what the frontend sends)."""
     base = {
         "sensors": {
-            "battery_soc": "sensor.growatt_battery_soc",
-            "pv_power": "sensor.growatt_pv_power",
+            "platform": "growatt_server_min",
+            "growatt_server_min": {
+                "battery_soc": "sensor.growatt_battery_soc",
+                "pv_power": "sensor.growatt_pv_power",
+            },
+            "growatt_server_sph": {},
+            "solax_modbus_growatt_min": {},
+            "solax_modbus_growatt_sph": {},
+            "solax_modbus_native": {},
+            "shared": {},
         },
         "nordpoolArea": "SE4",
         "nordpoolConfigEntryId": "entry-abc",
@@ -386,10 +404,23 @@ class TestSetupComplete:
     def test_sensors_persisted(self, complete_controller):
         _client.post("/api/setup/complete", json=_full_wizard_payload())
         call_args = complete_controller.settings_store.save_all.call_args[0][0]
-        assert call_args["sensors"]["battery_soc"] == "sensor.growatt_battery_soc"
+        assert (
+            call_args["sensors"]["growatt_server_min"]["battery_soc"]
+            == "sensor.growatt_battery_soc"
+        )
 
     def test_rejects_invalid_sensor_entity_ids(self, complete_controller):
-        payload = _full_wizard_payload(sensors={"battery_soc": "BAD-FORMAT"})
+        payload = _full_wizard_payload(
+            sensors={
+                "platform": "growatt_server_min",
+                "growatt_server_min": {"battery_soc": "BAD-FORMAT"},
+                "growatt_server_sph": {},
+                "solax_modbus_growatt_min": {},
+                "solax_modbus_growatt_sph": {},
+                "solax_modbus_native": {},
+                "shared": {},
+            }
+        )
         resp = _client.post("/api/setup/complete", json=payload)
         assert resp.status_code == 422
 
@@ -446,7 +477,15 @@ class TestSetupComplete:
     def test_empty_sensor_values_filtered_from_live_sensors(self, complete_controller):
         """Empty string sensors should not appear in the live ha_controller map."""
         payload = _full_wizard_payload(
-            sensors={"battery_soc": "sensor.batt", "pv_power": ""}
+            sensors={
+                "platform": "growatt_server_min",
+                "growatt_server_min": {"battery_soc": "sensor.batt", "pv_power": ""},
+                "growatt_server_sph": {},
+                "solax_modbus_growatt_min": {},
+                "solax_modbus_growatt_sph": {},
+                "solax_modbus_native": {},
+                "shared": {},
+            }
         )
         _client.post("/api/setup/complete", json=payload)
         assert "pv_power" not in complete_controller.ha_controller.sensors

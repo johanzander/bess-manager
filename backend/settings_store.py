@@ -30,6 +30,29 @@ OWNED_SECTIONS = (
     "sensors",
 )
 
+# All valid inverter platform IDs.
+VALID_PLATFORMS = (
+    "growatt_server_min",
+    "growatt_server_sph",
+    "solax_modbus_growatt_min",
+    "solax_modbus_growatt_sph",
+    "solax_modbus_native",
+)
+
+# Sensor keys that are shared across all platforms (not inverter-specific).
+SHARED_SENSOR_KEYS = frozenset(
+    {
+        "solar_forecast_today",
+        "solar_forecast_tomorrow",
+        "48h_avg_grid_import",
+        "current_l1",
+        "current_l2",
+        "current_l3",
+        "discharge_inhibit",
+        "weather_entity",
+    }
+)
+
 
 class SettingsStore:
     """Read/write /data/bess_settings.json with atomic writes.
@@ -114,6 +137,32 @@ class SettingsStore:
         self._write(self.data)
         logger.info("Saved all settings to %s", SETTINGS_PATH)
 
+    def get_active_sensors(self) -> dict:
+        """Return a flat sensor dict merging the active platform's sensors with shared sensors.
+
+        Internal consumers (scheduler, controllers) call this to get a flat
+        dict of sensor_key → entity_id without needing to know about the
+        per-platform storage structure.
+        """
+        sensors = self.data.get("sensors", {})
+        if not isinstance(sensors, dict):
+            return {}
+
+        # Legacy flat format (no "platform" key) — return as-is
+        if "platform" not in sensors:
+            return {k: v for k, v in sensors.items() if isinstance(v, str)}
+
+        platform = sensors.get("platform", "")
+        platform_sensors = sensors.get(platform, {})
+        shared_sensors = sensors.get("shared", {})
+
+        result = {}
+        if isinstance(shared_sensors, dict):
+            result.update(shared_sensors)
+        if isinstance(platform_sensors, dict):
+            result.update(platform_sensors)
+        return result
+
     def apply_discovered(
         self,
         sensor_map: dict,
@@ -137,13 +186,28 @@ class SettingsStore:
             nordpool_config_entry_id: HA config entry UUID for Nordpool.
             growatt_device_id: HA device registry ID for the Growatt device.
         """
-        # Sensors: overwrite with any non-empty discovered value.
-        # Empty strings are skipped so a partial discovery does not erase
-        # already-configured sensors.
         sensors = dict(self.data.get("sensors", {}))
-        for key, entity_id in sensor_map.items():
-            if entity_id:
-                sensors[key] = entity_id
+
+        # Per-platform format: route each sensor to the correct sub-dict
+        if "platform" in sensors:
+            platform = sensors.get("platform", "")
+            for key, entity_id in sensor_map.items():
+                if not entity_id:
+                    continue
+                if key in SHARED_SENSOR_KEYS:
+                    shared = dict(sensors.get("shared", {}))
+                    shared[key] = entity_id
+                    sensors["shared"] = shared
+                else:
+                    plat_dict = dict(sensors.get(platform, {}))
+                    plat_dict[key] = entity_id
+                    sensors[platform] = plat_dict
+        else:
+            # Legacy flat format
+            for key, entity_id in sensor_map.items():
+                if entity_id:
+                    sensors[key] = entity_id
+
         self.data["sensors"] = sensors
 
         # Nordpool area — always update when discovery provides a value
@@ -315,7 +379,15 @@ class SettingsStore:
             },
             "growatt": {"inverter_type": "", "device_id": ""},
             "inverter": {"platform": "", "device_id": ""},
-            "sensors": {},
+            "sensors": {
+                "platform": "",
+                "growatt_server_min": {},
+                "growatt_server_sph": {},
+                "solax_modbus_growatt_min": {},
+                "solax_modbus_growatt_sph": {},
+                "solax_modbus_native": {},
+                "shared": {},
+            },
         }
 
     def _migrate_schema(self) -> None:
@@ -442,6 +514,33 @@ class SettingsStore:
                 )
                 changed = True
 
+        # Migrate flat sensors → per-platform structure
+        sensors = self.data.get("sensors")
+        if isinstance(sensors, dict) and "platform" not in sensors:
+            # Flat format — migrate to per-platform structure.
+            # Determine the active platform from the inverter section.
+            inverter = self.data.get("inverter", {})
+            platform = inverter.get("platform", "")
+            if platform and platform in VALID_PLATFORMS:
+                new_sensors: dict = {"platform": platform}
+                shared: dict = {}
+                platform_dict: dict = {}
+                for key, value in sensors.items():
+                    if key in SHARED_SENSOR_KEYS:
+                        shared[key] = value
+                    else:
+                        platform_dict[key] = value
+                new_sensors[platform] = platform_dict
+                new_sensors["shared"] = shared
+                self.data["sensors"] = new_sensors
+                logger.info(
+                    "Schema migration: flat sensors → per-platform (%s: %d sensors, shared: %d)",
+                    platform,
+                    len(platform_dict),
+                    len(shared),
+                )
+                changed = True
+
         if changed:
             self._write(self.data)
 
@@ -457,17 +556,20 @@ class SettingsStore:
             # Also check if sensors section from options should be merged
             # (e.g. wizard was never run but options has sensors)
             sensors_in_options = options.get("sensors", {})
-            configured = sum(1 for v in sensors_in_options.values() if v)
+            configured = sum(
+                1 for v in sensors_in_options.values() if isinstance(v, str) and v
+            )
             if configured > 0:
-                sensors = dict(self.data.get("sensors", {}))
-                own_configured = sum(1 for v in sensors.values() if v)
+                active = self.get_active_sensors()
+                own_configured = sum(1 for v in active.values() if v)
                 if own_configured == 0:
                     logger.info(
                         "Overlaying %d sensors from options.json into store",
                         configured,
                     )
-                    self.data["sensors"] = dict(sensors_in_options)
-                    self._write(self.data)
+                    # Options has flat format — apply via apply_discovered which
+                    # handles both flat and per-platform formats.
+                    self.apply_discovered(sensor_map=sensors_in_options)
             return
 
         try:

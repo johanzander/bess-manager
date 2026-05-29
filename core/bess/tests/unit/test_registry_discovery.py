@@ -231,9 +231,9 @@ def _solax_growatt_registry() -> list[dict]:
         ),
         # Solar
         _entity(
-            "sensor.growatt_inverter_solax_pv_power_1",
+            "sensor.growatt_inverter_solax_pv_power_total",
             "solax_modbus",
-            "solax_pv_power_1",
+            "solax_pv_power_total",
         ),
         # Lifetime energy
         _entity(
@@ -346,19 +346,19 @@ def _solax_growatt_gen3_registry() -> list[dict]:
             "solax_battery_discharge_power",
         ),
         _entity(
-            "sensor.growatt_sph_solax_total_forward_power",
+            "sensor.growatt_sph_solax_ac_power_to_user",
             "solax_modbus",
-            "solax_total_forward_power",
+            "solax_ac_power_to_user",
         ),
         _entity(
-            "sensor.growatt_sph_solax_total_reverse_power",
+            "sensor.growatt_sph_solax_ac_power_to_grid",
             "solax_modbus",
-            "solax_total_reverse_power",
+            "solax_ac_power_to_grid",
         ),
         _entity(
-            "sensor.growatt_sph_solax_pv_power_1",
+            "sensor.growatt_sph_solax_pv_power_total",
             "solax_modbus",
-            "solax_pv_power_1",
+            "solax_pv_power_total",
         ),
         _entity(
             "sensor.growatt_sph_solax_total_load_power",
@@ -496,11 +496,11 @@ class TestMapRegistryEntities:
         assert len(result) == 7
 
     def test_solax_native_entities(self):
-        """Native SolaX entities match via SOLAX_ENTITY_SUFFIX_MAP."""
+        """Native SolaX entities match via SOLAX_NATIVE_SUFFIX_MAP."""
         result = self.ctrl._map_registry_entities(
             _solax_native_registry(),
             ["solax_modbus", "solax"],
-            self.ctrl.SOLAX_ENTITY_SUFFIX_MAP,
+            self.ctrl.SOLAX_NATIVE_SUFFIX_MAP,
         )
         assert result["battery_soc"] == "sensor.solax_battery_capacity"
         assert result["battery_charge_power"] == "sensor.solax_battery_power_charge"
@@ -515,11 +515,11 @@ class TestMapRegistryEntities:
         assert len(result) >= 10
 
     def test_solax_growatt_entities(self):
-        """Growatt inverter via solax_modbus matches via SOLAX_ENTITY_SUFFIX_MAP."""
+        """Growatt GEN4 inverter via solax_modbus matches via SOLAX_GROWATT_MIN_SUFFIX_MAP."""
         result = self.ctrl._map_registry_entities(
             _solax_growatt_registry(),
             ["solax_modbus", "solax"],
-            self.ctrl.SOLAX_ENTITY_SUFFIX_MAP,
+            self.ctrl.SOLAX_GROWATT_MIN_SUFFIX_MAP,
         )
         assert result["battery_soc"] == "sensor.growatt_inverter_solax_battery_soc"
         assert (
@@ -542,7 +542,7 @@ class TestMapRegistryEntities:
             result["local_load_power"]
             == "sensor.growatt_inverter_solax_total_load_power"
         )
-        assert result["pv_power"] == "sensor.growatt_inverter_solax_pv_power_1"
+        assert result["pv_power"] == "sensor.growatt_inverter_solax_pv_power_total"
         assert (
             result["battery_charging_power_rate"]
             == "number.growatt_inverter_solax_ems_charging_rate"
@@ -604,7 +604,7 @@ class TestMapRegistryEntities:
         result = self.ctrl._map_registry_entities(
             entities,
             ["solax_modbus"],
-            self.ctrl.SOLAX_ENTITY_SUFFIX_MAP,
+            self.ctrl.SOLAX_GROWATT_MIN_SUFFIX_MAP,
         )
         assert result["export_power"] == (
             "sensor.growatt_inverter_solax_total_export_power"
@@ -626,13 +626,15 @@ class TestDiscoverSensorsFromRegistry:
         self.ctrl = _make_controller()
 
     def test_growatt_only(self):
-        """When only growatt_server entities exist, detected_platform is growatt."""
+        """When only growatt_server entities exist, detected_platform is growatt_server_min."""
         sensors, platform = self.ctrl.discover_sensors_from_registry(
             _growatt_registry()
         )
-        assert platform == "growatt"
-        assert "growatt" in sensors
-        assert len(sensors["growatt"]) == 20
+        assert platform == "growatt_server_min"
+        assert "growatt_server_min" in sensors
+        assert "growatt_server_sph" in sensors
+        assert len(sensors["growatt_server_min"]) == 20
+        assert len(sensors["growatt_server_sph"]) == 20
 
     def test_solax_native_only(self):
         """When only native SolaX entities exist, detected_platform is solax."""
@@ -643,22 +645,20 @@ class TestDiscoverSensorsFromRegistry:
         assert "solax_modbus_native" in sensors
         assert len(sensors["solax_modbus_native"]) >= 10
 
-    def test_solax_growatt(self):
-        """Growatt inverter via solax_modbus maps all sensors via SOLAX_ENTITY_SUFFIX_MAP."""
+    def test_solax_growatt_min(self):
+        """Growatt GEN4 inverter via solax_modbus with TOU slots → solax_modbus_growatt_min."""
         sensors, platform = self.ctrl.discover_sensors_from_registry(
-            _solax_growatt_registry()
+            _solax_growatt_tou_registry()
         )
-        assert platform == "solax_modbus_native"
-        assert "solax_modbus_native" in sensors
-        assert len(sensors["solax_modbus_native"]) == 18
+        assert platform == "solax_modbus_growatt_min"
+        assert "solax_modbus_growatt_min" in sensors
+        growatt_min = sensors["solax_modbus_growatt_min"]
+        assert growatt_min["battery_soc"] == "sensor.growatt_inverter_solax_battery_soc"
         assert (
-            sensors["solax_modbus_native"]["battery_soc"]
-            == "sensor.growatt_inverter_solax_battery_soc"
-        )
-        assert (
-            sensors["solax_modbus_native"]["import_power"]
+            growatt_min["import_power"]
             == "sensor.growatt_inverter_solax_total_forward_power"
         )
+        assert "tou_time_1_enabled" in growatt_min
 
     def test_solax_growatt_with_tou(self):
         """Growatt with TOU entities detected as solax_modbus_growatt_min platform."""
@@ -678,24 +678,24 @@ class TestDiscoverSensorsFromRegistry:
             == "select.growatt_inverter_solax_time_1_enabled"
         )
 
-    def test_both_growatt_and_solax_present(self):
-        """When both integrations exist, both are mapped; growatt is primary."""
-        combined = _growatt_registry() + _solax_growatt_registry()
+    def test_both_growatt_and_solax_native_present(self):
+        """When both integrations exist, both are mapped; growatt_server_min is primary."""
+        combined = _growatt_registry() + _solax_native_registry()
         sensors, platform = self.ctrl.discover_sensors_from_registry(combined)
-        assert platform == "growatt"
-        assert "growatt" in sensors
+        assert platform == "growatt_server_min"
+        assert "growatt_server_min" in sensors
+        assert "growatt_server_sph" in sensors
         assert "solax_modbus_native" in sensors
-        assert len(sensors["growatt"]) == 20
-        assert len(sensors["solax_modbus_native"]) == 18
+        assert len(sensors["growatt_server_min"]) == 20
 
     def test_renamed_growatt_entities_discovered(self):
         """User-renamed entities still discovered via unique_id."""
         sensors, platform = self.ctrl.discover_sensors_from_registry(
             _growatt_renamed_registry()
         )
-        assert platform == "growatt"
-        assert sensors["growatt"]["battery_soc"] == "sensor.my_battery_soc"
-        assert sensors["growatt"]["pv_power"] == "sensor.solar_production"
+        assert platform == "growatt_server_min"
+        assert sensors["growatt_server_min"]["battery_soc"] == "sensor.my_battery_soc"
+        assert sensors["growatt_server_min"]["pv_power"] == "sensor.solar_production"
 
     def test_solax_growatt_gen3(self):
         """GEN3 Growatt (MIX/SPA/SPH) detected as solax_modbus_growatt_sph platform."""

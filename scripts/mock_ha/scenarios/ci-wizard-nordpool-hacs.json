@@ -322,7 +322,7 @@
     "inverter_type": "growatt_server_min",
     "currency": "SEK",
     "vat_multiplier": 1.25,
-    "detected_platform": "growatt",
+    "detected_platform": "growatt_server_min",
     "required_sensors": [
       "grid_charge"
     ]

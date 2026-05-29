@@ -113,7 +113,8 @@ class TestSectionAccess:
         store = SettingsStore()
         store.load({})
 
-        assert store.get_section("sensors") == {}
+        sensors = store.get_section("sensors")
+        assert "platform" in sensors  # per-platform structure from bootstrap defaults
 
     def test_save_section_makes_data_readable(self, tmp_path, monkeypatch):
         """Saving a section allows it to be read back immediately."""
@@ -232,16 +233,20 @@ class TestApplyDiscovered:
     """Discovery data is merged additively — existing values are never overwritten."""
 
     def test_discovered_sensors_are_stored(self, tmp_path, monkeypatch):
-        """Sensors provided by discovery appear in the sensors section."""
+        """Sensors provided by discovery appear in the active platform sub-dict."""
         _patch_path(tmp_path, monkeypatch)
         store = SettingsStore()
         store.load({})
+        # Set an active platform so apply_discovered routes to the right sub-dict
+        sensors = store.get_section("sensors")
+        sensors["platform"] = "growatt_server_min"
+        store.save_section("sensors", sensors)
 
         store.apply_discovered(
             sensor_map={"battery_soc": "sensor.battery_soc"},
         )
 
-        assert store.get_section("sensors")["battery_soc"] == "sensor.battery_soc"
+        assert store.get_active_sensors()["battery_soc"] == "sensor.battery_soc"
 
     def test_discovery_overwrites_existing_sensor(self, tmp_path, monkeypatch):
         """A non-empty discovered entity ID replaces the existing sensor value.
@@ -254,15 +259,17 @@ class TestApplyDiscovered:
         _patch_path(tmp_path, monkeypatch)
         store = SettingsStore()
         store.load({})
-        store.save_section("sensors", {"battery_soc": "sensor.old_value"})
+        sensors = store.get_section("sensors")
+        sensors["platform"] = "growatt_server_min"
+        sensors["growatt_server_min"] = {"battery_soc": "sensor.old_value"}
+        store.save_section("sensors", sensors)
 
         store.apply_discovered(
             sensor_map={"battery_soc": "sensor.corrected_by_discovery"},
         )
 
         assert (
-            store.get_section("sensors")["battery_soc"]
-            == "sensor.corrected_by_discovery"
+            store.get_active_sensors()["battery_soc"] == "sensor.corrected_by_discovery"
         )
 
     def test_discovery_empty_does_not_overwrite_existing_sensor(
@@ -272,13 +279,16 @@ class TestApplyDiscovered:
         _patch_path(tmp_path, monkeypatch)
         store = SettingsStore()
         store.load({})
-        store.save_section("sensors", {"battery_soc": "sensor.user_configured"})
+        sensors = store.get_section("sensors")
+        sensors["platform"] = "growatt_server_min"
+        sensors["growatt_server_min"] = {"battery_soc": "sensor.user_configured"}
+        store.save_section("sensors", sensors)
 
         store.apply_discovered(
             sensor_map={"battery_soc": ""},
         )
 
-        assert store.get_section("sensors")["battery_soc"] == "sensor.user_configured"
+        assert store.get_active_sensors()["battery_soc"] == "sensor.user_configured"
 
     def test_nordpool_area_is_stored(self, tmp_path, monkeypatch):
         """Nordpool area discovered during setup lands in electricity_price."""
@@ -347,7 +357,7 @@ class TestApplyDiscovered:
 
         store.apply_discovered(sensor_map={"battery_soc": ""})
 
-        assert store.get_section("sensors").get("battery_soc") is None
+        assert store.get_active_sensors().get("battery_soc") is None
 
 
 # ---------------------------------------------------------------------------

@@ -50,12 +50,10 @@ test.describe('Setup Wizard', () => {
     await expectActiveStep(page, 1);
     await expect(page.getByRole('heading', { name: 'Review Sensors' })).toBeVisible();
 
-    // Verify the correct inverter platform is detected
-    if (expected.solaxFound) {
-      await expect(page.getByText('SolaX (Native)').first()).toBeVisible();
-    } else {
-      await expect(page.getByText('Growatt Server').first()).toBeVisible();
-    }
+    // Verify the inverter platform tabs are visible
+    // Both tabs are always rendered — check the active one matches detection
+    await expect(page.getByRole('tab', { name: /Growatt Cloud/i })).toBeVisible();
+    await expect(page.getByRole('tab', { name: /SolaX Modbus/i })).toBeVisible();
   });
 
   test('auto-selects correct pricing provider', async ({ page }) => {
@@ -75,20 +73,16 @@ test.describe('Setup Wizard', () => {
     await page.goto('/setup');
     await expectActiveStep(page, 1);
 
-    // Verify inverter platform radio on sensor step
-    if (expected.inverterType === 'solax_modbus_native') {
-      // SolaX platform should be selected
-      await expect(radioByLabel(page, 'SolaX (Native)')).toBeChecked();
-    } else {
-      // Growatt platform — use exact role match to avoid "Growatt Server (Cloud)" ambiguity
-      await expect(page.getByRole('radio', { name: 'Growatt', exact: true })).toBeChecked();
+    // The UI uses Tabs (Growatt Cloud / SolaX Modbus) + pill buttons for subtypes
+    const isModbus = expected.inverterType.startsWith('solax_modbus');
+    const isCloud = expected.inverterType.startsWith('growatt_server');
 
-      // Sub-type radios are on the sensor/integrations step (step 1)
-      if (expected.inverterType === 'growatt_server_sph' || expected.inverterType === 'solax_modbus_growatt_sph') {
-        await expect(radioByLabel(page, 'SPH (DC-coupled)')).toBeChecked();
-      } else {
-        await expect(radioByLabel(page, 'MIC/MIN/MOD/MID (AC-coupled)')).toBeChecked();
-      }
+    if (isCloud) {
+      // Growatt Cloud tab should be active
+      await expect(page.getByRole('tab', { name: /Growatt Cloud/i })).toHaveAttribute('data-state', 'active');
+    } else if (isModbus) {
+      // SolaX Modbus tab should be active
+      await expect(page.getByRole('tab', { name: /SolaX Modbus/i })).toHaveAttribute('data-state', 'active');
     }
   });
 

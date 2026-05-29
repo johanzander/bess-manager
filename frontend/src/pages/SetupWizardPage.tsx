@@ -2,7 +2,8 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CheckCircle, ChevronRight, ChevronLeft, Zap } from 'lucide-react';
 import api from '../lib/api';
-import { INTEGRATIONS, INVERTER_INTEGRATION_IDS, swapInverterSensors } from '../lib/sensorDefinitions';
+import { INTEGRATIONS, INVERTER_INTEGRATION_IDS, SHARED_INTEGRATION_IDS, emptyPerPlatformSensors, getActiveSensorsFlat } from '../lib/sensorDefinitions';
+import type { PerPlatformSensors } from '../lib/sensorDefinitions';
 import { HomeFormSection } from '../components/settings/HomeFormSection';
 import type { HomeForm } from '../components/settings/HomeFormSection';
 import { PricingFormSection } from '../components/settings/PricingFormSection';
@@ -28,12 +29,12 @@ const SetupWizardPage: React.FC = () => {
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
   const [discovery, setDiscovery] = useState<DiscoveryResult | null>(null);
-  const [sensors, setSensors] = useState<Record<string, string>>({});
+  const [sensors, setSensors] = useState<PerPlatformSensors>(emptyPerPlatformSensors());
   const [confirming, setConfirming] = useState(false);
   const [confirmError, setConfirmError] = useState<string | null>(null);
   const [completing, setCompleting] = useState(false);
   const [completeError, setCompleteError] = useState<string | null>(null);
-  const existingSensorsRef = useRef<Record<string, string>>({});
+  const existingSensorsRef = useRef<PerPlatformSensors>(emptyPerPlatformSensors());
 
   const [batteryForm, setBatteryForm] = useState<BatteryForm>({
     totalCapacity: 30.0,
@@ -125,17 +126,45 @@ const SetupWizardPage: React.FC = () => {
         setInverterForm(f => ({ ...f, deviceId: d.growattDeviceId! }));
       }
 
-      // Merge discovered sensors with existing config. Discovered values take
-      // priority; existing config fills gaps when discovery fails (e.g. MID VR).
-      const allSensors: Record<string, string> = {};
-      for (const integration of INTEGRATIONS) {
-        for (const group of integration.sensorGroups) {
-          for (const s of group.sensors) {
-            allSensors[s.key] = d.sensors[s.key] ?? existingSensorsRef.current[s.key] ?? '';
+      // Build per-platform sensor structure from discovery results.
+      // platformSensors has per-platform dicts; shared sensors come from d.sensors.
+      const platform = d.inverterType ?? inverterForm.inverterType ?? '';
+      const newSensors: PerPlatformSensors = emptyPerPlatformSensors(platform);
+      const existing = existingSensorsRef.current;
+
+      // Populate each platform's sub-dict from discovered platformSensors
+      if (d.platformSensors) {
+        for (const [platId, platMap] of Object.entries(d.platformSensors)) {
+          if (platId in newSensors && platId !== 'platform' && platId !== 'shared') {
+            (newSensors as Record<string, Record<string, string>>)[platId] = { ...platMap };
           }
         }
       }
-      setSensors(allSensors);
+
+      // Populate shared sensors from discovery, falling back to existing config
+      const sharedSensors: Record<string, string> = {};
+      for (const intg of INTEGRATIONS) {
+        if (!SHARED_INTEGRATION_IDS.has(intg.id)) continue;
+        for (const group of intg.sensorGroups) {
+          for (const s of group.sensors) {
+            sharedSensors[s.key] = d.sensors[s.key] || (existing.shared ?? {})[s.key] || '';
+          }
+        }
+      }
+      newSensors.shared = sharedSensors;
+
+      // For each platform, merge with existing config (fill gaps)
+      for (const platId of Object.keys(INVERTER_INTEGRATION_IDS)) {
+        const disc = (newSensors as Record<string, Record<string, string>>)[platId] ?? {};
+        const prev = (existing as Record<string, Record<string, string>>)[platId] ?? {};
+        const merged: Record<string, string> = { ...prev };
+        for (const [k, v] of Object.entries(disc)) {
+          if (v) merged[k] = v;
+        }
+        (newSensors as Record<string, Record<string, string>>)[platId] = merged;
+      }
+
+      setSensors(newSensors);
       setStep(1);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Discovery failed';
@@ -157,10 +186,10 @@ const SetupWizardPage: React.FC = () => {
       const ep = s.energyProvider ?? {};
       const inv = s.growatt ?? {};
 
-      // Cache existing sensors so handleScan can use them as fallback when
-      // auto-discovery fails (e.g. MID VR inverter with different entity naming).
-      if (s.sensors && typeof s.sensors === 'object') {
-        existingSensorsRef.current = s.sensors as Record<string, string>;
+      // Cache existing sensors (per-platform structure) so handleScan can
+      // use them as fallback when auto-discovery fails.
+      if (s.sensors && typeof s.sensors === 'object' && 'platform' in s.sensors) {
+        existingSensorsRef.current = s.sensors as PerPlatformSensors;
       }
 
       setBatteryForm(f => ({
@@ -223,7 +252,7 @@ const SetupWizardPage: React.FC = () => {
     setConfirmError(null);
     try {
       await api.post('/api/setup/confirm', {
-        sensors,
+        sensors: getActiveSensorsFlat(sensors),
         nordpool_area: discovery.nordpoolArea,
         // Prefer the user-entered form value; fall back to auto-detected value
         nordpool_config_entry_id: pricingForm.nordpoolConfigEntryId || discovery.nordpoolConfigEntryId,
@@ -290,23 +319,22 @@ const SetupWizardPage: React.FC = () => {
     }
   };
 
-  // When the user switches inverter platform, replace all inverter-integration
-  // sensor fields with the new platform's discovered values.  Non-inverter
-  // sensors (Solcast, consumption forecast, phase current, etc.) are preserved.
-  // Nothing is saved until the user presses Save — this is purely in-memory.
+  // When the user switches inverter platform, just update inverterForm.
+  // The SensorConfigSection handles updating sensors.platform via onChange.
   const handleInverterChange = (newForm: InverterForm) => {
     setInverterForm(newForm);
-    setSensors(prev => swapInverterSensors(prev, newForm.inverterType, discovery?.platformSensors ?? undefined));
   };
 
-  const activeInverterIntegrationId = INVERTER_INTEGRATION_IDS[inverterForm.inverterType] ?? 'growatt';
+  const activeInverterIntegrationId = INVERTER_INTEGRATION_IDS[inverterForm.inverterType] ?? 'growatt_server_min';
   const inverterIntegrationIds = new Set(Object.values(INVERTER_INTEGRATION_IDS));
 
+  // Check that all required sensors are filled using the flat merged view
+  const activeSensorsFlat = getActiveSensorsFlat(sensors);
   const allRequiredFilled = INTEGRATIONS.every(integration => {
     // Skip inverter integrations that don't match the selected inverter type
     if (inverterIntegrationIds.has(integration.id) && integration.id !== activeInverterIntegrationId) return true;
     return integration.sensorGroups.every(group =>
-      group.sensors.every(s => !s.required || !!sensors[s.key]),
+      group.sensors.every(s => !s.required || !!activeSensorsFlat[s.key]),
     );
   });
 
@@ -470,7 +498,7 @@ const SetupWizardPage: React.FC = () => {
               form={batteryForm}
               onChange={setBatteryForm}
               currency={pricingForm.currency}
-              weatherEntity={sensors['weather_entity']}
+              weatherEntity={sensors.shared?.['weather_entity']}
               hideAdvanced
             />
 

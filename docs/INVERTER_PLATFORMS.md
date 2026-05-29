@@ -112,7 +112,9 @@ growatt_server.write_ac_charge_times(periods, power, stop_soc, mains_enabled)
 growatt_server.write_ac_discharge_times(periods, power, stop_soc)
 ```
 
-**Per-period control:** Same generic switch/number calls.
+**Per-period control:** None — the `growatt_server` integration exposes no
+number or switch entities for SPH models. All control (power rates, SOC
+limits, grid charge) is embedded in the service call parameters.
 
 ### SolaX — `solax`
 
@@ -162,6 +164,35 @@ button.press(trigger)
 | `lifetime_import_from_grid` | `lifetime_import_from_grid` |
 | `lifetime_load_consumption` | `lifetime_total_load_consumption` |
 
+### Growatt SPH (Cloud) — `growatt_server` integration
+
+The `growatt_server` integration exposes **no number or switch entities** for
+SPH models. All control (power, SOC, grid charge, time periods) is via
+`write_ac_charge_times` and `write_ac_discharge_times` service calls.
+
+**Monitoring sensors (required):**
+
+| BESS Sensor Key | Entity Type | Growatt Server Suffix | Purpose |
+|-----------------|-------------|----------------------|---------|
+| `battery_soc` | sensor | `state_of_charge_soc` | Current battery level |
+| `battery_charge_power` | sensor | `battery_1_charging_w` | Charge power (W) |
+| `battery_discharge_power` | sensor | `battery_1_discharging_w` | Discharge power (W) |
+| `import_power` | sensor | `import_power` | Grid import (W) |
+| `export_power` | sensor | `export_power` | Grid export (W) |
+| `pv_power` | sensor | `internal_wattage` | Solar production (W) |
+| `local_load_power` | sensor | `local_load_power` | Home consumption (W) |
+
+**Lifetime energy (optional but recommended):**
+
+| BESS Sensor Key | Growatt Server Suffix |
+|-----------------|---------------------|
+| `lifetime_battery_charged` | `lifetime_total_all_batteries_charged` |
+| `lifetime_battery_discharged` | `lifetime_total_all_batteries_discharged` |
+| `lifetime_solar_energy` | `lifetime_total_solar_energy` |
+| `lifetime_export_to_grid` | `lifetime_total_export_to_grid` |
+| `lifetime_import_from_grid` | `lifetime_import_from_grid` |
+| `lifetime_load_consumption` | `lifetime_total_load_consumption` |
+
 ### Growatt MIN (Local) — GEN4 — `solax_modbus` Growatt plugin
 
 **Monitoring and EMS control (GEN4):**
@@ -175,7 +206,7 @@ button.press(trigger)
 | `export_power` | sensor | `total_reverse_power` | Grid export (W) |
 | `pv_power` | sensor | `pv_power_1` | Solar production (W) |
 | `local_load_power` | sensor | `total_load_power` | Home consumption (W) |
-| `grid_charge` | switch | `charger_switch` | Grid charge enable |
+| `grid_charge` | select | `charger_switch` | Grid charge enable (Enabled/Disabled) |
 | `battery_charging_power_rate` | number | `ems_charging_rate` | Charge rate (%) |
 | `battery_discharging_power_rate` | number | `ems_discharging_rate` | Discharge rate (%) |
 | `battery_charge_stop_soc` | number | `ems_charging_stop_soc` | Max SOC target |
@@ -226,11 +257,11 @@ actively uses slot 1. A `time_N_clear` button also exists in the plugin
 | `battery_soc` | sensor | `battery_soc` | Current battery level |
 | `battery_charge_power` | sensor | `battery_charge_power` | Charge power (W) |
 | `battery_discharge_power` | sensor | `battery_discharge_power` | Discharge power (W) |
-| `import_power` | sensor | `total_forward_power` | Grid import (W) |
-| `export_power` | sensor | `total_reverse_power` | Grid export (W) |
-| `pv_power` | sensor | `pv_power_1` | Solar production (W) |
+| `import_power` | sensor | `ac_power_to_user` | Grid import (W) |
+| `export_power` | sensor | `ac_power_to_grid` | Grid export (W) |
+| `pv_power` | sensor | `pv_power_total` | Solar production (W) |
 | `local_load_power` | sensor | `total_load_power` | Home consumption (W) |
-| `grid_charge` | switch | `charger_switch` | Grid charge enable |
+| `grid_charge` | select | `battery_first_charge_from_grid` | Grid charge enable |
 | `battery_charging_power_rate` | number | `battery_first_charge_rate` | Charge rate (battery-first mode) |
 | `battery_discharging_power_rate` | number | `grid_first_discharge_rate` | Discharge rate (grid-first mode) |
 | `battery_charge_stop_soc` | number | `battery_first_maximum_soc` | Max SOC target |
@@ -254,13 +285,25 @@ actively uses slot 1. A `time_N_clear` button also exists in the plugin
 
 | BESS Sensor Key | Entity Type | solax_modbus Suffix | Purpose |
 |-----------------|-------------|---------------------|---------|
-| `battery_soc` | sensor | `battery_capacity` or `battery_soc` | Current battery level |
-| `battery_charge_power` | sensor | `battery_power_charge` or `battery_charge_power` | Charge power (W) |
-| `battery_discharge_power` | sensor | `battery_power_discharge` or `battery_discharge_power` | Discharge power (W) |
-| `import_power` | sensor | `measured_power` or `total_forward_power` | Grid import (W) |
-| `export_power` | sensor | `grid_export` or `total_reverse_power` | Grid export (W) |
+| `battery_soc` | sensor | `battery_capacity` | Current battery level |
+| `battery_charge_power` | sensor | `battery_power_charge` | Charge power (W) |
+| `battery_discharge_power` | sensor | `battery_power_discharge` | Discharge power (W) |
+| `import_power` | sensor | `measured_power` | Grid import (W) |
+| `export_power` | sensor | `grid_export` | Grid export (W) |
 | `pv_power` | sensor | `pv_power_1` | Solar production (W) |
-| `local_load_power` | sensor | `house_load` or `total_load_power` | Home consumption (W) |
+| `local_load_power` | sensor | `house_load` | Home consumption (W) |
+
+**Lifetime energy (optional):**
+
+| BESS Sensor Key | solax_modbus Suffix | Notes |
+|-----------------|---------------------|-------|
+| `lifetime_battery_charged` | `battery_input_energy_total` | |
+| `lifetime_battery_discharged` | `battery_output_energy_total` | |
+| `lifetime_solar_energy` | `total_solar_energy` | |
+| `lifetime_import_from_grid` | `grid_import_total` | |
+| `lifetime_export_to_grid` | `grid_export_total` | |
+| `lifetime_system_production` | `total_yield` | Register 0x52, "Total Yield" (production) |
+| `lifetime_load_consumption` | — | **No native register.** Derived from other sensors |
 
 **VPP control (required for SolaX):**
 
@@ -271,6 +314,7 @@ actively uses slot 1. A `time_N_clear` button also exists in the plugin
 | `solax_autorepeat_duration` | number | `remotecontrol_autorepeat_duration` | Command timeout (s) |
 | `solax_power_control_trigger` | button | `remotecontrol_trigger` | Execute command |
 | `solax_battery_min_soc` | number | `battery_minimum_capacity` | Min battery SOC (%) |
+| `solax_charger_use_mode` | select | `charger_use_mode` | Charger use mode (optional) |
 
 ---
 

@@ -764,7 +764,7 @@
     "inverter_type": "growatt_server_min",
     "currency": "GBP",
     "vat_multiplier": 1.0,
-    "detected_platform": "growatt",
+    "detected_platform": "growatt_server_min",
     "required_sensors": [
       "grid_charge"
     ]

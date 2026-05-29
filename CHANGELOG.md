@@ -4,6 +4,13 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.0.0b22] - 2026-05-29
+
+### Fixed
+
+- **Runtime failure banners not showing under HA ingress** — `useRuntimeFailures` hook used raw `fetch()` instead of the `api` axios instance, so requests missed the ingress base URL prefix and silently failed. Banners now appear when battery control errors occur.
+- **Algorithm tests triggering on every PR** — `dorny/paths-filter` with default `predicate-quantifier: some` caused negation patterns (e.g. `!core/bess/ha_api_controller.py`) to match all non-excluded files, including unrelated frontend files. Set `predicate-quantifier: every` so files must match all patterns.
+
 ## [9.0.0b21] - 2026-05-29
 
 ### Changed

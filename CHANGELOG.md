@@ -4,6 +4,14 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.0.0b21] - 2026-05-29
+
+### Changed
+
+- **Per-platform sensor storage** — sensor configuration is now stored per-platform (like `energy_provider`), so switching platforms preserves previously entered sensor values instead of discarding them.
+- **Split entity suffix maps** — `SOLAX_ENTITY_SUFFIX_MAP` split into 3 per-platform maps (`GROWATT_CLOUD_SUFFIX_MAP`, `GROWATT_MODBUS_SUFFIX_MAP`, `SOLAX_NATIVE_SUFFIX_MAP`), fixing the `total_yield` suffix collision between native SolaX (production) and GEN4 Growatt (load consumption).
+- **Tabs UI for platform selection** — wizard platform selector now uses tabs with pill buttons instead of radio buttons, with sensors rendered inline within tab content.
+
 ## [9.0.0b20] - 2026-05-27
 
 ### Fixed

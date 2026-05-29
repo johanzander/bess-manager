@@ -779,7 +779,7 @@
     "inverter_type": "solax_modbus_growatt_min",
     "currency": "SEK",
     "vat_multiplier": 1.25,
-    "detected_platform": "growatt",
+    "detected_platform": "growatt_server_min",
     "required_sensors": [
       "battery_soc",
       "battery_charge_power",

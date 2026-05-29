@@ -12,7 +12,8 @@ import { BatteryFormSection } from '../components/settings/BatteryFormSection';
 import type { BatteryForm } from '../components/settings/BatteryFormSection';
 import { SensorConfigSection } from '../components/settings/SensorConfigSection';
 import type { InverterForm } from '../components/settings/SensorConfigSection';
-import { swapInverterSensors } from '../lib/sensorDefinitions';
+import { emptyPerPlatformSensors, getActiveSensorsFlat } from '../lib/sensorDefinitions';
+import type { PerPlatformSensors } from '../lib/sensorDefinitions';
 
 // ---------------------------------------------------------------------------
 // Local types
@@ -67,7 +68,7 @@ const SettingsPage: React.FC = () => {
   const [homeForm, setHomeForm] = useState<HomeForm>(EMPTY_HOME);
   const [pricingForm, setPricingForm] = useState<PricingForm>(EMPTY_PRICING);
   const [inverterForm, setInverterForm] = useState<InverterForm>(EMPTY_INVERTER);
-  const [sensors, setSensors] = useState<Record<string, string>>({});
+  const [sensors, setSensors] = useState<PerPlatformSensors>(emptyPerPlatformSensors());
 
   // ── saved snapshots (for dirty detection) ──────────────────────────────
   const savedBattery = useRef<string>('');
@@ -78,8 +79,8 @@ const SettingsPage: React.FC = () => {
 
   // Sensor keys arrive in arbitrary order from different sources (backend
   // load vs. auto-configure merge), so sort keys before comparing.
-  const stableStringify = (obj: Record<string, string>) =>
-    JSON.stringify(Object.keys(obj).sort().reduce<Record<string, string>>((acc, k) => { acc[k] = obj[k]; return acc; }, {}));
+  const stableStringify = (obj: Record<string, unknown>) =>
+    JSON.stringify(obj, Object.keys(obj).sort());
 
   const isDirty: Record<Tab, boolean> = {
     home: JSON.stringify(homeForm) !== savedHome.current,
@@ -188,7 +189,9 @@ const SettingsPage: React.FC = () => {
       setInverterForm(inv);
       savedInverter.current = JSON.stringify(inv);
 
-      const sen: Record<string, string> = s.sensors ?? {};
+      const sen: PerPlatformSensors = s.sensors && 'platform' in s.sensors
+        ? s.sensors as PerPlatformSensors
+        : emptyPerPlatformSensors();
       setSensors(sen);
       savedSensors.current = stableStringify(sen);
 
@@ -217,16 +220,32 @@ const SettingsPage: React.FC = () => {
       const res = await api.post('/api/setup/discover');
       const d = res.data;
 
-      if (d.sensors && typeof d.sensors === 'object') {
+      if (d.platformSensors && typeof d.platformSensors === 'object') {
         setSensors(prev => {
-          const merged = {
-            ...d.sensors as Record<string, string>,
-            ...Object.fromEntries(Object.entries(prev).filter(([, v]) => v)),
-          };
-          // Drop empty-string entries so the result has the same shape as the
-          // persisted sensor map. Without this, discovered empty keys trigger a
-          // false dirty state even when nothing actually changed.
-          return Object.fromEntries(Object.entries(merged).filter(([, v]) => v)) as Record<string, string>;
+          const next = { ...prev };
+          // Merge discovered platform sensors into each platform sub-dict
+          for (const [platId, platMap] of Object.entries(d.platformSensors as Record<string, Record<string, string>>)) {
+            if (platId in next && platId !== 'platform' && platId !== 'shared') {
+              const existing = (next as Record<string, Record<string, string>>)[platId] ?? {};
+              const merged: Record<string, string> = { ...existing };
+              for (const [k, v] of Object.entries(platMap)) {
+                if (v) merged[k] = v;
+              }
+              (next as Record<string, Record<string, string>>)[platId] = merged;
+            }
+          }
+          // Merge shared sensors from flat discovery result
+          if (d.sensors) {
+            const shared = { ...(next.shared ?? {}) };
+            for (const [k, v] of Object.entries(d.sensors as Record<string, string>)) {
+              // Only merge keys that belong to shared integrations
+              if (v && !(k in ((next as Record<string, Record<string, string>>)[next.platform] ?? {}))) {
+                shared[k] = v;
+              }
+            }
+            next.shared = shared;
+          }
+          return next;
         });
       }
 
@@ -385,7 +404,7 @@ const SettingsPage: React.FC = () => {
           efficiencyDischarge: batteryForm.efficiencyDischarge,
           temperatureDerating: {
             enabled: batteryForm.temperatureDeratingEnabled,
-            weatherEntity: sensors['weather_entity'] ?? '',
+            weatherEntity: sensors.shared?.['weather_entity'] ?? '',
           },
         },
         growatt: {
@@ -425,7 +444,7 @@ const SettingsPage: React.FC = () => {
       });
       savedSensors.current = stableStringify(sensors);
       savedPricing.current = JSON.stringify(pricingForm);
-      const failed = await checkAndUpdateSensorHealth(sensors);
+      const failed = await checkAndUpdateSensorHealth(getActiveSensorsFlat(sensors));
       if (failed.length > 0) {
         setToast({
           type: 'error',
@@ -505,7 +524,7 @@ const SettingsPage: React.FC = () => {
                   onClick={() => {
                     setTab(t.id);
                     if (t.id === 'sensors' && Object.keys(sensorStatus).length === 0) {
-                      checkAndUpdateSensorHealth(sensors);
+                      checkAndUpdateSensorHealth(getActiveSensorsFlat(sensors));
                     }
                   }}
                   className={`flex items-center space-x-2 px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
@@ -569,7 +588,7 @@ const SettingsPage: React.FC = () => {
               form={batteryForm}
               onChange={setBatteryForm}
               currency={pricingForm.currency}
-              weatherEntity={sensors['weather_entity']}
+              weatherEntity={sensors.shared?.['weather_entity']}
             />
           )}
 
@@ -585,8 +604,7 @@ const SettingsPage: React.FC = () => {
                 inverterForm={inverterForm}
                 onInverterChange={(newForm) => {
                   setInverterForm(newForm);
-                  // Clear stale inverter sensor keys when switching platform
-                  setSensors(prev => swapInverterSensors(prev, newForm.inverterType));
+                  // SensorConfigSection handles updating sensors.platform via onChange
                 }}
                 sensorStatus={sensorStatus}
               />

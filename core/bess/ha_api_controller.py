@@ -376,8 +376,8 @@ class HomeAssistantAPIController:
     # lifetime_solar_energy          lifetime_total_solar_energy        solax_total_solar_energy
     # lifetime_export_to_grid        lifetime_total_export_to_grid      solax_grid_export_total / solax_total_grid_export
     # lifetime_import_from_grid      lifetime_import_from_grid          solax_grid_import_total / solax_total_grid_import
-    # lifetime_load_consumption      lifetime_total_load_consumption    solax_total_load (GEN3) / solax_home_consumption_energy (SPF only)
-    # lifetime_system_production     lifetime_system_production         solax_total_yield (GEN4 only)
+    # lifetime_load_consumption      lifetime_total_load_consumption    solax_total_yield (GEN4) / solax_total_load (GEN3)
+    # lifetime_system_production     lifetime_system_production         solax_total_power_generation (GEN4) / solax_total_yield (native SolaX)
     #
     # GEN3-only EMS entities (MIX/SPA/SPH via solax_modbus):
     # battery_charging_power_rate    —                                  solax_battery_first_charge_rate
@@ -465,82 +465,40 @@ class HomeAssistantAPIController:
         "tlx_self_consumption_total": "lifetime_self_consumption",
     }
 
-    # Maps exact unique_id suffix → BESS sensor key for solax_modbus entities.
-    # Used by _map_registry_entities() for registry-based discovery.
+    # ── Per-platform suffix maps for solax_modbus discovery ─────────────
     #
     # The solax_modbus integration (github.com/wills106/homeassistant-solax-modbus)
     # constructs unique_ids as "{serial}_solax_{plugin_key}".  Every suffix below
-    # is the full deterministic suffix including the "solax_" prefix, so matching
-    # is exact and unambiguous — no fuzzy endswith collisions.
+    # is the full deterministic suffix including the "solax_" prefix.
     #
-    # Includes both SolaX-native and Growatt inverter variants.
-    SOLAX_ENTITY_SUFFIX_MAP: ClassVar[dict[str, str]] = {
-        # ── Real-time power sensors (sensor.<prefix>_<suffix>) ───────────
-        # SOC
-        "solax_battery_capacity": "battery_soc",  # SolaX native
-        "solax_battery_soc": "battery_soc",  # Growatt inverter
-        # Battery power
-        "solax_battery_power_charge": "battery_charge_power",  # SolaX native
-        "solax_battery_charge_power": "battery_charge_power",  # Growatt inverter
-        "solax_battery_power_discharge": "battery_discharge_power",  # SolaX native
-        "solax_battery_discharge_power": "battery_discharge_power",  # Growatt inverter
-        # Grid power
-        "solax_measured_power": "import_power",  # SolaX native
-        "solax_total_forward_power": "import_power",  # Growatt GEN4 (MIN/MOD/MID) — register 3041
-        "solax_ac_power_to_user": "import_power",  # Growatt GEN3 (MIX/SPA/SPH) — register 1015
-        "solax_grid_export": "export_power",  # SolaX native
-        "solax_grid_import": "import_power",  # SolaX native alternative
-        "solax_total_reverse_power": "export_power",  # Growatt GEN4 (MIN/MOD/MID) — register 3043
-        "solax_ac_power_to_grid": "export_power",  # Growatt GEN3 (MIX/SPA/SPH) — register 1023
-        # Solar power
-        "solax_pv_power_1": "pv_power",  # SolaX native / single string
-        "solax_pv_power_total": "pv_power",  # Growatt (all generations) — register 1, enabled by default
-        "solax_total_pv_power": "pv_power",  # Growatt GEN4 (disabled by default)
-        # Load power
-        "solax_house_load": "local_load_power",  # SolaX native
-        "solax_total_load_power": "local_load_power",  # Growatt inverter
-        # ── Lifetime / cumulative energy sensors ─────────────────────────
-        # Battery energy (input = charged, output = discharged)
-        "solax_battery_input_energy_total": "lifetime_battery_charged",  # SolaX native
-        "solax_total_battery_input_energy": "lifetime_battery_charged",  # Growatt inverter
-        "solax_battery_output_energy_total": "lifetime_battery_discharged",  # SolaX native
-        "solax_total_battery_output_energy": "lifetime_battery_discharged",  # Growatt inverter
-        # Solar energy
+    # Each platform has its own map — no collisions, no remapping.
+
+    # Growatt GEN4 (MIN/MOD/MID) via solax_modbus Growatt plugin
+    SOLAX_GROWATT_MIN_SUFFIX_MAP: ClassVar[dict[str, str]] = {
+        # Real-time power
+        "solax_battery_soc": "battery_soc",
+        "solax_battery_charge_power": "battery_charge_power",
+        "solax_battery_discharge_power": "battery_discharge_power",
+        "solax_total_forward_power": "import_power",  # register 3041
+        "solax_total_reverse_power": "export_power",  # register 3043
+        "solax_pv_power_total": "pv_power",  # register 1, enabled by default
+        "solax_total_pv_power": "pv_power",  # disabled by default
+        "solax_total_load_power": "local_load_power",
+        # Lifetime energy
+        "solax_total_battery_input_energy": "lifetime_battery_charged",
+        "solax_total_battery_output_energy": "lifetime_battery_discharged",
         "solax_total_solar_energy": "lifetime_solar_energy",
-        # Grid energy — two naming variants across Gen2/3 vs Gen4+
-        "solax_grid_import_total": "lifetime_import_from_grid",
         "solax_total_grid_import": "lifetime_import_from_grid",
-        "solax_grid_export_total": "lifetime_export_to_grid",
         "solax_total_grid_export": "lifetime_export_to_grid",
-        # Load consumption — multiple naming variants across generations
-        "solax_home_consumption_energy": "lifetime_load_consumption",  # SPF only
-        "solax_total_load": "lifetime_load_consumption",  # GEN3 (MIX/SPA/SPH)
-        "solax_total_yield": "lifetime_load_consumption",  # GEN4 (MIN/MOD/MID) — register 3077, name="Total Load Energy"
-        # System production
-        "solax_total_power_generation": "lifetime_system_production",  # GEN4 (MIN/MOD/MID) — register 3051
-        # ── VPP control entities (select/number/button.<prefix>_<suffix>) ─
-        "solax_remotecontrol_power_control": "solax_power_control_mode",
-        "solax_remotecontrol_active_power": "solax_active_power",
-        "solax_remotecontrol_autorepeat_duration": "solax_autorepeat_duration",
-        "solax_remotecontrol_trigger": "solax_power_control_trigger",
-        "solax_battery_minimum_capacity": "solax_battery_min_soc",
-        "solax_battery_minimum_capacity_grid_tied": "solax_battery_min_soc",
-        # ── Charger use mode (select entity) ─────────────────────────────
-        "solax_charger_use_mode": "solax_charger_use_mode",
-        # ── Growatt inverter: EMS charge/discharge rate control ───────────
-        # GEN4 (MIN/MOD/MID) EMS entities:
+        "solax_total_yield": "lifetime_load_consumption",  # register 3077, "Total Load Energy"
+        "solax_total_power_generation": "lifetime_system_production",  # register 3051
+        # EMS control
         "solax_ems_charging_rate": "battery_charging_power_rate",
         "solax_ems_discharging_rate": "battery_discharging_power_rate",
         "solax_ems_charging_stop_soc": "battery_charge_stop_soc",
         "solax_ems_discharging_stop_soc": "battery_discharge_stop_soc",
-        # GEN3 (MIX/SPA/SPH) EMS entities — different names, same BESS keys:
-        "solax_battery_first_charge_rate": "battery_charging_power_rate",
-        "solax_grid_first_discharge_rate": "battery_discharging_power_rate",
-        "solax_battery_first_maximum_soc": "battery_charge_stop_soc",
-        "solax_load_first_battery_minimum_soc": "battery_discharge_stop_soc",
-        # Grid charge switch (both generations):
         "solax_charger_switch": "grid_charge",
-        # ── Growatt inverter: TOU time slot entities (9 slots) ───────────
+        # TOU time slots (9 slots)
         "solax_time_1_enabled": "tou_time_1_enabled",
         "solax_time_1_begin": "tou_time_1_begin",
         "solax_time_1_end": "tou_time_1_end",
@@ -586,6 +544,61 @@ class HomeAssistantAPIController:
         "solax_time_9_end": "tou_time_9_end",
         "solax_time_9_mode": "tou_time_9_mode",
         "solax_time_9_update": "tou_time_9_update",
+    }
+
+    # Growatt GEN3 (MIX/SPA/SPH) via solax_modbus Growatt plugin
+    SOLAX_GROWATT_SPH_SUFFIX_MAP: ClassVar[dict[str, str]] = {
+        # Real-time power
+        "solax_battery_soc": "battery_soc",
+        "solax_battery_charge_power": "battery_charge_power",
+        "solax_battery_discharge_power": "battery_discharge_power",
+        "solax_ac_power_to_user": "import_power",  # register 1015
+        "solax_ac_power_to_grid": "export_power",  # register 1023
+        "solax_pv_power_total": "pv_power",
+        "solax_total_load_power": "local_load_power",
+        # Lifetime energy
+        "solax_total_battery_input_energy": "lifetime_battery_charged",
+        "solax_total_battery_output_energy": "lifetime_battery_discharged",
+        "solax_total_solar_energy": "lifetime_solar_energy",
+        "solax_total_grid_import": "lifetime_import_from_grid",
+        "solax_total_grid_export": "lifetime_export_to_grid",
+        "solax_total_load": "lifetime_load_consumption",  # register 1062
+        # No lifetime_system_production — BESS derives from lifetime_solar_energy
+        # EMS control
+        "solax_battery_first_charge_rate": "battery_charging_power_rate",
+        "solax_grid_first_discharge_rate": "battery_discharging_power_rate",
+        "solax_battery_first_maximum_soc": "battery_charge_stop_soc",
+        "solax_load_first_battery_minimum_soc": "battery_discharge_stop_soc",
+        "solax_charger_switch": "grid_charge",
+    }
+
+    # SolaX native inverters via solax_modbus integration
+    SOLAX_NATIVE_SUFFIX_MAP: ClassVar[dict[str, str]] = {
+        # Real-time power
+        "solax_battery_capacity": "battery_soc",
+        "solax_battery_power_charge": "battery_charge_power",
+        "solax_battery_power_discharge": "battery_discharge_power",
+        "solax_measured_power": "import_power",
+        "solax_grid_import": "import_power",  # alternative suffix
+        "solax_grid_export": "export_power",
+        "solax_pv_power_1": "pv_power",
+        "solax_house_load": "local_load_power",
+        # Lifetime energy
+        "solax_battery_input_energy_total": "lifetime_battery_charged",
+        "solax_battery_output_energy_total": "lifetime_battery_discharged",
+        "solax_total_solar_energy": "lifetime_solar_energy",
+        "solax_grid_import_total": "lifetime_import_from_grid",
+        "solax_grid_export_total": "lifetime_export_to_grid",
+        "solax_total_yield": "lifetime_system_production",  # register 0x52, "Total Yield" (production)
+        # No native register for lifetime_load_consumption
+        # VPP control
+        "solax_remotecontrol_power_control": "solax_power_control_mode",
+        "solax_remotecontrol_active_power": "solax_active_power",
+        "solax_remotecontrol_autorepeat_duration": "solax_autorepeat_duration",
+        "solax_remotecontrol_trigger": "solax_power_control_trigger",
+        "solax_battery_minimum_capacity": "solax_battery_min_soc",
+        "solax_battery_minimum_capacity_grid_tied": "solax_battery_min_soc",
+        "solax_charger_use_mode": "solax_charger_use_mode",
     }
 
     def resolve_sensor_for_influxdb(self, sensor_key: str) -> str | None:
@@ -2609,31 +2622,40 @@ class HomeAssistantAPIController:
         detected_platform: str | None = None
 
         if inverter_detected.get("growatt"):
-            platform_sensors["growatt"] = self._map_registry_entities(
+            growatt_sensors = self._map_registry_entities(
                 entities,
                 ["growatt_server"],
                 self.ENTITY_SUFFIX_MAP,
             )
-            detected_platform = "growatt"
+            # Both MIN and SPH use the same Growatt Server cloud entities —
+            # the difference is in the service calls, not the sensors.
+            # Return both so the frontend can show either without re-discovery.
+            platform_sensors["growatt_server_min"] = dict(growatt_sensors)
+            platform_sensors["growatt_server_sph"] = dict(growatt_sensors)
+            detected_platform = "growatt_server_min"
 
         if inverter_detected.get("solax"):
             solax_platforms = ["solax_modbus", "solax"]
-            solax_sensors = self._map_registry_entities(
-                entities,
-                solax_platforms,
-                self.SOLAX_ENTITY_SUFFIX_MAP,
-            )
             if self._has_growatt_tou_entities(entities):
                 # GEN4: Growatt MIN/MOD/MID with numbered TOU slots
+                solax_sensors = self._map_registry_entities(
+                    entities, solax_platforms, self.SOLAX_GROWATT_MIN_SUFFIX_MAP
+                )
                 platform_sensors["solax_modbus_growatt_min"] = solax_sensors
                 if not detected_platform:
                     detected_platform = "solax_modbus_growatt_min"
             elif self._has_growatt_gen3_entities(entities):
                 # GEN3: Growatt MIX/SPA/SPH with mode-specific time slots
+                solax_sensors = self._map_registry_entities(
+                    entities, solax_platforms, self.SOLAX_GROWATT_SPH_SUFFIX_MAP
+                )
                 platform_sensors["solax_modbus_growatt_sph"] = solax_sensors
                 if not detected_platform:
                     detected_platform = "solax_modbus_growatt_sph"
             else:
+                solax_sensors = self._map_registry_entities(
+                    entities, solax_platforms, self.SOLAX_NATIVE_SUFFIX_MAP
+                )
                 platform_sensors["solax_modbus_native"] = solax_sensors
                 if not detected_platform:
                     detected_platform = "solax_modbus_native"

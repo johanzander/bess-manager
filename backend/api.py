@@ -163,12 +163,11 @@ async def get_settings():
         battery["reserved_capacity"] = battery["min_soe_kwh"]
         data["battery"] = battery
 
-        # Sensor keys are system identifiers — return the live merged view from
-        # ha_controller (which includes sensors loaded from options.json at startup
-        # that may not have been re-persisted to the store).
+        # Return the full per-platform sensors structure from the store.
+        # Also include a flat "activeSensors" view for backwards compatibility.
         data.pop("sensors", None)
         result = convert_keys_to_camel_case(data)
-        result["sensors"] = dict(bess_controller.ha_controller.sensors)
+        result["sensors"] = bess_controller.settings_store.data.get("sensors", {})
         return result
     except Exception as e:
         logger.error(f"Error getting settings: {e}")
@@ -201,12 +200,21 @@ async def patch_settings(updates: dict):
 
             # Validate before persisting — sensors need entity ID format checked first.
             if store_key == "sensors":
-                for value in snake_data.values():
-                    if value and not _ENTITY_ID_RE.match(value):
-                        raise HTTPException(
-                            status_code=422,
-                            detail=f"Invalid entity ID format: {value!r}",
-                        )
+                for key, value in snake_data.items():
+                    if isinstance(value, dict):
+                        # Per-platform sub-dict — validate entity IDs within
+                        for v in value.values():
+                            if v and isinstance(v, str) and not _ENTITY_ID_RE.match(v):
+                                raise HTTPException(
+                                    status_code=422,
+                                    detail=f"Invalid entity ID format: {v!r}",
+                                )
+                    elif isinstance(value, str) and value and key != "platform":
+                        if not _ENTITY_ID_RE.match(value):
+                            raise HTTPException(
+                                status_code=422,
+                                detail=f"Invalid entity ID format: {value!r}",
+                            )
 
             # Read-modify-write: merge into the existing section.
             # Use deep merge so that partial updates to nested sub-dicts (e.g.
@@ -270,10 +278,10 @@ async def patch_settings(updates: dict):
                     )
 
             elif store_key == "sensors":
-                # Full replace so unmapping a sensor (setting to "") takes
-                # effect immediately without requiring a restart.
+                # Update live ha_controller.sensors from the merged flat view
+                active = bess_controller.settings_store.get_active_sensors()
                 bess_controller.ha_controller.sensors = {
-                    k: v for k, v in section.items() if v
+                    k: v for k, v in active.items() if v
                 }
 
         _refresh_health(bess_controller)
@@ -2585,21 +2593,26 @@ async def run_setup_discovery():
             # the primary sensor source (it provides TOU control entities).
             effective_platform = detected_platform
             if (
-                detected_platform == "growatt"
+                detected_platform
+                and detected_platform.startswith("growatt_server")
                 and "solax_modbus_growatt_min" in platform_sensors
             ):
                 effective_platform = "solax_modbus_growatt_min"
             elif (
-                detected_platform == "growatt"
+                detected_platform
+                and detected_platform.startswith("growatt_server")
                 and "solax_modbus_growatt_sph" in platform_sensors
             ):
                 effective_platform = "solax_modbus_growatt_sph"
             sensors = dict(platform_sensors.get(effective_platform, {}))
-            suffix_map = (
-                ha.ENTITY_SUFFIX_MAP
-                if effective_platform == "growatt"
-                else ha.SOLAX_ENTITY_SUFFIX_MAP
-            )
+            _suffix_maps = {
+                "growatt_server_min": ha.ENTITY_SUFFIX_MAP,
+                "growatt_server_sph": ha.ENTITY_SUFFIX_MAP,
+                "solax_modbus_growatt_min": ha.SOLAX_GROWATT_MIN_SUFFIX_MAP,
+                "solax_modbus_growatt_sph": ha.SOLAX_GROWATT_SPH_SUFFIX_MAP,
+                "solax_modbus_native": ha.SOLAX_NATIVE_SUFFIX_MAP,
+            }
+            suffix_map = _suffix_maps.get(effective_platform, ha.ENTITY_SUFFIX_MAP)
             all_bess_keys = list(set(suffix_map.values()))
             # Single-segment TOU: Modbus GEN4 only needs slot 1 entities
             if effective_platform == "solax_modbus_growatt_min":
@@ -2861,10 +2874,10 @@ async def setup_complete(payload: APISetupCompletePayload):
         # Apply settings to live system so BESS starts immediately
         # without requiring a restart.
         if payload.sensors:
-            # Full replace (not merge) so stale sensors from a previous
-            # platform don't remain in memory after the wizard completes.
+            # Update live ha_controller.sensors from the merged flat view
+            active = bess_controller.settings_store.get_active_sensors()
             bess_controller.ha_controller.sensors = {
-                k: v for k, v in payload.sensors.items() if v
+                k: v for k, v in active.items() if v
             }
         if payload.growattDeviceId:
             bess_controller.ha_controller.growatt_device_id = payload.growattDeviceId

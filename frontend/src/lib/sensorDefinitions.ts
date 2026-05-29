@@ -31,51 +31,91 @@ export const INVERTER_INTEGRATION_IDS: Record<string, string> = {
 
 // Platform IDs are now used consistently at all layers — no conversion needed.
 
-// ---------------------------------------------------------------------------
-// Sensor swap helper — clears inverter-specific sensor keys when switching
-// platform and optionally fills from discovered values.
-// ---------------------------------------------------------------------------
+// All valid platform IDs.
+export const VALID_PLATFORMS = [
+  'growatt_server_min',
+  'growatt_server_sph',
+  'solax_modbus_growatt_min',
+  'solax_modbus_growatt_sph',
+  'solax_modbus_native',
+] as const;
 
-/** All sensor keys that belong to any inverter integration. */
-function getInverterSensorKeys(): Set<string> {
-  const inverterIntegrationIds = new Set(Object.values(INVERTER_INTEGRATION_IDS));
-  const keys = new Set<string>();
-  for (const intg of INTEGRATIONS) {
-    if (inverterIntegrationIds.has(intg.id)) {
-      for (const group of intg.sensorGroups) {
-        for (const s of group.sensors) {
-          keys.add(s.key);
-        }
-      }
-    }
-  }
-  return keys;
+export type PlatformId = typeof VALID_PLATFORMS[number];
+
+/**
+ * Per-platform sensor storage structure (mirrors backend settings_store).
+ * Each platform has its own independent sensor dict. Switching platform
+ * just changes the `platform` field — no clearing or swapping.
+ */
+export interface PerPlatformSensors {
+  platform: string;
+  growatt_server_min: Record<string, string>;
+  growatt_server_sph: Record<string, string>;
+  solax_modbus_growatt_min: Record<string, string>;
+  solax_modbus_growatt_sph: Record<string, string>;
+  solax_modbus_native: Record<string, string>;
+  shared: Record<string, string>;
+}
+
+/** IDs of non-inverter (shared) integrations. */
+export const SHARED_INTEGRATION_IDS = new Set([
+  'nordpool', 'solar_forecast', 'consumption_forecast',
+  'phase_current', 'discharge_inhibit', 'weather',
+]);
+
+/** Create an empty per-platform sensors structure. */
+export function emptyPerPlatformSensors(platform = ''): PerPlatformSensors {
+  return {
+    platform,
+    growatt_server_min: {},
+    growatt_server_sph: {},
+    solax_modbus_growatt_min: {},
+    solax_modbus_growatt_sph: {},
+    solax_modbus_native: {},
+    shared: {},
+  };
 }
 
 /**
- * Build a new sensors map after switching inverter platform.
- * Clears all inverter-specific keys and fills from platformSensors if available.
- * Non-inverter sensors (Solcast, weather, phase current, etc.) are preserved.
+ * Merge the active platform's sensors with shared sensors into a flat dict.
+ * Used when sending data to the backend (setup_complete) and for
+ * checking if required sensors are filled.
  */
-export function swapInverterSensors(
-  currentSensors: Record<string, string>,
-  newInverterType: string,
-  platformSensors?: Record<string, Record<string, string>>,
-): Record<string, string> {
-  const newPlatform = INVERTER_INTEGRATION_IDS[newInverterType] ?? 'growatt_server_min';
-  const platformMap = platformSensors?.[newPlatform] ?? {};
-  const inverterKeys = getInverterSensorKeys();
-
-  const next = { ...currentSensors };
-  for (const key of inverterKeys) {
-    next[key] = platformMap[key] ?? '';
-  }
-  return next;
+export function getActiveSensorsFlat(sensors: PerPlatformSensors): Record<string, string> {
+  const platform = sensors.platform as PlatformId;
+  return {
+    ...(sensors.shared ?? {}),
+    ...(sensors[platform] ?? {}),
+  };
 }
 
-// Shared sensor groups for Growatt cloud platforms (MIN and SPH use the same
-// HA growatt_server sensors — only the inverter model and service calls differ).
-const GROWATT_CLOUD_SENSOR_GROUPS: SensorGroup[] = [
+// Shared sensor groups used by multiple Growatt platforms.
+const GROWATT_POWER_MONITORING: SensorGroup = {
+  name: 'Power Monitoring',
+  sensors: [
+    { key: 'pv_power', label: 'Solar PV Power', required: false },
+    { key: 'local_load_power', label: 'Local Load Power', required: false },
+    { key: 'import_power', label: 'Grid Import Power', required: false },
+    { key: 'export_power', label: 'Grid Export Power', required: false },
+  ],
+};
+
+const GROWATT_CLOUD_LIFETIME: SensorGroup = {
+  name: 'Lifetime Energy Totals',
+  sensors: [
+    { key: 'lifetime_battery_charged', label: 'Total Battery Charged', required: true },
+    { key: 'lifetime_battery_discharged', label: 'Total Battery Discharged', required: true },
+    { key: 'lifetime_solar_energy', label: 'Total Solar Energy', required: true },
+    { key: 'lifetime_export_to_grid', label: 'Total Export to Grid', required: true },
+    { key: 'lifetime_import_from_grid', label: 'Total Import from Grid', required: true },
+    { key: 'lifetime_load_consumption', label: 'Total Load Consumption', required: true },
+    { key: 'lifetime_system_production', label: 'Total System Production', required: false },
+    { key: 'lifetime_self_consumption', label: 'Total Self Consumption', required: false },
+  ],
+};
+
+// MIN cloud: uses entity-based SOC limits, power rates, and grid_charge
+const GROWATT_CLOUD_MIN_SENSOR_GROUPS: SensorGroup[] = [
   {
     name: 'Battery Control',
     sensors: [
@@ -89,28 +129,24 @@ const GROWATT_CLOUD_SENSOR_GROUPS: SensorGroup[] = [
       { key: 'grid_charge', label: 'Grid Charge Enable', required: true },
     ],
   },
+  GROWATT_POWER_MONITORING,
+  GROWATT_CLOUD_LIFETIME,
+];
+
+// SPH cloud: the growatt_server integration exposes NO number or switch
+// entities for SPH — all control is via service calls (write_ac_charge_times,
+// write_ac_discharge_times).  Only sensors (SOC, power, lifetime) exist.
+const GROWATT_CLOUD_SPH_SENSOR_GROUPS: SensorGroup[] = [
   {
-    name: 'Power Monitoring',
+    name: 'Battery Monitoring',
     sensors: [
-      { key: 'pv_power', label: 'Solar PV Power', required: false },
-      { key: 'local_load_power', label: 'Local Load Power', required: false },
-      { key: 'import_power', label: 'Grid Import Power', required: false },
-      { key: 'export_power', label: 'Grid Export Power', required: false },
+      { key: 'battery_soc', label: 'State of Charge (SOC)', required: true },
+      { key: 'battery_charge_power', label: 'Charging Power', required: true },
+      { key: 'battery_discharge_power', label: 'Discharging Power', required: true },
     ],
   },
-  {
-    name: 'Lifetime Energy Totals',
-    sensors: [
-      { key: 'lifetime_battery_charged', label: 'Total Battery Charged', required: true },
-      { key: 'lifetime_battery_discharged', label: 'Total Battery Discharged', required: true },
-      { key: 'lifetime_solar_energy', label: 'Total Solar Energy', required: true },
-      { key: 'lifetime_export_to_grid', label: 'Total Export to Grid', required: true },
-      { key: 'lifetime_import_from_grid', label: 'Total Import from Grid', required: true },
-      { key: 'lifetime_load_consumption', label: 'Total Load Consumption', required: true },
-      { key: 'lifetime_system_production', label: 'Total System Production', required: false },
-      { key: 'lifetime_self_consumption', label: 'Total Self Consumption', required: false },
-    ],
-  },
+  GROWATT_POWER_MONITORING,
+  GROWATT_CLOUD_LIFETIME,
 ];
 
 export const INTEGRATIONS: IntegrationDef[] = [
@@ -119,14 +155,14 @@ export const INTEGRATIONS: IntegrationDef[] = [
     name: 'Growatt Cloud (MIN)',
     required: true,
     description: 'Growatt MIN inverter controlled via the Growatt Server cloud integration',
-    sensorGroups: GROWATT_CLOUD_SENSOR_GROUPS,
+    sensorGroups: GROWATT_CLOUD_MIN_SENSOR_GROUPS,
   },
   {
     id: 'growatt_server_sph',
     name: 'Growatt Cloud (SPH)',
     required: true,
     description: 'Growatt SPH inverter controlled via the Growatt Server cloud integration',
-    sensorGroups: GROWATT_CLOUD_SENSOR_GROUPS,
+    sensorGroups: GROWATT_CLOUD_SPH_SENSOR_GROUPS,
   },
   {
     id: 'solax_modbus_native',
@@ -159,7 +195,6 @@ export const INTEGRATIONS: IntegrationDef[] = [
           { key: 'lifetime_solar_energy', label: 'Total Solar Energy', required: false },
           { key: 'lifetime_import_from_grid', label: 'Grid Import Total', required: false },
           { key: 'lifetime_export_to_grid', label: 'Grid Export Total', required: false },
-          { key: 'lifetime_load_consumption', label: 'Home Consumption Energy', required: false },
           { key: 'lifetime_system_production', label: 'Total Yield', required: false },
         ],
       },
@@ -195,6 +230,8 @@ export const INTEGRATIONS: IntegrationDef[] = [
         sensors: [
           { key: 'battery_charging_power_rate', label: 'EMS Charging Rate', required: true },
           { key: 'battery_discharging_power_rate', label: 'EMS Discharging Rate', required: true },
+          { key: 'battery_charge_stop_soc', label: 'EMS Charging Stop SOC', required: true },
+          { key: 'battery_discharge_stop_soc', label: 'EMS Discharging Stop SOC', required: true },
           { key: 'grid_charge', label: 'Grid Charge Switch', required: true },
         ],
       },
@@ -249,7 +286,9 @@ export const INTEGRATIONS: IntegrationDef[] = [
         sensors: [
           { key: 'battery_charging_power_rate', label: 'Battery First Charge Rate', required: true },
           { key: 'battery_discharging_power_rate', label: 'Grid First Discharge Rate', required: true },
-          { key: 'grid_charge', label: 'Grid Charge Switch', required: true },
+          { key: 'battery_charge_stop_soc', label: 'Battery First Maximum SOC', required: true },
+          { key: 'battery_discharge_stop_soc', label: 'Load First Battery Minimum SOC', required: true },
+          { key: 'grid_charge', label: 'Charger Switch', required: true },
         ],
       },
       {

@@ -19,8 +19,8 @@ test.describe('Settings Page', () => {
     await page.goto('/settings');
     await expect(page.getByText('Loading settings')).not.toBeVisible({ timeout: 15_000 });
 
-    // Sensors tab is active by default — should show sensor group headers
-    await expect(page.getByText(/Growatt Server/i).first()).toBeVisible();
+    // Sensors tab is active by default — should show inverter platform selector
+    await expect(page.getByText('Growatt').first()).toBeVisible();
   });
 
   test('battery tab shows capacity fields', async ({ page }) => {

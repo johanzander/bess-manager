@@ -54,7 +54,7 @@ test.describe('Setup Wizard', () => {
     if (expected.solaxFound) {
       await expect(page.getByText('SolaX (Native)').first()).toBeVisible();
     } else {
-      await expect(page.getByText('Growatt Server').first()).toBeVisible();
+      await expect(page.getByText('Growatt').first()).toBeVisible();
     }
   });
 

@@ -40,6 +40,7 @@ export interface DiscoveryResult {
   sensors: Record<string, string>;
   platformSensors?: Record<string, Record<string, string>>;
   missingSensors: string[];
+  detectedPlatforms?: string[];
   inverterType: string | null;
   detectedPhaseCount: number | null;
   currency: string | null;

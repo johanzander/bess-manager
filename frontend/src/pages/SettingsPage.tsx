@@ -249,8 +249,9 @@ const SettingsPage: React.FC = () => {
         });
       }
 
-      if (d.inverterType) {
-        setInverterForm(f => ({ ...f, inverterType: d.inverterType }));
+      const detectedPlatform = d.detectedPlatforms?.[0] ?? d.inverterType;
+      if (detectedPlatform) {
+        setInverterForm(f => ({ ...f, inverterType: detectedPlatform }));
       }
       if (d.growattDeviceId) {
         setInverterForm(f => ({ ...f, deviceId: d.growattDeviceId }));
@@ -287,7 +288,7 @@ const SettingsPage: React.FC = () => {
       const sensorCount = d.sensors ? Object.keys(d.sensors).filter(k => d.sensors[k]).length : 0;
       setToast({
         type: 'success',
-        message: `Auto-configure found ${sensorCount} sensors${d.inverterType ? `, ${d.inverterType} inverter` : ''}${discoveredArea ? `, area ${discoveredArea}` : ''}. Review and save.`,
+        message: `Auto-configure found ${sensorCount} sensors${detectedPlatform ? `, ${detectedPlatform} inverter` : ''}${discoveredArea ? `, area ${discoveredArea}` : ''}. Review and save.`,
       });
 
       const healthRes = await api.get('/api/system-health').catch(() => ({ data: null }));

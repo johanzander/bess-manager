@@ -4,6 +4,18 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.0.0b24] - 2026-05-30
+
+### Fixed
+
+- **Wizard fails to detect Nordpool price area** — bare tuple unpacking in `_parse_ha_metadata` crashed on HA devices with non-2-element identifiers (`too many values to unpack`), silently losing nordpool_area, growatt_device_id, and all other WS-derived metadata. Now uses safe iteration with length checks.
+- **Sensor discovery fails for non-default solax_modbus device names** — suffix maps hardcoded `solax_` prefix (e.g. `solax_battery_soc`) which only matched users who named their device "solax". The prefix is user-configurable (`CONF_NAME` in solax_modbus). Maps now use only the fixed register key (e.g. `battery_soc`), matching any device name via `endswith()`.
+
+### Changed
+
+- **Return `detected_platforms` list from discovery** — backend no longer silently auto-selects `inverter_type` when multiple platforms are detected. Returns all detected platforms; frontend picks the first. `inverter_type` is only set when exactly one platform is found.
+- **Add diagnostic logging to discovery endpoint** — logs nordpool_area, currency, config_entry_id after `discover_integrations()` for easier debugging.
+
 ## [9.0.0b23] - 2026-05-30
 
 ### Fixed

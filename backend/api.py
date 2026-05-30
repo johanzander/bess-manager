@@ -2581,6 +2581,15 @@ async def run_setup_discovery():
         ha = bess_controller.ha_controller
 
         integrations, states = ha.discover_integrations()
+        logger.info(
+            "Setup discover: nordpool_area=%s, nordpool_custom_area=%s, "
+            "nordpool_config_entry_id=%s, currency=%s, vat_multiplier=%s",
+            integrations.get("nordpool_area"),
+            integrations.get("nordpool_custom_area"),
+            integrations.get("nordpool_config_entry_id"),
+            integrations.get("currency"),
+            integrations.get("vat_multiplier"),
+        )
 
         sensors: dict[str, str] = {}
         missing_sensors: list[str] = []
@@ -2666,6 +2675,7 @@ async def run_setup_discovery():
                 "octopus_found": integrations["octopus_found"],
                 "missing_sensors": missing_sensors,
                 # Auto-detected hints
+                "detected_platforms": integrations["detected_platforms"],
                 "inverter_type": integrations["inverter_type"],
                 "detected_phase_count": detected_phase_count,
                 "currency": integrations["currency"],

@@ -119,8 +119,10 @@ const SetupWizardPage: React.FC = () => {
         ...(d.octopusEntities?.exportToday ? { octopusExportTodayEntity: d.octopusEntities.exportToday } : {}),
         ...(d.octopusEntities?.exportTomorrow ? { octopusExportTomorrowEntity: d.octopusEntities.exportTomorrow } : {}),
       }));
-      if (d.inverterType) {
-        setInverterForm(f => ({ ...f, inverterType: d.inverterType }));
+      // Auto-select platform: use detected_platforms (preferred) or legacy inverterType
+      const detectedPlatform = d.detectedPlatforms?.[0] ?? d.inverterType;
+      if (detectedPlatform) {
+        setInverterForm(f => ({ ...f, inverterType: detectedPlatform }));
       }
       if (d.growattDeviceId) {
         setInverterForm(f => ({ ...f, deviceId: d.growattDeviceId! }));
@@ -128,7 +130,7 @@ const SetupWizardPage: React.FC = () => {
 
       // Build per-platform sensor structure from discovery results.
       // platformSensors has per-platform dicts; shared sensors come from d.sensors.
-      const platform = d.inverterType ?? inverterForm.inverterType ?? '';
+      const platform = detectedPlatform ?? inverterForm.inverterType ?? '';
       const newSensors: PerPlatformSensors = emptyPerPlatformSensors(platform);
       const existing = existingSensorsRef.current;
 

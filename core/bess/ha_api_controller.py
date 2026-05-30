@@ -474,131 +474,135 @@ class HomeAssistantAPIController:
     # Each platform has its own map — no collisions, no remapping.
 
     # Growatt GEN4 (MIN/MOD/MID) via solax_modbus Growatt plugin
+    # solax_modbus unique_id format: {user_chosen_device_name}_{register_key}
+    # The device name prefix is user-configurable (default "SolaX"), so suffix
+    # maps use only the fixed register key.  The matching code uses
+    # endswith(f"_{suffix}") which strips any prefix.
     SOLAX_GROWATT_MIN_SUFFIX_MAP: ClassVar[dict[str, str]] = {
         # Real-time power
-        "solax_battery_soc": "battery_soc",
-        "solax_battery_charge_power": "battery_charge_power",
-        "solax_battery_discharge_power": "battery_discharge_power",
-        "solax_total_forward_power": "import_power",  # register 3041
-        "solax_total_reverse_power": "export_power",  # register 3043
-        "solax_pv_power_total": "pv_power",  # register 1, enabled by default
-        "solax_total_pv_power": "pv_power",  # disabled by default
-        "solax_total_load_power": "local_load_power",
+        "battery_soc": "battery_soc",
+        "battery_charge_power": "battery_charge_power",
+        "battery_discharge_power": "battery_discharge_power",
+        "total_forward_power": "import_power",  # register 3041
+        "total_reverse_power": "export_power",  # register 3043
+        "pv_power_total": "pv_power",  # register 1, enabled by default
+        "total_pv_power": "pv_power",  # disabled by default
+        "total_load_power": "local_load_power",
         # Lifetime energy
-        "solax_total_battery_input_energy": "lifetime_battery_charged",
-        "solax_total_battery_output_energy": "lifetime_battery_discharged",
-        "solax_total_solar_energy": "lifetime_solar_energy",
-        "solax_total_grid_import": "lifetime_import_from_grid",
-        "solax_total_grid_export": "lifetime_export_to_grid",
-        "solax_total_yield": "lifetime_load_consumption",  # register 3077, "Total Load Energy"
-        "solax_total_power_generation": "lifetime_system_production",  # register 3051
+        "total_battery_input_energy": "lifetime_battery_charged",
+        "total_battery_output_energy": "lifetime_battery_discharged",
+        "total_solar_energy": "lifetime_solar_energy",
+        "total_grid_import": "lifetime_import_from_grid",
+        "total_grid_export": "lifetime_export_to_grid",
+        "total_yield": "lifetime_load_consumption",  # register 3077, "Total Load Energy"
+        "total_power_generation": "lifetime_system_production",  # register 3051
         # EMS control
-        "solax_ems_charging_rate": "battery_charging_power_rate",
-        "solax_ems_discharging_rate": "battery_discharging_power_rate",
-        "solax_ems_charging_stop_soc": "battery_charge_stop_soc",
-        "solax_ems_discharging_stop_soc": "battery_discharge_stop_soc",
-        "solax_charger_switch": "grid_charge",
+        "ems_charging_rate": "battery_charging_power_rate",
+        "ems_discharging_rate": "battery_discharging_power_rate",
+        "ems_charging_stop_soc": "battery_charge_stop_soc",
+        "ems_discharging_stop_soc": "battery_discharge_stop_soc",
+        "charger_switch": "grid_charge",
         # TOU time slots (9 slots)
-        "solax_time_1_enabled": "tou_time_1_enabled",
-        "solax_time_1_begin": "tou_time_1_begin",
-        "solax_time_1_end": "tou_time_1_end",
-        "solax_time_1_mode": "tou_time_1_mode",
-        "solax_time_1_update": "tou_time_1_update",
-        "solax_time_2_enabled": "tou_time_2_enabled",
-        "solax_time_2_begin": "tou_time_2_begin",
-        "solax_time_2_end": "tou_time_2_end",
-        "solax_time_2_mode": "tou_time_2_mode",
-        "solax_time_2_update": "tou_time_2_update",
-        "solax_time_3_enabled": "tou_time_3_enabled",
-        "solax_time_3_begin": "tou_time_3_begin",
-        "solax_time_3_end": "tou_time_3_end",
-        "solax_time_3_mode": "tou_time_3_mode",
-        "solax_time_3_update": "tou_time_3_update",
-        "solax_time_4_enabled": "tou_time_4_enabled",
-        "solax_time_4_begin": "tou_time_4_begin",
-        "solax_time_4_end": "tou_time_4_end",
-        "solax_time_4_mode": "tou_time_4_mode",
-        "solax_time_4_update": "tou_time_4_update",
-        "solax_time_5_enabled": "tou_time_5_enabled",
-        "solax_time_5_begin": "tou_time_5_begin",
-        "solax_time_5_end": "tou_time_5_end",
-        "solax_time_5_mode": "tou_time_5_mode",
-        "solax_time_5_update": "tou_time_5_update",
-        "solax_time_6_enabled": "tou_time_6_enabled",
-        "solax_time_6_begin": "tou_time_6_begin",
-        "solax_time_6_end": "tou_time_6_end",
-        "solax_time_6_mode": "tou_time_6_mode",
-        "solax_time_6_update": "tou_time_6_update",
-        "solax_time_7_enabled": "tou_time_7_enabled",
-        "solax_time_7_begin": "tou_time_7_begin",
-        "solax_time_7_end": "tou_time_7_end",
-        "solax_time_7_mode": "tou_time_7_mode",
-        "solax_time_7_update": "tou_time_7_update",
-        "solax_time_8_enabled": "tou_time_8_enabled",
-        "solax_time_8_begin": "tou_time_8_begin",
-        "solax_time_8_end": "tou_time_8_end",
-        "solax_time_8_mode": "tou_time_8_mode",
-        "solax_time_8_update": "tou_time_8_update",
-        "solax_time_9_enabled": "tou_time_9_enabled",
-        "solax_time_9_begin": "tou_time_9_begin",
-        "solax_time_9_end": "tou_time_9_end",
-        "solax_time_9_mode": "tou_time_9_mode",
-        "solax_time_9_update": "tou_time_9_update",
+        "time_1_enabled": "tou_time_1_enabled",
+        "time_1_begin": "tou_time_1_begin",
+        "time_1_end": "tou_time_1_end",
+        "time_1_mode": "tou_time_1_mode",
+        "time_1_update": "tou_time_1_update",
+        "time_2_enabled": "tou_time_2_enabled",
+        "time_2_begin": "tou_time_2_begin",
+        "time_2_end": "tou_time_2_end",
+        "time_2_mode": "tou_time_2_mode",
+        "time_2_update": "tou_time_2_update",
+        "time_3_enabled": "tou_time_3_enabled",
+        "time_3_begin": "tou_time_3_begin",
+        "time_3_end": "tou_time_3_end",
+        "time_3_mode": "tou_time_3_mode",
+        "time_3_update": "tou_time_3_update",
+        "time_4_enabled": "tou_time_4_enabled",
+        "time_4_begin": "tou_time_4_begin",
+        "time_4_end": "tou_time_4_end",
+        "time_4_mode": "tou_time_4_mode",
+        "time_4_update": "tou_time_4_update",
+        "time_5_enabled": "tou_time_5_enabled",
+        "time_5_begin": "tou_time_5_begin",
+        "time_5_end": "tou_time_5_end",
+        "time_5_mode": "tou_time_5_mode",
+        "time_5_update": "tou_time_5_update",
+        "time_6_enabled": "tou_time_6_enabled",
+        "time_6_begin": "tou_time_6_begin",
+        "time_6_end": "tou_time_6_end",
+        "time_6_mode": "tou_time_6_mode",
+        "time_6_update": "tou_time_6_update",
+        "time_7_enabled": "tou_time_7_enabled",
+        "time_7_begin": "tou_time_7_begin",
+        "time_7_end": "tou_time_7_end",
+        "time_7_mode": "tou_time_7_mode",
+        "time_7_update": "tou_time_7_update",
+        "time_8_enabled": "tou_time_8_enabled",
+        "time_8_begin": "tou_time_8_begin",
+        "time_8_end": "tou_time_8_end",
+        "time_8_mode": "tou_time_8_mode",
+        "time_8_update": "tou_time_8_update",
+        "time_9_enabled": "tou_time_9_enabled",
+        "time_9_begin": "tou_time_9_begin",
+        "time_9_end": "tou_time_9_end",
+        "time_9_mode": "tou_time_9_mode",
+        "time_9_update": "tou_time_9_update",
     }
 
     # Growatt GEN3 (MIX/SPA/SPH) via solax_modbus Growatt plugin
     SOLAX_GROWATT_SPH_SUFFIX_MAP: ClassVar[dict[str, str]] = {
         # Real-time power
-        "solax_battery_soc": "battery_soc",
-        "solax_battery_charge_power": "battery_charge_power",
-        "solax_battery_discharge_power": "battery_discharge_power",
-        "solax_ac_power_to_user": "import_power",  # register 1015
-        "solax_ac_power_to_grid": "export_power",  # register 1023
-        "solax_pv_power_total": "pv_power",
-        "solax_total_load_power": "local_load_power",
+        "battery_soc": "battery_soc",
+        "battery_charge_power": "battery_charge_power",
+        "battery_discharge_power": "battery_discharge_power",
+        "ac_power_to_user": "import_power",  # register 1015
+        "ac_power_to_grid": "export_power",  # register 1023
+        "pv_power_total": "pv_power",
+        "total_load_power": "local_load_power",
         # Lifetime energy
-        "solax_total_battery_input_energy": "lifetime_battery_charged",
-        "solax_total_battery_output_energy": "lifetime_battery_discharged",
-        "solax_total_solar_energy": "lifetime_solar_energy",
-        "solax_total_grid_import": "lifetime_import_from_grid",
-        "solax_total_grid_export": "lifetime_export_to_grid",
-        "solax_total_load": "lifetime_load_consumption",  # register 1062
+        "total_battery_input_energy": "lifetime_battery_charged",
+        "total_battery_output_energy": "lifetime_battery_discharged",
+        "total_solar_energy": "lifetime_solar_energy",
+        "total_grid_import": "lifetime_import_from_grid",
+        "total_grid_export": "lifetime_export_to_grid",
+        "total_load": "lifetime_load_consumption",  # register 1062
         # No lifetime_system_production — BESS derives from lifetime_solar_energy
         # EMS control
-        "solax_battery_first_charge_rate": "battery_charging_power_rate",
-        "solax_grid_first_discharge_rate": "battery_discharging_power_rate",
-        "solax_battery_first_maximum_soc": "battery_charge_stop_soc",
-        "solax_load_first_battery_minimum_soc": "battery_discharge_stop_soc",
-        "solax_charger_switch": "grid_charge",
+        "battery_first_charge_rate": "battery_charging_power_rate",
+        "grid_first_discharge_rate": "battery_discharging_power_rate",
+        "battery_first_maximum_soc": "battery_charge_stop_soc",
+        "load_first_battery_minimum_soc": "battery_discharge_stop_soc",
+        "charger_switch": "grid_charge",
     }
 
     # SolaX native inverters via solax_modbus integration
     SOLAX_NATIVE_SUFFIX_MAP: ClassVar[dict[str, str]] = {
         # Real-time power
-        "solax_battery_capacity": "battery_soc",
-        "solax_battery_power_charge": "battery_charge_power",
-        "solax_battery_power_discharge": "battery_discharge_power",
-        "solax_measured_power": "import_power",
-        "solax_grid_import": "import_power",  # alternative suffix
-        "solax_grid_export": "export_power",
-        "solax_pv_power_1": "pv_power",
-        "solax_house_load": "local_load_power",
+        "battery_capacity": "battery_soc",
+        "battery_power_charge": "battery_charge_power",
+        "battery_power_discharge": "battery_discharge_power",
+        "measured_power": "import_power",
+        "grid_import": "import_power",  # alternative suffix
+        "grid_export": "export_power",
+        "pv_power_1": "pv_power",
+        "house_load": "local_load_power",
         # Lifetime energy
-        "solax_battery_input_energy_total": "lifetime_battery_charged",
-        "solax_battery_output_energy_total": "lifetime_battery_discharged",
-        "solax_total_solar_energy": "lifetime_solar_energy",
-        "solax_grid_import_total": "lifetime_import_from_grid",
-        "solax_grid_export_total": "lifetime_export_to_grid",
-        "solax_total_yield": "lifetime_system_production",  # register 0x52, "Total Yield" (production)
+        "battery_input_energy_total": "lifetime_battery_charged",
+        "battery_output_energy_total": "lifetime_battery_discharged",
+        "total_solar_energy": "lifetime_solar_energy",
+        "grid_import_total": "lifetime_import_from_grid",
+        "grid_export_total": "lifetime_export_to_grid",
+        "total_yield": "lifetime_system_production",  # register 0x52, "Total Yield" (production)
         # No native register for lifetime_load_consumption
         # VPP control
-        "solax_remotecontrol_power_control": "solax_power_control_mode",
-        "solax_remotecontrol_active_power": "solax_active_power",
-        "solax_remotecontrol_autorepeat_duration": "solax_autorepeat_duration",
-        "solax_remotecontrol_trigger": "solax_power_control_trigger",
-        "solax_battery_minimum_capacity": "solax_battery_min_soc",
-        "solax_battery_minimum_capacity_grid_tied": "solax_battery_min_soc",
-        "solax_charger_use_mode": "solax_charger_use_mode",
+        "remotecontrol_power_control": "solax_power_control_mode",
+        "remotecontrol_active_power": "solax_active_power",
+        "remotecontrol_autorepeat_duration": "solax_autorepeat_duration",
+        "remotecontrol_trigger": "solax_power_control_trigger",
+        "battery_minimum_capacity": "solax_battery_min_soc",
+        "battery_minimum_capacity_grid_tied": "solax_battery_min_soc",
+        "charger_use_mode": "solax_charger_use_mode",
     }
 
     def resolve_sensor_for_influxdb(self, sensor_key: str) -> str | None:
@@ -2050,8 +2054,12 @@ class HomeAssistantAPIController:
         if device_sn:
             sn_upper = device_sn.upper()
             for device in devices_result:
-                for _domain, identifier in device.get("identifiers", []):
-                    if str(identifier).upper() == sn_upper:
+                for ident in device.get("identifiers", []):
+                    if (
+                        isinstance(ident, (list, tuple))
+                        and len(ident) == 2
+                        and str(ident[1]).upper() == sn_upper
+                    ):
                         growatt_device_id = device["id"]
                         break
                 if growatt_device_id:
@@ -2162,8 +2170,8 @@ class HomeAssistantAPIController:
             Tuple of (result_dict, states) where result_dict has keys:
             growatt_found, device_sn, growatt_device_id,
             nordpool_found, nordpool_area, nordpool_config_entry_id,
-            octopus_found, inverter_type, detected_phase_count,
-            currency, vat_multiplier.
+            octopus_found, detected_platforms, inverter_type,
+            detected_phase_count, currency, vat_multiplier.
             states is the raw list from /api/states for reuse by callers.
         """
         result: dict = {
@@ -2178,6 +2186,7 @@ class HomeAssistantAPIController:
             "nordpool_config_entry_id": None,
             "octopus_found": False,
             # Auto-detected hints (None = could not determine)
+            "detected_platforms": [],
             "inverter_type": None,
             "detected_phase_count": None,
             "currency": None,
@@ -2248,23 +2257,29 @@ class HomeAssistantAPIController:
             logger.warning("Failed to parse config entries / device registry: %s", e)
 
         # ── Auto-detected hints ───────────────────────────────────────────
-        # Inverter type: both growatt_server (cloud) and solax_modbus (local)
-        # can control the inverter.  When both are present and solax_modbus
-        # has TOU/GEN3 markers, prefer modbus — the user explicitly set up
-        # local control, which is faster and doesn't depend on cloud.
+        # Build a list of all detected platforms — no magic selection.
+        # The frontend picks the platform; the backend just reports what's
+        # available.
+        detected_platforms: list[str] = []
         if result["growatt_found"]:
-            result["inverter_type"] = metadata.get("growatt_inverter_type")
+            growatt_type = metadata.get("growatt_inverter_type")
+            if growatt_type:
+                detected_platforms.append(growatt_type)
         if result["solax_found"]:
             has_tou = self._has_growatt_tou_entities(registry)
             has_gen3 = self._has_growatt_gen3_entities(registry)
             result["solax_has_growatt_tou"] = has_tou
             result["solax_has_growatt_gen3"] = has_gen3
             if has_tou:
-                result["inverter_type"] = "solax_modbus_growatt_min"
+                detected_platforms.append("solax_modbus_growatt_min")
             elif has_gen3:
-                result["inverter_type"] = "solax_modbus_growatt_sph"
+                detected_platforms.append("solax_modbus_growatt_sph")
             elif not result["growatt_found"]:
-                result["inverter_type"] = "solax_modbus_native"
+                detected_platforms.append("solax_modbus_native")
+        result["detected_platforms"] = detected_platforms
+        result["inverter_type"] = (
+            detected_platforms[0] if len(detected_platforms) == 1 else None
+        )
 
         # Currency & VAT from Nordpool area or Octopus defaults
         area_hints = self._hints_from_nordpool_area(

@@ -248,6 +248,16 @@ But at noon every day we get tomorrows schedule. We could use this information t
 
 ## 🔵 **ROBUSTNESS IMPROVEMENTS** (System Observability)
 
+### **Retry discovery on startup when HA WebSocket is not ready**
+
+**Impact**: High | **Effort**: Low | **Dependencies**: `ha_api_controller.py`, `battery_system_manager.py`
+
+**Description**: BESS Manager starts as an HA add-on and can launch before HA's WebSocket API is fully ready. When the initial `discover_integrations()` WS connection fails during early boot, `nordpool_config_entry_id` stays None and the system enters degraded mode with no price data — even though HA becomes ready seconds later. Observed on Niklas's system (b18, 2026-05-26): WS failed at 05:08 (4 min after boot), but by 05:45 discovery worked fine.
+
+**Fix**: Re-attempt discovery with short backoff (e.g. 5s, 10s, 20s) until `config_entry_id` is populated or a max number of retries is reached.
+
+---
+
 ### ~~**Complete or Remove EV Energy Meter Integration**~~ ✅ Completed (v8.0.0)
 
 **Resolution**: EV energy meter dead code removed entirely in v8.0.0 release.

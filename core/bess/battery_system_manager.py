@@ -90,11 +90,10 @@ class BatterySystemManager:
         self.home_settings = HomeSettings()
         self.price_settings = PriceSettings()
         self._energy_provider_config = energy_provider_config or {}
-        self._addon_options = addon_options or {}
 
         # Initialize temperature derating (opt-in, disabled by default)
         self.temperature_derating = TemperatureDeratingSettings()
-        self.temperature_derating.from_ha_config(self._addon_options)
+        self.temperature_derating.from_ha_config(addon_options or {})
 
         # Store controller reference
         self._controller = controller
@@ -114,9 +113,12 @@ class BatterySystemManager:
             self.battery_settings,
         )
 
-        # Initialize hardware interface with battery settings.
+        # Resolve initial inverter platform from config.
         # On a fresh install no inverter platform is configured yet — the
         # controller stays None until the user completes the setup wizard.
+        self.inverter_platform: str | None = self._resolve_initial_platform(
+            addon_options or {}
+        )
         self._inverter_controller: InverterController | None = (
             self._create_inverter_controller()
         )
@@ -194,41 +196,42 @@ class BatterySystemManager:
         "SPH": "growatt_server_sph",
     }
 
-    def _create_inverter_controller(self) -> InverterController | None:
-        """Create an inverter controller instance matching the configured inverter type.
+    @staticmethod
+    def _resolve_initial_platform(options: dict) -> str | None:
+        """Determine inverter platform from startup config.
 
-        Returns None on a fresh install where no inverter platform has been
-        configured yet.  The controller is created later when the user completes
-        the setup wizard and calls ``switch_inverter_platform()``.
+        Checks ``inverter.platform`` first, then falls back to the legacy
+        ``growatt.inverter_type`` key.  Returns None on a fresh install.
         """
-        inverter_section = self._addon_options.get("inverter", {})
-        platform = inverter_section.get("platform")
-
+        platform = options.get("inverter", {}).get("platform")
         if not platform:
-            # Resolve from legacy growatt.inverter_type
-            inverter_type = self._addon_options.get("growatt", {}).get(
-                "inverter_type", ""
-            )
+            inverter_type = options.get("growatt", {}).get("inverter_type", "")
             if not inverter_type:
-                # Fresh install — no inverter configured yet
                 logger.info(
                     "No inverter platform configured — "
                     "system will start in unconfigured mode"
                 )
-                self.inverter_platform = None
                 return None
-            assert inverter_type in self._INVERTER_TYPE_TO_PLATFORM, (
+            assert inverter_type in BatterySystemManager._INVERTER_TYPE_TO_PLATFORM, (
                 f"Unknown inverter_type '{inverter_type}', "
-                f"expected one of {list(self._INVERTER_TYPE_TO_PLATFORM)}"
+                f"expected one of "
+                f"{list(BatterySystemManager._INVERTER_TYPE_TO_PLATFORM)}"
             )
-            platform = self._INVERTER_TYPE_TO_PLATFORM[inverter_type]
+            platform = BatterySystemManager._INVERTER_TYPE_TO_PLATFORM[inverter_type]
 
-        assert platform in self.VALID_PLATFORMS, (
+        assert platform in BatterySystemManager.VALID_PLATFORMS, (
             f"Unknown inverter platform '{platform}', "
-            f"expected one of {sorted(self.VALID_PLATFORMS)}"
+            f"expected one of {sorted(BatterySystemManager.VALID_PLATFORMS)}"
         )
+        return platform
 
-        self.inverter_platform = platform
+    def _create_inverter_controller(self) -> InverterController | None:
+        """Create an inverter controller for ``self.inverter_platform``.
+
+        Returns None when no platform is configured (fresh install).
+        """
+        if not self.inverter_platform:
+            return None
 
         if self.inverter_platform == "growatt_server_sph":
             return GrowattSphController(battery_settings=self.battery_settings)
@@ -268,11 +271,7 @@ class BatterySystemManager:
             platform,
         )
 
-        # Update the options so _create_inverter_controller reads the new value
-        if "inverter" not in self._addon_options:
-            self._addon_options["inverter"] = {}
-        self._addon_options["inverter"]["platform"] = platform
-
+        self.inverter_platform = platform
         self._inverter_controller = self._create_inverter_controller()
         logger.info(
             "Inverter controller recreated: %s",
@@ -982,8 +981,11 @@ class BatterySystemManager:
         Queries InfluxDB for the past 7 days of the local_load_power sensor
         and returns the 96-value weekly average profile (kWh per 15-min period).
         """
-        sensors_config = self._addon_options.get("sensors", {})
-        target_sensor = sensors_config.get("local_load_power", "")
+        target_sensor = (
+            self._controller.sensors.get("local_load_power", "")
+            if self._controller
+            else ""
+        )
         if not target_sensor:
             raise ValueError(
                 "influxdb_7d_avg strategy requires 'local_load_power' sensor configured"
@@ -1024,7 +1026,7 @@ class BatterySystemManager:
         if not day_profiles:
             raise ValueError(
                 "influxdb_7d_avg strategy: no valid historical data found in InfluxDB "
-                f"for the past 7 days of sensor '{sensors_config.get('local_load_power', '')}'"
+                f"for the past 7 days of sensor '{target_sensor}'"
             )
 
         # Average across all valid days

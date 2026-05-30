@@ -300,13 +300,20 @@ class DebugDataExport:
 class DebugDataAggregator:
     """Aggregates all system data for debug export."""
 
-    def __init__(self, system: BatterySystemManager):
+    def __init__(
+        self,
+        system: BatterySystemManager,
+        settings_data: dict | None = None,
+    ):
         """Initialize aggregator with system manager.
 
         Args:
             system: BatterySystemManager instance to export data from
+            settings_data: Full settings store data for debug export.
+                If None, addon_options in the export will be empty.
         """
         self.system = system
+        self._settings_data = settings_data or {}
         self._start_time = datetime.now()
 
     def aggregate_all_data(self, compact: bool = True) -> DebugDataExport:
@@ -492,20 +499,20 @@ class DebugDataAggregator:
             return {}
 
     def _serialize_addon_options(self) -> dict:
-        """Serialize addon options (entity ID mappings, inverter config).
+        """Serialize settings data (entity ID mappings, inverter config).
 
-        This is the complete options.json loaded at startup — includes sensor entity
-        IDs, battery settings, price config, and inverter device ID. Used by
-        from_debug_log.py to auto-generate bess_config for mock HA replay.
+        Includes sensor entity IDs, battery settings, price config, and
+        inverter device ID. Used by from_debug_log.py to auto-generate
+        bess_config for mock HA replay.
 
-        InfluxDB username and password are stripped — URL is retained for diagnosing
-        connection issues.
+        InfluxDB username and password are stripped — URL is retained for
+        diagnosing connection issues.
 
         Returns:
-            Addon options dict as loaded from options.json, with credentials redacted
+            Settings dict with credentials redacted.
         """
         try:
-            options = dict(self.system._addon_options)
+            options = dict(self._settings_data)
             if "influxdb" in options:
                 influxdb = dict(options["influxdb"])
                 influxdb.pop("username", None)

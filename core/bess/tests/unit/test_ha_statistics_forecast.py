@@ -55,15 +55,8 @@ def _create_manager_with_stats(
     home_settings = HomeSettings()
     home_settings.consumption_strategy = "ha_statistics"
 
-    addon_options = {
-        "sensors": {
-            "lifetime_load_consumption": "sensor.load_energy_total",
-        }
-    }
-
     manager = BatterySystemManager.__new__(BatterySystemManager)
     manager._controller = controller
-    manager._addon_options = addon_options
     manager.home_settings = home_settings
     manager.battery_settings = battery_settings
     manager._runtime_failure_tracker = RuntimeFailureTracker()
@@ -276,7 +269,6 @@ class TestHAStatisticsDispatch:
         controller = MockHomeAssistantController()
         manager = _create_manager_with_stats(controller, {})
         controller.sensors = {}  # Clear sensor mappings
-        manager._addon_options = {"sensors": {}}  # No sensor configured
 
         with patch("core.bess.battery_system_manager.time_utils") as mock_tu:
             mock_tu.today.return_value = datetime(2026, 5, 12, tzinfo=TIMEZONE).date()
@@ -289,7 +281,6 @@ class TestHAStatisticsDispatch:
         controller = MockHomeAssistantController()
         manager = _create_manager_with_stats(controller, {})
         controller.sensors = {}
-        manager._addon_options = {"sensors": {}}
         manager.home_settings.default_hourly = 3.0
 
         # Override mock to raise like the real controller does for missing sensors

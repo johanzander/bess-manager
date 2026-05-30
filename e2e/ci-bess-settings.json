@@ -46,17 +46,21 @@
     "device_id": ""
   },
   "sensors": {
-    "battery_soc": "sensor.growatt_battery_soc",
-    "battery_charge_power": "sensor.growatt_battery_charge_power",
-    "battery_discharge_power": "sensor.growatt_battery_discharge_power",
-    "import_power": "sensor.growatt_import_power",
-    "export_power": "sensor.growatt_export_power",
-    "pv_power": "sensor.growatt_pv_power",
-    "local_load_power": "sensor.growatt_load_power",
-    "battery_charging_power_rate": "number.growatt_battery_charging_power_rate",
-    "battery_discharging_power_rate": "number.growatt_battery_discharging_power_rate",
-    "battery_charge_stop_soc": "number.growatt_battery_charge_stop_soc",
-    "battery_discharge_stop_soc": "number.growatt_battery_discharge_stop_soc",
-    "grid_charge": "switch.growatt_grid_charge"
+    "platform": "growatt_server_min",
+    "growatt_server_min": {
+      "battery_soc": "sensor.growatt_battery_soc",
+      "battery_charge_power": "sensor.growatt_battery_charge_power",
+      "battery_discharge_power": "sensor.growatt_battery_discharge_power",
+      "import_power": "sensor.growatt_import_power",
+      "export_power": "sensor.growatt_export_power",
+      "pv_power": "sensor.growatt_pv_power",
+      "local_load_power": "sensor.growatt_load_power",
+      "battery_charging_power_rate": "number.growatt_battery_charging_power_rate",
+      "battery_discharging_power_rate": "number.growatt_battery_discharging_power_rate",
+      "battery_charge_stop_soc": "number.growatt_battery_charge_stop_soc",
+      "battery_discharge_stop_soc": "number.growatt_battery_discharge_stop_soc",
+      "grid_charge": "switch.growatt_grid_charge"
+    },
+    "shared": {}
   }
 }

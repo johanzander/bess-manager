@@ -2415,7 +2415,10 @@ async def export_debug_data(compact: bool = True):
 
     try:
         # Aggregate all system data
-        aggregator = DebugDataAggregator(bess_controller.system)
+        aggregator = DebugDataAggregator(
+            bess_controller.system,
+            settings_data=bess_controller.settings_store.data,
+        )
         export_data = aggregator.aggregate_all_data(compact=compact)
 
         # Format as markdown report

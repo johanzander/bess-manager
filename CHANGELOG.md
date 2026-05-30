@@ -4,6 +4,17 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.0.0b23] - 2026-05-30
+
+### Fixed
+
+- **Dashboard hangs after wizard when using `influxdb_7d_avg` strategy** — `_get_influxdb_7d_avg_forecast()` read `local_load_power` from a stale startup options dict (`_addon_options`) that was never updated when the wizard saved sensors. The schedule build failed every cycle, leaving the dashboard stuck in "initializing" state forever. Now reads from the live `controller.sensors` dict.
+
+### Changed
+
+- **Remove `_addon_options` from BatterySystemManager** — eliminated a stale startup snapshot dict that duplicated state already owned by `controller.sensors`, `inverter_platform`, and the settings dataclasses. Inverter platform resolution extracted into `_resolve_initial_platform()` static method. Debug exporter now reads from the settings store instead.
+- **Pass `BESS_VERSION` to Docker container** — `BUILD_VERSION` build arg is now set as `BESS_VERSION` env var so the running container can report its version.
+
 ## [9.0.0b22] - 2026-05-29
 
 ### Fixed

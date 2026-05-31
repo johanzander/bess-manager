@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 - Merged `origin/main` (v8.7.0, Octopus wizard persistence fix, analysis agent improvements) into beta.
 
+
 ## [9.0.0b26] - 2026-05-31
 
 ### Fixed

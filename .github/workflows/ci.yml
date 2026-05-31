@@ -20,7 +20,6 @@ jobs:
       - uses: dorny/paths-filter@v3
         id: filter
         with:
-          predicate-quantifier: 'every'
           filters: |
             # Algorithm tests (~75 min) only run when optimizer-relevant
             # source files change.  Uses exclusion pattern so new files

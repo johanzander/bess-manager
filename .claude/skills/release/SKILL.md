@@ -8,6 +8,7 @@
    - `pytest -m "not slow"` (includes scenario discovery regression tests)
    - `pytest core/bess/tests/unit/test_scenario_discovery.py -v` (show individual scenario results)
    - `npx vitest run` (frontend tests)
+   - `cd frontend && npx tsc --noEmit` (TypeScript type check — catches errors that vitest and vite build miss)
    - If any fix during this session revealed another bug, fix it now. Do not cut a release per fix — batch fixes locally until all tests pass.
 3. **Bump version** in `config.yaml` to the next version determined in step 1.
 4. **Update CHANGELOG.md** — add entry at the top following Keep a Changelog format (Fixed/Added/Changed sections). This is NOT optional.
@@ -20,10 +21,11 @@
      --base main --head <branch> \
      --title "release: v<version>" --body "<changelog>"
    ```
-9. **Wait for CI** to pass on the PR. Check with:
+9. **Monitor CI** on the PR. Check with:
    ```
    gh pr checks <pr-number> --repo johanzander/bess-manager-beta --watch
    ```
+   **If any check fails**: read the failure logs with `gh run view <run-id> --repo johanzander/bess-manager-beta --log-failed`, fix the issue locally, commit, push, and re-check. Do NOT proceed to merge until all required checks pass. Also run `npx tsc --noEmit` locally before pushing — the CI type-check catches errors that `npm run build` misses.
 10. **Merge PR**: `gh pr merge <pr-number> --repo johanzander/bess-manager-beta --squash`
 11. **Tag and push tag**:
     ```

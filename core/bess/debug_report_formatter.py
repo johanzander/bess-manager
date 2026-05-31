@@ -94,11 +94,22 @@ class DebugReportFormatter:
         """
         health = export.health_check_results
 
-        # Extract overall status
-        overall_status = health.get("overall_status", "UNKNOWN")
-        critical_count = health.get("critical_count", 0)
-        warning_count = health.get("warning_count", 0)
-        ok_count = health.get("ok_count", 0)
+        # Derive overall status from component checks — run_system_health_checks()
+        # returns {timestamp, system_mode, checks} without pre-computed summaries.
+        checks = health.get("checks", [])
+        error_count = sum(1 for c in checks if c.get("status") == "ERROR")
+        warning_count = sum(1 for c in checks if c.get("status") == "WARNING")
+        ok_count = sum(1 for c in checks if c.get("status") == "OK")
+
+        if error_count > 0:
+            overall_status = "ERROR"
+        elif warning_count > 0:
+            overall_status = "WARNING"
+        elif ok_count > 0:
+            overall_status = "OK"
+        else:
+            overall_status = "UNKNOWN"
+        critical_count = error_count
 
         summary = f"""## System Health Status
 

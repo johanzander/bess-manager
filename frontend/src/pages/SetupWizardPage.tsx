@@ -229,6 +229,11 @@ const SetupWizardPage: React.FC = () => {
         // Restore saved config entry IDs so manual entries survive a wizard re-run
         nordpoolConfigEntryId: ep.nordpoolOfficial?.configEntryId ?? f.nordpoolConfigEntryId,
         nordpoolEntity:        ep.nordpoolHacs?.entity           ?? f.nordpoolEntity,
+        // Restore Octopus Energy entity IDs
+        octopusImportTodayEntity:    ep.octopus?.importTodayEntity    ?? f.octopusImportTodayEntity,
+        octopusImportTomorrowEntity: ep.octopus?.importTomorrowEntity ?? f.octopusImportTomorrowEntity,
+        octopusExportTodayEntity:    ep.octopus?.exportTodayEntity    ?? f.octopusExportTodayEntity,
+        octopusExportTomorrowEntity: ep.octopus?.exportTomorrowEntity ?? f.octopusExportTomorrowEntity,
       }));
       // Restore inverter type from new inverter.platform or legacy growatt.inverter_type
       const invNew = s.inverter ?? {};

@@ -334,6 +334,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Setup wizard failed to auto-detect `battery_discharge_soc_limit_on_grid` entity on Growatt models that expose separate on-grid/off-grid SOC limit entities.
 - MIN inverter returned 500 errors when the TOU schedule exceeded 9 slots on price-volatile days. Hardware writes now use only the active (capped) intervals with content-aware slot assignment to avoid evicting still-needed segments. (thanks [@pookey](https://github.com/pookey))
 
+## [8.7.0] - 2026-05-22
+
+### Fixed
+
+- **Octopus Energy setup wizard** — entity IDs for import/export rates (today/tomorrow) are now persisted when completing the setup wizard. Previously these were collected in the form but never saved, forcing Octopus users (Flux, Agile, etc.) to re-enter them on the Settings page. ([#60](https://github.com/johanzander/bess-manager/issues/60))
+- **Analysis agent** — restructured the `@claude-bot analyze` pipeline to focus on the user's current problem instead of stale issue reports. The bot now triages the latest debug bundle before reading code, and performs a sanity check against recent comments before posting.
+
+### Added
+
+- Setup wizard E2E test coverage for `POST /api/setup/complete` endpoint (3 new tests).
+- Agent documentation sync from beta: verification guidelines, release workflow, scope discipline, worktree conventions, 7-scenario wizard E2E matrix docs, project-level agent memory files.
+- Ruff auto-lint hook for edited Python files (`.claude/settings.json`).
+
 ## [8.6.0] - 2026-05-14
 
 ### Added

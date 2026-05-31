@@ -59,23 +59,30 @@ jobs:
   test-fast:
     name: Fast tests
     needs: changes
-    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        if: needs.changes.outputs.backend == 'true'
 
       - uses: actions/setup-python@v5
+        if: needs.changes.outputs.backend == 'true'
         with:
           python-version: "3.13"
           cache: pip
 
       - name: Install dependencies
+        if: needs.changes.outputs.backend == 'true'
         run: |
           pip install -r backend/requirements.txt
           pip install -r requirements-dev.txt
 
       - name: Run fast tests
+        if: needs.changes.outputs.backend == 'true'
         run: pytest -m "not slow" --tb=short -q
+
+      - name: No backend changes
+        if: needs.changes.outputs.backend != 'true'
+        run: echo "No backend changes — skipping"
 
   # ── Slow tests: full optimizer / scenario / integration ─────────
   test-algorithm:
@@ -103,142 +110,158 @@ jobs:
   test-frontend:
     name: Frontend checks
     needs: changes
-    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        if: needs.changes.outputs.frontend == 'true'
 
       - uses: actions/setup-node@v4
+        if: needs.changes.outputs.frontend == 'true'
         with:
           node-version: "20"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
-      - run: cd frontend && npm ci
-      - run: cd frontend && npm test
-      - run: cd frontend && npm run type-check
-      - run: cd frontend && npm run lint
+      - name: Install and test
+        if: needs.changes.outputs.frontend == 'true'
+        run: cd frontend && npm ci && npm test && npm run type-check && npm run lint
+
+      - name: No frontend changes
+        if: needs.changes.outputs.frontend != 'true'
+        run: echo "No frontend changes — skipping"
 
   # ── E2E: Playwright against docker-compose mock HA ───────────────
   e2e:
     name: E2E tests
     needs: changes
-    if: needs.changes.outputs.e2e == 'true'
     runs-on: ubuntu-latest
+    env:
+      RUN_E2E: ${{ needs.changes.outputs.e2e }}
     steps:
+      - name: No E2E changes
+        if: env.RUN_E2E != 'true'
+        run: echo "No E2E-relevant changes — skipping"
+
       - uses: actions/checkout@v5
+        if: env.RUN_E2E == 'true'
       - uses: actions/setup-node@v4
+        if: env.RUN_E2E == 'true'
         with:
           node-version: "20"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - name: Build frontend
+        if: env.RUN_E2E == 'true'
         run: cd frontend && npm ci && npm run build
       - name: Install Playwright
+        if: env.RUN_E2E == 'true'
         run: cd e2e && npm ci && npx playwright install chromium --with-deps
 
       # Phase 1: Smoke / navigation / dashboard tests (pre-configured system)
       - name: "E2E: Start environment (normal day)"
+        if: env.RUN_E2E == 'true'
         run: |
           SCENARIO=ci-normal-day docker compose -f docker-compose.ci.yml up -d
           timeout 120 bash -c 'until curl -sf http://localhost:8080/api/settings > /dev/null 2>&1; do sleep 2; done'
       - name: "E2E: Run smoke & navigation tests"
+        if: env.RUN_E2E == 'true'
         run: cd e2e && npx playwright test --project=chromium
       - name: "E2E: Stop environment"
-        if: always()
+        if: always() && env.RUN_E2E == 'true'
         run: docker compose -f docker-compose.ci.yml down
 
       # Phase 2: Setup wizard tests (all scenario combinations)
       # Each step resets bess_settings.json to empty so the wizard triggers fresh.
       - name: "E2E: Wizard — Nordpool + MIN"
+        if: env.RUN_E2E == 'true'
         run: |
           echo '{}' > ./e2e/ci-wizard-settings.json
           SCENARIO=ci-wizard-nordpool-min BESS_SETTINGS=./e2e/ci-wizard-settings.json BESS_OPTIONS=./e2e/ci-wizard-options.json docker compose -f docker-compose.ci.yml up -d
           timeout 120 bash -c 'until curl -sf http://localhost:8080/api/setup/status > /dev/null 2>&1; do sleep 2; done'
           cd e2e && SCENARIO=ci-wizard-nordpool-min npx playwright test --project=wizard
       - name: "E2E: Stop wizard (Nordpool + MIN)"
-        if: always()
+        if: always() && env.RUN_E2E == 'true'
         run: docker compose -f docker-compose.ci.yml down
 
       - name: "E2E: Wizard — Nordpool + SPH"
-        if: always()
+        if: always() && env.RUN_E2E == 'true'
         run: |
           echo '{}' > ./e2e/ci-wizard-settings.json
           SCENARIO=ci-wizard-nordpool-sph BESS_SETTINGS=./e2e/ci-wizard-settings.json BESS_OPTIONS=./e2e/ci-wizard-options.json docker compose -f docker-compose.ci.yml up -d
           timeout 120 bash -c 'until curl -sf http://localhost:8080/api/setup/status > /dev/null 2>&1; do sleep 2; done'
           cd e2e && SCENARIO=ci-wizard-nordpool-sph npx playwright test --project=wizard
       - name: "E2E: Stop wizard (Nordpool + SPH)"
-        if: always()
+        if: always() && env.RUN_E2E == 'true'
         run: docker compose -f docker-compose.ci.yml down
 
       - name: "E2E: Wizard — Nordpool + SolaX"
-        if: always()
+        if: always() && env.RUN_E2E == 'true'
         run: |
           echo '{}' > ./e2e/ci-wizard-settings.json
           SCENARIO=ci-wizard-nordpool-solax BESS_SETTINGS=./e2e/ci-wizard-settings.json BESS_OPTIONS=./e2e/ci-wizard-options.json docker compose -f docker-compose.ci.yml up -d
           timeout 120 bash -c 'until curl -sf http://localhost:8080/api/setup/status > /dev/null 2>&1; do sleep 2; done'
           cd e2e && SCENARIO=ci-wizard-nordpool-solax npx playwright test --project=wizard
       - name: "E2E: Stop wizard (Nordpool + SolaX)"
-        if: always()
+        if: always() && env.RUN_E2E == 'true'
         run: docker compose -f docker-compose.ci.yml down
 
       - name: "E2E: Wizard — Octopus + MIN"
-        if: always()
+        if: always() && env.RUN_E2E == 'true'
         run: |
           echo '{}' > ./e2e/ci-wizard-settings.json
           SCENARIO=ci-wizard-octopus BESS_SETTINGS=./e2e/ci-wizard-settings.json BESS_OPTIONS=./e2e/ci-wizard-options.json docker compose -f docker-compose.ci.yml up -d
           timeout 120 bash -c 'until curl -sf http://localhost:8080/api/setup/status > /dev/null 2>&1; do sleep 2; done'
           cd e2e && SCENARIO=ci-wizard-octopus npx playwright test --project=wizard
       - name: "E2E: Stop wizard (Octopus + MIN)"
-        if: always()
+        if: always() && env.RUN_E2E == 'true'
         run: docker compose -f docker-compose.ci.yml down
 
       - name: "E2E: Wizard — Full integrations"
-        if: always()
+        if: always() && env.RUN_E2E == 'true'
         run: |
           echo '{}' > ./e2e/ci-wizard-settings.json
           SCENARIO=ci-wizard-full BESS_SETTINGS=./e2e/ci-wizard-settings.json BESS_OPTIONS=./e2e/ci-wizard-options.json docker compose -f docker-compose.ci.yml up -d
           timeout 120 bash -c 'until curl -sf http://localhost:8080/api/setup/status > /dev/null 2>&1; do sleep 2; done'
           cd e2e && SCENARIO=ci-wizard-full npx playwright test --project=wizard
       - name: "E2E: Stop wizard (Full)"
-        if: always()
+        if: always() && env.RUN_E2E == 'true'
         run: docker compose -f docker-compose.ci.yml down
 
       - name: "E2E: Wizard — Nordpool HACS"
-        if: always()
+        if: always() && env.RUN_E2E == 'true'
         run: |
           echo '{}' > ./e2e/ci-wizard-settings.json
           SCENARIO=ci-wizard-nordpool-hacs BESS_SETTINGS=./e2e/ci-wizard-settings.json BESS_OPTIONS=./e2e/ci-wizard-options.json docker compose -f docker-compose.ci.yml up -d
           timeout 120 bash -c 'until curl -sf http://localhost:8080/api/setup/status > /dev/null 2>&1; do sleep 2; done'
           cd e2e && SCENARIO=ci-wizard-nordpool-hacs npx playwright test --project=wizard
       - name: "E2E: Stop wizard (Nordpool HACS)"
-        if: always()
+        if: always() && env.RUN_E2E == 'true'
         run: docker compose -f docker-compose.ci.yml down
 
       - name: "E2E: Wizard — Octopus + SPH"
-        if: always()
+        if: always() && env.RUN_E2E == 'true'
         run: |
           echo '{}' > ./e2e/ci-wizard-settings.json
           SCENARIO=ci-wizard-octopus-sph BESS_SETTINGS=./e2e/ci-wizard-settings.json BESS_OPTIONS=./e2e/ci-wizard-options.json docker compose -f docker-compose.ci.yml up -d
           timeout 120 bash -c 'until curl -sf http://localhost:8080/api/setup/status > /dev/null 2>&1; do sleep 2; done'
           cd e2e && SCENARIO=ci-wizard-octopus-sph npx playwright test --project=wizard
       - name: "E2E: Stop wizard (Octopus + SPH)"
-        if: always()
+        if: always() && env.RUN_E2E == 'true'
         run: docker compose -f docker-compose.ci.yml down
 
       - name: "E2E: Wizard — Both providers"
-        if: always()
+        if: always() && env.RUN_E2E == 'true'
         run: |
           echo '{}' > ./e2e/ci-wizard-settings.json
           SCENARIO=ci-wizard-both-providers BESS_SETTINGS=./e2e/ci-wizard-settings.json BESS_OPTIONS=./e2e/ci-wizard-options.json docker compose -f docker-compose.ci.yml up -d
           timeout 120 bash -c 'until curl -sf http://localhost:8080/api/setup/status > /dev/null 2>&1; do sleep 2; done'
           cd e2e && SCENARIO=ci-wizard-both-providers npx playwright test --project=wizard
       - name: "E2E: Stop wizard (Both providers)"
-        if: always()
+        if: always() && env.RUN_E2E == 'true'
         run: docker compose -f docker-compose.ci.yml down
 
       - uses: actions/upload-artifact@v4
-        if: failure()
+        if: failure() && env.RUN_E2E == 'true'
         with:
           name: playwright-report
           path: e2e/playwright-report/

@@ -4,6 +4,18 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.0.0b25] - 2026-05-31
+
+### Fixed
+
+- **Grid charge control broken on solax_modbus** — `set_grid_charge()` called `switch.turn_on/turn_off` which silently did nothing on `select` entities (solax_modbus uses `select.allow_grid_charge`). `grid_charge_enabled()` checked `state == "on"` but select entities use `"Enabled"`/`"Disabled"`, so it always returned False. Now detects entity domain and uses the correct HA service and state values.
+- **Debug report always shows "Overall Status: UNKNOWN"** — `_format_health_status()` read `overall_status`, `critical_count`, etc. from the health check dict, but `run_system_health_checks()` never included those keys. Now derives status summary from the component checks array.
+
+### Changed
+
+- **Positive detection for solax_modbus_native platform** — replaced the fallback-based detection ("not Growatt TOU, not GEN3, therefore native SolaX") with a positive VPP marker check (`remotecontrol_power_control` suffix). Only platforms that can be positively identified are reported.
+- **Debug report discovery shows detected_platforms** — the "Resolved by BESS" section now includes `detected_platforms` (all positively identified platforms) alongside the legacy `growatt_inverter_type`, so it's clear what was detected vs what the user selected.
+
 ## [9.0.0b24] - 2026-05-30
 
 ### Fixed

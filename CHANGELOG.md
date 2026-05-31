@@ -15,6 +15,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 - **Positive detection for solax_modbus_native platform** — replaced the fallback-based detection ("not Growatt TOU, not GEN3, therefore native SolaX") with a positive VPP marker check (`remotecontrol_power_control` suffix). Only platforms that can be positively identified are reported.
 - **Debug report discovery shows detected_platforms** — the "Resolved by BESS" section now includes `detected_platforms` (all positively identified platforms) alongside the legacy `growatt_inverter_type`, so it's clear what was detected vs what the user selected.
+- **CI skipped tests when non-code files changed** — `predicate-quantifier: 'every'` in paths-filter required ALL changed files to match, so PRs with `.claude/` or `CHANGELOG.md` changes alongside `core/bess/` changes skipped backend/frontend/E2E tests. Removed to use default `'some'` (trigger if ANY file matches).
 
 ## [9.0.0b24] - 2026-05-30
 

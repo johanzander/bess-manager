@@ -1125,33 +1125,53 @@ class HomeAssistantAPIController:
         return self._get_sensor_value("battery_discharge_power")
 
     def set_grid_charge(self, enable):
-        """Enable or disable grid charging."""
+        """Enable or disable grid charging.
+
+        Supports both switch entities (growatt_server: on/off) and select
+        entities (solax_modbus: Enabled/Disabled).  The entity domain is
+        detected from the configured entity_id prefix.
+        """
         entity_id = self._get_entity_for_service("grid_charge")
-        service = "turn_on" if enable else "turn_off"
 
         if enable:
             logger.info("Enabling grid charge")
         else:
             logger.info("Disabling grid charge")
 
-        self._service_call_with_retry(
-            "switch",
-            service,
-            entity_id=entity_id,
-        )
+        if entity_id.startswith("select."):
+            self._service_call_with_retry(
+                "select",
+                "select_option",
+                entity_id=entity_id,
+                option="Enabled" if enable else "Disabled",
+            )
+        else:
+            service = "turn_on" if enable else "turn_off"
+            self._service_call_with_retry(
+                "switch",
+                service,
+                entity_id=entity_id,
+            )
 
     def grid_charge_enabled(self):
-        """Return True if grid charging is enabled."""
+        """Return True if grid charging is enabled.
+
+        Handles both switch entities (state ``"on"``) and select entities
+        (state ``"Enabled"``).
+        """
         try:
             entity_id = self._get_entity_for_service("grid_charge")
             response = self._api_request(
                 "get",
                 f"/api/states/{entity_id}",
-                operation="Check grid charge switch state",
+                operation="Check grid charge state",
                 category="sensor_read",
             )
             if response and "state" in response:
-                return response["state"] == "on"
+                state = response["state"]
+                if entity_id.startswith("select."):
+                    return state == "Enabled"
+                return state == "on"
             return False
         except ValueError as e:
             logger.warning(str(e))
@@ -2097,20 +2117,39 @@ class HomeAssistantAPIController:
                 "growatt_server_min" if has_tlx else "growatt_server_sph"
             )
 
+        # Build detected_platforms list — all platforms we can identify from
+        # the entity registry, independent of what the user has selected.
+        detected_platforms: list[str] = []
+        if growatt_inverter_type:
+            detected_platforms.append(growatt_inverter_type)
+
+        solax_config_entry = any(
+            entry.get("domain") == "solax_modbus" and entry.get("state") == "loaded"
+            for entry in config_entries_result
+        )
+        if solax_config_entry:
+            if self._has_growatt_tou_entities(entity_registry_result):
+                detected_platforms.append("solax_modbus_growatt_min")
+            elif self._has_growatt_gen3_entities(entity_registry_result):
+                detected_platforms.append("solax_modbus_growatt_sph")
+
         logger.info(
             "WS discovery: nordpool_config_entry_id=%s, nordpool_area=%s, "
-            "growatt_device_id=%s, inverter_type=%s, octopus_found=%s",
+            "growatt_device_id=%s, inverter_type=%s, octopus_found=%s, "
+            "detected_platforms=%s",
             nordpool_config_entry_id,
             nordpool_area,
             growatt_device_id,
             growatt_inverter_type,
             octopus_found,
+            detected_platforms,
         )
         return {
             "growatt_device_id": growatt_device_id,
             "nordpool_config_entry_id": nordpool_config_entry_id,
             "nordpool_area": nordpool_area,
             "growatt_inverter_type": growatt_inverter_type,
+            "detected_platforms": detected_platforms,
             "octopus_found": octopus_found,
         }
 
@@ -2274,7 +2313,7 @@ class HomeAssistantAPIController:
                 detected_platforms.append("solax_modbus_growatt_min")
             elif has_gen3:
                 detected_platforms.append("solax_modbus_growatt_sph")
-            elif not result["growatt_found"]:
+            elif self._has_solax_native_entities(registry):
                 detected_platforms.append("solax_modbus_native")
         result["detected_platforms"] = detected_platforms
         result["inverter_type"] = (
@@ -2533,13 +2572,16 @@ class HomeAssistantAPIController:
             )
         return detected
 
-    # ── Growatt generation markers for solax_modbus platform detection ──
+    # ── Platform markers for solax_modbus platform detection ────────────
     # GEN4 (MIN/MOD/MID/TL-X): uses numbered TOU time slots (time_N_enabled).
     # GEN3 (MIX/SPA/SPH): uses mode-specific time slots and distinct EMS entities.
-    # If neither marker is found, the inverter is assumed to be native SolaX.
+    # Native SolaX: uses VPP remote-control entities (remotecontrol_power_control).
     _GROWATT_TOU_MARKER_SUFFIX: ClassVar[str] = "time_1_enabled"  # GEN4
     _GROWATT_GEN3_MARKER_SUFFIX: ClassVar[str] = (
         "load_first_battery_minimum_soc"  # GEN3
+    )
+    _SOLAX_NATIVE_MARKER_SUFFIX: ClassVar[str] = (
+        "remotecontrol_power_control"  # VPP mode selector, SolaX-only
     )
 
     _SOLAX_PLATFORMS: ClassVar[set[str]] = {"solax_modbus", "solax"}
@@ -2570,6 +2612,12 @@ class HomeAssistantAPIController:
         """Check for GEN3 Growatt (MIX/SPA/SPH) entities via solax_modbus."""
         return self._has_solax_entity_suffix(
             entities, self._GROWATT_GEN3_MARKER_SUFFIX, "Growatt GEN3"
+        )
+
+    def _has_solax_native_entities(self, entities: list[dict]) -> bool:
+        """Check for native SolaX inverter VPP entities via solax_modbus."""
+        return self._has_solax_entity_suffix(
+            entities, self._SOLAX_NATIVE_MARKER_SUFFIX, "SolaX native VPP"
         )
 
     def detect_inverter_integrations(

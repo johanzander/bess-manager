@@ -9,6 +9,21 @@
 
 **Description**: Discharge power seems to always be 100% leading to higher export than intended during EXPORT_ARBITRAGE operations.
 
+### **Charging power rate setting has no effect**
+
+**Impact**: Medium | **Effort**: Medium | **Dependencies**: `inverter_controller.py`, `battery_system_manager.py`, `power_monitor.py`
+
+**Description**: The `charging_power_rate` setting (default 40%) is overridden every cycle by `adjust_charging_power()`, which reads `charge_rate` from `INTENT_TO_CONTROL` — always 0 or 100. The configured value is only used as the initial `target_charging_power_pct` in `HomePowerMonitor`, but is immediately overwritten by the first `adjust_charging_power()` call. This affects all platforms.
+
+**User-reported symptom**: Log shows "charging power 40%" but the inverter always charges at 100%.
+
+**Options to consider**:
+1. Remove the setting entirely if per-intent 0/100 is the intended design (and update UI to not show a configurable value)
+2. Use the setting as an actual cap: `charge_rate = min(intent_charge_rate, configured_rate)`
+3. Make `INTENT_TO_CONTROL` use the configured rate instead of hardcoded 100 for charging intents
+
+**Files**: `core/bess/inverter_controller.py` (lines 33-47), `core/bess/battery_system_manager.py` (lines 2538-2548), `core/bess/power_monitor.py` (line 67), `core/bess/settings.py` (line 54)
+
 ## 🟡 **HIGH PRIORITY** (Core Functionality)
 
 ### **Add SolaX Modbus inverter support**

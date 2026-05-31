@@ -243,7 +243,7 @@ interface BatterySettings {
 
 interface DashboardData {
   hourlyData: Array<{
-    hour: number;
+    period: number;
     strategicIntent?: string;
     batteryAction?: number;
     batteryCharged?: number;
@@ -432,7 +432,7 @@ const InverterStatusDashboard: React.FC = () => {
   // Merge dashboard data with schedule data to get correct strategic intents
   const getMergedHourData = (hour: number) => {
     const scheduleHour = inverterSchedule?.scheduleData?.find(h => h.hour === hour);
-    const dashboardHour = dashboardData?.hourlyData?.find(h => h.hour === hour);
+    const dashboardHour = dashboardData?.hourlyData?.find(h => h.period === hour);
 
     if (!scheduleHour && !dashboardHour) return null;
     
@@ -572,7 +572,7 @@ const InverterStatusDashboard: React.FC = () => {
           metrics={[
             {
               label: "State of Energy",
-              value: getDisplayText(dashboardData?.hourlyData?.find(h => h.hour === new Date().getHours())?.batterySoeEnd),
+              value: getDisplayText(dashboardData?.hourlyData?.find(h => h.period === new Date().getHours())?.batterySoeEnd),
               unit: "",
               icon: Battery
             },
@@ -592,7 +592,7 @@ const InverterStatusDashboard: React.FC = () => {
             },
             {
               label: "Solar Production",
-              value: getDisplayText(dashboardData?.hourlyData?.find(h => h.hour === new Date().getHours())?.solarProduction),
+              value: getDisplayText(dashboardData?.hourlyData?.find(h => h.period === new Date().getHours())?.solarProduction),
               unit: "",
               icon: Sun
             }
@@ -622,16 +622,16 @@ const InverterStatusDashboard: React.FC = () => {
             },
             {
               label: "Battery Action",
-              value: getDisplayText(dashboardData?.hourlyData?.find(h => h.hour === new Date().getHours())?.batteryAction),
+              value: getDisplayText(dashboardData?.hourlyData?.find(h => h.period === new Date().getHours())?.batteryAction),
               unit: "",
-              icon: getValue(dashboardData?.hourlyData?.find(h => h.hour === new Date().getHours())?.batteryAction) && Math.abs(getValue(dashboardData?.hourlyData?.find(h => h.hour === new Date().getHours())?.batteryAction)) > 0.01 ?
-                (getValue(dashboardData?.hourlyData?.find(h => h.hour === new Date().getHours())?.batteryAction) > 0 ? TrendingUp : TrendingDown) : Zap,
-              color: getValue(dashboardData?.hourlyData?.find(h => h.hour === new Date().getHours())?.batteryAction) && Math.abs(getValue(dashboardData?.hourlyData?.find(h => h.hour === new Date().getHours())?.batteryAction)) > 0.01 ?
-                (getValue(dashboardData?.hourlyData?.find(h => h.hour === new Date().getHours())?.batteryAction) > 0 ? 'green' : 'yellow') : undefined
+              icon: getValue(dashboardData?.hourlyData?.find(h => h.period === new Date().getHours())?.batteryAction) && Math.abs(getValue(dashboardData?.hourlyData?.find(h => h.period === new Date().getHours())?.batteryAction)) > 0.01 ?
+                (getValue(dashboardData?.hourlyData?.find(h => h.period === new Date().getHours())?.batteryAction) > 0 ? TrendingUp : TrendingDown) : Zap,
+              color: getValue(dashboardData?.hourlyData?.find(h => h.period === new Date().getHours())?.batteryAction) && Math.abs(getValue(dashboardData?.hourlyData?.find(h => h.period === new Date().getHours())?.batteryAction)) > 0.01 ?
+                (getValue(dashboardData?.hourlyData?.find(h => h.period === new Date().getHours())?.batteryAction) > 0 ? 'green' : 'yellow') : undefined
             },
             {
               label: "Target SOC",
-              value: getDisplayText(dashboardData?.hourlyData?.find(h => h.hour === new Date().getHours())?.batterySocEnd),
+              value: getDisplayText(dashboardData?.hourlyData?.find(h => h.period === new Date().getHours())?.batterySocEnd),
               unit: "",
               icon: CheckCircle
             }

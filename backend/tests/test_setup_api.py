@@ -215,8 +215,8 @@ class TestConfirmSetup:
         assert resp.status_code == 200
 
 
-class TestSetupComplete:
-    """POST /api/setup/complete."""
+class TestSetupCompleteLegacy:
+    """POST /api/setup/complete — legacy persistence tests."""
 
     def test_persists_octopus_entities(self, mock_controller):
         """Octopus Energy entity IDs from the wizard are saved to settings."""

@@ -4,6 +4,16 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.0.0b27] - 2026-05-31
+
+### Fixed
+
+- **Inverter tab missing values** — State of Energy, Solar Production, Battery Action, and Target SOC always showed "-" due to `h.hour` vs `h.period` field name mismatch in `InverterStatusDashboard.tsx`. Regression from commit `b8e111a`.
+
+### Changed
+
+- Merged `origin/main` (v8.7.0, Octopus wizard persistence fix, analysis agent improvements) into beta.
+
 ## [9.0.0b26] - 2026-05-31
 
 ### Fixed

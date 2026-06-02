@@ -1001,7 +1001,7 @@ class APISetupCompletePayload(BaseModel):
     octopusExportTodayEntity: str | None = None
     octopusExportTomorrowEntity: str | None = None
     # Inverter
-    inverterType: str | None = None
+    inverterPlatform: str | None = None
 
     @field_validator("sensors")
     @classmethod

@@ -50,20 +50,15 @@ PRICE_STORE_TO_API: dict[str, str] = {
     "tax_reduction": "taxReduction",
 }
 
-# Maps UI inverter type values to canonical inverter.platform store keys.
-# Single source of truth — used by setup_complete, settings_store migration,
-# and PATCH /api/settings.
-UI_TYPE_TO_PLATFORM: dict[str, str] = {
-    "growatt_server_min": "growatt_server_min",
-    "growatt_server_sph": "growatt_server_sph",
-    "solax_modbus_growatt_min": "solax_modbus_growatt_min",
-    "solax_modbus_growatt_sph": "solax_modbus_growatt_sph",
-    "solax_modbus_native": "solax_modbus_native",
-    # Legacy values stored in growatt.inverter_type — used by settings_store
-    # migration to map old configs to new platform names.
+# Legacy inverter_type values ("MIN"/"SPH") → canonical inverter.platform.
+# Used only by settings_store migration for old configs.
+LEGACY_INVERTER_PLATFORM_MAP: dict[str, str] = {
     "MIN": "growatt_server_min",
     "SPH": "growatt_server_sph",
 }
+
+# Keep old name as alias for backward compat with PATCH /api/settings handler
+UI_TYPE_TO_PLATFORM = LEGACY_INVERTER_PLATFORM_MAP
 
 
 def build_system_settings(options: dict) -> dict:

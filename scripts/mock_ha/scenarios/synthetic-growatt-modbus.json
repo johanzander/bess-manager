@@ -1,7 +1,6 @@
 {
   "name": "synthetic-growatt-modbus",
   "description": "Synthetic Growatt MIN via solax_modbus (local Modbus) scenario with Nordpool SE2 for E2E testing",
-  "inverter_type": "solax_modbus_growatt_min",
   "mock_time": "@2026-05-10 08:00:00",
   "timezone": "Europe/Stockholm",
   "bess_config": {
@@ -76,47 +75,69 @@
   "sensors": {
     "sensor.growatt_inv_solax_battery_soc": {
       "state": "55",
-      "attributes": { "unit_of_measurement": "%" }
+      "attributes": {
+        "unit_of_measurement": "%"
+      }
     },
     "sensor.growatt_inv_solax_battery_charge_power": {
       "state": "0",
-      "attributes": { "unit_of_measurement": "W" }
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
     },
     "sensor.growatt_inv_solax_battery_discharge_power": {
       "state": "600",
-      "attributes": { "unit_of_measurement": "W" }
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
     },
     "sensor.growatt_inv_solax_total_forward_power": {
       "state": "800",
-      "attributes": { "unit_of_measurement": "W" }
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
     },
     "sensor.growatt_inv_solax_total_reverse_power": {
       "state": "0",
-      "attributes": { "unit_of_measurement": "W" }
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
     },
     "sensor.growatt_inv_solax_pv_power_1": {
       "state": "2500",
-      "attributes": { "unit_of_measurement": "W" }
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
     },
     "sensor.growatt_inv_solax_total_load_power": {
       "state": "3900",
-      "attributes": { "unit_of_measurement": "W" }
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
     },
     "number.growatt_inv_solax_ems_charging_rate": {
       "state": "100",
-      "attributes": { "unit_of_measurement": "%" }
+      "attributes": {
+        "unit_of_measurement": "%"
+      }
     },
     "number.growatt_inv_solax_ems_discharging_rate": {
       "state": "100",
-      "attributes": { "unit_of_measurement": "%" }
+      "attributes": {
+        "unit_of_measurement": "%"
+      }
     },
     "number.growatt_inv_solax_ems_charging_stop_soc": {
       "state": "100",
-      "attributes": { "unit_of_measurement": "%" }
+      "attributes": {
+        "unit_of_measurement": "%"
+      }
     },
     "number.growatt_inv_solax_ems_discharging_stop_soc": {
       "state": "10",
-      "attributes": { "unit_of_measurement": "%" }
+      "attributes": {
+        "unit_of_measurement": "%"
+      }
     },
     "switch.growatt_inv_solax_charger_switch": {
       "state": "off",
@@ -124,31 +145,48 @@
     },
     "sensor.growatt_inv_solax_total_battery_input_energy": {
       "state": "2200",
-      "attributes": { "unit_of_measurement": "kWh" }
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
     },
     "sensor.growatt_inv_solax_total_battery_output_energy": {
       "state": "2100",
-      "attributes": { "unit_of_measurement": "kWh" }
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
     },
     "sensor.growatt_inv_solax_total_solar_energy": {
       "state": "7500",
-      "attributes": { "unit_of_measurement": "kWh" }
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
     },
     "sensor.growatt_inv_solax_total_grid_import": {
       "state": "4200",
-      "attributes": { "unit_of_measurement": "kWh" }
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
     },
     "sensor.growatt_inv_solax_total_grid_export": {
       "state": "3500",
-      "attributes": { "unit_of_measurement": "kWh" }
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
     },
     "sensor.growatt_inv_solax_home_consumption_energy": {
       "state": "8500",
-      "attributes": { "unit_of_measurement": "kWh" }
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
     },
     "select.growatt_inv_solax_time_1_enabled": {
       "state": "Disabled",
-      "attributes": { "options": ["Enabled", "Disabled"] }
+      "attributes": {
+        "options": [
+          "Enabled",
+          "Disabled"
+        ]
+      }
     },
     "select.growatt_inv_solax_time_1_begin": {
       "state": "00:00",
@@ -160,7 +198,13 @@
     },
     "select.growatt_inv_solax_time_1_mode": {
       "state": "Load First",
-      "attributes": { "options": ["Battery First", "Load First", "Grid First"] }
+      "attributes": {
+        "options": [
+          "Battery First",
+          "Load First",
+          "Grid First"
+        ]
+      }
     },
     "button.growatt_inv_solax_time_1_update": {
       "state": "unknown",
@@ -175,42 +219,181 @@
     }
   },
   "entity_registry": [
-    { "entity_id": "sensor.growatt_inv_solax_battery_soc", "platform": "solax_modbus", "unique_id": "solax_battery_soc" },
-    { "entity_id": "sensor.growatt_inv_solax_battery_charge_power", "platform": "solax_modbus", "unique_id": "solax_battery_charge_power" },
-    { "entity_id": "sensor.growatt_inv_solax_battery_discharge_power", "platform": "solax_modbus", "unique_id": "solax_battery_discharge_power" },
-    { "entity_id": "sensor.growatt_inv_solax_total_forward_power", "platform": "solax_modbus", "unique_id": "solax_total_forward_power" },
-    { "entity_id": "sensor.growatt_inv_solax_total_reverse_power", "platform": "solax_modbus", "unique_id": "solax_total_reverse_power" },
-    { "entity_id": "sensor.growatt_inv_solax_pv_power_1", "platform": "solax_modbus", "unique_id": "solax_pv_power_1" },
-    { "entity_id": "sensor.growatt_inv_solax_total_load_power", "platform": "solax_modbus", "unique_id": "solax_total_load_power" },
-    { "entity_id": "number.growatt_inv_solax_ems_charging_rate", "platform": "solax_modbus", "unique_id": "solax_ems_charging_rate" },
-    { "entity_id": "number.growatt_inv_solax_ems_discharging_rate", "platform": "solax_modbus", "unique_id": "solax_ems_discharging_rate" },
-    { "entity_id": "number.growatt_inv_solax_ems_charging_stop_soc", "platform": "solax_modbus", "unique_id": "solax_ems_charging_stop_soc" },
-    { "entity_id": "number.growatt_inv_solax_ems_discharging_stop_soc", "platform": "solax_modbus", "unique_id": "solax_ems_discharging_stop_soc" },
-    { "entity_id": "switch.growatt_inv_solax_charger_switch", "platform": "solax_modbus", "unique_id": "solax_charger_switch" },
-    { "entity_id": "sensor.growatt_inv_solax_total_battery_input_energy", "platform": "solax_modbus", "unique_id": "solax_total_battery_input_energy" },
-    { "entity_id": "sensor.growatt_inv_solax_total_battery_output_energy", "platform": "solax_modbus", "unique_id": "solax_total_battery_output_energy" },
-    { "entity_id": "sensor.growatt_inv_solax_total_solar_energy", "platform": "solax_modbus", "unique_id": "solax_total_solar_energy" },
-    { "entity_id": "sensor.growatt_inv_solax_total_grid_import", "platform": "solax_modbus", "unique_id": "solax_total_grid_import" },
-    { "entity_id": "sensor.growatt_inv_solax_total_grid_export", "platform": "solax_modbus", "unique_id": "solax_total_grid_export" },
-    { "entity_id": "sensor.growatt_inv_solax_home_consumption_energy", "platform": "solax_modbus", "unique_id": "solax_home_consumption_energy" },
-    { "entity_id": "select.growatt_inv_solax_time_1_enabled", "platform": "solax_modbus", "unique_id": "solax_time_1_enabled" },
-    { "entity_id": "select.growatt_inv_solax_time_1_begin", "platform": "solax_modbus", "unique_id": "solax_time_1_begin" },
-    { "entity_id": "select.growatt_inv_solax_time_1_end", "platform": "solax_modbus", "unique_id": "solax_time_1_end" },
-    { "entity_id": "select.growatt_inv_solax_time_1_mode", "platform": "solax_modbus", "unique_id": "solax_time_1_mode" },
-    { "entity_id": "button.growatt_inv_solax_time_1_update", "platform": "solax_modbus", "unique_id": "solax_time_1_update" },
-    { "entity_id": "sensor.nordpool_kwh_se2_sek_2_10_025", "platform": "nordpool", "unique_id": "nordpool_kwh_se2_sek_2_10_025" }
+    {
+      "entity_id": "sensor.growatt_inv_solax_battery_soc",
+      "platform": "solax_modbus",
+      "unique_id": "solax_battery_soc"
+    },
+    {
+      "entity_id": "sensor.growatt_inv_solax_battery_charge_power",
+      "platform": "solax_modbus",
+      "unique_id": "solax_battery_charge_power"
+    },
+    {
+      "entity_id": "sensor.growatt_inv_solax_battery_discharge_power",
+      "platform": "solax_modbus",
+      "unique_id": "solax_battery_discharge_power"
+    },
+    {
+      "entity_id": "sensor.growatt_inv_solax_total_forward_power",
+      "platform": "solax_modbus",
+      "unique_id": "solax_total_forward_power"
+    },
+    {
+      "entity_id": "sensor.growatt_inv_solax_total_reverse_power",
+      "platform": "solax_modbus",
+      "unique_id": "solax_total_reverse_power"
+    },
+    {
+      "entity_id": "sensor.growatt_inv_solax_pv_power_1",
+      "platform": "solax_modbus",
+      "unique_id": "solax_pv_power_1"
+    },
+    {
+      "entity_id": "sensor.growatt_inv_solax_total_load_power",
+      "platform": "solax_modbus",
+      "unique_id": "solax_total_load_power"
+    },
+    {
+      "entity_id": "number.growatt_inv_solax_ems_charging_rate",
+      "platform": "solax_modbus",
+      "unique_id": "solax_ems_charging_rate"
+    },
+    {
+      "entity_id": "number.growatt_inv_solax_ems_discharging_rate",
+      "platform": "solax_modbus",
+      "unique_id": "solax_ems_discharging_rate"
+    },
+    {
+      "entity_id": "number.growatt_inv_solax_ems_charging_stop_soc",
+      "platform": "solax_modbus",
+      "unique_id": "solax_ems_charging_stop_soc"
+    },
+    {
+      "entity_id": "number.growatt_inv_solax_ems_discharging_stop_soc",
+      "platform": "solax_modbus",
+      "unique_id": "solax_ems_discharging_stop_soc"
+    },
+    {
+      "entity_id": "switch.growatt_inv_solax_charger_switch",
+      "platform": "solax_modbus",
+      "unique_id": "solax_charger_switch"
+    },
+    {
+      "entity_id": "sensor.growatt_inv_solax_total_battery_input_energy",
+      "platform": "solax_modbus",
+      "unique_id": "solax_total_battery_input_energy"
+    },
+    {
+      "entity_id": "sensor.growatt_inv_solax_total_battery_output_energy",
+      "platform": "solax_modbus",
+      "unique_id": "solax_total_battery_output_energy"
+    },
+    {
+      "entity_id": "sensor.growatt_inv_solax_total_solar_energy",
+      "platform": "solax_modbus",
+      "unique_id": "solax_total_solar_energy"
+    },
+    {
+      "entity_id": "sensor.growatt_inv_solax_total_grid_import",
+      "platform": "solax_modbus",
+      "unique_id": "solax_total_grid_import"
+    },
+    {
+      "entity_id": "sensor.growatt_inv_solax_total_grid_export",
+      "platform": "solax_modbus",
+      "unique_id": "solax_total_grid_export"
+    },
+    {
+      "entity_id": "sensor.growatt_inv_solax_home_consumption_energy",
+      "platform": "solax_modbus",
+      "unique_id": "solax_home_consumption_energy"
+    },
+    {
+      "entity_id": "select.growatt_inv_solax_time_1_enabled",
+      "platform": "solax_modbus",
+      "unique_id": "solax_time_1_enabled"
+    },
+    {
+      "entity_id": "select.growatt_inv_solax_time_1_begin",
+      "platform": "solax_modbus",
+      "unique_id": "solax_time_1_begin"
+    },
+    {
+      "entity_id": "select.growatt_inv_solax_time_1_end",
+      "platform": "solax_modbus",
+      "unique_id": "solax_time_1_end"
+    },
+    {
+      "entity_id": "select.growatt_inv_solax_time_1_mode",
+      "platform": "solax_modbus",
+      "unique_id": "solax_time_1_mode"
+    },
+    {
+      "entity_id": "button.growatt_inv_solax_time_1_update",
+      "platform": "solax_modbus",
+      "unique_id": "solax_time_1_update"
+    },
+    {
+      "entity_id": "sensor.nordpool_kwh_se2_sek_2_10_025",
+      "platform": "nordpool",
+      "unique_id": "nordpool_kwh_se2_sek_2_10_025"
+    }
   ],
   "price_data": {
     "today": [
-      0.28, 0.22, 0.18, 0.15, 0.14, 0.20, 0.38, 0.52,
-      0.65, 0.72, 0.68, 0.60, 0.55, 0.50, 0.48, 0.52,
-      0.58, 0.70, 0.85, 0.78, 0.62, 0.45, 0.35, 0.30
+      0.28,
+      0.22,
+      0.18,
+      0.15,
+      0.14,
+      0.2,
+      0.38,
+      0.52,
+      0.65,
+      0.72,
+      0.68,
+      0.6,
+      0.55,
+      0.5,
+      0.48,
+      0.52,
+      0.58,
+      0.7,
+      0.85,
+      0.78,
+      0.62,
+      0.45,
+      0.35,
+      0.3
     ],
     "tomorrow": [
-      0.25, 0.20, 0.16, 0.14, 0.13, 0.18, 0.35, 0.48,
-      0.60, 0.68, 0.65, 0.58, 0.52, 0.48, 0.45, 0.50,
-      0.55, 0.68, 0.80, 0.75, 0.58, 0.42, 0.32, 0.28
+      0.25,
+      0.2,
+      0.16,
+      0.14,
+      0.13,
+      0.18,
+      0.35,
+      0.48,
+      0.6,
+      0.68,
+      0.65,
+      0.58,
+      0.52,
+      0.48,
+      0.45,
+      0.5,
+      0.55,
+      0.68,
+      0.8,
+      0.75,
+      0.58,
+      0.42,
+      0.32,
+      0.28
     ]
   },
-  "time_segments": []
+  "time_segments": [],
+  "inverter_platform": "solax_modbus_growatt_min"
 }

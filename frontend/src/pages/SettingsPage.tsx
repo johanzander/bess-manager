@@ -51,7 +51,7 @@ const EMPTY_PRICING: PricingForm = {
   area: '', markupRate: 0, vatMultiplier: 1.25, additionalCosts: 0,
   taxReduction: 0,
 };
-const EMPTY_INVERTER: InverterForm = { inverterType: 'growatt_server_min', deviceId: '' };
+const EMPTY_INVERTER: InverterForm = { inverterPlatform: 'growatt_server_min', deviceId: '' };
 
 // ---------------------------------------------------------------------------
 // Component
@@ -179,11 +179,10 @@ const SettingsPage: React.FC = () => {
       setPricingForm(p);
       savedPricing.current = JSON.stringify(p);
 
-      // Prefer inverter.platform (canonical); fall back to legacy growatt.inverterType
       const invNew = s.inverter ?? {};
-      const uiType = invNew.platform ?? growatt_s.inverterType ?? 'growatt_server_min';
+      const uiType = invNew.platform ?? 'growatt_server_min';
       const inv: InverterForm = {
-        inverterType: uiType,
+        inverterPlatform: uiType,
         deviceId: growatt_s.deviceId ?? '',
       };
       setInverterForm(inv);
@@ -249,9 +248,10 @@ const SettingsPage: React.FC = () => {
         });
       }
 
-      const detectedPlatform = d.detectedPlatforms?.[0] ?? d.inverterType;
+      const detected = d.detectedInverterPlatforms ?? [];
+      const detectedPlatform = detected[0] ?? null;
       if (detectedPlatform) {
-        setInverterForm(f => ({ ...f, inverterType: detectedPlatform }));
+        setInverterForm(f => ({ ...f, inverterPlatform: detectedPlatform }));
       }
       if (d.growattDeviceId) {
         setInverterForm(f => ({ ...f, deviceId: d.growattDeviceId }));
@@ -409,11 +409,10 @@ const SettingsPage: React.FC = () => {
           },
         },
         growatt: {
-          inverterType: inverterForm.inverterType,
           deviceId: inverterForm.deviceId,
         },
         inverter: {
-          platform: inverterForm.inverterType,
+          platform: inverterForm.inverterPlatform,
         },
       });
       savedBattery.current = JSON.stringify(batteryForm);

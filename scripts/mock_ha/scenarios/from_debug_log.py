@@ -244,10 +244,10 @@ def generate_scenario(log_path: str) -> None:
             },
         }
 
-    # Derive inverter type from schedule structure:
+    # Derive inverter platform from schedule structure:
     # MIN produces time_segments; SPH produces ac_charge_times/ac_discharge_times.
     opt_result = log.last_schedule.get("optimization_result", {})
-    inverter_type = "sph" if "ac_charge_times" in opt_result else "min"
+    inverter_platform = "sph" if "ac_charge_times" in opt_result else "min"
 
     scenario = {
         "name": output_name,
@@ -256,7 +256,7 @@ def generate_scenario(log_path: str) -> None:
             f"Period {log.optimization_period}, initial_soe={initial_soe:.1f} kWh, "
             f"horizon={horizon}."
         ),
-        "inverter_type": inverter_type,
+        "inverter_platform": inverter_platform,
         "timezone": log.timezone if log.timezone else None,
         "bess_config": log.addon_options if log.addon_options else None,
         "sensors": sensors,
@@ -265,7 +265,7 @@ def generate_scenario(log_path: str) -> None:
             log.historical_periods if log.historical_periods else None
         ),
         "mock_time": mock_time,
-        "time_segments": time_segments if inverter_type == "min" else None,
+        "time_segments": time_segments if inverter_platform == "min" else None,
         "ac_charge_times": (
             {
                 "charge_power": 100,
@@ -273,16 +273,16 @@ def generate_scenario(log_path: str) -> None:
                 "mains_enabled": False,
                 "periods": [],
             }
-            if inverter_type == "sph"
+            if inverter_platform == "sph"
             else None
         ),
         "ac_discharge_times": (
             {"discharge_power": 100, "discharge_stop_soc": 15, "periods": []}
-            if inverter_type == "sph"
+            if inverter_platform == "sph"
             else None
         ),
     }
-    # Remove keys that don't apply to this inverter type or are absent
+    # Remove keys that don't apply to this inverter platform or are absent
     scenario = {k: v for k, v in scenario.items() if v is not None}
 
     if not log.addon_options:

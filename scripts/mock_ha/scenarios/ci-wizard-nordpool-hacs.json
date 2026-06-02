@@ -3,7 +3,6 @@
   "description": "Setup wizard scenario — Swedish user, Nordpool HACS custom sensor (no official integration), MIN inverter, 1-phase, with Solcast and weather.",
   "mock_time": "@2025-01-15 08:30:00",
   "timezone": "Europe/Stockholm",
-  "inverter_type": "growatt_server_min",
   "sensors": {
     "sensor.abc1234567_state_of_charge_soc": {
       "state": "50",
@@ -319,12 +318,12 @@
     "nordpool_custom_area": "SE4",
     "nordpool_config_entry_id": null,
     "octopus_found": false,
-    "inverter_type": "growatt_server_min",
     "currency": "SEK",
     "vat_multiplier": 1.25,
     "detected_platform": "growatt_server_min",
     "required_sensors": [
       "grid_charge"
     ]
-  }
+  },
+  "inverter_platform": "growatt_server_min"
 }

@@ -10,7 +10,7 @@ export interface WizardExpectation {
   // Mandatory integrations
   growattFound: boolean;
   solaxFound: boolean;
-  inverterType: 'growatt_server_min' | 'growatt_server_sph' | 'solax_modbus_native' | 'solax_modbus_growatt_min' | 'solax_modbus_growatt_sph';
+  inverterPlatform: 'growatt_server_min' | 'growatt_server_sph' | 'solax_modbus_native' | 'solax_modbus_growatt_min' | 'solax_modbus_growatt_sph';
   nordpoolFound: boolean;
   octopusFound: boolean;
   /** Which provider radio should be auto-selected after discovery */
@@ -28,7 +28,7 @@ export const EXPECTATIONS: Record<string, WizardExpectation> = {
   'ci-wizard-nordpool-min': {
     growattFound: true,
     solaxFound: false,
-    inverterType: 'growatt_server_min',
+    inverterPlatform: 'growatt_server_min',
     nordpoolFound: true,
     octopusFound: false,
     autoSelectedProvider: 'nordpool_official',
@@ -41,7 +41,7 @@ export const EXPECTATIONS: Record<string, WizardExpectation> = {
   'ci-wizard-nordpool-sph': {
     growattFound: true,
     solaxFound: false,
-    inverterType: 'growatt_server_sph',
+    inverterPlatform: 'growatt_server_sph',
     nordpoolFound: true,
     octopusFound: false,
     autoSelectedProvider: 'nordpool_official',
@@ -54,7 +54,7 @@ export const EXPECTATIONS: Record<string, WizardExpectation> = {
   'ci-wizard-octopus': {
     growattFound: true,
     solaxFound: false,
-    inverterType: 'growatt_server_min',
+    inverterPlatform: 'growatt_server_min',
     nordpoolFound: false,
     octopusFound: true,
     autoSelectedProvider: 'octopus',
@@ -67,7 +67,7 @@ export const EXPECTATIONS: Record<string, WizardExpectation> = {
   'ci-wizard-full': {
     growattFound: true,
     solaxFound: false,
-    inverterType: 'growatt_server_min',
+    inverterPlatform: 'growatt_server_min',
     nordpoolFound: true,
     octopusFound: false,
     autoSelectedProvider: 'nordpool_official',
@@ -80,7 +80,7 @@ export const EXPECTATIONS: Record<string, WizardExpectation> = {
   'ci-wizard-nordpool-hacs': {
     growattFound: true,
     solaxFound: false,
-    inverterType: 'growatt_server_min',
+    inverterPlatform: 'growatt_server_min',
     nordpoolFound: true,
     octopusFound: false,
     autoSelectedProvider: 'nordpool_hacs',
@@ -93,7 +93,7 @@ export const EXPECTATIONS: Record<string, WizardExpectation> = {
   'ci-wizard-octopus-sph': {
     growattFound: true,
     solaxFound: false,
-    inverterType: 'growatt_server_sph',
+    inverterPlatform: 'growatt_server_sph',
     nordpoolFound: false,
     octopusFound: true,
     autoSelectedProvider: 'octopus',
@@ -106,7 +106,7 @@ export const EXPECTATIONS: Record<string, WizardExpectation> = {
   'ci-wizard-both-providers': {
     growattFound: true,
     solaxFound: false,
-    inverterType: 'growatt_server_min',
+    inverterPlatform: 'growatt_server_min',
     nordpoolFound: true,
     octopusFound: true,
     autoSelectedProvider: 'nordpool_official',
@@ -119,7 +119,7 @@ export const EXPECTATIONS: Record<string, WizardExpectation> = {
   'ci-wizard-growatt-modbus': {
     growattFound: true,
     solaxFound: true,
-    inverterType: 'solax_modbus_growatt_min',
+    inverterPlatform: 'solax_modbus_growatt_min',
     nordpoolFound: true,
     octopusFound: false,
     autoSelectedProvider: 'nordpool_official',
@@ -132,7 +132,7 @@ export const EXPECTATIONS: Record<string, WizardExpectation> = {
   'ci-wizard-nordpool-solax': {
     growattFound: false,
     solaxFound: true,
-    inverterType: 'solax_modbus_native',
+    inverterPlatform: 'solax_modbus_native',
     nordpoolFound: true,
     octopusFound: false,
     autoSelectedProvider: 'nordpool_official',

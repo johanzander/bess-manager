@@ -984,12 +984,8 @@ class HomeAssistantAPIController:
             return None
         except requests.RequestException as e:
             logger.error("Error fetching sensor %s: %s", sensor_name, str(e))
-            if self.failure_tracker:
-                self.failure_tracker.record_failure(
-                    operation=f"Read sensor '{sensor_name}'",
-                    category="sensor_read",
-                    error=e,
-                )
+            # Note: failure is already recorded by _api_request() — don't
+            # duplicate the record_failure call here.
             return None
 
     def _get_sensor_value(self, sensor_name) -> float | None:
@@ -2014,7 +2010,7 @@ class HomeAssistantAPIController:
 
         Returns:
             dict with keys: growatt_device_id, nordpool_config_entry_id,
-            nordpool_area, growatt_inverter_type, octopus_found
+            nordpool_area, detected_platforms, octopus_found
         """
         # Find nordpool config_entry_id from config entries.
         nordpool_config_entry_id: str | None = None
@@ -2106,22 +2102,18 @@ class HomeAssistantAPIController:
         #   "mix"       (DC-coupled) → sensors from mix.py → unique_id "{SN}-mix_*"
         #   "sph"       (DC-coupled) → sensors from sph.py → unique_id "{SN}-mix_*"/"{SN}-sph_*"
         # We check for "-tlx_" as the positive MIN signal.
-        growatt_inverter_type: str | None = None
+        # Build detected_platforms list — all platforms we can identify from
+        # the entity registry, independent of what the user has selected.
+        detected_platforms: list[str] = []
         if growatt_config_entry_id:
             has_tlx = any(
                 entry.get("platform") == "growatt_server"
                 and "-tlx_" in str(entry.get("unique_id", ""))
                 for entry in entity_registry_result
             )
-            growatt_inverter_type = (
+            detected_platforms.append(
                 "growatt_server_min" if has_tlx else "growatt_server_sph"
             )
-
-        # Build detected_platforms list — all platforms we can identify from
-        # the entity registry, independent of what the user has selected.
-        detected_platforms: list[str] = []
-        if growatt_inverter_type:
-            detected_platforms.append(growatt_inverter_type)
 
         solax_config_entry = any(
             entry.get("domain") == "solax_modbus" and entry.get("state") == "loaded"
@@ -2135,12 +2127,11 @@ class HomeAssistantAPIController:
 
         logger.info(
             "WS discovery: nordpool_config_entry_id=%s, nordpool_area=%s, "
-            "growatt_device_id=%s, inverter_type=%s, octopus_found=%s, "
+            "growatt_device_id=%s, octopus_found=%s, "
             "detected_platforms=%s",
             nordpool_config_entry_id,
             nordpool_area,
             growatt_device_id,
-            growatt_inverter_type,
             octopus_found,
             detected_platforms,
         )
@@ -2148,7 +2139,6 @@ class HomeAssistantAPIController:
             "growatt_device_id": growatt_device_id,
             "nordpool_config_entry_id": nordpool_config_entry_id,
             "nordpool_area": nordpool_area,
-            "growatt_inverter_type": growatt_inverter_type,
             "detected_platforms": detected_platforms,
             "octopus_found": octopus_found,
         }
@@ -2209,7 +2199,7 @@ class HomeAssistantAPIController:
             Tuple of (result_dict, states) where result_dict has keys:
             growatt_found, device_sn, growatt_device_id,
             nordpool_found, nordpool_area, nordpool_config_entry_id,
-            octopus_found, detected_platforms, inverter_type,
+            octopus_found, detected_inverter_platforms,
             detected_phase_count, currency, vat_multiplier.
             states is the raw list from /api/states for reuse by callers.
         """
@@ -2224,9 +2214,8 @@ class HomeAssistantAPIController:
             "nordpool_custom_entity": None,
             "nordpool_config_entry_id": None,
             "octopus_found": False,
-            # Auto-detected hints (None = could not determine)
-            "detected_platforms": [],
-            "inverter_type": None,
+            # Auto-detected hints
+            "detected_inverter_platforms": [],
             "detected_phase_count": None,
             "currency": None,
             "vat_multiplier": None,
@@ -2299,26 +2288,21 @@ class HomeAssistantAPIController:
         # Build a list of all detected platforms — no magic selection.
         # The frontend picks the platform; the backend just reports what's
         # available.
-        detected_platforms: list[str] = []
-        if result["growatt_found"]:
-            growatt_type = metadata.get("growatt_inverter_type")
-            if growatt_type:
-                detected_platforms.append(growatt_type)
+        # Start from WS-detected inverter platforms (growatt cloud + solax modbus growatt)
+        detected: list[str] = list(metadata.get("detected_platforms", []))
         if result["solax_found"]:
             has_tou = self._has_growatt_tou_entities(registry)
             has_gen3 = self._has_growatt_gen3_entities(registry)
             result["solax_has_growatt_tou"] = has_tou
             result["solax_has_growatt_gen3"] = has_gen3
-            if has_tou:
-                detected_platforms.append("solax_modbus_growatt_min")
-            elif has_gen3:
-                detected_platforms.append("solax_modbus_growatt_sph")
+            # Only add solax platforms not already detected by _parse_ha_metadata
+            if has_tou and "solax_modbus_growatt_min" not in detected:
+                detected.append("solax_modbus_growatt_min")
+            elif has_gen3 and "solax_modbus_growatt_sph" not in detected:
+                detected.append("solax_modbus_growatt_sph")
             elif self._has_solax_native_entities(registry):
-                detected_platforms.append("solax_modbus_native")
-        result["detected_platforms"] = detected_platforms
-        result["inverter_type"] = (
-            detected_platforms[0] if len(detected_platforms) == 1 else None
-        )
+                detected.append("solax_modbus_native")
+        result["detected_inverter_platforms"] = detected
 
         # Currency & VAT from Nordpool area or Octopus defaults
         area_hints = self._hints_from_nordpool_area(

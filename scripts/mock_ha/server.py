@@ -60,10 +60,10 @@ _devices: list[dict] = []
 _services: dict[str, Any] = {}
 
 
-def _generate_entity_registry(inverter_type: str) -> list[dict]:
+def _generate_entity_registry(inverter_platform: str) -> list[dict]:
     """Auto-generate entity registry entries from _sensors dict.
 
-    Infers the HA integration platform from the inverter_type and sensor
+    Infers the HA integration platform from the inverter_platform and sensor
     entity IDs so that BESS auto-discovery can detect the integration.
     """
     platform_map = {
@@ -73,7 +73,7 @@ def _generate_entity_registry(inverter_type: str) -> list[dict]:
         "solax_modbus_growatt_sph": "solax_modbus",
         "solax_modbus_native": "solax_modbus",
     }
-    inverter_platform = platform_map.get(inverter_type, "growatt_server")
+    inverter_platform = platform_map.get(inverter_platform, "growatt_server")
 
     entries: list[dict] = []
     for entity_id in _sensors:
@@ -103,7 +103,7 @@ def _generate_entity_registry(inverter_type: str) -> list[dict]:
 def _generate_config_entries(scenario: dict) -> list[dict]:
     """Generate synthetic config entries for auto-discovery."""
     entries = []
-    inverter_type = scenario.get("inverter_type", "min")
+    inverter_platform = scenario.get("inverter_platform", "min")
 
     # Nordpool config entry (needed for nordpool_config_entry_id)
     if any("nordpool" in k for k in _sensors):
@@ -117,7 +117,7 @@ def _generate_config_entries(scenario: dict) -> list[dict]:
         )
 
     # Inverter config entry
-    if inverter_type in ("growatt_server_min", "growatt_server_sph"):
+    if inverter_platform in ("growatt_server_min", "growatt_server_sph"):
         entries.append(
             {
                 "entry_id": "mock_growatt_config_entry",
@@ -126,7 +126,7 @@ def _generate_config_entries(scenario: dict) -> list[dict]:
                 "state": "loaded",
             }
         )
-    elif inverter_type in (
+    elif inverter_platform in (
         "solax_modbus_growatt_min",
         "solax_modbus_growatt_sph",
         "solax_modbus_native",
@@ -143,14 +143,14 @@ def _generate_config_entries(scenario: dict) -> list[dict]:
     return entries
 
 
-def _generate_services(inverter_type: str) -> dict:
+def _generate_services(inverter_platform: str) -> dict:
     """Generate synthetic service list for inverter type detection."""
     services: dict[str, Any] = {}
 
-    if inverter_type in ("growatt_server_min", "growatt_server_sph"):
+    if inverter_platform in ("growatt_server_min", "growatt_server_sph"):
         growatt_services: dict[str, Any] = {}
         # MIN uses update_time_segment, SPH uses write_ac_charge_times
-        if inverter_type == "growatt_server_min":
+        if inverter_platform == "growatt_server_min":
             growatt_services["update_time_segment"] = {}
             growatt_services["read_time_segments"] = {}
         else:
@@ -249,26 +249,26 @@ def _load_scenario() -> None:
 
     # Auto-generate entity registry for sensors not already covered
     existing_entity_ids = {e["entity_id"] for e in _entity_registry}
-    inverter_type = scenario.get("inverter_type", "min")
+    inverter_platform = scenario.get("inverter_platform", "min")
     auto_entries = [
         e
-        for e in _generate_entity_registry(inverter_type)
+        for e in _generate_entity_registry(inverter_platform)
         if e["entity_id"] not in existing_entity_ids
     ]
     if auto_entries:
         _entity_registry.extend(auto_entries)
         logger.info(
-            "Auto-generated %d entity registry entries for inverter_type=%s",
+            "Auto-generated %d entity registry entries for inverter_platform=%s",
             len(auto_entries),
-            inverter_type,
+            inverter_platform,
         )
 
     if not _config_entries:
         _config_entries.extend(_generate_config_entries(scenario))
 
     if not _services:
-        inverter_type = scenario.get("inverter_type", "min")
-        _services.update(_generate_services(inverter_type))
+        inverter_platform = scenario.get("inverter_platform", "min")
+        _services.update(_generate_services(inverter_platform))
 
     logger.info(
         "Loaded scenario '%s' — %d sensors, %d TOU segments, %d registry entries",

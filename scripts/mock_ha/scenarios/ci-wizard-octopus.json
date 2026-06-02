@@ -3,7 +3,6 @@
   "description": "Setup wizard scenario — UK user, Octopus Energy Agile tariff, MIN (AC-coupled) inverter, single-phase.",
   "mock_time": "@2025-01-15 08:30:00",
   "timezone": "Europe/London",
-  "inverter_type": "growatt_server_min",
   "sensors": {
     "sensor.abc1234567_state_of_charge_soc": {
       "state": "45",
@@ -761,12 +760,12 @@
     "nordpool_custom_area": null,
     "nordpool_config_entry_id": null,
     "octopus_found": true,
-    "inverter_type": "growatt_server_min",
     "currency": "GBP",
     "vat_multiplier": 1.0,
     "detected_platform": "growatt_server_min",
     "required_sensors": [
       "grid_charge"
     ]
-  }
+  },
+  "inverter_platform": "growatt_server_min"
 }

@@ -18,6 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - **Simplified `api_conversion.py`** — `UI_TYPE_TO_PLATFORM` reduced to legacy-only mapping (`"MIN"` / `"SPH"`); setup complete now validates directly against `VALID_PLATFORMS`.
 - **Setup complete no longer writes `growatt.inverter_type`** — Only `inverter.platform` is written to settings.
 
+
 ## [9.0.0b27] - 2026-05-31
 
 ### Fixed

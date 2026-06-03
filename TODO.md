@@ -261,6 +261,19 @@ But at noon every day we get tomorrows schedule. We could use this information t
 
 **Files**: `core/bess/battery_system_manager.py` (`_get_ha_statistics_forecast`)
 
+### **Suppress retry warnings for expected Nordpool "tomorrow not available" responses**
+
+**Impact**: Low | **Effort**: Low | **Dependencies**: `official_nordpool_source.py`, `ha_api_controller.py`
+
+**Description**: The Nordpool integration returns HTTP 500 when tomorrow's prices aren't published yet (typically before ~13:00 CET). `_api_request` logs a WARNING on each retry attempt, producing misleading warnings every optimization cycle overnight (00:00–12:00). The retry eventually fails, but `get_combined_prices()` in `price_manager.py` handles this gracefully — it catches the exception and falls back to today-only prices with an INFO log. The warnings are harmless but noisy and can alarm users reading logs.
+
+**Options**:
+1. Have `official_nordpool_source.py` catch the 500 for tomorrow and raise a specific "not available yet" exception that `_api_request` doesn't retry
+2. Add a `suppress_retry_warnings=True` param to `_api_request` for expected-failure calls
+3. Accept the noise as-is (log-level only, no UI banners)
+
+**Files**: `core/bess/official_nordpool_source.py`, `core/bess/ha_api_controller.py`, `core/bess/price_manager.py`
+
 ## 🔵 **ROBUSTNESS IMPROVEMENTS** (System Observability)
 
 ### **Retry discovery on startup when HA WebSocket is not ready**

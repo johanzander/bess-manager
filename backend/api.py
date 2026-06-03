@@ -85,6 +85,26 @@ def _deep_merge(base: dict, updates: dict) -> dict:
     return result
 
 
+def _strip_empty_sensor_values(sensors: dict) -> dict:
+    """Remove empty-string values from sensor sub-dicts.
+
+    Sensor sections have structure like:
+        {"platform": "growatt_server_min", "shared": {...}, "growatt_server_min": {...}}
+
+    For each sub-dict (shared, platform-specific), strip keys whose values are
+    empty strings.  This ensures cleared sensors are fully removed from persistent
+    storage rather than lingering as zombie entries.
+    """
+    result = {}
+    for key, value in sensors.items():
+        if isinstance(value, dict):
+            cleaned = {k: v for k, v in value.items() if v != ""}
+            result[key] = cleaned
+        else:
+            result[key] = value
+    return result
+
+
 def _require_configured_system(bess_controller) -> None:
     """Raise HTTP 503 if the BESS system has not been configured yet.
 
@@ -221,6 +241,12 @@ async def patch_settings(updates: dict):
             # nordpool_official.config_entry_id) do not erase sibling keys.
             section = bess_controller.settings_store.get_section(store_key)
             section = _deep_merge(section, snake_data)
+
+            # Strip empty-string sensor values so they don't persist as
+            # zombie entries.  An empty string means "remove this sensor".
+            if store_key == "sensors":
+                section = _strip_empty_sensor_values(section)
+
             bess_controller.settings_store.save_section(store_key, section)
 
             # Apply in-memory updates for sections that drive live behaviour

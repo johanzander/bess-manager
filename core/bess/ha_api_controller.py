@@ -858,7 +858,7 @@ class HomeAssistantAPIController:
                             if response_body:
                                 enriched_context["response_body"] = response_body
 
-                        self.failure_tracker.record_failure(
+                        self.failure_tracker.record_failure_once(
                             operation=operation_description,
                             category=operation_category,
                             error=e,
@@ -959,11 +959,12 @@ class HomeAssistantAPIController:
             return None
 
         try:
+            failure_category = f"sensor_read:{sensor_name}"
             response = self._api_request(
                 "get",
                 f"/api/states/{entity_id}",
                 operation=f"Read sensor '{sensor_name}'",
-                category="sensor_read",
+                category=failure_category,
             )
             if response and "state" in response:
                 state = response["state"]
@@ -975,6 +976,9 @@ class HomeAssistantAPIController:
                         state,
                     )
                     return None
+                # Sensor read succeeded — auto-dismiss any prior failure
+                if self.failure_tracker:
+                    self.failure_tracker.dismiss_by_category(failure_category)
                 return str(state)
             logger.warning(
                 "Sensor %s (entity_id: %s) returned invalid response or no state",

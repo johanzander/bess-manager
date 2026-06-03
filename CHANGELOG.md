@@ -17,6 +17,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - **Per-sensor failure categories** — Sensor reads now use `sensor_read:<name>` categories so each sensor gets its own coalesced failure entry, and failures auto-dismiss when the sensor recovers.
 - **Failure statistics in health check** — Health check response now includes aggregated failure stats (counts, last failure time, occurrences per category).
 
+
 ## [9.0.0b28] - 2026-06-02
 
 ### Fixed

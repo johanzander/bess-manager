@@ -4,6 +4,21 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.0.0b28] - 2026-06-02
+
+### Fixed
+
+- **InfluxDB consumption forecast fetched every cycle** — `_gather_optimization_data()` bypassed the `_consumption_predictions` cache, re-querying InfluxDB 7-day averages on every optimization cycle instead of using the cached result.
+- **Duplicate failure recording** — `_get_raw_state()` called `record_failure` for request errors already recorded by `_api_request()`, double-counting HA API failures.
+
+### Changed
+
+- **Unified inverter naming: `inverterType` → `inverterPlatform`** — Renamed across API payloads, frontend state, discovery response, tests, and scenario files. All inverter platforms now use consistent naming (`inverterPlatform` / `inverter_platform`). The legacy `growatt.inverter_type` migration path in settings_store is preserved.
+- **Removed `inverter_type` shortcut from discovery** — Discovery no longer returns a redundant `inverter_type` field; only `detected_inverter_platforms` (renamed from `detected_platforms`).
+- **Simplified `api_conversion.py`** — `UI_TYPE_TO_PLATFORM` reduced to legacy-only mapping (`"MIN"` / `"SPH"`); setup complete now validates directly against `VALID_PLATFORMS`.
+- **Setup complete no longer writes `growatt.inverter_type`** — Only `inverter.platform` is written to settings.
+
+
 ## [9.0.0b27] - 2026-05-31
 
 ### Fixed

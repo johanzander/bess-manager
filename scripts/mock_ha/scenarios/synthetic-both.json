@@ -1,7 +1,6 @@
 {
   "name": "synthetic-both",
   "description": "Combined Growatt SPH + SolaX scenario for testing wizard platform selection",
-  "inverter_type": "growatt_server_sph",
   "mock_time": "@2026-04-24 12:00:00",
   "timezone": "Europe/Stockholm",
   "bess_config": {
@@ -3344,5 +3343,6 @@
         "future_target_hours": []
       }
     }
-  ]
+  ],
+  "inverter_platform": "growatt_server_sph"
 }

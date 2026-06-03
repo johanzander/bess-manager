@@ -8,7 +8,6 @@ import threading
 from datetime import datetime, timedelta
 
 from api_conversion import (
-    UI_TYPE_TO_PLATFORM,
     convert_keys_to_camel_case,
     convert_keys_to_snake_case,
 )
@@ -27,6 +26,7 @@ from api_dataclasses import (
 from fastapi import APIRouter, HTTPException, Query
 from loguru import logger
 from pydantic import BaseModel, field_validator
+from settings_store import VALID_PLATFORMS
 
 from core.bess import time_utils
 from core.bess.health_check import run_system_health_checks
@@ -2675,8 +2675,9 @@ async def run_setup_discovery():
                 "octopus_found": integrations["octopus_found"],
                 "missing_sensors": missing_sensors,
                 # Auto-detected hints
-                "detected_platforms": integrations["detected_platforms"],
-                "inverter_type": integrations["inverter_type"],
+                "detected_inverter_platforms": integrations[
+                    "detected_inverter_platforms"
+                ],
                 "detected_phase_count": detected_phase_count,
                 "currency": integrations["currency"],
                 "vat_multiplier": integrations["vat_multiplier"],
@@ -2856,21 +2857,20 @@ async def setup_complete(payload: APISetupCompletePayload):
             sections["energy_provider"] = ep
 
         # --- inverter ---
-        if payload.inverterType is not None:
-            _platform = UI_TYPE_TO_PLATFORM.get(
-                payload.inverterType, "growatt_server_min"
-            )
+        if payload.inverterPlatform is not None:
+            _platform = payload.inverterPlatform
+            if _platform not in VALID_PLATFORMS:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Unknown inverter platform '{_platform}', "
+                    f"expected one of {list(VALID_PLATFORMS)}",
+                )
             inv_section = bess_controller.settings_store.get_section("inverter")
             inv_section["platform"] = _platform
             sections["inverter"] = inv_section
-            # Keep legacy growatt section updated for cloud platforms
-            if _platform in ("growatt_server_min", "growatt_server_sph"):
+            if payload.growattDeviceId:
                 growatt_section = bess_controller.settings_store.get_section("growatt")
-                growatt_section["inverter_type"] = (
-                    "MIN" if "min" in _platform else "SPH"
-                )
-                if payload.growattDeviceId:
-                    growatt_section["device_id"] = payload.growattDeviceId
+                growatt_section["device_id"] = payload.growattDeviceId
                 sections["growatt"] = growatt_section
 
         # Persist all sections atomically

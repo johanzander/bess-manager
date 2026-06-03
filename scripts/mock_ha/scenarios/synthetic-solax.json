@@ -1,7 +1,6 @@
 {
   "name": "synthetic-solax",
   "description": "Synthetic SolaX scenario for testing auto-discovery and VPP control",
-  "inverter_type": "solax_modbus_native",
   "mock_time": "@2026-04-24 12:00:00",
   "timezone": "Europe/Stockholm",
   "bess_config": {
@@ -2946,5 +2945,6 @@
       }
     }
   ],
-  "time_segments": []
+  "time_segments": [],
+  "inverter_platform": "solax_modbus_native"
 }

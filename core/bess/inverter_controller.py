@@ -374,12 +374,7 @@ class InverterController(ABC):
             controller.set_grid_charge(grid_charge)
         except Exception as e:
             logger.error("FAILED: set_grid_charge(%s): %s", grid_charge, e)
-            if controller.failure_tracker:
-                controller.failure_tracker.record_failure(
-                    category="inverter_control",
-                    operation=f"Set grid charge to {grid_charge}",
-                    error=e,
-                )
+            # Failure already recorded by _api_request via record_failure_once
 
         try:
             controller.set_discharging_power_rate(discharge_rate)
@@ -387,12 +382,7 @@ class InverterController(ABC):
             logger.error(
                 "FAILED: set_discharging_power_rate(%s): %s", discharge_rate, e
             )
-            if controller.failure_tracker:
-                controller.failure_tracker.record_failure(
-                    category="inverter_control",
-                    operation=f"Set discharge rate to {discharge_rate}%",
-                    error=e,
-                )
+            # Failure already recorded by _api_request via record_failure_once
 
     @abstractmethod
     def get_all_tou_segments(self) -> list[dict]:

@@ -363,11 +363,15 @@ def run_system_health_checks(system_manager):
     history_checks = check_historical_data_access()
     all_component_checks.extend(history_checks)
 
+    # Failure statistics from runtime tracker
+    failure_stats = system_manager._runtime_failure_tracker.get_failure_stats()
+
     # Wrap results with metadata
     return {
         "timestamp": datetime.now().isoformat(),
         "system_mode": "demo" if system_manager._controller.test_mode else "normal",
         "checks": all_component_checks,
+        "failure_stats": failure_stats,
     }
 
 

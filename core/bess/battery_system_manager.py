@@ -1449,7 +1449,13 @@ class BatterySystemManager:
 
         if prepare_next_day:
             # For next day, use predictions only
-            consumption_predictions = self._get_consumption_forecast()
+            # Use cached predictions when available to avoid re-fetching
+            # expensive data sources (e.g. InfluxDB 7-day avg) every cycle
+            consumption_predictions = (
+                self._consumption_predictions
+                if self._consumption_predictions
+                else self._get_consumption_forecast()
+            )
             solar_predictions = self.controller.get_solar_forecast()
 
             consumption_data = consumption_predictions
@@ -1467,7 +1473,13 @@ class BatterySystemManager:
             completed_periods = [
                 i for i, p in enumerate(today_periods) if p is not None
             ]
-            predictions_consumption = self._get_consumption_forecast()
+            # Use cached predictions when available to avoid re-fetching
+            # expensive data sources (e.g. InfluxDB 7-day avg) every cycle
+            predictions_consumption = (
+                self._consumption_predictions
+                if self._consumption_predictions
+                else self._get_consumption_forecast()
+            )
             predictions_solar = self.controller.get_solar_forecast()
 
             # Extend predictions for tomorrow when horizon exceeds today

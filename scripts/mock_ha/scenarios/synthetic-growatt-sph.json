@@ -1,7 +1,6 @@
 {
   "name": "synthetic-growatt-sph",
   "description": "Synthetic Growatt SPH scenario for testing auto-discovery and AC charge/discharge",
-  "inverter_type": "growatt_server_sph",
   "mock_time": "@2026-04-24 12:00:00",
   "timezone": "Europe/Stockholm",
   "bess_config": {
@@ -2950,5 +2949,6 @@
     "discharge_power": 100,
     "discharge_stop_soc": 15,
     "periods": []
-  }
+  },
+  "inverter_platform": "growatt_server_sph"
 }

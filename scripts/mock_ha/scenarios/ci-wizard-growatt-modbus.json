@@ -1,7 +1,6 @@
 {
   "name": "ci-wizard-growatt-modbus",
   "description": "Fresh install with Growatt MIN + SolaX Modbus (GEN4 TOU) + official Nordpool SE3. Tests the setup wizard for both local Modbus and cloud control paths.",
-  "inverter_type": "solax_modbus_growatt_min",
   "mock_time": "@2026-05-21 17:17:48",
   "timezone": "Europe/Stockholm",
   "bess_config": {
@@ -776,8 +775,6 @@
     "nordpool_custom_area": null,
     "nordpool_config_entry_id": "entry-nordpool-001",
     "octopus_found": false,
-    "detected_platforms": ["growatt_server_min", "solax_modbus_growatt_min"],
-    "inverter_type": null,
     "currency": "SEK",
     "vat_multiplier": 1.25,
     "detected_platform": "growatt_server_min",
@@ -827,6 +824,10 @@
       "lifetime_import_from_grid",
       "lifetime_export_to_grid",
       "lifetime_load_consumption"
+    ],
+    "detected_inverter_platforms": [
+      "growatt_server_min",
+      "solax_modbus_growatt_min"
     ]
   },
   "expected_wizard": {
@@ -885,7 +886,7 @@
         "additionalCosts": 0.773,
         "taxReduction": 0.1988,
         "provider": "nordpool_official",
-        "inverterType": "solax_modbus_growatt_min"
+        "inverterPlatform": "solax_modbus_growatt_min"
       },
       "expected_saved": {
         "inverter": {
@@ -914,9 +915,7 @@
           "current_l3": "sensor.growatt_inverter_solax_grid_current_l3"
         }
       },
-      "expected_absent_sections": [
-        "growatt"
-      ],
+      "expected_absent_sections": [],
       "expected_live": {
         "growatt_device_id": "dev-growatt-001",
         "switch_inverter_platform": "solax_modbus_growatt_min",
@@ -990,14 +989,13 @@
         "additionalCosts": 0.773,
         "taxReduction": 0.1988,
         "provider": "nordpool_official",
-        "inverterType": "growatt_server_min"
+        "inverterPlatform": "growatt_server_min"
       },
       "expected_saved": {
         "inverter": {
           "platform": "growatt_server_min"
         },
         "growatt": {
-          "inverter_type": "MIN",
           "device_id": "dev-growatt-001"
         },
         "battery": {
@@ -1018,5 +1016,6 @@
       },
       "no_tou_slots": true
     }
-  }
+  },
+  "inverter_platform": "solax_modbus_growatt_min"
 }

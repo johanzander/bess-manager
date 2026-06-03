@@ -10,7 +10,7 @@ import type { HealthStatus } from '../../types';
 // ---------------------------------------------------------------------------
 
 export interface InverterForm {
-  inverterType: string;
+  inverterPlatform: string;
   deviceId: string;
 }
 
@@ -40,8 +40,7 @@ export interface DiscoveryResult {
   sensors: Record<string, string>;
   platformSensors?: Record<string, Record<string, string>>;
   missingSensors: string[];
-  detectedPlatforms?: string[];
-  inverterType: string | null;
+  detectedInverterPlatforms?: string[];
   detectedPhaseCount: number | null;
   currency: string | null;
   vatMultiplier: number | null;
@@ -175,7 +174,7 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
   };
 
   // Derive active inverter integration from the selected type
-  const activeInverterIntegrationId = INVERTER_INTEGRATION_IDS[inverterForm.inverterType] ?? 'growatt_server_min';
+  const activeInverterIntegrationId = INVERTER_INTEGRATION_IDS[inverterForm.inverterPlatform] ?? 'growatt_server_min';
   const isGrowatt = activeInverterIntegrationId === 'growatt_server_min'
     || activeInverterIntegrationId === 'growatt_server_sph'
     || activeInverterIntegrationId === 'solax_modbus_growatt_min'
@@ -213,22 +212,22 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
   };
 
   // Derive which Level 1 integration is active
-  const isCloudActive = inverterForm.inverterType === 'growatt_server_min' || inverterForm.inverterType === 'growatt_server_sph';
-  const isModbusActive = inverterForm.inverterType === 'solax_modbus_growatt_min'
-    || inverterForm.inverterType === 'solax_modbus_growatt_sph'
-    || inverterForm.inverterType === 'solax_modbus_native';
+  const isCloudActive = inverterForm.inverterPlatform === 'growatt_server_min' || inverterForm.inverterPlatform === 'growatt_server_sph';
+  const isModbusActive = inverterForm.inverterPlatform === 'solax_modbus_growatt_min'
+    || inverterForm.inverterPlatform === 'solax_modbus_growatt_sph'
+    || inverterForm.inverterPlatform === 'solax_modbus_native';
 
   const handleIntegrationChange = (integration: 'cloud' | 'modbus') => {
     if (integration === 'cloud') {
       const newType = 'growatt_server_min';
-      onInverterChange({ ...inverterForm, inverterType: newType });
+      onInverterChange({ ...inverterForm, inverterPlatform: newType });
       onChange({ ...sensors, platform: newType });
     } else {
       // Default to solax_modbus_growatt_min if Growatt TOU detected, otherwise native
       const newType = growattModbusDetected ? 'solax_modbus_growatt_min'
         : growattModbusGen3Detected ? 'solax_modbus_growatt_sph'
         : 'solax_modbus_native';
-      onInverterChange({ ...inverterForm, inverterType: newType });
+      onInverterChange({ ...inverterForm, inverterPlatform: newType });
       onChange({ ...sensors, platform: newType });
     }
   };
@@ -300,13 +299,13 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
                     { value: 'growatt_server_min' as const, label: 'MIN/MIC/MOD (AC-coupled)' },
                     { value: 'growatt_server_sph' as const, label: 'MIX/SPA/SPH (DC-coupled)' },
                   ]).map(opt => {
-                    const selected = inverterForm.inverterType === opt.value;
+                    const selected = inverterForm.inverterPlatform === opt.value;
                     return (
                       <button
                         key={opt.value}
                         type="button"
                         onClick={() => {
-                          onInverterChange({ ...inverterForm, inverterType: opt.value });
+                          onInverterChange({ ...inverterForm, inverterPlatform: opt.value });
                           onChange({ ...sensors, platform: opt.value });
                         }}
                         className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
@@ -341,7 +340,7 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
                     { value: 'solax_modbus_growatt_min' as const, label: 'Growatt MIN/GEN4', detected: growattModbusDetected },
                     { value: 'solax_modbus_growatt_sph' as const, label: 'Growatt SPH/GEN3', detected: growattModbusGen3Detected },
                   ]).map(opt => {
-                    const selected = inverterForm.inverterType === opt.value;
+                    const selected = inverterForm.inverterPlatform === opt.value;
                     const disabled = wizardMode && !opt.detected;
                     return (
                       <button
@@ -349,7 +348,7 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
                         type="button"
                         disabled={disabled}
                         onClick={() => {
-                          onInverterChange({ ...inverterForm, inverterType: opt.value });
+                          onInverterChange({ ...inverterForm, inverterPlatform: opt.value });
                           onChange({ ...sensors, platform: opt.value });
                         }}
                         className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${

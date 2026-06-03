@@ -49,7 +49,7 @@ const SetupWizardPage: React.FC = () => {
   });
 
   const [inverterForm, setInverterForm] = useState<InverterForm>({
-    inverterType: 'growatt_server_min',
+    inverterPlatform: 'growatt_server_min',
     deviceId: '',
   });
 
@@ -119,10 +119,11 @@ const SetupWizardPage: React.FC = () => {
         ...(d.octopusEntities?.exportToday ? { octopusExportTodayEntity: d.octopusEntities.exportToday } : {}),
         ...(d.octopusEntities?.exportTomorrow ? { octopusExportTomorrowEntity: d.octopusEntities.exportTomorrow } : {}),
       }));
-      // Auto-select platform: use detected_platforms (preferred) or legacy inverterType
-      const detectedPlatform = d.detectedPlatforms?.[0] ?? d.inverterType;
+      // Auto-select the first detected platform; user can switch if multiple
+      const detected = d.detectedInverterPlatforms ?? [];
+      const detectedPlatform = detected[0] ?? null;
       if (detectedPlatform) {
-        setInverterForm(f => ({ ...f, inverterType: detectedPlatform }));
+        setInverterForm(f => ({ ...f, inverterPlatform: detectedPlatform }));
       }
       if (d.growattDeviceId) {
         setInverterForm(f => ({ ...f, deviceId: d.growattDeviceId! }));
@@ -130,7 +131,7 @@ const SetupWizardPage: React.FC = () => {
 
       // Build per-platform sensor structure from discovery results.
       // platformSensors has per-platform dicts; shared sensors come from d.sensors.
-      const platform = detectedPlatform ?? inverterForm.inverterType ?? '';
+      const platform = detectedPlatform ?? inverterForm.inverterPlatform ?? '';
       const newSensors: PerPlatformSensors = emptyPerPlatformSensors(platform);
       const existing = existingSensorsRef.current;
 
@@ -235,12 +236,9 @@ const SetupWizardPage: React.FC = () => {
         octopusExportTodayEntity:    ep.octopus?.exportTodayEntity    ?? f.octopusExportTodayEntity,
         octopusExportTomorrowEntity: ep.octopus?.exportTomorrowEntity ?? f.octopusExportTomorrowEntity,
       }));
-      // Restore inverter type from new inverter.platform or legacy growatt.inverter_type
       const invNew = s.inverter ?? {};
       if (invNew.platform) {
-        setInverterForm(f => ({ ...f, inverterType: invNew.platform }));
-      } else if (inv.inverterType) {
-        setInverterForm(f => ({ ...f, inverterType: inv.inverterType }));
+        setInverterForm(f => ({ ...f, inverterPlatform: invNew.platform }));
       }
       if (inv.deviceId) setInverterForm(f => ({ ...f, deviceId: inv.deviceId }));
     }).catch((err: unknown) => {
@@ -316,7 +314,7 @@ const SetupWizardPage: React.FC = () => {
         octopusExportTodayEntity: pricingForm.octopusExportTodayEntity || undefined,
         octopusExportTomorrowEntity: pricingForm.octopusExportTomorrowEntity || undefined,
         // Inverter
-        inverterType: inverterForm.inverterType,
+        inverterPlatform: inverterForm.inverterPlatform,
       });
       setStep(5);
     } catch (err: unknown) {
@@ -332,7 +330,7 @@ const SetupWizardPage: React.FC = () => {
     setInverterForm(newForm);
   };
 
-  const activeInverterIntegrationId = INVERTER_INTEGRATION_IDS[inverterForm.inverterType] ?? 'growatt_server_min';
+  const activeInverterIntegrationId = INVERTER_INTEGRATION_IDS[inverterForm.inverterPlatform] ?? 'growatt_server_min';
   const inverterIntegrationIds = new Set(Object.values(INVERTER_INTEGRATION_IDS));
 
   // Check that all required sensors are filled using the flat merged view
@@ -580,7 +578,7 @@ const SetupWizardPage: React.FC = () => {
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-500 dark:text-gray-400">Inverter type</span>
-                <span className="font-medium text-gray-900 dark:text-white">{inverterForm.inverterType}</span>
+                <span className="font-medium text-gray-900 dark:text-white">{inverterForm.inverterPlatform}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-500 dark:text-gray-400">Currency</span>

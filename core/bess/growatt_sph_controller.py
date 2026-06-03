@@ -312,13 +312,7 @@ class GrowattSphController(InverterController):
             writes += 1
         except Exception as e:
             logger.error("FAILED: write_ac_charge_times: %s", e)
-            if controller.failure_tracker:
-                controller.failure_tracker.record_failure(
-                    category="inverter_control",
-                    operation="Write SPH charge periods",
-                    error=e,
-                    context={"periods": self._charge_periods},
-                )
+            # Failure already recorded by _api_request via record_failure_once
 
         logger.info(
             "SPH HARDWARE: Writing discharge periods (power=%d%%, stop_soc=%d%%): %s",
@@ -335,13 +329,7 @@ class GrowattSphController(InverterController):
             writes += 1
         except Exception as e:
             logger.error("FAILED: write_ac_discharge_times: %s", e)
-            if controller.failure_tracker:
-                controller.failure_tracker.record_failure(
-                    category="inverter_control",
-                    operation="Write SPH discharge periods",
-                    error=e,
-                    context={"periods": self._discharge_periods},
-                )
+            # Failure already recorded by _api_request via record_failure_once
 
         return writes, 0
 

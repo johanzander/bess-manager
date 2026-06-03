@@ -74,8 +74,8 @@ test.describe('Setup Wizard', () => {
     await expectActiveStep(page, 1);
 
     // The UI uses Tabs (Growatt Cloud / SolaX Modbus) + pill buttons for subtypes
-    const isModbus = expected.inverterType.startsWith('solax_modbus');
-    const isCloud = expected.inverterType.startsWith('growatt_server');
+    const isModbus = expected.inverterPlatform.startsWith('solax_modbus');
+    const isCloud = expected.inverterPlatform.startsWith('growatt_server');
 
     if (isCloud) {
       // Growatt Cloud tab should be active

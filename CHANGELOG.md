@@ -4,6 +4,19 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.0.0b29] - 2026-06-03
+
+### Fixed
+
+- **Clearing optional sensors now removes from persistent store** — Empty-string sensor values from PATCH were stored in `bess_settings.json` as zombie entries, preventing re-discovery and leaving the UI showing cleared sensors as greyed-out. Empty strings are now stripped before persisting.
+- **Recurring failure banner spam** — A missing sensor (e.g. `discharge_inhibit`) polled every minute generated a new failure banner each time. New `record_failure_once()` coalesces repeated failures of the same category into one entry with an occurrence count.
+- **Double failure banners on inverter control errors** — Inverter controllers (`_write_period_to_hardware`, `_apply_tou_to_hardware`, SPH charge/discharge) recorded a second failure after `_api_request` had already recorded one, producing two banners per underlying failure. Removed the duplicate calls.
+
+### Changed
+
+- **Per-sensor failure categories** — Sensor reads now use `sensor_read:<name>` categories so each sensor gets its own coalesced failure entry, and failures auto-dismiss when the sensor recovers.
+- **Failure statistics in health check** — Health check response now includes aggregated failure stats (counts, last failure time, occurrences per category).
+
 ## [9.0.0b28] - 2026-06-02
 
 ### Fixed

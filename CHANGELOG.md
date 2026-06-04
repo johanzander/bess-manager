@@ -4,6 +4,12 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.0.0b30] - 2026-06-04
+
+### Fixed
+
+- **Settings save button greyed out after sensor changes** — `stableStringify` used `Object.keys(obj).sort()` as a JSON replacer whitelist, which stripped nested object contents. Clearing or entering a sensor value produced identical JSON, so the dirty detection never triggered. Fixed to recursively sort keys at all nesting levels.
+
 ## [9.0.0b29] - 2026-06-03
 
 ### Fixed

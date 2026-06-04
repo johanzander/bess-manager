@@ -4,11 +4,18 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [9.0.0b30] - 2026-06-04
+## [9.0.0b31] - 2026-06-04
 
 ### Fixed
 
 - **Settings save button greyed out after sensor changes** — `stableStringify` used `Object.keys(obj).sort()` as a JSON replacer whitelist, which stripped nested object contents. Clearing or entering a sensor value produced identical JSON, so the dirty detection never triggered. Fixed to recursively sort keys at all nesting levels.
+- **Safari served stale UI after updates** — `index.html` was served without `Cache-Control` headers, so Safari and HA ingress cached the old HTML (which referenced old JS bundle hashes). Added `no-cache, no-store, must-revalidate` to all `index.html` responses.
+
+## [9.0.0b30] - 2026-06-04
+
+### Fixed
+
+- Released with the `stableStringify` fix but without the cache-control fix, so Safari users didn't receive the updated JS bundle.
 
 ## [9.0.0b29] - 2026-06-03
 

@@ -432,10 +432,16 @@ ingress_base_path = os.environ.get("INGRESS_BASE_PATH", "/local_bess_manager/ing
 
 
 # Handle root and ingress paths
+# index.html must not be cached — it contains hashed asset references that
+# change on every build. Without no-cache, Safari and HA ingress may serve a
+# stale index.html that still points to the old JS bundle after an update.
+_INDEX_HEADERS = {"Cache-Control": "no-cache, no-store, must-revalidate"}
+
+
 @app.get("/")
 async def root_index():
     logger.info("Root path requested")
-    return FileResponse("/app/frontend/index.html")
+    return FileResponse("/app/frontend/index.html", headers=_INDEX_HEADERS)
 
 
 # All API endpoints are found in api.py and are imported via the router
@@ -445,4 +451,4 @@ async def root_index():
 # SPA catch-all: serve index.html for any path not matched by API or asset routes
 @app.get("/{full_path:path}")
 async def spa_fallback(full_path: str):
-    return FileResponse("/app/frontend/index.html")
+    return FileResponse("/app/frontend/index.html", headers=_INDEX_HEADERS)

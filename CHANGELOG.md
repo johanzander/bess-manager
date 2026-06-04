@@ -11,32 +11,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - **SolaX inverter support** — native SolaX inverters now supported via the homeassistant-solax-modbus HACS integration, using VPP active-power commands for battery control. Setup wizard auto-detects SolaX entities and shows platform-specific sensor configuration.
 - **Growatt Local Modbus support** — Growatt MIN (GEN4) and SPH/MIX (GEN3) inverters can now be controlled locally via the solax_modbus HACS integration instead of the Growatt cloud API, providing faster response times and no cloud dependency.
 - **Single-segment TOU for Growatt Modbus** — replaces the 9-slot TOU approach with a single TOU segment updated per-period, reducing required HA entities from 45 to 5. Legacy TOU slots 2-9 are auto-migrated on startup.
-- **Multi-platform architecture** — inverter scheduling refactored into an `InverterController` base class with five platform-specific controllers: `growatt_server_min`, `growatt_server_sph`, `solax_modbus_growatt_min` (GEN4), `solax_modbus_growatt_sph` (GEN3), and `solax_modbus_native`. Runtime platform switching without restart.
-- **Entity-registry-based discovery** — sensor auto-detection now exclusively uses the HA entity registry via WebSocket API (unique_id + platform fields, both immutable), replacing fragile states-based discovery that broke when users renamed entities.
-- **Nordpool HACS provider support** — setup wizard and settings page now handle three distinct pricing providers: `nordpool_official` (HA core integration), `nordpool_hacs` (HACS custom sensor), and `octopus`. HACS entities are auto-detected from discovery.
-- **Per-platform sensor storage** — sensor configuration is stored per-platform, so switching platforms in the wizard preserves previously entered sensor values.
-- **Tabs UI for platform selection** — wizard platform selector uses tabs with pill buttons and inline sensor configuration.
-- **Fresh install support** — system starts in unconfigured mode when no inverter platform is configured, serving the web UI and setup wizard without crashing.
 - **Failure tracking improvements** — recurring failures are coalesced with occurrence counts, inverter command failures are surfaced in the dashboard banner, and per-sensor failure categories auto-dismiss on recovery.
 - **Scenario-driven wizard tests** — setup wizard and discovery tests load from JSON scenario files covering all supported integration combinations.
 
 ### Changed
 
-- **Platform identifiers renamed** — all inverter platform strings now follow a consistent `<plugin>_<inverter>` convention across backend, frontend, API, and discovery.
-- **Unified inverter naming** — `inverterType` → `inverterPlatform` across all API payloads, frontend state, and discovery responses. Legacy `growatt.inverter_type` settings are migrated automatically.
 - **Energy flow derivation unified** — `EnergyFlowCalculator` derives `load_consumption`, `system_production`, and `self_consumption` from 5 core sensors on all platforms, eliminating zero values on platforms without dedicated registers.
-- **Dead code cleanup** — removed unused hourly settings abstraction, duplicate controller overrides, stale `_addon_options` startup snapshot, states-based discovery methods, and WebSocket fallbacks.
-- **Cache-Control headers on index.html** — prevents Safari and HA ingress from serving stale UI bundles after updates.
+- **Multi-platform architecture** — inverter scheduling refactored into an `InverterController` base class with five platform-specific controllers: `growatt_server_min`, `growatt_server_sph`, `solax_modbus_growatt_min` (GEN4), `solax_modbus_growatt_sph` (GEN3), and `solax_modbus_native`. Runtime platform switching without restart.
+- **Entity-registry-based discovery** — sensor auto-detection now exclusively uses the HA entity registry via WebSocket API (unique_id + platform fields, both immutable), replacing fragile states-based discovery that broke when users renamed entities.
+- **Per-platform sensor storage** — sensor configuration is stored per-platform, so switching platforms in the wizard preserves previously entered sensor values.
 
 ### Fixed
 
 - **Intent classification** — `classify_strategic_intent()` now checks `grid_to_battery > 0` directly instead of comparing grid import vs home consumption, fixing misclassification when solar partially covers home load.
-- **Grid charge control on solax_modbus** — `set_grid_charge()` now detects entity domain (`switch` vs `select`) and uses the correct HA service and state values.
-- **Sensor discovery for custom device names** — suffix maps use register keys only (not hardcoded prefixes), matching any user-configured device name via `endswith()`.
 - **Nordpool area detection** — uses device registry identifiers instead of brittle entity unique_id parsing; discovery-detected area is no longer overwritten by stale settings.
-- **Dashboard hangs after wizard** — fixed stale startup options dict that prevented InfluxDB consumption forecast from reading live sensor config.
 - **Hardware write retry** — failed schedule writes are retried on the next quarterly cycle instead of silently running with stale inverter settings.
-- **Settings save button** — fixed `stableStringify` stripping nested object contents, causing dirty detection to never trigger after sensor changes.
 
 ## [8.7.0] - 2026-05-22
 

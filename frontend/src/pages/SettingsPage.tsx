@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Activity, Battery, Home, Settings, Sun, Zap } from 'lucide-react';
+import { Activity, Battery, Brain, Home, Settings, Sun, Zap } from 'lucide-react';
 import api from '../lib/api';
 import SystemHealthComponent from '../components/SystemHealth';
 import type { HealthStatus } from '../types';
@@ -12,6 +12,8 @@ import { BatteryFormSection } from '../components/settings/BatteryFormSection';
 import type { BatteryForm } from '../components/settings/BatteryFormSection';
 import { SensorConfigSection } from '../components/settings/SensorConfigSection';
 import type { InverterForm } from '../components/settings/SensorConfigSection';
+import { AIAnalystSettings } from '../components/settings/AIAnalystSettings';
+import type { AIAnalystForm } from '../components/settings/AIAnalystSettings';
 import { emptyPerPlatformSensors, getActiveSensorsFlat } from '../lib/sensorDefinitions';
 import type { PerPlatformSensors } from '../lib/sensorDefinitions';
 
@@ -19,7 +21,7 @@ import type { PerPlatformSensors } from '../lib/sensorDefinitions';
 // Local types
 // ---------------------------------------------------------------------------
 
-type Tab = 'home' | 'pricing' | 'battery' | 'sensors' | 'health';
+type Tab = 'home' | 'pricing' | 'battery' | 'sensors' | 'health' | 'ai';
 
 interface Toast {
   type: 'success' | 'error';
@@ -69,6 +71,7 @@ const SettingsPage: React.FC = () => {
   const [pricingForm, setPricingForm] = useState<PricingForm>(EMPTY_PRICING);
   const [inverterForm, setInverterForm] = useState<InverterForm>(EMPTY_INVERTER);
   const [sensors, setSensors] = useState<PerPlatformSensors>(emptyPerPlatformSensors());
+  const [aiForm, setAiForm] = useState<AIAnalystForm>({ apiKey: '', model: 'claude-sonnet-4-20250514', enabled: true });
 
   // ── saved snapshots (for dirty detection) ──────────────────────────────
   const savedBattery = useRef<string>('');
@@ -76,6 +79,7 @@ const SettingsPage: React.FC = () => {
   const savedPricing = useRef<string>('');
   const savedInverter = useRef<string>('');
   const savedSensors = useRef<string>('');
+  const savedAi = useRef<string>('');
 
   // Sensor keys arrive in arbitrary order from different sources (backend
   // load vs. auto-configure merge), so sort keys recursively before comparing.
@@ -101,6 +105,7 @@ const SettingsPage: React.FC = () => {
       JSON.stringify(inverterForm) !== savedInverter.current,
     sensors: stableStringify(sensors) !== savedSensors.current,
     health: false,
+    ai: JSON.stringify(aiForm) !== savedAi.current,
   };
 
   // ── loading / saving / error state ────────────────────────────────────
@@ -204,6 +209,15 @@ const SettingsPage: React.FC = () => {
         : emptyPerPlatformSensors();
       setSensors(sen);
       savedSensors.current = stableStringify(sen);
+
+      const ai_s = s.aiAnalyst ?? {};
+      const ai: AIAnalystForm = {
+        apiKey: ai_s.apiKey ?? '',
+        model: ai_s.model ?? 'claude-sonnet-4-20250514',
+        enabled: ai_s.enabled ?? true,
+      };
+      setAiForm(ai);
+      savedAi.current = JSON.stringify(ai);
 
       if (healthRes.data?.checks) {
         const map: Record<string, HealthStatus> = {};
@@ -471,12 +485,26 @@ const SettingsPage: React.FC = () => {
     }
   };
 
+  const saveAi = async () => {
+    setSaving(true);
+    try {
+      await api.patch('/api/settings', { aiAnalyst: aiForm });
+      savedAi.current = JSON.stringify(aiForm);
+      setToast({ type: 'success', message: 'AI Analyst settings saved.' });
+    } catch (err) {
+      setToast({ type: 'error', message: err instanceof Error ? err.message : 'Save failed.' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const saveHandlers: Record<Tab, (() => Promise<void>) | null> = {
     home: saveHome,
     pricing: savePricing,
     battery: saveBattery,
     sensors: saveSensors,
     health: null,
+    ai: saveAi,
   };
 
   // ── tab definitions ───────────────────────────────────────────────────
@@ -486,6 +514,7 @@ const SettingsPage: React.FC = () => {
     { id: 'battery', label: 'Battery', icon: <Battery className="h-4 w-4" /> },
     { id: 'home', label: 'Home', icon: <Home className="h-4 w-4" /> },
     { id: 'health', label: 'Health', icon: <Activity className="h-4 w-4" /> },
+    { id: 'ai', label: 'AI Analyst', icon: <Brain className="h-4 w-4" /> },
   ];
 
   // ── render ────────────────────────────────────────────────────────────
@@ -559,6 +588,7 @@ const SettingsPage: React.FC = () => {
                 {tab === 'battery' && 'Growatt inverter type and battery parameters.'}
                 {tab === 'sensors' && 'Inverter platform selection and sensor entity IDs for each integration.'}
                 {tab === 'health' && 'System component health and diagnostics.'}
+                {tab === 'ai' && 'Claude API key and model for the AI analyst chat.'}
               </p>
               <div className="flex items-center gap-2 flex-shrink-0">
                 <button
@@ -642,6 +672,11 @@ const SettingsPage: React.FC = () => {
                 </div>
               </div>
             </div>
+          )}
+
+          {/* ── AI Analyst ─────────────────────────────────────────────── */}
+          {tab === 'ai' && (
+            <AIAnalystSettings form={aiForm} onChange={setAiForm} />
           )}
         </>
       )}

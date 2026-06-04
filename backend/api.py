@@ -150,6 +150,7 @@ _SECTION_MAP: dict[str, str] = {
     "growatt": "growatt",
     "inverter": "inverter",
     "sensors": "sensors",
+    "aiAnalyst": "ai_analyst",
 }
 
 # Derived from the BatterySettings dataclass — fields with init=True are the
@@ -2560,6 +2561,96 @@ async def dismiss_all_runtime_failures():
     except Exception as e:
         logger.error(f"Error dismissing all runtime failures: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+# ---------------------------------------------------------------------------
+# AI Analyst chat endpoints
+# ---------------------------------------------------------------------------
+
+
+def _get_ai_service():
+    """Lazy-initialise and return the shared AIAnalystService."""
+    from app import bess_controller
+
+    if not hasattr(bess_controller, "_ai_analyst_service"):
+        from ai_chat import AIAnalystService
+
+        bess_controller._ai_analyst_service = AIAnalystService(
+            bess_controller.settings_store
+        )
+    return bess_controller._ai_analyst_service, bess_controller
+
+
+@router.get("/api/ai/chat/status")
+async def ai_chat_status():
+    """Check whether the AI analyst is configured and enabled."""
+    service, _ = _get_ai_service()
+    return service.get_status()
+
+
+@router.post("/api/ai/chat/start")
+async def ai_chat_start():
+    """Start a new AI chat session with fresh system context."""
+    service, ctrl = _get_ai_service()
+
+    status = service.get_status()
+    if not status["configured"]:
+        raise HTTPException(
+            status_code=400,
+            detail="AI Analyst not configured. Add an API key in Settings.",
+        )
+
+    result = service.start_session(ctrl.system)
+    return result
+
+
+@router.post("/api/ai/chat/stream")
+async def ai_chat_stream(body: dict):
+    """Stream an AI response as Server-Sent Events.
+
+    Body:
+        sessionId: Active session UUID.
+        message: The user's question.
+
+    Returns:
+        StreamingResponse with text/event-stream media type.
+    """
+    from fastapi.responses import StreamingResponse
+
+    service, _ = _get_ai_service()
+    session_id = body.get("sessionId", "")
+    message = body.get("message", "").strip()
+
+    if not session_id or not message:
+        raise HTTPException(
+            status_code=400, detail="sessionId and message are required"
+        )
+
+    return StreamingResponse(
+        service.stream_response(session_id, message),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.post("/api/ai/chat/refresh")
+async def ai_chat_refresh(body: dict):
+    """Refresh the system context for an existing chat session."""
+    service, ctrl = _get_ai_service()
+    session_id = body.get("sessionId", "")
+
+    if not session_id:
+        raise HTTPException(status_code=400, detail="sessionId is required")
+
+    try:
+        return service.refresh_context(session_id, ctrl.system)
+    except KeyError as err:
+        raise HTTPException(
+            status_code=404, detail="Session not found or expired"
+        ) from err
 
 
 @router.get("/api/setup/status")

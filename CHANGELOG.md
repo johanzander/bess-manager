@@ -4,6 +4,14 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.1.0b1] - 2026-06-04
+
+### Added
+
+- **AI Analyst chat panel** — Embedded AI analyst in the BESS Manager UI. Users can ask questions about battery performance, optimization decisions, savings deviations, and system configuration directly from a floating chat panel visible on all pages. Responses stream in real-time via SSE. Requires a Claude API key configured in Settings > AI Analyst tab.
+- **AI Analyst settings tab** — New settings section for configuring the AI analyst: API key, model selection (Sonnet/Opus), and enable/disable toggle with a "Test connection" button.
+- **Context-aware responses** — The AI analyst automatically gathers current system state (debug data, sensor readings, optimization history) as context for each chat session, using the same data the bess-analyst agent uses for issue analysis.
+
 ## [9.0.0b31] - 2026-06-04
 
 ### Fixed

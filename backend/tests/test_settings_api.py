@@ -407,7 +407,60 @@ class TestPatchSettingsSensorValidation:
             "/api/settings",
             json={"sensors": {"growatt_server_min": {"battery_soc": ""}}},
         )
+        # Must be gone from in-memory ha_controller
         assert "battery_soc" not in mock_controller.ha_controller.sensors
+        # Must be gone from persistent store (not lingering as empty string)
+        stored = mock_controller.settings_store.data["sensors"]["growatt_server_min"]
+        assert "battery_soc" not in stored
+
+    def test_clear_optional_sensor_removes_from_store(self, mock_controller):
+        """Clearing an optional sensor (discharge_inhibit) removes it from storage."""
+        mock_controller.settings_store.data["sensors"]["shared"] = {
+            "discharge_inhibit": "input_boolean.bess_discharge_inhibit",
+            "battery_soc": "sensor.battery_soc",
+        }
+        mock_controller.ha_controller.sensors = {
+            "discharge_inhibit": "input_boolean.bess_discharge_inhibit",
+            "battery_soc": "sensor.battery_soc",
+        }
+        resp = _client.patch(
+            "/api/settings",
+            json={"sensors": {"shared": {"discharge_inhibit": ""}}},
+        )
+        assert resp.status_code == 200
+        # Gone from in-memory
+        assert "discharge_inhibit" not in mock_controller.ha_controller.sensors
+        # Gone from persistent store
+        shared = mock_controller.settings_store.data["sensors"]["shared"]
+        assert "discharge_inhibit" not in shared
+        # Other sensors preserved
+        assert "battery_soc" in mock_controller.ha_controller.sensors
+
+    def test_clear_phase_current_sensor_removes_from_store(self, mock_controller):
+        """Clearing a phase current sensor removes it from both store and memory."""
+        mock_controller.settings_store.data["sensors"]["shared"] = {
+            "phase_current_l3": "sensor.phase_l3",
+            "phase_current_l1": "sensor.phase_l1",
+        }
+        mock_controller.ha_controller.sensors = {
+            "phase_current_l3": "sensor.phase_l3",
+            "phase_current_l1": "sensor.phase_l1",
+        }
+        resp = _client.patch(
+            "/api/settings",
+            json={"sensors": {"shared": {"phase_current_l3": ""}}},
+        )
+        assert resp.status_code == 200
+        # L3 gone from both store and memory
+        shared = mock_controller.settings_store.data["sensors"]["shared"]
+        assert "phase_current_l3" not in shared
+        assert "phase_current_l3" not in mock_controller.ha_controller.sensors
+        # L1 preserved
+        assert shared["phase_current_l1"] == "sensor.phase_l1"
+        assert (
+            mock_controller.ha_controller.sensors["phase_current_l1"]
+            == "sensor.phase_l1"
+        )
 
     def test_multiple_valid_sensors_all_stored(self, mock_controller):
         payload = {

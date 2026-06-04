@@ -28,6 +28,7 @@ OWNED_SECTIONS = (
     "growatt",
     "inverter",
     "sensors",
+    "ai_analyst",
 )
 
 # All valid inverter platform IDs.

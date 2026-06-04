@@ -13,31 +13,17 @@ jobs:
     outputs:
       backend: ${{ steps.filter.outputs.backend }}
       frontend: ${{ steps.filter.outputs.frontend }}
-      algorithm: ${{ steps.filter.outputs.algorithm }}
+      algorithm: ${{ steps.algorithm.outputs.changed }}
       e2e: ${{ steps.filter.outputs.e2e }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
       - uses: dorny/paths-filter@v3
         id: filter
         with:
           filters: |
-            # Algorithm tests (~75 min) only run when optimizer-relevant
-            # source files change.  Uses exclusion pattern so new files
-            # trigger the suite by default (safe-by-default).
-            # Excluded: I/O-only files whose changes are fully mocked
-            # in the slow test suite.
-            algorithm:
-              - 'core/bess/**'
-              - '!core/bess/ha_api_controller.py'
-              - '!core/bess/sensor_collector.py'
-              - '!core/bess/weather.py'
-              - '!core/bess/octopus_energy_source.py'
-              - '!core/bess/official_nordpool_source.py'
-              - '!core/bess/debug_data_exporter.py'
-              - '!core/bess/debug_report_formatter.py'
-              - '!core/bess/health_check.py'
-              - '!core/bess/influxdb_helper.py'
-              - '!core/bess/prediction_analyzer.py'
             backend:
               - 'backend/**'
               - 'core/bess/**'
@@ -54,6 +40,54 @@ jobs:
               - 'docker-compose.ci.yml'
               - 'docker-compose.prod-test.yml'
               - 'Dockerfile'
+
+      # Algorithm filter uses a script instead of dorny because dorny's
+      # negation patterns don't work correctly with the default 'some'
+      # quantifier — any unrelated file matches '!core/bess/excluded.py',
+      # so algorithm always triggers.  This script checks whether any
+      # core/bess/ file changed that is NOT in the I/O-only exclusion list.
+      - name: Check algorithm-relevant changes
+        id: algorithm
+        run: |
+          # I/O-only files excluded from algorithm tests (fully mocked in slow suite)
+          EXCLUDED=(
+            core/bess/ha_api_controller.py
+            core/bess/sensor_collector.py
+            core/bess/weather.py
+            core/bess/octopus_energy_source.py
+            core/bess/official_nordpool_source.py
+            core/bess/debug_data_exporter.py
+            core/bess/debug_report_formatter.py
+            core/bess/health_check.py
+            core/bess/influxdb_helper.py
+            core/bess/prediction_analyzer.py
+          )
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+            HEAD="${{ github.event.pull_request.head.sha }}"
+          else
+            BASE="${{ github.event.before }}"
+            HEAD="${{ github.sha }}"
+          fi
+
+          CHANGED="false"
+          for file in $(git diff --name-only "$BASE" "$HEAD" -- 'core/bess/'); do
+            SKIP="false"
+            for ex in "${EXCLUDED[@]}"; do
+              if [ "$file" = "$ex" ]; then
+                SKIP="true"
+                break
+              fi
+            done
+            if [ "$SKIP" = "false" ]; then
+              echo "Algorithm-relevant change: $file"
+              CHANGED="true"
+            fi
+          done
+
+          echo "changed=$CHANGED" >> "$GITHUB_OUTPUT"
+          echo "Algorithm tests needed: $CHANGED"
 
   # ── Fast tests: backend API + non-optimizer unit tests ──────────
   test-fast:

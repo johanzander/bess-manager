@@ -18,10 +18,13 @@ import anthropic
 
 logger = logging.getLogger(__name__)
 
-# Path to the bess-analyst agent definition (ships with the Docker image).
-_ANALYST_MD_PATH = (
-    Path(__file__).resolve().parent.parent / ".claude" / "agents" / "bess-analyst.md"
-)
+# Path to the bess-analyst agent definition.
+# In Docker the file is at /app/agents/bess-analyst.md.
+# In local dev it lives at <repo>/.claude/agents/bess-analyst.md.
+_APP_DIR = Path(__file__).resolve().parent
+_ANALYST_MD_PATH = _APP_DIR / "agents" / "bess-analyst.md"
+if not _ANALYST_MD_PATH.exists():
+    _ANALYST_MD_PATH = _APP_DIR.parent / ".claude" / "agents" / "bess-analyst.md"
 
 # Preamble prepended to the agent definition to adapt it for in-app use.
 _PREAMBLE = """\

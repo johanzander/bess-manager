@@ -21,9 +21,6 @@ export default function AIChatPanel() {
     clearChat,
   } = useAIChat();
 
-  // Don't render anything if AI is not configured or not enabled.
-  if (!status?.configured || !status?.enabled) return null;
-
   // Auto-scroll on new content.
   useEffect(() => {
     if (scrollRef.current) {
@@ -35,6 +32,9 @@ export default function AIChatPanel() {
   useEffect(() => {
     if (open) inputRef.current?.focus();
   }, [open]);
+
+  // Don't render anything if AI is not configured or not enabled.
+  if (!status?.configured || !status?.enabled) return null;
 
   const handleSend = () => {
     const text = input.trim();

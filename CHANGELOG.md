@@ -4,6 +4,13 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.1.0b3] - 2026-06-05
+
+### Fixed
+
+- **React crash on page load (error #310)** — `useEffect` hooks in `AIChatPanel` were called after a conditional early return, violating React's rules of hooks. Moved all hooks above the conditional return.
+- **Algorithm tests running on every PR** — replaced broken `dorny/paths-filter` negation patterns with a shell script that correctly detects `core/bess/` changes, skipping the 35-min algorithm suite when no optimizer code changed.
+
 ## [9.1.0b2] - 2026-06-05
 
 ### Fixed

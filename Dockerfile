@@ -36,10 +36,13 @@ RUN apk add --no-cache \
 WORKDIR /app
 
 # Copy Python application files from backend directory
-COPY backend/app.py backend/api.py backend/api_conversion.py backend/api_dataclasses.py backend/log_config.py backend/settings_store.py backend/requirements.txt ./
+COPY backend/app.py backend/api.py backend/api_conversion.py backend/api_dataclasses.py backend/ai_chat.py backend/log_config.py backend/settings_store.py backend/requirements.txt ./
 
 # Copy core directory
 COPY core/ /app/core/
+
+# Copy agent definition (used as system prompt by AI analyst)
+COPY .claude/agents/bess-analyst.md /app/agents/bess-analyst.md
 
 # Build and copy frontend
 # BUILD_VERSION is used here so every new version busts the Docker layer cache,

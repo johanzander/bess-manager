@@ -50,6 +50,16 @@ PRICE_STORE_TO_API: dict[str, str] = {
     "tax_reduction": "taxReduction",
 }
 
+# Legacy inverter_type values ("MIN"/"SPH") → canonical inverter.platform.
+# Used only by settings_store migration for old configs.
+LEGACY_INVERTER_PLATFORM_MAP: dict[str, str] = {
+    "MIN": "growatt_server_min",
+    "SPH": "growatt_server_sph",
+}
+
+# Keep old name as alias for backward compat with PATCH /api/settings handler
+UI_TYPE_TO_PLATFORM = LEGACY_INVERTER_PLATFORM_MAP
+
 
 def build_system_settings(options: dict) -> dict:
     """Validate settings options and return the camelCase dict for update_settings().

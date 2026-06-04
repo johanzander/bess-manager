@@ -9,8 +9,11 @@ import type { HomeForm } from '../components/settings/HomeFormSection';
 import { PricingFormSection } from '../components/settings/PricingFormSection';
 import type { PricingForm } from '../components/settings/PricingFormSection';
 import { BatteryFormSection } from '../components/settings/BatteryFormSection';
-import type { BatteryForm, InverterForm } from '../components/settings/BatteryFormSection';
+import type { BatteryForm } from '../components/settings/BatteryFormSection';
 import { SensorConfigSection } from '../components/settings/SensorConfigSection';
+import type { InverterForm } from '../components/settings/SensorConfigSection';
+import { emptyPerPlatformSensors, getActiveSensorsFlat } from '../lib/sensorDefinitions';
+import type { PerPlatformSensors } from '../lib/sensorDefinitions';
 
 // ---------------------------------------------------------------------------
 // Local types
@@ -48,7 +51,7 @@ const EMPTY_PRICING: PricingForm = {
   area: '', markupRate: 0, vatMultiplier: 1.25, additionalCosts: 0,
   taxReduction: 0,
 };
-const EMPTY_INVERTER: InverterForm = { inverterType: 'MIN', deviceId: '' };
+const EMPTY_INVERTER: InverterForm = { inverterPlatform: 'growatt_server_min', deviceId: '' };
 
 // ---------------------------------------------------------------------------
 // Component
@@ -65,7 +68,7 @@ const SettingsPage: React.FC = () => {
   const [homeForm, setHomeForm] = useState<HomeForm>(EMPTY_HOME);
   const [pricingForm, setPricingForm] = useState<PricingForm>(EMPTY_PRICING);
   const [inverterForm, setInverterForm] = useState<InverterForm>(EMPTY_INVERTER);
-  const [sensors, setSensors] = useState<Record<string, string>>({});
+  const [sensors, setSensors] = useState<PerPlatformSensors>(emptyPerPlatformSensors());
 
   // ── saved snapshots (for dirty detection) ──────────────────────────────
   const savedBattery = useRef<string>('');
@@ -75,9 +78,20 @@ const SettingsPage: React.FC = () => {
   const savedSensors = useRef<string>('');
 
   // Sensor keys arrive in arbitrary order from different sources (backend
-  // load vs. auto-configure merge), so sort keys before comparing.
-  const stableStringify = (obj: Record<string, string>) =>
-    JSON.stringify(Object.keys(obj).sort().reduce<Record<string, string>>((acc, k) => { acc[k] = obj[k]; return acc; }, {}));
+  // load vs. auto-configure merge), so sort keys recursively before comparing.
+  const stableStringify = (obj: unknown): string => {
+    const sortKeys = (val: unknown): unknown => {
+      if (val && typeof val === 'object' && !Array.isArray(val)) {
+        const sorted: Record<string, unknown> = {};
+        for (const k of Object.keys(val as Record<string, unknown>).sort()) {
+          sorted[k] = sortKeys((val as Record<string, unknown>)[k]);
+        }
+        return sorted;
+      }
+      return val;
+    };
+    return JSON.stringify(sortKeys(obj));
+  };
 
   const isDirty: Record<Tab, boolean> = {
     home: JSON.stringify(homeForm) !== savedHome.current,
@@ -129,7 +143,7 @@ const SettingsPage: React.FC = () => {
       const prov_s = s.energyProvider ?? {};
       const growatt_s = s.growatt ?? {};
       const nordpool = prov_s.nordpoolOfficial ?? {};
-      const nordpoolCustom = prov_s.nordpool ?? {};
+      const nordpoolCustom = prov_s.nordpoolHacs ?? {};
       const octopus = prov_s.octopus ?? {};
 
       const bat: BatteryForm = {
@@ -176,14 +190,18 @@ const SettingsPage: React.FC = () => {
       setPricingForm(p);
       savedPricing.current = JSON.stringify(p);
 
+      const invNew = s.inverter ?? {};
+      const uiType = invNew.platform ?? 'growatt_server_min';
       const inv: InverterForm = {
-        inverterType: growatt_s.inverterType ?? 'MIN',
+        inverterPlatform: uiType,
         deviceId: growatt_s.deviceId ?? '',
       };
       setInverterForm(inv);
       savedInverter.current = JSON.stringify(inv);
 
-      const sen: Record<string, string> = s.sensors ?? {};
+      const sen: PerPlatformSensors = s.sensors && 'platform' in s.sensors
+        ? s.sensors as PerPlatformSensors
+        : emptyPerPlatformSensors();
       setSensors(sen);
       savedSensors.current = stableStringify(sen);
 
@@ -212,38 +230,60 @@ const SettingsPage: React.FC = () => {
       const res = await api.post('/api/setup/discover');
       const d = res.data;
 
-      if (d.sensors && typeof d.sensors === 'object') {
+      if (d.platformSensors && typeof d.platformSensors === 'object') {
         setSensors(prev => {
-          const merged = {
-            ...d.sensors as Record<string, string>,
-            ...Object.fromEntries(Object.entries(prev).filter(([, v]) => v)),
-          };
-          // Drop empty-string entries so the result has the same shape as the
-          // persisted sensor map. Without this, discovered empty keys trigger a
-          // false dirty state even when nothing actually changed.
-          return Object.fromEntries(Object.entries(merged).filter(([, v]) => v)) as Record<string, string>;
+          const next = { ...prev };
+          // Merge discovered platform sensors into each platform sub-dict
+          for (const [platId, platMap] of Object.entries(d.platformSensors as Record<string, Record<string, string>>)) {
+            if (platId in next && platId !== 'platform' && platId !== 'shared') {
+              const existing = (next as Record<string, Record<string, string>>)[platId] ?? {};
+              const merged: Record<string, string> = { ...existing };
+              for (const [k, v] of Object.entries(platMap)) {
+                if (v) merged[k] = v;
+              }
+              (next as Record<string, Record<string, string>>)[platId] = merged;
+            }
+          }
+          // Merge shared sensors from flat discovery result
+          if (d.sensors) {
+            const shared = { ...(next.shared ?? {}) };
+            for (const [k, v] of Object.entries(d.sensors as Record<string, string>)) {
+              // Only merge keys that belong to shared integrations
+              if (v && !(k in ((next as Record<string, Record<string, string>>)[next.platform] ?? {}))) {
+                shared[k] = v;
+              }
+            }
+            next.shared = shared;
+          }
+          return next;
         });
       }
 
-      if (d.inverterType || d.growattDeviceId) {
-        setInverterForm(f => ({
-          ...f,
-          ...(d.inverterType ? { inverterType: d.inverterType } : {}),
-          ...(d.growattDeviceId ? { deviceId: d.growattDeviceId } : {}),
-        }));
+      const detected = d.detectedInverterPlatforms ?? [];
+      const detectedPlatform = detected[0] ?? null;
+      if (detectedPlatform) {
+        setInverterForm(f => ({ ...f, inverterPlatform: detectedPlatform }));
+      }
+      if (d.growattDeviceId) {
+        setInverterForm(f => ({ ...f, deviceId: d.growattDeviceId }));
       }
 
       // Only update discovery fields that actually changed.
       // Never overwrite user-configured price calculation fields
       // (vatMultiplier, markupRate, additionalCosts, taxReduction).
+      // Use area from matching integration: official if available,
+      // otherwise HACS custom — never mix the two.
+      const discoveredArea = d.nordpoolConfigEntryId
+        ? d.nordpoolArea : d.nordpoolCustomArea;
+
       setPricingForm(f => {
         const next = { ...f };
         let changed = false;
         if (d.nordpoolConfigEntryId && d.nordpoolConfigEntryId !== f.nordpoolConfigEntryId) {
           next.nordpoolConfigEntryId = d.nordpoolConfigEntryId; changed = true;
         }
-        if (d.nordpoolArea && d.nordpoolArea !== f.area) {
-          next.area = d.nordpoolArea; changed = true;
+        if (discoveredArea && discoveredArea !== f.area) {
+          next.area = discoveredArea; changed = true;
         }
         if (d.currency && d.currency !== f.currency) {
           next.currency = d.currency; changed = true;
@@ -259,7 +299,7 @@ const SettingsPage: React.FC = () => {
       const sensorCount = d.sensors ? Object.keys(d.sensors).filter(k => d.sensors[k]).length : 0;
       setToast({
         type: 'success',
-        message: `Auto-configure found ${sensorCount} sensors${d.inverterType ? `, ${d.inverterType} inverter` : ''}${d.nordpoolArea ? `, area ${d.nordpoolArea}` : ''}. Review and save.`,
+        message: `Auto-configure found ${sensorCount} sensors${detectedPlatform ? `, ${detectedPlatform} inverter` : ''}${discoveredArea ? `, area ${discoveredArea}` : ''}. Review and save.`,
       });
 
       const healthRes = await api.get('/api/system-health').catch(() => ({ data: null }));
@@ -340,7 +380,7 @@ const SettingsPage: React.FC = () => {
         energyProvider: {
           provider: pricingForm.provider,
           nordpoolOfficial: { configEntryId: pricingForm.nordpoolConfigEntryId },
-          nordpool: { entity: pricingForm.nordpoolEntity },
+          nordpoolHacs: { entity: pricingForm.nordpoolEntity },
           octopus: {
             importTodayEntity: pricingForm.octopusImportTodayEntity,
             importTomorrowEntity: pricingForm.octopusImportTomorrowEntity,
@@ -376,12 +416,14 @@ const SettingsPage: React.FC = () => {
           efficiencyDischarge: batteryForm.efficiencyDischarge,
           temperatureDerating: {
             enabled: batteryForm.temperatureDeratingEnabled,
-            weatherEntity: sensors['weather_entity'] ?? '',
+            weatherEntity: sensors.shared?.['weather_entity'] ?? '',
           },
         },
         growatt: {
-          inverterType: inverterForm.inverterType,
           deviceId: inverterForm.deviceId,
+        },
+        inverter: {
+          platform: inverterForm.inverterPlatform,
         },
       });
       savedBattery.current = JSON.stringify(batteryForm);
@@ -402,7 +444,7 @@ const SettingsPage: React.FC = () => {
         energyProvider: {
           provider: pricingForm.provider,
           nordpoolOfficial: { configEntryId: pricingForm.nordpoolConfigEntryId },
-          nordpool: { entity: pricingForm.nordpoolEntity },
+          nordpoolHacs: { entity: pricingForm.nordpoolEntity },
           octopus: {
             importTodayEntity: pricingForm.octopusImportTodayEntity,
             importTomorrowEntity: pricingForm.octopusImportTomorrowEntity,
@@ -413,7 +455,7 @@ const SettingsPage: React.FC = () => {
       });
       savedSensors.current = stableStringify(sensors);
       savedPricing.current = JSON.stringify(pricingForm);
-      const failed = await checkAndUpdateSensorHealth(sensors);
+      const failed = await checkAndUpdateSensorHealth(getActiveSensorsFlat(sensors));
       if (failed.length > 0) {
         setToast({
           type: 'error',
@@ -439,7 +481,7 @@ const SettingsPage: React.FC = () => {
 
   // ── tab definitions ───────────────────────────────────────────────────
   const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
-    { id: 'sensors', label: 'Sensors', icon: <Sun className="h-4 w-4" /> },
+    { id: 'sensors', label: 'Integrations', icon: <Sun className="h-4 w-4" /> },
     { id: 'pricing', label: 'Electricity Pricing', icon: <Zap className="h-4 w-4" /> },
     { id: 'battery', label: 'Battery', icon: <Battery className="h-4 w-4" /> },
     { id: 'home', label: 'Home', icon: <Home className="h-4 w-4" /> },
@@ -493,7 +535,7 @@ const SettingsPage: React.FC = () => {
                   onClick={() => {
                     setTab(t.id);
                     if (t.id === 'sensors' && Object.keys(sensorStatus).length === 0) {
-                      checkAndUpdateSensorHealth(sensors);
+                      checkAndUpdateSensorHealth(getActiveSensorsFlat(sensors));
                     }
                   }}
                   className={`flex items-center space-x-2 px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
@@ -515,7 +557,7 @@ const SettingsPage: React.FC = () => {
                 {tab === 'home' && 'Home electrical setup and consumption prediction for the optimizer.'}
                 {tab === 'pricing' && 'Electricity price source and cost calculation (markup, VAT, tax reduction).'}
                 {tab === 'battery' && 'Growatt inverter type and battery parameters.'}
-                {tab === 'sensors' && 'All sensor entity IDs, grouped by integration.'}
+                {tab === 'sensors' && 'Inverter platform selection and sensor entity IDs for each integration.'}
                 {tab === 'health' && 'System component health and diagnostics.'}
               </p>
               <div className="flex items-center gap-2 flex-shrink-0">
@@ -543,7 +585,7 @@ const SettingsPage: React.FC = () => {
 
           {/* ── Home ─────────────────────────────────────────────────────── */}
           {tab === 'home' && (
-            <HomeFormSection form={homeForm} onChange={setHomeForm} sensors={sensors} />
+            <HomeFormSection form={homeForm} onChange={setHomeForm} sensors={getActiveSensorsFlat(sensors)} />
           )}
 
           {/* ── Electricity Pricing ──────────────────────────────────────── */}
@@ -556,10 +598,8 @@ const SettingsPage: React.FC = () => {
             <BatteryFormSection
               form={batteryForm}
               onChange={setBatteryForm}
-              inverterForm={inverterForm}
-              onInverterChange={setInverterForm}
               currency={pricingForm.currency}
-              weatherEntity={sensors['weather_entity']}
+              weatherEntity={sensors.shared?.['weather_entity']}
             />
           )}
 
@@ -572,6 +612,11 @@ const SettingsPage: React.FC = () => {
               <SensorConfigSection
                 sensors={sensors}
                 onChange={setSensors}
+                inverterForm={inverterForm}
+                onInverterChange={(newForm) => {
+                  setInverterForm(newForm);
+                  // SensorConfigSection handles updating sensors.platform via onChange
+                }}
                 sensorStatus={sensorStatus}
               />
             </div>

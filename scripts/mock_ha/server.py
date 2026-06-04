@@ -46,18 +46,125 @@ async def log_requests(request: Request, call_next):  # type: ignore[no-untyped-
 # Mutable state — populated at startup from scenario file
 _sensors: dict[str, Any] = {}
 _time_segments: list[dict] = []
-_ac_charge_times: list[dict] = []
-_ac_discharge_times: list[dict] = []
+_ac_charge_times: dict[str, Any] = {}
+_ac_discharge_times: dict[str, Any] = {}
 _service_log: list[dict] = []
 # Nordpool prices keyed by date string "YYYY-MM-DD" → list of quarterly prices (SEK/kWh)
 _nordpool_prices: dict[str, list[float]] = {}
 # IANA timezone name for this scenario (e.g. "Europe/Stockholm")
 _timezone: str = "UTC"
-# WebSocket discovery data — loaded from scenario JSON
+# WebSocket registry data — populated from scenario or auto-generated from sensors
+_entity_registry: list[dict] = []
 _config_entries: list[dict] = []
 _devices: list[dict] = []
 _services: dict[str, Any] = {}
-_entity_registry: list[dict] = []
+
+
+def _generate_entity_registry(inverter_platform: str) -> list[dict]:
+    """Auto-generate entity registry entries from _sensors dict.
+
+    Infers the HA integration platform from the inverter_platform and sensor
+    entity IDs so that BESS auto-discovery can detect the integration.
+    """
+    platform_map = {
+        "growatt_server_min": "growatt_server",
+        "growatt_server_sph": "growatt_server",
+        "solax_modbus_growatt_min": "solax_modbus",
+        "solax_modbus_growatt_sph": "solax_modbus",
+        "solax_modbus_native": "solax_modbus",
+    }
+    inverter_platform = platform_map.get(inverter_platform, "growatt_server")
+
+    entries: list[dict] = []
+    for entity_id in _sensors:
+        # Determine platform from entity_id patterns
+        platform = inverter_platform  # default: assume inverter entity
+        if "nordpool" in entity_id:
+            platform = "nordpool"
+        elif "solcast" in entity_id:
+            platform = "solcast_solar"
+        elif "weather." in entity_id:
+            platform = "weather"
+        elif entity_id.startswith("sensor.current_l"):
+            platform = "homeassistant"
+        elif entity_id.startswith("sensor.48h_"):
+            platform = "homeassistant"
+
+        entries.append(
+            {
+                "entity_id": entity_id,
+                "platform": platform,
+                "unique_id": entity_id.replace(".", "_"),
+            }
+        )
+    return entries
+
+
+def _generate_config_entries(scenario: dict) -> list[dict]:
+    """Generate synthetic config entries for auto-discovery."""
+    entries = []
+    inverter_platform = scenario.get("inverter_platform", "min")
+
+    # Nordpool config entry (needed for nordpool_config_entry_id)
+    if any("nordpool" in k for k in _sensors):
+        entries.append(
+            {
+                "entry_id": "mock_nordpool_config_entry",
+                "domain": "nordpool",
+                "title": "Nordpool",
+                "state": "loaded",
+            }
+        )
+
+    # Inverter config entry
+    if inverter_platform in ("growatt_server_min", "growatt_server_sph"):
+        entries.append(
+            {
+                "entry_id": "mock_growatt_config_entry",
+                "domain": "growatt_server",
+                "title": "Growatt Server",
+                "state": "loaded",
+            }
+        )
+    elif inverter_platform in (
+        "solax_modbus_growatt_min",
+        "solax_modbus_growatt_sph",
+        "solax_modbus_native",
+    ):
+        entries.append(
+            {
+                "entry_id": "mock_solax_config_entry",
+                "domain": "solax_modbus",
+                "title": "SolaX Modbus",
+                "state": "loaded",
+            }
+        )
+
+    return entries
+
+
+def _generate_services(inverter_platform: str) -> dict:
+    """Generate synthetic service list for inverter type detection."""
+    services: dict[str, Any] = {}
+
+    if inverter_platform in ("growatt_server_min", "growatt_server_sph"):
+        growatt_services: dict[str, Any] = {}
+        # MIN uses update_time_segment, SPH uses write_ac_charge_times
+        if inverter_platform == "growatt_server_min":
+            growatt_services["update_time_segment"] = {}
+            growatt_services["read_time_segments"] = {}
+        else:
+            growatt_services["write_ac_charge_times"] = {}
+            growatt_services["read_ac_charge_times"] = {}
+            growatt_services["write_ac_discharge_times"] = {}
+            growatt_services["read_ac_discharge_times"] = {}
+        services["growatt_server"] = growatt_services
+
+    # solax_modbus platforms use entity-based control — no
+    # growatt_server services needed. Detection relies on entity
+    # registry suffixes (TOU time_1_enabled vs VPP remotecontrol_*).
+
+    return services
 
 
 def _load_scenario() -> None:
@@ -81,14 +188,9 @@ def _load_scenario() -> None:
     global _timezone
     _sensors.update(scenario.get("sensors", {}))
     _time_segments.extend(scenario.get("time_segments", []))
-    _ac_charge_times.extend(scenario.get("ac_charge_times", []))
-    _ac_discharge_times.extend(scenario.get("ac_discharge_times", []))
+    _ac_charge_times.update(scenario.get("ac_charge_times", {}))
+    _ac_discharge_times.update(scenario.get("ac_discharge_times", {}))
     _timezone = scenario.get("timezone", "UTC")
-    # WebSocket discovery data (optional — used by setup wizard)
-    _config_entries.extend(scenario.get("config_entries", []))
-    _devices.extend(scenario.get("devices", []))
-    _services.update(scenario.get("services", {}))
-    _entity_registry.extend(scenario.get("entity_registry", []))
 
     # Build nordpool prices lookup for the mock get_prices_for_date service call.
     # Prices can come from two sources:
@@ -108,8 +210,9 @@ def _load_scenario() -> None:
             attrs = nordpool_sensor.get("attributes", {})
             today_prices = attrs.get("today", [])
             tomorrow_prices = attrs.get("tomorrow", [])
-        else:
-            # nordpool_official uses service calls — no sensor state. Fall back to price_data.
+        if not nordpool_sensor or (not today_prices and not tomorrow_prices):
+            # nordpool_official uses service calls — sensor may exist but won't
+            # carry today/tomorrow price arrays. Fall back to price_data.
             price_data = scenario.get("price_data", {})
             today_prices = price_data.get("today", [])
             tomorrow_prices = price_data.get("tomorrow", [])
@@ -138,11 +241,41 @@ def _load_scenario() -> None:
             "python scripts/mock_ha/scenarios/from_debug_log.py <debug_log>"
         )
 
+    # WebSocket registry data — used by setup wizard auto-discovery
+    _entity_registry.extend(scenario.get("entity_registry", []))
+    _config_entries.extend(scenario.get("config_entries", []))
+    _devices.extend(scenario.get("devices", []))
+    _services.update(scenario.get("services", {}))
+
+    # Auto-generate entity registry for sensors not already covered
+    existing_entity_ids = {e["entity_id"] for e in _entity_registry}
+    inverter_platform = scenario.get("inverter_platform", "min")
+    auto_entries = [
+        e
+        for e in _generate_entity_registry(inverter_platform)
+        if e["entity_id"] not in existing_entity_ids
+    ]
+    if auto_entries:
+        _entity_registry.extend(auto_entries)
+        logger.info(
+            "Auto-generated %d entity registry entries for inverter_platform=%s",
+            len(auto_entries),
+            inverter_platform,
+        )
+
+    if not _config_entries:
+        _config_entries.extend(_generate_config_entries(scenario))
+
+    if not _services:
+        inverter_platform = scenario.get("inverter_platform", "min")
+        _services.update(_generate_services(inverter_platform))
+
     logger.info(
-        "Loaded scenario '%s' — %d sensors, %d TOU segments",
+        "Loaded scenario '%s' — %d sensors, %d TOU segments, %d registry entries",
         scenario.get("name", scenario_name),
         len(_sensors),
         len(_time_segments),
+        len(_entity_registry),
     )
 
 
@@ -250,6 +383,41 @@ async def call_service(domain: str, service: str, request: Request) -> JSONRespo
             return JSONResponse({"service_response": _ac_charge_times})
         if service in ("read_ac_discharge_times", "read_ac_discharge_time"):
             return JSONResponse({"service_response": _ac_discharge_times})
+
+    # State-mutating service calls — update _sensors so subsequent reads
+    # reflect the change (needed for entity-based TOU and EMS control).
+    if domain == "select" and service == "select_option":
+        entity_id = body.get("entity_id", "")
+        option = body.get("option", "")
+        if entity_id in _sensors:
+            if isinstance(_sensors[entity_id], dict):
+                _sensors[entity_id]["state"] = option
+            else:
+                _sensors[entity_id] = {"state": option, "attributes": {}}
+        else:
+            _sensors[entity_id] = {"state": option, "attributes": {}}
+
+    elif domain == "number" and service == "set_value":
+        entity_id = body.get("entity_id", "")
+        value = body.get("value", 0)
+        if entity_id in _sensors:
+            if isinstance(_sensors[entity_id], dict):
+                _sensors[entity_id]["state"] = str(value)
+            else:
+                _sensors[entity_id] = {"state": str(value), "attributes": {}}
+        else:
+            _sensors[entity_id] = {"state": str(value), "attributes": {}}
+
+    elif domain == "switch" and service in ("turn_on", "turn_off"):
+        entity_id = body.get("entity_id", "")
+        state = "on" if service == "turn_on" else "off"
+        if entity_id in _sensors:
+            if isinstance(_sensors[entity_id], dict):
+                _sensors[entity_id]["state"] = state
+            else:
+                _sensors[entity_id] = {"state": state, "attributes": {}}
+        else:
+            _sensors[entity_id] = {"state": state, "attributes": {}}
 
     # All write operations: record and acknowledge
     return JSONResponse({})

@@ -42,7 +42,7 @@ export function PricingFormSection({ form, onChange }: Props) {
           'Provider',
           [
             { value: 'nordpool_official', label: 'Nord Pool (official HA integration)' },
-            { value: 'nordpool', label: 'Nord Pool (HACS custom sensor)' },
+            { value: 'nordpool_hacs', label: 'Nord Pool (HACS custom sensor)' },
             { value: 'octopus', label: 'Octopus Energy' },
           ],
           form.provider,
@@ -60,7 +60,7 @@ export function PricingFormSection({ form, onChange }: Props) {
           </div>
         )}
 
-        {form.provider === 'nordpool' && (
+        {form.provider === 'nordpool_hacs' && (
           <div className="space-y-3">
             {txtInput('Sensor', form.nordpoolEntity,
               v => onChange({ ...form, nordpoolEntity: v }), 'sensor.nordpool_…')}

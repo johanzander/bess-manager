@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import api from '../lib/api';
 
 interface RuntimeFailure {
   id: string;
@@ -19,12 +20,8 @@ export const useRuntimeFailures = () => {
     try {
       setLoading(true);
       setError(null);
-      const response = await fetch('/api/runtime-failures');
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      const data = await response.json();
-      setFailures(data);
+      const response = await api.get('/api/runtime-failures');
+      setFailures(response.data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch runtime failures');
       console.error('Error fetching runtime failures:', err);
@@ -35,12 +32,7 @@ export const useRuntimeFailures = () => {
 
   const dismissFailure = useCallback(async (failureId: string) => {
     try {
-      const response = await fetch(`/api/runtime-failures/${failureId}/dismiss`, {
-        method: 'POST',
-      });
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
+      await api.post(`/api/runtime-failures/${failureId}/dismiss`);
       // Remove the dismissed failure from local state
       setFailures(prev => prev.filter(f => f.id !== failureId));
     } catch (err) {
@@ -53,12 +45,7 @@ export const useRuntimeFailures = () => {
 
   const dismissAllFailures = useCallback(async () => {
     try {
-      const response = await fetch('/api/runtime-failures/dismiss-all', {
-        method: 'POST',
-      });
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
+      await api.post('/api/runtime-failures/dismiss-all');
       // Clear all failures from local state
       setFailures([]);
     } catch (err) {

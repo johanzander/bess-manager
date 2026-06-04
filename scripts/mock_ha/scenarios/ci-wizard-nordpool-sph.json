@@ -3,51 +3,81 @@
   "description": "Setup wizard scenario — Swedish user, Nordpool Official, SPH (DC-coupled) inverter, 3-phase.",
   "mock_time": "@2025-01-15 08:30:00",
   "timezone": "Europe/Stockholm",
-  "inverter_type": "sph",
   "sensors": {
     "sensor.xyz9876543_state_of_charge_soc": {
       "state": "60",
-      "attributes": { "unit_of_measurement": "%", "friendly_name": "State of charge (SoC)" }
+      "attributes": {
+        "unit_of_measurement": "%",
+        "friendly_name": "State of charge (SoC)"
+      }
     },
     "sensor.xyz9876543_battery_1_charging_w": {
       "state": "0",
-      "attributes": { "unit_of_measurement": "W" }
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
     },
     "sensor.xyz9876543_battery_1_discharging_w": {
       "state": "300",
-      "attributes": { "unit_of_measurement": "W" }
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
     },
     "sensor.xyz9876543_import_power": {
       "state": "0",
-      "attributes": { "unit_of_measurement": "W" }
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
     },
     "sensor.xyz9876543_export_power": {
       "state": "0",
-      "attributes": { "unit_of_measurement": "W" }
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
     },
     "sensor.xyz9876543_internal_wattage": {
       "state": "0",
-      "attributes": { "unit_of_measurement": "W" }
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
     },
     "sensor.xyz9876543_local_load_power": {
       "state": "1200",
-      "attributes": { "unit_of_measurement": "W" }
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
     },
     "number.xyz9876543_battery_charge_power_limit": {
       "state": "100",
-      "attributes": { "unit_of_measurement": "%", "min": 0, "max": 100 }
+      "attributes": {
+        "unit_of_measurement": "%",
+        "min": 0,
+        "max": 100
+      }
     },
     "number.xyz9876543_battery_discharge_power_limit": {
       "state": "100",
-      "attributes": { "unit_of_measurement": "%", "min": 0, "max": 100 }
+      "attributes": {
+        "unit_of_measurement": "%",
+        "min": 0,
+        "max": 100
+      }
     },
     "number.xyz9876543_battery_charge_soc_limit": {
       "state": "95",
-      "attributes": { "unit_of_measurement": "%", "min": 0, "max": 100 }
+      "attributes": {
+        "unit_of_measurement": "%",
+        "min": 0,
+        "max": 100
+      }
     },
     "number.xyz9876543_battery_discharge_soc_limit": {
       "state": "15",
-      "attributes": { "unit_of_measurement": "%", "min": 0, "max": 100 }
+      "attributes": {
+        "unit_of_measurement": "%",
+        "min": 0,
+        "max": 100
+      }
     },
     "switch.xyz9876543_charge_from_grid": {
       "state": "off",
@@ -57,21 +87,103 @@
       "state": "0.92",
       "attributes": {
         "unit_of_measurement": "SEK/kWh",
-        "today": [0.55, 0.45, 0.35, 0.30, 0.28, 0.45, 0.75, 0.95, 1.15, 1.25, 1.35, 1.45, 1.35, 1.25, 1.15, 1.35, 1.45, 1.55, 1.65, 1.55, 1.35, 0.95, 0.75, 0.65],
+        "today": [
+          0.55,
+          0.45,
+          0.35,
+          0.3,
+          0.28,
+          0.45,
+          0.75,
+          0.95,
+          1.15,
+          1.25,
+          1.35,
+          1.45,
+          1.35,
+          1.25,
+          1.15,
+          1.35,
+          1.45,
+          1.55,
+          1.65,
+          1.55,
+          1.35,
+          0.95,
+          0.75,
+          0.65
+        ],
         "tomorrow": []
       }
     },
     "sensor.main_breaker_current_l1": {
       "state": "7.0",
-      "attributes": { "unit_of_measurement": "A", "device_class": "current" }
+      "attributes": {
+        "unit_of_measurement": "A",
+        "device_class": "current"
+      }
     },
     "sensor.main_breaker_current_l2": {
       "state": "5.5",
-      "attributes": { "unit_of_measurement": "A", "device_class": "current" }
+      "attributes": {
+        "unit_of_measurement": "A",
+        "device_class": "current"
+      }
     },
     "sensor.main_breaker_current_l3": {
       "state": "3.8",
-      "attributes": { "unit_of_measurement": "A", "device_class": "current" }
+      "attributes": {
+        "unit_of_measurement": "A",
+        "device_class": "current"
+      }
+    },
+    "sensor.xyz9876543_lifetime_total_all_batteries_charged": {
+      "state": "5234.5",
+      "attributes": {
+        "unit_of_measurement": "kWh",
+        "device_class": "energy",
+        "state_class": "total_increasing"
+      }
+    },
+    "sensor.xyz9876543_lifetime_total_all_batteries_discharged": {
+      "state": "4812.3",
+      "attributes": {
+        "unit_of_measurement": "kWh",
+        "device_class": "energy",
+        "state_class": "total_increasing"
+      }
+    },
+    "sensor.xyz9876543_lifetime_total_solar_energy": {
+      "state": "12450.7",
+      "attributes": {
+        "unit_of_measurement": "kWh",
+        "device_class": "energy",
+        "state_class": "total_increasing"
+      }
+    },
+    "sensor.xyz9876543_lifetime_total_export_to_grid": {
+      "state": "3120.4",
+      "attributes": {
+        "unit_of_measurement": "kWh",
+        "device_class": "energy",
+        "state_class": "total_increasing"
+      }
+    },
+    "sensor.xyz9876543_lifetime_import_from_grid": {
+      "state": "8540.2",
+      "attributes": {
+        "unit_of_measurement": "kWh",
+        "device_class": "energy",
+        "state_class": "total_increasing"
+      }
+    },
+    "sensor.xyz9876543_lifetime_total_load_consumption": {
+      "state": "15230.1",
+      "attributes": {
+        "unit_of_measurement": "kWh",
+        "device_class": "energy",
+        "state_class": "total_increasing"
+      }
     }
   },
   "config_entries": [
@@ -115,7 +227,45 @@
   "ac_charge_times": [],
   "ac_discharge_times": [],
   "price_data": {
-    "today": [0.55, 0.45, 0.35, 0.30, 0.28, 0.45, 0.75, 0.95, 1.15, 1.25, 1.35, 1.45, 1.35, 1.25, 1.15, 1.35, 1.45, 1.55, 1.65, 1.55, 1.35, 0.95, 0.75, 0.65],
+    "today": [
+      0.55,
+      0.45,
+      0.35,
+      0.3,
+      0.28,
+      0.45,
+      0.75,
+      0.95,
+      1.15,
+      1.25,
+      1.35,
+      1.45,
+      1.35,
+      1.25,
+      1.15,
+      1.35,
+      1.45,
+      1.55,
+      1.65,
+      1.55,
+      1.35,
+      0.95,
+      0.75,
+      0.65
+    ],
     "tomorrow": []
-  }
+  },
+  "expected_discovery": {
+    "growatt_found": true,
+    "solax_found": false,
+    "nordpool_found": true,
+    "nordpool_area": null,
+    "nordpool_custom_area": "SE3",
+    "nordpool_config_entry_id": "mock_nordpool_config_entry",
+    "octopus_found": false,
+    "currency": "SEK",
+    "vat_multiplier": 1.25,
+    "detected_platform": null
+  },
+  "inverter_platform": "growatt_server_sph"
 }

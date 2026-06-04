@@ -62,7 +62,7 @@ class HomePowerMonitor:
         self.max_charge_power_w = self.battery_settings.max_charge_power_kw * 1000
 
         # Target charging power percentage - initialized from battery settings
-        # This can be modified by external components like growatt_schedule
+        # This can be modified by external components like inverter_controller
         # to reflect the actual charging power needed for strategic intents
         self.target_charging_power_pct = self.battery_settings.charging_power_rate
 
@@ -117,7 +117,6 @@ class HomePowerMonitor:
             is_required=False,
             controller=self.controller,
             all_methods=all_methods,
-            required_methods=[],
         )
 
         return [health_check]
@@ -222,7 +221,7 @@ class HomePowerMonitor:
     def update_target_charging_power(self, percentage: float) -> None:
         """Update the target charging power percentage.
 
-        This method allows external components (like GrowattScheduleManager)
+        This method allows external components (like InverterController)
         to update the target charging power percentage based on strategic intents
         and optimization results.
 

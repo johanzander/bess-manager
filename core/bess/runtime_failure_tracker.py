@@ -40,6 +40,7 @@ class RuntimeFailure:
     error_message: str = ""
     dismissed: bool = False
     context: dict = field(default_factory=dict)
+    occurrence_count: int = 1
 
 
 class RuntimeFailureTracker:
@@ -91,6 +92,53 @@ class RuntimeFailureTracker:
         logger.warning(f"Runtime failure recorded [{category}]: {operation} - {error}")
 
         return failure
+
+    def record_failure_once(
+        self,
+        category: str,
+        operation: str,
+        error: Exception,
+        context: dict | None = None,
+    ) -> RuntimeFailure:
+        """Record a failure, coalescing with an existing active failure of the same category.
+
+        If an active (non-dismissed) failure already exists for the given category,
+        updates its timestamp, error message, and increments occurrence_count instead
+        of creating a new entry. This prevents banner spam from recurring failures
+        (e.g. a missing sensor polled every minute).
+
+        Args:
+            category: Failure category for grouping
+            operation: Human-readable operation description
+            error: The exception that was raised
+            context: Optional additional context data
+
+        Returns:
+            The created or updated RuntimeFailure object
+        """
+        with self._lock:
+            for failure in self._failures:
+                if not failure.dismissed and failure.category == category:
+                    failure.timestamp = datetime.now()
+                    failure.error_message = str(error)
+                    failure.occurrence_count += 1
+                    if context:
+                        failure.context = context
+                    logger.debug(
+                        "Runtime failure updated [%s]: %s (occurrence %d)",
+                        category,
+                        operation,
+                        failure.occurrence_count,
+                    )
+                    return failure
+
+        # No existing active failure — create a new one
+        return self.record_failure(
+            category=category,
+            operation=operation,
+            error=error,
+            context=context,
+        )
 
     def get_active_failures(self) -> list[RuntimeFailure]:
         """Get all non-dismissed failures, sorted by timestamp (newest first).
@@ -161,6 +209,43 @@ class RuntimeFailureTracker:
                 logger.info(f"Dismissed {count} runtime failures (bulk action)")
 
             return count
+
+    def get_failure_stats(self) -> dict:
+        """Get aggregated failure statistics by category.
+
+        Returns:
+            dict with total_failures, active_count, dismissed_count,
+            and per-category breakdowns including occurrence counts.
+        """
+        with self._lock:
+            active = [f for f in self._failures if not f.dismissed]
+            dismissed = [f for f in self._failures if f.dismissed]
+
+            by_category: dict[str, dict] = {}
+            for f in self._failures:
+                if f.category not in by_category:
+                    by_category[f.category] = {
+                        "active_count": 0,
+                        "total_occurrences": 0,
+                        "last_failure": None,
+                        "last_operation": None,
+                        "last_error": None,
+                    }
+                entry = by_category[f.category]
+                entry["total_occurrences"] += f.occurrence_count
+                if not f.dismissed:
+                    entry["active_count"] += 1
+                if entry["last_failure"] is None or f.timestamp > entry["last_failure"]:
+                    entry["last_failure"] = f.timestamp
+                    entry["last_operation"] = f.operation
+                    entry["last_error"] = f.error_message
+
+            return {
+                "total_failures": len(self._failures),
+                "active_count": len(active),
+                "dismissed_count": len(dismissed),
+                "categories": by_category,
+            }
 
     def _enforce_max_size(self) -> None:
         """Enforce max failure limit with FIFO eviction of dismissed failures.

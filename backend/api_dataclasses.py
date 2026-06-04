@@ -965,7 +965,7 @@ class APISensorsPayload(BaseModel):
 class APISetupCompletePayload(BaseModel):
     """Request body for POST /api/setup/complete — full wizard output."""
 
-    sensors: dict[str, str] = {}
+    sensors: dict[str, str | dict[str, str]] = {}
     nordpoolArea: str | None = None
     nordpoolConfigEntryId: str | None = None
     growattDeviceId: str | None = None
@@ -993,18 +993,27 @@ class APISetupCompletePayload(BaseModel):
     taxReduction: float | None = None
     # Energy provider
     provider: str | None = None
-    # Octopus Energy entity IDs (event.* entities for Flux tariffs etc.)
+    # Nordpool HACS entity (required when provider == "nordpool_hacs")
+    nordpoolEntity: str | None = None
+    # Octopus Energy entity IDs (required when provider == "octopus")
     octopusImportTodayEntity: str | None = None
     octopusImportTomorrowEntity: str | None = None
     octopusExportTodayEntity: str | None = None
     octopusExportTomorrowEntity: str | None = None
     # Inverter
-    inverterType: str | None = None
+    inverterPlatform: str | None = None
 
     @field_validator("sensors")
     @classmethod
-    def validate_sensor_entity_ids(cls, sensors: dict[str, str]) -> dict[str, str]:
-        for value in sensors.values():
-            if value and not _ENTITY_ID_RE.match(value):
-                raise ValueError(f"Invalid entity ID format: {value}")
+    def validate_sensor_entity_ids(
+        cls, sensors: dict[str, str | dict[str, str]]
+    ) -> dict[str, str | dict[str, str]]:
+        for key, value in sensors.items():
+            if isinstance(value, dict):
+                for v in value.values():
+                    if v and isinstance(v, str) and not _ENTITY_ID_RE.match(v):
+                        raise ValueError(f"Invalid entity ID format: {v}")
+            elif isinstance(value, str) and value and key != "platform":
+                if not _ENTITY_ID_RE.match(value):
+                    raise ValueError(f"Invalid entity ID format: {value}")
         return sensors

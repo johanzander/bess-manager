@@ -122,8 +122,10 @@ class BESSController:
         for section, value in self.settings_store.data.items():
             merged[section] = value
 
-        # Initialize Home Assistant API Controller with sensor config from options
-        sensor_config = merged.get("sensors", {})
+        # Initialize Home Assistant API Controller with flat sensor config.
+        # The store holds per-platform structure; get_active_sensors() merges
+        # the active platform + shared into a flat dict for the controller.
+        sensor_config = self.settings_store.get_active_sensors()
         growatt_config = merged.get("growatt", {})
         growatt_device_id = growatt_config.get("device_id")
         self.ha_controller = self._init_ha_controller(sensor_config, growatt_device_id)
@@ -174,8 +176,11 @@ class BESSController:
             }
         )
 
-        # Apply all settings to the system immediately
-        self._apply_settings(merged)
+        # Apply all settings to the system immediately (skip on fresh install
+        # where the system has no inverter configured — settings will be applied
+        # when the user completes the setup wizard).
+        if self.system.is_configured:
+            self._apply_settings(merged)
 
         logger.info("BESS Controller initialized with early settings loading")
 
@@ -285,6 +290,7 @@ class BESSController:
             self.ha_controller.growatt_device_id = growatt_device_id
         if nordpool_area:
             self.system.price_manager.area = nordpool_area
+            self.system.price_manager.clear_cache()
         if nordpool_config_entry_id:
             from core.bess.official_nordpool_source import OfficialNordpoolSource
 
@@ -306,6 +312,17 @@ class BESSController:
             nordpool_config_entry_id=nordpool_config_entry_id,
             growatt_device_id=growatt_device_id,
         )
+
+    def start_scheduler(self) -> None:
+        """Start the periodic scheduler if it is not already running.
+
+        Called from ``start()`` during normal startup and from the setup-wizard
+        endpoint on a fresh install once the system becomes configured.
+        """
+        if self.scheduler.running:
+            return
+        self._init_scheduler_jobs()
+        logger.info("Scheduler started")
 
     def _init_scheduler_jobs(self):
         """Configure scheduler jobs."""
@@ -386,13 +403,24 @@ class BESSController:
             ) from e
 
     def start(self):
-        """Start the scheduler."""
+        """Start the scheduler.
+
+        On a fresh install the system is unconfigured — the web server starts
+        but scheduling and hardware control are deferred until the user
+        completes the setup wizard.
+        """
         self.system.start()
+
+        if not self.system.is_configured:
+            logger.info(
+                "System unconfigured — scheduler deferred until setup is complete"
+            )
+            return
+
         now = time_utils.now()
         current_period = now.hour * 4 + now.minute // 15
         self.system.update_battery_schedule(current_period=current_period)
-        self._init_scheduler_jobs()
-        logger.info("Scheduler started successfully")
+        self.start_scheduler()
 
 
 # Global BESS controller instance
@@ -404,10 +432,16 @@ ingress_base_path = os.environ.get("INGRESS_BASE_PATH", "/local_bess_manager/ing
 
 
 # Handle root and ingress paths
+# index.html must not be cached — it contains hashed asset references that
+# change on every build. Without no-cache, Safari and HA ingress may serve a
+# stale index.html that still points to the old JS bundle after an update.
+_INDEX_HEADERS = {"Cache-Control": "no-cache, no-store, must-revalidate"}
+
+
 @app.get("/")
 async def root_index():
     logger.info("Root path requested")
-    return FileResponse("/app/frontend/index.html")
+    return FileResponse("/app/frontend/index.html", headers=_INDEX_HEADERS)
 
 
 # All API endpoints are found in api.py and are imported via the router
@@ -417,4 +451,4 @@ async def root_index():
 # SPA catch-all: serve index.html for any path not matched by API or asset routes
 @app.get("/{full_path:path}")
 async def spa_fallback(full_path: str):
-    return FileResponse("/app/frontend/index.html")
+    return FileResponse("/app/frontend/index.html", headers=_INDEX_HEADERS)

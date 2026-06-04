@@ -56,21 +56,19 @@ def format_sensor_value_with_unit(value, method_name: str, controller) -> str:
 def determine_health_status(
     health_check_results: list,
     working_sensors: int,
-    required_methods: list | None = None,
+    required_methods: list[str],
 ) -> str:
-    """Generic method to determine health check status based on required vs optional sensors.
+    """Determine health check status based on required vs optional sensors.
 
     Args:
         health_check_results: List of health check results (after method calls)
         working_sensors: Count of working sensors (unused, kept for compatibility)
-        required_methods: List of method names that are required (optional sensors are non-required)
+        required_methods: List of method names that are required.
+            Methods not in this list are treated as optional.
 
     Returns:
         Status string: "OK", "WARNING", or "ERROR"
     """
-    if not required_methods:
-        # If no required methods specified, all methods are optional
-        required_methods = []
 
     # Count required vs optional sensors that are actually working
     required_working = 0
@@ -96,6 +94,10 @@ def determine_health_status(
             if is_working:
                 optional_working += 1
 
+    # ERROR if required methods were specified but none are configured at all
+    if required_methods and required_total == 0:
+        return "ERROR"
+
     # ERROR if not all required sensors are working
     # WARNING if any optional sensor is not working
     # OK if all sensors are working
@@ -113,21 +115,26 @@ def perform_health_check(
     is_required: bool,
     controller,
     all_methods: list[str],
-    required_methods: list[str] | None = None,
 ) -> dict:
     """Generic health check function that can be used by any component.
+
+    Severity is derived from ``is_required``:
+    - ``is_required=True``  → all methods are required → failure → ERROR
+    - ``is_required=False`` → all methods are optional  → failure → WARNING
 
     Args:
         component_name: Name of the component being checked
         description: Description of what the component does
-        is_required: Whether this component is required for system operation
+        is_required: Whether this component is required for system operation.
+            Also controls severity: required components show ERROR on failure,
+            optional components show WARNING.
         controller: The controller instance with validate_methods_sensors method
         all_methods: List of all method names this component uses
-        required_methods: List of method names that are required (None = all required)
 
     Returns:
         Health check result dictionary
     """
+    required_methods = all_methods if is_required else []
     health_check = {
         "name": component_name,
         "description": description,
@@ -308,11 +315,11 @@ def run_system_health_checks(system_manager):
     price_checks = system_manager._price_manager.check_health()
     all_component_checks.extend(price_checks)
 
-    # 2. Growatt Schedule Manager (Battery Control) - core control system
-    growatt_checks = system_manager._schedule_manager.check_health(
+    # 2. Inverter Controller (Battery Control) - core control system
+    inverter_checks = system_manager._inverter_controller.check_health(
         system_manager._controller
     )
-    all_component_checks.extend(growatt_checks)
+    all_component_checks.extend(inverter_checks)
 
     # 3. & 4. SensorCollector (Battery Monitoring + Energy Monitoring) - operational sensors
     sensor_collector_health = system_manager.sensor_collector.check_health()
@@ -349,7 +356,6 @@ def run_system_health_checks(system_manager):
             is_required=False,
             controller=system_manager._controller,
             all_methods=["get_discharge_inhibit_active"],
-            required_methods=[],
         )
         all_component_checks.append(discharge_check)
 
@@ -357,11 +363,15 @@ def run_system_health_checks(system_manager):
     history_checks = check_historical_data_access()
     all_component_checks.extend(history_checks)
 
+    # Failure statistics from runtime tracker
+    failure_stats = system_manager._runtime_failure_tracker.get_failure_stats()
+
     # Wrap results with metadata
     return {
         "timestamp": datetime.now().isoformat(),
         "system_mode": "demo" if system_manager._controller.test_mode else "normal",
         "checks": all_component_checks,
+        "failure_stats": failure_stats,
     }
 
 

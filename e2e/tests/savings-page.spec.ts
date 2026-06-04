@@ -55,14 +55,13 @@ test.describe('Savings Page', () => {
 
     await page.getByRole('button', { name: /Detailed View/i }).click();
 
-    // Detailed view should show either a data table or a "no data" message
-    const hasTable = await page.locator('table').first().isVisible().catch(() => false);
-    const noData = await page.getByText(/No schedule data|no.*data/i).isVisible().catch(() => false);
-
     // At minimum the page should not crash
     await expect(page.getByRole('heading', { name: /Financial Analysis/i })).toBeVisible();
-    // And one of the states should be visible
-    expect(hasTable || noData).toBe(true);
+
+    // Wait for the detailed view to settle — either a table or a no-data message
+    await expect(
+      page.locator('table').first().or(page.getByText(/No schedule data|no.*data/i))
+    ).toBeVisible({ timeout: 10_000 });
   });
 
   test('switching to 15 min resolution does not crash', async ({ page }) => {

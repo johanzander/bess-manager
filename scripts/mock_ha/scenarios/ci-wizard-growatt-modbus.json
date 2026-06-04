@@ -1,0 +1,1021 @@
+{
+  "name": "ci-wizard-growatt-modbus",
+  "description": "Fresh install with Growatt MIN + SolaX Modbus (GEN4 TOU) + official Nordpool SE3. Tests the setup wizard for both local Modbus and cloud control paths.",
+  "mock_time": "@2026-05-21 17:17:48",
+  "timezone": "Europe/Stockholm",
+  "bess_config": {
+    "battery": {
+      "total_capacity": 30.0,
+      "min_soc": 10,
+      "max_soc": 100,
+      "max_charge_power_kw": 15.0,
+      "max_discharge_power_kw": 15.0,
+      "cycle_cost_per_kwh": 0.4,
+      "min_action_profit_threshold": 0.0,
+      "efficiency_charge": 0.97,
+      "efficiency_discharge": 0.95
+    },
+    "home": {
+      "default_hourly": 4.6,
+      "currency": "SEK",
+      "consumption_strategy": "fixed",
+      "max_fuse_current": 25,
+      "voltage": 230,
+      "safety_margin": 1.0,
+      "phase_count": 1,
+      "power_monitoring_enabled": false
+    },
+    "electricity_price": {
+      "markup_rate": 0.08,
+      "vat_multiplier": 1.25,
+      "additional_costs": 0.773,
+      "tax_reduction": 0.1988,
+      "area": "SE4"
+    },
+    "energy_provider": {
+      "provider": "nordpool_official",
+      "nordpool_official": {
+        "config_entry_id": ""
+      },
+      "nordpool": {
+        "entity": ""
+      },
+      "octopus": {}
+    },
+    "growatt": {
+      "inverter_type": "",
+      "device_id": ""
+    },
+    "inverter": {
+      "platform": "",
+      "device_id": ""
+    },
+    "sensors": {}
+  },
+  "sensors": {
+    "sensor.growatt_inverter_solax_battery_soc": {
+      "state": "45",
+      "attributes": {
+        "unit_of_measurement": "%"
+      }
+    },
+    "sensor.growatt_inverter_solax_battery_charge_power": {
+      "state": "0",
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
+    },
+    "sensor.growatt_inverter_solax_battery_discharge_power": {
+      "state": "1200",
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
+    },
+    "sensor.growatt_inverter_solax_total_import_power": {
+      "state": "2500",
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
+    },
+    "sensor.growatt_inverter_solax_total_export_power": {
+      "state": "0",
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
+    },
+    "sensor.growatt_inverter_solax_pv_power_total": {
+      "state": "800",
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
+    },
+    "sensor.growatt_inverter_solax_total_load_power": {
+      "state": "4500",
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
+    },
+    "number.growatt_inverter_solax_inverter_ems_charging_rate": {
+      "state": "100",
+      "attributes": {
+        "unit_of_measurement": "%"
+      }
+    },
+    "number.growatt_inverter_solax_inverter_ems_discharging_rate": {
+      "state": "100",
+      "attributes": {
+        "unit_of_measurement": "%"
+      }
+    },
+    "number.growatt_inverter_solax_inverter_ems_charging_stop_soc": {
+      "state": "100",
+      "attributes": {
+        "unit_of_measurement": "%"
+      }
+    },
+    "number.growatt_inverter_solax_inverter_ems_discharging_stop_soc_on_grid": {
+      "state": "10",
+      "attributes": {
+        "unit_of_measurement": "%"
+      }
+    },
+    "select.growatt_inverter_solax_inverter_allow_grid_charge": {
+      "state": "Disabled",
+      "attributes": {
+        "options": [
+          "Enabled",
+          "Disabled"
+        ]
+      }
+    },
+    "select.growatt_inverter_solax_inverter_time_1_active": {
+      "state": "Disabled",
+      "attributes": {
+        "options": [
+          "Enabled",
+          "Disabled"
+        ]
+      }
+    },
+    "select.growatt_inverter_solax_inverter_time_1_begin": {
+      "state": "00:00",
+      "attributes": {}
+    },
+    "select.growatt_inverter_solax_inverter_time_1_end": {
+      "state": "00:00",
+      "attributes": {}
+    },
+    "select.growatt_inverter_solax_inverter_time_1_mode": {
+      "state": "Load First",
+      "attributes": {
+        "options": [
+          "Battery First",
+          "Load First",
+          "Grid First"
+        ]
+      }
+    },
+    "button.growatt_inverter_solax_inverter_time_1_update": {
+      "state": "unknown",
+      "attributes": {}
+    },
+    "sensor.growatt_inverter_solax_total_battery_input_energy": {
+      "state": "5000",
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
+    },
+    "sensor.growatt_inverter_solax_total_battery_output_energy": {
+      "state": "4500",
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
+    },
+    "sensor.growatt_inverter_solax_total_solar_energy": {
+      "state": "10000",
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
+    },
+    "sensor.growatt_inverter_solax_total_grid_import": {
+      "state": "15000",
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
+    },
+    "sensor.growatt_inverter_solax_total_grid_export": {
+      "state": "3000",
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
+    },
+    "sensor.growatt_inverter_solax_total_load_energy": {
+      "state": "20000",
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
+    },
+    "sensor.growatt_inverter_solax_total_power_generation": {
+      "state": "25000",
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
+    },
+    "sensor.growatt_inverter_solax_grid_current_l1": {
+      "state": "3.5",
+      "attributes": {
+        "unit_of_measurement": "A"
+      }
+    },
+    "sensor.growatt_inverter_solax_grid_current_l2": {
+      "state": "4.1",
+      "attributes": {
+        "unit_of_measurement": "A"
+      }
+    },
+    "sensor.growatt_inverter_solax_grid_current_l3": {
+      "state": "3.8",
+      "attributes": {
+        "unit_of_measurement": "A"
+      }
+    },
+    "sensor.growatt_inverter_cloud_state_of_charge_soc": {
+      "state": "45",
+      "attributes": {
+        "unit_of_measurement": "%"
+      }
+    },
+    "sensor.growatt_inverter_cloud_battery_1_charging_w": {
+      "state": "0",
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
+    },
+    "sensor.growatt_inverter_cloud_battery_1_discharging_w": {
+      "state": "600",
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
+    },
+    "sensor.growatt_inverter_cloud_import_power": {
+      "state": "2500",
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
+    },
+    "sensor.growatt_inverter_cloud_export_power": {
+      "state": "0",
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
+    },
+    "sensor.growatt_inverter_cloud_internal_wattage": {
+      "state": "800",
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
+    },
+    "sensor.growatt_inverter_cloud_local_load_power": {
+      "state": "4500",
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
+    },
+    "switch.growatt_inverter_cloud_charge_from_grid": {
+      "state": "off",
+      "attributes": {}
+    },
+    "number.growatt_inverter_cloud_battery_charge_power_limit": {
+      "state": "100",
+      "attributes": {
+        "unit_of_measurement": "%"
+      }
+    },
+    "number.growatt_inverter_cloud_battery_discharge_power_limit": {
+      "state": "100",
+      "attributes": {
+        "unit_of_measurement": "%"
+      }
+    },
+    "number.growatt_inverter_cloud_battery_charge_soc_limit": {
+      "state": "100",
+      "attributes": {
+        "unit_of_measurement": "%"
+      }
+    },
+    "number.growatt_inverter_cloud_battery_discharge_soc_limit_on_grid": {
+      "state": "10",
+      "attributes": {
+        "unit_of_measurement": "%"
+      }
+    },
+    "sensor.growatt_inverter_cloud_lifetime_total_all_batteries_charged": {
+      "state": "5000",
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
+    },
+    "sensor.growatt_inverter_cloud_lifetime_total_all_batteries_discharged": {
+      "state": "4500",
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
+    },
+    "sensor.growatt_inverter_cloud_lifetime_total_solar_energy": {
+      "state": "10000",
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
+    },
+    "sensor.growatt_inverter_cloud_lifetime_total_export_to_grid": {
+      "state": "3000",
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
+    },
+    "sensor.growatt_inverter_cloud_lifetime_import_from_grid": {
+      "state": "15000",
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
+    },
+    "sensor.growatt_inverter_cloud_lifetime_total_load_consumption": {
+      "state": "20000",
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
+    },
+    "sensor.growatt_inverter_cloud_lifetime_system_production": {
+      "state": "10000",
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
+    },
+    "sensor.growatt_inverter_cloud_lifetime_self_consumption": {
+      "state": "7000",
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
+    },
+    "sensor.nord_pool_se3_current_price": {
+      "state": "0.52",
+      "attributes": {
+        "unit_of_measurement": "SEK/kWh",
+        "price_area": "SE3"
+      }
+    }
+  },
+  "entity_registry": [
+    {
+      "entity_id": "sensor.growatt_inverter_solax_battery_soc",
+      "platform": "solax_modbus",
+      "unique_id": "solax_battery_soc",
+      "device_id": "dev-solax-001"
+    },
+    {
+      "entity_id": "sensor.growatt_inverter_solax_battery_charge_power",
+      "platform": "solax_modbus",
+      "unique_id": "solax_battery_charge_power",
+      "device_id": "dev-solax-001"
+    },
+    {
+      "entity_id": "sensor.growatt_inverter_solax_battery_discharge_power",
+      "platform": "solax_modbus",
+      "unique_id": "solax_battery_discharge_power",
+      "device_id": "dev-solax-001"
+    },
+    {
+      "entity_id": "sensor.growatt_inverter_solax_total_import_power",
+      "platform": "solax_modbus",
+      "unique_id": "solax_total_forward_power",
+      "device_id": "dev-solax-001"
+    },
+    {
+      "entity_id": "sensor.growatt_inverter_solax_total_export_power",
+      "platform": "solax_modbus",
+      "unique_id": "solax_total_reverse_power",
+      "device_id": "dev-solax-001"
+    },
+    {
+      "entity_id": "sensor.growatt_inverter_solax_pv_power_total",
+      "platform": "solax_modbus",
+      "unique_id": "solax_pv_power_total",
+      "device_id": "dev-solax-001"
+    },
+    {
+      "entity_id": "sensor.growatt_inverter_solax_total_load_power",
+      "platform": "solax_modbus",
+      "unique_id": "solax_total_load_power",
+      "device_id": "dev-solax-001"
+    },
+    {
+      "entity_id": "number.growatt_inverter_solax_inverter_ems_charging_rate",
+      "platform": "solax_modbus",
+      "unique_id": "solax_ems_charging_rate",
+      "device_id": "dev-solax-001"
+    },
+    {
+      "entity_id": "number.growatt_inverter_solax_inverter_ems_discharging_rate",
+      "platform": "solax_modbus",
+      "unique_id": "solax_ems_discharging_rate",
+      "device_id": "dev-solax-001"
+    },
+    {
+      "entity_id": "number.growatt_inverter_solax_inverter_ems_charging_stop_soc",
+      "platform": "solax_modbus",
+      "unique_id": "solax_ems_charging_stop_soc",
+      "device_id": "dev-solax-001"
+    },
+    {
+      "entity_id": "number.growatt_inverter_solax_inverter_ems_discharging_stop_soc_on_grid",
+      "platform": "solax_modbus",
+      "unique_id": "solax_ems_discharging_stop_soc",
+      "device_id": "dev-solax-001"
+    },
+    {
+      "entity_id": "select.growatt_inverter_solax_inverter_allow_grid_charge",
+      "platform": "solax_modbus",
+      "unique_id": "solax_charger_switch",
+      "device_id": "dev-solax-001"
+    },
+    {
+      "entity_id": "select.growatt_inverter_solax_inverter_time_1_active",
+      "platform": "solax_modbus",
+      "unique_id": "solax_time_1_enabled",
+      "device_id": "dev-solax-001"
+    },
+    {
+      "entity_id": "select.growatt_inverter_solax_inverter_time_1_begin",
+      "platform": "solax_modbus",
+      "unique_id": "solax_time_1_begin",
+      "device_id": "dev-solax-001"
+    },
+    {
+      "entity_id": "select.growatt_inverter_solax_inverter_time_1_end",
+      "platform": "solax_modbus",
+      "unique_id": "solax_time_1_end",
+      "device_id": "dev-solax-001"
+    },
+    {
+      "entity_id": "select.growatt_inverter_solax_inverter_time_1_mode",
+      "platform": "solax_modbus",
+      "unique_id": "solax_time_1_mode",
+      "device_id": "dev-solax-001"
+    },
+    {
+      "entity_id": "button.growatt_inverter_solax_inverter_time_1_update",
+      "platform": "solax_modbus",
+      "unique_id": "solax_time_1_update",
+      "device_id": "dev-solax-001"
+    },
+    {
+      "entity_id": "sensor.growatt_inverter_solax_total_battery_input_energy",
+      "platform": "solax_modbus",
+      "unique_id": "solax_total_battery_input_energy",
+      "device_id": "dev-solax-001"
+    },
+    {
+      "entity_id": "sensor.growatt_inverter_solax_total_battery_output_energy",
+      "platform": "solax_modbus",
+      "unique_id": "solax_total_battery_output_energy",
+      "device_id": "dev-solax-001"
+    },
+    {
+      "entity_id": "sensor.growatt_inverter_solax_total_solar_energy",
+      "platform": "solax_modbus",
+      "unique_id": "solax_total_solar_energy",
+      "device_id": "dev-solax-001"
+    },
+    {
+      "entity_id": "sensor.growatt_inverter_solax_total_grid_import",
+      "platform": "solax_modbus",
+      "unique_id": "solax_total_grid_import",
+      "device_id": "dev-solax-001"
+    },
+    {
+      "entity_id": "sensor.growatt_inverter_solax_total_grid_export",
+      "platform": "solax_modbus",
+      "unique_id": "solax_total_grid_export",
+      "device_id": "dev-solax-001"
+    },
+    {
+      "entity_id": "sensor.growatt_inverter_solax_total_load_energy",
+      "platform": "solax_modbus",
+      "unique_id": "solax_total_yield",
+      "device_id": "dev-solax-001"
+    },
+    {
+      "entity_id": "sensor.growatt_inverter_solax_total_power_generation",
+      "platform": "solax_modbus",
+      "unique_id": "solax_total_power_generation",
+      "device_id": "dev-solax-001"
+    },
+    {
+      "entity_id": "sensor.growatt_inverter_solax_grid_current_l1",
+      "platform": "solax_modbus",
+      "unique_id": "solax_grid_current_l1",
+      "device_id": "dev-solax-001"
+    },
+    {
+      "entity_id": "sensor.growatt_inverter_solax_grid_current_l2",
+      "platform": "solax_modbus",
+      "unique_id": "solax_grid_current_l2",
+      "device_id": "dev-solax-001"
+    },
+    {
+      "entity_id": "sensor.growatt_inverter_solax_grid_current_l3",
+      "platform": "solax_modbus",
+      "unique_id": "solax_grid_current_l3",
+      "device_id": "dev-solax-001"
+    },
+    {
+      "entity_id": "sensor.growatt_inverter_cloud_state_of_charge_soc",
+      "platform": "growatt_server",
+      "unique_id": "SERIAL001-tlx_statement_of_charge",
+      "device_id": "dev-growatt-001"
+    },
+    {
+      "entity_id": "sensor.growatt_inverter_cloud_battery_1_charging_w",
+      "platform": "growatt_server",
+      "unique_id": "SERIAL001-tlx_battery_1_charge_w",
+      "device_id": "dev-growatt-001"
+    },
+    {
+      "entity_id": "sensor.growatt_inverter_cloud_battery_1_discharging_w",
+      "platform": "growatt_server",
+      "unique_id": "SERIAL001-tlx_battery_1_discharge_w",
+      "device_id": "dev-growatt-001"
+    },
+    {
+      "entity_id": "sensor.growatt_inverter_cloud_import_power",
+      "platform": "growatt_server",
+      "unique_id": "SERIAL001-tlx_pac_to_user_total",
+      "device_id": "dev-growatt-001"
+    },
+    {
+      "entity_id": "sensor.growatt_inverter_cloud_export_power",
+      "platform": "growatt_server",
+      "unique_id": "SERIAL001-tlx_pac_to_grid_total",
+      "device_id": "dev-growatt-001"
+    },
+    {
+      "entity_id": "sensor.growatt_inverter_cloud_internal_wattage",
+      "platform": "growatt_server",
+      "unique_id": "SERIAL001-tlx_internal_wattage",
+      "device_id": "dev-growatt-001"
+    },
+    {
+      "entity_id": "sensor.growatt_inverter_cloud_local_load_power",
+      "platform": "growatt_server",
+      "unique_id": "SERIAL001-tlx_pac_to_local_load",
+      "device_id": "dev-growatt-001"
+    },
+    {
+      "entity_id": "switch.growatt_inverter_cloud_charge_from_grid",
+      "platform": "growatt_server",
+      "unique_id": "SERIAL001-ac_charge",
+      "device_id": "dev-growatt-001"
+    },
+    {
+      "entity_id": "number.growatt_inverter_cloud_battery_charge_power_limit",
+      "platform": "growatt_server",
+      "unique_id": "SERIAL001-battery_charge_power_limit",
+      "device_id": "dev-growatt-001"
+    },
+    {
+      "entity_id": "number.growatt_inverter_cloud_battery_discharge_power_limit",
+      "platform": "growatt_server",
+      "unique_id": "SERIAL001-battery_discharge_power_limit",
+      "device_id": "dev-growatt-001"
+    },
+    {
+      "entity_id": "number.growatt_inverter_cloud_battery_charge_soc_limit",
+      "platform": "growatt_server",
+      "unique_id": "SERIAL001-battery_charge_soc_limit",
+      "device_id": "dev-growatt-001"
+    },
+    {
+      "entity_id": "number.growatt_inverter_cloud_battery_discharge_soc_limit_on_grid",
+      "platform": "growatt_server",
+      "unique_id": "SERIAL001-soc_limit_on_grid",
+      "device_id": "dev-growatt-001"
+    },
+    {
+      "entity_id": "sensor.growatt_inverter_cloud_lifetime_total_all_batteries_charged",
+      "platform": "growatt_server",
+      "unique_id": "SERIAL001-tlx_all_batteries_charge_total",
+      "device_id": "dev-growatt-001"
+    },
+    {
+      "entity_id": "sensor.growatt_inverter_cloud_lifetime_total_all_batteries_discharged",
+      "platform": "growatt_server",
+      "unique_id": "SERIAL001-tlx_all_batteries_discharge_total",
+      "device_id": "dev-growatt-001"
+    },
+    {
+      "entity_id": "sensor.growatt_inverter_cloud_lifetime_total_solar_energy",
+      "platform": "growatt_server",
+      "unique_id": "SERIAL001-tlx_solar_generation_total",
+      "device_id": "dev-growatt-001"
+    },
+    {
+      "entity_id": "sensor.growatt_inverter_cloud_lifetime_total_export_to_grid",
+      "platform": "growatt_server",
+      "unique_id": "SERIAL001-tlx_export_to_grid_total",
+      "device_id": "dev-growatt-001"
+    },
+    {
+      "entity_id": "sensor.growatt_inverter_cloud_lifetime_import_from_grid",
+      "platform": "growatt_server",
+      "unique_id": "SERIAL001-tlx_import_from_grid_total",
+      "device_id": "dev-growatt-001"
+    },
+    {
+      "entity_id": "sensor.growatt_inverter_cloud_lifetime_total_load_consumption",
+      "platform": "growatt_server",
+      "unique_id": "SERIAL001-mix_load_consumption_total",
+      "device_id": "dev-growatt-001"
+    },
+    {
+      "entity_id": "sensor.growatt_inverter_cloud_lifetime_system_production",
+      "platform": "growatt_server",
+      "unique_id": "SERIAL001-tlx_system_production_total",
+      "device_id": "dev-growatt-001"
+    },
+    {
+      "entity_id": "sensor.growatt_inverter_cloud_lifetime_self_consumption",
+      "platform": "growatt_server",
+      "unique_id": "SERIAL001-tlx_self_consumption_total",
+      "device_id": "dev-growatt-001"
+    },
+    {
+      "entity_id": "sensor.nord_pool_se3_current_price",
+      "platform": "nordpool",
+      "unique_id": "SE3-current_price",
+      "device_id": "dev-nordpool-001",
+      "config_entry_id": "entry-nordpool-001"
+    }
+  ],
+  "config_entries": [
+    {
+      "entry_id": "entry-nordpool-001",
+      "domain": "nordpool",
+      "title": "Nord Pool",
+      "state": "loaded"
+    },
+    {
+      "entry_id": "entry-growatt-001",
+      "domain": "growatt_server",
+      "title": "Growatt",
+      "state": "loaded"
+    },
+    {
+      "entry_id": "entry-solax-001",
+      "domain": "solax_modbus",
+      "title": "solax",
+      "state": "loaded"
+    }
+  ],
+  "devices": [
+    {
+      "id": "dev-growatt-001",
+      "name": "Inverter",
+      "manufacturer": "Growatt",
+      "model": null,
+      "identifiers": [
+        [
+          "growatt_server",
+          "SERIAL001"
+        ]
+      ],
+      "config_entries": [
+        "entry-growatt-001"
+      ]
+    },
+    {
+      "id": "dev-solax-001",
+      "name": "Growatt Inverter",
+      "manufacturer": "Growatt New Energy",
+      "model": null,
+      "identifiers": [],
+      "config_entries": [
+        "entry-solax-001"
+      ]
+    },
+    {
+      "id": "dev-nordpool-001",
+      "name": "Nord Pool SE3",
+      "manufacturer": "Nord Pool",
+      "model": null,
+      "identifiers": [
+        [
+          "nordpool",
+          "SE3"
+        ]
+      ],
+      "config_entries": [
+        "entry-nordpool-001"
+      ]
+    }
+  ],
+  "services": {
+    "growatt_server": {
+      "read_time_segments": {},
+      "update_time_segment": {},
+      "read_ac_charge_times": {},
+      "write_ac_charge_times": {}
+    },
+    "solax_modbus": {
+      "stop_all": {},
+      "stop_hub": {}
+    }
+  },
+  "price_data": {
+    "today": [
+      0.45,
+      0.38,
+      0.32,
+      0.28,
+      0.25,
+      0.3,
+      0.55,
+      0.82,
+      1.05,
+      1.15,
+      1.08,
+      0.95,
+      0.85,
+      0.78,
+      0.72,
+      0.8,
+      0.92,
+      1.25,
+      1.55,
+      1.42,
+      1.1,
+      0.75,
+      0.58,
+      0.48
+    ],
+    "tomorrow": [
+      0.42,
+      0.35,
+      0.3,
+      0.26,
+      0.23,
+      0.28,
+      0.5,
+      0.78,
+      1.0,
+      1.1,
+      1.02,
+      0.9,
+      0.8,
+      0.74,
+      0.68,
+      0.76,
+      0.88,
+      1.2,
+      1.48,
+      1.35,
+      1.05,
+      0.7,
+      0.55,
+      0.45
+    ]
+  },
+  "time_segments": [],
+  "expected_discovery": {
+    "growatt_found": true,
+    "solax_found": true,
+    "solax_has_growatt_tou": true,
+    "solax_has_growatt_gen3": false,
+    "nordpool_found": true,
+    "nordpool_area": "SE3",
+    "nordpool_custom_area": null,
+    "nordpool_config_entry_id": "entry-nordpool-001",
+    "octopus_found": false,
+    "currency": "SEK",
+    "vat_multiplier": 1.25,
+    "detected_platform": "growatt_server_min",
+    "required_sensors": [
+      "battery_soc",
+      "battery_charge_power",
+      "battery_discharge_power",
+      "import_power",
+      "export_power",
+      "pv_power",
+      "local_load_power",
+      "battery_charging_power_rate",
+      "battery_discharging_power_rate",
+      "battery_charge_stop_soc",
+      "battery_discharge_stop_soc",
+      "grid_charge",
+      "lifetime_system_production",
+      "lifetime_solar_energy",
+      "lifetime_battery_charged",
+      "lifetime_battery_discharged",
+      "lifetime_import_from_grid",
+      "lifetime_export_to_grid",
+      "lifetime_load_consumption"
+    ],
+    "required_sensors_solax_modbus_growatt_min": [
+      "battery_soc",
+      "battery_charge_power",
+      "battery_discharge_power",
+      "import_power",
+      "export_power",
+      "pv_power",
+      "local_load_power",
+      "battery_charging_power_rate",
+      "battery_discharging_power_rate",
+      "battery_charge_stop_soc",
+      "battery_discharge_stop_soc",
+      "grid_charge",
+      "tou_time_1_enabled",
+      "tou_time_1_begin",
+      "tou_time_1_end",
+      "tou_time_1_mode",
+      "tou_time_1_update",
+      "lifetime_system_production",
+      "lifetime_solar_energy",
+      "lifetime_battery_charged",
+      "lifetime_battery_discharged",
+      "lifetime_import_from_grid",
+      "lifetime_export_to_grid",
+      "lifetime_load_consumption"
+    ],
+    "detected_inverter_platforms": [
+      "growatt_server_min",
+      "solax_modbus_growatt_min"
+    ]
+  },
+  "expected_wizard": {
+    "solax_modbus_growatt_min": {
+      "_comment": "Growatt MIN via local SolaX Modbus (GEN4 single-segment TOU)",
+      "payload": {
+        "sensors": {
+          "battery_soc": "sensor.growatt_inverter_solax_battery_soc",
+          "battery_charge_power": "sensor.growatt_inverter_solax_battery_charge_power",
+          "battery_discharge_power": "sensor.growatt_inverter_solax_battery_discharge_power",
+          "import_power": "sensor.growatt_inverter_solax_total_import_power",
+          "export_power": "sensor.growatt_inverter_solax_total_export_power",
+          "pv_power": "sensor.growatt_inverter_solax_pv_power_total",
+          "local_load_power": "sensor.growatt_inverter_solax_total_load_power",
+          "battery_charging_power_rate": "number.growatt_inverter_solax_inverter_ems_charging_rate",
+          "battery_discharging_power_rate": "number.growatt_inverter_solax_inverter_ems_discharging_rate",
+          "battery_charge_stop_soc": "number.growatt_inverter_solax_inverter_ems_charging_stop_soc",
+          "battery_discharge_stop_soc": "number.growatt_inverter_solax_inverter_ems_discharging_stop_soc_on_grid",
+          "grid_charge": "select.growatt_inverter_solax_inverter_allow_grid_charge",
+          "tou_time_1_enabled": "select.growatt_inverter_solax_inverter_time_1_active",
+          "tou_time_1_begin": "select.growatt_inverter_solax_inverter_time_1_begin",
+          "tou_time_1_end": "select.growatt_inverter_solax_inverter_time_1_end",
+          "tou_time_1_mode": "select.growatt_inverter_solax_inverter_time_1_mode",
+          "tou_time_1_update": "button.growatt_inverter_solax_inverter_time_1_update",
+          "lifetime_battery_charged": "sensor.growatt_inverter_solax_total_battery_input_energy",
+          "lifetime_battery_discharged": "sensor.growatt_inverter_solax_total_battery_output_energy",
+          "lifetime_solar_energy": "sensor.growatt_inverter_solax_total_solar_energy",
+          "lifetime_import_from_grid": "sensor.growatt_inverter_solax_total_grid_import",
+          "lifetime_export_to_grid": "sensor.growatt_inverter_solax_total_grid_export",
+          "lifetime_load_consumption": "sensor.growatt_inverter_solax_total_load_energy",
+          "lifetime_system_production": "sensor.growatt_inverter_solax_total_power_generation",
+          "current_l1": "sensor.growatt_inverter_solax_grid_current_l1",
+          "current_l2": "sensor.growatt_inverter_solax_grid_current_l2",
+          "current_l3": "sensor.growatt_inverter_solax_grid_current_l3"
+        },
+        "nordpoolArea": "SE3",
+        "nordpoolConfigEntryId": "entry-nordpool-001",
+        "growattDeviceId": "dev-growatt-001",
+        "totalCapacity": 30.0,
+        "minSoc": 10.0,
+        "maxSoc": 100.0,
+        "maxChargeDischargePower": 15.0,
+        "cycleCost": 0.4,
+        "minActionProfitThreshold": 0.0,
+        "currency": "SEK",
+        "consumption": 4.6,
+        "consumptionStrategy": "fixed",
+        "maxFuseCurrent": 25,
+        "voltage": 230,
+        "safetyMarginFactor": 1.0,
+        "phaseCount": 3,
+        "powerMonitoringEnabled": false,
+        "area": "SE3",
+        "markupRate": 0.08,
+        "vatMultiplier": 1.25,
+        "additionalCosts": 0.773,
+        "taxReduction": 0.1988,
+        "provider": "nordpool_official",
+        "inverterPlatform": "solax_modbus_growatt_min"
+      },
+      "expected_saved": {
+        "inverter": {
+          "platform": "solax_modbus_growatt_min"
+        },
+        "battery": {
+          "total_capacity": 30.0,
+          "max_charge_power_kw": 15.0,
+          "max_discharge_power_kw": 15.0,
+          "cycle_cost_per_kwh": 0.4,
+          "efficiency_charge": 0.97,
+          "efficiency_discharge": 0.95
+        },
+        "electricity_price": {
+          "area": "SE3",
+          "additional_costs": 0.773,
+          "tax_reduction": 0.1988,
+          "vat_multiplier": 1.25
+        },
+        "sensors": {
+          "battery_soc": "sensor.growatt_inverter_solax_battery_soc",
+          "tou_time_1_enabled": "select.growatt_inverter_solax_inverter_time_1_active",
+          "grid_charge": "select.growatt_inverter_solax_inverter_allow_grid_charge",
+          "current_l1": "sensor.growatt_inverter_solax_grid_current_l1",
+          "current_l2": "sensor.growatt_inverter_solax_grid_current_l2",
+          "current_l3": "sensor.growatt_inverter_solax_grid_current_l3"
+        }
+      },
+      "expected_absent_sections": [],
+      "expected_live": {
+        "growatt_device_id": "dev-growatt-001",
+        "switch_inverter_platform": "solax_modbus_growatt_min",
+        "ha_sensors": {
+          "battery_soc": "sensor.growatt_inverter_solax_battery_soc",
+          "tou_time_1_enabled": "select.growatt_inverter_solax_inverter_time_1_active"
+        }
+      },
+      "tou_slots_present": [
+        1
+      ],
+      "tou_slots_absent": [
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ]
+    },
+    "growatt_cloud": {
+      "_comment": "Same hardware, but user picks Growatt cloud (growatt_server) control path",
+      "payload": {
+        "sensors": {
+          "battery_soc": "sensor.growatt_inverter_cloud_state_of_charge_soc",
+          "battery_charge_power": "sensor.growatt_inverter_cloud_battery_1_charging_w",
+          "battery_discharge_power": "sensor.growatt_inverter_cloud_battery_1_discharging_w",
+          "import_power": "sensor.growatt_inverter_cloud_import_power",
+          "export_power": "sensor.growatt_inverter_cloud_export_power",
+          "pv_power": "sensor.growatt_inverter_cloud_internal_wattage",
+          "local_load_power": "sensor.growatt_inverter_cloud_local_load_power",
+          "grid_charge": "switch.growatt_inverter_cloud_charge_from_grid",
+          "battery_charging_power_rate": "number.growatt_inverter_cloud_battery_charge_power_limit",
+          "battery_discharging_power_rate": "number.growatt_inverter_cloud_battery_discharge_power_limit",
+          "battery_charge_stop_soc": "number.growatt_inverter_cloud_battery_charge_soc_limit",
+          "battery_discharge_stop_soc": "number.growatt_inverter_cloud_battery_discharge_soc_limit_on_grid",
+          "lifetime_battery_charged": "sensor.growatt_inverter_cloud_lifetime_total_all_batteries_charged",
+          "lifetime_battery_discharged": "sensor.growatt_inverter_cloud_lifetime_total_all_batteries_discharged",
+          "lifetime_solar_energy": "sensor.growatt_inverter_cloud_lifetime_total_solar_energy",
+          "lifetime_import_from_grid": "sensor.growatt_inverter_cloud_lifetime_import_from_grid",
+          "lifetime_export_to_grid": "sensor.growatt_inverter_cloud_lifetime_total_export_to_grid",
+          "lifetime_load_consumption": "sensor.growatt_inverter_cloud_lifetime_total_load_consumption",
+          "lifetime_system_production": "sensor.growatt_inverter_cloud_lifetime_system_production",
+          "lifetime_self_consumption": "sensor.growatt_inverter_cloud_lifetime_self_consumption",
+          "current_l1": "sensor.growatt_inverter_solax_grid_current_l1",
+          "current_l2": "sensor.growatt_inverter_solax_grid_current_l2",
+          "current_l3": "sensor.growatt_inverter_solax_grid_current_l3"
+        },
+        "nordpoolArea": "SE3",
+        "nordpoolConfigEntryId": "entry-nordpool-001",
+        "growattDeviceId": "dev-growatt-001",
+        "totalCapacity": 30.0,
+        "minSoc": 10.0,
+        "maxSoc": 100.0,
+        "maxChargeDischargePower": 15.0,
+        "cycleCost": 0.4,
+        "minActionProfitThreshold": 0.0,
+        "currency": "SEK",
+        "consumption": 4.6,
+        "consumptionStrategy": "fixed",
+        "maxFuseCurrent": 25,
+        "voltage": 230,
+        "safetyMarginFactor": 1.0,
+        "phaseCount": 3,
+        "powerMonitoringEnabled": false,
+        "area": "SE3",
+        "markupRate": 0.08,
+        "vatMultiplier": 1.25,
+        "additionalCosts": 0.773,
+        "taxReduction": 0.1988,
+        "provider": "nordpool_official",
+        "inverterPlatform": "growatt_server_min"
+      },
+      "expected_saved": {
+        "inverter": {
+          "platform": "growatt_server_min"
+        },
+        "growatt": {
+          "device_id": "dev-growatt-001"
+        },
+        "battery": {
+          "total_capacity": 30.0,
+          "max_charge_power_kw": 15.0
+        },
+        "sensors": {
+          "battery_soc": "sensor.growatt_inverter_cloud_state_of_charge_soc",
+          "grid_charge": "switch.growatt_inverter_cloud_charge_from_grid",
+          "pv_power": "sensor.growatt_inverter_cloud_internal_wattage",
+          "current_l1": "sensor.growatt_inverter_solax_grid_current_l1"
+        }
+      },
+      "expected_absent_sections": [],
+      "expected_live": {
+        "growatt_device_id": "dev-growatt-001",
+        "switch_inverter_platform": "growatt_server_min"
+      },
+      "no_tou_slots": true
+    }
+  },
+  "inverter_platform": "solax_modbus_growatt_min"
+}

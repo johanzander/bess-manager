@@ -10,16 +10,20 @@
     "power_monitoring_enabled": false
   },
   "battery": {
-    "total_capacity": 10.0,
+    "total_capacity": 10,
     "min_soc": 10,
     "max_soc": 100,
-    "max_charge_power_kw": 5.0,
-    "max_discharge_power_kw": 5.0,
+    "max_charge_power_kw": 5,
+    "max_discharge_power_kw": 5,
     "cycle_cost_per_kwh": 0.4,
-    "min_action_profit_threshold": 0.0,
+    "min_action_profit_threshold": 0,
     "charging_power_rate": 40,
     "efficiency_charge": 0.97,
-    "efficiency_discharge": 0.95
+    "efficiency_discharge": 0.95,
+    "temperature_derating": {
+      "enabled": false,
+      "weather_entity": ""
+    }
   },
   "electricity_price": {
     "area": "SE4",
@@ -34,19 +38,29 @@
       "config_entry_id": "mock_config_entry"
     }
   },
-  "growatt": {},
+  "inverter": {
+    "platform": "growatt_server_min"
+  },
+  "growatt": {
+    "inverter_type": "MIN",
+    "device_id": ""
+  },
   "sensors": {
-    "battery_soc": "sensor.growatt_battery_soc",
-    "battery_charge_power": "sensor.growatt_battery_charge_power",
-    "battery_discharge_power": "sensor.growatt_battery_discharge_power",
-    "import_power": "sensor.growatt_import_power",
-    "export_power": "sensor.growatt_export_power",
-    "pv_power": "sensor.growatt_pv_power",
-    "local_load_power": "sensor.growatt_load_power",
-    "battery_charging_power_rate": "number.growatt_battery_charging_power_rate",
-    "battery_discharging_power_rate": "number.growatt_battery_discharging_power_rate",
-    "battery_charge_stop_soc": "number.growatt_battery_charge_stop_soc",
-    "battery_discharge_stop_soc": "number.growatt_battery_discharge_stop_soc",
-    "grid_charge": "switch.growatt_grid_charge"
+    "platform": "growatt_server_min",
+    "growatt_server_min": {
+      "battery_soc": "sensor.growatt_battery_soc",
+      "battery_charge_power": "sensor.growatt_battery_charge_power",
+      "battery_discharge_power": "sensor.growatt_battery_discharge_power",
+      "import_power": "sensor.growatt_import_power",
+      "export_power": "sensor.growatt_export_power",
+      "pv_power": "sensor.growatt_pv_power",
+      "local_load_power": "sensor.growatt_load_power",
+      "battery_charging_power_rate": "number.growatt_battery_charging_power_rate",
+      "battery_discharging_power_rate": "number.growatt_battery_discharging_power_rate",
+      "battery_charge_stop_soc": "number.growatt_battery_charge_stop_soc",
+      "battery_discharge_stop_soc": "number.growatt_battery_discharge_stop_soc",
+      "grid_charge": "switch.growatt_grid_charge"
+    },
+    "shared": {}
   }
 }

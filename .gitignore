@@ -31,6 +31,7 @@ yarn-error.log*
 backend/dev-options.json
 backend/dev-historical-seed.json
 backend/dev-bess-settings.json
+backend/mock-bess-settings.json
 
 # Build output
 dist/
@@ -52,6 +53,7 @@ docs/private/
 docs/bess-debug-*.md
 scripts/mock_ha/scenarios/*.json
 !scripts/mock_ha/scenarios/ci-*.json
+!scripts/mock_ha/scenarios/synthetic-*.json
 
 # Playwright
 e2e/playwright-report/
@@ -60,5 +62,6 @@ e2e/test-results/
 # Mock HA settings generated for CI (derived from scenario)
 backend/mock-bess-settings.json
 
-# Claude Code worktrees (temporary)
+# Claude Code (temporary/session-specific)
 .claude/worktrees/
+.claude/scheduled_tasks.lock

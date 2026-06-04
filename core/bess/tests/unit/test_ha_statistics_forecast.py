@@ -55,15 +55,8 @@ def _create_manager_with_stats(
     home_settings = HomeSettings()
     home_settings.consumption_strategy = "ha_statistics"
 
-    addon_options = {
-        "sensors": {
-            "lifetime_load_consumption": "sensor.load_energy_total",
-        }
-    }
-
     manager = BatterySystemManager.__new__(BatterySystemManager)
     manager._controller = controller
-    manager._addon_options = addon_options
     manager.home_settings = home_settings
     manager.battery_settings = battery_settings
     manager._runtime_failure_tracker = RuntimeFailureTracker()
@@ -276,7 +269,6 @@ class TestHAStatisticsDispatch:
         controller = MockHomeAssistantController()
         manager = _create_manager_with_stats(controller, {})
         controller.sensors = {}  # Clear sensor mappings
-        manager._addon_options = {"sensors": {}}  # No sensor configured
 
         with patch("core.bess.battery_system_manager.time_utils") as mock_tu:
             mock_tu.today.return_value = datetime(2026, 5, 12, tzinfo=TIMEZONE).date()
@@ -284,12 +276,12 @@ class TestHAStatisticsDispatch:
             with pytest.raises(HAStatisticsUnavailableError):
                 manager._get_ha_statistics_forecast()
 
-    def test_missing_sensor_raises_from_dispatch(self):
-        """Dispatch should raise (not fall back) when sensor is not configured."""
+    def test_missing_sensor_falls_back_from_dispatch(self):
+        """Dispatch should fall back to fixed when sensor is not configured."""
         controller = MockHomeAssistantController()
         manager = _create_manager_with_stats(controller, {})
         controller.sensors = {}
-        manager._addon_options = {"sensors": {}}
+        manager.home_settings.default_hourly = 3.0
 
         # Override mock to raise like the real controller does for missing sensors
         def strict_resolve(sensor_key):
@@ -297,8 +289,9 @@ class TestHAStatisticsDispatch:
 
         controller._resolve_entity_id = strict_resolve
 
-        with pytest.raises(HAStatisticsUnavailableError):
-            manager._get_consumption_forecast()
+        result = manager._get_consumption_forecast()
+        assert len(result) == 96
+        assert all(v == 3.0 / 4.0 for v in result)
 
     def test_fallback_to_fixed_on_insufficient_data(self):
         """Dispatch should fall back to fixed profile when data is insufficient."""

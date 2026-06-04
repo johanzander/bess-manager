@@ -40,17 +40,16 @@ class SensorCollector:
         # Simple cache: last known cumulative sensor readings (for current - previous = delta)
         self._last_readings: dict[str, float] | None = None
 
-        # Cumulative sensors we track from InfluxDB
-        # Use sensor keys instead of hardcoded entity IDs
+        # Cumulative sensors we track from InfluxDB.
+        # Only the 5 core energy sensors + battery_soc are collected.
+        # load_consumption, system_production, and self_consumption are
+        # derived by EnergyFlowCalculator from these 5 core sensors.
         self.cumulative_sensor_keys = [
             "lifetime_battery_charged",
             "lifetime_battery_discharged",
             "lifetime_solar_energy",
-            "lifetime_load_consumption",
             "lifetime_import_from_grid",
             "lifetime_export_to_grid",
-            "lifetime_system_production",
-            "lifetime_self_consumption",
             "battery_soc",
         ]
 
@@ -100,6 +99,7 @@ class SensorCollector:
         """
         self.cumulative_sensors = self._resolve_sensor_entity_ids()
         self.power_sensors = self._resolve_power_sensor_ids()
+        self.energy_flow_calculator.rebuild_sensor_mapping()
 
     def _resolve_power_sensor_ids(self) -> list[str]:
         """Resolve power sensor keys to entity IDs for InfluxDB.
@@ -396,7 +396,18 @@ class SensorCollector:
                 else:
                     return True
             else:
-                return True
+                # For today, invalidate empty caches so we retry after
+                # transient InfluxDB failures (e.g. first boot).
+                if not self._batch_cache.get(target_date):
+                    logger.info(
+                        "Invalidating empty batch cache for today %s",
+                        target_date.strftime("%Y-%m-%d"),
+                    )
+                    del self._batch_cache[target_date]
+                    if target_date in self._batch_cache_loaded_on:
+                        del self._batch_cache_loaded_on[target_date]
+                else:
+                    return True
 
         # Fetch batch data
         logger.info(
@@ -412,10 +423,14 @@ class SensorCollector:
             if not data:
                 logger.warning(
                     "Batch data for %s returned no periods — InfluxDB query matched "
-                    "no sensor data (check sensor names, bucket, and time range). "
-                    "Not caching empty result so next period will retry.",
+                    "no sensor data (check sensor names, bucket, and time range).",
                     target_date.strftime("%Y-%m-%d"),
                 )
+                # Cache the empty result so we don't retry the same failing
+                # query for every period in the backfill loop.  The quarterly
+                # scheduler will naturally re-fetch once the cache expires.
+                self._batch_cache[target_date] = {}
+                self._batch_cache_loaded_on[target_date] = today
                 return False
             self._batch_cache[target_date] = data
             self._batch_cache_loaded_on[target_date] = today
@@ -432,6 +447,9 @@ class SensorCollector:
                 target_date.strftime("%Y-%m-%d"),
                 result.get("message", "Unknown error"),
             )
+            # Cache the failure so we don't hammer InfluxDB on every period.
+            self._batch_cache[target_date] = {}
+            self._batch_cache_loaded_on[target_date] = today
             return False
 
     def _ensure_power_batch_loaded(self, target_date) -> bool:
@@ -589,16 +607,13 @@ class SensorCollector:
         """
         readings = {}
 
-        # Map sensor keys to ha_controller methods
+        # Map sensor keys to ha_controller methods (only core sensors)
         sensor_method_map = {
             "lifetime_battery_charged": "get_battery_charged_lifetime",
             "lifetime_battery_discharged": "get_battery_discharged_lifetime",
             "lifetime_solar_energy": "get_solar_production_lifetime",
-            "lifetime_load_consumption": "get_load_consumption_lifetime",
             "lifetime_import_from_grid": "get_grid_import_lifetime",
             "lifetime_export_to_grid": "get_grid_export_lifetime",
-            "lifetime_system_production": "get_system_production_lifetime",
-            "lifetime_self_consumption": "get_self_consumption_lifetime",
             "battery_soc": "get_battery_soc",
         }
 
@@ -677,7 +692,7 @@ class SensorCollector:
         # Validate that we have the minimum required sensors
         # Check for required sensors using resolved entity IDs
         required_sensors = []
-        required_keys = ["battery_soc", "lifetime_load_consumption"]
+        required_keys = ["battery_soc"]
         for key in required_keys:
             entity_id = self.ha_controller.resolve_sensor_for_influxdb(key)
             if entity_id:
@@ -697,79 +712,46 @@ class SensorCollector:
 
     def check_battery_health(self) -> dict:
         """Check battery monitoring health, with all sensors required for critical battery operation."""
-        # Define required methods
-        required_battery_methods = [
-            "get_battery_soc",
-            "get_battery_charge_power",
-            "get_battery_discharge_power",
-        ]
-
-        # Define optional methods
-        optional_battery_methods = []
-
-        # Combine all methods for health check
-        all_battery_methods = required_battery_methods + optional_battery_methods
-
         return perform_health_check(
             component_name="Battery Monitoring",
             description="Real-time battery state and power monitoring",
             is_required=True,
             controller=self.ha_controller,
-            all_methods=all_battery_methods,
-            required_methods=required_battery_methods,
+            all_methods=[
+                "get_battery_soc",
+                "get_battery_charge_power",
+                "get_battery_discharge_power",
+            ],
         )
 
     def check_energy_health(self) -> dict:
-        """Check energy monitoring health, with all sensors required except EV."""
-
-        # Define required methods (critical for energy flow calculations)
-        required_energy_methods = [
-            "get_grid_import_lifetime",
-            "get_grid_export_lifetime",
-            "get_solar_production_lifetime",
-            "get_load_consumption_lifetime",
-            "get_battery_charged_lifetime",
-            "get_battery_discharged_lifetime",
-        ]
-
-        # Define optional methods (nice-to-have but not critical)
-        optional_energy_methods: list[str] = []
-
-        # Combine all methods for health check
-        all_energy_methods = required_energy_methods + optional_energy_methods
-
+        """Check energy monitoring health, with all sensors required."""
         return perform_health_check(
             component_name="Energy Monitoring",
             description="Tracks energy flows and consumption patterns",
             is_required=True,
             controller=self.ha_controller,
-            all_methods=all_energy_methods,
-            required_methods=required_energy_methods,
+            all_methods=[
+                "get_grid_import_lifetime",
+                "get_grid_export_lifetime",
+                "get_solar_production_lifetime",
+                "get_load_consumption_lifetime",
+                "get_battery_charged_lifetime",
+                "get_battery_discharged_lifetime",
+            ],
         )
 
     def check_prediction_health(self) -> dict:
         """Check prediction health, with no sensors required (nice-to-have for optimization)."""
-        # Define required methods
-        required_prediction_methods = []
-
-        # Define optional methods
-        optional_prediction_methods = [
-            "get_estimated_consumption",
-            "get_solar_forecast",
-        ]
-
-        # Combine all methods for health check
-        all_prediction_methods = (
-            required_prediction_methods + optional_prediction_methods
-        )
-
         return perform_health_check(
             component_name="Energy Prediction",
             description="Solar and consumption forecasting for optimization",
             is_required=False,
             controller=self.ha_controller,
-            all_methods=all_prediction_methods,
-            required_methods=required_prediction_methods,
+            all_methods=[
+                "get_estimated_consumption",
+                "get_solar_forecast",
+            ],
         )
 
     def check_health(self) -> list:

@@ -3,10 +3,11 @@
 Coverage goals:
 - GET /api/setup/status: returns wizard_needed based on sensor config
 - POST /api/setup/confirm: validates entity IDs, persists config
-- POST /api/setup/complete: persists final settings
+- POST /api/setup/complete: persists all settings, applies live, starts scheduler
 """
 
 import sys
+from copy import deepcopy
 from unittest.mock import MagicMock
 
 import pytest
@@ -28,6 +29,126 @@ def mock_controller():
     ctrl.settings_store.get_section.return_value = {}
     sys.modules["app"].bess_controller = ctrl
     return ctrl
+
+
+# ---------------------------------------------------------------------------
+# Richer fixture for setup_complete — needs mutable read-modify-write store
+# ---------------------------------------------------------------------------
+
+_PRE_EXISTING_STORE: dict = {
+    "battery": {
+        "total_capacity": 10.0,
+        "min_soc": 5.0,
+        "max_soc": 100.0,
+        "max_charge_power_kw": 5.0,
+        "max_discharge_power_kw": 5.0,
+        "cycle_cost_per_kwh": 0.3,
+        "min_action_profit_threshold": 0.0,
+        "efficiency_charge": 0.97,
+        "efficiency_discharge": 0.95,
+        "temperature_derating": {"enabled": False, "weather_entity": ""},
+    },
+    "home": {
+        "default_hourly": 2.0,
+        "currency": "EUR",
+        "consumption_strategy": "fixed",
+        "max_fuse_current": 16,
+        "voltage": 230,
+        "safety_margin": 1.0,
+        "phase_count": 1,
+        "power_monitoring_enabled": False,
+    },
+    "electricity_price": {
+        "area": "SE3",
+        "markup_rate": 0.05,
+        "vat_multiplier": 1.20,
+        "additional_costs": 0.50,
+        "tax_reduction": 0.10,
+    },
+    "energy_provider": {
+        "provider": "nordpool_official",
+        "nordpool_official": {"config_entry_id": "old-entry"},
+    },
+    "growatt": {"device_id": "old-dev"},
+    "inverter": {"platform": "growatt_server_min"},
+    "sensors": {"battery_soc": "sensor.old_soc"},
+}
+
+
+@pytest.fixture()
+def complete_controller():
+    """A bess_controller with a mutable store for setup_complete tests."""
+    ctrl = MagicMock()
+    store_data = deepcopy(_PRE_EXISTING_STORE)
+    ctrl.settings_store.data = store_data
+    ctrl.ha_controller.sensors = {}
+
+    def _get_section(name: str) -> dict:
+        return dict(store_data.get(name, {}))
+
+    def _save_all(data: dict) -> None:
+        for key, val in data.items():
+            store_data[key] = dict(val)
+
+    def _get_active_sensors() -> dict:
+        sensors = store_data.get("sensors", {})
+        if "platform" not in sensors:
+            return {k: v for k, v in sensors.items() if isinstance(v, str)}
+        platform = sensors.get("platform", "")
+        result = dict(sensors.get("shared", {}))
+        result.update(sensors.get(platform, {}))
+        return result
+
+    ctrl.settings_store.get_section.side_effect = _get_section
+    ctrl.settings_store.save_all.side_effect = _save_all
+    ctrl.settings_store.get_active_sensors.side_effect = _get_active_sensors
+
+    sys.modules["app"].bess_controller = ctrl
+    return ctrl
+
+
+def _full_wizard_payload(**overrides) -> dict:
+    """A realistic wizard completion payload (mirrors what the frontend sends)."""
+    base = {
+        "sensors": {
+            "platform": "growatt_server_min",
+            "growatt_server_min": {
+                "battery_soc": "sensor.growatt_battery_soc",
+                "pv_power": "sensor.growatt_pv_power",
+            },
+            "growatt_server_sph": {},
+            "solax_modbus_growatt_min": {},
+            "solax_modbus_growatt_sph": {},
+            "solax_modbus_native": {},
+            "shared": {},
+        },
+        "nordpoolArea": "SE4",
+        "nordpoolConfigEntryId": "entry-abc",
+        "growattDeviceId": "dev-123",
+        "totalCapacity": 30.0,
+        "minSoc": 10.0,
+        "maxSoc": 95.0,
+        "maxChargeDischargePower": 15.0,
+        "cycleCost": 0.50,
+        "minActionProfitThreshold": 8.0,
+        "currency": "SEK",
+        "consumption": 3.5,
+        "consumptionStrategy": "sensor",
+        "maxFuseCurrent": 25,
+        "voltage": 230,
+        "safetyMarginFactor": 1.0,
+        "phaseCount": 3,
+        "powerMonitoringEnabled": True,
+        "area": "SE4",
+        "markupRate": 0.08,
+        "vatMultiplier": 1.25,
+        "additionalCosts": 0.77,
+        "taxReduction": 0.20,
+        "provider": "nordpool_official",
+        "inverterPlatform": "growatt_server_min",
+    }
+    base.update(overrides)
+    return base
 
 
 class TestGetSetupStatus:
@@ -94,8 +215,8 @@ class TestConfirmSetup:
         assert resp.status_code == 200
 
 
-class TestSetupComplete:
-    """POST /api/setup/complete."""
+class TestSetupCompleteLegacy:
+    """POST /api/setup/complete — legacy persistence tests."""
 
     def test_persists_octopus_entities(self, mock_controller):
         """Octopus Energy entity IDs from the wizard are saved to settings."""
@@ -209,3 +330,294 @@ class TestRuntimeFailures:
         body = resp.json()
         assert body["success"] is True
         assert "3" in body["message"]
+
+
+# ===========================================================================
+# POST /api/setup/complete
+# ===========================================================================
+
+
+class TestSetupComplete:
+    """POST /api/setup/complete — the atomic wizard completion endpoint."""
+
+    def test_returns_200_with_full_payload(self, complete_controller):
+        resp = _client.post("/api/setup/complete", json=_full_wizard_payload())
+        assert resp.status_code == 200
+        assert resp.json()["success"] is True
+
+    def test_saved_sections_listed_in_response(self, complete_controller):
+        resp = _client.post("/api/setup/complete", json=_full_wizard_payload())
+        saved = resp.json()["saved_sections"]
+        assert "battery" in saved
+        assert "home" in saved
+        assert "electricity_price" in saved
+        assert "energy_provider" in saved
+        assert "inverter" in saved
+        assert "sensors" in saved
+
+    # -- Battery persistence --
+
+    def test_battery_fields_persisted_as_snake_case(self, complete_controller):
+        _client.post("/api/setup/complete", json=_full_wizard_payload())
+        call_args = complete_controller.settings_store.save_all.call_args[0][0]
+        bat = call_args["battery"]
+        assert bat["total_capacity"] == 30.0
+        assert bat["min_soc"] == 10.0
+        assert bat["max_soc"] == 95.0
+        assert bat["max_charge_power_kw"] == 15.0
+        assert bat["max_discharge_power_kw"] == 15.0
+        assert bat["cycle_cost_per_kwh"] == 0.50
+        assert bat["min_action_profit_threshold"] == 8.0
+
+    def test_battery_preserves_keys_not_in_wizard(self, complete_controller):
+        """Keys like efficiency_charge and temperature_derating must survive."""
+        _client.post("/api/setup/complete", json=_full_wizard_payload())
+        call_args = complete_controller.settings_store.save_all.call_args[0][0]
+        bat = call_args["battery"]
+        assert bat["efficiency_charge"] == 0.97
+        assert bat["temperature_derating"]["enabled"] is False
+
+    # -- Home persistence --
+
+    def test_home_fields_persisted(self, complete_controller):
+        _client.post("/api/setup/complete", json=_full_wizard_payload())
+        call_args = complete_controller.settings_store.save_all.call_args[0][0]
+        home = call_args["home"]
+        assert home["default_hourly"] == 3.5
+        assert home["currency"] == "SEK"
+        assert home["consumption_strategy"] == "sensor"
+        assert home["max_fuse_current"] == 25
+        assert home["voltage"] == 230
+        assert home["safety_margin"] == 1.0
+        assert home["phase_count"] == 3
+        assert home["power_monitoring_enabled"] is True
+
+    # -- Electricity price persistence --
+
+    def test_electricity_price_fields_persisted(self, complete_controller):
+        _client.post("/api/setup/complete", json=_full_wizard_payload())
+        call_args = complete_controller.settings_store.save_all.call_args[0][0]
+        elec = call_args["electricity_price"]
+        assert elec["area"] == "SE4"
+        assert elec["markup_rate"] == 0.08
+        assert elec["vat_multiplier"] == 1.25
+        assert elec["additional_costs"] == 0.77
+        assert elec["tax_reduction"] == 0.20
+
+    # -- Energy provider persistence --
+
+    def test_energy_provider_persisted(self, complete_controller):
+        _client.post("/api/setup/complete", json=_full_wizard_payload())
+        call_args = complete_controller.settings_store.save_all.call_args[0][0]
+        ep = call_args["energy_provider"]
+        assert ep["provider"] == "nordpool_official"
+
+    def test_octopus_entities_persisted_when_provider_is_octopus(
+        self, complete_controller
+    ):
+        payload = _full_wizard_payload(
+            provider="octopus",
+            octopusImportTodayEntity="sensor.octopus_import_today",
+            octopusImportTomorrowEntity="sensor.octopus_import_tomorrow",
+            octopusExportTodayEntity="sensor.octopus_export_today",
+            octopusExportTomorrowEntity="sensor.octopus_export_tomorrow",
+        )
+        _client.post("/api/setup/complete", json=payload)
+        call_args = complete_controller.settings_store.save_all.call_args[0][0]
+        octopus = call_args["energy_provider"]["octopus"]
+        assert octopus["import_today_entity"] == "sensor.octopus_import_today"
+        assert octopus["export_tomorrow_entity"] == "sensor.octopus_export_tomorrow"
+
+    # -- Inverter persistence --
+
+    def test_inverter_platform_set_for_min(self, complete_controller):
+        _client.post(
+            "/api/setup/complete",
+            json=_full_wizard_payload(inverterPlatform="growatt_server_min"),
+        )
+        call_args = complete_controller.settings_store.save_all.call_args[0][0]
+        assert call_args["inverter"]["platform"] == "growatt_server_min"
+
+    def test_inverter_platform_set_for_sph(self, complete_controller):
+        _client.post(
+            "/api/setup/complete",
+            json=_full_wizard_payload(inverterPlatform="growatt_server_sph"),
+        )
+        call_args = complete_controller.settings_store.save_all.call_args[0][0]
+        assert call_args["inverter"]["platform"] == "growatt_server_sph"
+
+    def test_inverter_platform_set_for_solax(self, complete_controller):
+        _client.post(
+            "/api/setup/complete",
+            json=_full_wizard_payload(inverterPlatform="solax_modbus_native"),
+        )
+        call_args = complete_controller.settings_store.save_all.call_args[0][0]
+        assert call_args["inverter"]["platform"] == "solax_modbus_native"
+
+    def test_inverter_platform_set_for_solax_modbus_growatt_min(
+        self, complete_controller
+    ):
+        _client.post(
+            "/api/setup/complete",
+            json=_full_wizard_payload(inverterPlatform="solax_modbus_growatt_min"),
+        )
+        call_args = complete_controller.settings_store.save_all.call_args[0][0]
+        assert call_args["inverter"]["platform"] == "solax_modbus_growatt_min"
+
+    def test_inverter_platform_set_for_sph_modbus(self, complete_controller):
+        _client.post(
+            "/api/setup/complete",
+            json=_full_wizard_payload(inverterPlatform="solax_modbus_growatt_sph"),
+        )
+        call_args = complete_controller.settings_store.save_all.call_args[0][0]
+        assert call_args["inverter"]["platform"] == "solax_modbus_growatt_sph"
+
+    def test_growatt_inverter_type_not_written(self, complete_controller):
+        """Setup should not write legacy growatt.inverter_type for any platform."""
+        # Clear pre-existing legacy field to verify setup doesn't add it
+        complete_controller.settings_store.data["growatt"] = {"device_id": "old-dev"}
+        _client.post(
+            "/api/setup/complete",
+            json=_full_wizard_payload(inverterPlatform="growatt_server_sph"),
+        )
+        call_args = complete_controller.settings_store.save_all.call_args[0][0]
+        assert "inverter_type" not in call_args.get("growatt", {})
+
+    def test_growatt_section_not_written_without_device_id(self, complete_controller):
+        _client.post(
+            "/api/setup/complete",
+            json=_full_wizard_payload(
+                inverterPlatform="solax_modbus_native", growattDeviceId=None
+            ),
+        )
+        call_args = complete_controller.settings_store.save_all.call_args[0][0]
+        assert "growatt" not in call_args
+
+    # -- Sensors --
+
+    def test_sensors_persisted(self, complete_controller):
+        _client.post("/api/setup/complete", json=_full_wizard_payload())
+        call_args = complete_controller.settings_store.save_all.call_args[0][0]
+        assert (
+            call_args["sensors"]["growatt_server_min"]["battery_soc"]
+            == "sensor.growatt_battery_soc"
+        )
+
+    def test_rejects_invalid_sensor_entity_ids(self, complete_controller):
+        payload = _full_wizard_payload(
+            sensors={
+                "platform": "growatt_server_min",
+                "growatt_server_min": {"battery_soc": "BAD-FORMAT"},
+                "growatt_server_sph": {},
+                "solax_modbus_growatt_min": {},
+                "solax_modbus_growatt_sph": {},
+                "solax_modbus_native": {},
+                "shared": {},
+            }
+        )
+        resp = _client.post("/api/setup/complete", json=payload)
+        assert resp.status_code == 422
+
+    # -- Live system updates --
+
+    def test_live_battery_update_sent(self, complete_controller):
+        _client.post("/api/setup/complete", json=_full_wizard_payload())
+        calls = complete_controller.system.update_settings.call_args_list
+        battery_calls = [c for c in calls if "battery" in c[0][0]]
+        assert len(battery_calls) >= 1
+        sent = battery_calls[0][0][0]["battery"]
+        assert sent["totalCapacity"] == 30.0
+        assert sent["maxChargePowerKw"] == 15.0
+
+    def test_live_home_update_sent(self, complete_controller):
+        _client.post("/api/setup/complete", json=_full_wizard_payload())
+        calls = complete_controller.system.update_settings.call_args_list
+        home_calls = [c for c in calls if "home" in c[0][0]]
+        assert len(home_calls) >= 1
+        sent = home_calls[0][0][0]["home"]
+        assert sent["defaultHourly"] == 3.5
+        assert sent["currency"] == "SEK"
+
+    def test_live_price_update_sent(self, complete_controller):
+        _client.post("/api/setup/complete", json=_full_wizard_payload())
+        calls = complete_controller.system.update_settings.call_args_list
+        price_calls = [c for c in calls if "price" in c[0][0]]
+        assert len(price_calls) >= 1
+        sent = price_calls[0][0][0]["price"]
+        assert sent["vatMultiplier"] == 1.25
+
+    def test_live_energy_provider_update_sent(self, complete_controller):
+        _client.post("/api/setup/complete", json=_full_wizard_payload())
+        calls = complete_controller.system.update_settings.call_args_list
+        ep_calls = [c for c in calls if "energy_provider" in c[0][0]]
+        assert len(ep_calls) >= 1
+
+    def test_inverter_platform_switched_live(self, complete_controller):
+        _client.post(
+            "/api/setup/complete",
+            json=_full_wizard_payload(inverterPlatform="growatt_server_sph"),
+        )
+        complete_controller.system.switch_inverter_platform.assert_called_once_with(
+            "growatt_server_sph"
+        )
+
+    def test_sensors_applied_to_ha_controller(self, complete_controller):
+        _client.post("/api/setup/complete", json=_full_wizard_payload())
+        assert (
+            complete_controller.ha_controller.sensors["battery_soc"]
+            == "sensor.growatt_battery_soc"
+        )
+
+    def test_empty_sensor_values_filtered_from_live_sensors(self, complete_controller):
+        """Empty string sensors should not appear in the live ha_controller map."""
+        payload = _full_wizard_payload(
+            sensors={
+                "platform": "growatt_server_min",
+                "growatt_server_min": {"battery_soc": "sensor.batt", "pv_power": ""},
+                "growatt_server_sph": {},
+                "solax_modbus_growatt_min": {},
+                "solax_modbus_growatt_sph": {},
+                "solax_modbus_native": {},
+                "shared": {},
+            }
+        )
+        _client.post("/api/setup/complete", json=payload)
+        assert "pv_power" not in complete_controller.ha_controller.sensors
+
+    def test_growatt_device_id_applied_to_ha_controller(self, complete_controller):
+        _client.post("/api/setup/complete", json=_full_wizard_payload())
+        assert complete_controller.ha_controller.growatt_device_id == "dev-123"
+
+    def test_scheduler_started(self, complete_controller):
+        _client.post("/api/setup/complete", json=_full_wizard_payload())
+        complete_controller.start_scheduler.assert_called_once()
+
+    def test_health_check_rerun(self, complete_controller):
+        _client.post("/api/setup/complete", json=_full_wizard_payload())
+        complete_controller.system._run_health_check.assert_called()
+
+    def test_discovered_config_applied(self, complete_controller):
+        _client.post("/api/setup/complete", json=_full_wizard_payload())
+        complete_controller.apply_discovered_config.assert_called_once_with(
+            sensor_map={},
+            nordpool_area="SE4",
+            nordpool_config_entry_id="entry-abc",
+            growatt_device_id="dev-123",
+        )
+
+    # -- Partial payloads --
+
+    def test_minimal_payload_succeeds(self, complete_controller):
+        """Wizard with only sensors and no other settings should not crash."""
+        resp = _client.post(
+            "/api/setup/complete",
+            json={"sensors": {"battery_soc": "sensor.batt"}},
+        )
+        assert resp.status_code == 200
+
+    def test_no_battery_section_when_capacity_is_none(self, complete_controller):
+        """If the wizard sends no battery fields, battery should not be in save_all."""
+        payload = {"sensors": {"battery_soc": "sensor.batt"}}
+        _client.post("/api/setup/complete", json=payload)
+        call_args = complete_controller.settings_store.save_all.call_args[0][0]
+        assert "battery" not in call_args

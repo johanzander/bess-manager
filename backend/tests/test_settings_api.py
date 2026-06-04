@@ -69,7 +69,15 @@ _DEFAULT_STORE: dict = {
         "nordpool_official": {"config_entry_id": "abc-123"},
     },
     "growatt": {"device_id": "dev-1"},
-    "sensors": {},
+    "sensors": {
+        "platform": "growatt_server_min",
+        "growatt_server_min": {},
+        "growatt_server_sph": {},
+        "solax_modbus_growatt_min": {},
+        "solax_modbus_growatt_sph": {},
+        "solax_modbus_native": {},
+        "shared": {},
+    },
 }
 
 
@@ -88,8 +96,18 @@ def mock_controller():
     def _save_section(name: str, data: dict) -> None:
         store_data[name] = dict(data)
 
+    def _get_active_sensors() -> dict:
+        sensors = store_data.get("sensors", {})
+        if "platform" not in sensors:
+            return {k: v for k, v in sensors.items() if isinstance(v, str)}
+        platform = sensors.get("platform", "")
+        result = dict(sensors.get("shared", {}))
+        result.update(sensors.get(platform, {}))
+        return result
+
     ctrl.settings_store.get_section.side_effect = _get_section
     ctrl.settings_store.save_section.side_effect = _save_section
+    ctrl.settings_store.get_active_sensors.side_effect = _get_active_sensors
 
     ctrl.ha_controller.sensors = {}
 
@@ -119,22 +137,28 @@ class TestGetSettings:
         assert battery["maxSoeKwh"] == pytest.approx(28.5)
         assert battery["reservedCapacity"] == pytest.approx(3.0)
 
-    def test_sensors_come_from_ha_controller(self, mock_controller):
-        """Sensor values must be sourced from ha_controller, not the store."""
-        mock_controller.ha_controller.sensors = {"battery_soc": "sensor.battery_live"}
+    def test_sensors_come_from_store(self, mock_controller):
+        """Sensor values are returned from the per-platform store structure."""
+        mock_controller.settings_store.data["sensors"]["growatt_server_min"] = {
+            "battery_soc": "sensor.battery_live"
+        }
         resp = _client.get("/api/settings")
-        assert resp.json()["sensors"]["battery_soc"] == "sensor.battery_live"
+        sensors = resp.json()["sensors"]
+        assert sensors["growatt_server_min"]["battery_soc"] == "sensor.battery_live"
 
-    def test_store_sensors_not_in_response(self, mock_controller):
-        """Store sensors section is replaced by ha_controller sensors — no duplicate."""
-        mock_controller.settings_store.data["sensors"] = {
-            "battery_soc": "sensor.stale_from_store"
+    def test_per_platform_structure_returned(self, mock_controller):
+        """GET /api/settings returns the full per-platform sensor structure."""
+        mock_controller.settings_store.data["sensors"]["growatt_server_min"] = {
+            "battery_soc": "sensor.growatt_soc"
         }
-        mock_controller.ha_controller.sensors = {
-            "battery_soc": "sensor.live_from_controller"
+        mock_controller.settings_store.data["sensors"]["shared"] = {
+            "weather_entity": "weather.home"
         }
         resp = _client.get("/api/settings")
-        assert resp.json()["sensors"]["battery_soc"] == "sensor.live_from_controller"
+        sensors = resp.json()["sensors"]
+        assert sensors["platform"] == "growatt_server_min"
+        assert sensors["growatt_server_min"]["battery_soc"] == "sensor.growatt_soc"
+        assert sensors["shared"]["weather_entity"] == "weather.home"
 
     def test_non_sensor_sections_are_camel_case(self, mock_controller):
         """Store snake_case keys must be returned as camelCase for non-sensor sections."""
@@ -200,7 +224,11 @@ class TestPatchSettingsCamelToSnake:
         """Sensor keys are system identifiers — they must not be camelCase-converted."""
         _client.patch(
             "/api/settings",
-            json={"sensors": {"battery_soc": "sensor.battery_soc_percent"}},
+            json={
+                "sensors": {
+                    "growatt_server_min": {"battery_soc": "sensor.battery_soc_percent"}
+                }
+            },
         )
         assert (
             mock_controller.ha_controller.sensors.get("battery_soc")
@@ -335,7 +363,11 @@ class TestPatchSettingsSensorValidation:
     def test_valid_entity_id_stored(self, mock_controller):
         resp = _client.patch(
             "/api/settings",
-            json={"sensors": {"battery_soc": "sensor.battery_soc_percent"}},
+            json={
+                "sensors": {
+                    "growatt_server_min": {"battery_soc": "sensor.battery_soc_percent"}
+                }
+            },
         )
         assert resp.status_code == 200
         assert (
@@ -346,31 +378,97 @@ class TestPatchSettingsSensorValidation:
     def test_invalid_entity_id_returns_422(self, mock_controller):
         resp = _client.patch(
             "/api/settings",
-            json={"sensors": {"battery_soc": "not_valid_entity_format"}},
+            json={
+                "sensors": {
+                    "growatt_server_min": {"battery_soc": "not_valid_entity_format"}
+                }
+            },
         )
         assert resp.status_code == 422
 
     def test_entity_id_missing_domain_returns_422(self, mock_controller):
         resp = _client.patch(
             "/api/settings",
-            json={"sensors": {"battery_soc": "battery_soc_percent"}},
+            json={
+                "sensors": {
+                    "growatt_server_min": {"battery_soc": "battery_soc_percent"}
+                }
+            },
         )
         assert resp.status_code == 422
 
-    def test_empty_entity_id_not_stored(self, mock_controller):
-        """Empty strings clear intent — they must not overwrite configured sensors."""
+    def test_empty_entity_id_unmaps_sensor(self, mock_controller):
+        """Empty string in PATCH unmaps the sensor both on disk and in memory."""
+        mock_controller.settings_store.data["sensors"]["growatt_server_min"] = {
+            "battery_soc": "sensor.existing"
+        }
         mock_controller.ha_controller.sensors = {"battery_soc": "sensor.existing"}
-        _client.patch("/api/settings", json={"sensors": {"battery_soc": ""}})
+        _client.patch(
+            "/api/settings",
+            json={"sensors": {"growatt_server_min": {"battery_soc": ""}}},
+        )
+        # Must be gone from in-memory ha_controller
+        assert "battery_soc" not in mock_controller.ha_controller.sensors
+        # Must be gone from persistent store (not lingering as empty string)
+        stored = mock_controller.settings_store.data["sensors"]["growatt_server_min"]
+        assert "battery_soc" not in stored
+
+    def test_clear_optional_sensor_removes_from_store(self, mock_controller):
+        """Clearing an optional sensor (discharge_inhibit) removes it from storage."""
+        mock_controller.settings_store.data["sensors"]["shared"] = {
+            "discharge_inhibit": "input_boolean.bess_discharge_inhibit",
+            "battery_soc": "sensor.battery_soc",
+        }
+        mock_controller.ha_controller.sensors = {
+            "discharge_inhibit": "input_boolean.bess_discharge_inhibit",
+            "battery_soc": "sensor.battery_soc",
+        }
+        resp = _client.patch(
+            "/api/settings",
+            json={"sensors": {"shared": {"discharge_inhibit": ""}}},
+        )
+        assert resp.status_code == 200
+        # Gone from in-memory
+        assert "discharge_inhibit" not in mock_controller.ha_controller.sensors
+        # Gone from persistent store
+        shared = mock_controller.settings_store.data["sensors"]["shared"]
+        assert "discharge_inhibit" not in shared
+        # Other sensors preserved
+        assert "battery_soc" in mock_controller.ha_controller.sensors
+
+    def test_clear_phase_current_sensor_removes_from_store(self, mock_controller):
+        """Clearing a phase current sensor removes it from both store and memory."""
+        mock_controller.settings_store.data["sensors"]["shared"] = {
+            "phase_current_l3": "sensor.phase_l3",
+            "phase_current_l1": "sensor.phase_l1",
+        }
+        mock_controller.ha_controller.sensors = {
+            "phase_current_l3": "sensor.phase_l3",
+            "phase_current_l1": "sensor.phase_l1",
+        }
+        resp = _client.patch(
+            "/api/settings",
+            json={"sensors": {"shared": {"phase_current_l3": ""}}},
+        )
+        assert resp.status_code == 200
+        # L3 gone from both store and memory
+        shared = mock_controller.settings_store.data["sensors"]["shared"]
+        assert "phase_current_l3" not in shared
+        assert "phase_current_l3" not in mock_controller.ha_controller.sensors
+        # L1 preserved
+        assert shared["phase_current_l1"] == "sensor.phase_l1"
         assert (
-            mock_controller.ha_controller.sensors.get("battery_soc")
-            == "sensor.existing"
+            mock_controller.ha_controller.sensors["phase_current_l1"]
+            == "sensor.phase_l1"
         )
 
     def test_multiple_valid_sensors_all_stored(self, mock_controller):
         payload = {
             "sensors": {
-                "battery_soc": "sensor.battery_soc",
-                "grid_power": "sensor.grid_power",
+                "growatt_server_min": {
+                    "battery_soc": "sensor.battery_soc",
+                    "grid_power": "sensor.grid_power",
+                }
             }
         }
         resp = _client.patch("/api/settings", json=payload)

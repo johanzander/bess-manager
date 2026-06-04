@@ -21,7 +21,7 @@ describe('useSettings', () => {
     mockGet.mockResolvedValueOnce({
       data: {
         battery: { capacity: 10, minSoc: 10, maxSoc: 90 },
-        electricityPrice: { provider: 'nordpool', currency: 'SEK' },
+        electricityPrice: { provider: 'nordpool_hacs', currency: 'SEK' },
       },
     })
 
@@ -40,7 +40,7 @@ describe('useSettings', () => {
       maxSoc: 90,
     })
     expect(result.current.electricitySettings).toEqual({
-      provider: 'nordpool',
+      provider: 'nordpool_hacs',
       currency: 'SEK',
     })
     expect(result.current.error).toBeNull()

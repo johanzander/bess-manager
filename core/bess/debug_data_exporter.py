@@ -84,10 +84,39 @@ _CONFIG_ENTRY_DATA_ALLOWLIST: dict[str, frozenset[str]] = {
     "nordpool": frozenset({"area", "areas", "currency", "vat", "country", "name"}),
     "growatt_server": frozenset({"name", "plant_id", "url"}),
     "growatt": frozenset({"name", "plant_id", "url"}),
+    "solax_modbus": frozenset({"name"}),
+    "solax": frozenset({"name"}),
 }
 
 # Domains whose config entries are captured in the WS discovery dump.
-_WS_TARGET_DOMAINS = frozenset({"nordpool", "growatt", "growatt_server"})
+_WS_TARGET_DOMAINS = frozenset(
+    {"nordpool", "growatt", "growatt_server", "solax_modbus", "solax"}
+)
+
+# Domains whose entities are captured from the entity registry.
+_ENTITY_REGISTRY_DOMAINS = frozenset(
+    {"growatt_server", "solax_modbus", "solax", "nordpool"}
+)
+
+# Keywords matched against entity_id and unique_id to capture entities
+# that belong to BESS-relevant integrations even if they register under
+# an unexpected platform name.
+_ENTITY_REGISTRY_KEYWORDS = ("growatt", "solax", "nordpool")
+
+# Entity registry fields that are useful for debugging discovery and
+# sensor mapping. unique_id is redacted (last-4) since it often contains
+# the hub name or serial number.
+_ENTITY_REGISTRY_FIELDS = (
+    "entity_id",
+    "unique_id",
+    "platform",
+    "device_id",
+    "original_name",
+    "disabled_by",
+    "hidden_by",
+    "capabilities",
+    "entity_category",
+)
 
 
 def _is_secret_key(key: str) -> bool:
@@ -130,6 +159,20 @@ def _redact_identifiers(identifiers: Any) -> list:
     return out
 
 
+def _collect_device_serials(devices: list) -> set[str]:
+    """Extract raw identifier values (serials, MACs) from device registry entries."""
+    serials: set[str] = set()
+    for d in devices:
+        if not isinstance(d, dict):
+            continue
+        for ident in d.get("identifiers") or []:
+            if isinstance(ident, list | tuple) and len(ident) == 2:
+                val = str(ident[1])
+                if len(val) >= 4:
+                    serials.add(val)
+    return serials
+
+
 def _scrub_config_entry(entry: dict) -> dict:
     """Filter a HA config entry to a minimal, secret-free shape.
 
@@ -152,7 +195,7 @@ def _scrub_config_entry(entry: dict) -> dict:
         {
             "entry_id": entry.get("entry_id"),
             "domain": entry.get("domain"),
-            "title": entry.get("title"),
+            "title": "***",
             "state": entry.get("state"),
             "version": entry.get("version"),
             "options": _filter(entry.get("options", {})),
@@ -170,6 +213,39 @@ def _scrub_device(device: dict) -> dict:
         "model": device.get("model"),
         "identifiers": _redact_identifiers(device.get("identifiers")),
     }
+
+
+def _scrub_entity_registry_entry(
+    entity: dict, device_serials: set[str] | None = None
+) -> dict:
+    """Filter an entity registry entry, redacting the unique_id.
+
+    The unique_id often contains a device serial or hub name as a prefix
+    (e.g. ``KMN0DYP037-tlx_battery_1_charge_w``).  We replace known
+    serials with ``***`` so the separator and key are preserved — making
+    the output directly usable for building test scenario ``unique_id``
+    values by plugging a serial back in.
+    """
+    raw_uid = str(entity.get("unique_id", ""))
+    redacted_uid = _redact_identifier_value(raw_uid) if raw_uid else ""
+
+    out: dict[str, Any] = {}
+    for field_name in _ENTITY_REGISTRY_FIELDS:
+        if field_name == "unique_id":
+            out["unique_id"] = redacted_uid
+            # Replace known serials with *** to preserve separator and key.
+            scrubbed = raw_uid
+            if device_serials:
+                for serial in device_serials:
+                    if serial in scrubbed:
+                        scrubbed = scrubbed.replace(serial, "***")
+                        break
+            out["unique_id_suffix"] = scrubbed
+        else:
+            val = entity.get(field_name)
+            if val is not None:
+                out[field_name] = val
+    return out
 
 
 # Patterns that identify actionable log lines worth including in compact exports.
@@ -224,13 +300,20 @@ class DebugDataExport:
 class DebugDataAggregator:
     """Aggregates all system data for debug export."""
 
-    def __init__(self, system: BatterySystemManager):
+    def __init__(
+        self,
+        system: BatterySystemManager,
+        settings_data: dict | None = None,
+    ):
         """Initialize aggregator with system manager.
 
         Args:
             system: BatterySystemManager instance to export data from
+            settings_data: Full settings store data for debug export.
+                If None, addon_options in the export will be empty.
         """
         self.system = system
+        self._settings_data = settings_data or {}
         self._start_time = datetime.now()
 
     def aggregate_all_data(self, compact: bool = True) -> DebugDataExport:
@@ -356,7 +439,11 @@ class DebugDataAggregator:
         Returns:
             Energy provider config as dictionary
         """
-        return self.system._energy_provider_config
+        try:
+            return self.system._energy_provider_config
+        except Exception as e:
+            logger.warning("Failed to serialize energy provider config: %s", e)
+            return {}
 
     def _serialize_battery_settings(self) -> dict:
         """Serialize battery settings to dictionary.
@@ -364,7 +451,11 @@ class DebugDataAggregator:
         Returns:
             Battery settings as dictionary
         """
-        return asdict(self.system.battery_settings)
+        try:
+            return asdict(self.system.battery_settings)
+        except Exception as e:
+            logger.warning("Failed to serialize battery settings: %s", e)
+            return {}
 
     def _serialize_price_settings(self) -> dict:
         """Serialize price settings to dictionary.
@@ -372,7 +463,11 @@ class DebugDataAggregator:
         Returns:
             Price settings as dictionary
         """
-        return asdict(self.system.price_settings)
+        try:
+            return asdict(self.system.price_settings)
+        except Exception as e:
+            logger.warning("Failed to serialize price settings: %s", e)
+            return {}
 
     def _serialize_price_data(self) -> dict:
         """Serialize full-day raw prices for today and tomorrow.
@@ -397,23 +492,27 @@ class DebugDataAggregator:
         Returns:
             Home settings as dictionary
         """
-        return asdict(self.system.home_settings)
+        try:
+            return asdict(self.system.home_settings)
+        except Exception as e:
+            logger.warning("Failed to serialize home settings: %s", e)
+            return {}
 
     def _serialize_addon_options(self) -> dict:
-        """Serialize addon options (entity ID mappings, inverter config).
+        """Serialize settings data (entity ID mappings, inverter config).
 
-        This is the complete options.json loaded at startup — includes sensor entity
-        IDs, battery settings, price config, and inverter device ID. Used by
-        from_debug_log.py to auto-generate bess_config for mock HA replay.
+        Includes sensor entity IDs, battery settings, price config, and
+        inverter device ID. Used by from_debug_log.py to auto-generate
+        bess_config for mock HA replay.
 
-        InfluxDB username and password are stripped — URL is retained for diagnosing
-        connection issues.
+        InfluxDB username and password are stripped — URL is retained for
+        diagnosing connection issues.
 
         Returns:
-            Addon options dict as loaded from options.json, with credentials redacted
+            Settings dict with credentials redacted.
         """
         try:
-            options = dict(self.system._addon_options)
+            options = dict(self._settings_data)
             if "influxdb" in options:
                 influxdb = dict(options["influxdb"])
                 influxdb.pop("username", None)
@@ -432,9 +531,10 @@ class DebugDataAggregator:
         #91, where SE3 users get SE4) require seeing the actual config-entry
         shape that HA returns, because BESS has no other way to learn it.
 
-        Captures only nordpool/growatt config entries and growatt-tagged
-        devices; scrubs secrets via key-name pattern and per-domain data
-        allowlist; redacts device identifiers to last-4 of any serial/MAC.
+        Captures config entries, device registry, services, and entity
+        registry for all BESS-relevant domains (growatt, solax, nordpool).
+        Scrubs secrets via key-name pattern and per-domain data allowlist;
+        redacts device identifiers and entity unique_ids.
         """
         controller = self.system._controller
         if controller is None:
@@ -446,6 +546,7 @@ class DebugDataAggregator:
                     {"type": "config_entries/get"},
                     {"type": "config/device_registry/list"},
                     {"type": "get_services"},
+                    {"type": "config/entity_registry/list"},
                 ]
             )
         except Exception as e:
@@ -455,27 +556,63 @@ class DebugDataAggregator:
         config_entries_raw = results[0] if len(results) > 0 else []
         devices_raw = results[1] if len(results) > 1 else []
         services_raw = results[2] if len(results) > 2 else {}
+        entity_registry_raw = results[3] if len(results) > 3 else []
 
         config_entries = [
             _scrub_config_entry(e)
             for e in config_entries_raw
-            if isinstance(e, dict) and e.get("domain") in _WS_TARGET_DOMAINS
+            if isinstance(e, dict)
+            and (
+                e.get("domain") in _WS_TARGET_DOMAINS
+                or any(
+                    kw in str(e.get("domain", "")).lower()
+                    or kw in str(e.get("title", "")).lower()
+                    for kw in _ENTITY_REGISTRY_KEYWORDS
+                )
+            )
         ]
+
+        # Collect raw serials from device identifiers before scrubbing,
+        # so we can replace them in unique_ids to preserve the full key format.
+        device_serials = _collect_device_serials(devices_raw)
 
         devices: list[dict] = []
         for d in devices_raw:
             if not isinstance(d, dict):
                 continue
             ident_str = json.dumps(d.get("identifiers", [])).lower()
-            if "growatt" in ident_str:
+            if "growatt" in ident_str or "solax" in ident_str:
                 devices.append(_scrub_device(d))
 
         services: dict[str, list[str]] = {}
         if isinstance(services_raw, dict):
-            for domain in ("nordpool", "growatt", "growatt_server"):
-                domain_svcs = services_raw.get(domain)
-                if isinstance(domain_svcs, dict):
-                    services[domain] = sorted(domain_svcs.keys())
+            for domain in sorted(services_raw.keys()):
+                if domain in _WS_TARGET_DOMAINS or any(
+                    kw in domain.lower() for kw in _ENTITY_REGISTRY_KEYWORDS
+                ):
+                    domain_svcs = services_raw[domain]
+                    if isinstance(domain_svcs, dict):
+                        services[domain] = sorted(domain_svcs.keys())
+
+        # Entity registry: capture entities by known platform OR by keyword
+        # match in entity_id/unique_id.  This catches entities that register
+        # under an unexpected platform name (e.g. a solax_modbus variant).
+        entity_registry: list[dict] = []
+        for entity in entity_registry_raw:
+            if not isinstance(entity, dict):
+                continue
+            if entity.get("platform") in _ENTITY_REGISTRY_DOMAINS:
+                entity_registry.append(
+                    _scrub_entity_registry_entry(entity, device_serials)
+                )
+            else:
+                # Keyword fallback: check entity_id and unique_id
+                eid = str(entity.get("entity_id", "")).lower()
+                uid = str(entity.get("unique_id", "")).lower()
+                if any(kw in eid or kw in uid for kw in _ENTITY_REGISTRY_KEYWORDS):
+                    entity_registry.append(
+                        _scrub_entity_registry_entry(entity, device_serials)
+                    )
 
         try:
             resolved = controller.discover_ha_metadata(device_sn=None)
@@ -486,6 +623,7 @@ class DebugDataAggregator:
             "config_entries": config_entries,
             "devices": devices,
             "services": services,
+            "entity_registry": entity_registry,
             "resolved": resolved,
         }
 
@@ -541,8 +679,8 @@ class DebugDataAggregator:
         config = self.system._energy_provider_config
         provider = config["provider"]
 
-        if provider == "nordpool":
-            nordpool_cfg = config["nordpool"]
+        if provider == "nordpool_hacs":
+            nordpool_cfg = config["nordpool_hacs"]
             entity_id = nordpool_cfg.get("entity")
             if entity_id:
                 try:
@@ -593,7 +731,7 @@ class DebugDataAggregator:
             List of TOU segment dicts as held in active_tou_intervals
         """
         try:
-            return list(self.system._schedule_manager.active_tou_intervals)
+            return list(self.system._inverter_controller.active_tou_intervals)
         except Exception as e:
             logger.warning("Failed to serialize inverter TOU segments: %s", e)
             return []

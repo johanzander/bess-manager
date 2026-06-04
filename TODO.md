@@ -9,6 +9,21 @@
 
 **Description**: Discharge power seems to always be 100% leading to higher export than intended during EXPORT_ARBITRAGE operations.
 
+### **Charging power rate setting has no effect**
+
+**Impact**: Medium | **Effort**: Medium | **Dependencies**: `inverter_controller.py`, `battery_system_manager.py`, `power_monitor.py`
+
+**Description**: The `charging_power_rate` setting (default 40%) is overridden every cycle by `adjust_charging_power()`, which reads `charge_rate` from `INTENT_TO_CONTROL` — always 0 or 100. The configured value is only used as the initial `target_charging_power_pct` in `HomePowerMonitor`, but is immediately overwritten by the first `adjust_charging_power()` call. This affects all platforms.
+
+**User-reported symptom**: Log shows "charging power 40%" but the inverter always charges at 100%.
+
+**Options to consider**:
+1. Remove the setting entirely if per-intent 0/100 is the intended design (and update UI to not show a configurable value)
+2. Use the setting as an actual cap: `charge_rate = min(intent_charge_rate, configured_rate)`
+3. Make `INTENT_TO_CONTROL` use the configured rate instead of hardcoded 100 for charging intents
+
+**Files**: `core/bess/inverter_controller.py` (lines 33-47), `core/bess/battery_system_manager.py` (lines 2538-2548), `core/bess/power_monitor.py` (line 67), `core/bess/settings.py` (line 54)
+
 ## 🟡 **HIGH PRIORITY** (Core Functionality)
 
 ### **Add SolaX Modbus inverter support**
@@ -236,7 +251,40 @@ But at noon every day we get tomorrows schedule. We could use this information t
 
 **Resolution**: The DP optimizer now considers up to 192 periods (2 days) when tomorrow's prices are available (PR #21). Dashboard charts (PR #22) and inverter schedule overview (PR #23) display the extended horizon. TOU deployment remains today-only due to Growatt hardware limitations.
 
+### **Make ha_statistics consumption forecast work on all platforms**
+
+**Impact**: Medium | **Effort**: Medium | **Dependencies**: `battery_system_manager.py`, `ha_api_controller.py`
+
+**Description**: The `ha_statistics` consumption forecast strategy currently requires a native `lifetime_load_consumption` HA entity to query HA Recorder statistics. Platforms without this entity (GEN4 Growatt Modbus, SolaX Native) fall back to the `fixed` profile, losing the time-of-day shaped consumption forecast.
+
+**Fix**: Instead of querying a single load consumption entity, query the 3 universal sensors (`lifetime_solar_energy`, `lifetime_import_from_grid`, `lifetime_export_to_grid`) and derive load per hour: `load = solar_change + import_change - export_change`. Same physics, works on every platform.
+
+**Files**: `core/bess/battery_system_manager.py` (`_get_ha_statistics_forecast`)
+
+### **Suppress retry warnings for expected Nordpool "tomorrow not available" responses**
+
+**Impact**: Low | **Effort**: Low | **Dependencies**: `official_nordpool_source.py`, `ha_api_controller.py`
+
+**Description**: The Nordpool integration returns HTTP 500 when tomorrow's prices aren't published yet (typically before ~13:00 CET). `_api_request` logs a WARNING on each retry attempt, producing misleading warnings every optimization cycle overnight (00:00–12:00). The retry eventually fails, but `get_combined_prices()` in `price_manager.py` handles this gracefully — it catches the exception and falls back to today-only prices with an INFO log. The warnings are harmless but noisy and can alarm users reading logs.
+
+**Options**:
+1. Have `official_nordpool_source.py` catch the 500 for tomorrow and raise a specific "not available yet" exception that `_api_request` doesn't retry
+2. Add a `suppress_retry_warnings=True` param to `_api_request` for expected-failure calls
+3. Accept the noise as-is (log-level only, no UI banners)
+
+**Files**: `core/bess/official_nordpool_source.py`, `core/bess/ha_api_controller.py`, `core/bess/price_manager.py`
+
 ## 🔵 **ROBUSTNESS IMPROVEMENTS** (System Observability)
+
+### **Retry discovery on startup when HA WebSocket is not ready**
+
+**Impact**: High | **Effort**: Low | **Dependencies**: `ha_api_controller.py`, `battery_system_manager.py`
+
+**Description**: BESS Manager starts as an HA add-on and can launch before HA's WebSocket API is fully ready. When the initial `discover_integrations()` WS connection fails during early boot, `nordpool_config_entry_id` stays None and the system enters degraded mode with no price data — even though HA becomes ready seconds later. Observed on Niklas's system (b18, 2026-05-26): WS failed at 05:08 (4 min after boot), but by 05:45 discovery worked fine.
+
+**Fix**: Re-attempt discovery with short backoff (e.g. 5s, 10s, 20s) until `config_entry_id` is populated or a max number of retries is reached.
+
+---
 
 ### ~~**Complete or Remove EV Energy Meter Integration**~~ ✅ Completed (v8.0.0)
 
@@ -408,6 +456,22 @@ This would make the profitability gate compare apples-to-apples with the dashboa
 
 ## 🔧 **TECHNICAL DEBT**
 
+### Move inverter-specific logic out of BatterySystemManager
+
+**Impact**: Low | **Effort**: Medium | **Dependencies**: `InverterController` base class
+
+**Description**: `BatterySystemManager` contains platform-specific checks like `if self.inverter_platform == "solax": return` in `adjust_charging_power()`. This logic belongs in the inverter controller layer — each controller should implement (or no-op) methods via the `InverterController` interface, so `BatterySystemManager` never branches on platform strings.
+
+**Examples**:
+
+- `adjust_charging_power()` — no-op for SolaX, active for Growatt
+- `grid_charge_enabled()` in `ha_api_controller.py` — not applicable to SolaX, logs a spurious WARNING
+
+**Files**: `core/bess/battery_system_manager.py`, `core/bess/inverter_controller.py`, `core/bess/solax_controller.py`, `core/bess/ha_api_controller.py`
+
+---
+
+
 ### Simplify Health Check Severity Model
 
 **Impact**: Low | **Effort**: Low-Medium | **Dependencies**: `health_check.py`, `power_monitor.py`, all callers of `perform_health_check()`
@@ -467,6 +531,44 @@ This eliminates the `required_methods` parameter entirely and makes the policy s
 ### ~~Hardcoded Fallback Values Violating CLAUDE.md~~ ✅ Completed (v8.2.1)
 
 **Resolution**: All `hasattr` guards and hardcoded fallback values removed from `api.py`. System now accesses `battery_settings`, `controller`, `price_manager`, `_schedule_manager`, and `has_critical_sensor_failures` directly. Added `_get_intent_description()` to `SphScheduleManager` to eliminate polymorphism-related `hasattr`.
+
+### Upstream PR: growatt_server should register services per device type
+
+**Impact**: Medium | **Effort**: Low | **Dependencies**: HA core `homeassistant/components/growatt_server/services.py`
+
+**Description**: The HA `growatt_server` integration unconditionally registers all 6 services (`update_time_segment`, `read_time_segments`, `write_ac_charge_times`, `read_ac_charge_times`, `write_ac_discharge_times`, `read_ac_discharge_times`) regardless of inverter type. At runtime the handlers check `device_type` and fail with "no devices configured" if the wrong type is called. This prevents external tools (like BESS) from using the service list to distinguish MIN from SPH.
+
+**Proposed upstream fix**: Only register `update_time_segment`/`read_time_segments` when a MIN coordinator exists, and `write_ac_charge_times`/`read_ac_charge_times`/`write_ac_discharge_times`/`read_ac_discharge_times` when an SPH coordinator exists. This is a small change in `async_setup_services()`.
+
+**After upstream fix lands**: Update our detection in `discover_ha_metadata()` to use services again (more robust than the current entity-registry `ac_charge` switch heuristic, which breaks if the user deletes the entity or if the HA integration changes entity creation).
+
+**Current workaround**: We detect MIN vs SPH by checking if a `growatt_server` entity with unique_id ending in `-ac_charge` exists in the entity registry (MIN creates `switch.*_ac_charge`, SPH does not).
+
+---
+
+### Remove non-required derived sensors from discovery and config
+
+**Impact**: Low | **Effort**: Low | **Dependencies**: `ha_api_controller.py`, `sensorDefinitions.ts`
+
+**Description**: Several sensors are discovered and stored in `bess_settings.json` but are never consumed — they are always derived from the 5 core energy sensors by `EnergyFlowCalculator`:
+
+- `lifetime_system_production` (mapped from `total_yield`) — derived as `solar_production` when missing
+- `lifetime_self_consumption` — derived as `load - import` when missing
+- `lifetime_load_consumption` — derived as `solar + import - export` when missing
+
+These sensors remain in `ENTITY_SUFFIX_MAP` / `SOLAX_ENTITY_SUFFIX_MAP`, get discovered, appear in the wizard sensor list, and are saved to config, but nothing reads them at runtime. Remove them from the suffix maps and `sensorDefinitions.ts` to reduce wizard clutter and avoid confusion about which sensors actually matter.
+
+**Files**: `core/bess/ha_api_controller.py` (`ENTITY_SUFFIX_MAP`, `SOLAX_ENTITY_SUFFIX_MAP`), `frontend/src/lib/sensorDefinitions.ts`
+
+---
+
+### Clean up `ENTITY_SUFFIX_MAP` dead entries
+
+**Impact**: Low | **Effort**: Low | **Dependencies**: `ha_api_controller.py`
+
+**Description**: `ENTITY_SUFFIX_MAP` contains `battery_discharge_soc_limit_on_grid` which never matches any real `unique_id` suffix. The actual `growatt_server` unique_id for this entity uses the shorter suffix `soc_limit_on_grid` (added separately). Audit the full suffix map for other entries that exist only because they matched entity_id patterns but have no corresponding unique_id in any real integration. Discovery matches exclusively on `unique_id` via `_map_registry_entities`, so entity_id-shaped suffixes are dead code.
+
+**Files**: `core/bess/ha_api_controller.py` (`ENTITY_SUFFIX_MAP`, `SOLAX_ENTITY_SUFFIX_MAP`)
 
 ### Other Technical Debt
 

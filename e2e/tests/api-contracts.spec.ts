@@ -38,15 +38,20 @@ test.describe('API Contracts: /api/settings', () => {
     expect(battery.minSoc).toBeLessThanOrEqual(battery.maxSoc);
   });
 
-  test('sensors section maps keys to entity IDs', async ({ request }) => {
+  test('sensors section has per-platform structure', async ({ request }) => {
     const res = await request.get('/api/settings');
     const { sensors } = await res.json();
 
     expect(typeof sensors).toBe('object');
-    // At least battery_soc should be configured in the ci scenario
-    expect(sensors).toHaveProperty('battery_soc');
-    // All values should be entity ID strings or empty
-    for (const [key, value] of Object.entries(sensors)) {
+    // Per-platform structure has a platform key
+    expect(sensors).toHaveProperty('platform');
+    const platform = sensors.platform;
+    expect(typeof platform).toBe('string');
+    // The active platform sub-dict should contain battery_soc
+    const platformSensors = sensors[platform] ?? {};
+    expect(platformSensors).toHaveProperty('battery_soc');
+    // Platform sub-dict values should be entity ID strings
+    for (const [key, value] of Object.entries(platformSensors)) {
       expect(typeof key).toBe('string');
       expect(typeof value).toBe('string');
     }
@@ -331,20 +336,22 @@ test.describe('API Contracts: PATCH /api/settings', () => {
     // First get current sensors to restore later
     const before = await request.get('/api/settings');
     const originalSensors = (await before.json()).sensors;
+    const platform = originalSensors.platform;
 
+    // PATCH merges into the active platform sub-dict
     const res = await request.patch('/api/settings', {
-      data: { sensors: { battery_soc: 'sensor.test_battery_soc' } },
+      data: { sensors: { [platform]: { battery_soc: 'sensor.test_battery_soc' } } },
     });
     expect(res.status()).toBe(200);
 
-    // Verify it was persisted
+    // Verify it was persisted in the platform sub-dict
     const after = await request.get('/api/settings');
     const updated = (await after.json()).sensors;
-    expect(updated.battery_soc).toBe('sensor.test_battery_soc');
+    expect(updated[platform].battery_soc).toBe('sensor.test_battery_soc');
 
     // Restore original
     await request.patch('/api/settings', {
-      data: { sensors: { battery_soc: originalSensors.battery_soc } },
+      data: { sensors: { [platform]: { battery_soc: originalSensors[platform].battery_soc } } },
     });
   });
 

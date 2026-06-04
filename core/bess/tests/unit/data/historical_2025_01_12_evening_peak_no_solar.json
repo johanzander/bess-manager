@@ -97,6 +97,12 @@
     "total_charged": 26.8,
     "total_discharged": 26.8
   },
+  "price_data": {
+    "markup_rate": 0.08,
+    "vat_multiplier": 1.25,
+    "additional_costs": 1.03,
+    "tax_reduction": 0.0
+  },
   "expected_behavior": {
     "description": "Evening peak without solar: grid-charge during off-peak, support load during evening peak",
     "intents_present": [

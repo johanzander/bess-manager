@@ -23,7 +23,7 @@ services:
   mock-ha:
     build: ./scripts/mock_ha
     ports:
-      - "8123:8123"
+      - "${BESS_MOCK_HA_PORT:-8123}:8123"
     volumes:
       - ./scripts/mock_ha/scenarios:/scenarios:ro
     environment:

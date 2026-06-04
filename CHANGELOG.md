@@ -4,6 +4,29 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.0.0] - 2026-06-04
+
+### Added
+
+- **SolaX inverter support** — native SolaX inverters now supported via the homeassistant-solax-modbus HACS integration, using VPP active-power commands for battery control. Setup wizard auto-detects SolaX entities and shows platform-specific sensor configuration.
+- **Growatt Local Modbus support** — Growatt MIN (GEN4) and SPH/MIX (GEN3) inverters can now be controlled locally via the solax_modbus HACS integration instead of the Growatt cloud API, providing faster response times and no cloud dependency.
+- **Single-segment TOU for Growatt Modbus** — replaces the 9-slot TOU approach with a single TOU segment updated per-period, reducing required HA entities from 45 to 5. Legacy TOU slots 2-9 are auto-migrated on startup.
+- **Failure tracking improvements** — recurring failures are coalesced with occurrence counts, inverter command failures are surfaced in the dashboard banner, and per-sensor failure categories auto-dismiss on recovery.
+- **Scenario-driven wizard tests** — setup wizard and discovery tests load from JSON scenario files covering all supported integration combinations.
+
+### Changed
+
+- **Energy flow derivation unified** — `EnergyFlowCalculator` derives `load_consumption`, `system_production`, and `self_consumption` from 5 core sensors on all platforms, eliminating zero values on platforms without dedicated registers.
+- **Multi-platform architecture** — inverter scheduling refactored into an `InverterController` base class with five platform-specific controllers: `growatt_server_min`, `growatt_server_sph`, `solax_modbus_growatt_min` (GEN4), `solax_modbus_growatt_sph` (GEN3), and `solax_modbus_native`. Runtime platform switching without restart.
+- **Entity-registry-based discovery** — sensor auto-detection now exclusively uses the HA entity registry via WebSocket API (unique_id + platform fields, both immutable), replacing fragile states-based discovery that broke when users renamed entities.
+- **Per-platform sensor storage** — sensor configuration is stored per-platform, so switching platforms in the wizard preserves previously entered sensor values.
+
+### Fixed
+
+- **Intent classification** — `classify_strategic_intent()` now checks `grid_to_battery > 0` directly instead of comparing grid import vs home consumption, fixing misclassification when solar partially covers home load.
+- **Nordpool area detection** — uses device registry identifiers instead of brittle entity unique_id parsing; discovery-detected area is no longer overwritten by stale settings.
+- **Hardware write retry** — failed schedule writes are retried on the next quarterly cycle instead of silently running with stale inverter settings.
+
 ## [8.7.0] - 2026-05-22
 
 ### Fixed

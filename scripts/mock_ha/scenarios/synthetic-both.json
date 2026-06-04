@@ -1,0 +1,3348 @@
+{
+  "name": "synthetic-both",
+  "description": "Combined Growatt SPH + SolaX scenario for testing wizard platform selection",
+  "mock_time": "@2026-04-24 12:00:00",
+  "timezone": "Europe/Stockholm",
+  "bess_config": {
+    "home": {
+      "default_hourly": 4.6,
+      "currency": "SEK",
+      "consumption_strategy": "fixed",
+      "max_fuse_current": 25,
+      "voltage": 230,
+      "safety_margin": 1,
+      "phase_count": 3,
+      "power_monitoring_enabled": false
+    },
+    "battery": {
+      "total_capacity": 10.0,
+      "min_soc": 10,
+      "max_soc": 100,
+      "max_charge_power_kw": 5.0,
+      "max_discharge_power_kw": 5.0,
+      "cycle_cost_per_kwh": 0.3,
+      "min_action_profit_threshold": 5.0,
+      "charging_power_rate": 100,
+      "efficiency_charge": 0.95,
+      "efficiency_discharge": 0.95
+    },
+    "electricity_price": {
+      "area": "SE4",
+      "vat_multiplier": 1.25,
+      "markup_rate": 0.1,
+      "additional_costs": 0.773,
+      "tax_reduction": 0.1988
+    },
+    "energy_provider": {
+      "provider": "nordpool_official",
+      "nordpool_official": {
+        "config_entry_id": "mock_nordpool_config_entry"
+      }
+    },
+    "inverter": {
+      "platform": "growatt_server_sph"
+    },
+    "growatt": {
+      "inverter_type": "growatt_server_sph",
+      "device_id": "mock_sph_device_id"
+    },
+    "sensors": {
+      "battery_soc": "sensor.sph10000_state_of_charge_soc",
+      "battery_charge_power": "sensor.sph10000_battery_1_charging_w",
+      "battery_discharge_power": "sensor.sph10000_battery_1_discharging_w",
+      "import_power": "sensor.sph10000_import_power",
+      "export_power": "sensor.sph10000_export_power",
+      "pv_power": "sensor.sph10000_internal_wattage",
+      "local_load_power": "sensor.sph10000_local_load_power",
+      "grid_charge": "switch.sph10000_charge_from_grid",
+      "battery_charging_power_rate": "number.sph10000_battery_charge_power_limit",
+      "battery_discharging_power_rate": "number.sph10000_battery_discharge_power_limit",
+      "battery_charge_stop_soc": "number.sph10000_battery_charge_soc_limit",
+      "battery_discharge_stop_soc": "number.sph10000_battery_discharge_soc_limit",
+      "lifetime_battery_charged": "sensor.sph10000_lifetime_total_all_batteries_charged",
+      "lifetime_battery_discharged": "sensor.sph10000_lifetime_total_all_batteries_discharged",
+      "lifetime_solar_energy": "sensor.sph10000_lifetime_total_solar_energy",
+      "lifetime_import_from_grid": "sensor.sph10000_lifetime_import_from_grid",
+      "lifetime_export_to_grid": "sensor.sph10000_lifetime_total_export_to_grid",
+      "lifetime_load_consumption": "sensor.sph10000_lifetime_total_load_consumption",
+      "lifetime_system_production": "sensor.sph10000_lifetime_system_production",
+      "lifetime_self_consumption": "sensor.sph10000_lifetime_self_consumption",
+      "current_l1": "sensor.current_l1",
+      "current_l2": "sensor.current_l2",
+      "current_l3": "sensor.current_l3",
+      "48h_avg_grid_import": "sensor.48h_average_grid_import_power",
+      "solar_forecast_today": "sensor.solcast_pv_forecast_forecast_today",
+      "solar_forecast_tomorrow": "sensor.solcast_pv_forecast_forecast_tomorrow"
+    }
+  },
+  "sensors": {
+    "sensor.sph10000_state_of_charge_soc": {
+      "state": "72",
+      "attributes": {
+        "unit_of_measurement": "%"
+      }
+    },
+    "sensor.sph10000_battery_1_charging_w": {
+      "state": "0",
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
+    },
+    "sensor.sph10000_battery_1_discharging_w": {
+      "state": "1500",
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
+    },
+    "sensor.sph10000_import_power": {
+      "state": "2000",
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
+    },
+    "sensor.sph10000_export_power": {
+      "state": "0",
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
+    },
+    "sensor.sph10000_local_load_power": {
+      "state": "3500",
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
+    },
+    "sensor.sph10000_internal_wattage": {
+      "state": "1500",
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
+    },
+    "number.sph10000_battery_charge_power_limit": {
+      "state": "100",
+      "attributes": {
+        "unit_of_measurement": "%"
+      }
+    },
+    "number.sph10000_battery_discharge_power_limit": {
+      "state": "100",
+      "attributes": {
+        "unit_of_measurement": "%"
+      }
+    },
+    "number.sph10000_battery_charge_soc_limit": {
+      "state": "100",
+      "attributes": {
+        "unit_of_measurement": "%"
+      }
+    },
+    "number.sph10000_battery_discharge_soc_limit": {
+      "state": "10",
+      "attributes": {
+        "unit_of_measurement": "%"
+      }
+    },
+    "switch.sph10000_charge_from_grid": {
+      "state": "off",
+      "attributes": {}
+    },
+    "sensor.sph10000_lifetime_total_all_batteries_charged": {
+      "state": "2000",
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
+    },
+    "sensor.sph10000_lifetime_total_all_batteries_discharged": {
+      "state": "1800",
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
+    },
+    "sensor.sph10000_lifetime_total_solar_energy": {
+      "state": "8000",
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
+    },
+    "sensor.sph10000_lifetime_total_export_to_grid": {
+      "state": "3000",
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
+    },
+    "sensor.sph10000_lifetime_import_from_grid": {
+      "state": "4000",
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
+    },
+    "sensor.sph10000_lifetime_total_load_consumption": {
+      "state": "9000",
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
+    },
+    "sensor.sph10000_lifetime_system_production": {
+      "state": "8000",
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
+    },
+    "sensor.sph10000_lifetime_self_consumption": {
+      "state": "5000",
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
+    },
+    "sensor.nordpool_kwh_se4_sek_2_10_025": {
+      "state": "0.85",
+      "attributes": {
+        "unit_of_measurement": "SEK/kWh",
+        "price_area": "SE4"
+      }
+    },
+    "sensor.solcast_pv_forecast_forecast_today": {
+      "state": "8.5",
+      "attributes": {
+        "unit_of_measurement": "kWh",
+        "detailedHourly": [
+          {
+            "period_start": "2026-04-24T00:00:00+02:00",
+            "pv_estimate": 0.0
+          },
+          {
+            "period_start": "2026-04-24T01:00:00+02:00",
+            "pv_estimate": 0.0
+          },
+          {
+            "period_start": "2026-04-24T02:00:00+02:00",
+            "pv_estimate": 0.0
+          },
+          {
+            "period_start": "2026-04-24T03:00:00+02:00",
+            "pv_estimate": 0.0
+          },
+          {
+            "period_start": "2026-04-24T04:00:00+02:00",
+            "pv_estimate": 0.0
+          },
+          {
+            "period_start": "2026-04-24T05:00:00+02:00",
+            "pv_estimate": 0.1
+          },
+          {
+            "period_start": "2026-04-24T06:00:00+02:00",
+            "pv_estimate": 0.5
+          },
+          {
+            "period_start": "2026-04-24T07:00:00+02:00",
+            "pv_estimate": 1.2
+          },
+          {
+            "period_start": "2026-04-24T08:00:00+02:00",
+            "pv_estimate": 2.0
+          },
+          {
+            "period_start": "2026-04-24T09:00:00+02:00",
+            "pv_estimate": 2.8
+          },
+          {
+            "period_start": "2026-04-24T10:00:00+02:00",
+            "pv_estimate": 3.2
+          },
+          {
+            "period_start": "2026-04-24T11:00:00+02:00",
+            "pv_estimate": 3.5
+          },
+          {
+            "period_start": "2026-04-24T12:00:00+02:00",
+            "pv_estimate": 3.5
+          },
+          {
+            "period_start": "2026-04-24T13:00:00+02:00",
+            "pv_estimate": 3.2
+          },
+          {
+            "period_start": "2026-04-24T14:00:00+02:00",
+            "pv_estimate": 2.8
+          },
+          {
+            "period_start": "2026-04-24T15:00:00+02:00",
+            "pv_estimate": 2.0
+          },
+          {
+            "period_start": "2026-04-24T16:00:00+02:00",
+            "pv_estimate": 1.2
+          },
+          {
+            "period_start": "2026-04-24T17:00:00+02:00",
+            "pv_estimate": 0.5
+          },
+          {
+            "period_start": "2026-04-24T18:00:00+02:00",
+            "pv_estimate": 0.1
+          },
+          {
+            "period_start": "2026-04-24T19:00:00+02:00",
+            "pv_estimate": 0.0
+          },
+          {
+            "period_start": "2026-04-24T20:00:00+02:00",
+            "pv_estimate": 0.0
+          },
+          {
+            "period_start": "2026-04-24T21:00:00+02:00",
+            "pv_estimate": 0.0
+          },
+          {
+            "period_start": "2026-04-24T22:00:00+02:00",
+            "pv_estimate": 0.0
+          },
+          {
+            "period_start": "2026-04-24T23:00:00+02:00",
+            "pv_estimate": 0.0
+          }
+        ]
+      }
+    },
+    "sensor.solcast_pv_forecast_forecast_tomorrow": {
+      "state": "9.2",
+      "attributes": {
+        "unit_of_measurement": "kWh",
+        "detailedHourly": [
+          {
+            "period_start": "2026-04-25T00:00:00+02:00",
+            "pv_estimate": 0.0
+          },
+          {
+            "period_start": "2026-04-25T01:00:00+02:00",
+            "pv_estimate": 0.0
+          },
+          {
+            "period_start": "2026-04-25T02:00:00+02:00",
+            "pv_estimate": 0.0
+          },
+          {
+            "period_start": "2026-04-25T03:00:00+02:00",
+            "pv_estimate": 0.0
+          },
+          {
+            "period_start": "2026-04-25T04:00:00+02:00",
+            "pv_estimate": 0.0
+          },
+          {
+            "period_start": "2026-04-25T05:00:00+02:00",
+            "pv_estimate": 0.1
+          },
+          {
+            "period_start": "2026-04-25T06:00:00+02:00",
+            "pv_estimate": 0.6
+          },
+          {
+            "period_start": "2026-04-25T07:00:00+02:00",
+            "pv_estimate": 1.3
+          },
+          {
+            "period_start": "2026-04-25T08:00:00+02:00",
+            "pv_estimate": 2.1
+          },
+          {
+            "period_start": "2026-04-25T09:00:00+02:00",
+            "pv_estimate": 2.9
+          },
+          {
+            "period_start": "2026-04-25T10:00:00+02:00",
+            "pv_estimate": 3.3
+          },
+          {
+            "period_start": "2026-04-25T11:00:00+02:00",
+            "pv_estimate": 3.6
+          },
+          {
+            "period_start": "2026-04-25T12:00:00+02:00",
+            "pv_estimate": 3.6
+          },
+          {
+            "period_start": "2026-04-25T13:00:00+02:00",
+            "pv_estimate": 3.3
+          },
+          {
+            "period_start": "2026-04-25T14:00:00+02:00",
+            "pv_estimate": 2.9
+          },
+          {
+            "period_start": "2026-04-25T15:00:00+02:00",
+            "pv_estimate": 2.1
+          },
+          {
+            "period_start": "2026-04-25T16:00:00+02:00",
+            "pv_estimate": 1.3
+          },
+          {
+            "period_start": "2026-04-25T17:00:00+02:00",
+            "pv_estimate": 0.6
+          },
+          {
+            "period_start": "2026-04-25T18:00:00+02:00",
+            "pv_estimate": 0.1
+          },
+          {
+            "period_start": "2026-04-25T19:00:00+02:00",
+            "pv_estimate": 0.0
+          },
+          {
+            "period_start": "2026-04-25T20:00:00+02:00",
+            "pv_estimate": 0.0
+          },
+          {
+            "period_start": "2026-04-25T21:00:00+02:00",
+            "pv_estimate": 0.0
+          },
+          {
+            "period_start": "2026-04-25T22:00:00+02:00",
+            "pv_estimate": 0.0
+          },
+          {
+            "period_start": "2026-04-25T23:00:00+02:00",
+            "pv_estimate": 0.0
+          }
+        ]
+      }
+    },
+    "sensor.current_l1": {
+      "state": "8.0",
+      "attributes": {
+        "unit_of_measurement": "A"
+      }
+    },
+    "sensor.current_l2": {
+      "state": "6.0",
+      "attributes": {
+        "unit_of_measurement": "A"
+      }
+    },
+    "sensor.current_l3": {
+      "state": "10.0",
+      "attributes": {
+        "unit_of_measurement": "A"
+      }
+    },
+    "sensor.48h_average_grid_import_power": {
+      "state": "4600",
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
+    },
+    "sensor.solax_battery_capacity": {
+      "state": "65",
+      "attributes": {
+        "unit_of_measurement": "%"
+      }
+    },
+    "sensor.solax_battery_power_charge": {
+      "state": "0",
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
+    },
+    "sensor.solax_battery_power_discharge": {
+      "state": "800",
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
+    },
+    "sensor.solax_measured_power": {
+      "state": "1200",
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
+    },
+    "sensor.solax_grid_export": {
+      "state": "0",
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
+    },
+    "sensor.solax_grid_import": {
+      "state": "1200",
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
+    },
+    "sensor.solax_pv_power_1": {
+      "state": "3200",
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
+    },
+    "sensor.solax_house_load": {
+      "state": "4000",
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
+    },
+    "sensor.solax_battery_input_energy_total": {
+      "state": "1500",
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
+    },
+    "sensor.solax_battery_output_energy_total": {
+      "state": "1400",
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
+    },
+    "sensor.solax_total_solar_energy": {
+      "state": "5000",
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
+    },
+    "sensor.solax_grid_import_total": {
+      "state": "3000",
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
+    },
+    "sensor.solax_grid_export_total": {
+      "state": "2000",
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
+    },
+    "sensor.solax_home_consumption_energy": {
+      "state": "6000",
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
+    },
+    "sensor.solax_total_yield": {
+      "state": "5000",
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
+    },
+    "select.solax_remotecontrol_power_control": {
+      "state": "Disabled",
+      "attributes": {
+        "options": [
+          "Disabled",
+          "Enabled Battery Control"
+        ]
+      }
+    },
+    "number.solax_remotecontrol_active_power": {
+      "state": "0",
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
+    },
+    "number.solax_remotecontrol_autorepeat_duration": {
+      "state": "0",
+      "attributes": {
+        "unit_of_measurement": "s"
+      }
+    },
+    "button.solax_remotecontrol_trigger": {
+      "state": "unknown",
+      "attributes": {}
+    },
+    "number.solax_battery_minimum_capacity": {
+      "state": "10",
+      "attributes": {
+        "unit_of_measurement": "%"
+      }
+    },
+    "select.solax_charger_use_mode": {
+      "state": "Self Use Mode",
+      "attributes": {}
+    }
+  },
+  "entity_registry": [
+    {
+      "entity_id": "sensor.sph10000_state_of_charge_soc",
+      "platform": "growatt_server",
+      "unique_id": "sensor_sph10000_state_of_charge_soc"
+    },
+    {
+      "entity_id": "sensor.sph10000_battery_1_charging_w",
+      "platform": "growatt_server",
+      "unique_id": "sensor_sph10000_battery_1_charging_w"
+    },
+    {
+      "entity_id": "sensor.sph10000_battery_1_discharging_w",
+      "platform": "growatt_server",
+      "unique_id": "sensor_sph10000_battery_1_discharging_w"
+    },
+    {
+      "entity_id": "sensor.sph10000_import_power",
+      "platform": "growatt_server",
+      "unique_id": "sensor_sph10000_import_power"
+    },
+    {
+      "entity_id": "sensor.sph10000_export_power",
+      "platform": "growatt_server",
+      "unique_id": "sensor_sph10000_export_power"
+    },
+    {
+      "entity_id": "sensor.sph10000_local_load_power",
+      "platform": "growatt_server",
+      "unique_id": "sensor_sph10000_local_load_power"
+    },
+    {
+      "entity_id": "sensor.sph10000_internal_wattage",
+      "platform": "growatt_server",
+      "unique_id": "sensor_sph10000_internal_wattage"
+    },
+    {
+      "entity_id": "number.sph10000_battery_charge_power_limit",
+      "platform": "growatt_server",
+      "unique_id": "number_sph10000_battery_charge_power_limit"
+    },
+    {
+      "entity_id": "number.sph10000_battery_discharge_power_limit",
+      "platform": "growatt_server",
+      "unique_id": "number_sph10000_battery_discharge_power_limit"
+    },
+    {
+      "entity_id": "number.sph10000_battery_charge_soc_limit",
+      "platform": "growatt_server",
+      "unique_id": "number_sph10000_battery_charge_soc_limit"
+    },
+    {
+      "entity_id": "number.sph10000_battery_discharge_soc_limit",
+      "platform": "growatt_server",
+      "unique_id": "number_sph10000_battery_discharge_soc_limit"
+    },
+    {
+      "entity_id": "switch.sph10000_charge_from_grid",
+      "platform": "growatt_server",
+      "unique_id": "switch_sph10000_charge_from_grid"
+    },
+    {
+      "entity_id": "sensor.sph10000_lifetime_total_all_batteries_charged",
+      "platform": "growatt_server",
+      "unique_id": "sensor_sph10000_lifetime_total_all_batteries_charged"
+    },
+    {
+      "entity_id": "sensor.sph10000_lifetime_total_all_batteries_discharged",
+      "platform": "growatt_server",
+      "unique_id": "sensor_sph10000_lifetime_total_all_batteries_discharged"
+    },
+    {
+      "entity_id": "sensor.sph10000_lifetime_total_solar_energy",
+      "platform": "growatt_server",
+      "unique_id": "sensor_sph10000_lifetime_total_solar_energy"
+    },
+    {
+      "entity_id": "sensor.sph10000_lifetime_total_export_to_grid",
+      "platform": "growatt_server",
+      "unique_id": "sensor_sph10000_lifetime_total_export_to_grid"
+    },
+    {
+      "entity_id": "sensor.sph10000_lifetime_import_from_grid",
+      "platform": "growatt_server",
+      "unique_id": "sensor_sph10000_lifetime_import_from_grid"
+    },
+    {
+      "entity_id": "sensor.sph10000_lifetime_total_load_consumption",
+      "platform": "growatt_server",
+      "unique_id": "sensor_sph10000_lifetime_total_load_consumption"
+    },
+    {
+      "entity_id": "sensor.sph10000_lifetime_system_production",
+      "platform": "growatt_server",
+      "unique_id": "sensor_sph10000_lifetime_system_production"
+    },
+    {
+      "entity_id": "sensor.sph10000_lifetime_self_consumption",
+      "platform": "growatt_server",
+      "unique_id": "sensor_sph10000_lifetime_self_consumption"
+    },
+    {
+      "entity_id": "sensor.nordpool_kwh_se4_sek_2_10_025",
+      "platform": "nordpool",
+      "unique_id": "sensor_nordpool_kwh_se4_sek_2_10_025"
+    },
+    {
+      "entity_id": "sensor.solcast_pv_forecast_forecast_today",
+      "platform": "solcast_solar",
+      "unique_id": "sensor_solcast_pv_forecast_forecast_today"
+    },
+    {
+      "entity_id": "sensor.solcast_pv_forecast_forecast_tomorrow",
+      "platform": "solcast_solar",
+      "unique_id": "sensor_solcast_pv_forecast_forecast_tomorrow"
+    },
+    {
+      "entity_id": "sensor.current_l1",
+      "platform": "homeassistant",
+      "unique_id": "sensor_current_l1"
+    },
+    {
+      "entity_id": "sensor.current_l2",
+      "platform": "homeassistant",
+      "unique_id": "sensor_current_l2"
+    },
+    {
+      "entity_id": "sensor.current_l3",
+      "platform": "homeassistant",
+      "unique_id": "sensor_current_l3"
+    },
+    {
+      "entity_id": "sensor.48h_average_grid_import_power",
+      "platform": "homeassistant",
+      "unique_id": "sensor_48h_average_grid_import_power"
+    },
+    {
+      "entity_id": "sensor.solax_battery_capacity",
+      "platform": "solax_modbus",
+      "unique_id": "sensor_solax_battery_capacity"
+    },
+    {
+      "entity_id": "sensor.solax_battery_power_charge",
+      "platform": "solax_modbus",
+      "unique_id": "sensor_solax_battery_power_charge"
+    },
+    {
+      "entity_id": "sensor.solax_battery_power_discharge",
+      "platform": "solax_modbus",
+      "unique_id": "sensor_solax_battery_power_discharge"
+    },
+    {
+      "entity_id": "sensor.solax_measured_power",
+      "platform": "solax_modbus",
+      "unique_id": "sensor_solax_measured_power"
+    },
+    {
+      "entity_id": "sensor.solax_grid_export",
+      "platform": "solax_modbus",
+      "unique_id": "sensor_solax_grid_export"
+    },
+    {
+      "entity_id": "sensor.solax_grid_import",
+      "platform": "solax_modbus",
+      "unique_id": "sensor_solax_grid_import"
+    },
+    {
+      "entity_id": "sensor.solax_pv_power_1",
+      "platform": "solax_modbus",
+      "unique_id": "sensor_solax_pv_power_1"
+    },
+    {
+      "entity_id": "sensor.solax_house_load",
+      "platform": "solax_modbus",
+      "unique_id": "sensor_solax_house_load"
+    },
+    {
+      "entity_id": "sensor.solax_battery_input_energy_total",
+      "platform": "solax_modbus",
+      "unique_id": "sensor_solax_battery_input_energy_total"
+    },
+    {
+      "entity_id": "sensor.solax_battery_output_energy_total",
+      "platform": "solax_modbus",
+      "unique_id": "sensor_solax_battery_output_energy_total"
+    },
+    {
+      "entity_id": "sensor.solax_total_solar_energy",
+      "platform": "solax_modbus",
+      "unique_id": "sensor_solax_total_solar_energy"
+    },
+    {
+      "entity_id": "sensor.solax_grid_import_total",
+      "platform": "solax_modbus",
+      "unique_id": "sensor_solax_grid_import_total"
+    },
+    {
+      "entity_id": "sensor.solax_grid_export_total",
+      "platform": "solax_modbus",
+      "unique_id": "sensor_solax_grid_export_total"
+    },
+    {
+      "entity_id": "sensor.solax_home_consumption_energy",
+      "platform": "solax_modbus",
+      "unique_id": "sensor_solax_home_consumption_energy"
+    },
+    {
+      "entity_id": "sensor.solax_total_yield",
+      "platform": "solax_modbus",
+      "unique_id": "sensor_solax_total_yield"
+    },
+    {
+      "entity_id": "select.solax_remotecontrol_power_control",
+      "platform": "solax_modbus",
+      "unique_id": "select_solax_remotecontrol_power_control"
+    },
+    {
+      "entity_id": "number.solax_remotecontrol_active_power",
+      "platform": "solax_modbus",
+      "unique_id": "number_solax_remotecontrol_active_power"
+    },
+    {
+      "entity_id": "number.solax_remotecontrol_autorepeat_duration",
+      "platform": "solax_modbus",
+      "unique_id": "number_solax_remotecontrol_autorepeat_duration"
+    },
+    {
+      "entity_id": "button.solax_remotecontrol_trigger",
+      "platform": "solax_modbus",
+      "unique_id": "button_solax_remotecontrol_trigger"
+    },
+    {
+      "entity_id": "number.solax_battery_minimum_capacity",
+      "platform": "solax_modbus",
+      "unique_id": "number_solax_battery_minimum_capacity"
+    },
+    {
+      "entity_id": "select.solax_charger_use_mode",
+      "platform": "solax_modbus",
+      "unique_id": "select_solax_charger_use_mode"
+    }
+  ],
+  "config_entries": [
+    {
+      "entry_id": "mock_nordpool_config_entry",
+      "domain": "nordpool",
+      "title": "Nordpool",
+      "state": "loaded"
+    },
+    {
+      "entry_id": "mock_growatt_config_entry",
+      "domain": "growatt_server",
+      "title": "Growatt Server",
+      "state": "loaded"
+    },
+    {
+      "entry_id": "mock_solax_config_entry",
+      "domain": "solax_modbus",
+      "title": "SolaX Modbus",
+      "state": "loaded"
+    }
+  ],
+  "services": {
+    "growatt_server": {
+      "write_ac_charge_times": {},
+      "read_ac_charge_times": {},
+      "write_ac_discharge_times": {},
+      "read_ac_discharge_times": {}
+    }
+  },
+  "ac_charge_times": {
+    "charge_power": 100,
+    "charge_stop_soc": 95,
+    "mains_enabled": false,
+    "periods": []
+  },
+  "ac_discharge_times": {
+    "discharge_power": 100,
+    "discharge_stop_soc": 15,
+    "periods": []
+  },
+  "price_data": {
+    "today": [
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0524,
+      0.0613,
+      0.0799,
+      0.083,
+      0.0663
+    ],
+    "tomorrow": [
+      0.0328,
+      0.0266,
+      0.0198,
+      0.0009,
+      0.0145,
+      0.0013,
+      0.0016,
+      0.0017,
+      0.0032,
+      0.0032,
+      0.0031,
+      0.0031,
+      0.0031,
+      0.0031,
+      0.0031,
+      0.0031,
+      0.0032,
+      0.0032,
+      0.0032,
+      0.0124,
+      0.0034,
+      0.0142,
+      0.0179,
+      0.0295,
+      0.0274,
+      0.0352,
+      0.056,
+      0.0788,
+      0.1061,
+      0.1119,
+      0.1067,
+      0.1059,
+      0.1065,
+      0.1067,
+      0.1071,
+      0.1074,
+      0.1073,
+      0.1068,
+      0.107,
+      0.1066,
+      0.1066,
+      0.1026,
+      0.0767,
+      0.0506,
+      0.0711,
+      0.0567,
+      0.0537,
+      0.0514,
+      0.0679,
+      0.0604,
+      0.0542,
+      0.0517,
+      0.0545,
+      0.0528,
+      0.0516,
+      0.0509,
+      0.0389,
+      0.0427,
+      0.0436,
+      0.0591,
+      0.0332,
+      0.0509,
+      0.0769,
+      0.1314,
+      0.1061,
+      0.2065,
+      0.4173,
+      0.5405,
+      0.3284,
+      0.5488,
+      0.7885,
+      0.8534,
+      0.8329,
+      0.784,
+      0.8089,
+      0.7728,
+      0.5406,
+      0.4245,
+      0.4271,
+      0.377,
+      0.3589,
+      0.326,
+      0.3367,
+      0.3212,
+      0.2779,
+      0.2275,
+      0.1907,
+      0.1473,
+      0.4231,
+      0.3056,
+      0.2358,
+      0.1504,
+      0.2059,
+      0.1455,
+      0.1345,
+      0.1127
+    ]
+  },
+  "historical_periods": [
+    {
+      "period": 0,
+      "energy": {
+        "solar_production": 0.0,
+        "home_consumption": 0.875,
+        "battery_charged": 0.0,
+        "battery_discharged": 0.875,
+        "grid_imported": 0.0,
+        "grid_exported": 0.0,
+        "battery_soe_start": 8.0,
+        "battery_soe_end": 7.125,
+        "solar_to_home": 0.0,
+        "solar_to_battery": 0.0,
+        "solar_to_grid": 0.0,
+        "grid_to_home": 0.0,
+        "grid_to_battery": 0.0,
+        "battery_to_home": 0.875,
+        "battery_to_grid": 0.0
+      },
+      "timestamp": "2026-04-24 00:00:00+02:00",
+      "data_source": "actual",
+      "economic": {
+        "buy_price": 0.8,
+        "sell_price": 0.5599999999999999,
+        "grid_cost": 0.0,
+        "battery_cycle_cost": 0.0,
+        "hourly_cost": 0.0,
+        "grid_only_cost": 0.7,
+        "solar_only_cost": 0.7,
+        "hourly_savings": 0.7,
+        "solar_savings": 0.0
+      },
+      "decision": {
+        "strategic_intent": "LOAD_SUPPORT",
+        "observed_intent": "LOAD_SUPPORT",
+        "battery_action": null,
+        "cost_basis": 0.0,
+        "pattern_name": "",
+        "description": "",
+        "economic_chain": "",
+        "immediate_value": 0.0,
+        "future_value": 0.0,
+        "net_strategy_value": 0.0,
+        "advanced_flow_pattern": "",
+        "detailed_flow_values": {},
+        "future_target_hours": []
+      }
+    },
+    {
+      "period": 1,
+      "energy": {
+        "solar_production": 0.0,
+        "home_consumption": 0.875,
+        "battery_charged": 0.0,
+        "battery_discharged": 0.875,
+        "grid_imported": 0.0,
+        "grid_exported": 0.0,
+        "battery_soe_start": 7.125,
+        "battery_soe_end": 6.25,
+        "solar_to_home": 0.0,
+        "solar_to_battery": 0.0,
+        "solar_to_grid": 0.0,
+        "grid_to_home": 0.0,
+        "grid_to_battery": 0.0,
+        "battery_to_home": 0.875,
+        "battery_to_grid": 0.0
+      },
+      "timestamp": "2026-04-24 00:15:00+02:00",
+      "data_source": "actual",
+      "economic": {
+        "buy_price": 0.8,
+        "sell_price": 0.5599999999999999,
+        "grid_cost": 0.0,
+        "battery_cycle_cost": 0.0,
+        "hourly_cost": 0.0,
+        "grid_only_cost": 0.7,
+        "solar_only_cost": 0.7,
+        "hourly_savings": 0.7,
+        "solar_savings": 0.0
+      },
+      "decision": {
+        "strategic_intent": "LOAD_SUPPORT",
+        "observed_intent": "LOAD_SUPPORT",
+        "battery_action": null,
+        "cost_basis": 0.0,
+        "pattern_name": "",
+        "description": "",
+        "economic_chain": "",
+        "immediate_value": 0.0,
+        "future_value": 0.0,
+        "net_strategy_value": 0.0,
+        "advanced_flow_pattern": "",
+        "detailed_flow_values": {},
+        "future_target_hours": []
+      }
+    },
+    {
+      "period": 2,
+      "energy": {
+        "solar_production": 0.0,
+        "home_consumption": 0.875,
+        "battery_charged": 0.0,
+        "battery_discharged": 0.875,
+        "grid_imported": 0.0,
+        "grid_exported": 0.0,
+        "battery_soe_start": 6.25,
+        "battery_soe_end": 5.375,
+        "solar_to_home": 0.0,
+        "solar_to_battery": 0.0,
+        "solar_to_grid": 0.0,
+        "grid_to_home": 0.0,
+        "grid_to_battery": 0.0,
+        "battery_to_home": 0.875,
+        "battery_to_grid": 0.0
+      },
+      "timestamp": "2026-04-24 00:30:00+02:00",
+      "data_source": "actual",
+      "economic": {
+        "buy_price": 0.8,
+        "sell_price": 0.5599999999999999,
+        "grid_cost": 0.0,
+        "battery_cycle_cost": 0.0,
+        "hourly_cost": 0.0,
+        "grid_only_cost": 0.7,
+        "solar_only_cost": 0.7,
+        "hourly_savings": 0.7,
+        "solar_savings": 0.0
+      },
+      "decision": {
+        "strategic_intent": "LOAD_SUPPORT",
+        "observed_intent": "LOAD_SUPPORT",
+        "battery_action": null,
+        "cost_basis": 0.0,
+        "pattern_name": "",
+        "description": "",
+        "economic_chain": "",
+        "immediate_value": 0.0,
+        "future_value": 0.0,
+        "net_strategy_value": 0.0,
+        "advanced_flow_pattern": "",
+        "detailed_flow_values": {},
+        "future_target_hours": []
+      }
+    },
+    {
+      "period": 3,
+      "energy": {
+        "solar_production": 0.0,
+        "home_consumption": 0.875,
+        "battery_charged": 0.0,
+        "battery_discharged": 0.875,
+        "grid_imported": 0.0,
+        "grid_exported": 0.0,
+        "battery_soe_start": 5.375,
+        "battery_soe_end": 4.5,
+        "solar_to_home": 0.0,
+        "solar_to_battery": 0.0,
+        "solar_to_grid": 0.0,
+        "grid_to_home": 0.0,
+        "grid_to_battery": 0.0,
+        "battery_to_home": 0.875,
+        "battery_to_grid": 0.0
+      },
+      "timestamp": "2026-04-24 00:45:00+02:00",
+      "data_source": "actual",
+      "economic": {
+        "buy_price": 0.8,
+        "sell_price": 0.5599999999999999,
+        "grid_cost": 0.0,
+        "battery_cycle_cost": 0.0,
+        "hourly_cost": 0.0,
+        "grid_only_cost": 0.7,
+        "solar_only_cost": 0.7,
+        "hourly_savings": 0.7,
+        "solar_savings": 0.0
+      },
+      "decision": {
+        "strategic_intent": "LOAD_SUPPORT",
+        "observed_intent": "LOAD_SUPPORT",
+        "battery_action": null,
+        "cost_basis": 0.0,
+        "pattern_name": "",
+        "description": "",
+        "economic_chain": "",
+        "immediate_value": 0.0,
+        "future_value": 0.0,
+        "net_strategy_value": 0.0,
+        "advanced_flow_pattern": "",
+        "detailed_flow_values": {},
+        "future_target_hours": []
+      }
+    },
+    {
+      "period": 4,
+      "energy": {
+        "solar_production": 0.0,
+        "home_consumption": 0.875,
+        "battery_charged": 0.0,
+        "battery_discharged": 0.875,
+        "grid_imported": 0.0,
+        "grid_exported": 0.0,
+        "battery_soe_start": 4.5,
+        "battery_soe_end": 3.625,
+        "solar_to_home": 0.0,
+        "solar_to_battery": 0.0,
+        "solar_to_grid": 0.0,
+        "grid_to_home": 0.0,
+        "grid_to_battery": 0.0,
+        "battery_to_home": 0.875,
+        "battery_to_grid": 0.0
+      },
+      "timestamp": "2026-04-24 01:00:00+02:00",
+      "data_source": "actual",
+      "economic": {
+        "buy_price": 0.8,
+        "sell_price": 0.5599999999999999,
+        "grid_cost": 0.0,
+        "battery_cycle_cost": 0.0,
+        "hourly_cost": 0.0,
+        "grid_only_cost": 0.7,
+        "solar_only_cost": 0.7,
+        "hourly_savings": 0.7,
+        "solar_savings": 0.0
+      },
+      "decision": {
+        "strategic_intent": "LOAD_SUPPORT",
+        "observed_intent": "LOAD_SUPPORT",
+        "battery_action": null,
+        "cost_basis": 0.0,
+        "pattern_name": "",
+        "description": "",
+        "economic_chain": "",
+        "immediate_value": 0.0,
+        "future_value": 0.0,
+        "net_strategy_value": 0.0,
+        "advanced_flow_pattern": "",
+        "detailed_flow_values": {},
+        "future_target_hours": []
+      }
+    },
+    {
+      "period": 5,
+      "energy": {
+        "solar_production": 0.0,
+        "home_consumption": 0.875,
+        "battery_charged": 0.0,
+        "battery_discharged": 0.875,
+        "grid_imported": 0.0,
+        "grid_exported": 0.0,
+        "battery_soe_start": 3.625,
+        "battery_soe_end": 2.75,
+        "solar_to_home": 0.0,
+        "solar_to_battery": 0.0,
+        "solar_to_grid": 0.0,
+        "grid_to_home": 0.0,
+        "grid_to_battery": 0.0,
+        "battery_to_home": 0.875,
+        "battery_to_grid": 0.0
+      },
+      "timestamp": "2026-04-24 01:15:00+02:00",
+      "data_source": "actual",
+      "economic": {
+        "buy_price": 0.8,
+        "sell_price": 0.5599999999999999,
+        "grid_cost": 0.0,
+        "battery_cycle_cost": 0.0,
+        "hourly_cost": 0.0,
+        "grid_only_cost": 0.7,
+        "solar_only_cost": 0.7,
+        "hourly_savings": 0.7,
+        "solar_savings": 0.0
+      },
+      "decision": {
+        "strategic_intent": "LOAD_SUPPORT",
+        "observed_intent": "LOAD_SUPPORT",
+        "battery_action": null,
+        "cost_basis": 0.0,
+        "pattern_name": "",
+        "description": "",
+        "economic_chain": "",
+        "immediate_value": 0.0,
+        "future_value": 0.0,
+        "net_strategy_value": 0.0,
+        "advanced_flow_pattern": "",
+        "detailed_flow_values": {},
+        "future_target_hours": []
+      }
+    },
+    {
+      "period": 6,
+      "energy": {
+        "solar_production": 0.0,
+        "home_consumption": 0.875,
+        "battery_charged": 0.0,
+        "battery_discharged": 0.875,
+        "grid_imported": 0.0,
+        "grid_exported": 0.0,
+        "battery_soe_start": 2.75,
+        "battery_soe_end": 1.875,
+        "solar_to_home": 0.0,
+        "solar_to_battery": 0.0,
+        "solar_to_grid": 0.0,
+        "grid_to_home": 0.0,
+        "grid_to_battery": 0.0,
+        "battery_to_home": 0.875,
+        "battery_to_grid": 0.0
+      },
+      "timestamp": "2026-04-24 01:30:00+02:00",
+      "data_source": "actual",
+      "economic": {
+        "buy_price": 0.8,
+        "sell_price": 0.5599999999999999,
+        "grid_cost": 0.0,
+        "battery_cycle_cost": 0.0,
+        "hourly_cost": 0.0,
+        "grid_only_cost": 0.7,
+        "solar_only_cost": 0.7,
+        "hourly_savings": 0.7,
+        "solar_savings": 0.0
+      },
+      "decision": {
+        "strategic_intent": "LOAD_SUPPORT",
+        "observed_intent": "LOAD_SUPPORT",
+        "battery_action": null,
+        "cost_basis": 0.0,
+        "pattern_name": "",
+        "description": "",
+        "economic_chain": "",
+        "immediate_value": 0.0,
+        "future_value": 0.0,
+        "net_strategy_value": 0.0,
+        "advanced_flow_pattern": "",
+        "detailed_flow_values": {},
+        "future_target_hours": []
+      }
+    },
+    {
+      "period": 7,
+      "energy": {
+        "solar_production": 0.0,
+        "home_consumption": 0.875,
+        "battery_charged": 0.0,
+        "battery_discharged": 0.875,
+        "grid_imported": 0.0,
+        "grid_exported": 0.0,
+        "battery_soe_start": 1.875,
+        "battery_soe_end": 1.0,
+        "solar_to_home": 0.0,
+        "solar_to_battery": 0.0,
+        "solar_to_grid": 0.0,
+        "grid_to_home": 0.0,
+        "grid_to_battery": 0.0,
+        "battery_to_home": 0.875,
+        "battery_to_grid": 0.0
+      },
+      "timestamp": "2026-04-24 01:45:00+02:00",
+      "data_source": "actual",
+      "economic": {
+        "buy_price": 0.8,
+        "sell_price": 0.5599999999999999,
+        "grid_cost": 0.0,
+        "battery_cycle_cost": 0.0,
+        "hourly_cost": 0.0,
+        "grid_only_cost": 0.7,
+        "solar_only_cost": 0.7,
+        "hourly_savings": 0.7,
+        "solar_savings": 0.0
+      },
+      "decision": {
+        "strategic_intent": "LOAD_SUPPORT",
+        "observed_intent": "LOAD_SUPPORT",
+        "battery_action": null,
+        "cost_basis": 0.0,
+        "pattern_name": "",
+        "description": "",
+        "economic_chain": "",
+        "immediate_value": 0.0,
+        "future_value": 0.0,
+        "net_strategy_value": 0.0,
+        "advanced_flow_pattern": "",
+        "detailed_flow_values": {},
+        "future_target_hours": []
+      }
+    },
+    {
+      "period": 8,
+      "energy": {
+        "solar_production": 0.0,
+        "home_consumption": 0.875,
+        "battery_charged": 0.0,
+        "battery_discharged": 0.0,
+        "grid_imported": 0.875,
+        "grid_exported": 0.0,
+        "battery_soe_start": 1.0,
+        "battery_soe_end": 1.0,
+        "solar_to_home": 0.0,
+        "solar_to_battery": 0.0,
+        "solar_to_grid": 0.0,
+        "grid_to_home": 0.875,
+        "grid_to_battery": 0.0,
+        "battery_to_home": 0.0,
+        "battery_to_grid": 0.0
+      },
+      "timestamp": "2026-04-24 02:00:00+02:00",
+      "data_source": "actual",
+      "economic": {
+        "buy_price": 0.8,
+        "sell_price": 0.5599999999999999,
+        "grid_cost": 0.7,
+        "battery_cycle_cost": 0.0,
+        "hourly_cost": 0.7,
+        "grid_only_cost": 0.7,
+        "solar_only_cost": 0.7,
+        "hourly_savings": 0.0,
+        "solar_savings": 0.0
+      },
+      "decision": {
+        "strategic_intent": "IDLE",
+        "observed_intent": "IDLE",
+        "battery_action": null,
+        "cost_basis": 0.0,
+        "pattern_name": "",
+        "description": "",
+        "economic_chain": "",
+        "immediate_value": 0.0,
+        "future_value": 0.0,
+        "net_strategy_value": 0.0,
+        "advanced_flow_pattern": "",
+        "detailed_flow_values": {},
+        "future_target_hours": []
+      }
+    },
+    {
+      "period": 9,
+      "energy": {
+        "solar_production": 0.0,
+        "home_consumption": 0.875,
+        "battery_charged": 0.0,
+        "battery_discharged": 0.0,
+        "grid_imported": 0.875,
+        "grid_exported": 0.0,
+        "battery_soe_start": 1.0,
+        "battery_soe_end": 1.0,
+        "solar_to_home": 0.0,
+        "solar_to_battery": 0.0,
+        "solar_to_grid": 0.0,
+        "grid_to_home": 0.875,
+        "grid_to_battery": 0.0,
+        "battery_to_home": 0.0,
+        "battery_to_grid": 0.0
+      },
+      "timestamp": "2026-04-24 02:15:00+02:00",
+      "data_source": "actual",
+      "economic": {
+        "buy_price": 0.8,
+        "sell_price": 0.5599999999999999,
+        "grid_cost": 0.7,
+        "battery_cycle_cost": 0.0,
+        "hourly_cost": 0.7,
+        "grid_only_cost": 0.7,
+        "solar_only_cost": 0.7,
+        "hourly_savings": 0.0,
+        "solar_savings": 0.0
+      },
+      "decision": {
+        "strategic_intent": "IDLE",
+        "observed_intent": "IDLE",
+        "battery_action": null,
+        "cost_basis": 0.0,
+        "pattern_name": "",
+        "description": "",
+        "economic_chain": "",
+        "immediate_value": 0.0,
+        "future_value": 0.0,
+        "net_strategy_value": 0.0,
+        "advanced_flow_pattern": "",
+        "detailed_flow_values": {},
+        "future_target_hours": []
+      }
+    },
+    {
+      "period": 10,
+      "energy": {
+        "solar_production": 0.0,
+        "home_consumption": 0.875,
+        "battery_charged": 0.0,
+        "battery_discharged": 0.0,
+        "grid_imported": 0.875,
+        "grid_exported": 0.0,
+        "battery_soe_start": 1.0,
+        "battery_soe_end": 1.0,
+        "solar_to_home": 0.0,
+        "solar_to_battery": 0.0,
+        "solar_to_grid": 0.0,
+        "grid_to_home": 0.875,
+        "grid_to_battery": 0.0,
+        "battery_to_home": 0.0,
+        "battery_to_grid": 0.0
+      },
+      "timestamp": "2026-04-24 02:30:00+02:00",
+      "data_source": "actual",
+      "economic": {
+        "buy_price": 0.8,
+        "sell_price": 0.5599999999999999,
+        "grid_cost": 0.7,
+        "battery_cycle_cost": 0.0,
+        "hourly_cost": 0.7,
+        "grid_only_cost": 0.7,
+        "solar_only_cost": 0.7,
+        "hourly_savings": 0.0,
+        "solar_savings": 0.0
+      },
+      "decision": {
+        "strategic_intent": "IDLE",
+        "observed_intent": "IDLE",
+        "battery_action": null,
+        "cost_basis": 0.0,
+        "pattern_name": "",
+        "description": "",
+        "economic_chain": "",
+        "immediate_value": 0.0,
+        "future_value": 0.0,
+        "net_strategy_value": 0.0,
+        "advanced_flow_pattern": "",
+        "detailed_flow_values": {},
+        "future_target_hours": []
+      }
+    },
+    {
+      "period": 11,
+      "energy": {
+        "solar_production": 0.0,
+        "home_consumption": 0.875,
+        "battery_charged": 0.0,
+        "battery_discharged": 0.0,
+        "grid_imported": 0.875,
+        "grid_exported": 0.0,
+        "battery_soe_start": 1.0,
+        "battery_soe_end": 1.0,
+        "solar_to_home": 0.0,
+        "solar_to_battery": 0.0,
+        "solar_to_grid": 0.0,
+        "grid_to_home": 0.875,
+        "grid_to_battery": 0.0,
+        "battery_to_home": 0.0,
+        "battery_to_grid": 0.0
+      },
+      "timestamp": "2026-04-24 02:45:00+02:00",
+      "data_source": "actual",
+      "economic": {
+        "buy_price": 0.8,
+        "sell_price": 0.5599999999999999,
+        "grid_cost": 0.7,
+        "battery_cycle_cost": 0.0,
+        "hourly_cost": 0.7,
+        "grid_only_cost": 0.7,
+        "solar_only_cost": 0.7,
+        "hourly_savings": 0.0,
+        "solar_savings": 0.0
+      },
+      "decision": {
+        "strategic_intent": "IDLE",
+        "observed_intent": "IDLE",
+        "battery_action": null,
+        "cost_basis": 0.0,
+        "pattern_name": "",
+        "description": "",
+        "economic_chain": "",
+        "immediate_value": 0.0,
+        "future_value": 0.0,
+        "net_strategy_value": 0.0,
+        "advanced_flow_pattern": "",
+        "detailed_flow_values": {},
+        "future_target_hours": []
+      }
+    },
+    {
+      "period": 12,
+      "energy": {
+        "solar_production": 0.0,
+        "home_consumption": 0.875,
+        "battery_charged": 0.0,
+        "battery_discharged": 0.0,
+        "grid_imported": 0.875,
+        "grid_exported": 0.0,
+        "battery_soe_start": 1.0,
+        "battery_soe_end": 1.0,
+        "solar_to_home": 0.0,
+        "solar_to_battery": 0.0,
+        "solar_to_grid": 0.0,
+        "grid_to_home": 0.875,
+        "grid_to_battery": 0.0,
+        "battery_to_home": 0.0,
+        "battery_to_grid": 0.0
+      },
+      "timestamp": "2026-04-24 03:00:00+02:00",
+      "data_source": "actual",
+      "economic": {
+        "buy_price": 0.8,
+        "sell_price": 0.5599999999999999,
+        "grid_cost": 0.7,
+        "battery_cycle_cost": 0.0,
+        "hourly_cost": 0.7,
+        "grid_only_cost": 0.7,
+        "solar_only_cost": 0.7,
+        "hourly_savings": 0.0,
+        "solar_savings": 0.0
+      },
+      "decision": {
+        "strategic_intent": "IDLE",
+        "observed_intent": "IDLE",
+        "battery_action": null,
+        "cost_basis": 0.0,
+        "pattern_name": "",
+        "description": "",
+        "economic_chain": "",
+        "immediate_value": 0.0,
+        "future_value": 0.0,
+        "net_strategy_value": 0.0,
+        "advanced_flow_pattern": "",
+        "detailed_flow_values": {},
+        "future_target_hours": []
+      }
+    },
+    {
+      "period": 13,
+      "energy": {
+        "solar_production": 0.0,
+        "home_consumption": 0.875,
+        "battery_charged": 0.0,
+        "battery_discharged": 0.0,
+        "grid_imported": 0.875,
+        "grid_exported": 0.0,
+        "battery_soe_start": 1.0,
+        "battery_soe_end": 1.0,
+        "solar_to_home": 0.0,
+        "solar_to_battery": 0.0,
+        "solar_to_grid": 0.0,
+        "grid_to_home": 0.875,
+        "grid_to_battery": 0.0,
+        "battery_to_home": 0.0,
+        "battery_to_grid": 0.0
+      },
+      "timestamp": "2026-04-24 03:15:00+02:00",
+      "data_source": "actual",
+      "economic": {
+        "buy_price": 0.8,
+        "sell_price": 0.5599999999999999,
+        "grid_cost": 0.7,
+        "battery_cycle_cost": 0.0,
+        "hourly_cost": 0.7,
+        "grid_only_cost": 0.7,
+        "solar_only_cost": 0.7,
+        "hourly_savings": 0.0,
+        "solar_savings": 0.0
+      },
+      "decision": {
+        "strategic_intent": "IDLE",
+        "observed_intent": "IDLE",
+        "battery_action": null,
+        "cost_basis": 0.0,
+        "pattern_name": "",
+        "description": "",
+        "economic_chain": "",
+        "immediate_value": 0.0,
+        "future_value": 0.0,
+        "net_strategy_value": 0.0,
+        "advanced_flow_pattern": "",
+        "detailed_flow_values": {},
+        "future_target_hours": []
+      }
+    },
+    {
+      "period": 14,
+      "energy": {
+        "solar_production": 0.0,
+        "home_consumption": 0.875,
+        "battery_charged": 0.0,
+        "battery_discharged": 0.0,
+        "grid_imported": 0.875,
+        "grid_exported": 0.0,
+        "battery_soe_start": 1.0,
+        "battery_soe_end": 1.0,
+        "solar_to_home": 0.0,
+        "solar_to_battery": 0.0,
+        "solar_to_grid": 0.0,
+        "grid_to_home": 0.875,
+        "grid_to_battery": 0.0,
+        "battery_to_home": 0.0,
+        "battery_to_grid": 0.0
+      },
+      "timestamp": "2026-04-24 03:30:00+02:00",
+      "data_source": "actual",
+      "economic": {
+        "buy_price": 0.8,
+        "sell_price": 0.5599999999999999,
+        "grid_cost": 0.7,
+        "battery_cycle_cost": 0.0,
+        "hourly_cost": 0.7,
+        "grid_only_cost": 0.7,
+        "solar_only_cost": 0.7,
+        "hourly_savings": 0.0,
+        "solar_savings": 0.0
+      },
+      "decision": {
+        "strategic_intent": "IDLE",
+        "observed_intent": "IDLE",
+        "battery_action": null,
+        "cost_basis": 0.0,
+        "pattern_name": "",
+        "description": "",
+        "economic_chain": "",
+        "immediate_value": 0.0,
+        "future_value": 0.0,
+        "net_strategy_value": 0.0,
+        "advanced_flow_pattern": "",
+        "detailed_flow_values": {},
+        "future_target_hours": []
+      }
+    },
+    {
+      "period": 15,
+      "energy": {
+        "solar_production": 0.0,
+        "home_consumption": 0.875,
+        "battery_charged": 0.0,
+        "battery_discharged": 0.0,
+        "grid_imported": 0.875,
+        "grid_exported": 0.0,
+        "battery_soe_start": 1.0,
+        "battery_soe_end": 1.0,
+        "solar_to_home": 0.0,
+        "solar_to_battery": 0.0,
+        "solar_to_grid": 0.0,
+        "grid_to_home": 0.875,
+        "grid_to_battery": 0.0,
+        "battery_to_home": 0.0,
+        "battery_to_grid": 0.0
+      },
+      "timestamp": "2026-04-24 03:45:00+02:00",
+      "data_source": "actual",
+      "economic": {
+        "buy_price": 0.8,
+        "sell_price": 0.5599999999999999,
+        "grid_cost": 0.7,
+        "battery_cycle_cost": 0.0,
+        "hourly_cost": 0.7,
+        "grid_only_cost": 0.7,
+        "solar_only_cost": 0.7,
+        "hourly_savings": 0.0,
+        "solar_savings": 0.0
+      },
+      "decision": {
+        "strategic_intent": "IDLE",
+        "observed_intent": "IDLE",
+        "battery_action": null,
+        "cost_basis": 0.0,
+        "pattern_name": "",
+        "description": "",
+        "economic_chain": "",
+        "immediate_value": 0.0,
+        "future_value": 0.0,
+        "net_strategy_value": 0.0,
+        "advanced_flow_pattern": "",
+        "detailed_flow_values": {},
+        "future_target_hours": []
+      }
+    },
+    {
+      "period": 16,
+      "energy": {
+        "solar_production": 0.0,
+        "home_consumption": 0.875,
+        "battery_charged": 0.0,
+        "battery_discharged": 0.0,
+        "grid_imported": 0.875,
+        "grid_exported": 0.0,
+        "battery_soe_start": 1.0,
+        "battery_soe_end": 1.0,
+        "solar_to_home": 0.0,
+        "solar_to_battery": 0.0,
+        "solar_to_grid": 0.0,
+        "grid_to_home": 0.875,
+        "grid_to_battery": 0.0,
+        "battery_to_home": 0.0,
+        "battery_to_grid": 0.0
+      },
+      "timestamp": "2026-04-24 04:00:00+02:00",
+      "data_source": "actual",
+      "economic": {
+        "buy_price": 0.8,
+        "sell_price": 0.5599999999999999,
+        "grid_cost": 0.7,
+        "battery_cycle_cost": 0.0,
+        "hourly_cost": 0.7,
+        "grid_only_cost": 0.7,
+        "solar_only_cost": 0.7,
+        "hourly_savings": 0.0,
+        "solar_savings": 0.0
+      },
+      "decision": {
+        "strategic_intent": "IDLE",
+        "observed_intent": "IDLE",
+        "battery_action": null,
+        "cost_basis": 0.0,
+        "pattern_name": "",
+        "description": "",
+        "economic_chain": "",
+        "immediate_value": 0.0,
+        "future_value": 0.0,
+        "net_strategy_value": 0.0,
+        "advanced_flow_pattern": "",
+        "detailed_flow_values": {},
+        "future_target_hours": []
+      }
+    },
+    {
+      "period": 17,
+      "energy": {
+        "solar_production": 0.0,
+        "home_consumption": 0.875,
+        "battery_charged": 0.0,
+        "battery_discharged": 0.0,
+        "grid_imported": 0.875,
+        "grid_exported": 0.0,
+        "battery_soe_start": 1.0,
+        "battery_soe_end": 1.0,
+        "solar_to_home": 0.0,
+        "solar_to_battery": 0.0,
+        "solar_to_grid": 0.0,
+        "grid_to_home": 0.875,
+        "grid_to_battery": 0.0,
+        "battery_to_home": 0.0,
+        "battery_to_grid": 0.0
+      },
+      "timestamp": "2026-04-24 04:15:00+02:00",
+      "data_source": "actual",
+      "economic": {
+        "buy_price": 0.8,
+        "sell_price": 0.5599999999999999,
+        "grid_cost": 0.7,
+        "battery_cycle_cost": 0.0,
+        "hourly_cost": 0.7,
+        "grid_only_cost": 0.7,
+        "solar_only_cost": 0.7,
+        "hourly_savings": 0.0,
+        "solar_savings": 0.0
+      },
+      "decision": {
+        "strategic_intent": "IDLE",
+        "observed_intent": "IDLE",
+        "battery_action": null,
+        "cost_basis": 0.0,
+        "pattern_name": "",
+        "description": "",
+        "economic_chain": "",
+        "immediate_value": 0.0,
+        "future_value": 0.0,
+        "net_strategy_value": 0.0,
+        "advanced_flow_pattern": "",
+        "detailed_flow_values": {},
+        "future_target_hours": []
+      }
+    },
+    {
+      "period": 18,
+      "energy": {
+        "solar_production": 0.0,
+        "home_consumption": 0.875,
+        "battery_charged": 0.0,
+        "battery_discharged": 0.0,
+        "grid_imported": 0.875,
+        "grid_exported": 0.0,
+        "battery_soe_start": 1.0,
+        "battery_soe_end": 1.0,
+        "solar_to_home": 0.0,
+        "solar_to_battery": 0.0,
+        "solar_to_grid": 0.0,
+        "grid_to_home": 0.875,
+        "grid_to_battery": 0.0,
+        "battery_to_home": 0.0,
+        "battery_to_grid": 0.0
+      },
+      "timestamp": "2026-04-24 04:30:00+02:00",
+      "data_source": "actual",
+      "economic": {
+        "buy_price": 0.8,
+        "sell_price": 0.5599999999999999,
+        "grid_cost": 0.7,
+        "battery_cycle_cost": 0.0,
+        "hourly_cost": 0.7,
+        "grid_only_cost": 0.7,
+        "solar_only_cost": 0.7,
+        "hourly_savings": 0.0,
+        "solar_savings": 0.0
+      },
+      "decision": {
+        "strategic_intent": "IDLE",
+        "observed_intent": "IDLE",
+        "battery_action": null,
+        "cost_basis": 0.0,
+        "pattern_name": "",
+        "description": "",
+        "economic_chain": "",
+        "immediate_value": 0.0,
+        "future_value": 0.0,
+        "net_strategy_value": 0.0,
+        "advanced_flow_pattern": "",
+        "detailed_flow_values": {},
+        "future_target_hours": []
+      }
+    },
+    {
+      "period": 19,
+      "energy": {
+        "solar_production": 0.0,
+        "home_consumption": 0.875,
+        "battery_charged": 0.0,
+        "battery_discharged": 0.0,
+        "grid_imported": 0.875,
+        "grid_exported": 0.0,
+        "battery_soe_start": 1.0,
+        "battery_soe_end": 1.0,
+        "solar_to_home": 0.0,
+        "solar_to_battery": 0.0,
+        "solar_to_grid": 0.0,
+        "grid_to_home": 0.875,
+        "grid_to_battery": 0.0,
+        "battery_to_home": 0.0,
+        "battery_to_grid": 0.0
+      },
+      "timestamp": "2026-04-24 04:45:00+02:00",
+      "data_source": "actual",
+      "economic": {
+        "buy_price": 0.8,
+        "sell_price": 0.5599999999999999,
+        "grid_cost": 0.7,
+        "battery_cycle_cost": 0.0,
+        "hourly_cost": 0.7,
+        "grid_only_cost": 0.7,
+        "solar_only_cost": 0.7,
+        "hourly_savings": 0.0,
+        "solar_savings": 0.0
+      },
+      "decision": {
+        "strategic_intent": "IDLE",
+        "observed_intent": "IDLE",
+        "battery_action": null,
+        "cost_basis": 0.0,
+        "pattern_name": "",
+        "description": "",
+        "economic_chain": "",
+        "immediate_value": 0.0,
+        "future_value": 0.0,
+        "net_strategy_value": 0.0,
+        "advanced_flow_pattern": "",
+        "detailed_flow_values": {},
+        "future_target_hours": []
+      }
+    },
+    {
+      "period": 20,
+      "energy": {
+        "solar_production": 0.0,
+        "home_consumption": 0.875,
+        "battery_charged": 0.0,
+        "battery_discharged": 0.0,
+        "grid_imported": 0.875,
+        "grid_exported": 0.0,
+        "battery_soe_start": 1.0,
+        "battery_soe_end": 1.0,
+        "solar_to_home": 0.0,
+        "solar_to_battery": 0.0,
+        "solar_to_grid": 0.0,
+        "grid_to_home": 0.875,
+        "grid_to_battery": 0.0,
+        "battery_to_home": 0.0,
+        "battery_to_grid": 0.0
+      },
+      "timestamp": "2026-04-24 05:00:00+02:00",
+      "data_source": "actual",
+      "economic": {
+        "buy_price": 0.8,
+        "sell_price": 0.5599999999999999,
+        "grid_cost": 0.7,
+        "battery_cycle_cost": 0.0,
+        "hourly_cost": 0.7,
+        "grid_only_cost": 0.7,
+        "solar_only_cost": 0.7,
+        "hourly_savings": 0.0,
+        "solar_savings": 0.0
+      },
+      "decision": {
+        "strategic_intent": "IDLE",
+        "observed_intent": "IDLE",
+        "battery_action": null,
+        "cost_basis": 0.0,
+        "pattern_name": "",
+        "description": "",
+        "economic_chain": "",
+        "immediate_value": 0.0,
+        "future_value": 0.0,
+        "net_strategy_value": 0.0,
+        "advanced_flow_pattern": "",
+        "detailed_flow_values": {},
+        "future_target_hours": []
+      }
+    },
+    {
+      "period": 21,
+      "energy": {
+        "solar_production": 0.0,
+        "home_consumption": 0.875,
+        "battery_charged": 0.0,
+        "battery_discharged": 0.0,
+        "grid_imported": 0.875,
+        "grid_exported": 0.0,
+        "battery_soe_start": 1.0,
+        "battery_soe_end": 1.0,
+        "solar_to_home": 0.0,
+        "solar_to_battery": 0.0,
+        "solar_to_grid": 0.0,
+        "grid_to_home": 0.875,
+        "grid_to_battery": 0.0,
+        "battery_to_home": 0.0,
+        "battery_to_grid": 0.0
+      },
+      "timestamp": "2026-04-24 05:15:00+02:00",
+      "data_source": "actual",
+      "economic": {
+        "buy_price": 0.8,
+        "sell_price": 0.5599999999999999,
+        "grid_cost": 0.7,
+        "battery_cycle_cost": 0.0,
+        "hourly_cost": 0.7,
+        "grid_only_cost": 0.7,
+        "solar_only_cost": 0.7,
+        "hourly_savings": 0.0,
+        "solar_savings": 0.0
+      },
+      "decision": {
+        "strategic_intent": "IDLE",
+        "observed_intent": "IDLE",
+        "battery_action": null,
+        "cost_basis": 0.0,
+        "pattern_name": "",
+        "description": "",
+        "economic_chain": "",
+        "immediate_value": 0.0,
+        "future_value": 0.0,
+        "net_strategy_value": 0.0,
+        "advanced_flow_pattern": "",
+        "detailed_flow_values": {},
+        "future_target_hours": []
+      }
+    },
+    {
+      "period": 22,
+      "energy": {
+        "solar_production": 0.0,
+        "home_consumption": 0.875,
+        "battery_charged": 0.0,
+        "battery_discharged": 0.0,
+        "grid_imported": 0.875,
+        "grid_exported": 0.0,
+        "battery_soe_start": 1.0,
+        "battery_soe_end": 1.0,
+        "solar_to_home": 0.0,
+        "solar_to_battery": 0.0,
+        "solar_to_grid": 0.0,
+        "grid_to_home": 0.875,
+        "grid_to_battery": 0.0,
+        "battery_to_home": 0.0,
+        "battery_to_grid": 0.0
+      },
+      "timestamp": "2026-04-24 05:30:00+02:00",
+      "data_source": "actual",
+      "economic": {
+        "buy_price": 0.8,
+        "sell_price": 0.5599999999999999,
+        "grid_cost": 0.7,
+        "battery_cycle_cost": 0.0,
+        "hourly_cost": 0.7,
+        "grid_only_cost": 0.7,
+        "solar_only_cost": 0.7,
+        "hourly_savings": 0.0,
+        "solar_savings": 0.0
+      },
+      "decision": {
+        "strategic_intent": "IDLE",
+        "observed_intent": "IDLE",
+        "battery_action": null,
+        "cost_basis": 0.0,
+        "pattern_name": "",
+        "description": "",
+        "economic_chain": "",
+        "immediate_value": 0.0,
+        "future_value": 0.0,
+        "net_strategy_value": 0.0,
+        "advanced_flow_pattern": "",
+        "detailed_flow_values": {},
+        "future_target_hours": []
+      }
+    },
+    {
+      "period": 23,
+      "energy": {
+        "solar_production": 0.0,
+        "home_consumption": 0.875,
+        "battery_charged": 0.0,
+        "battery_discharged": 0.0,
+        "grid_imported": 0.875,
+        "grid_exported": 0.0,
+        "battery_soe_start": 1.0,
+        "battery_soe_end": 1.0,
+        "solar_to_home": 0.0,
+        "solar_to_battery": 0.0,
+        "solar_to_grid": 0.0,
+        "grid_to_home": 0.875,
+        "grid_to_battery": 0.0,
+        "battery_to_home": 0.0,
+        "battery_to_grid": 0.0
+      },
+      "timestamp": "2026-04-24 05:45:00+02:00",
+      "data_source": "actual",
+      "economic": {
+        "buy_price": 0.8,
+        "sell_price": 0.5599999999999999,
+        "grid_cost": 0.7,
+        "battery_cycle_cost": 0.0,
+        "hourly_cost": 0.7,
+        "grid_only_cost": 0.7,
+        "solar_only_cost": 0.7,
+        "hourly_savings": 0.0,
+        "solar_savings": 0.0
+      },
+      "decision": {
+        "strategic_intent": "IDLE",
+        "observed_intent": "IDLE",
+        "battery_action": null,
+        "cost_basis": 0.0,
+        "pattern_name": "",
+        "description": "",
+        "economic_chain": "",
+        "immediate_value": 0.0,
+        "future_value": 0.0,
+        "net_strategy_value": 0.0,
+        "advanced_flow_pattern": "",
+        "detailed_flow_values": {},
+        "future_target_hours": []
+      }
+    },
+    {
+      "period": 24,
+      "energy": {
+        "solar_production": 0.0,
+        "home_consumption": 0.875,
+        "battery_charged": 0.0,
+        "battery_discharged": 0.0,
+        "grid_imported": 0.875,
+        "grid_exported": 0.0,
+        "battery_soe_start": 1.0,
+        "battery_soe_end": 1.0,
+        "solar_to_home": 0.0,
+        "solar_to_battery": 0.0,
+        "solar_to_grid": 0.0,
+        "grid_to_home": 0.875,
+        "grid_to_battery": 0.0,
+        "battery_to_home": 0.0,
+        "battery_to_grid": 0.0
+      },
+      "timestamp": "2026-04-24 06:00:00+02:00",
+      "data_source": "actual",
+      "economic": {
+        "buy_price": 1.5,
+        "sell_price": 1.0499999999999998,
+        "grid_cost": 1.3125,
+        "battery_cycle_cost": 0.0,
+        "hourly_cost": 1.3125,
+        "grid_only_cost": 1.3125,
+        "solar_only_cost": 1.3125,
+        "hourly_savings": 0.0,
+        "solar_savings": 0.0
+      },
+      "decision": {
+        "strategic_intent": "IDLE",
+        "observed_intent": "IDLE",
+        "battery_action": null,
+        "cost_basis": 0.0,
+        "pattern_name": "",
+        "description": "",
+        "economic_chain": "",
+        "immediate_value": 0.0,
+        "future_value": 0.0,
+        "net_strategy_value": 0.0,
+        "advanced_flow_pattern": "",
+        "detailed_flow_values": {},
+        "future_target_hours": []
+      }
+    },
+    {
+      "period": 25,
+      "energy": {
+        "solar_production": 0.05,
+        "home_consumption": 0.875,
+        "battery_charged": 0.0,
+        "battery_discharged": 0.0,
+        "grid_imported": 0.825,
+        "grid_exported": 0.0,
+        "battery_soe_start": 1.0,
+        "battery_soe_end": 1.0,
+        "solar_to_home": 0.05,
+        "solar_to_battery": 0.0,
+        "solar_to_grid": 0.0,
+        "grid_to_home": 0.825,
+        "grid_to_battery": 0.0,
+        "battery_to_home": 0.0,
+        "battery_to_grid": 0.0
+      },
+      "timestamp": "2026-04-24 06:15:00+02:00",
+      "data_source": "actual",
+      "economic": {
+        "buy_price": 1.5,
+        "sell_price": 1.0499999999999998,
+        "grid_cost": 1.2375,
+        "battery_cycle_cost": 0.0,
+        "hourly_cost": 1.2375,
+        "grid_only_cost": 1.3125,
+        "solar_only_cost": 1.2375,
+        "hourly_savings": 0.075,
+        "solar_savings": 0.075
+      },
+      "decision": {
+        "strategic_intent": "IDLE",
+        "observed_intent": "IDLE",
+        "battery_action": null,
+        "cost_basis": 0.0,
+        "pattern_name": "",
+        "description": "",
+        "economic_chain": "",
+        "immediate_value": 0.0,
+        "future_value": 0.0,
+        "net_strategy_value": 0.0,
+        "advanced_flow_pattern": "",
+        "detailed_flow_values": {},
+        "future_target_hours": []
+      }
+    },
+    {
+      "period": 26,
+      "energy": {
+        "solar_production": 0.1,
+        "home_consumption": 0.875,
+        "battery_charged": 0.0,
+        "battery_discharged": 0.0,
+        "grid_imported": 0.775,
+        "grid_exported": 0.0,
+        "battery_soe_start": 1.0,
+        "battery_soe_end": 1.0,
+        "solar_to_home": 0.1,
+        "solar_to_battery": 0.0,
+        "solar_to_grid": 0.0,
+        "grid_to_home": 0.775,
+        "grid_to_battery": 0.0,
+        "battery_to_home": 0.0,
+        "battery_to_grid": 0.0
+      },
+      "timestamp": "2026-04-24 06:30:00+02:00",
+      "data_source": "actual",
+      "economic": {
+        "buy_price": 1.5,
+        "sell_price": 1.0499999999999998,
+        "grid_cost": 1.1625,
+        "battery_cycle_cost": 0.0,
+        "hourly_cost": 1.1625,
+        "grid_only_cost": 1.3125,
+        "solar_only_cost": 1.1625,
+        "hourly_savings": 0.15,
+        "solar_savings": 0.15
+      },
+      "decision": {
+        "strategic_intent": "IDLE",
+        "observed_intent": "IDLE",
+        "battery_action": null,
+        "cost_basis": 0.0,
+        "pattern_name": "",
+        "description": "",
+        "economic_chain": "",
+        "immediate_value": 0.0,
+        "future_value": 0.0,
+        "net_strategy_value": 0.0,
+        "advanced_flow_pattern": "",
+        "detailed_flow_values": {},
+        "future_target_hours": []
+      }
+    },
+    {
+      "period": 27,
+      "energy": {
+        "solar_production": 0.15,
+        "home_consumption": 0.875,
+        "battery_charged": 0.0,
+        "battery_discharged": 0.0,
+        "grid_imported": 0.725,
+        "grid_exported": 0.0,
+        "battery_soe_start": 1.0,
+        "battery_soe_end": 1.0,
+        "solar_to_home": 0.15,
+        "solar_to_battery": 0.0,
+        "solar_to_grid": 0.0,
+        "grid_to_home": 0.725,
+        "grid_to_battery": 0.0,
+        "battery_to_home": 0.0,
+        "battery_to_grid": 0.0
+      },
+      "timestamp": "2026-04-24 06:45:00+02:00",
+      "data_source": "actual",
+      "economic": {
+        "buy_price": 1.5,
+        "sell_price": 1.0499999999999998,
+        "grid_cost": 1.0875,
+        "battery_cycle_cost": 0.0,
+        "hourly_cost": 1.0875,
+        "grid_only_cost": 1.3125,
+        "solar_only_cost": 1.0875,
+        "hourly_savings": 0.225,
+        "solar_savings": 0.225
+      },
+      "decision": {
+        "strategic_intent": "IDLE",
+        "observed_intent": "IDLE",
+        "battery_action": null,
+        "cost_basis": 0.0,
+        "pattern_name": "",
+        "description": "",
+        "economic_chain": "",
+        "immediate_value": 0.0,
+        "future_value": 0.0,
+        "net_strategy_value": 0.0,
+        "advanced_flow_pattern": "",
+        "detailed_flow_values": {},
+        "future_target_hours": []
+      }
+    },
+    {
+      "period": 28,
+      "energy": {
+        "solar_production": 0.2,
+        "home_consumption": 1.15,
+        "battery_charged": 0.0,
+        "battery_discharged": 0.0,
+        "grid_imported": 0.95,
+        "grid_exported": 0.0,
+        "battery_soe_start": 1.0,
+        "battery_soe_end": 1.0,
+        "solar_to_home": 0.2,
+        "solar_to_battery": 0.0,
+        "solar_to_grid": 0.0,
+        "grid_to_home": 0.95,
+        "grid_to_battery": 0.0,
+        "battery_to_home": 0.0,
+        "battery_to_grid": 0.0
+      },
+      "timestamp": "2026-04-24 07:00:00+02:00",
+      "data_source": "actual",
+      "economic": {
+        "buy_price": 1.5,
+        "sell_price": 1.0499999999999998,
+        "grid_cost": 1.425,
+        "battery_cycle_cost": 0.0,
+        "hourly_cost": 1.425,
+        "grid_only_cost": 1.725,
+        "solar_only_cost": 1.425,
+        "hourly_savings": 0.3,
+        "solar_savings": 0.3
+      },
+      "decision": {
+        "strategic_intent": "IDLE",
+        "observed_intent": "IDLE",
+        "battery_action": null,
+        "cost_basis": 0.0,
+        "pattern_name": "",
+        "description": "",
+        "economic_chain": "",
+        "immediate_value": 0.0,
+        "future_value": 0.0,
+        "net_strategy_value": 0.0,
+        "advanced_flow_pattern": "",
+        "detailed_flow_values": {},
+        "future_target_hours": []
+      }
+    },
+    {
+      "period": 29,
+      "energy": {
+        "solar_production": 0.25,
+        "home_consumption": 1.15,
+        "battery_charged": 0.0,
+        "battery_discharged": 0.0,
+        "grid_imported": 0.9,
+        "grid_exported": 0.0,
+        "battery_soe_start": 1.0,
+        "battery_soe_end": 1.0,
+        "solar_to_home": 0.25,
+        "solar_to_battery": 0.0,
+        "solar_to_grid": 0.0,
+        "grid_to_home": 0.9,
+        "grid_to_battery": 0.0,
+        "battery_to_home": 0.0,
+        "battery_to_grid": 0.0
+      },
+      "timestamp": "2026-04-24 07:15:00+02:00",
+      "data_source": "actual",
+      "economic": {
+        "buy_price": 1.5,
+        "sell_price": 1.0499999999999998,
+        "grid_cost": 1.35,
+        "battery_cycle_cost": 0.0,
+        "hourly_cost": 1.35,
+        "grid_only_cost": 1.725,
+        "solar_only_cost": 1.35,
+        "hourly_savings": 0.375,
+        "solar_savings": 0.375
+      },
+      "decision": {
+        "strategic_intent": "IDLE",
+        "observed_intent": "IDLE",
+        "battery_action": null,
+        "cost_basis": 0.0,
+        "pattern_name": "",
+        "description": "",
+        "economic_chain": "",
+        "immediate_value": 0.0,
+        "future_value": 0.0,
+        "net_strategy_value": 0.0,
+        "advanced_flow_pattern": "",
+        "detailed_flow_values": {},
+        "future_target_hours": []
+      }
+    },
+    {
+      "period": 30,
+      "energy": {
+        "solar_production": 0.3,
+        "home_consumption": 1.15,
+        "battery_charged": 0.0,
+        "battery_discharged": 0.0,
+        "grid_imported": 0.85,
+        "grid_exported": 0.0,
+        "battery_soe_start": 1.0,
+        "battery_soe_end": 1.0,
+        "solar_to_home": 0.3,
+        "solar_to_battery": 0.0,
+        "solar_to_grid": 0.0,
+        "grid_to_home": 0.85,
+        "grid_to_battery": 0.0,
+        "battery_to_home": 0.0,
+        "battery_to_grid": 0.0
+      },
+      "timestamp": "2026-04-24 07:30:00+02:00",
+      "data_source": "actual",
+      "economic": {
+        "buy_price": 1.5,
+        "sell_price": 1.0499999999999998,
+        "grid_cost": 1.275,
+        "battery_cycle_cost": 0.0,
+        "hourly_cost": 1.275,
+        "grid_only_cost": 1.725,
+        "solar_only_cost": 1.275,
+        "hourly_savings": 0.45,
+        "solar_savings": 0.45
+      },
+      "decision": {
+        "strategic_intent": "IDLE",
+        "observed_intent": "IDLE",
+        "battery_action": null,
+        "cost_basis": 0.0,
+        "pattern_name": "",
+        "description": "",
+        "economic_chain": "",
+        "immediate_value": 0.0,
+        "future_value": 0.0,
+        "net_strategy_value": 0.0,
+        "advanced_flow_pattern": "",
+        "detailed_flow_values": {},
+        "future_target_hours": []
+      }
+    },
+    {
+      "period": 31,
+      "energy": {
+        "solar_production": 0.35,
+        "home_consumption": 1.15,
+        "battery_charged": 0.0,
+        "battery_discharged": 0.0,
+        "grid_imported": 0.8,
+        "grid_exported": 0.0,
+        "battery_soe_start": 1.0,
+        "battery_soe_end": 1.0,
+        "solar_to_home": 0.35,
+        "solar_to_battery": 0.0,
+        "solar_to_grid": 0.0,
+        "grid_to_home": 0.8,
+        "grid_to_battery": 0.0,
+        "battery_to_home": 0.0,
+        "battery_to_grid": 0.0
+      },
+      "timestamp": "2026-04-24 07:45:00+02:00",
+      "data_source": "actual",
+      "economic": {
+        "buy_price": 1.5,
+        "sell_price": 1.0499999999999998,
+        "grid_cost": 1.2,
+        "battery_cycle_cost": 0.0,
+        "hourly_cost": 1.2,
+        "grid_only_cost": 1.725,
+        "solar_only_cost": 1.2,
+        "hourly_savings": 0.525,
+        "solar_savings": 0.525
+      },
+      "decision": {
+        "strategic_intent": "IDLE",
+        "observed_intent": "IDLE",
+        "battery_action": null,
+        "cost_basis": 0.0,
+        "pattern_name": "",
+        "description": "",
+        "economic_chain": "",
+        "immediate_value": 0.0,
+        "future_value": 0.0,
+        "net_strategy_value": 0.0,
+        "advanced_flow_pattern": "",
+        "detailed_flow_values": {},
+        "future_target_hours": []
+      }
+    },
+    {
+      "period": 32,
+      "energy": {
+        "solar_production": 0.4,
+        "home_consumption": 1.15,
+        "battery_charged": 0.0,
+        "battery_discharged": 0.0,
+        "grid_imported": 0.75,
+        "grid_exported": 0.0,
+        "battery_soe_start": 1.0,
+        "battery_soe_end": 1.0,
+        "solar_to_home": 0.4,
+        "solar_to_battery": 0.0,
+        "solar_to_grid": 0.0,
+        "grid_to_home": 0.75,
+        "grid_to_battery": 0.0,
+        "battery_to_home": 0.0,
+        "battery_to_grid": 0.0
+      },
+      "timestamp": "2026-04-24 08:00:00+02:00",
+      "data_source": "actual",
+      "economic": {
+        "buy_price": 1.5,
+        "sell_price": 1.0499999999999998,
+        "grid_cost": 1.125,
+        "battery_cycle_cost": 0.0,
+        "hourly_cost": 1.125,
+        "grid_only_cost": 1.725,
+        "solar_only_cost": 1.125,
+        "hourly_savings": 0.6,
+        "solar_savings": 0.6
+      },
+      "decision": {
+        "strategic_intent": "IDLE",
+        "observed_intent": "IDLE",
+        "battery_action": null,
+        "cost_basis": 0.0,
+        "pattern_name": "",
+        "description": "",
+        "economic_chain": "",
+        "immediate_value": 0.0,
+        "future_value": 0.0,
+        "net_strategy_value": 0.0,
+        "advanced_flow_pattern": "",
+        "detailed_flow_values": {},
+        "future_target_hours": []
+      }
+    },
+    {
+      "period": 33,
+      "energy": {
+        "solar_production": 0.45,
+        "home_consumption": 1.15,
+        "battery_charged": 0.0,
+        "battery_discharged": 0.0,
+        "grid_imported": 0.7,
+        "grid_exported": 0.0,
+        "battery_soe_start": 1.0,
+        "battery_soe_end": 1.0,
+        "solar_to_home": 0.45,
+        "solar_to_battery": 0.0,
+        "solar_to_grid": 0.0,
+        "grid_to_home": 0.7,
+        "grid_to_battery": 0.0,
+        "battery_to_home": 0.0,
+        "battery_to_grid": 0.0
+      },
+      "timestamp": "2026-04-24 08:15:00+02:00",
+      "data_source": "actual",
+      "economic": {
+        "buy_price": 1.5,
+        "sell_price": 1.0499999999999998,
+        "grid_cost": 1.05,
+        "battery_cycle_cost": 0.0,
+        "hourly_cost": 1.05,
+        "grid_only_cost": 1.725,
+        "solar_only_cost": 1.05,
+        "hourly_savings": 0.675,
+        "solar_savings": 0.675
+      },
+      "decision": {
+        "strategic_intent": "IDLE",
+        "observed_intent": "IDLE",
+        "battery_action": null,
+        "cost_basis": 0.0,
+        "pattern_name": "",
+        "description": "",
+        "economic_chain": "",
+        "immediate_value": 0.0,
+        "future_value": 0.0,
+        "net_strategy_value": 0.0,
+        "advanced_flow_pattern": "",
+        "detailed_flow_values": {},
+        "future_target_hours": []
+      }
+    },
+    {
+      "period": 34,
+      "energy": {
+        "solar_production": 0.5,
+        "home_consumption": 1.15,
+        "battery_charged": 0.0,
+        "battery_discharged": 0.0,
+        "grid_imported": 0.65,
+        "grid_exported": 0.0,
+        "battery_soe_start": 1.0,
+        "battery_soe_end": 1.0,
+        "solar_to_home": 0.5,
+        "solar_to_battery": 0.0,
+        "solar_to_grid": 0.0,
+        "grid_to_home": 0.65,
+        "grid_to_battery": 0.0,
+        "battery_to_home": 0.0,
+        "battery_to_grid": 0.0
+      },
+      "timestamp": "2026-04-24 08:30:00+02:00",
+      "data_source": "actual",
+      "economic": {
+        "buy_price": 1.5,
+        "sell_price": 1.0499999999999998,
+        "grid_cost": 0.975,
+        "battery_cycle_cost": 0.0,
+        "hourly_cost": 0.975,
+        "grid_only_cost": 1.725,
+        "solar_only_cost": 0.975,
+        "hourly_savings": 0.75,
+        "solar_savings": 0.75
+      },
+      "decision": {
+        "strategic_intent": "IDLE",
+        "observed_intent": "IDLE",
+        "battery_action": null,
+        "cost_basis": 0.0,
+        "pattern_name": "",
+        "description": "",
+        "economic_chain": "",
+        "immediate_value": 0.0,
+        "future_value": 0.0,
+        "net_strategy_value": 0.0,
+        "advanced_flow_pattern": "",
+        "detailed_flow_values": {},
+        "future_target_hours": []
+      }
+    },
+    {
+      "period": 35,
+      "energy": {
+        "solar_production": 0.55,
+        "home_consumption": 1.15,
+        "battery_charged": 0.0,
+        "battery_discharged": 0.0,
+        "grid_imported": 0.6,
+        "grid_exported": 0.0,
+        "battery_soe_start": 1.0,
+        "battery_soe_end": 1.0,
+        "solar_to_home": 0.55,
+        "solar_to_battery": 0.0,
+        "solar_to_grid": 0.0,
+        "grid_to_home": 0.6,
+        "grid_to_battery": 0.0,
+        "battery_to_home": 0.0,
+        "battery_to_grid": 0.0
+      },
+      "timestamp": "2026-04-24 08:45:00+02:00",
+      "data_source": "actual",
+      "economic": {
+        "buy_price": 1.5,
+        "sell_price": 1.0499999999999998,
+        "grid_cost": 0.9,
+        "battery_cycle_cost": 0.0,
+        "hourly_cost": 0.9,
+        "grid_only_cost": 1.725,
+        "solar_only_cost": 0.9,
+        "hourly_savings": 0.825,
+        "solar_savings": 0.825
+      },
+      "decision": {
+        "strategic_intent": "IDLE",
+        "observed_intent": "IDLE",
+        "battery_action": null,
+        "cost_basis": 0.0,
+        "pattern_name": "",
+        "description": "",
+        "economic_chain": "",
+        "immediate_value": 0.0,
+        "future_value": 0.0,
+        "net_strategy_value": 0.0,
+        "advanced_flow_pattern": "",
+        "detailed_flow_values": {},
+        "future_target_hours": []
+      }
+    },
+    {
+      "period": 36,
+      "energy": {
+        "solar_production": 0.6,
+        "home_consumption": 0.875,
+        "battery_charged": 0.0,
+        "battery_discharged": 0.0,
+        "grid_imported": 0.275,
+        "grid_exported": 0.0,
+        "battery_soe_start": 1.0,
+        "battery_soe_end": 1.0,
+        "solar_to_home": 0.6,
+        "solar_to_battery": 0.0,
+        "solar_to_grid": 0.0,
+        "grid_to_home": 0.275,
+        "grid_to_battery": 0.0,
+        "battery_to_home": 0.0,
+        "battery_to_grid": 0.0
+      },
+      "timestamp": "2026-04-24 09:00:00+02:00",
+      "data_source": "actual",
+      "economic": {
+        "buy_price": 1.5,
+        "sell_price": 1.0499999999999998,
+        "grid_cost": 0.4125,
+        "battery_cycle_cost": 0.0,
+        "hourly_cost": 0.4125,
+        "grid_only_cost": 1.3125,
+        "solar_only_cost": 0.4125,
+        "hourly_savings": 0.9,
+        "solar_savings": 0.9
+      },
+      "decision": {
+        "strategic_intent": "IDLE",
+        "observed_intent": "IDLE",
+        "battery_action": null,
+        "cost_basis": 0.0,
+        "pattern_name": "",
+        "description": "",
+        "economic_chain": "",
+        "immediate_value": 0.0,
+        "future_value": 0.0,
+        "net_strategy_value": 0.0,
+        "advanced_flow_pattern": "",
+        "detailed_flow_values": {},
+        "future_target_hours": []
+      }
+    },
+    {
+      "period": 37,
+      "energy": {
+        "solar_production": 0.65,
+        "home_consumption": 0.875,
+        "battery_charged": 0.0,
+        "battery_discharged": 0.0,
+        "grid_imported": 0.225,
+        "grid_exported": 0.0,
+        "battery_soe_start": 1.0,
+        "battery_soe_end": 1.0,
+        "solar_to_home": 0.65,
+        "solar_to_battery": 0.0,
+        "solar_to_grid": 0.0,
+        "grid_to_home": 0.225,
+        "grid_to_battery": 0.0,
+        "battery_to_home": 0.0,
+        "battery_to_grid": 0.0
+      },
+      "timestamp": "2026-04-24 09:15:00+02:00",
+      "data_source": "actual",
+      "economic": {
+        "buy_price": 1.5,
+        "sell_price": 1.0499999999999998,
+        "grid_cost": 0.3375,
+        "battery_cycle_cost": 0.0,
+        "hourly_cost": 0.3375,
+        "grid_only_cost": 1.3125,
+        "solar_only_cost": 0.3375,
+        "hourly_savings": 0.975,
+        "solar_savings": 0.975
+      },
+      "decision": {
+        "strategic_intent": "IDLE",
+        "observed_intent": "IDLE",
+        "battery_action": null,
+        "cost_basis": 0.0,
+        "pattern_name": "",
+        "description": "",
+        "economic_chain": "",
+        "immediate_value": 0.0,
+        "future_value": 0.0,
+        "net_strategy_value": 0.0,
+        "advanced_flow_pattern": "",
+        "detailed_flow_values": {},
+        "future_target_hours": []
+      }
+    },
+    {
+      "period": 38,
+      "energy": {
+        "solar_production": 0.7,
+        "home_consumption": 0.875,
+        "battery_charged": 0.0,
+        "battery_discharged": 0.0,
+        "grid_imported": 0.175,
+        "grid_exported": 0.0,
+        "battery_soe_start": 1.0,
+        "battery_soe_end": 1.0,
+        "solar_to_home": 0.7,
+        "solar_to_battery": 0.0,
+        "solar_to_grid": 0.0,
+        "grid_to_home": 0.175,
+        "grid_to_battery": 0.0,
+        "battery_to_home": 0.0,
+        "battery_to_grid": 0.0
+      },
+      "timestamp": "2026-04-24 09:30:00+02:00",
+      "data_source": "actual",
+      "economic": {
+        "buy_price": 1.5,
+        "sell_price": 1.0499999999999998,
+        "grid_cost": 0.2625,
+        "battery_cycle_cost": 0.0,
+        "hourly_cost": 0.2625,
+        "grid_only_cost": 1.3125,
+        "solar_only_cost": 0.2625,
+        "hourly_savings": 1.05,
+        "solar_savings": 1.05
+      },
+      "decision": {
+        "strategic_intent": "IDLE",
+        "observed_intent": "IDLE",
+        "battery_action": null,
+        "cost_basis": 0.0,
+        "pattern_name": "",
+        "description": "",
+        "economic_chain": "",
+        "immediate_value": 0.0,
+        "future_value": 0.0,
+        "net_strategy_value": 0.0,
+        "advanced_flow_pattern": "",
+        "detailed_flow_values": {},
+        "future_target_hours": []
+      }
+    },
+    {
+      "period": 39,
+      "energy": {
+        "solar_production": 0.75,
+        "home_consumption": 0.875,
+        "battery_charged": 0.0,
+        "battery_discharged": 0.0,
+        "grid_imported": 0.125,
+        "grid_exported": 0.0,
+        "battery_soe_start": 1.0,
+        "battery_soe_end": 1.0,
+        "solar_to_home": 0.75,
+        "solar_to_battery": 0.0,
+        "solar_to_grid": 0.0,
+        "grid_to_home": 0.125,
+        "grid_to_battery": 0.0,
+        "battery_to_home": 0.0,
+        "battery_to_grid": 0.0
+      },
+      "timestamp": "2026-04-24 09:45:00+02:00",
+      "data_source": "actual",
+      "economic": {
+        "buy_price": 1.5,
+        "sell_price": 1.0499999999999998,
+        "grid_cost": 0.1875,
+        "battery_cycle_cost": 0.0,
+        "hourly_cost": 0.1875,
+        "grid_only_cost": 1.3125,
+        "solar_only_cost": 0.1875,
+        "hourly_savings": 1.125,
+        "solar_savings": 1.125
+      },
+      "decision": {
+        "strategic_intent": "IDLE",
+        "observed_intent": "IDLE",
+        "battery_action": null,
+        "cost_basis": 0.0,
+        "pattern_name": "",
+        "description": "",
+        "economic_chain": "",
+        "immediate_value": 0.0,
+        "future_value": 0.0,
+        "net_strategy_value": 0.0,
+        "advanced_flow_pattern": "",
+        "detailed_flow_values": {},
+        "future_target_hours": []
+      }
+    },
+    {
+      "period": 40,
+      "energy": {
+        "solar_production": 0.8,
+        "home_consumption": 0.875,
+        "battery_charged": 0.0,
+        "battery_discharged": 0.0,
+        "grid_imported": 0.075,
+        "grid_exported": 0.0,
+        "battery_soe_start": 1.0,
+        "battery_soe_end": 1.0,
+        "solar_to_home": 0.8,
+        "solar_to_battery": 0.0,
+        "solar_to_grid": 0.0,
+        "grid_to_home": 0.075,
+        "grid_to_battery": 0.0,
+        "battery_to_home": 0.0,
+        "battery_to_grid": 0.0
+      },
+      "timestamp": "2026-04-24 10:00:00+02:00",
+      "data_source": "actual",
+      "economic": {
+        "buy_price": 1.5,
+        "sell_price": 1.0499999999999998,
+        "grid_cost": 0.1125,
+        "battery_cycle_cost": 0.0,
+        "hourly_cost": 0.1125,
+        "grid_only_cost": 1.3125,
+        "solar_only_cost": 0.1125,
+        "hourly_savings": 1.2,
+        "solar_savings": 1.2
+      },
+      "decision": {
+        "strategic_intent": "IDLE",
+        "observed_intent": "IDLE",
+        "battery_action": null,
+        "cost_basis": 0.0,
+        "pattern_name": "",
+        "description": "",
+        "economic_chain": "",
+        "immediate_value": 0.0,
+        "future_value": 0.0,
+        "net_strategy_value": 0.0,
+        "advanced_flow_pattern": "",
+        "detailed_flow_values": {},
+        "future_target_hours": []
+      }
+    },
+    {
+      "period": 41,
+      "energy": {
+        "solar_production": 0.8,
+        "home_consumption": 0.875,
+        "battery_charged": 0.0,
+        "battery_discharged": 0.0,
+        "grid_imported": 0.075,
+        "grid_exported": 0.0,
+        "battery_soe_start": 1.0,
+        "battery_soe_end": 1.0,
+        "solar_to_home": 0.8,
+        "solar_to_battery": 0.0,
+        "solar_to_grid": 0.0,
+        "grid_to_home": 0.075,
+        "grid_to_battery": 0.0,
+        "battery_to_home": 0.0,
+        "battery_to_grid": 0.0
+      },
+      "timestamp": "2026-04-24 10:15:00+02:00",
+      "data_source": "actual",
+      "economic": {
+        "buy_price": 1.5,
+        "sell_price": 1.0499999999999998,
+        "grid_cost": 0.1125,
+        "battery_cycle_cost": 0.0,
+        "hourly_cost": 0.1125,
+        "grid_only_cost": 1.3125,
+        "solar_only_cost": 0.1125,
+        "hourly_savings": 1.2,
+        "solar_savings": 1.2
+      },
+      "decision": {
+        "strategic_intent": "IDLE",
+        "observed_intent": "IDLE",
+        "battery_action": null,
+        "cost_basis": 0.0,
+        "pattern_name": "",
+        "description": "",
+        "economic_chain": "",
+        "immediate_value": 0.0,
+        "future_value": 0.0,
+        "net_strategy_value": 0.0,
+        "advanced_flow_pattern": "",
+        "detailed_flow_values": {},
+        "future_target_hours": []
+      }
+    },
+    {
+      "period": 42,
+      "energy": {
+        "solar_production": 0.8,
+        "home_consumption": 0.875,
+        "battery_charged": 0.0,
+        "battery_discharged": 0.0,
+        "grid_imported": 0.075,
+        "grid_exported": 0.0,
+        "battery_soe_start": 1.0,
+        "battery_soe_end": 1.0,
+        "solar_to_home": 0.8,
+        "solar_to_battery": 0.0,
+        "solar_to_grid": 0.0,
+        "grid_to_home": 0.075,
+        "grid_to_battery": 0.0,
+        "battery_to_home": 0.0,
+        "battery_to_grid": 0.0
+      },
+      "timestamp": "2026-04-24 10:30:00+02:00",
+      "data_source": "actual",
+      "economic": {
+        "buy_price": 1.5,
+        "sell_price": 1.0499999999999998,
+        "grid_cost": 0.1125,
+        "battery_cycle_cost": 0.0,
+        "hourly_cost": 0.1125,
+        "grid_only_cost": 1.3125,
+        "solar_only_cost": 0.1125,
+        "hourly_savings": 1.2,
+        "solar_savings": 1.2
+      },
+      "decision": {
+        "strategic_intent": "IDLE",
+        "observed_intent": "IDLE",
+        "battery_action": null,
+        "cost_basis": 0.0,
+        "pattern_name": "",
+        "description": "",
+        "economic_chain": "",
+        "immediate_value": 0.0,
+        "future_value": 0.0,
+        "net_strategy_value": 0.0,
+        "advanced_flow_pattern": "",
+        "detailed_flow_values": {},
+        "future_target_hours": []
+      }
+    },
+    {
+      "period": 43,
+      "energy": {
+        "solar_production": 0.8,
+        "home_consumption": 0.875,
+        "battery_charged": 0.0,
+        "battery_discharged": 0.0,
+        "grid_imported": 0.075,
+        "grid_exported": 0.0,
+        "battery_soe_start": 1.0,
+        "battery_soe_end": 1.0,
+        "solar_to_home": 0.8,
+        "solar_to_battery": 0.0,
+        "solar_to_grid": 0.0,
+        "grid_to_home": 0.075,
+        "grid_to_battery": 0.0,
+        "battery_to_home": 0.0,
+        "battery_to_grid": 0.0
+      },
+      "timestamp": "2026-04-24 10:45:00+02:00",
+      "data_source": "actual",
+      "economic": {
+        "buy_price": 1.5,
+        "sell_price": 1.0499999999999998,
+        "grid_cost": 0.1125,
+        "battery_cycle_cost": 0.0,
+        "hourly_cost": 0.1125,
+        "grid_only_cost": 1.3125,
+        "solar_only_cost": 0.1125,
+        "hourly_savings": 1.2,
+        "solar_savings": 1.2
+      },
+      "decision": {
+        "strategic_intent": "IDLE",
+        "observed_intent": "IDLE",
+        "battery_action": null,
+        "cost_basis": 0.0,
+        "pattern_name": "",
+        "description": "",
+        "economic_chain": "",
+        "immediate_value": 0.0,
+        "future_value": 0.0,
+        "net_strategy_value": 0.0,
+        "advanced_flow_pattern": "",
+        "detailed_flow_values": {},
+        "future_target_hours": []
+      }
+    },
+    {
+      "period": 44,
+      "energy": {
+        "solar_production": 0.8,
+        "home_consumption": 0.875,
+        "battery_charged": 0.0,
+        "battery_discharged": 0.0,
+        "grid_imported": 0.075,
+        "grid_exported": 0.0,
+        "battery_soe_start": 1.0,
+        "battery_soe_end": 1.0,
+        "solar_to_home": 0.8,
+        "solar_to_battery": 0.0,
+        "solar_to_grid": 0.0,
+        "grid_to_home": 0.075,
+        "grid_to_battery": 0.0,
+        "battery_to_home": 0.0,
+        "battery_to_grid": 0.0
+      },
+      "timestamp": "2026-04-24 11:00:00+02:00",
+      "data_source": "actual",
+      "economic": {
+        "buy_price": 1.5,
+        "sell_price": 1.0499999999999998,
+        "grid_cost": 0.1125,
+        "battery_cycle_cost": 0.0,
+        "hourly_cost": 0.1125,
+        "grid_only_cost": 1.3125,
+        "solar_only_cost": 0.1125,
+        "hourly_savings": 1.2,
+        "solar_savings": 1.2
+      },
+      "decision": {
+        "strategic_intent": "IDLE",
+        "observed_intent": "IDLE",
+        "battery_action": null,
+        "cost_basis": 0.0,
+        "pattern_name": "",
+        "description": "",
+        "economic_chain": "",
+        "immediate_value": 0.0,
+        "future_value": 0.0,
+        "net_strategy_value": 0.0,
+        "advanced_flow_pattern": "",
+        "detailed_flow_values": {},
+        "future_target_hours": []
+      }
+    },
+    {
+      "period": 45,
+      "energy": {
+        "solar_production": 0.8,
+        "home_consumption": 0.875,
+        "battery_charged": 0.0,
+        "battery_discharged": 0.0,
+        "grid_imported": 0.075,
+        "grid_exported": 0.0,
+        "battery_soe_start": 1.0,
+        "battery_soe_end": 1.0,
+        "solar_to_home": 0.8,
+        "solar_to_battery": 0.0,
+        "solar_to_grid": 0.0,
+        "grid_to_home": 0.075,
+        "grid_to_battery": 0.0,
+        "battery_to_home": 0.0,
+        "battery_to_grid": 0.0
+      },
+      "timestamp": "2026-04-24 11:15:00+02:00",
+      "data_source": "actual",
+      "economic": {
+        "buy_price": 1.5,
+        "sell_price": 1.0499999999999998,
+        "grid_cost": 0.1125,
+        "battery_cycle_cost": 0.0,
+        "hourly_cost": 0.1125,
+        "grid_only_cost": 1.3125,
+        "solar_only_cost": 0.1125,
+        "hourly_savings": 1.2,
+        "solar_savings": 1.2
+      },
+      "decision": {
+        "strategic_intent": "IDLE",
+        "observed_intent": "IDLE",
+        "battery_action": null,
+        "cost_basis": 0.0,
+        "pattern_name": "",
+        "description": "",
+        "economic_chain": "",
+        "immediate_value": 0.0,
+        "future_value": 0.0,
+        "net_strategy_value": 0.0,
+        "advanced_flow_pattern": "",
+        "detailed_flow_values": {},
+        "future_target_hours": []
+      }
+    },
+    {
+      "period": 46,
+      "energy": {
+        "solar_production": 0.8,
+        "home_consumption": 0.875,
+        "battery_charged": 0.0,
+        "battery_discharged": 0.0,
+        "grid_imported": 0.075,
+        "grid_exported": 0.0,
+        "battery_soe_start": 1.0,
+        "battery_soe_end": 1.0,
+        "solar_to_home": 0.8,
+        "solar_to_battery": 0.0,
+        "solar_to_grid": 0.0,
+        "grid_to_home": 0.075,
+        "grid_to_battery": 0.0,
+        "battery_to_home": 0.0,
+        "battery_to_grid": 0.0
+      },
+      "timestamp": "2026-04-24 11:30:00+02:00",
+      "data_source": "actual",
+      "economic": {
+        "buy_price": 1.5,
+        "sell_price": 1.0499999999999998,
+        "grid_cost": 0.1125,
+        "battery_cycle_cost": 0.0,
+        "hourly_cost": 0.1125,
+        "grid_only_cost": 1.3125,
+        "solar_only_cost": 0.1125,
+        "hourly_savings": 1.2,
+        "solar_savings": 1.2
+      },
+      "decision": {
+        "strategic_intent": "IDLE",
+        "observed_intent": "IDLE",
+        "battery_action": null,
+        "cost_basis": 0.0,
+        "pattern_name": "",
+        "description": "",
+        "economic_chain": "",
+        "immediate_value": 0.0,
+        "future_value": 0.0,
+        "net_strategy_value": 0.0,
+        "advanced_flow_pattern": "",
+        "detailed_flow_values": {},
+        "future_target_hours": []
+      }
+    },
+    {
+      "period": 47,
+      "energy": {
+        "solar_production": 0.8,
+        "home_consumption": 0.875,
+        "battery_charged": 0.0,
+        "battery_discharged": 0.0,
+        "grid_imported": 0.075,
+        "grid_exported": 0.0,
+        "battery_soe_start": 1.0,
+        "battery_soe_end": 1.0,
+        "solar_to_home": 0.8,
+        "solar_to_battery": 0.0,
+        "solar_to_grid": 0.0,
+        "grid_to_home": 0.075,
+        "grid_to_battery": 0.0,
+        "battery_to_home": 0.0,
+        "battery_to_grid": 0.0
+      },
+      "timestamp": "2026-04-24 11:45:00+02:00",
+      "data_source": "actual",
+      "economic": {
+        "buy_price": 1.5,
+        "sell_price": 1.0499999999999998,
+        "grid_cost": 0.1125,
+        "battery_cycle_cost": 0.0,
+        "hourly_cost": 0.1125,
+        "grid_only_cost": 1.3125,
+        "solar_only_cost": 0.1125,
+        "hourly_savings": 1.2,
+        "solar_savings": 1.2
+      },
+      "decision": {
+        "strategic_intent": "IDLE",
+        "observed_intent": "IDLE",
+        "battery_action": null,
+        "cost_basis": 0.0,
+        "pattern_name": "",
+        "description": "",
+        "economic_chain": "",
+        "immediate_value": 0.0,
+        "future_value": 0.0,
+        "net_strategy_value": 0.0,
+        "advanced_flow_pattern": "",
+        "detailed_flow_values": {},
+        "future_target_hours": []
+      }
+    }
+  ],
+  "inverter_platform": "growatt_server_sph"
+}

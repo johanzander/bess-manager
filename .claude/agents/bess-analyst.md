@@ -123,6 +123,28 @@ theory without checking whether the evidence actually supports it.
    Does your analysis address what the user is actually struggling with NOW?
    If not, you've likely analyzed a stale problem.
 
+### CRITICAL: Analyzing Runtime Failures and Errors
+
+When you see errors or runtime failures in debug logs or screenshots:
+
+1. **NEVER dismiss errors as "stale" or "transient" without proving it.**
+   For every error, find the exact source code that generated the error message
+   (grep for the operation string). Read the full method. Determine whether
+   the failure condition is still present in the code. An error that happened
+   once will happen again if the underlying code is broken.
+2. **A green health check does NOT mean the feature works.** The health check
+   may test a different code path than the runtime operation, or it may accept
+   a wrong return value as valid. Always compare what the health check tests
+   vs what the runtime code actually does.
+3. **Verify assumptions across platforms.** Code that works for one inverter
+   platform may silently fail on another. Always check which platform the user
+   is on and trace the full call chain for that platform — including inherited
+   base-class methods that may not be overridden.
+4. **"No error in the log" does not mean "no bug."** Silent failures (wrong
+   return values, service calls to wrong HA domains, swallowed exceptions)
+   are harder to spot than crashes. Check whether the code actually achieves
+   its intended effect, not just whether it avoids exceptions.
+
 ## Common Analysis Tasks
 
 ### Debugging Negative Savings
@@ -140,6 +162,20 @@ theory without checking whether the evidence actually supports it.
 2. Check `min_action_profit_threshold` vs calculated savings
 3. Trace the cost basis tracking through charge/discharge
 4. Verify price data fed to optimizer
+
+### Debugging Discovery & Integration Issues
+
+1. Read `ha_api_controller.py` — focus on:
+   - `discover_integrations()` (line ~2099) — integration detection
+   - `discover_sensors_from_registry()` (line ~2539) — entity suffix matching
+   - `SOLAX_ENTITY_SUFFIX_MAP` — maps unique_id suffixes to BESS sensor keys
+   - `_GROWATT_TOU_MARKER_SUFFIX` / `_GROWATT_GEN3_MARKER_SUFFIX` — platform detection
+2. Read the relevant scenario fixture in `scripts/mock_ha/scenarios/`
+3. Check entity registry data: does the `unique_id` suffix match a map entry?
+4. Check platform detection: does the entity's `platform` field match `_SOLAX_PLATFORMS`?
+5. **Blast radius**: list all consumers of `discover_sensors_from_registry` output
+   (setup wizard API, health checks, settings save) and verify none break
+6. Run `pytest core/bess/tests/unit/test_scenario_discovery.py -v` to verify
 
 ### Debugging Schedule Issues
 

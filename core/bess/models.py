@@ -43,13 +43,12 @@ def infer_intent_from_flows(power: float, energy_data: "EnergyData") -> str:
         Inferred strategic intent string based on observed flows
     """
     if power > 0.1:  # CHARGING
-        if energy_data.grid_to_battery > 0.1:  # ANY grid charging needs capability
-            return "GRID_CHARGING"  # Enable grid charging capability
-        elif energy_data.solar_to_battery > 0.1 or energy_data.solar_production > 0.1:
-            return "SOLAR_STORAGE"  # Solar charging (check both flows and production)
+        if energy_data.grid_to_battery > 0.01:
+            return (
+                "GRID_CHARGING"  # Grid must participate → battery_first, grid_charge=ON
+            )
         else:
-            # Small amounts of charging from unclear source - default to grid
-            return "GRID_CHARGING"
+            return "SOLAR_STORAGE"  # Solar surplus covers it → load_first
     elif power < -0.1:  # DISCHARGING
         if energy_data.battery_to_grid > 0.1:  # ANY export needs capability
             return "EXPORT_ARBITRAGE"  # Enable export capability
@@ -116,11 +115,12 @@ class EnergyData:
         battery_to_grid = self.battery_discharged - battery_to_home
 
         # Step 3: Grid flow allocation (uses actual measured totals)
-        # Grid import covers remaining home consumption first, then battery charging
-        grid_to_home = min(self.grid_imported, remaining_consumption)
         # Grid to battery is whatever battery charging wasn't covered by solar
-        # Must be constrained by actual battery_charged to avoid impossible flows
-        grid_to_battery = max(0, self.battery_charged - solar_to_battery)
+        grid_to_battery = min(
+            max(0, self.battery_charged - solar_to_battery), self.grid_imported
+        )
+        # Grid to home is the remainder of actual imports
+        grid_to_home = self.grid_imported - grid_to_battery
 
         # Step 4: Export flow reconciliation (ensure exports match measured total)
         calculated_export = solar_to_grid + battery_to_grid

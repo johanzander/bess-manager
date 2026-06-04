@@ -65,6 +65,7 @@ COPY backend/run.sh ./
 RUN python3 -m venv /app/venv
 ENV PATH="/app/venv/bin:$PATH"
 ENV PYTHONPATH="/app:${PYTHONPATH}"
+ENV BESS_VERSION=${BUILD_VERSION}
 
 # Install Python requirements in the virtual environment
 RUN pip install --no-cache-dir -r requirements.txt

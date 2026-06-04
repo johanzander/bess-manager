@@ -1,0 +1,241 @@
+{
+  "name": "synthetic-growatt-min",
+  "description": "Synthetic Growatt MIN (cloud/growatt_server) scenario with Nordpool SE2 for E2E testing",
+  "mock_time": "@2026-05-10 08:00:00",
+  "timezone": "Europe/Stockholm",
+  "bess_config": {
+    "home": {
+      "default_hourly": 3.8,
+      "currency": "SEK",
+      "consumption_strategy": "fixed",
+      "max_fuse_current": 20,
+      "voltage": 230,
+      "safety_margin": 1,
+      "phase_count": 3,
+      "power_monitoring_enabled": false
+    },
+    "battery": {
+      "total_capacity": 10.0,
+      "min_soc": 10,
+      "max_soc": 100,
+      "max_charge_power_kw": 5.0,
+      "max_discharge_power_kw": 5.0,
+      "cycle_cost_per_kwh": 0.3,
+      "min_action_profit_threshold": 5.0,
+      "charging_power_rate": 100,
+      "efficiency_charge": 0.95,
+      "efficiency_discharge": 0.95
+    },
+    "electricity_price": {
+      "area": "SE2",
+      "vat_multiplier": 1.25,
+      "markup_rate": 0.08,
+      "additional_costs": 0.65,
+      "tax_reduction": 0.1988
+    },
+    "energy_provider": {
+      "provider": "nordpool_official",
+      "nordpool_official": {
+        "config_entry_id": "mock_nordpool_config_entry"
+      }
+    },
+    "inverter": {
+      "platform": "growatt_server_min"
+    },
+    "growatt": {
+      "inverter_type": "MIN",
+      "device_id": "mock_min_sn"
+    },
+    "sensors": {
+      "battery_soc": "sensor.mock_min_sn_state_of_charge_soc",
+      "battery_charge_power": "sensor.mock_min_sn_battery_1_charging_w",
+      "battery_discharge_power": "sensor.mock_min_sn_battery_1_discharging_w",
+      "import_power": "sensor.mock_min_sn_import_power",
+      "export_power": "sensor.mock_min_sn_export_power",
+      "pv_power": "sensor.mock_min_sn_internal_wattage",
+      "local_load_power": "sensor.mock_min_sn_local_load_power",
+      "battery_charging_power_rate": "number.mock_min_sn_battery_charge_power_limit",
+      "battery_discharging_power_rate": "number.mock_min_sn_battery_discharge_power_limit",
+      "battery_charge_stop_soc": "number.mock_min_sn_battery_charge_soc_limit",
+      "battery_discharge_stop_soc": "number.mock_min_sn_battery_discharge_soc_limit",
+      "grid_charge": "switch.mock_min_sn_charge_from_grid",
+      "lifetime_battery_charged": "sensor.mock_min_sn_lifetime_total_all_batteries_charged",
+      "lifetime_battery_discharged": "sensor.mock_min_sn_lifetime_total_all_batteries_discharged",
+      "lifetime_solar_energy": "sensor.mock_min_sn_lifetime_total_solar_energy",
+      "lifetime_export_to_grid": "sensor.mock_min_sn_lifetime_total_export_to_grid",
+      "lifetime_import_from_grid": "sensor.mock_min_sn_lifetime_import_from_grid",
+      "lifetime_load_consumption": "sensor.mock_min_sn_lifetime_total_load_consumption"
+    }
+  },
+  "sensors": {
+    "sensor.mock_min_sn_state_of_charge_soc": {
+      "state": "55",
+      "attributes": {
+        "unit_of_measurement": "%"
+      }
+    },
+    "sensor.mock_min_sn_battery_1_charging_w": {
+      "state": "0",
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
+    },
+    "sensor.mock_min_sn_battery_1_discharging_w": {
+      "state": "600",
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
+    },
+    "sensor.mock_min_sn_import_power": {
+      "state": "800",
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
+    },
+    "sensor.mock_min_sn_export_power": {
+      "state": "0",
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
+    },
+    "sensor.mock_min_sn_internal_wattage": {
+      "state": "2500",
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
+    },
+    "sensor.mock_min_sn_local_load_power": {
+      "state": "3900",
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
+    },
+    "number.mock_min_sn_battery_charge_power_limit": {
+      "state": "100",
+      "attributes": {
+        "unit_of_measurement": "%"
+      }
+    },
+    "number.mock_min_sn_battery_discharge_power_limit": {
+      "state": "100",
+      "attributes": {
+        "unit_of_measurement": "%"
+      }
+    },
+    "number.mock_min_sn_battery_charge_soc_limit": {
+      "state": "100",
+      "attributes": {
+        "unit_of_measurement": "%"
+      }
+    },
+    "number.mock_min_sn_battery_discharge_soc_limit": {
+      "state": "10",
+      "attributes": {
+        "unit_of_measurement": "%"
+      }
+    },
+    "switch.mock_min_sn_charge_from_grid": {
+      "state": "off",
+      "attributes": {}
+    },
+    "sensor.mock_min_sn_lifetime_total_all_batteries_charged": {
+      "state": "2200",
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
+    },
+    "sensor.mock_min_sn_lifetime_total_all_batteries_discharged": {
+      "state": "2100",
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
+    },
+    "sensor.mock_min_sn_lifetime_total_solar_energy": {
+      "state": "7500",
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
+    },
+    "sensor.mock_min_sn_lifetime_total_export_to_grid": {
+      "state": "3500",
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
+    },
+    "sensor.mock_min_sn_lifetime_import_from_grid": {
+      "state": "4200",
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
+    },
+    "sensor.mock_min_sn_lifetime_total_load_consumption": {
+      "state": "8500",
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
+    },
+    "sensor.nordpool_kwh_se2_sek_2_10_025": {
+      "state": "0.42",
+      "attributes": {
+        "unit_of_measurement": "SEK/kWh",
+        "price_area": "SE2"
+      }
+    }
+  },
+  "price_data": {
+    "today": [
+      0.28,
+      0.22,
+      0.18,
+      0.15,
+      0.14,
+      0.2,
+      0.38,
+      0.52,
+      0.65,
+      0.72,
+      0.68,
+      0.6,
+      0.55,
+      0.5,
+      0.48,
+      0.52,
+      0.58,
+      0.7,
+      0.85,
+      0.78,
+      0.62,
+      0.45,
+      0.35,
+      0.3
+    ],
+    "tomorrow": [
+      0.25,
+      0.2,
+      0.16,
+      0.14,
+      0.13,
+      0.18,
+      0.35,
+      0.48,
+      0.6,
+      0.68,
+      0.65,
+      0.58,
+      0.52,
+      0.48,
+      0.45,
+      0.5,
+      0.55,
+      0.68,
+      0.8,
+      0.75,
+      0.58,
+      0.42,
+      0.32,
+      0.28
+    ]
+  },
+  "time_segments": [],
+  "inverter_platform": "growatt_server_min"
+}

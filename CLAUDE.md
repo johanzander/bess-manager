@@ -6,9 +6,10 @@ non-negotiable and apply to all agents.
 
 ## Verification Before Action
 
-- ALWAYS run tests locally before pushing commits
+- ALWAYS run tests locally before pushing commits — never push to any remote until local tests are green
 - ALWAYS verify against actual source code/repos before making assumptions about APIs, entity names, or naming patterns
 - NEVER speculate about file contents or behavior - read the file or run the code first
+- Before proposing any fix, show the exact code path and evidence (logs, source) that proves the root cause — do not guess at entity names, prefixes, or discovery logic
 
 ## Agent Documentation Index
 
@@ -122,15 +123,19 @@ of `analyzed`.
 
 ## Release Workflow
 
+- Always release through a PR so CI runs — never push directly to a branch bypassing CI
 - Always check the current published version before tagging (e.g., check GitHub releases) to avoid version collisions
 - Confirm the target remote and branch BEFORE pushing releases (beta vs main, origin vs beta remote)
 - Run the full test suite locally before any release tag or beta push
+- Never skip the CHANGELOG.md update or version bump
 
 ## Scope Discipline
 
 - Do NOT modify, remove, or 'clean up' items the user hasn't asked you to change
 - When doing cleanup, list what you plan to change and confirm before editing
 - Do not revert intentional linter changes or simplifications without explicit instruction
+- After editing, list every file and symbol changed so the user can confirm nothing unrelated was touched
+- Never add speculative fallbacks, defensive error handling, or "robustness" improvements beyond what was asked
 
 ## Worktree Conventions
 

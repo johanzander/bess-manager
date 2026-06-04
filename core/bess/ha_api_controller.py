@@ -336,47 +336,273 @@ class HomeAssistantAPIController:
         },
     }
 
-    # Maps entity ID suffix (after device_sn_) → BESS sensor key.
-    # Used by discover_growatt_sensors() to map entity IDs from GET /api/states.
-    # Entity IDs follow the pattern: <domain>.<device_sn>_<suffix>
+    # ── Entity Discovery Architecture ─────────────────────────────────────
+    # HA's entity registry has three key fields per entity:
+    #   unique_id  — assigned by the integration, NEVER changes (e.g. "rkm0d7n04x_import_power")
+    #   entity_id  — the API-callable name (e.g. "sensor.rkm0d7n04x_import_power"), user CAN rename
+    #   platform   — which integration created it (e.g. "growatt_server"), NEVER changes
     #
-    # HA generates entity IDs from the slugified *translation name*, not the sensor key.
-    # E.g. key="tlx_statement_of_charge", name="State of charge (SoC)"
-    #      → entity ID suffix: "state_of_charge_soc"  (tlx_ never appears in entity IDs)
+    # Discovery uses unique_id + platform (both immutable) to FIND the correct
+    # entities regardless of user renaming.  It then stores the entity_id because
+    # that is what HA's REST/WebSocket APIs require for reading sensor values.
+    # Re-running discovery after a rename will update the stored entity_id.
     #
-    # The SOC sensor name was corrected at some point ("Statement of Charge SOC" →
-    # "State of charge (SoC)"), so both suffixes exist across installations.
-    # All other sensor names are stable — these entries cover MIN/TLX interface models
-    # (MIN, MID, MIC, MOD, MOC, NEO, etc.) via both official HA Core and HACS builds.
+    # ── BESS Sensor Key Mapping ───────────────────────────────────────────
+    # Each BESS key has a unique_id suffix per integration.  Discovery matches
+    # unique_id.endswith("_<suffix>") to resolve the entity.
+    #
+    # solax_modbus unique_ids follow the pattern "{serial}_solax_{plugin_key}".
+    # The suffix map uses the FULL suffix including the "solax_" prefix to
+    # ensure exact, deterministic matching with no ambiguity.
+    #
+    # growatt_server unique_ids use "{SN}_{key}" or "{SN}-{sensor_key}".
+    #
+    # BESS key                       growatt_server suffix              solax_modbus suffix (full)
+    # ─────────────────────────────  ─────────────────────────────────  ─────────────────────────────────
+    # battery_soc                    state_of_charge_soc                solax_battery_capacity / solax_battery_soc
+    # battery_charge_power           battery_1_charging_w               solax_battery_power_charge / solax_battery_charge_power
+    # battery_discharge_power        battery_1_discharging_w            solax_battery_power_discharge / solax_battery_discharge_power
+    # import_power                   import_power                       solax_measured_power / solax_total_forward_power / solax_ac_power_to_user
+    # export_power                   export_power                       solax_grid_export / solax_total_reverse_power / solax_ac_power_to_grid
+    # local_load_power               local_load_power                   solax_house_load / solax_total_load_power
+    # pv_power                       internal_wattage                   solax_pv_power_1 / solax_pv_power_total / solax_total_pv_power
+    # grid_charge                    charge_from_grid                   solax_charger_switch
+    # battery_charging_power_rate    battery_charge_power_limit         solax_ems_charging_rate
+    # battery_discharging_power_rate battery_discharge_power_limit      solax_ems_discharging_rate
+    # battery_charge_stop_soc        battery_charge_soc_limit           solax_ems_charging_stop_soc
+    # battery_discharge_stop_soc     battery_discharge_soc_limit        solax_ems_discharging_stop_soc
+    # lifetime_battery_charged       lifetime_total_all_batteries_charged  solax_battery_input_energy_total / solax_total_battery_input_energy
+    # lifetime_battery_discharged    lifetime_total_all_batteries_discharged  solax_battery_output_energy_total / solax_total_battery_output_energy
+    # lifetime_solar_energy          lifetime_total_solar_energy        solax_total_solar_energy
+    # lifetime_export_to_grid        lifetime_total_export_to_grid      solax_grid_export_total / solax_total_grid_export
+    # lifetime_import_from_grid      lifetime_import_from_grid          solax_grid_import_total / solax_total_grid_import
+    # lifetime_load_consumption      lifetime_total_load_consumption    solax_total_yield (GEN4) / solax_total_load (GEN3)
+    # lifetime_system_production     lifetime_system_production         solax_total_power_generation (GEN4) / solax_total_yield (native SolaX)
+    #
+    # GEN3-only EMS entities (MIX/SPA/SPH via solax_modbus):
+    # battery_charging_power_rate    —                                  solax_battery_first_charge_rate
+    # battery_discharging_power_rate —                                  solax_grid_first_discharge_rate
+    # lifetime_self_consumption      lifetime_self_consumption          — (growatt_server only)
+    #
+    # SOLAX-ONLY (VPP control — native SolaX inverters):
+    # solax_power_control_mode       —                                  solax_remotecontrol_power_control
+    # solax_active_power             —                                  solax_remotecontrol_active_power
+    # solax_autorepeat_duration      —                                  solax_remotecontrol_autorepeat_duration
+    # solax_power_control_trigger    —                                  solax_remotecontrol_trigger
+    # solax_battery_min_soc          —                                  solax_battery_minimum_capacity
+    # solax_charger_use_mode         —                                  solax_charger_use_mode (SolaX native only)
+    #
+    # GROWATT-VIA-SOLAX-ONLY (TOU time slots — Growatt MIN via solax_modbus):
+    # Note: plugin key="time_N_enabled" (used in unique_id) but
+    # name="Time N Active" (used in entity_id → *_time_N_active).
+    # Detection and mapping match on unique_id, so the suffix is "enabled".
+    # Slots 4-9 are disabled by default in HA entity registry.
+    # tou_time_N_enabled             —                                  solax_time_N_enabled  (N=1..9)
+    # tou_time_N_begin               —                                  solax_time_N_begin
+    # tou_time_N_end                 —                                  solax_time_N_end
+    # tou_time_N_mode                —                                  solax_time_N_mode
+    # tou_time_N_update              —                                  solax_time_N_update
+    # ───────────────────────────────────────────────────────────────────────────
+
+    # Maps unique_id suffix → BESS sensor key for growatt_server entities.
+    # Used by _map_registry_entities() for registry-based discovery.
+    # Maps unique_id suffix → BESS sensor key for growatt_server entities.
+    # Used by _map_registry_entities() for registry-based discovery.
+    #
+    # The growatt_server integration uses TWO different unique_id formats:
+    #   - Number/switch entities: "{SN}_{key}" e.g. "RKM0D7N04X_battery_charge_power_limit"
+    #   - Sensor entities: "{SN}-{sensor_key}" e.g. "RKM0D7N04X-tlx_battery_1_charge_w"
+    #
+    # The sensor key (e.g. "tlx_battery_1_charge_w") differs from the entity_id suffix
+    # (e.g. "battery_1_charging_w") because HA generates entity IDs from the slugified
+    # translation name, not the key.
+    #
+    # Both formats are included below to support matching on unique_id.
     ENTITY_SUFFIX_MAP: ClassVar[dict[str, str]] = {
-        # SOC — two variants due to historical translation name correction
-        "state_of_charge_soc": "battery_soc",  # current name: "State of charge (SoC)"
-        "statement_of_charge_soc": "battery_soc",  # old name: "Statement of Charge SOC"
-        # Real-time power sensors
-        "battery_1_charging_w": "battery_charge_power",
-        "battery_1_discharging_w": "battery_discharge_power",
-        "import_power": "import_power",
-        "export_power": "export_power",
-        "local_load_power": "local_load_power",
-        "internal_wattage": "pv_power",
-        # Grid charge switch — two variants (old key-based vs translation-name-based slug)
-        "charge_from_grid": "grid_charge",  # current name: "Charge from grid"
-        "ac_charge": "grid_charge",  # old name: key used directly as entity ID
-        # Number entities — names slugify to the same string as the key
+        # ── SOC ──────────────────────────────────────────────────────────
+        "state_of_charge_soc": "battery_soc",  # entity_id suffix (current translation)
+        "statement_of_charge_soc": "battery_soc",  # entity_id suffix (old translation)
+        "tlx_statement_of_charge": "battery_soc",  # unique_id sensor key
+        # ── Real-time power sensors ──────────────────────────────────────
+        "battery_1_charging_w": "battery_charge_power",  # entity_id suffix
+        "tlx_battery_1_charge_w": "battery_charge_power",  # unique_id sensor key
+        "battery_1_discharging_w": "battery_discharge_power",  # entity_id suffix
+        "tlx_battery_1_discharge_w": "battery_discharge_power",  # unique_id sensor key
+        "import_power": "import_power",  # entity_id suffix
+        "tlx_pac_to_user_total": "import_power",  # unique_id sensor key (MIN)
+        "export_power": "export_power",  # entity_id suffix
+        "tlx_pac_to_grid_total": "export_power",  # unique_id sensor key (MIN)
+        "local_load_power": "local_load_power",  # entity_id suffix
+        "tlx_pac_to_local_load": "local_load_power",  # unique_id sensor key
+        "internal_wattage": "pv_power",  # entity_id suffix
+        "tlx_internal_wattage": "pv_power",  # unique_id sensor key
+        # ── Grid charge switch ───────────────────────────────────────────
+        "charge_from_grid": "grid_charge",  # entity_id suffix (translation name)
+        "ac_charge": "grid_charge",  # unique_id key / old entity_id suffix
+        # ── Number entities (unique_id matches entity_id suffix) ─────────
         "battery_charge_power_limit": "battery_charging_power_rate",
         "battery_discharge_power_limit": "battery_discharging_power_rate",
         "battery_charge_soc_limit": "battery_charge_stop_soc",
         "battery_discharge_soc_limit": "battery_discharge_stop_soc",
         "battery_discharge_soc_limit_on_grid": "battery_discharge_stop_soc",
-        # Lifetime energy sensors
+        "soc_limit_on_grid": "battery_discharge_stop_soc",
+        # ── Lifetime energy sensors ──────────────────────────────────────
         "lifetime_total_all_batteries_charged": "lifetime_battery_charged",
+        "tlx_all_batteries_charge_total": "lifetime_battery_charged",
         "lifetime_total_all_batteries_discharged": "lifetime_battery_discharged",
+        "tlx_all_batteries_discharge_total": "lifetime_battery_discharged",
         "lifetime_total_solar_energy": "lifetime_solar_energy",
+        "tlx_solar_generation_total": "lifetime_solar_energy",
         "lifetime_total_export_to_grid": "lifetime_export_to_grid",
+        "tlx_export_to_grid_total": "lifetime_export_to_grid",
         "lifetime_import_from_grid": "lifetime_import_from_grid",
+        "tlx_import_from_grid_total": "lifetime_import_from_grid",
         "lifetime_total_load_consumption": "lifetime_load_consumption",
+        "mix_load_consumption_total": "lifetime_load_consumption",  # unique_id uses mix_ prefix
         "lifetime_system_production": "lifetime_system_production",
+        "tlx_system_production_total": "lifetime_system_production",
         "lifetime_self_consumption": "lifetime_self_consumption",
+        "tlx_self_consumption_total": "lifetime_self_consumption",
+    }
+
+    # ── Per-platform suffix maps for solax_modbus discovery ─────────────
+    #
+    # The solax_modbus integration (github.com/wills106/homeassistant-solax-modbus)
+    # constructs unique_ids as "{serial}_solax_{plugin_key}".  Every suffix below
+    # is the full deterministic suffix including the "solax_" prefix.
+    #
+    # Each platform has its own map — no collisions, no remapping.
+
+    # Growatt GEN4 (MIN/MOD/MID) via solax_modbus Growatt plugin
+    # solax_modbus unique_id format: {user_chosen_device_name}_{register_key}
+    # The device name prefix is user-configurable (default "SolaX"), so suffix
+    # maps use only the fixed register key.  The matching code uses
+    # endswith(f"_{suffix}") which strips any prefix.
+    SOLAX_GROWATT_MIN_SUFFIX_MAP: ClassVar[dict[str, str]] = {
+        # Real-time power
+        "battery_soc": "battery_soc",
+        "battery_charge_power": "battery_charge_power",
+        "battery_discharge_power": "battery_discharge_power",
+        "total_forward_power": "import_power",  # register 3041
+        "total_reverse_power": "export_power",  # register 3043
+        "pv_power_total": "pv_power",  # register 1, enabled by default
+        "total_pv_power": "pv_power",  # disabled by default
+        "total_load_power": "local_load_power",
+        # Lifetime energy
+        "total_battery_input_energy": "lifetime_battery_charged",
+        "total_battery_output_energy": "lifetime_battery_discharged",
+        "total_solar_energy": "lifetime_solar_energy",
+        "total_grid_import": "lifetime_import_from_grid",
+        "total_grid_export": "lifetime_export_to_grid",
+        "total_yield": "lifetime_load_consumption",  # register 3077, "Total Load Energy"
+        "total_power_generation": "lifetime_system_production",  # register 3051
+        # EMS control
+        "ems_charging_rate": "battery_charging_power_rate",
+        "ems_discharging_rate": "battery_discharging_power_rate",
+        "ems_charging_stop_soc": "battery_charge_stop_soc",
+        "ems_discharging_stop_soc": "battery_discharge_stop_soc",
+        "charger_switch": "grid_charge",
+        # TOU time slots (9 slots)
+        "time_1_enabled": "tou_time_1_enabled",
+        "time_1_begin": "tou_time_1_begin",
+        "time_1_end": "tou_time_1_end",
+        "time_1_mode": "tou_time_1_mode",
+        "time_1_update": "tou_time_1_update",
+        "time_2_enabled": "tou_time_2_enabled",
+        "time_2_begin": "tou_time_2_begin",
+        "time_2_end": "tou_time_2_end",
+        "time_2_mode": "tou_time_2_mode",
+        "time_2_update": "tou_time_2_update",
+        "time_3_enabled": "tou_time_3_enabled",
+        "time_3_begin": "tou_time_3_begin",
+        "time_3_end": "tou_time_3_end",
+        "time_3_mode": "tou_time_3_mode",
+        "time_3_update": "tou_time_3_update",
+        "time_4_enabled": "tou_time_4_enabled",
+        "time_4_begin": "tou_time_4_begin",
+        "time_4_end": "tou_time_4_end",
+        "time_4_mode": "tou_time_4_mode",
+        "time_4_update": "tou_time_4_update",
+        "time_5_enabled": "tou_time_5_enabled",
+        "time_5_begin": "tou_time_5_begin",
+        "time_5_end": "tou_time_5_end",
+        "time_5_mode": "tou_time_5_mode",
+        "time_5_update": "tou_time_5_update",
+        "time_6_enabled": "tou_time_6_enabled",
+        "time_6_begin": "tou_time_6_begin",
+        "time_6_end": "tou_time_6_end",
+        "time_6_mode": "tou_time_6_mode",
+        "time_6_update": "tou_time_6_update",
+        "time_7_enabled": "tou_time_7_enabled",
+        "time_7_begin": "tou_time_7_begin",
+        "time_7_end": "tou_time_7_end",
+        "time_7_mode": "tou_time_7_mode",
+        "time_7_update": "tou_time_7_update",
+        "time_8_enabled": "tou_time_8_enabled",
+        "time_8_begin": "tou_time_8_begin",
+        "time_8_end": "tou_time_8_end",
+        "time_8_mode": "tou_time_8_mode",
+        "time_8_update": "tou_time_8_update",
+        "time_9_enabled": "tou_time_9_enabled",
+        "time_9_begin": "tou_time_9_begin",
+        "time_9_end": "tou_time_9_end",
+        "time_9_mode": "tou_time_9_mode",
+        "time_9_update": "tou_time_9_update",
+    }
+
+    # Growatt GEN3 (MIX/SPA/SPH) via solax_modbus Growatt plugin
+    SOLAX_GROWATT_SPH_SUFFIX_MAP: ClassVar[dict[str, str]] = {
+        # Real-time power
+        "battery_soc": "battery_soc",
+        "battery_charge_power": "battery_charge_power",
+        "battery_discharge_power": "battery_discharge_power",
+        "ac_power_to_user": "import_power",  # register 1015
+        "ac_power_to_grid": "export_power",  # register 1023
+        "pv_power_total": "pv_power",
+        "total_load_power": "local_load_power",
+        # Lifetime energy
+        "total_battery_input_energy": "lifetime_battery_charged",
+        "total_battery_output_energy": "lifetime_battery_discharged",
+        "total_solar_energy": "lifetime_solar_energy",
+        "total_grid_import": "lifetime_import_from_grid",
+        "total_grid_export": "lifetime_export_to_grid",
+        "total_load": "lifetime_load_consumption",  # register 1062
+        # No lifetime_system_production — BESS derives from lifetime_solar_energy
+        # EMS control
+        "battery_first_charge_rate": "battery_charging_power_rate",
+        "grid_first_discharge_rate": "battery_discharging_power_rate",
+        "battery_first_maximum_soc": "battery_charge_stop_soc",
+        "load_first_battery_minimum_soc": "battery_discharge_stop_soc",
+        "charger_switch": "grid_charge",
+    }
+
+    # SolaX native inverters via solax_modbus integration
+    SOLAX_NATIVE_SUFFIX_MAP: ClassVar[dict[str, str]] = {
+        # Real-time power
+        "battery_capacity": "battery_soc",
+        "battery_power_charge": "battery_charge_power",
+        "battery_power_discharge": "battery_discharge_power",
+        "measured_power": "import_power",
+        "grid_import": "import_power",  # alternative suffix
+        "grid_export": "export_power",
+        "pv_power_1": "pv_power",
+        "house_load": "local_load_power",
+        # Lifetime energy
+        "battery_input_energy_total": "lifetime_battery_charged",
+        "battery_output_energy_total": "lifetime_battery_discharged",
+        "total_solar_energy": "lifetime_solar_energy",
+        "grid_import_total": "lifetime_import_from_grid",
+        "grid_export_total": "lifetime_export_to_grid",
+        "total_yield": "lifetime_system_production",  # register 0x52, "Total Yield" (production)
+        # No native register for lifetime_load_consumption
+        # VPP control
+        "remotecontrol_power_control": "solax_power_control_mode",
+        "remotecontrol_active_power": "solax_active_power",
+        "remotecontrol_autorepeat_duration": "solax_autorepeat_duration",
+        "remotecontrol_trigger": "solax_power_control_trigger",
+        "battery_minimum_capacity": "solax_battery_min_soc",
+        "battery_minimum_capacity_grid_tied": "solax_battery_min_soc",
+        "charger_use_mode": "solax_charger_use_mode",
     }
 
     def resolve_sensor_for_influxdb(self, sensor_key: str) -> str | None:
@@ -632,7 +858,7 @@ class HomeAssistantAPIController:
                             if response_body:
                                 enriched_context["response_body"] = response_body
 
-                        self.failure_tracker.record_failure(
+                        self.failure_tracker.record_failure_once(
                             operation=operation_description,
                             category=operation_category,
                             error=e,
@@ -727,17 +953,18 @@ class HomeAssistantAPIController:
                 resolution_method,
             )
         except ValueError:
-            logger.warning(
+            logger.debug(
                 "Could not get value for %s: sensor not configured", sensor_name
             )
             return None
 
         try:
+            failure_category = f"sensor_read:{sensor_name}"
             response = self._api_request(
                 "get",
                 f"/api/states/{entity_id}",
                 operation=f"Read sensor '{sensor_name}'",
-                category="sensor_read",
+                category=failure_category,
             )
             if response and "state" in response:
                 state = response["state"]
@@ -749,6 +976,9 @@ class HomeAssistantAPIController:
                         state,
                     )
                     return None
+                # Sensor read succeeded — auto-dismiss any prior failure
+                if self.failure_tracker:
+                    self.failure_tracker.dismiss_by_category(failure_category)
                 return str(state)
             logger.warning(
                 "Sensor %s (entity_id: %s) returned invalid response or no state",
@@ -758,12 +988,8 @@ class HomeAssistantAPIController:
             return None
         except requests.RequestException as e:
             logger.error("Error fetching sensor %s: %s", sensor_name, str(e))
-            if self.failure_tracker:
-                self.failure_tracker.record_failure(
-                    operation=f"Read sensor '{sensor_name}'",
-                    category="sensor_read",
-                    error=e,
-                )
+            # Note: failure is already recorded by _api_request() — don't
+            # duplicate the record_failure call here.
             return None
 
     def _get_sensor_value(self, sensor_name) -> float | None:
@@ -899,33 +1125,53 @@ class HomeAssistantAPIController:
         return self._get_sensor_value("battery_discharge_power")
 
     def set_grid_charge(self, enable):
-        """Enable or disable grid charging."""
+        """Enable or disable grid charging.
+
+        Supports both switch entities (growatt_server: on/off) and select
+        entities (solax_modbus: Enabled/Disabled).  The entity domain is
+        detected from the configured entity_id prefix.
+        """
         entity_id = self._get_entity_for_service("grid_charge")
-        service = "turn_on" if enable else "turn_off"
 
         if enable:
             logger.info("Enabling grid charge")
         else:
             logger.info("Disabling grid charge")
 
-        self._service_call_with_retry(
-            "switch",
-            service,
-            entity_id=entity_id,
-        )
+        if entity_id.startswith("select."):
+            self._service_call_with_retry(
+                "select",
+                "select_option",
+                entity_id=entity_id,
+                option="Enabled" if enable else "Disabled",
+            )
+        else:
+            service = "turn_on" if enable else "turn_off"
+            self._service_call_with_retry(
+                "switch",
+                service,
+                entity_id=entity_id,
+            )
 
     def grid_charge_enabled(self):
-        """Return True if grid charging is enabled."""
+        """Return True if grid charging is enabled.
+
+        Handles both switch entities (state ``"on"``) and select entities
+        (state ``"Enabled"``).
+        """
         try:
             entity_id = self._get_entity_for_service("grid_charge")
             response = self._api_request(
                 "get",
                 f"/api/states/{entity_id}",
-                operation="Check grid charge switch state",
+                operation="Check grid charge state",
                 category="sensor_read",
             )
             if response and "state" in response:
-                return response["state"] == "on"
+                state = response["state"]
+                if entity_id.startswith("select."):
+                    return state == "Enabled"
+                return state == "on"
             return False
         except ValueError as e:
             logger.warning(str(e))
@@ -1009,6 +1255,119 @@ class HomeAssistantAPIController:
         except (requests.RequestException, ValueError, KeyError) as e:
             logger.warning("Failed to read time segments: %s", str(e))
             return []
+
+    # ── solax_modbus entity-based TOU segment control (Growatt plugin) ────
+
+    # Maps BESS internal batt_mode to solax_modbus select option strings
+    _MODBUS_MODE_OPTIONS: ClassVar[dict[str, str]] = {
+        "battery_first": "Battery First",
+        "load_first": "Load First",
+        "grid_first": "Grid First",
+    }
+
+    def set_tou_segment_via_entities(
+        self,
+        segment_id: int,
+        batt_mode: str,
+        start_time: str,
+        end_time: str,
+        enabled: bool,
+    ) -> None:
+        """Write a TOU segment via solax_modbus entity writes.
+
+        Uses select.select_option for mode/time/enabled, then button.press
+        to commit the slot to the inverter.
+
+        The enabled entity's plugin key is ``time_N_enabled`` (used in
+        unique_id and BESS sensor key) while its HA entity_id contains
+        ``time_N_active`` (from the display name "Time N Active"). The
+        option values are "Enabled"/"Disabled" regardless.
+
+        Args:
+            segment_id: Slot number (1-9)
+            batt_mode: Battery mode ("load_first", "battery_first", "grid_first")
+            start_time: Start time "HH:MM"
+            end_time: End time "HH:MM"
+            enabled: Whether the segment is active
+        """
+        prefix = f"tou_time_{segment_id}"
+
+        mode_option = self._MODBUS_MODE_OPTIONS[batt_mode]
+        enabled_option = "Enabled" if enabled else "Disabled"
+
+        # Set all 4 select entities before pressing update
+        entity_writes = [
+            (f"{prefix}_enabled", enabled_option),
+            (f"{prefix}_begin", start_time),
+            (f"{prefix}_end", end_time),
+            (f"{prefix}_mode", mode_option),
+        ]
+
+        for sensor_key, option in entity_writes:
+            entity_id = self._get_entity_for_service(sensor_key)
+            self._service_call_with_retry(
+                "select",
+                "select_option",
+                operation=f"TOU slot {segment_id} set {sensor_key}={option}",
+                entity_id=entity_id,
+                option=option,
+            )
+
+        # Press update button to commit the slot to inverter
+        update_entity_id = self._get_entity_for_service(f"{prefix}_update")
+        self._service_call_with_retry(
+            "button",
+            "press",
+            operation=f"TOU slot {segment_id} commit",
+            entity_id=update_entity_id,
+        )
+
+    def read_tou_segments_from_entities(self) -> list[dict]:
+        """Read all 9 TOU segments from solax_modbus entity states.
+
+        Returns list of segment dicts in the same format as
+        read_inverter_time_segments() for compatibility with
+        initialize_from_tou_segments().
+        """
+        # Reverse mode mapping: "Battery First" -> "battery_first"
+        mode_reverse = {v: k for k, v in self._MODBUS_MODE_OPTIONS.items()}
+
+        segments: list[dict] = []
+        for slot in range(1, 10):
+            prefix = f"tou_time_{slot}"
+            try:
+                enabled_id = self._get_entity_for_service(f"{prefix}_enabled")
+                begin_id = self._get_entity_for_service(f"{prefix}_begin")
+                end_id = self._get_entity_for_service(f"{prefix}_end")
+                mode_id = self._get_entity_for_service(f"{prefix}_mode")
+            except ValueError:
+                logger.debug("TOU slot %d entities not configured, skipping", slot)
+                continue
+
+            try:
+                enabled_state = self._api_request("get", f"/api/states/{enabled_id}")
+                begin_state = self._api_request("get", f"/api/states/{begin_id}")
+                end_state = self._api_request("get", f"/api/states/{end_id}")
+                mode_state = self._api_request("get", f"/api/states/{mode_id}")
+
+                enabled_val = enabled_state.get("state", "Disabled")
+                batt_mode = mode_reverse.get(
+                    mode_state.get("state", "Load First"), "load_first"
+                )
+
+                segments.append(
+                    {
+                        "segment_id": slot,
+                        "start_time": begin_state.get("state", "00:00"),
+                        "end_time": end_state.get("state", "00:00"),
+                        "batt_mode": batt_mode,
+                        "enabled": enabled_val == "Enabled",
+                    }
+                )
+            except Exception as e:
+                logger.warning("Failed to read TOU slot %d: %s", slot, e)
+
+        return segments
 
     def write_ac_charge_times(
         self,
@@ -1138,6 +1497,94 @@ class HomeAssistantAPIController:
         except (requests.RequestException, ValueError, KeyError) as e:
             logger.warning("Failed to read AC discharge times: %s", str(e))
             return {}
+
+    # ── SolaX VPP control ─────────────────────────────────────────────────────
+
+    def set_solax_active_power_control(self, watts: int) -> None:
+        """Issue a SolaX VPP active-power command.
+
+        Enables battery control mode, sets the active power target, arms
+        autorepeat for 1 200 s (covers a 15-min period with margin), then
+        triggers the command.
+
+        Args:
+            watts: Target power in watts.  Positive = charge, negative = discharge.
+        """
+        mode_entity = self._get_entity_for_service("solax_power_control_mode")
+        power_entity = self._get_entity_for_service("solax_active_power")
+        repeat_entity = self._get_entity_for_service("solax_autorepeat_duration")
+        trigger_entity = self._get_entity_for_service("solax_power_control_trigger")
+
+        logger.info("SolaX VPP: enabling battery control, power=%d W", watts)
+
+        self._service_call_with_retry(
+            "select",
+            "select_option",
+            operation="SolaX VPP enable battery control",
+            entity_id=mode_entity,
+            option="Enabled Battery Control",
+        )
+        self._service_call_with_retry(
+            "number",
+            "set_value",
+            operation="SolaX VPP set active power",
+            entity_id=power_entity,
+            value=watts,
+        )
+        self._service_call_with_retry(
+            "number",
+            "set_value",
+            operation="SolaX VPP set autorepeat duration",
+            entity_id=repeat_entity,
+            value=1200,
+        )
+        self._service_call_with_retry(
+            "button",
+            "press",
+            operation="SolaX VPP trigger",
+            entity_id=trigger_entity,
+        )
+
+    def set_solax_vpp_disabled(self) -> None:
+        """Disable SolaX VPP mode, reverting the inverter to self-use behaviour.
+
+        Used for IDLE and SOLAR_STORAGE intents where the inverter's default
+        self-use logic should take over.  Autorepeat on previous commands
+        expires naturally; this call cancels active control explicitly.
+        """
+        mode_entity = self._get_entity_for_service("solax_power_control_mode")
+
+        logger.info("SolaX VPP: disabling battery control (self-use mode)")
+
+        self._service_call_with_retry(
+            "select",
+            "select_option",
+            operation="SolaX VPP disable battery control",
+            entity_id=mode_entity,
+            option="Disabled",
+        )
+
+    def set_solax_min_soc(self, min_soc: int) -> None:
+        """Write the battery minimum SOC to the SolaX inverter.
+
+        Args:
+            min_soc: Minimum state-of-charge in percent (0-100).
+        """
+        entity_id = self._get_entity_for_service("solax_battery_min_soc")
+        logger.info("SolaX: setting battery minimum SOC to %d%%", min_soc)
+        self._service_call_with_retry(
+            "number",
+            "set_value",
+            operation="SolaX set battery minimum SOC",
+            entity_id=entity_id,
+            value=min_soc,
+        )
+
+    def get_solax_power_control_mode(self) -> str | None:
+        """Read the current SolaX power control mode."""
+        return self._get_raw_state("solax_power_control_mode")
+
+    # ─────────────────────────────────────────────────────────────────────────
 
     def set_test_mode(self, enabled):
         """Enable or disable test mode."""
@@ -1347,12 +1794,35 @@ class HomeAssistantAPIController:
         return self._get_sensor_value("lifetime_export_to_grid")
 
     def get_load_consumption_lifetime(self):
-        """Get lifetime total load consumption energy in kWh."""
-        return self._get_sensor_value("lifetime_load_consumption")
+        """Get lifetime total load consumption energy in kWh.
+
+        If no direct sensor is configured (e.g. GEN4 Growatt inverters lack a
+        native load consumption register), derives the value from:
+            load = solar + grid_import - grid_export
+        """
+        direct = self._get_sensor_value("lifetime_load_consumption")
+        if direct is not None:
+            return direct
+
+        # Derive from other lifetime sensors when direct sensor unavailable
+        solar = self._get_sensor_value("lifetime_solar_energy")
+        grid_import = self._get_sensor_value("lifetime_import_from_grid")
+        grid_export = self._get_sensor_value("lifetime_export_to_grid")
+        if solar is not None and grid_import is not None and grid_export is not None:
+            derived = solar + grid_import - grid_export
+            return max(derived, 0.0)  # Guard against small negative rounding
+        return None
 
     def get_system_production_lifetime(self):
-        """Get lifetime total system production energy in kWh."""
-        return self._get_sensor_value("lifetime_system_production")
+        """Get lifetime total system production energy in kWh.
+
+        If no direct sensor is configured (e.g. GEN3 Growatt inverters lack
+        a ``total_yield`` register), falls back to ``lifetime_solar_energy``.
+        """
+        direct = self._get_sensor_value("lifetime_system_production")
+        if direct is not None:
+            return direct
+        return self._get_sensor_value("lifetime_solar_energy")
 
     def get_self_consumption_lifetime(self):
         """Get lifetime total self consumption energy in kWh."""
@@ -1493,7 +1963,11 @@ class HomeAssistantAPIController:
                 return entity_id
         return None
 
-    def discover_ha_metadata(self, device_sn: str | None) -> dict:
+    def discover_ha_metadata(
+        self,
+        device_sn: str | None,
+        entity_registry: list[dict] | None = None,
+    ) -> dict:
         """Discover HA-internal IDs via the WebSocket API.
 
         Queries the config entry and device registries to find:
@@ -1502,6 +1976,7 @@ class HomeAssistantAPIController:
 
         Args:
             device_sn: Growatt device serial number to match, or None
+            entity_registry: Pre-fetched entity registry list, or None to fetch.
 
         Returns:
             dict with keys: growatt_device_id, nordpool_config_entry_id
@@ -1509,43 +1984,114 @@ class HomeAssistantAPIController:
         commands = [
             {"type": "config_entries/get"},
             {"type": "config/device_registry/list"},
-            {"type": "get_services"},
-            {"type": "config/entity_registry/list"},
         ]
+        if entity_registry is None:
+            commands.append({"type": "config/entity_registry/list"})
 
         results = self._ws_query(commands)
         config_entries_result = results[0]
         devices_result = results[1]
-        services_result: dict = results[2]
-        entity_registry_result = results[3]
+        entity_registry_result = (
+            entity_registry if entity_registry is not None else results[2]
+        )
 
+        return self._parse_ha_metadata(
+            device_sn, config_entries_result, devices_result, entity_registry_result
+        )
+
+    def _parse_ha_metadata(
+        self,
+        device_sn: str | None,
+        config_entries_result: list[dict],
+        devices_result: list[dict],
+        entity_registry_result: list[dict],
+    ) -> dict:
+        """Parse config entries and device registry into BESS metadata.
+
+        Pure parsing — no WebSocket calls.  Called by both
+        ``discover_ha_metadata`` (standalone) and ``discover_integrations``
+        (which fetches everything in a single WS connection).
+
+        Returns:
+            dict with keys: growatt_device_id, nordpool_config_entry_id,
+            nordpool_area, detected_platforms, octopus_found
+        """
         # Find nordpool config_entry_id from config entries.
         nordpool_config_entry_id: str | None = None
+        octopus_found = False
         for entry in config_entries_result:
             if entry.get("domain") == "nordpool" and entry.get("state") == "loaded":
                 nordpool_config_entry_id = entry["entry_id"]
-                break
+            if (
+                entry.get("domain") == "octopus_energy"
+                and entry.get("state") == "loaded"
+            ):
+                octopus_found = True
 
-        # Extract nordpool area from entity registry unique_ids.
-        # The official HA nordpool integration creates entities with
-        # unique_id format "{AREA}-{key}" (e.g. "SE4-current_price").
-        # config_entries/get does NOT return data/options, so the area
-        # must be read from entity unique_ids instead.
+        # Extract nordpool area from device registry identifiers.
+        # The official HA nordpool integration creates a device with
+        # identifiers [["nordpool", "SE3"]].  The HACS custom integration
+        # uses long identifiers like [["nordpool", "nordpool_kwh_se2_sek_2_10_025"]].
+        # We normalise both forms to a short area code (e.g. "SE2") using
+        # the same regex that parses entity_ids.
         nordpool_area: str | None = None
         if nordpool_config_entry_id:
-            for entity in entity_registry_result:
-                if (
-                    entity.get("platform") == "nordpool"
-                    and entity.get("config_entry_id") == nordpool_config_entry_id
-                ):
-                    unique_id = entity.get("unique_id", "")
-                    if "-" in unique_id:
-                        nordpool_area = unique_id.split("-", 1)[0].upper()
+            for device in devices_result:
+                if nordpool_config_entry_id in device.get("config_entries", []):
+                    for ident in device.get("identifiers", []):
+                        if (
+                            isinstance(ident, (list, tuple))
+                            and len(ident) == 2
+                            and str(ident[0]).lower() == "nordpool"
+                        ):
+                            raw = str(ident[1])
+                            nordpool_area = (
+                                self._parse_nordpool_area_from_entity_id(raw)
+                                or raw.upper()
+                            )
+                            break
+                    if nordpool_area:
                         break
 
-        # Find growatt device_id by matching device name to device_sn
+        # Find growatt config_entry_id for device matching
+        growatt_config_entry_id: str | None = None
+        for entry in config_entries_result:
+            if (
+                entry.get("domain") == "growatt_server"
+                and entry.get("state") == "loaded"
+            ):
+                growatt_config_entry_id = entry["entry_id"]
+                break
+
+        # Find growatt device_id from device registry.
+        # Strategy 1: match by identifiers containing the device SN
+        #   (immutable, unaffected by user renames)
+        # Strategy 2: match by config_entry belonging to growatt_server
+        #   (works even without a detected SN)
+        # Strategy 3: match by device name equal to device SN
+        #   (legacy fallback)
         growatt_device_id: str | None = None
         if device_sn:
+            sn_upper = device_sn.upper()
+            for device in devices_result:
+                for ident in device.get("identifiers", []):
+                    if (
+                        isinstance(ident, (list, tuple))
+                        and len(ident) == 2
+                        and str(ident[1]).upper() == sn_upper
+                    ):
+                        growatt_device_id = device["id"]
+                        break
+                if growatt_device_id:
+                    break
+
+        if not growatt_device_id and growatt_config_entry_id:
+            for device in devices_result:
+                if growatt_config_entry_id in device.get("config_entries", []):
+                    growatt_device_id = device["id"]
+                    break
+
+        if not growatt_device_id and device_sn:
             sn_upper = device_sn.upper()
             for device in devices_result:
                 name = str(device.get("name", "")).upper()
@@ -1553,29 +2099,52 @@ class HomeAssistantAPIController:
                     growatt_device_id = device["id"]
                     break
 
-        # Determine inverter type from registered growatt_server services:
-        # MIN registers update_time_segment / read_time_segments
-        # SPH registers write_ac_charge_times / read_ac_charge_times
-        growatt_inverter_type: str | None = None
-        growatt_services = services_result.get("growatt_server", {})
-        if "update_time_segment" in growatt_services:
-            growatt_inverter_type = "MIN"
-        elif "write_ac_charge_times" in growatt_services:
-            growatt_inverter_type = "SPH"
+        # Determine inverter type from entity registry unique_id prefixes.
+        # The HA growatt_server integration uses different sensor key prefixes
+        # depending on the Growatt Cloud device_type:
+        #   "min"/"tlx" (AC-coupled) → sensors from tlx.py → unique_id "{SN}-tlx_*"
+        #   "mix"       (DC-coupled) → sensors from mix.py → unique_id "{SN}-mix_*"
+        #   "sph"       (DC-coupled) → sensors from sph.py → unique_id "{SN}-mix_*"/"{SN}-sph_*"
+        # We check for "-tlx_" as the positive MIN signal.
+        # Build detected_platforms list — all platforms we can identify from
+        # the entity registry, independent of what the user has selected.
+        detected_platforms: list[str] = []
+        if growatt_config_entry_id:
+            has_tlx = any(
+                entry.get("platform") == "growatt_server"
+                and "-tlx_" in str(entry.get("unique_id", ""))
+                for entry in entity_registry_result
+            )
+            detected_platforms.append(
+                "growatt_server_min" if has_tlx else "growatt_server_sph"
+            )
+
+        solax_config_entry = any(
+            entry.get("domain") == "solax_modbus" and entry.get("state") == "loaded"
+            for entry in config_entries_result
+        )
+        if solax_config_entry:
+            if self._has_growatt_tou_entities(entity_registry_result):
+                detected_platforms.append("solax_modbus_growatt_min")
+            elif self._has_growatt_gen3_entities(entity_registry_result):
+                detected_platforms.append("solax_modbus_growatt_sph")
 
         logger.info(
             "WS discovery: nordpool_config_entry_id=%s, nordpool_area=%s, "
-            "growatt_device_id=%s, inverter_type=%s",
+            "growatt_device_id=%s, octopus_found=%s, "
+            "detected_platforms=%s",
             nordpool_config_entry_id,
             nordpool_area,
             growatt_device_id,
-            growatt_inverter_type,
+            octopus_found,
+            detected_platforms,
         )
         return {
             "growatt_device_id": growatt_device_id,
             "nordpool_config_entry_id": nordpool_config_entry_id,
             "nordpool_area": nordpool_area,
-            "growatt_inverter_type": growatt_inverter_type,
+            "detected_platforms": detected_platforms,
+            "octopus_found": octopus_found,
         }
 
     def _fetch_all_states(self) -> list[dict]:
@@ -1624,31 +2193,62 @@ class HomeAssistantAPIController:
     def discover_integrations(self) -> tuple[dict, list[dict]]:
         """Discover installed HA integrations relevant to BESS configuration.
 
-        Combines two official HA APIs:
-        - REST GET /api/states: entity IDs, attributes (device_sn, area, sensors)
+        Uses three official HA APIs:
+        - REST GET /api/config/entity_registry/list: platform-based integration
+          detection and entity-to-sensor mapping (robust against entity renaming)
+        - REST GET /api/states: live entity attributes (Nordpool area, phase counts)
         - WebSocket: config entries and device registry (config_entry_id, device_id)
 
         Returns:
             Tuple of (result_dict, states) where result_dict has keys:
             growatt_found, device_sn, growatt_device_id,
             nordpool_found, nordpool_area, nordpool_config_entry_id,
-            inverter_type, detected_phase_count, currency, vat_multiplier.
+            octopus_found, detected_inverter_platforms,
+            detected_phase_count, currency, vat_multiplier.
             states is the raw list from /api/states for reuse by callers.
         """
         result: dict = {
             "growatt_found": False,
             "device_sn": None,
             "growatt_device_id": None,
+            "solax_found": False,
             "nordpool_found": False,
             "nordpool_area": None,
+            "nordpool_custom_area": None,
+            "nordpool_custom_entity": None,
             "nordpool_config_entry_id": None,
-            # Auto-detected hints (None = could not determine)
-            "inverter_type": None,
+            "octopus_found": False,
+            # Auto-detected hints
+            "detected_inverter_platforms": [],
             "detected_phase_count": None,
             "currency": None,
             "vat_multiplier": None,
         }
 
+        # ── Single WebSocket connection for all registry queries ─────────
+        # Previously this opened two separate WebSocket connections (one for
+        # entity registry, one for config entries + devices).  If HA was still
+        # starting, the second connection could fail even though the first
+        # succeeded — silently losing nordpool_config_entry_id and area.
+        # Now all commands go through one connection.  If it fails, we let
+        # the exception propagate — partial discovery is worse than no
+        # discovery because it silently produces incomplete configuration.
+        metadata: dict = {}
+        ws_commands = [
+            {"type": "config/entity_registry/list"},
+            {"type": "config_entries/get"},
+            {"type": "config/device_registry/list"},
+        ]
+        ws_results = self._ws_query(ws_commands)
+        registry = ws_results[0]
+        config_entries = ws_results[1]
+        devices = ws_results[2]
+
+        inverter_detected = self.detect_inverter_integrations(registry)
+        result["growatt_found"] = inverter_detected.get("growatt", False)
+        result["solax_found"] = inverter_detected.get("solax", False)
+
+        # ── States: Growatt device SN, Nordpool area ─────────────────────
         states = self._fetch_all_states()
 
         device_sn = self._extract_growatt_device_sn(states)
@@ -1658,43 +2258,66 @@ class HomeAssistantAPIController:
 
         for state in states:
             entity_id = str(state.get("entity_id", "")).lower()
-            if entity_id.startswith("sensor.nordpool"):
+            # HACS custom nordpool: sensor.nordpool_kwh_se3_sek_*
+            # (Official HA nordpool is detected via config entries below)
+            if entity_id.startswith("sensor.nordpool_"):
                 result["nordpool_found"] = True
-                if not result["nordpool_area"]:
+                if not result["nordpool_custom_entity"]:
+                    result["nordpool_custom_entity"] = state.get("entity_id")
+                if not result["nordpool_custom_area"]:
                     parsed_area = self._parse_nordpool_area_from_entity_id(entity_id)
                     if parsed_area:
-                        result["nordpool_area"] = parsed_area
+                        result["nordpool_custom_area"] = parsed_area
+            # Detect Octopus Energy from event entities
+            if "octopus_energy" in entity_id and "rate" in entity_id:
+                result["octopus_found"] = True
 
-        # Fetch HA-internal IDs via WebSocket
-        metadata: dict = {}
+        # ── Parse config entries + device registry ────────────────────────
         try:
-            metadata = self.discover_ha_metadata(device_sn)
+            metadata = self._parse_ha_metadata(
+                device_sn, config_entries, devices, registry
+            )
             result["growatt_device_id"] = metadata["growatt_device_id"]
             result["nordpool_config_entry_id"] = metadata["nordpool_config_entry_id"]
-            # Official HA core integration: area comes from entity registry
-            # unique_ids (e.g. "SE4-current_price"), resolved in
-            # discover_ha_metadata.
             if metadata["nordpool_config_entry_id"]:
                 result["nordpool_found"] = True
-                if not result["nordpool_area"] and metadata.get("nordpool_area"):
+                if metadata.get("nordpool_area"):
                     result["nordpool_area"] = metadata["nordpool_area"]
-        except Exception:
-            logger.warning(
-                "WebSocket discovery failed; growatt_device_id, "
-                "nordpool_config_entry_id and inverter_type unavailable"
-            )
+            if metadata.get("octopus_found"):
+                result["octopus_found"] = True
+        except Exception as e:
+            logger.warning("Failed to parse config entries / device registry: %s", e)
 
         # ── Auto-detected hints ───────────────────────────────────────────
-        # Inverter type: determined from registered growatt_server services
-        # (MIN: update_time_segment, SPH: write_ac_charge_times).
-        # Only set when WebSocket succeeded; None means undetermined.
-        if result["growatt_found"]:
-            result["inverter_type"] = metadata.get("growatt_inverter_type")
+        # Build a list of all detected platforms — no magic selection.
+        # The frontend picks the platform; the backend just reports what's
+        # available.
+        # Start from WS-detected inverter platforms (growatt cloud + solax modbus growatt)
+        detected: list[str] = list(metadata.get("detected_platforms", []))
+        if result["solax_found"]:
+            has_tou = self._has_growatt_tou_entities(registry)
+            has_gen3 = self._has_growatt_gen3_entities(registry)
+            result["solax_has_growatt_tou"] = has_tou
+            result["solax_has_growatt_gen3"] = has_gen3
+            # Only add solax platforms not already detected by _parse_ha_metadata
+            if has_tou and "solax_modbus_growatt_min" not in detected:
+                detected.append("solax_modbus_growatt_min")
+            elif has_gen3 and "solax_modbus_growatt_sph" not in detected:
+                detected.append("solax_modbus_growatt_sph")
+            elif self._has_solax_native_entities(registry):
+                detected.append("solax_modbus_native")
+        result["detected_inverter_platforms"] = detected
 
-        # Currency & VAT from Nordpool area
-        area_hints = self._hints_from_nordpool_area(result.get("nordpool_area"))
-        result["currency"] = area_hints.get("currency")
-        result["vat_multiplier"] = area_hints.get("vat_multiplier")
+        # Currency & VAT from Nordpool area or Octopus defaults
+        area_hints = self._hints_from_nordpool_area(
+            result.get("nordpool_area") or result.get("nordpool_custom_area")
+        )
+        if area_hints:
+            result["currency"] = area_hints.get("currency")
+            result["vat_multiplier"] = area_hints.get("vat_multiplier")
+        elif result["octopus_found"] and not result["nordpool_found"]:
+            result["currency"] = "GBP"
+            result["vat_multiplier"] = 1.0
 
         return result, states
 
@@ -1702,8 +2325,9 @@ class HomeAssistantAPIController:
         """Parse Nordpool area code from an entity_id.
 
         Examples:
-        - sensor.nordpool_kwh_se4_sek_2_10_025 -> SE4
-        - sensor.nordpool_kwh_no1_nok_3_10_025 -> NO1
+        - sensor.nordpool_kwh_se4_sek_2_10_025 -> SE4  (custom integration)
+        - sensor.nordpool_kwh_no1_nok_3_10_025 -> NO1  (custom integration)
+        - sensor.nord_pool_se3_current_price    -> SE3  (official HA)
         """
         match = re.search(
             r"(?:^|_)(se[1-4]|no[1-5]|dk[12]|fi|ee|lt|lv)(?:_|$)", entity_id
@@ -1747,44 +2371,6 @@ class HomeAssistantAPIController:
                 return object_id.split("_", 1)[0]
 
         return None
-
-    def discover_growatt_sensors(
-        self, device_sn: str, states: list[dict]
-    ) -> dict[str, str]:
-        """Discover Growatt sensor entity IDs for a given device serial number.
-
-        Maps entities matching the device serial number to BESS sensor keys
-        using known Growatt entity naming conventions.
-
-        Growatt entities follow the pattern: <domain>.<device_sn>_<suffix>
-        The suffix is mapped to a BESS sensor key via ENTITY_SUFFIX_MAP.
-
-        Args:
-            device_sn: Growatt device serial number (e.g. "rkm0d7n04x")
-            states: List of state dicts from /api/states
-
-        Returns:
-            dict mapping bess_sensor_key -> entity_id for all discovered sensors
-        """
-        result: dict[str, str] = {}
-        prefix = f"{device_sn}_"
-        for state in states:
-            entity_id = str(state.get("entity_id", ""))
-            if not entity_id.startswith(("sensor.", "number.", "switch.")):
-                continue
-            object_id = entity_id.split(".", 1)[1]
-            if not object_id.startswith(prefix):
-                continue
-            suffix = object_id[len(prefix) :]
-            if suffix in self.ENTITY_SUFFIX_MAP:
-                result[self.ENTITY_SUFFIX_MAP[suffix]] = entity_id
-
-        logger.info(
-            "Discovered %d Growatt sensors for device %s",
-            len(result),
-            device_sn,
-        )
-        return result
 
     def discover_current_sensors(self, states: list[dict]) -> dict[str, str]:
         """Discover phase current sensor entity IDs.
@@ -1850,6 +2436,36 @@ class HomeAssistantAPIController:
 
         return None
 
+    def discover_octopus_entities(self, states: list[dict]) -> dict[str, str]:
+        """Discover Octopus Energy pricing entity IDs.
+
+        Scans entity states for Octopus Energy event entities that provide
+        half-hourly rate data. These map to the 4 pricing form fields:
+        importToday, importTomorrow, exportToday, exportTomorrow.
+
+        Args:
+            states: List of state dicts from /api/states
+
+        Returns:
+            dict mapping form field keys to entity_ids, empty if not found
+        """
+        result: dict[str, str] = {}
+        for state in states:
+            entity_id = str(state.get("entity_id", ""))
+            lower_id = entity_id.lower()
+            if "octopus_energy" not in lower_id:
+                continue
+            if "export" in lower_id:
+                if "next_day" in lower_id:
+                    result["exportTomorrow"] = entity_id
+                elif "current_day" in lower_id:
+                    result["exportToday"] = entity_id
+            elif "next_day" in lower_id and "rate" in lower_id:
+                result["importTomorrow"] = entity_id
+            elif "current_day" in lower_id and "rate" in lower_id:
+                result["importToday"] = entity_id
+        return result
+
     def discover_optional_sensors(self, states: list[dict]) -> dict[str, str]:
         """Discover optional integration sensors from entity states.
 
@@ -1884,4 +2500,293 @@ class HomeAssistantAPIController:
                 result[key] = matched_id
 
         logger.info("Discovered %d optional sensor(s)", len(result))
+        return result
+
+    def fetch_entity_registry(self) -> list[dict]:
+        """Fetch the full entity registry from Home Assistant via WebSocket.
+
+        The entity registry is only accessible through the WebSocket API
+        (not REST).  Each entry contains at minimum: ``entity_id``,
+        ``platform``, ``unique_id``.  The ``platform`` field identifies
+        which integration created the entity (e.g. ``"solax_modbus"``,
+        ``"growatt_server"``, ``"nordpool"``).
+
+        Raises:
+            SystemConfigurationError: If entity registry cannot be queried.
+        """
+        try:
+            results = self._ws_query([{"type": "config/entity_registry/list"}])
+            return results[0]
+        except Exception as e:
+            raise SystemConfigurationError(
+                f"Failed to query Home Assistant entity registry: {e}"
+            ) from e
+
+    # Platform names used by each integration in the HA entity registry.
+    _INVERTER_PLATFORMS: ClassVar[dict[str, list[str]]] = {
+        "growatt": ["growatt_server"],
+        "solax": ["solax_modbus", "solax"],
+    }
+    _PRICE_PLATFORMS: ClassVar[dict[str, list[str]]] = {
+        "nordpool": ["nordpool"],
+        "octopus_energy": ["octopus_energy"],
+    }
+    _FORECAST_PLATFORMS: ClassVar[dict[str, list[str]]] = {
+        "solcast": ["solcast_solar"],
+        "weather": ["weather"],
+    }
+
+    @staticmethod
+    def _detect_platforms(
+        entities: list[dict], platform_map: dict[str, list[str]]
+    ) -> dict[str, bool]:
+        """Check which integration platforms are present in the entity registry."""
+        # Build a set of all platform values for fast lookup
+        all_platforms = {p for platforms in platform_map.values() for p in platforms}
+        found_platforms: set[str] = set()
+        for entity in entities:
+            plat = entity.get("platform")
+            if plat and plat in all_platforms:
+                found_platforms.add(plat)
+
+        detected = {}
+        for name, platforms in platform_map.items():
+            is_found = any(p in found_platforms for p in platforms)
+            detected[name] = is_found
+            logger.info(
+                "Integration '%s': %s",
+                name,
+                "DETECTED" if is_found else "not found",
+            )
+        return detected
+
+    # ── Platform markers for solax_modbus platform detection ────────────
+    # GEN4 (MIN/MOD/MID/TL-X): uses numbered TOU time slots (time_N_enabled).
+    # GEN3 (MIX/SPA/SPH): uses mode-specific time slots and distinct EMS entities.
+    # Native SolaX: uses VPP remote-control entities (remotecontrol_power_control).
+    _GROWATT_TOU_MARKER_SUFFIX: ClassVar[str] = "time_1_enabled"  # GEN4
+    _GROWATT_GEN3_MARKER_SUFFIX: ClassVar[str] = (
+        "load_first_battery_minimum_soc"  # GEN3
+    )
+    _SOLAX_NATIVE_MARKER_SUFFIX: ClassVar[str] = (
+        "remotecontrol_power_control"  # VPP mode selector, SolaX-only
+    )
+
+    _SOLAX_PLATFORMS: ClassVar[set[str]] = {"solax_modbus", "solax"}
+
+    def _has_solax_entity_suffix(
+        self, entities: list[dict], suffix: str, label: str
+    ) -> bool:
+        """Check whether any solax_modbus entity has a unique_id ending with the suffix."""
+        count = 0
+        for entity in entities:
+            if entity.get("platform") not in self._SOLAX_PLATFORMS:
+                continue
+            count += 1
+            unique_id = str(entity.get("unique_id", ""))
+            if unique_id.endswith(f"_{suffix}"):
+                logger.info("%s marker found: unique_id=%s", label, unique_id)
+                return True
+        logger.info("No %s marker found among %d solax_modbus entities", label, count)
+        return False
+
+    def _has_growatt_tou_entities(self, entities: list[dict]) -> bool:
+        """Check for GEN4 Growatt (MIN/MOD/MID) TOU entities via solax_modbus."""
+        return self._has_solax_entity_suffix(
+            entities, self._GROWATT_TOU_MARKER_SUFFIX, "Growatt GEN4 TOU"
+        )
+
+    def _has_growatt_gen3_entities(self, entities: list[dict]) -> bool:
+        """Check for GEN3 Growatt (MIX/SPA/SPH) entities via solax_modbus."""
+        return self._has_solax_entity_suffix(
+            entities, self._GROWATT_GEN3_MARKER_SUFFIX, "Growatt GEN3"
+        )
+
+    def _has_solax_native_entities(self, entities: list[dict]) -> bool:
+        """Check for native SolaX inverter VPP entities via solax_modbus."""
+        return self._has_solax_entity_suffix(
+            entities, self._SOLAX_NATIVE_MARKER_SUFFIX, "SolaX native VPP"
+        )
+
+    def detect_inverter_integrations(
+        self, entities: list[dict] | None = None
+    ) -> dict[str, bool]:
+        """Detect which inverter integrations are installed."""
+        if entities is None:
+            entities = self.fetch_entity_registry()
+        return self._detect_platforms(entities, self._INVERTER_PLATFORMS)
+
+    def detect_price_integrations(
+        self, entities: list[dict] | None = None
+    ) -> dict[str, bool]:
+        """Detect which price/energy integrations are installed."""
+        if entities is None:
+            entities = self.fetch_entity_registry()
+        return self._detect_platforms(entities, self._PRICE_PLATFORMS)
+
+    def detect_forecast_integrations(
+        self, entities: list[dict] | None = None
+    ) -> dict[str, bool]:
+        """Detect which forecast/weather integrations are installed."""
+        if entities is None:
+            entities = self.fetch_entity_registry()
+        return self._detect_platforms(entities, self._FORECAST_PLATFORMS)
+
+    def detect_all_integrations(self) -> dict[str, dict[str, bool]]:
+        """Detect all required and optional integrations.
+
+        Fetches the entity registry once and reuses it across all detection
+        methods to avoid redundant HTTP calls.
+        """
+        entities = self.fetch_entity_registry()
+        return {
+            "inverter": self.detect_inverter_integrations(entities),
+            "price": self.detect_price_integrations(entities),
+            "forecast": self.detect_forecast_integrations(entities),
+        }
+
+    def discover_sensors_from_registry(
+        self, entities: list[dict] | None = None
+    ) -> tuple[dict[str, dict[str, str]], str | None]:
+        """Discover sensor entity IDs for all detected inverter platforms.
+
+        Uses the ``platform`` field to identify integration entities, then maps
+        entity ID suffixes to BESS sensor keys via the suffix maps.  This is
+        robust against entity renaming because it identifies the integration
+        directly rather than pattern-matching entity ID prefixes.
+
+        Args:
+            entities: Pre-fetched entity registry list, or None to fetch.
+
+        Returns:
+            Tuple of (platform_sensors, detected_platform) where
+            platform_sensors maps platform name to its sensor dict
+            (e.g. ``{"growatt": {bess_key: entity_id, ...}, "solax": {...}}``)
+            and detected_platform is ``"growatt"``, ``"solax"``, or None.
+            Growatt takes priority when both are present.
+        """
+        if entities is None:
+            entities = self.fetch_entity_registry()
+
+        inverter_detected = self.detect_inverter_integrations(entities)
+        platform_sensors: dict[str, dict[str, str]] = {}
+        detected_platform: str | None = None
+
+        if inverter_detected.get("growatt"):
+            growatt_sensors = self._map_registry_entities(
+                entities,
+                ["growatt_server"],
+                self.ENTITY_SUFFIX_MAP,
+            )
+            # Both MIN and SPH use the same Growatt Server cloud entities —
+            # the difference is in the service calls, not the sensors.
+            # Return both so the frontend can show either without re-discovery.
+            platform_sensors["growatt_server_min"] = dict(growatt_sensors)
+            platform_sensors["growatt_server_sph"] = dict(growatt_sensors)
+            detected_platform = "growatt_server_min"
+
+        if inverter_detected.get("solax"):
+            solax_platforms = ["solax_modbus", "solax"]
+            if self._has_growatt_tou_entities(entities):
+                # GEN4: Growatt MIN/MOD/MID with numbered TOU slots
+                solax_sensors = self._map_registry_entities(
+                    entities, solax_platforms, self.SOLAX_GROWATT_MIN_SUFFIX_MAP
+                )
+                platform_sensors["solax_modbus_growatt_min"] = solax_sensors
+                if not detected_platform:
+                    detected_platform = "solax_modbus_growatt_min"
+            elif self._has_growatt_gen3_entities(entities):
+                # GEN3: Growatt MIX/SPA/SPH with mode-specific time slots
+                solax_sensors = self._map_registry_entities(
+                    entities, solax_platforms, self.SOLAX_GROWATT_SPH_SUFFIX_MAP
+                )
+                platform_sensors["solax_modbus_growatt_sph"] = solax_sensors
+                if not detected_platform:
+                    detected_platform = "solax_modbus_growatt_sph"
+            else:
+                solax_sensors = self._map_registry_entities(
+                    entities, solax_platforms, self.SOLAX_NATIVE_SUFFIX_MAP
+                )
+                platform_sensors["solax_modbus_native"] = solax_sensors
+                if not detected_platform:
+                    detected_platform = "solax_modbus_native"
+
+        return platform_sensors, detected_platform
+
+    def _map_registry_entities(
+        self,
+        entities: list[dict],
+        platforms: list[str],
+        suffix_map: dict[str, str],
+    ) -> dict[str, str]:
+        """Map entity registry entries to BESS sensor keys using unique_id.
+
+        Filters entities belonging to the given platforms, then matches
+        the ``unique_id`` suffix against the suffix map.  ``unique_id``
+        is assigned by the integration and never changes regardless of
+        user entity renaming — this is the only reliable matching strategy.
+
+        Enabled entities are preferred over disabled ones.  If the only
+        match for a sensor key is a disabled entity, it is still returned
+        (the caller can read its state) but a warning is logged.
+
+        Args:
+            entities: Full entity registry list.
+            platforms: HA platform names to filter by (e.g. ["solax_modbus"]).
+            suffix_map: Maps entity suffix -> BESS sensor key.
+
+        Returns:
+            dict mapping bess_sensor_key -> entity_id.
+        """
+        result: dict[str, str] = {}
+        disabled_matches: dict[str, str] = {}
+        platform_set = set(platforms)
+
+        # Sort suffixes longest-first so "total_grid_import" matches before
+        # the shorter "grid_import" when both are in the map.
+        sorted_suffixes = sorted(
+            suffix_map.items(), key=lambda x: len(x[0]), reverse=True
+        )
+
+        for entity in entities:
+            if entity.get("platform") not in platform_set:
+                continue
+            entity_id = entity.get("entity_id", "")
+            if "." not in entity_id:
+                continue
+
+            unique_id = str(entity.get("unique_id", ""))
+            is_disabled = bool(entity.get("disabled_by"))
+
+            for suffix, bess_key in sorted_suffixes:
+                if (
+                    unique_id.endswith(f"_{suffix}")
+                    or unique_id.endswith(f"-{suffix}")
+                    or unique_id == suffix
+                ):
+                    if bess_key not in result:
+                        if is_disabled:
+                            # Defer — an enabled entity may appear later
+                            if bess_key not in disabled_matches:
+                                disabled_matches[bess_key] = entity_id
+                        else:
+                            result[bess_key] = entity_id
+                    break
+
+        # Fill gaps with disabled entities and warn
+        for bess_key, entity_id in disabled_matches.items():
+            if bess_key not in result:
+                result[bess_key] = entity_id
+                logger.warning(
+                    "Sensor '%s' mapped to disabled entity %s — "
+                    "enable it in Home Assistant for reliable operation",
+                    bess_key,
+                    entity_id,
+                )
+
+        logger.info(
+            "Mapped %d entities from registry (platforms=%s)",
+            len(result),
+            platforms,
+        )
         return result

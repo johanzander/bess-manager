@@ -19,46 +19,297 @@ export interface IntegrationDef {
   sensorGroups: SensorGroup[];
 }
 
+// Platform IDs — one consistent string used everywhere.
+// Maps platform → integration section ID (used to show the right sensor form).
+export const INVERTER_INTEGRATION_IDS: Record<string, string> = {
+  growatt_server_min: 'growatt_server_min',
+  growatt_server_sph: 'growatt_server_sph',
+  solax_modbus_growatt_min: 'solax_modbus_growatt_min',
+  solax_modbus_growatt_sph: 'solax_modbus_growatt_sph',
+  solax_modbus_native: 'solax_modbus_native',
+};
+
+// Platform IDs are now used consistently at all layers — no conversion needed.
+
+// All valid platform IDs.
+export const VALID_PLATFORMS = [
+  'growatt_server_min',
+  'growatt_server_sph',
+  'solax_modbus_growatt_min',
+  'solax_modbus_growatt_sph',
+  'solax_modbus_native',
+] as const;
+
+export type PlatformId = typeof VALID_PLATFORMS[number];
+
+/**
+ * Per-platform sensor storage structure (mirrors backend settings_store).
+ * Each platform has its own independent sensor dict. Switching platform
+ * just changes the `platform` field — no clearing or swapping.
+ */
+export interface PerPlatformSensors {
+  [key: string]: string | Record<string, string>;
+  platform: string;
+  growatt_server_min: Record<string, string>;
+  growatt_server_sph: Record<string, string>;
+  solax_modbus_growatt_min: Record<string, string>;
+  solax_modbus_growatt_sph: Record<string, string>;
+  solax_modbus_native: Record<string, string>;
+  shared: Record<string, string>;
+}
+
+/** IDs of non-inverter (shared) integrations. */
+export const SHARED_INTEGRATION_IDS = new Set([
+  'nordpool', 'solar_forecast', 'consumption_forecast',
+  'phase_current', 'discharge_inhibit', 'weather',
+]);
+
+/** Create an empty per-platform sensors structure. */
+export function emptyPerPlatformSensors(platform = ''): PerPlatformSensors {
+  return {
+    platform,
+    growatt_server_min: {},
+    growatt_server_sph: {},
+    solax_modbus_growatt_min: {},
+    solax_modbus_growatt_sph: {},
+    solax_modbus_native: {},
+    shared: {},
+  };
+}
+
+/**
+ * Merge the active platform's sensors with shared sensors into a flat dict.
+ * Used when sending data to the backend (setup_complete) and for
+ * checking if required sensors are filled.
+ */
+export function getActiveSensorsFlat(sensors: PerPlatformSensors): Record<string, string> {
+  const platform = sensors.platform as PlatformId;
+  return {
+    ...(sensors.shared ?? {}),
+    ...(sensors[platform] ?? {}),
+  };
+}
+
+// Shared sensor groups used by multiple Growatt platforms.
+const GROWATT_POWER_MONITORING: SensorGroup = {
+  name: 'Power Monitoring',
+  sensors: [
+    { key: 'pv_power', label: 'Solar PV Power', required: false },
+    { key: 'local_load_power', label: 'Local Load Power', required: false },
+    { key: 'import_power', label: 'Grid Import Power', required: false },
+    { key: 'export_power', label: 'Grid Export Power', required: false },
+  ],
+};
+
+const GROWATT_CLOUD_LIFETIME: SensorGroup = {
+  name: 'Lifetime Energy Totals',
+  sensors: [
+    { key: 'lifetime_battery_charged', label: 'Total Battery Charged', required: true },
+    { key: 'lifetime_battery_discharged', label: 'Total Battery Discharged', required: true },
+    { key: 'lifetime_solar_energy', label: 'Total Solar Energy', required: true },
+    { key: 'lifetime_export_to_grid', label: 'Total Export to Grid', required: true },
+    { key: 'lifetime_import_from_grid', label: 'Total Import from Grid', required: true },
+    { key: 'lifetime_load_consumption', label: 'Total Load Consumption', required: true },
+    { key: 'lifetime_system_production', label: 'Total System Production', required: false },
+    { key: 'lifetime_self_consumption', label: 'Total Self Consumption', required: false },
+  ],
+};
+
+// MIN cloud: uses entity-based SOC limits, power rates, and grid_charge
+const GROWATT_CLOUD_MIN_SENSOR_GROUPS: SensorGroup[] = [
+  {
+    name: 'Battery Control',
+    sensors: [
+      { key: 'battery_soc', label: 'State of Charge (SOC)', required: true },
+      { key: 'battery_charge_power', label: 'Charging Power', required: true },
+      { key: 'battery_discharge_power', label: 'Discharging Power', required: true },
+      { key: 'battery_charge_stop_soc', label: 'Charge Stop SOC', required: true },
+      { key: 'battery_discharge_stop_soc', label: 'Discharge Stop SOC', required: true },
+      { key: 'battery_charging_power_rate', label: 'Charging Power Rate', required: true },
+      { key: 'battery_discharging_power_rate', label: 'Discharging Power Rate', required: true },
+      { key: 'grid_charge', label: 'Grid Charge Enable', required: true },
+    ],
+  },
+  GROWATT_POWER_MONITORING,
+  GROWATT_CLOUD_LIFETIME,
+];
+
+// SPH cloud: the growatt_server integration exposes NO number or switch
+// entities for SPH — all control is via service calls (write_ac_charge_times,
+// write_ac_discharge_times).  Only sensors (SOC, power, lifetime) exist.
+const GROWATT_CLOUD_SPH_SENSOR_GROUPS: SensorGroup[] = [
+  {
+    name: 'Battery Monitoring',
+    sensors: [
+      { key: 'battery_soc', label: 'State of Charge (SOC)', required: true },
+      { key: 'battery_charge_power', label: 'Charging Power', required: true },
+      { key: 'battery_discharge_power', label: 'Discharging Power', required: true },
+    ],
+  },
+  GROWATT_POWER_MONITORING,
+  GROWATT_CLOUD_LIFETIME,
+];
+
 export const INTEGRATIONS: IntegrationDef[] = [
   {
-    id: 'growatt',
-    name: 'Growatt Server',
+    id: 'growatt_server_min',
+    name: 'Growatt Cloud (MIN)',
     required: true,
-    description: 'Battery inverter — all battery control and power monitoring sensors come from the Growatt Server integration',
+    description: 'Growatt MIN inverter controlled via the Growatt Server cloud integration',
+    sensorGroups: GROWATT_CLOUD_MIN_SENSOR_GROUPS,
+  },
+  {
+    id: 'growatt_server_sph',
+    name: 'Growatt Cloud (SPH)',
+    required: true,
+    description: 'Growatt SPH inverter controlled via the Growatt Server cloud integration',
+    sensorGroups: GROWATT_CLOUD_SPH_SENSOR_GROUPS,
+  },
+  {
+    id: 'solax_modbus_native',
+    name: 'SolaX Modbus (Native)',
+    required: true,
+    description: 'Native SolaX inverter controlled via VPP active-power commands (not for Growatt inverters)',
     sensorGroups: [
       {
-        name: 'Battery Control',
+        name: 'Battery Monitoring',
         sensors: [
-          { key: 'battery_soc', label: 'State of Charge (SOC)', required: true },
-          { key: 'battery_charge_power', label: 'Charging Power', required: true },
-          { key: 'battery_discharge_power', label: 'Discharging Power', required: true },
-          { key: 'battery_charge_stop_soc', label: 'Charge Stop SOC', required: true },
-          { key: 'battery_discharge_stop_soc', label: 'Discharge Stop SOC', required: true },
-          { key: 'battery_charging_power_rate', label: 'Charging Power Rate', required: true },
-          { key: 'battery_discharging_power_rate', label: 'Discharging Power Rate', required: true },
-          { key: 'grid_charge', label: 'Grid Charge Enable', required: true },
+          { key: 'battery_soc', label: 'Battery Capacity (SOC)', required: true },
+          { key: 'battery_charge_power', label: 'Battery Charge Power', required: true },
+          { key: 'battery_discharge_power', label: 'Battery Discharge Power', required: true },
         ],
       },
       {
         name: 'Power Monitoring',
         sensors: [
-          { key: 'pv_power', label: 'Solar PV Power', required: false },
-          { key: 'local_load_power', label: 'Local Load Power', required: false },
-          { key: 'import_power', label: 'Grid Import Power', required: false },
+          { key: 'pv_power', label: 'PV Power', required: false },
+          { key: 'local_load_power', label: 'House Load', required: false },
+          { key: 'import_power', label: 'Measured Power (Grid)', required: false },
           { key: 'export_power', label: 'Grid Export Power', required: false },
         ],
       },
       {
-        name: 'Lifetime Energy Totals',
+        name: 'Lifetime Energy',
         sensors: [
-          { key: 'lifetime_battery_charged', label: 'Total Battery Charged', required: true },
-          { key: 'lifetime_battery_discharged', label: 'Total Battery Discharged', required: true },
-          { key: 'lifetime_solar_energy', label: 'Total Solar Energy', required: true },
-          { key: 'lifetime_export_to_grid', label: 'Total Export to Grid', required: true },
-          { key: 'lifetime_import_from_grid', label: 'Total Import from Grid', required: true },
-          { key: 'lifetime_load_consumption', label: 'Total Load Consumption', required: true },
-          { key: 'lifetime_system_production', label: 'Total System Production', required: false },
-          { key: 'lifetime_self_consumption', label: 'Total Self Consumption', required: false },
+          { key: 'lifetime_battery_charged', label: 'Battery Input Energy Total', required: false },
+          { key: 'lifetime_battery_discharged', label: 'Battery Output Energy Total', required: false },
+          { key: 'lifetime_solar_energy', label: 'Total Solar Energy', required: false },
+          { key: 'lifetime_import_from_grid', label: 'Grid Import Total', required: false },
+          { key: 'lifetime_export_to_grid', label: 'Grid Export Total', required: false },
+          { key: 'lifetime_system_production', label: 'Total Yield', required: false },
+        ],
+      },
+      {
+        name: 'VPP Control',
+        sensors: [
+          { key: 'solax_power_control_mode', label: 'Power Control Mode', required: true },
+          { key: 'solax_active_power', label: 'Active Power Target', required: true },
+          { key: 'solax_autorepeat_duration', label: 'Autorepeat Duration', required: true },
+          { key: 'solax_power_control_trigger', label: 'Power Control Trigger', required: true },
+          { key: 'solax_battery_min_soc', label: 'Battery Minimum SOC', required: true },
+          { key: 'solax_charger_use_mode', label: 'Charger Use Mode', required: false },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'solax_modbus_growatt_min',
+    name: 'SolaX Modbus (Growatt MIN)',
+    required: true,
+    description: 'Growatt MIN inverter controlled via the homeassistant-solax-modbus Growatt plugin (local Modbus, TOU entity writes)',
+    sensorGroups: [
+      {
+        name: 'Battery Monitoring',
+        sensors: [
+          { key: 'battery_soc', label: 'Battery Capacity (SOC)', required: true },
+          { key: 'battery_charge_power', label: 'Battery Charge Power', required: true },
+          { key: 'battery_discharge_power', label: 'Battery Discharge Power', required: true },
+        ],
+      },
+      {
+        name: 'EMS Control',
+        sensors: [
+          { key: 'battery_charging_power_rate', label: 'EMS Charging Rate', required: true },
+          { key: 'battery_discharging_power_rate', label: 'EMS Discharging Rate', required: true },
+          { key: 'battery_charge_stop_soc', label: 'EMS Charging Stop SOC', required: true },
+          { key: 'battery_discharge_stop_soc', label: 'EMS Discharging Stop SOC', required: true },
+          { key: 'grid_charge', label: 'Grid Charge Switch', required: true },
+        ],
+      },
+      {
+        name: 'Power Monitoring',
+        sensors: [
+          { key: 'pv_power', label: 'PV Power', required: false },
+          { key: 'local_load_power', label: 'House Load', required: false },
+          { key: 'import_power', label: 'Measured Power (Grid)', required: false },
+          { key: 'export_power', label: 'Grid Export Power', required: false },
+        ],
+      },
+      {
+        name: 'Lifetime Energy',
+        sensors: [
+          { key: 'lifetime_battery_charged', label: 'Battery Input Energy Total', required: false },
+          { key: 'lifetime_battery_discharged', label: 'Battery Output Energy Total', required: false },
+          { key: 'lifetime_solar_energy', label: 'Total Solar Energy', required: false },
+          { key: 'lifetime_import_from_grid', label: 'Grid Import Total', required: false },
+          { key: 'lifetime_export_to_grid', label: 'Grid Export Total', required: false },
+          { key: 'lifetime_system_production', label: 'Total Yield', required: false },
+        ],
+      },
+      {
+        name: 'TOU Schedule',
+        sensors: [
+          { key: 'tou_time_1_enabled', label: 'Time Slot 1 Enabled', required: true },
+          { key: 'tou_time_1_begin', label: 'Time Slot 1 Begin', required: true },
+          { key: 'tou_time_1_end', label: 'Time Slot 1 End', required: true },
+          { key: 'tou_time_1_mode', label: 'Time Slot 1 Mode', required: true },
+          { key: 'tou_time_1_update', label: 'Time Slot 1 Update', required: true },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'solax_modbus_growatt_sph',
+    name: 'SolaX Modbus (Growatt SPH)',
+    required: true,
+    description: 'Growatt MIX/SPA/SPH inverter (GEN3) controlled via the homeassistant-solax-modbus Growatt plugin (local Modbus)',
+    sensorGroups: [
+      {
+        name: 'Battery Monitoring',
+        sensors: [
+          { key: 'battery_soc', label: 'Battery Capacity (SOC)', required: true },
+          { key: 'battery_charge_power', label: 'Battery Charge Power', required: true },
+          { key: 'battery_discharge_power', label: 'Battery Discharge Power', required: true },
+        ],
+      },
+      {
+        name: 'EMS Control',
+        sensors: [
+          { key: 'battery_charging_power_rate', label: 'Battery First Charge Rate', required: true },
+          { key: 'battery_discharging_power_rate', label: 'Grid First Discharge Rate', required: true },
+          { key: 'battery_charge_stop_soc', label: 'Battery First Maximum SOC', required: true },
+          { key: 'battery_discharge_stop_soc', label: 'Load First Battery Minimum SOC', required: true },
+          { key: 'grid_charge', label: 'Charger Switch', required: true },
+        ],
+      },
+      {
+        name: 'Power Monitoring',
+        sensors: [
+          { key: 'pv_power', label: 'PV Power', required: false },
+          { key: 'local_load_power', label: 'House Load', required: false },
+          { key: 'import_power', label: 'Measured Power (Grid)', required: false },
+          { key: 'export_power', label: 'Grid Export Power', required: false },
+        ],
+      },
+      {
+        name: 'Lifetime Energy',
+        sensors: [
+          { key: 'lifetime_battery_charged', label: 'Battery Input Energy Total', required: false },
+          { key: 'lifetime_battery_discharged', label: 'Battery Output Energy Total', required: false },
+          { key: 'lifetime_solar_energy', label: 'Total Solar Energy', required: false },
+          { key: 'lifetime_import_from_grid', label: 'Grid Import Total', required: false },
+          { key: 'lifetime_export_to_grid', label: 'Grid Export Total', required: false },
+          { key: 'lifetime_load_consumption', label: 'Total Load', required: false },
         ],
       },
     ],

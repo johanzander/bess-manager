@@ -67,7 +67,7 @@ Frontend mirrors these in `frontend/src/types.ts`.
 return perform_health_check(
     component_name="Battery Monitoring",
     description="Real-time battery state monitoring",
-    is_required=True,            # True -> failure = ERROR, False -> failure = WARNING
+    is_required=True,            # True → failure = ERROR, False → failure = WARNING
     controller=self.ha_controller,
     all_methods=battery_methods,
 )

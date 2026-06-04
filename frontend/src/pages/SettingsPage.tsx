@@ -78,9 +78,20 @@ const SettingsPage: React.FC = () => {
   const savedSensors = useRef<string>('');
 
   // Sensor keys arrive in arbitrary order from different sources (backend
-  // load vs. auto-configure merge), so sort keys before comparing.
-  const stableStringify = (obj: Record<string, unknown>) =>
-    JSON.stringify(obj, Object.keys(obj).sort());
+  // load vs. auto-configure merge), so sort keys recursively before comparing.
+  const stableStringify = (obj: unknown): string => {
+    const sortKeys = (val: unknown): unknown => {
+      if (val && typeof val === 'object' && !Array.isArray(val)) {
+        const sorted: Record<string, unknown> = {};
+        for (const k of Object.keys(val as Record<string, unknown>).sort()) {
+          sorted[k] = sortKeys((val as Record<string, unknown>)[k]);
+        }
+        return sorted;
+      }
+      return val;
+    };
+    return JSON.stringify(sortKeys(obj));
+  };
 
   const isDirty: Record<Tab, boolean> = {
     home: JSON.stringify(homeForm) !== savedHome.current,

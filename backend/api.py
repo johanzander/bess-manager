@@ -2622,7 +2622,9 @@ async def ai_chat_stream(body: dict):
     message = body.get("message", "").strip()
 
     if not session_id or not message:
-        raise HTTPException(status_code=400, detail="sessionId and message are required")
+        raise HTTPException(
+            status_code=400, detail="sessionId and message are required"
+        )
 
     return StreamingResponse(
         service.stream_response(session_id, message),
@@ -2645,8 +2647,10 @@ async def ai_chat_refresh(body: dict):
 
     try:
         return service.refresh_context(session_id, ctrl.system)
-    except KeyError:
-        raise HTTPException(status_code=404, detail="Session not found or expired")
+    except KeyError as err:
+        raise HTTPException(
+            status_code=404, detail="Session not found or expired"
+        ) from err
 
 
 @router.get("/api/setup/status")

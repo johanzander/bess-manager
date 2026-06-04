@@ -10,16 +10,18 @@ import logging
 import re
 import time
 import uuid
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import AsyncIterator
 
 import anthropic
 
 logger = logging.getLogger(__name__)
 
 # Path to the bess-analyst agent definition (ships with the Docker image).
-_ANALYST_MD_PATH = Path(__file__).resolve().parent.parent / ".claude" / "agents" / "bess-analyst.md"
+_ANALYST_MD_PATH = (
+    Path(__file__).resolve().parent.parent / ".claude" / "agents" / "bess-analyst.md"
+)
 
 # Preamble prepended to the agent definition to adapt it for in-app use.
 _PREAMBLE = """\
@@ -140,7 +142,10 @@ class AIAnalystService:
         cfg = self._get_config()
         api_key = cfg.get("api_key", "")
         if not api_key:
-            yield _sse_event("error", {"error": "API key not configured. Go to Settings > AI Analyst."})
+            yield _sse_event(
+                "error",
+                {"error": "API key not configured. Go to Settings > AI Analyst."},
+            )
             return
 
         model = cfg.get("model", "claude-sonnet-4-20250514")
@@ -165,14 +170,21 @@ class AIAnalystService:
             yield _sse_event("done", {})
 
         except anthropic.AuthenticationError:
-            yield _sse_event("error", {"error": "Invalid API key. Check Settings > AI Analyst."})
+            yield _sse_event(
+                "error", {"error": "Invalid API key. Check Settings > AI Analyst."}
+            )
         except anthropic.RateLimitError:
-            yield _sse_event("error", {"error": "Rate limited by Claude API. Please wait a moment and try again."})
+            yield _sse_event(
+                "error",
+                {
+                    "error": "Rate limited by Claude API. Please wait a moment and try again."
+                },
+            )
         except anthropic.APIError as e:
             logger.error("Claude API error: %s", e)
             yield _sse_event("error", {"error": f"AI service error: {e.message}"})
         except Exception as e:
-            logger.error("Unexpected error in AI chat stream: %s", e, exc_info=True)
+            logger.exception("Unexpected error in AI chat stream: %s", e)
             yield _sse_event("error", {"error": "An unexpected error occurred."})
 
     def refresh_context(self, session_id: str, system_manager) -> dict:
@@ -212,7 +224,10 @@ class AIAnalystService:
         try:
             raw = _ANALYST_MD_PATH.read_text(encoding="utf-8")
         except FileNotFoundError:
-            logger.warning("bess-analyst.md not found at %s — using minimal prompt", _ANALYST_MD_PATH)
+            logger.warning(
+                "bess-analyst.md not found at %s — using minimal prompt",
+                _ANALYST_MD_PATH,
+            )
             return "You are a BESS (Battery Energy Storage System) analyst."
 
         # Strip YAML frontmatter (between --- markers at the start).
@@ -246,7 +261,11 @@ class AIAnalystService:
             markdown = formatter.format_report(export_data)
 
             # Build a short summary for the UI.
-            period_count = len(export_data.historical_periods) if export_data.historical_periods else 0
+            period_count = (
+                len(export_data.historical_periods)
+                if export_data.historical_periods
+                else 0
+            )
             schedule_count = len(export_data.schedules) if export_data.schedules else 0
             summary = (
                 f"Loaded: {period_count} historical periods, "
@@ -257,7 +276,7 @@ class AIAnalystService:
             return markdown, summary
 
         except Exception as e:
-            logger.error("Failed to gather AI chat context: %s", e, exc_info=True)
+            logger.exception("Failed to gather AI chat context: %s", e)
             return "", "Warning: Could not load full system context."
 
     def _trim_messages(self, session: ChatSession) -> None:

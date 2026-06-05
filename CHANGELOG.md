@@ -4,6 +4,16 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.1.0b6] - 2026-06-05
+
+### Fixed
+
+- **AI analyst response quality** — Improved prompt: concise style (no headings), correct savings reasoning. Moved savings domain knowledge to bess-analyst.md as single source of truth.
+
+### Changed
+
+- **AI Analyst description in README** — Added AI Analyst to the web interface feature list.
+
 ## [9.1.0b5] - 2026-06-05
 
 ### Added

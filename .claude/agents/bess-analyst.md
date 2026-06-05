@@ -156,6 +156,28 @@ When you see errors or runtime failures in debug logs or screenshots:
 3. Check if viewing partial arbitrage cycle (charge happened, discharge pending)
 4. Verify energy balance consistency in sensor data
 
+### Understanding Prediction Snapshots and Expected Savings
+
+The prediction snapshots track **expected total savings** over the day.
+Each snapshot records: expected_savings = actual_savings + predicted_savings.
+
+- **Actual savings**: sum of hourly_savings for completed periods (past).
+- **Predicted savings**: sum of hourly_savings for future periods (from the
+  latest optimization schedule).
+
+**Expected savings should NOT naturally decrease as time passes.** As the
+day progresses, predicted periods become actual periods, but the total should
+stay roughly the same IF the system performs as predicted.
+
+If expected savings DROP between snapshots, it means **actual performance was
+worse than predicted** for the periods that elapsed — NOT "natural decay."
+Common causes: lower solar than forecast, higher consumption than expected,
+price changes between optimization runs, or the optimizer re-running with
+updated data and finding a less profitable schedule.
+
+NEVER say savings "naturally decay" or "diminish over time." A drop in
+expected savings is always a real deviation that deserves investigation.
+
 ### Debugging Optimization Decisions
 
 1. Read `dp_battery_algorithm.py` optimization logic

@@ -40,6 +40,8 @@ The BESS Manager provides a comprehensive web interface organized into focused p
 
 **System Health**: Component status monitoring with sensor validation, integration health checks, and system diagnostics.
 
+**AI Analyst**: Built-in AI chat assistant that can answer questions about your battery system's performance, explain optimization decisions, and investigate issues. It has full access to the running system's state (sensor data, schedules, logs) and can read its own source code to give accurate, code-backed explanations. Requires a Claude API key configured in Settings.
+
 ## Compatibility
 
 ### Supported Battery Systems

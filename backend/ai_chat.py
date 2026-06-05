@@ -3,11 +3,16 @@
 Provides a streaming chat interface backed by the Claude API.  The system prompt
 is loaded directly from .claude/agents/bess-analyst.md (single source of truth)
 and augmented with live system context from the debug data exporter.
+
+The AI has tool-use capabilities: it can read source files, search the codebase,
+and list directories — giving it full access to its own code for deep analysis.
 """
 
+import fnmatch
 import json
 import logging
 import re
+import subprocess
 import time
 import uuid
 from collections.abc import AsyncIterator
@@ -18,13 +23,122 @@ import anthropic
 
 logger = logging.getLogger(__name__)
 
-# Path to the bess-analyst agent definition.
-# In Docker the file is at /app/agents/bess-analyst.md.
-# In local dev it lives at <repo>/.claude/agents/bess-analyst.md.
+# ---------------------------------------------------------------------------
+# Path resolution
+# ---------------------------------------------------------------------------
+
+# In Docker the layout is /app/{*.py, core/, agents/}.
+# In local dev it's <repo>/{backend/, core/, .claude/agents/}.
 _APP_DIR = Path(__file__).resolve().parent
+
+# Codebase root: the directory that contains core/ and backend/.
+_CODEBASE_ROOT = _APP_DIR  # Docker: /app/
+if not (_CODEBASE_ROOT / "core" / "bess").exists():
+    _CODEBASE_ROOT = _APP_DIR.parent  # Local dev: repo root
+
+# bess-analyst.md location.
 _ANALYST_MD_PATH = _APP_DIR / "agents" / "bess-analyst.md"
 if not _ANALYST_MD_PATH.exists():
     _ANALYST_MD_PATH = _APP_DIR.parent / ".claude" / "agents" / "bess-analyst.md"
+
+# Directories the AI is allowed to read (relative to _CODEBASE_ROOT).
+_ALLOWED_DIRS = ("core/", "backend/", "docs/", "scripts/", ".claude/agents/")
+
+# Files/patterns the AI must NOT read (secrets, settings with keys).
+_BLOCKED_PATTERNS = (
+    "*.env",
+    "*bess_settings.json",
+    "*options.json",
+    "*credentials*",
+    "*secret*",
+)
+
+# ---------------------------------------------------------------------------
+# Tool definitions (Claude API format)
+# ---------------------------------------------------------------------------
+
+_TOOLS = [
+    {
+        "name": "read_file",
+        "description": (
+            "Read a source file from the BESS Manager codebase.  Returns the "
+            "file contents with line numbers.  For large files, use start_line "
+            "and end_line to read a specific range."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": (
+                        "Relative path from the project root, e.g. "
+                        "'core/bess/dp_battery_algorithm.py' or 'backend/api.py'."
+                    ),
+                },
+                "start_line": {
+                    "type": "integer",
+                    "description": "First line to read (1-based).  Omit to start from line 1.",
+                },
+                "end_line": {
+                    "type": "integer",
+                    "description": "Last line to read (1-based).  Omit to read to end of file.",
+                },
+            },
+            "required": ["path"],
+        },
+    },
+    {
+        "name": "search_code",
+        "description": (
+            "Search the BESS Manager codebase for a regex pattern.  Returns "
+            "matching lines with file paths and line numbers.  Use to find "
+            "functions, variables, error messages, or trace code paths."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "pattern": {
+                    "type": "string",
+                    "description": "Regex pattern to search for, e.g. 'cost_basis' or 'def optimize_.*schedule'.",
+                },
+                "file_glob": {
+                    "type": "string",
+                    "description": "Optional glob to filter files, e.g. '*.py' or 'core/bess/*.py'.  Default: '*.py'.",
+                },
+            },
+            "required": ["pattern"],
+        },
+    },
+    {
+        "name": "list_files",
+        "description": (
+            "List source files in a directory of the BESS Manager codebase.  "
+            "Returns file names with sizes.  Useful for understanding project "
+            "structure before reading specific files."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": (
+                        "Relative directory path, e.g. 'core/bess/' or 'backend/'.  "
+                        "Omit or use '' for the project root."
+                    ),
+                },
+            },
+        },
+    },
+]
+
+# ---------------------------------------------------------------------------
+# Limits
+# ---------------------------------------------------------------------------
+
+_MAX_TOOL_ITERATIONS = 10
+_MAX_FILE_READ_LINES = 500
+_MAX_SEARCH_RESULTS = 50
+_MAX_TOOL_RESULT_CHARS = 200_000
 
 # Preamble prepended to the agent definition to adapt it for in-app use.
 _PREAMBLE = """\
@@ -32,18 +146,27 @@ You are an AI analyst embedded in the BESS Manager web UI.  A user is asking
 you questions about their battery energy storage system — its performance,
 optimization decisions, savings, and configuration.
 
-You have access to a complete snapshot of the live system state (settings,
-sensor data, schedules, predictions, logs) provided below.  Use this data to
-give specific, evidence-based answers.  Reference actual numbers from the data
-when possible.
+You have TWO sources of knowledge:
+
+1. **Live system state** — a snapshot of settings, sensor data, schedules,
+   predictions, and logs is provided below in "Current System State".
+
+2. **Source code access** — you have tools to read any source file, search
+   the codebase, and list directories.  Use these to trace algorithm logic,
+   verify decision paths, and investigate bugs.
 
 Important guidelines:
 - Be concise and direct.  The user is looking at their dashboard while chatting.
+- When explaining optimizer decisions, read the relevant source code to give
+  accurate, code-backed answers — don't guess from memory.
 - When discussing savings deviations, cite the specific periods and values.
 - If the data is insufficient to answer, say so clearly.
 - Format responses with markdown (bold, lists, code blocks) for readability.
 - Do NOT suggest the user look at code or run commands — they are end users.
+  YOU read the code on their behalf and explain what it does.
 - Monetary values should use the currency from the system settings.
+- When you use a tool, briefly mention what you're looking at so the user
+  knows you're investigating (e.g., "Let me check the optimization logic...").
 
 Below is your domain knowledge about the BESS system, followed by the current
 system state.
@@ -59,9 +182,7 @@ _MAX_MESSAGE_PAIRS = 20
 # Conservative token estimate: ~4 chars per token.
 _CHARS_PER_TOKEN = 4
 
-# Maximum characters for the system context.  Leaves room for the system
-# prompt base (~12K chars), preamble (~2K), and conversation history.
-# 150K tokens * 4 chars/token = 600K chars.
+# Maximum characters for the system context.
 _MAX_CONTEXT_CHARS = 600_000
 
 
@@ -75,6 +196,233 @@ class ChatSession:
     context_summary: str = ""
     created_at: float = field(default_factory=time.time)
     last_active: float = field(default_factory=time.time)
+
+
+# ======================================================================
+# Tool execution
+# ======================================================================
+
+
+def _resolve_and_validate_path(relative_path: str) -> Path | None:
+    """Resolve a relative path and validate it's within the sandbox.
+
+    Returns the resolved absolute Path, or None if access is denied.
+    """
+    # Normalize separators.
+    cleaned = relative_path.replace("\\", "/")
+
+    # Block absolute paths.
+    if cleaned.startswith("/"):
+        return None
+
+    # Block obvious traversal attempts.
+    if ".." in cleaned.split("/"):
+        return None
+
+    resolved = (_CODEBASE_ROOT / cleaned).resolve()
+
+    # Must be under the codebase root.
+    try:
+        resolved.relative_to(_CODEBASE_ROOT.resolve())
+    except ValueError:
+        return None
+
+    # Must be in an allowed directory (or be the root itself for listing).
+    rel_str = str(resolved.relative_to(_CODEBASE_ROOT.resolve()))
+    if resolved.is_file() or resolved.is_dir():
+        if not any(rel_str.startswith(d.rstrip("/")) for d in _ALLOWED_DIRS):
+            # Allow listing the root directory itself.
+            if rel_str != ".":
+                return None
+
+    # Must not match blocked patterns.
+    filename = resolved.name.lower()
+    for pattern in _BLOCKED_PATTERNS:
+        if fnmatch.fnmatch(filename, pattern):
+            return None
+
+    return resolved
+
+
+def _tool_read_file(params: dict) -> str:
+    """Read a source file, optionally a line range."""
+    path_str = params.get("path", "")
+    resolved = _resolve_and_validate_path(path_str)
+    if resolved is None:
+        return f"Error: Access denied for path '{path_str}'."
+    if not resolved.is_file():
+        return f"Error: File not found: '{path_str}'."
+
+    try:
+        lines = resolved.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError as e:
+        return f"Error reading file: {e}"
+
+    start = max(1, params.get("start_line", 1))
+    end = params.get("end_line", len(lines))
+    end = min(end, len(lines))
+
+    # Cap the range.
+    if end - start + 1 > _MAX_FILE_READ_LINES:
+        end = start + _MAX_FILE_READ_LINES - 1
+        truncated = True
+    else:
+        truncated = False
+
+    numbered = [f"{i}: {lines[i - 1]}" for i in range(start, end + 1)]
+    result = f"# {path_str} (lines {start}-{end} of {len(lines)})\n"
+    result += "\n".join(numbered)
+    if truncated:
+        result += f"\n\n[Truncated — showing {_MAX_FILE_READ_LINES} lines. Use start_line/end_line to read more.]"
+    return result
+
+
+def _tool_search_code(params: dict) -> str:
+    """Search the codebase using grep."""
+    pattern = params.get("pattern", "")
+    file_glob = params.get("file_glob", "*.py")
+
+    if not pattern:
+        return "Error: pattern is required."
+
+    # Search only within allowed directories.
+    search_dirs = []
+    for d in _ALLOWED_DIRS:
+        search_path = _CODEBASE_ROOT / d.rstrip("/")
+        if search_path.is_dir():
+            search_dirs.append(str(search_path))
+    if not search_dirs:
+        return "Error: No searchable directories found."
+
+    # Use grep for search — available in both Docker (Alpine) and local dev.
+    cmd = [
+        "grep",
+        "-rn",
+        "--include",
+        file_glob,
+        "-E",
+        pattern,
+        *search_dirs,
+    ]
+
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired:
+        return "Error: Search timed out."
+    except FileNotFoundError:
+        return "Error: grep not available."
+
+    if result.returncode not in (0, 1):
+        return f"Error: Search failed: {result.stderr[:200]}"
+
+    if not result.stdout.strip():
+        return f"No matches found for pattern '{pattern}' in {file_glob}."
+
+    # Convert absolute paths to relative and filter blocked files.
+    root_str = str(_CODEBASE_ROOT.resolve())
+    output_lines = []
+    for line in result.stdout.splitlines():
+        # Strip the codebase root prefix for cleaner output.
+        if line.startswith(root_str):
+            line = line[len(root_str) :].lstrip("/")
+
+        # Skip blocked files and test directories in results.
+        skip = False
+        for bp in _BLOCKED_PATTERNS:
+            if fnmatch.fnmatch(line.split(":")[0].split("/")[-1].lower(), bp):
+                skip = True
+                break
+        if skip:
+            continue
+
+        output_lines.append(line)
+        if len(output_lines) >= _MAX_SEARCH_RESULTS:
+            output_lines.append(
+                f"\n[Showing first {_MAX_SEARCH_RESULTS} matches — narrow your search pattern.]"
+            )
+            break
+
+    return (
+        "\n".join(output_lines)
+        if output_lines
+        else f"No accessible matches for '{pattern}'."
+    )
+
+
+def _tool_list_files(params: dict) -> str:
+    """List files in a directory."""
+    path_str = params.get("path", "")
+
+    if not path_str:
+        # List top-level directories.
+        entries = []
+        for d in sorted(_CODEBASE_ROOT.iterdir()):
+            rel = d.name
+            if d.is_dir() and any(
+                rel.rstrip("/").startswith(a.rstrip("/")) for a in _ALLOWED_DIRS
+            ):
+                entries.append(f"  {rel}/")
+            elif d.is_file() and d.suffix in (".py", ".md", ".yaml", ".yml", ".txt"):
+                entries.append(f"  {rel} ({d.stat().st_size:,} bytes)")
+        return (
+            "Project root:\n" + "\n".join(entries)
+            if entries
+            else "No accessible files."
+        )
+
+    resolved = _resolve_and_validate_path(path_str)
+    if resolved is None:
+        return f"Error: Access denied for path '{path_str}'."
+    if not resolved.is_dir():
+        return f"Error: Not a directory: '{path_str}'."
+
+    entries = []
+    for item in sorted(resolved.iterdir()):
+        rel_name = item.name
+        if rel_name.startswith("__pycache__") or rel_name.startswith("."):
+            continue
+        if item.is_dir():
+            entries.append(f"  {rel_name}/")
+        elif item.is_file():
+            entries.append(f"  {rel_name} ({item.stat().st_size:,} bytes)")
+
+    return (
+        f"{path_str}:\n" + "\n".join(entries)
+        if entries
+        else f"No files in '{path_str}'."
+    )
+
+
+def _execute_tool(name: str, tool_input: dict) -> str:
+    """Dispatch a tool call and return the result string."""
+    handlers = {
+        "read_file": _tool_read_file,
+        "search_code": _tool_search_code,
+        "list_files": _tool_list_files,
+    }
+    handler = handlers.get(name)
+    if handler is None:
+        return f"Error: Unknown tool '{name}'."
+
+    result = handler(tool_input)
+
+    # Cap total result size.
+    if len(result) > _MAX_TOOL_RESULT_CHARS:
+        result = (
+            result[:_MAX_TOOL_RESULT_CHARS]
+            + "\n\n[... result truncated to fit token limit]"
+        )
+    return result
+
+
+# ======================================================================
+# Main service
+# ======================================================================
 
 
 class AIAnalystService:
@@ -125,7 +473,12 @@ class AIAnalystService:
     async def stream_response(
         self, session_id: str, user_message: str
     ) -> AsyncIterator[str]:
-        """Stream an AI response as SSE events.
+        """Stream an AI response as SSE events, with tool-use loop.
+
+        The model may request tool calls (read_file, search_code, list_files).
+        Each tool call is executed locally and the result sent back to the model.
+        Text deltas are streamed to the frontend in real-time.  Tool activity
+        is reported via ``tool_use`` SSE events.
 
         Args:
             session_id: Active session UUID.
@@ -161,20 +514,98 @@ class AIAnalystService:
 
         try:
             client = anthropic.AsyncAnthropic(api_key=api_key)
-            assistant_text = ""
+            final_text = ""
 
-            async with client.messages.stream(
-                model=model,
-                max_tokens=4096,
-                system=system_prompt,
-                messages=session.messages,
-            ) as stream:
-                async for text in stream.text_stream:
-                    assistant_text += text
-                    yield _sse_event("text_delta", {"text": text})
+            for _iteration in range(_MAX_TOOL_ITERATIONS):
+                # Stream the model response.
+                text_so_far = ""
+                response = None
 
-            # Store assistant response in history.
-            session.messages.append({"role": "assistant", "content": assistant_text})
+                async with client.messages.stream(
+                    model=model,
+                    max_tokens=4096,
+                    system=system_prompt,
+                    tools=_TOOLS,
+                    messages=session.messages,
+                ) as stream:
+                    # Stream text deltas to the frontend as they arrive.
+                    async for event in stream:
+                        if hasattr(event, "type"):
+                            if event.type == "content_block_delta":
+                                if hasattr(event.delta, "text"):
+                                    text_so_far += event.delta.text
+                                    yield _sse_event(
+                                        "text_delta", {"text": event.delta.text}
+                                    )
+
+                    response = await stream.get_final_message()
+
+                # Check for tool use blocks.
+                tool_use_blocks = [b for b in response.content if b.type == "tool_use"]
+
+                if not tool_use_blocks:
+                    # No tools requested — this is the final answer.
+                    final_text = text_so_far
+                    break
+
+                # Model wants to use tools.  Serialize the full response
+                # (may contain both text and tool_use blocks) to messages.
+                assistant_content = []
+                for block in response.content:
+                    if block.type == "text":
+                        assistant_content.append({"type": "text", "text": block.text})
+                    elif block.type == "tool_use":
+                        assistant_content.append(
+                            {
+                                "type": "tool_use",
+                                "id": block.id,
+                                "name": block.name,
+                                "input": block.input,
+                            }
+                        )
+                session.messages.append(
+                    {"role": "assistant", "content": assistant_content}
+                )
+
+                # Execute each tool and build results.
+                tool_results = []
+                for block in tool_use_blocks:
+                    # Notify frontend about tool activity.
+                    yield _sse_event(
+                        "tool_use",
+                        {"tool": block.name, "input": block.input},
+                    )
+                    logger.info(
+                        "AI tool call: %s(%s)",
+                        block.name,
+                        json.dumps(block.input, default=str)[:200],
+                    )
+
+                    result_str = _execute_tool(block.name, block.input)
+                    tool_results.append(
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": block.id,
+                            "content": result_str,
+                        }
+                    )
+
+                session.messages.append({"role": "user", "content": tool_results})
+
+            else:
+                # Hit the iteration limit.
+                yield _sse_event(
+                    "text_delta",
+                    {
+                        "text": "\n\n*[Reached maximum tool call limit — "
+                        "please refine your question.]*"
+                    },
+                )
+
+            # Store the final text in a simplified form for conversation
+            # history (collapse tool_use/tool_result pairs).
+            if final_text:
+                session.messages.append({"role": "assistant", "content": final_text})
             yield _sse_event("done", {})
 
         except anthropic.AuthenticationError:
@@ -242,12 +673,29 @@ class AIAnalystService:
         stripped = re.sub(r"\A---\n.*?\n---\n*", "", raw, count=1, flags=re.DOTALL)
         return stripped.strip()
 
-    def _build_full_system_prompt(self, context: str) -> str:
-        """Combine preamble + domain knowledge + live context."""
-        parts = [_PREAMBLE, self._system_prompt_base]
+    def _build_full_system_prompt(self, context: str) -> list[dict]:
+        """Combine preamble + domain knowledge + live context.
+
+        Returns a list of content blocks for the ``system`` parameter.
+        The static portion (preamble + bess-analyst.md) is marked with
+        cache_control for Anthropic prompt caching.
+        """
+        static = _PREAMBLE + self._system_prompt_base
+        blocks = [
+            {
+                "type": "text",
+                "text": static,
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
         if context:
-            parts.append("\n\n---\n\n# Current System State\n\n" + context)
-        return "\n".join(parts)
+            blocks.append(
+                {
+                    "type": "text",
+                    "text": "\n\n---\n\n# Current System State\n\n" + context,
+                }
+            )
+        return blocks
 
     def _gather_context(self, system_manager) -> tuple[str, str]:
         """Build a token-efficient context from the debug export.
@@ -457,10 +905,44 @@ class AIAnalystService:
             return "", "Warning: Could not load full system context."
 
     def _trim_messages(self, session: ChatSession) -> None:
-        """Keep at most _MAX_MESSAGE_PAIRS user/assistant pairs."""
+        """Keep conversation within budget by collapsing old tool exchanges.
+
+        Strategy: keep the most recent _MAX_MESSAGE_PAIRS simple
+        user/assistant exchanges.  Older tool_use/tool_result message
+        pairs are collapsed to just the final assistant text.
+        """
+        # First pass: collapse old tool exchanges into simple text messages.
+        collapsed = []
+        i = 0
+        while i < len(session.messages):
+            msg = session.messages[i]
+
+            # Check if this is an assistant message with tool_use content.
+            if msg.get("role") == "assistant" and isinstance(msg.get("content"), list):
+                # This is a tool-use exchange.  Skip it and the following
+                # tool_result message — they'll be naturally replaced by
+                # the final text response that follows.
+                i += 1
+                # Skip the tool_result message too.
+                if (
+                    i < len(session.messages)
+                    and isinstance(session.messages[i].get("content"), list)
+                    and any(
+                        isinstance(c, dict) and c.get("type") == "tool_result"
+                        for c in session.messages[i].get("content", [])
+                    )
+                ):
+                    i += 1
+                continue
+
+            collapsed.append(msg)
+            i += 1
+
+        session.messages = collapsed
+
+        # Second pass: enforce max message count.
         max_messages = _MAX_MESSAGE_PAIRS * 2
         if len(session.messages) > max_messages:
-            # Keep the most recent messages.
             session.messages = session.messages[-max_messages:]
 
     def _cleanup_expired(self) -> None:

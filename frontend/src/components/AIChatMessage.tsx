@@ -1,9 +1,32 @@
 import React from 'react';
-import type { ChatMessage } from '../hooks/useAIChat';
+import type { ChatMessage, ToolActivity } from '../hooks/useAIChat';
 
 interface Props {
   message: ChatMessage;
   isStreaming?: boolean;
+}
+
+const TOOL_LABELS: Record<string, string> = {
+  read_file: 'Reading',
+  search_code: 'Searching',
+  list_files: 'Listing',
+};
+
+function toolDescription(activity: ToolActivity): string {
+  const label = TOOL_LABELS[activity.tool] || activity.tool;
+  const input = activity.input;
+  if (activity.tool === 'read_file') {
+    const path = (input.path as string) || '';
+    const range = input.start_line ? ` lines ${input.start_line}-${input.end_line || '?'}` : '';
+    return `${label} ${path}${range}`;
+  }
+  if (activity.tool === 'search_code') {
+    return `${label} for "${input.pattern}"${input.file_glob ? ` in ${input.file_glob}` : ''}`;
+  }
+  if (activity.tool === 'list_files') {
+    return `${label} ${(input.path as string) || 'project root'}`;
+  }
+  return label;
 }
 
 /** Minimal markdown-to-JSX: bold, inline code, code blocks, lists. */
@@ -86,6 +109,20 @@ export default function AIChatMessage({ message, isStreaming }: Props) {
           <p className="whitespace-pre-wrap">{message.content}</p>
         ) : (
           <div className="space-y-0 leading-relaxed">
+            {/* Tool activity indicators */}
+            {message.toolActivity && message.toolActivity.length > 0 && (
+              <div className="mb-1.5 space-y-0.5">
+                {message.toolActivity.map((activity, idx) => (
+                  <div key={idx} className="flex items-center gap-1.5 text-[10px] text-gray-400 dark:text-gray-500">
+                    <svg className="h-3 w-3 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                      <polyline points="14 2 14 8 20 8" />
+                    </svg>
+                    <span className="truncate">{toolDescription(activity)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
             {message.content ? renderMarkdown(message.content) : (
               isStreaming && (
                 <span className="inline-flex gap-1">

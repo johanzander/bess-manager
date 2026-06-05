@@ -1,9 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import api from '../lib/api';
 
+export interface ToolActivity {
+  tool: string;
+  input: Record<string, unknown>;
+}
+
 export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
+  toolActivity?: ToolActivity[];
 }
 
 interface AIStatus {
@@ -110,6 +116,17 @@ export function useAIChat() {
                 const lastIdx = next.length - 1;
                 if (lastIdx >= 0 && next[lastIdx].role === 'assistant') {
                   next[lastIdx] = { ...next[lastIdx], content: text };
+                }
+                return next;
+              });
+            } else if (event.type === 'tool_use') {
+              const activity: ToolActivity = { tool: event.tool, input: event.input };
+              setMessages(prev => {
+                const next = [...prev];
+                const lastIdx = next.length - 1;
+                if (lastIdx >= 0 && next[lastIdx].role === 'assistant') {
+                  const existing = next[lastIdx].toolActivity || [];
+                  next[lastIdx] = { ...next[lastIdx], toolActivity: [...existing, activity] };
                 }
                 return next;
               });

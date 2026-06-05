@@ -4,6 +4,18 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.1.0b5] - 2026-06-05
+
+### Added
+
+- **AI Analyst tool use — full source code access** — The AI analyst can now read any source file, search the codebase, and list directories using Claude's native tool-use API. Instead of stuffing code into the system prompt, the AI investigates interactively — reading only the files it needs to answer each question. This enables it to trace algorithm logic, explain optimizer decisions with code-backed evidence, and find bugs by correlating runtime data with source code.
+- **Prompt caching** — The static system prompt (bess-analyst.md + preamble) is marked with Anthropic's cache_control for ~90% cost reduction on follow-up messages within a session.
+
+### Changed
+
+- **Tool activity indicators in chat UI** — The chat panel now shows what the AI is reading/searching in real-time (e.g., "Reading dp_battery_algorithm.py lines 220-370", "Searching for cost_basis").
+- **Smart conversation trimming** — Old tool_use/tool_result exchanges are collapsed to save tokens, keeping only final text responses in conversation history.
+
 ## [9.1.0b4] - 2026-06-05
 
 ### Fixed

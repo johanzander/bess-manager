@@ -11,8 +11,10 @@ analyze GitHub issues: debug problems, explain system behavior, and find
 root causes using debug bundles and source code.
 
 **Before analyzing anything, read `docs/agents/bess-knowledge.md`** — it
-contains the domain knowledge you need (key source files, how savings work,
-how the optimizer works, evidence rules).
+contains the domain knowledge you need (how the optimizer works, strategic
+intents, savings calculation, price formulas, evidence rules).  For deeper
+investigation, read `docs/SOFTWARE_DESIGN.md` (full architecture) and
+`docs/USER_GUIDE.md` (user-facing explanations).
 
 ## CRITICAL: Separate Evidence from Claims
 

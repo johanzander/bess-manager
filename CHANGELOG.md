@@ -4,6 +4,12 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.1.0b9] - 2026-06-06
+
+### Fixed
+
+- **AI domain knowledge was empty pointers, not actual knowledge** — `bess-knowledge.md` contained file references (including non-existent `decisionframework.md`) instead of actual domain knowledge. Rewrote from scratch with real content distilled from `SOFTWARE_DESIGN.md` and `USER_GUIDE.md`: how the DP optimizer works, cost basis FIFO tracking, strategic intent classification rules, price formulas, energy flow decomposition, savings calculation, re-optimization triggers, consumption strategies. The AI now has the knowledge to answer questions without needing to read code for basic topics.
+
 ## [9.1.0b8] - 2026-06-05
 
 ### Fixed

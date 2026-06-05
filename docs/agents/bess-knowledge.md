@@ -1,97 +1,197 @@
 # BESS Domain Knowledge
 
-Shared domain knowledge for all BESS analyst contexts (GitHub issue analysis,
-in-app AI chat, etc.).  This is the single source of truth for how the BESS
-system works and how to investigate it.
+This document contains the domain knowledge an analyst needs to answer
+questions about the BESS Manager battery optimization system.  It is the
+single source of truth for both the in-app AI chat and the GitHub analysis
+agent.
 
-## Key Source Files
+For deeper investigation, use tools to read the source code directly.
+Key files: `core/bess/dp_battery_algorithm.py` (optimizer),
+`core/bess/models.py` (data models), `core/bess/energy_flow_calculator.py`
+(flow decomposition), `core/bess/growatt_schedule.py` (schedule generation),
+`core/bess/battery_system_manager.py` (orchestrator).
 
-Read these before analyzing any issue.  Use tools (read_file, search_code)
-to read the actual code — never assume how things work from memory.
 
-| File | What it explains |
-|------|-----------------|
-| `decisionframework.md` | Strategic intents, economic decision logic, when charging/discharging is profitable |
-| `core/bess/sw_design_hourly_update.wsd` | System flow: when and how optimization runs, how schedules are applied |
-| `core/bess/dp_battery_algorithm.py` | Dynamic programming optimization, cost basis tracking, profitability thresholds, savings calculation |
-| `core/bess/models.py` | EnergyData (energy flows), EconomicData (costs/savings), PeriodData (historical/predicted) |
-| `core/bess/energy_flow_calculator.py` | How sensor data becomes energy flows, derived flow calculations |
-| `core/bess/growatt_schedule.py` | How strategic intents become TOU intervals, hardware schedule application |
-| `core/bess/daily_view_builder.py` | How historical and predicted data are combined for the dashboard |
-| `core/bess/battery_system_manager.py` | Main orchestrator |
-| `core/bess/decision_intelligence.py` | Decision explanations |
-| `core/bess/settings.py` | Configuration parameters |
+## How the System Works
 
-## Evidence-Based Analysis
+BESS Manager optimizes a home battery to minimize electricity costs.  Every
+15 minutes it re-runs a dynamic programming optimizer that looks at:
 
-**Every claim must be backed by evidence** — a specific data point, log line,
-or line of code.  If you cannot point to evidence, do not make the claim.
+- **Electricity prices** (today + tomorrow when available, at 15-min resolution)
+- **Solar production forecast**
+- **Consumption prediction** (time-of-day shaped or flat, depending on strategy)
+- **Current battery state** (charge level, cost basis of stored energy)
+- **Battery parameters** (capacity, efficiency, cycle cost)
 
-Rules:
-- NEVER speculate.  Do not use "likely", "probably", "suggests", "may have",
-  "possibly", or "could have".  State what happened with evidence, or say
-  "I don't have enough data to determine this."
-- Start from what the data actually shows, not from a theory about what
-  might have happened.
-- Verify claims against actual code paths — code that works for one inverter
-  platform may behave differently on another.
-- A design choice that is intentional is not a bug, even if a user finds it
-  unexpected.
+The optimizer produces a schedule of battery actions (charge / discharge /
+idle) for each 15-minute slot from now through the end of available price
+data.  This schedule is applied to the inverter via Home Assistant.
 
-## Strategic Intents and Hardware Behavior
+**Re-optimization**: The system re-runs every 15 minutes.  Each run uses the
+latest actual data (replacing predictions with measurements) and may produce
+a different schedule.  Common triggers for schedule changes:
+- Tomorrow's prices become available (typically around 13:00 for Nordpool)
+- Actual solar or consumption differs from the forecast
+- Battery state differs from what was predicted
 
-Strategic intents are NOT just labels — they control actual inverter modes:
-- **EXPORT_ARBITRAGE** → grid_first mode (enables export)
-- **GRID_CHARGING** → battery_first mode (allows grid charging)
-- **LOAD_SUPPORT** → load_first mode (discharge for home)
-- Wrong intent = wrong hardware mode = system malfunction
+
+## The Dynamic Programming Algorithm
+
+The optimizer uses **backward induction**.  Starting from the last period and
+working backwards, it evaluates all possible battery actions at each period
+and selects the one that minimizes total electricity cost over the remaining
+horizon.
+
+**State space**: Discretized battery state of energy (SOE) levels.
+
+**Actions**: Charge, discharge, or idle at various power levels — filtered
+by physical constraints (available energy, remaining capacity, power limits).
+
+**Transition**: Each action updates SOE accounting for charge/discharge
+efficiency losses and updates the **cost basis** of stored energy.
+
+**Objective**: Minimize net electricity cost (grid import cost minus export
+revenue) while accounting for battery cycle degradation costs and a terminal
+value for energy remaining at end of horizon.
+
+**Cost basis tracking (FIFO)**: When the battery charges at different prices
+over time, the system tracks the cost of stored energy using FIFO (first-in,
+first-out) accounting.  When the battery discharges, the oldest (cheapest)
+energy is used first.  This determines the true profit of a discharge action.
+
+**Profit threshold**: After optimization, total savings are compared against
+a minimum threshold scaled by remaining day fraction.  If savings are too
+low, the schedule is rejected in favor of all-IDLE to prevent cycling for
+marginal gains.
+
+
+## Strategic Intents
+
+Every 15-minute slot gets a strategic intent based on the energy flows the
+optimizer chose.  These are classified from the actual flow pattern:
+
+| Intent | Condition | What it means |
+|--------|-----------|---------------|
+| **GRID_CHARGING** | grid_to_battery >= 0.1 kWh | Buying cheap grid electricity to store in battery |
+| **SOLAR_STORAGE** | solar_to_battery > 0.1 kWh, grid_to_battery < 0.1 | Storing excess solar production for later |
+| **LOAD_SUPPORT** | battery_to_home > 0.1 kWh, battery_to_grid <= 0.1 | Using battery to power home (avoid expensive grid) |
+| **EXPORT_ARBITRAGE** | battery_to_grid > 0.1 kWh | Selling stored energy to grid at high prices |
+| **IDLE** | No significant battery flows | No profitable action — direct solar/grid consumption |
+
+**Hardware mapping**: Intents control actual inverter behavior:
+- GRID_CHARGING → battery_first mode + grid charge ON
+- LOAD_SUPPORT → load_first mode
+- EXPORT_ARBITRAGE → grid_first mode (enables grid export)
+- SOLAR_STORAGE / IDLE → load_first mode (solar serves home first)
+
+
+## Price Calculation
+
+The optimizer works with buy and sell prices derived from spot prices:
+
+    buy_price  = (spot + markup) * VAT_multiplier + additional_costs
+    sell_price = spot + export_compensation
+
+For Octopus Energy (UK), prices are already final — no markup/VAT applied.
+
+A discharge is profitable when:
+    sell_price (or avoided buy_price) > cost_basis + cycle_cost
+
+Where cost_basis is the price at which the energy was originally stored
+(tracked via FIFO), and cycle_cost is the battery wear cost per kWh.
+
+
+## Energy Flow Decomposition
+
+The system decomposes measured energy totals into detailed flows using
+energy conservation:
+
+    solar_to_home    = min(solar_production, home_consumption)
+    solar_to_battery = min(remaining_solar, battery_charged)
+    solar_to_grid    = remaining_solar - solar_to_battery
+    grid_to_home     = home_consumption - solar_to_home
+    grid_to_battery  = battery_charged - solar_to_battery
+
+Home consumption gets solar first (free), then grid.  Battery charges from
+solar first (free), then grid (paid).
+
 
 ## Prediction Snapshots and Expected Savings
 
-The prediction snapshots track **expected total savings** over the day.
-Each snapshot records:
+Every time the optimizer runs, a **prediction snapshot** is saved recording:
 
     expected_savings = actual_savings + predicted_savings
 
-- **Actual savings**: sum of savings for completed time slots (past).
-- **Predicted savings**: sum of savings for future time slots (from the
+- **Actual savings**: Sum of savings for completed time slots (past).
+- **Predicted savings**: Sum of savings for future time slots (from the
   latest optimization schedule).
 
-**Expected savings should NOT naturally decrease as time passes.** As the
+**Expected savings should NOT naturally decrease as time passes.**  As the
 day progresses, predictions become actuals, but the total should stay
 roughly the same IF the system performs as predicted.
 
-If expected savings DROP between snapshots, it means **actual performance
-was worse than predicted** — NOT "natural decay."
+If expected savings DROP between snapshots, it means something changed:
 
-Possible causes (but you MUST verify which one by checking the data):
-- Tomorrow's prices became available, causing the optimizer to shift
-  discharge value to a more profitable time tomorrow.
-- Actual solar production was lower than the forecast.
-- Actual consumption was higher than estimated (e.g., EV charging).
-- Price data changed between optimization runs.
+1. **Tomorrow's prices became available** — the optimizer now sees a longer
+   horizon and may shift profitable discharge from today to tomorrow.
+   Check: did the schedule's horizon expand?  Do tomorrow's prices exist?
+
+2. **Actual solar was lower than forecast** — less free energy means more
+   grid purchases.  Check: compare Historical Data solar column vs what
+   the schedule predicted for the same time slots.
+
+3. **Actual consumption was higher than estimated** — more demand than
+   expected (e.g., EV charging).  Check: compare Historical Data import
+   column vs schedule predictions.
+
+4. **Prices changed between runs** — updated price data shifted the
+   economics.  Check: logs for price fetch events.
 
 **NEVER say savings "naturally decay" or "diminish over time."** A drop
-is always a real deviation that deserves investigation with specific data.
+is always caused by a specific, identifiable change.
 
-## Debugging Negative Savings
 
-1. Read how `EconomicData.from_energy_and_prices()` calculates savings
-2. Understand the difference between:
-   - `hourly_savings`: per-quarter-hour comparison
-   - `grid_to_battery_solar_savings`: total optimization savings
-3. Check if viewing partial arbitrage cycle (charge happened, discharge pending)
-4. Verify energy balance consistency in sensor data
+## Consumption Prediction Strategies
 
-## Debugging Optimization Decisions
+The optimizer needs a consumption forecast.  Four strategies exist:
 
-1. Read `dp_battery_algorithm.py` optimization logic
-2. Check `min_action_profit_threshold` vs calculated savings
-3. Trace the cost basis tracking through charge/discharge
-4. Verify price data fed to optimizer
+- **ha_statistics** (recommended): Builds a 96-period time-of-day profile
+  from the past 7 days of HA Recorder data.  Uses trimmed mean to filter
+  out spikes like EV charging.  Higher during evening peaks, lower overnight.
+- **influxdb_7d_avg**: Same concept but queries InfluxDB instead of HA.
+- **sensor**: Reads a 48-hour rolling average sensor.  Produces a flat
+  prediction (same value all day).
+- **fixed**: A single fixed kWh/hour value.  Does not adapt.
 
-## Debugging Schedule Issues
 
-1. Read `growatt_schedule.py` TOU conversion logic
-2. Check strategic intent → TOU interval mapping
-3. Verify schedule comparison logic (why update vs keep)
+## Savings Calculation
+
+For each 15-minute slot, savings are calculated as:
+
+    hourly_savings = grid_only_cost - optimized_cost
+
+Where grid_only_cost is what the user would pay without any battery or solar
+(all consumption from grid at buy_price), and optimized_cost is the actual
+cost with battery optimization (grid imports minus export revenue).
+
+Positive savings = the battery saved money.  Negative savings = the battery
+action cost more than doing nothing (can happen during charging periods —
+the benefit comes later when discharging).
+
+The daily totals show:
+- **grid_only_cost**: Total cost if no solar or battery existed
+- **solar_only_cost**: Cost with solar but no battery optimization
+- **battery_solar_cost**: Actual cost with full optimization
+- **grid_to_battery_solar_savings**: Total savings from optimization
+
+
+## Evidence-Based Analysis
+
+When analyzing system behavior:
+
+- Every claim must be backed by specific data — a row in the data tables,
+  a log line, or a line of source code.
+- NEVER speculate.  Do not use "likely", "probably", "suggests", "may have".
+  State what happened with evidence, or say you don't have enough data.
+- Start from what the data shows, not from a theory.
+- Use tools (read_file, search_code) to verify claims against actual code.

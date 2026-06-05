@@ -240,7 +240,7 @@ class TestLoadSystemPrompt:
     def test_strips_frontmatter(self):
         md_content = "---\nname: test\ntype: agent\n---\n\n# Domain Knowledge\nHello"
         service = _make_service()
-        with patch("ai_chat._ANALYST_MD_PATH") as mock_path:
+        with patch("ai_chat._KNOWLEDGE_MD_PATH") as mock_path:
             mock_path.read_text.return_value = md_content
             result = service._load_system_prompt()
         assert result == "# Domain Knowledge\nHello"
@@ -248,7 +248,7 @@ class TestLoadSystemPrompt:
 
     def test_file_not_found_fallback(self):
         service = _make_service()
-        with patch("ai_chat._ANALYST_MD_PATH") as mock_path:
+        with patch("ai_chat._KNOWLEDGE_MD_PATH") as mock_path:
             mock_path.read_text.side_effect = FileNotFoundError
             result = service._load_system_prompt()
         assert "BESS" in result

@@ -4,6 +4,13 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.1.0b8] - 2026-06-05
+
+### Fixed
+
+- **AI analyst ignores instructions and speculates** — Root cause: the in-app AI loaded `bess-analyst.md` (270 lines of GitHub issue analysis process — debug bundles, issue comments, 4-phase triage) as its system prompt. The 50-line chat preamble couldn't override these conflicting instructions. Fix: separated shared domain knowledge into `docs/agents/bess-knowledge.md` (how savings work, key source files, evidence rules). The in-app AI now loads only domain knowledge + chat-specific behavioral instructions. The GitHub agent keeps its own process.
+- **Removed period index columns from data tables** — Historical Data, Schedule, and Prediction Snapshots tables no longer show internal period indices. The AI only sees human-readable times.
+
 ## [9.1.0b7] - 2026-06-05
 
 ### Fixed

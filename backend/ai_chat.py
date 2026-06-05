@@ -1,8 +1,8 @@
 """AI Analyst chat service for in-app BESS analysis.
 
 Provides a streaming chat interface backed by the Claude API.  The system prompt
-is loaded directly from .claude/agents/bess-analyst.md (single source of truth)
-and augmented with live system context from the debug data exporter.
+combines a chat-specific preamble with shared domain knowledge from
+docs/agents/bess-knowledge.md and live system context.
 
 The AI has tool-use capabilities: it can read source files, search the codebase,
 and list directories — giving it full access to its own code for deep analysis.
@@ -36,10 +36,12 @@ _CODEBASE_ROOT = _APP_DIR  # Docker: /app/
 if not (_CODEBASE_ROOT / "core" / "bess").exists():
     _CODEBASE_ROOT = _APP_DIR.parent  # Local dev: repo root
 
-# bess-analyst.md location.
-_ANALYST_MD_PATH = _APP_DIR / "agents" / "bess-analyst.md"
-if not _ANALYST_MD_PATH.exists():
-    _ANALYST_MD_PATH = _APP_DIR.parent / ".claude" / "agents" / "bess-analyst.md"
+# Domain knowledge file location.
+# In Docker: /app/agents/bess-knowledge.md  (copied from docs/agents/)
+# Local dev: <repo>/docs/agents/bess-knowledge.md
+_KNOWLEDGE_MD_PATH = _APP_DIR / "agents" / "bess-knowledge.md"
+if not _KNOWLEDGE_MD_PATH.exists():
+    _KNOWLEDGE_MD_PATH = _APP_DIR.parent / "docs" / "agents" / "bess-knowledge.md"
 
 # Directories the AI is allowed to read (relative to _CODEBASE_ROOT).
 _ALLOWED_DIRS = ("core/", "backend/", "docs/", "scripts/", ".claude/agents/")
@@ -142,62 +144,60 @@ _MAX_TOOL_RESULT_CHARS = 200_000
 
 # Preamble prepended to the agent definition to adapt it for in-app use.
 _PREAMBLE = """\
-You are an AI analyst embedded in the BESS Manager web UI.  A user is asking
-you questions about their battery energy storage system — its performance,
-optimization decisions, savings, and configuration.
+You are an AI analyst embedded in the BESS Manager web UI.  The user is a
+home owner looking at their battery dashboard.  They ask you questions about
+performance, optimization decisions, savings, and configuration.
 
-You have TWO sources of knowledge:
+You have THREE sources of information:
 
-1. **Live system state** — a snapshot of settings, sensor data, schedules,
-   predictions, and logs is provided below in "Current System State".
+1. **Domain knowledge** — provided below (how the system works, key source
+   files, how savings are calculated).
+2. **Live system state** — tables of current sensor data, schedules,
+   prediction snapshots, and logs (in "Current System State" below).
+3. **Source code access** — you have tools to read any source file, search
+   the codebase, and list directories.
 
-2. **Source code access** — you have tools to read any source file, search
-   the codebase, and list directories.  Use these to trace algorithm logic,
-   verify decision paths, and investigate bugs.
-
-Important guidelines:
+## How you MUST respond
 
 **Style:**
-- **Be concise.**  Answer the question directly, then stop.
-- Keep responses short: a few paragraphs at most.
-- Do NOT use markdown headings (##, ###) — they render poorly in this chat.
-  Use **bold** for emphasis and bullet lists for structure instead.
-- Use human-friendly language.  Say "at 13:00" not "period 52".  Say
-  "the optimizer re-ran" not "a new optimization cycle executed".  The user
-  is not a developer — never expose implementation details like period
-  indices, class names, or internal data structures.
-- Do NOT suggest the user look at code or run commands — they are end users.
-  YOU read the code on their behalf and explain what it does.
-- Monetary values should use the currency from the system settings.
-- When you use a tool, briefly mention what you're looking at so the user
-  knows you're investigating (e.g., "Let me check the optimization logic...").
-- When explaining optimizer decisions, read the relevant source code to give
-  accurate, code-backed answers — don't guess from memory.
-- When discussing savings deviations, cite the specific periods and values.
-- If the data is insufficient to answer, say so clearly.
+- Be concise.  Answer the question directly, then stop.
+- Keep responses short — a few paragraphs at most.
+- Do NOT use markdown headings (##, ###).  Use **bold** and bullet lists.
+- Use human-friendly language.  Say "at 13:00" not "period 52".  The user
+  is not a developer — never expose period indices, class names, or
+  internal data structures.
+- Do NOT suggest the user look at code or run commands.  YOU read code on
+  their behalf using tools.
+- Use the currency from the system settings for monetary values.
+- When using a tool, briefly say what you're checking ("Let me look at the
+  optimization code...").
 
-**Analysis — facts, not guesses:**
-- NEVER speculate with "likely", "probably", "suggests", or "may have".
-  Either find the evidence in the data and state what happened, or say you
-  don't have enough data to determine the cause.
-- When analyzing savings changes, follow this process:
-  1. Look at the Prediction Snapshots table.  Identify the exact times where
-     total savings changed significantly (e.g., dropped from 53 to 28 SEK).
-  2. For each significant change, check what happened at that time: Did new
-     prices arrive (check price data, logs)?  Did actual consumption or solar
-     differ from predictions (compare Historical Data vs schedule)?  Did the
-     optimizer extend its horizon to include tomorrow's prices?
-  3. Report what ACTUALLY changed with specific numbers.  For example:
-     "At 13:00 the optimizer re-ran with tomorrow's prices now available.
-     This shifted 15 SEK of planned discharge value to tomorrow because
-     evening prices tomorrow are higher than today."
-- When explaining optimizer decisions, read the relevant source code to give
-  accurate, code-backed answers — don't guess from memory.
-- If the data is insufficient to determine a cause, say so clearly rather
-  than inventing a plausible-sounding explanation.
+**Analysis — EVERY claim must have evidence:**
+- Before stating any cause or explanation, you MUST point to the specific
+  evidence: a row in the data tables, a log line, or a line of source code.
+  If you cannot cite evidence, do not make the claim.
+- NEVER use "likely", "probably", "suggests", "may have", "possibly", or
+  "could have".  Either state what happened with evidence, or say "I don't
+  have enough data to determine the cause."
+- When analyzing savings changes:
+  1. Find the exact timestamps in Prediction Snapshots where savings changed.
+  2. For each significant change, check the data to find the cause:
+     - Check if tomorrow's prices appeared (price data, logs).
+     - Compare Historical Data vs Schedule for the same time to find
+       solar or consumption differences.
+     - Check if Predicted Count changed (horizon expansion).
+  3. Report ONLY what the data shows, with specific numbers.
 
-Below is your domain knowledge about the BESS system, followed by the current
-system state.
+  Good: "At 13:00, tomorrow's prices became available.  The optimizer
+  shifted 15 SEK of discharge value to tomorrow where evening prices are
+  0.50 SEK/kWh higher."
+
+  Bad: "The optimizer likely received updated data that made it recalculate
+  profitability."  (This says nothing — what data?  What changed?)
+
+- If the data is insufficient, say so rather than inventing an explanation.
+
+---
 
 """
 
@@ -687,17 +687,17 @@ class AIAnalystService:
         return self._settings_store.get_section("ai_analyst")
 
     def _load_system_prompt(self) -> str:
-        """Load the bess-analyst.md file, stripping YAML frontmatter."""
+        """Load the bess-knowledge.md domain knowledge file."""
         try:
-            raw = _ANALYST_MD_PATH.read_text(encoding="utf-8")
+            raw = _KNOWLEDGE_MD_PATH.read_text(encoding="utf-8")
         except FileNotFoundError:
             logger.warning(
-                "bess-analyst.md not found at %s — using minimal prompt",
-                _ANALYST_MD_PATH,
+                "bess-knowledge.md not found at %s — using minimal prompt",
+                _KNOWLEDGE_MD_PATH,
             )
             return "You are a BESS (Battery Energy Storage System) analyst."
 
-        # Strip YAML frontmatter (between --- markers at the start).
+        # Strip YAML frontmatter if present (between --- markers at the start).
         stripped = re.sub(r"\A---\n.*?\n---\n*", "", raw, count=1, flags=re.DOTALL)
         return stripped.strip()
 
@@ -705,7 +705,7 @@ class AIAnalystService:
         """Combine preamble + domain knowledge + live context.
 
         Returns a list of content blocks for the ``system`` parameter.
-        The static portion (preamble + bess-analyst.md) is marked with
+        The static portion (preamble + bess-knowledge.md) is marked with
         cache_control for Anthropic prompt caching.
         """
         static = _PREAMBLE + self._system_prompt_base
@@ -816,9 +816,9 @@ class AIAnalystService:
             )
             if export.historical_periods:
                 rows = [
-                    f"## Historical Data ({period_count} periods)",
-                    "| Per | Time | Intent | Observed | SOE kWh | Solar | Import | Savings |",
-                    "|-----|------|--------|----------|---------|-------|--------|---------|",
+                    f"## Historical Data ({period_count} quarter-hours)",
+                    "| Time | Intent | Observed | SOE kWh | Solar | Import | Savings |",
+                    "|------|--------|----------|---------|-------|--------|---------|",
                 ]
                 for p in export.historical_periods:
                     if p is None:
@@ -828,7 +828,6 @@ class AIAnalystService:
                     en = p.get("energy", {})
                     econ = p.get("economic", {})
                     rows.append(
-                        f"| {p.get('period', ''):>3} "
                         f"| {ts[11:16] if len(ts) >= 16 else ''} "
                         f"| {(dec.get('strategic_intent') or '')[:16]} "
                         f"| {(dec.get('observed_intent') or '')[:16]} "
@@ -848,14 +847,14 @@ class AIAnalystService:
                 period_data = opt_result.get("period_data", [])
 
                 sched_parts = [
-                    f"## Latest Schedule (period {sched.get('optimization_period', '?')})",
+                    "## Latest Schedule",
                     f"```json\n{json.dumps(econ_summary, indent=1, default=str)}\n```",
                 ]
 
                 if period_data:
                     rows = [
-                        "| Per | Time | Intent | BattAct | SOE kWh | BuyPrice | Savings |",
-                        "|-----|------|--------|---------|---------|----------|---------|",
+                        "| Time | Intent | BattAct | SOE kWh | BuyPrice | Savings |",
+                        "|------|--------|---------|---------|----------|---------|",
                     ]
                     for p in period_data:
                         dec = p.get("decision", {})
@@ -863,7 +862,6 @@ class AIAnalystService:
                         econ = p.get("economic", {})
                         ts = str(p.get("timestamp", ""))
                         rows.append(
-                            f"| {p.get('period', ''):>3} "
                             f"| {ts[11:16] if len(ts) >= 16 else ''} "
                             f"| {(dec.get('strategic_intent') or '')[:16]} "
                             f"| {(dec.get('battery_action', 0) or 0):>+.3f} "
@@ -879,13 +877,12 @@ class AIAnalystService:
             if export.snapshots:
                 rows = [
                     f"## Prediction Snapshots ({len(export.snapshots)})",
-                    "| Timestamp | Per | Total Savings | Actual | Predicted |",
-                    "|-----------|-----|---------------|--------|-----------|",
+                    "| Timestamp | Total Savings | Actual Count | Predicted Count |",
+                    "|-----------|---------------|--------------|-----------------|",
                 ]
                 for sn in export.snapshots:
                     rows.append(
                         f"| {str(sn.get('snapshot_timestamp', ''))[:16]} "
-                        f"| {sn.get('optimization_period', '')} "
                         f"| {(sn.get('total_savings', 0) or 0):.4f} "
                         f"| {sn.get('actual_count', 0)} "
                         f"| {sn.get('predicted_count', 0)} |"

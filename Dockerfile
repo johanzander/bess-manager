@@ -41,8 +41,8 @@ COPY backend/app.py backend/api.py backend/api_conversion.py backend/api_datacla
 # Copy core directory
 COPY core/ /app/core/
 
-# Copy agent definition (used as system prompt by AI analyst)
-COPY .claude/agents/bess-analyst.md /app/agents/bess-analyst.md
+# Copy domain knowledge (used as system prompt by AI analyst)
+COPY docs/agents/bess-knowledge.md /app/agents/bess-knowledge.md
 
 # Build and copy frontend
 # BUILD_VERSION is used here so every new version busts the Docker layer cache,

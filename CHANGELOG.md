@@ -4,6 +4,12 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.1.0b7] - 2026-06-05
+
+### Fixed
+
+- **AI analyst speculates instead of analyzing** — Rewrote prompt to enforce fact-based analysis: the AI must find evidence in the data (prediction snapshots, historical periods, prices, logs) before stating a cause. Banned hedging language ("likely", "probably", "suggests"). Added step-by-step analysis process for savings drops. Enforced human-friendly language (times instead of period indices).
+
 ## [9.1.0b6] - 2026-06-05
 
 ### Fixed

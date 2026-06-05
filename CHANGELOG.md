@@ -4,6 +4,12 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.1.0b4] - 2026-06-05
+
+### Fixed
+
+- **AI chat context too large (204K tokens)** — the full debug report formatter output (~800KB with raw JSON dumps) exceeded Claude's 200K token limit. Replaced with a lean context builder that uses only markdown tables and small JSON blocks, skipping the large raw JSON sections meant for file-based debugging.
+
 ## [9.1.0b3] - 2026-06-05
 
 ### Fixed

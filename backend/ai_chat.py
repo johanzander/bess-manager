@@ -59,6 +59,11 @@ _MAX_MESSAGE_PAIRS = 20
 # Conservative token estimate: ~4 chars per token.
 _CHARS_PER_TOKEN = 4
 
+# Maximum characters for the system context.  Leaves room for the system
+# prompt base (~12K chars), preamble (~2K), and conversation history.
+# 150K tokens * 4 chars/token = 600K chars.
+_MAX_CONTEXT_CHARS = 600_000
+
 
 @dataclass
 class ChatSession:
@@ -245,35 +250,204 @@ class AIAnalystService:
         return "\n".join(parts)
 
     def _gather_context(self, system_manager) -> tuple[str, str]:
-        """Gather compact debug export as context string.
+        """Build a token-efficient context from the debug export.
+
+        The full DebugReportFormatter output is ~200K+ tokens (includes raw
+        JSON dumps for file-based debugging).  For the chat context we only
+        need the human-readable tables and small JSON blocks — no raw entity
+        snapshots, no full schedule JSON, no full historical JSON.
 
         Returns:
-            Tuple of (full_context_markdown, short_summary).
+            Tuple of (context_markdown, short_summary).
         """
         from core.bess.debug_data_exporter import DebugDataAggregator
-        from core.bess.debug_report_formatter import DebugReportFormatter
 
         try:
             aggregator = DebugDataAggregator(
                 system_manager,
                 settings_data=self._settings_store.data,
             )
-            export_data = aggregator.aggregate_all_data(compact=True)
+            export = aggregator.aggregate_all_data(compact=True)
 
-            formatter = DebugReportFormatter()
-            markdown = formatter.format_report(export_data)
+            sections = []
 
-            # Build a short summary for the UI.
-            period_count = (
-                len(export_data.historical_periods)
-                if export_data.historical_periods
-                else 0
+            # System info (tiny)
+            sections.append(
+                f"## System\nVersion: {export.bess_version}, "
+                f"Uptime: {export.system_uptime_hours:.1f}h, "
+                f"TZ: {export.timezone}"
             )
-            schedule_count = len(export_data.schedules) if export_data.schedules else 0
+
+            # Health status (small)
+            checks = export.health_check_results.get("checks", [])
+            errors = [c for c in checks if c.get("status") == "ERROR"]
+            warnings = [c for c in checks if c.get("status") == "WARNING"]
+            health_lines = [
+                f"## Health: {len(errors)} errors, {len(warnings)} warnings"
+            ]
+            for c in errors + warnings:
+                health_lines.append(
+                    f"- **{c.get('status')}** {c.get('name', '?')}: {c.get('message', '')}"
+                )
+            sections.append("\n".join(health_lines))
+
+            # Settings (small JSON blocks — battery, pricing, home)
+            settings_parts = ["## Settings"]
+            for label, data in [
+                ("Battery", export.battery_settings),
+                ("Pricing", export.price_settings),
+                ("Home", export.home_settings),
+            ]:
+                settings_parts.append(
+                    f"### {label}\n```json\n{json.dumps(data, indent=1, default=str)}\n```"
+                )
+            sections.append("\n\n".join(settings_parts))
+
+            # Price data (can be large with 96 periods — include as compact JSON)
+            if export.price_data:
+                sections.append(
+                    f"## Price Data\n```json\n{json.dumps(export.price_data, indent=1, default=str)}\n```"
+                )
+
+            # Entity snapshot — table only, no raw JSON
+            if export.entity_snapshot:
+                rows = [
+                    "## Entity Snapshot",
+                    "| Entity | State | Unit |",
+                    "|---|---|---|",
+                ]
+                for eid, state in sorted(export.entity_snapshot.items()):
+                    if isinstance(state, dict):
+                        val = state.get("state", "")
+                        unit = state.get("attributes", {}).get(
+                            "unit_of_measurement", ""
+                        )
+                    else:
+                        val, unit = str(state), ""
+                    rows.append(f"| `{eid}` | {val} | {unit} |")
+                sections.append("\n".join(rows))
+
+            # TOU segments (small)
+            if export.inverter_tou_segments:
+                sections.append(
+                    f"## Inverter TOU ({len(export.inverter_tou_segments)} segments)\n"
+                    f"```json\n{json.dumps(export.inverter_tou_segments, indent=1, default=str)}\n```"
+                )
+
+            # Historical data — table only, no raw JSON
+            period_count = (
+                len(export.historical_periods) if export.historical_periods else 0
+            )
+            if export.historical_periods:
+                rows = [
+                    f"## Historical Data ({period_count} periods)",
+                    "| Per | Time | Intent | Observed | SOE kWh | Solar | Import | Savings |",
+                    "|-----|------|--------|----------|---------|-------|--------|---------|",
+                ]
+                for p in export.historical_periods:
+                    if p is None:
+                        continue
+                    ts = str(p.get("timestamp", ""))
+                    dec = p.get("decision", {})
+                    en = p.get("energy", {})
+                    econ = p.get("economic", {})
+                    rows.append(
+                        f"| {p.get('period', ''):>3} "
+                        f"| {ts[11:16] if len(ts) >= 16 else ''} "
+                        f"| {(dec.get('strategic_intent') or '')[:16]} "
+                        f"| {(dec.get('observed_intent') or '')[:16]} "
+                        f"| {en.get('battery_soe_start', 0):.1f}→{en.get('battery_soe_end', 0):.1f} "
+                        f"| {en.get('solar_production', 0):.2f} "
+                        f"| {en.get('grid_imported', 0):.2f} "
+                        f"| {econ.get('hourly_savings', 0):.4f} |"
+                    )
+                sections.append("\n".join(rows))
+
+            # Latest schedule — table only
+            schedule_count = len(export.schedules) if export.schedules else 0
+            if export.schedules:
+                sched = export.schedules[0]
+                opt_result = sched.get("optimization_result", {})
+                econ_summary = opt_result.get("economic_summary", {})
+                period_data = opt_result.get("period_data", [])
+
+                sched_parts = [
+                    f"## Latest Schedule (period {sched.get('optimization_period', '?')})",
+                    f"```json\n{json.dumps(econ_summary, indent=1, default=str)}\n```",
+                ]
+
+                if period_data:
+                    rows = [
+                        "| Per | Time | Intent | BattAct | SOE kWh | BuyPrice | Savings |",
+                        "|-----|------|--------|---------|---------|----------|---------|",
+                    ]
+                    for p in period_data:
+                        dec = p.get("decision", {})
+                        en = p.get("energy", {})
+                        econ = p.get("economic", {})
+                        ts = str(p.get("timestamp", ""))
+                        rows.append(
+                            f"| {p.get('period', ''):>3} "
+                            f"| {ts[11:16] if len(ts) >= 16 else ''} "
+                            f"| {(dec.get('strategic_intent') or '')[:16]} "
+                            f"| {(dec.get('battery_action', 0) or 0):>+.3f} "
+                            f"| {en.get('battery_soe_start', 0):.1f}→{en.get('battery_soe_end', 0):.1f} "
+                            f"| {econ.get('buy_price', 0):.4f} "
+                            f"| {econ.get('hourly_savings', 0):.4f} |"
+                        )
+                    sched_parts.append("\n".join(rows))
+
+                sections.append("\n\n".join(sched_parts))
+
+            # Prediction snapshots — evolution table
+            if export.snapshots:
+                rows = [
+                    f"## Prediction Snapshots ({len(export.snapshots)})",
+                    "| Timestamp | Per | Total Savings | Actual | Predicted |",
+                    "|-----------|-----|---------------|--------|-----------|",
+                ]
+                for sn in export.snapshots:
+                    rows.append(
+                        f"| {str(sn.get('snapshot_timestamp', ''))[:16]} "
+                        f"| {sn.get('optimization_period', '')} "
+                        f"| {(sn.get('total_savings', 0) or 0):.4f} "
+                        f"| {sn.get('actual_count', 0)} "
+                        f"| {sn.get('predicted_count', 0)} |"
+                    )
+                sections.append("\n".join(rows))
+
+            # Logs — key events only, capped
+            if (
+                export.todays_log_content
+                and "not found" not in export.todays_log_content.lower()
+            ):
+                log_lines = export.todays_log_content.split("\n")
+                # Cap at 200 lines to stay within budget.
+                if len(log_lines) > 200:
+                    log_lines = log_lines[-200:]
+                    sections.append(
+                        f"## Logs (last 200 of {len(export.todays_log_content.splitlines())} lines)\n"
+                        f"```\n{chr(10).join(log_lines)}\n```"
+                    )
+                else:
+                    sections.append(
+                        f"## Logs ({len(log_lines)} lines)\n```\n{chr(10).join(log_lines)}\n```"
+                    )
+
+            markdown = "\n\n".join(sections)
+
+            # Final safety net: hard truncate if still too large.
+            if len(markdown) > _MAX_CONTEXT_CHARS:
+                markdown = (
+                    markdown[:_MAX_CONTEXT_CHARS]
+                    + "\n\n[... context truncated to fit token limit]"
+                )
+
             summary = (
                 f"Loaded: {period_count} historical periods, "
                 f"{schedule_count} schedule(s), "
-                f"health check, settings, logs"
+                f"health, settings, logs "
+                f"({len(markdown) // 1000}KB)"
             )
 
             return markdown, summary

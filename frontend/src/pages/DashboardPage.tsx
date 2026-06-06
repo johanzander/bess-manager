@@ -74,6 +74,7 @@ export default function DashboardPage({
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isInitializing, setIsInitializing] = useState(false);
+  const [initStatus, setInitStatus] = useState<string>("");
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
   const [isInitialLoad, setIsInitialLoad] = useState(true);
 
@@ -144,8 +145,9 @@ export default function DashboardPage({
       
       if (response?.data) {
         if (response.data.error === 'initializing') {
-          // System just configured — backfill + schedule still running in background.
+          // System just configured or restarting — init still running in background.
           setIsInitializing(true);
+          setInitStatus(response.data.status || "");
           setDashboardData(null);
         } else if (response.data.error === 'incomplete_data') {
           setIsInitializing(false);
@@ -195,9 +197,10 @@ export default function DashboardPage({
 
   useEffect(() => {
     fetchData();
-    const interval = setInterval(() => fetchData(), 60000); // Auto-refresh every minute
+    // Poll every 3s while initializing for live progress, 60s normally
+    const interval = setInterval(() => fetchData(), isInitializing ? 3000 : 60000);
     return () => clearInterval(interval);
-  }, [fetchData]); // Add fetchData dependency (which includes onLoadingChange)
+  }, [fetchData, isInitializing]);
 
   // Check if we have valid dashboard data
   const hasValidData = dashboardData && dashboardData.hourlyData && dashboardData.hourlyData.length > 0;
@@ -316,13 +319,16 @@ export default function DashboardPage({
         </div>
       </div>
 
-      {/* Initializing state — backfill + schedule running in background */}
+      {/* Initializing state — startup or backfill + schedule running in background */}
       {isInitializing && (
         <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 p-6 rounded-lg text-center">
           <div className="flex flex-col items-center gap-3">
             <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-400 border-t-transparent" />
             <h3 className="text-sm font-medium text-blue-800 dark:text-blue-200">Initializing system</h3>
-            <p className="text-sm text-blue-700 dark:text-blue-300">Loading historical data and building optimization schedule. This takes up to a minute after first setup.</p>
+            {initStatus && (
+              <p className="text-sm font-medium text-blue-600 dark:text-blue-400">{initStatus}</p>
+            )}
+            <p className="text-xs text-blue-500 dark:text-blue-400">This takes up to a minute after startup.</p>
           </div>
         </div>
       )}

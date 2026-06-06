@@ -122,6 +122,11 @@ def _require_configured_system(bess_controller) -> None:
             status_code=503,
             detail="System not configured. Complete the setup wizard first.",
         )
+    if not bess_controller.startup_complete:
+        raise HTTPException(
+            status_code=503,
+            detail="System is starting up. Please wait.",
+        )
 
 
 def _refresh_health(bess_controller) -> None:
@@ -520,12 +525,30 @@ async def get_dashboard_data(
     """
     from app import bess_controller
 
-    _require_configured_system(bess_controller)
+    # On a fresh install, the system is unconfigured — 503 so the frontend
+    # redirects to the setup wizard.
+    if not bess_controller.system.is_configured:
+        raise HTTPException(
+            status_code=503,
+            detail="System not configured. Complete the setup wizard first.",
+        )
+
+    # During startup (configured system, background init still running) or
+    # post-wizard backfill, return an "initializing" response so the
+    # frontend shows a spinner instead of an error.
+    if not bess_controller.startup_complete:
+        logger.info("Dashboard requested during startup — returning initializing state")
+        return {
+            "error": "initializing",
+            "message": "System is starting up. The optimization schedule will be ready shortly.",
+            "status": bess_controller.startup_status,
+        }
 
     try:
         logger.debug(f"Starting dashboard data retrieval with resolution={resolution}")
 
-        # Guard: if no schedule exists yet the system is still initializing.
+        # Guard: if no schedule exists yet the system is still initializing
+        # (post-wizard backfill running in background).
         if not bess_controller.system.schedule_store.get_latest_schedule():
             logger.info(
                 "Dashboard requested before schedule is ready — returning initializing state"
@@ -1809,6 +1832,21 @@ async def get_dashboard_health_summary():
     """Get lightweight health summary for dashboard alert banner - only critical issues."""
     from app import bess_controller
 
+    # During background startup, return a clean summary — health checks
+    # haven't run yet so there's nothing meaningful to report.  This check
+    # must come before _require_configured_system which would 503 during startup.
+    if bess_controller.system.is_configured and not bess_controller.startup_complete:
+        return convert_keys_to_camel_case(
+            {
+                "has_critical_errors": False,
+                "has_warnings": False,
+                "critical_issues": [],
+                "total_critical_issues": 0,
+                "timestamp": datetime.now().isoformat(),
+                "system_mode": "initializing",
+            }
+        )
+
     _require_configured_system(bess_controller)
 
     try:
@@ -1925,6 +1963,20 @@ async def get_historical_data_status():
     dashboard accuracy and optimization quality.
     """
     from app import bess_controller
+
+    # During background startup, historical data hasn't been fetched yet.
+    if bess_controller.system.is_configured and not bess_controller.startup_complete:
+        return convert_keys_to_camel_case(
+            {
+                "is_incomplete": False,
+                "missing_hours": [],
+                "completed_hours": [],
+                "total_missing": 0,
+                "total_completed": 0,
+                "message": "System is starting up.",
+                "timestamp": datetime.now().isoformat(),
+            }
+        )
 
     _require_configured_system(bess_controller)
 

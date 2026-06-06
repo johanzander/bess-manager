@@ -4,6 +4,7 @@ Main application entry point for the BESS management system.
 
 import json
 import os
+import threading
 import traceback
 from contextlib import asynccontextmanager
 
@@ -103,6 +104,13 @@ app.include_router(endpoints_router)
 class BESSController:
     def __init__(self):
         """Initialize the BESS Controller."""
+        # Startup state: set to True once start() completes.  Until then,
+        # API endpoints return an "initializing" response so the UI can show
+        # a spinner instead of an error.  startup_status holds a human-readable
+        # description of the current step for live progress display.
+        self.startup_complete = False
+        self.startup_status = ""
+
         # Environment variables are injected by HA Supervisor (production)
         # or docker-compose (development).
 
@@ -409,23 +417,52 @@ class BESSController:
         but scheduling and hardware control are deferred until the user
         completes the setup wizard.
         """
-        self.system.start()
+        self.startup_status = "Connecting to Home Assistant..."
+        self.system.start(status_callback=self._update_startup_status)
 
         if not self.system.is_configured:
             logger.info(
                 "System unconfigured — scheduler deferred until setup is complete"
             )
+            self.startup_complete = True
             return
 
+        self.startup_status = "Running optimization..."
         now = time_utils.now()
         current_period = now.hour * 4 + now.minute // 15
         self.system.update_battery_schedule(current_period=current_period)
+        self.startup_status = "Starting scheduler..."
         self.start_scheduler()
+        self.startup_complete = True
+
+    def _update_startup_status(self, status: str) -> None:
+        """Callback for BatterySystemManager to report startup progress."""
+        self.startup_status = status
+
+    def start_in_background(self):
+        """Run start() in a background thread so uvicorn can bind immediately.
+
+        On a configured system, start() runs health checks, fetches historical
+        data from InfluxDB, and builds the first schedule — this can take
+        10-60+ seconds.  Running it in a background thread lets the web server
+        start serving immediately.  The dashboard shows an "Initializing"
+        spinner until the schedule is ready.
+        """
+
+        def _run():
+            try:
+                self.start()
+            except Exception:
+                logger.exception("Background startup failed")
+                self.startup_complete = True
+
+        thread = threading.Thread(target=_run, name="bess-startup", daemon=True)
+        thread.start()
 
 
 # Global BESS controller instance
 bess_controller = BESSController()
-bess_controller.start()
+bess_controller.start_in_background()
 
 # Get ingress base path, important for Home Assistant ingress
 ingress_base_path = os.environ.get("INGRESS_BASE_PATH", "/local_bess_manager/ingress")

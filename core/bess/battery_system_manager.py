@@ -28,7 +28,7 @@ from .growatt_sph_controller import GrowattSphController
 from .ha_api_controller import HomeAssistantAPIController
 from .health_check import run_system_health_checks
 from .historical_data_store import HistoricalDataStore
-from .influxdb_helper import get_power_sensor_data_batch
+from .influxdb_helper import get_power_sensor_data_batch, is_influxdb_configured
 from .inverter_controller import InverterController
 from .models import (
     DecisionData,
@@ -350,14 +350,23 @@ class BatterySystemManager:
                 e,
             )
 
-    def start(self) -> None:
+    def start(self, status_callback=None) -> None:
         """Start the system - preserves original functionality.
 
         On a fresh install where no inverter is configured the system starts
         in an unconfigured state.  The web UI is still reachable so the user
         can complete the setup wizard, which will call
         ``switch_inverter_platform()`` to finish initialization.
+
+        Args:
+            status_callback: Optional callable(str) invoked with a human-readable
+                description before each startup step, for live UI progress.
         """
+
+        def _status(msg: str) -> None:
+            if status_callback:
+                status_callback(msg)
+
         if not self.is_configured:
             logger.info(
                 "System is unconfigured — skipping hardware initialization. "
@@ -376,19 +385,26 @@ class BatterySystemManager:
                     )
 
                 # Run health check before we start using sensors
+                _status("Checking sensor health...")
                 self._run_health_check()
 
                 # Initialize schedule from inverter before SOC sync so cached
                 # periods are available (required for SPH write-back)
+                _status("Reading inverter schedule...")
                 self._initialize_tou_schedule_from_inverter()
 
                 # Sync SOC limits from config to inverter (config as master)
+                _status("Syncing battery limits...")
                 self._sync_soc_limits()
 
                 # Initialize historical data - using improved sensor collector
-                self._fetch_and_initialize_historical_data()
+                _status("Fetching historical data...")
+                self._fetch_and_initialize_historical_data(
+                    status_callback=status_callback
+                )
 
                 # Fetch predictions
+                _status("Almost there — fetching predictions...")
                 self._fetch_predictions()
 
             self.log_system_startup()
@@ -666,8 +682,14 @@ class BatterySystemManager:
         logger.info("Historical seed loaded: %d periods from '%s'", loaded, seed_file)
         return loaded > 0
 
-    def _fetch_and_initialize_historical_data(self) -> None:
+    def _fetch_and_initialize_historical_data(self, status_callback=None) -> None:
         """Fetch and initialize historical data using quarterly resolution."""
+        if not is_influxdb_configured():
+            logger.info(
+                "InfluxDB is not configured — skipping historical data backfill"
+            )
+            return
+
         try:
             now = time_utils.now()
             current_period = now.hour * 4 + now.minute // 15
@@ -690,6 +712,13 @@ class BatterySystemManager:
 
                 # Collect quarterly data for all completed periods
                 for period in range(0, current_period):
+                    # Report progress at each hour boundary (every 4th period)
+                    if status_callback and period % 4 == 0:
+                        hour = period // 4
+                        total_hours = current_period // 4
+                        status_callback(
+                            f"Fetching historical data ({hour}/{total_hours}h)..."
+                        )
                     try:
                         # Collect cumulative sensor readings at period boundary (calculate deltas for energy flows)
                         period_energy_data = self.sensor_collector.collect_energy_data(

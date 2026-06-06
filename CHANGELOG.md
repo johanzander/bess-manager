@@ -4,6 +4,14 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.1.0b10] - 2026-06-06
+
+### Fixed
+
+- **502 Bad Gateway on startup** — `bess_controller.start()` blocked the uvicorn event loop during initialization (sensor checks, historical data backfill, optimization), showing a 502 error for up to a minute. Moved initialization to a background thread so the web server binds immediately. The dashboard now shows a live progress spinner during startup.
+- **InfluxDB warnings on startup when not configured** — Fresh installs with default placeholder credentials (`your_db_username_here`) triggered warnings in the health check and a cascade of per-period errors during historical data backfill. InfluxDB is optional, so unconfigured state is now detected early, logged at INFO level, and the backfill is skipped entirely.
+- **Deploy script fails on beta version strings** — `deploy.sh` used bash arithmetic on version strings like `0b9`, which bash misinterprets as octal. Fixed version parsing to handle beta suffixes. Also added CHANGELOG.md to the add-on build output so HA shows the changelog in the add-on UI.
+
 ## [9.1.0b9] - 2026-06-06
 
 ### Fixed

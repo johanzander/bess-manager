@@ -4,6 +4,12 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Schedule bar showed "Charging from Grid" during solar charging** — The intent classifier used a near-zero threshold (`grid_to_battery > 0.01`) to distinguish grid charging from solar storage. Any tiny grid supplement (e.g. 0.1 kWh grid vs 0.7 kWh solar) flipped the intent to GRID_CHARGING, which both mislabeled the UI and set the inverter to `grid_charge=True, battery_first` — actively pulling from grid. Fixed by comparing dominant source (`grid_to_battery > solar_to_battery`), matching hardware reality: the Growatt has no "mostly solar, top up from grid" mode.
+
 ## [9.1.0b10] - 2026-06-06
 
 ### Fixed

@@ -73,7 +73,11 @@ The BESS Manager provides a comprehensive web interface organized into focused p
 ![Battery Schedule](.assets/battery-schedule.png)
 *Intelligent scheduling showing charge/discharge decisions with price predictions*
 
-> 📸 **Screenshot placeholders** - Add actual screenshots to `docs/images/` directory
+![Scenario Comparison Analysis](./assets/scenario-analysis.png)
+*Compare Grid-only, Solar-only and Solar+Battery scenarios to see where your savings come from*
+
+![BESS Analyst](./assets/bess-analyst.png)
+*Built-in AI analyst answers questions about your battery performance, savings and optimization decisions*
 
 ## Documentation
 

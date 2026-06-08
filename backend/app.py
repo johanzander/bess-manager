@@ -375,6 +375,9 @@ class BESSController:
             misfire_grace_time=30,  # Allow 30 seconds of misfire before warning
         )
 
+        # Give BSM access to the scheduler for one-shot retry jobs
+        self.system.set_scheduler(self.scheduler)
+
         self.scheduler.start()
 
     def _apply_settings(self, options):

@@ -99,7 +99,9 @@ class SolaxModbusGrowattController(GrowattMinController):
 
     # ── Hardware interface ────────────────────────────────────────────────────
 
-    def apply_period(self, controller, grid_charge: bool, discharge_rate: int) -> None:
+    def apply_period(
+        self, controller, grid_charge: bool, discharge_rate: int
+    ) -> tuple[bool, str]:
         """Write period control settings, including TOU mode update when needed.
 
         Derives the required TOU mode from the current period's strategic intent.
@@ -110,7 +112,11 @@ class SolaxModbusGrowattController(GrowattMinController):
             controller: HomeAssistantAPIController instance
             grid_charge: Whether to enable grid charging
             discharge_rate: Discharge power rate (0-100%), post-inhibit
+
+        Returns:
+            Tuple of (success, error_message). error_message is empty on success.
         """
+        errors = []
         now = time_utils.now()
         current_period = now.hour * 4 + now.minute // 15
 
@@ -127,18 +133,30 @@ class SolaxModbusGrowattController(GrowattMinController):
                     current_period,
                     intent,
                 )
-                controller.set_tou_segment_via_entities(
-                    segment_id=1,
-                    batt_mode=mode,
-                    start_time="00:00",
-                    end_time="23:59",
-                    enabled=enabled,
-                )
-                self._last_written_tou_mode = mode
-                self._update_tou_display_state()
+                try:
+                    controller.set_tou_segment_via_entities(
+                        segment_id=1,
+                        batt_mode=mode,
+                        start_time="00:00",
+                        end_time="23:59",
+                        enabled=enabled,
+                    )
+                    self._last_written_tou_mode = mode
+                    self._update_tou_display_state()
+                except Exception as e:
+                    logger.error("FAILED: set TOU segment mode to %s: %s", mode, e)
+                    errors.append(str(e))
 
         # Set grid charge and discharge rate (same as parent)
-        self._write_period_to_hardware(controller, grid_charge, discharge_rate)
+        success, error_msg = self._write_period_to_hardware(
+            controller, grid_charge, discharge_rate
+        )
+        if not success:
+            errors.append(error_msg)
+
+        if errors:
+            return False, "; ".join(errors)
+        return True, ""
 
     def write_schedule_to_hardware(
         self,

@@ -137,7 +137,7 @@ _TOOLS = [
 # Limits
 # ---------------------------------------------------------------------------
 
-_MAX_TOOL_ITERATIONS = 10
+_MAX_TOOL_ITERATIONS = 20
 _MAX_FILE_READ_LINES = 500
 _MAX_SEARCH_RESULTS = 50
 _MAX_TOOL_RESULT_CHARS = 200_000

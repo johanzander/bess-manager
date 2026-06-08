@@ -166,23 +166,32 @@ The optimizer needs a consumption forecast.  Four strategies exist:
 
 ## Savings Calculation
 
-For each 15-minute slot, savings are calculated as:
+There are two savings metrics.  The distinction matters when reporting numbers:
 
-    hourly_savings = grid_only_cost - optimized_cost
+**Total savings** (shown on the dashboard Savings card):
 
-Where grid_only_cost is what the user would pay without any battery or solar
-(all consumption from grid at buy_price), and optimized_cost is the actual
-cost with battery optimization (grid imports minus export revenue).
+    total_savings = grid_only_cost - hourly_cost
 
-Positive savings = the battery saved money.  Negative savings = the battery
+This is the full benefit of having solar + battery compared to grid-only.
+
+**Battery-only savings** (per-period `hourly_savings` in data tables):
+
+    hourly_savings = solar_only_cost - hourly_cost
+
+This isolates the battery's contribution on top of what solar already saves.
+
+Total savings = solar savings + battery savings.  Summing per-period
+`hourly_savings` gives a lower number than the dashboard total because it
+excludes the solar benefit.
+
+Positive savings = the system saved money.  Negative savings = the battery
 action cost more than doing nothing (can happen during charging periods —
 the benefit comes later when discharging).
 
-The daily totals show:
-- **grid_only_cost**: Total cost if no solar or battery existed
+Cost baselines:
+- **grid_only_cost**: Cost if no solar or battery existed (all consumption from grid)
 - **solar_only_cost**: Cost with solar but no battery optimization
-- **battery_solar_cost**: Actual cost with full optimization
-- **grid_to_battery_solar_savings**: Total savings from optimization
+- **hourly_cost** (aka optimized cost): Actual cost with full optimization
 
 
 ## Evidence-Based Analysis

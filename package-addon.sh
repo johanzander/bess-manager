@@ -37,6 +37,7 @@ cp backend/requirements.txt "$BUILD_DIR/requirements.txt"
 cp backend/run.sh "$BUILD_DIR/run.sh"
 cp config.yaml "$BUILD_DIR/config.yaml"
 cp README.md "$BUILD_DIR/README.md"
+cp CHANGELOG.md "$BUILD_DIR/CHANGELOG.md"
 
 # Copy core files
 mkdir -p "$BUILD_DIR/core"

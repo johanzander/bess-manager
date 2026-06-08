@@ -28,6 +28,30 @@ OWNED_SECTIONS = (
     "growatt",
     "inverter",
     "sensors",
+    "ai_analyst",
+)
+
+# All valid inverter platform IDs.
+VALID_PLATFORMS = (
+    "growatt_server_min",
+    "growatt_server_sph",
+    "solax_modbus_growatt_min",
+    "solax_modbus_growatt_sph",
+    "solax_modbus_native",
+)
+
+# Sensor keys that are shared across all platforms (not inverter-specific).
+SHARED_SENSOR_KEYS = frozenset(
+    {
+        "solar_forecast_today",
+        "solar_forecast_tomorrow",
+        "48h_avg_grid_import",
+        "current_l1",
+        "current_l2",
+        "current_l3",
+        "discharge_inhibit",
+        "weather_entity",
+    }
 )
 
 # All valid inverter platform IDs.

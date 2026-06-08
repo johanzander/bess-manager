@@ -23,8 +23,15 @@ if [ -f "$TARGET_PATH/config.yaml" ]; then
         MINOR=$(echo $BUILD_VERSION | cut -d. -f2)
         PATCH=$(echo $BUILD_VERSION | cut -d. -f3)
 
-        # Increment patch version
-        NEW_PATCH=$((PATCH + 1))
+        # Increment patch version (use 10# base to avoid octal interpretation of e.g. "0b9")
+        if [[ "$PATCH" =~ ^([0-9]+b)([0-9]+)$ ]]; then
+            # Beta version like "0b9" → "0b10"
+            BETA_PREFIX="${BASH_REMATCH[1]}"
+            BETA_NUM=$((10#${BASH_REMATCH[2]} + 1))
+            NEW_PATCH="${BETA_PREFIX}${BETA_NUM}"
+        else
+            NEW_PATCH=$((10#$PATCH + 1))
+        fi
         NEW_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
 
         echo "Updating version: $BUILD_VERSION → $NEW_VERSION"

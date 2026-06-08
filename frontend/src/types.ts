@@ -134,7 +134,7 @@ export interface ScheduleData {
   summary: ScheduleSummary;
 }
 
-export type HealthStatus = "OK" | "WARNING" | "ERROR" | "UNKNOWN";
+export type HealthStatus = "OK" | "WARNING" | "ERROR" | "UNKNOWN" | "NOT_CONFIGURED";
 
 export interface HealthCheckResult {
   name: string;

@@ -75,7 +75,8 @@ const SystemHealthComponent: React.FC = () => {
     OK: 0,
     WARNING: 0,
     ERROR: 0,
-    UNKNOWN: 0
+    UNKNOWN: 0,
+    NOT_CONFIGURED: 0
   };
 
   healthData?.checks.forEach((component: ComponentHealthStatus) => {

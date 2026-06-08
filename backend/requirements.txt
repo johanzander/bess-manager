@@ -13,3 +13,4 @@ pyyaml
 watchdog
 numpy
 pandas
+anthropic>=0.40.0

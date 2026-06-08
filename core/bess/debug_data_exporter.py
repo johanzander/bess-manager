@@ -853,18 +853,25 @@ class DebugDataAggregator:
             if not compact:
                 return [asdict(snapshot) for snapshot in snapshots]
             # Compact: all snapshots as summary rows for the evolution table.
-            # daily_view.total_savings is the running total (actuals + predictions)
-            # at the time of each optimization — this is what tracks prediction drift.
-            return [
-                {
-                    "snapshot_timestamp": snapshot.snapshot_timestamp.isoformat(),
-                    "optimization_period": snapshot.optimization_period,
-                    "total_savings": snapshot.daily_view.total_savings,
-                    "actual_count": snapshot.daily_view.actual_count,
-                    "predicted_count": snapshot.daily_view.predicted_count,
-                }
-                for snapshot in snapshots
-            ]
+            # Use grid_only_cost - hourly_cost to match the dashboard total
+            # savings definition (includes both solar and battery benefit).
+            result = []
+            for snapshot in snapshots:
+                total_savings = sum(
+                    p.economic.grid_only_cost - p.economic.hourly_cost
+                    for p in snapshot.daily_view.periods
+                    if p.economic is not None
+                )
+                result.append(
+                    {
+                        "snapshot_timestamp": snapshot.snapshot_timestamp.isoformat(),
+                        "optimization_period": snapshot.optimization_period,
+                        "total_savings": total_savings,
+                        "actual_count": snapshot.daily_view.actual_count,
+                        "predicted_count": snapshot.daily_view.predicted_count,
+                    }
+                )
+            return result
         except Exception as e:
             logger.exception(f"Failed to serialize snapshots: {e}")
             return []

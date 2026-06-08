@@ -1070,6 +1070,7 @@ class HomeAssistantAPIController:
         self._service_call_with_retry(
             "number",
             "set_value",
+            operation="Set charge stop SOC",
             entity_id=entity_id,
             value=charge_stop_soc,
         )
@@ -1084,6 +1085,7 @@ class HomeAssistantAPIController:
         self._service_call_with_retry(
             "number",
             "set_value",
+            operation="Set discharge stop SOC",
             entity_id=entity_id,
             value=discharge_stop_soc,
         )
@@ -1098,6 +1100,7 @@ class HomeAssistantAPIController:
         self._service_call_with_retry(
             "number",
             "set_value",
+            operation="Set charging power rate",
             entity_id=entity_id,
             value=rate,
         )
@@ -1112,6 +1115,7 @@ class HomeAssistantAPIController:
         self._service_call_with_retry(
             "number",
             "set_value",
+            operation="Set discharging power rate",
             entity_id=entity_id,
             value=rate,
         )
@@ -1138,10 +1142,13 @@ class HomeAssistantAPIController:
         else:
             logger.info("Disabling grid charge")
 
+        operation = "Enable grid charge" if enable else "Disable grid charge"
+
         if entity_id.startswith("select."):
             self._service_call_with_retry(
                 "select",
                 "select_option",
+                operation=operation,
                 entity_id=entity_id,
                 option="Enabled" if enable else "Disabled",
             )
@@ -1150,6 +1157,7 @@ class HomeAssistantAPIController:
             self._service_call_with_retry(
                 "switch",
                 service,
+                operation=operation,
                 entity_id=entity_id,
             )
 

@@ -4,10 +4,16 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [9.1.0b11] - 2026-06-08
+
+### Added
+
+- **Period-level retry with user-facing banners** — When HA supervisor is temporarily unresponsive, per-period hardware writes now retry after 3 and 8 minutes instead of waiting 15 minutes for the next cycle. The dashboard shows clear banners like "Period 68 (17:00): Could not apply optimization to inverter, retrying in 3 min" instead of cryptic "Call number.set_value" errors.
 
 ### Fixed
 
+- **AI chat showed wrong savings numbers** — The AI analyst saw battery-only savings (~63 SEK) instead of total savings (~150 SEK) shown on the dashboard. Fixed prediction snapshot export to use `grid_only_cost - hourly_cost` matching the UI definition. Also increased AI tool iteration limit from 10 to 20 and clarified savings definitions (total vs battery-only) in domain knowledge.
+- **Cryptic error messages on inverter write failures** — Hardware write operations (`set_grid_charge`, `set_discharging_power_rate`, etc.) now include descriptive operation labels instead of generic HA service call names.
 - **Schedule bar showed "Charging from Grid" during solar charging** — The intent classifier used a near-zero threshold (`grid_to_battery > 0.01`) to distinguish grid charging from solar storage. Any tiny grid supplement (e.g. 0.1 kWh grid vs 0.7 kWh solar) flipped the intent to GRID_CHARGING, which both mislabeled the UI and set the inverter to `grid_charge=True, battery_first` — actively pulling from grid. Fixed by comparing dominant source (`grid_to_battery > solar_to_battery`), matching hardware reality: the Growatt has no "mostly solar, top up from grid" mode.
 
 ## [9.1.0b10] - 2026-06-06

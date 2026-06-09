@@ -736,6 +736,38 @@ class TestDiscoverLocaleDefaults:
         assert store["electricity_price"]["additional_costs"] == 0.773
         assert store["electricity_price"]["tax_reduction"] == 0.1988
 
+    def test_norwegian_nordpool_updates_currency_preserves_costs(self):
+        """Non-Swedish Nordpool updates currency but keeps cost fields as rough defaults."""
+        store = deepcopy(_PRE_EXISTING_STORE)
+        store["home"]["currency"] = "SEK"
+        store["electricity_price"]["additional_costs"] = 0.773
+        store["electricity_price"]["tax_reduction"] = 0.1988
+
+        ctrl = _make_discover_controller(store)
+        integrations = {
+            "growatt_found": False,
+            "device_sn": None,
+            "growatt_device_id": None,
+            "solax_found": False,
+            "nordpool_found": True,
+            "nordpool_area": "NO1",
+            "nordpool_custom_area": None,
+            "nordpool_custom_entity": None,
+            "nordpool_config_entry_id": "entry-456",
+            "octopus_found": False,
+            "detected_inverter_platforms": [],
+            "detected_phase_count": None,
+            "currency": "NOK",
+            "vat_multiplier": 1.25,
+        }
+        resp = self._run_discover(ctrl, integrations)
+        assert resp.status_code == 200
+
+        assert store["home"]["currency"] == "NOK"
+        # Cost fields kept — Swedish values are a rough approximation, better than zero
+        assert store["electricity_price"]["additional_costs"] == 0.773
+        assert store["electricity_price"]["tax_reduction"] == 0.1988
+
     def test_no_locale_hints_leaves_defaults_unchanged(self):
         """When discovery returns no currency/vat hints, store is untouched."""
         store = deepcopy(_PRE_EXISTING_STORE)

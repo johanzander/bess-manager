@@ -621,3 +621,146 @@ class TestSetupComplete:
         _client.post("/api/setup/complete", json=payload)
         call_args = complete_controller.settings_store.save_all.call_args[0][0]
         assert "battery" not in call_args
+
+
+# ---------------------------------------------------------------------------
+# Discovery locale persistence (#113)
+# ---------------------------------------------------------------------------
+
+
+def _make_discover_controller(store_data: dict) -> MagicMock:
+    """Build a bess_controller mock for /api/setup/discover tests.
+
+    The mock stores data mutably so save_section calls are visible in asserts.
+    """
+    ctrl = MagicMock()
+    ctrl.settings_store.data = store_data
+
+    def _get_section(name: str) -> dict:
+        return dict(store_data.get(name, {}))
+
+    def _save_section(name: str, data: dict) -> None:
+        store_data[name] = dict(data)
+
+    ctrl.settings_store.get_section.side_effect = _get_section
+    ctrl.settings_store.save_section.side_effect = _save_section
+    return ctrl
+
+
+class TestDiscoverLocaleDefaults:
+    """POST /api/setup/discover — locale-appropriate defaults (#113)."""
+
+    def _run_discover(self, ctrl, integrations):
+        """Helper: mock HA calls and POST /api/setup/discover."""
+        ha = ctrl.ha_controller
+        ha.discover_integrations.return_value = (integrations, [])
+        ha.fetch_entity_registry.return_value = []
+        ha.discover_sensors_from_registry.return_value = ({}, None)
+        ha.discover_current_sensors.return_value = {}
+        ha.discover_optional_sensors.return_value = {}
+        ha.discover_octopus_entities.return_value = {}
+        ha.ENTITY_SUFFIX_MAP = {}
+        ha.SOLAX_GROWATT_MIN_SUFFIX_MAP = {}
+        ha.SOLAX_GROWATT_SPH_SUFFIX_MAP = {}
+        ha.SOLAX_NATIVE_SUFFIX_MAP = {}
+        sys.modules["app"].bess_controller = ctrl
+        return _client.post("/api/setup/discover")
+
+    def test_octopus_only_persists_gbp_defaults(self):
+        """Octopus-only discovery overwrites Swedish bootstrap defaults with UK values."""
+        store = deepcopy(_PRE_EXISTING_STORE)
+        store["home"]["currency"] = "SEK"
+        store["electricity_price"]["vat_multiplier"] = 1.25
+        store["electricity_price"]["additional_costs"] = 0.773
+        store["electricity_price"]["tax_reduction"] = 0.1988
+        store["energy_provider"]["provider"] = "nordpool_official"
+
+        ctrl = _make_discover_controller(store)
+        integrations = {
+            "growatt_found": False,
+            "device_sn": None,
+            "growatt_device_id": None,
+            "solax_found": False,
+            "nordpool_found": False,
+            "nordpool_area": None,
+            "nordpool_custom_area": None,
+            "nordpool_custom_entity": None,
+            "nordpool_config_entry_id": None,
+            "octopus_found": True,
+            "detected_inverter_platforms": [],
+            "detected_phase_count": None,
+            "currency": "GBP",
+            "vat_multiplier": 1.0,
+        }
+        resp = self._run_discover(ctrl, integrations)
+        assert resp.status_code == 200
+
+        assert store["home"]["currency"] == "GBP"
+        assert store["electricity_price"]["vat_multiplier"] == 1.0
+        assert store["electricity_price"]["additional_costs"] == 0.0
+        assert store["electricity_price"]["tax_reduction"] == 0.0
+        assert store["energy_provider"]["provider"] == "octopus"
+
+    def test_nordpool_discovery_does_not_clear_costs(self):
+        """Nordpool discovery updates currency/vat but keeps additional_costs/tax_reduction."""
+        store = deepcopy(_PRE_EXISTING_STORE)
+        store["home"]["currency"] = "SEK"
+        store["electricity_price"]["vat_multiplier"] = 1.25
+        store["electricity_price"]["additional_costs"] = 0.773
+        store["electricity_price"]["tax_reduction"] = 0.1988
+
+        ctrl = _make_discover_controller(store)
+        integrations = {
+            "growatt_found": False,
+            "device_sn": None,
+            "growatt_device_id": None,
+            "solax_found": False,
+            "nordpool_found": True,
+            "nordpool_area": "SE3",
+            "nordpool_custom_area": None,
+            "nordpool_custom_entity": None,
+            "nordpool_config_entry_id": "entry-123",
+            "octopus_found": False,
+            "detected_inverter_platforms": [],
+            "detected_phase_count": None,
+            "currency": "SEK",
+            "vat_multiplier": 1.25,
+        }
+        resp = self._run_discover(ctrl, integrations)
+        assert resp.status_code == 200
+
+        # Currency and VAT unchanged (already correct)
+        assert store["home"]["currency"] == "SEK"
+        assert store["electricity_price"]["vat_multiplier"] == 1.25
+        # Swedish cost fields preserved
+        assert store["electricity_price"]["additional_costs"] == 0.773
+        assert store["electricity_price"]["tax_reduction"] == 0.1988
+
+    def test_no_locale_hints_leaves_defaults_unchanged(self):
+        """When discovery returns no currency/vat hints, store is untouched."""
+        store = deepcopy(_PRE_EXISTING_STORE)
+        original_currency = store["home"]["currency"]
+        original_vat = store["electricity_price"]["vat_multiplier"]
+
+        ctrl = _make_discover_controller(store)
+        integrations = {
+            "growatt_found": False,
+            "device_sn": None,
+            "growatt_device_id": None,
+            "solax_found": False,
+            "nordpool_found": False,
+            "nordpool_area": None,
+            "nordpool_custom_area": None,
+            "nordpool_custom_entity": None,
+            "nordpool_config_entry_id": None,
+            "octopus_found": False,
+            "detected_inverter_platforms": [],
+            "detected_phase_count": None,
+            "currency": None,
+            "vat_multiplier": None,
+        }
+        resp = self._run_discover(ctrl, integrations)
+        assert resp.status_code == 200
+
+        assert store["home"]["currency"] == original_currency
+        assert store["electricity_price"]["vat_multiplier"] == original_vat

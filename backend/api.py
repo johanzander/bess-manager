@@ -2759,6 +2759,46 @@ async def run_setup_discovery():
             integrations.get("vat_multiplier"),
         )
 
+        # Persist locale-appropriate defaults when discovery detects a
+        # non-Swedish locale.  Bootstrap defaults hardcode SEK/SE4/1.25 which
+        # are wrong for e.g. UK Octopus users.  Overwrite the pricing fields
+        # now so the store has correct values even if the wizard never
+        # completes.  (#113)
+        detected_currency = integrations.get("currency")
+        detected_vat = integrations.get("vat_multiplier")
+        if detected_currency or detected_vat is not None:
+            home = bess_controller.settings_store.get_section("home")
+            elec = bess_controller.settings_store.get_section("electricity_price")
+            changed = False
+            if detected_currency and home.get("currency") != detected_currency:
+                home["currency"] = detected_currency
+                changed = True
+            if detected_vat is not None and elec.get("vat_multiplier") != detected_vat:
+                elec["vat_multiplier"] = detected_vat
+                changed = True
+            # For Octopus-only users, clear Swedish-specific cost fields
+            if integrations.get("octopus_found") and not integrations.get(
+                "nordpool_found"
+            ):
+                if elec.get("additional_costs", 0) != 0:
+                    elec["additional_costs"] = 0.0
+                    changed = True
+                if elec.get("tax_reduction", 0) != 0:
+                    elec["tax_reduction"] = 0.0
+                    changed = True
+                ep = bess_controller.settings_store.get_section("energy_provider")
+                if ep.get("provider") != "octopus":
+                    ep["provider"] = "octopus"
+                    bess_controller.settings_store.save_section("energy_provider", ep)
+            if changed:
+                bess_controller.settings_store.save_section("home", home)
+                bess_controller.settings_store.save_section("electricity_price", elec)
+                logger.info(
+                    "Persisted locale defaults: currency=%s, vat=%s",
+                    detected_currency,
+                    detected_vat,
+                )
+
         sensors: dict[str, str] = {}
         missing_sensors: list[str] = []
         platform_sensors: dict[str, dict[str, str]] = {}

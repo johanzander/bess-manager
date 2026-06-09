@@ -17,6 +17,28 @@ from core.bess import time_utils
 _LOGGER = logging.getLogger(__name__)
 
 
+PLACEHOLDER_VALUES = {"your_db_username_here", "your_db_password_here"}
+
+
+def is_influxdb_configured() -> bool:
+    """Return True if InfluxDB has real (non-placeholder) credentials configured."""
+    try:
+        config = get_influxdb_config()
+    except (KeyError, FileNotFoundError, json.JSONDecodeError):
+        return False
+
+    if not config["url"] or not config["username"] or not config["password"]:
+        return False
+
+    if (
+        config["username"] in PLACEHOLDER_VALUES
+        or config["password"] in PLACEHOLDER_VALUES
+    ):
+        return False
+
+    return True
+
+
 def get_influxdb_config():
     """Load InfluxDB config with environment variable precedence.
 

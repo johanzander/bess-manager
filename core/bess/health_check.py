@@ -4,6 +4,7 @@ from datetime import datetime
 
 from .influxdb_helper import (
     get_influxdb_config,
+    is_influxdb_configured,
     test_influxdb_connection,
 )
 
@@ -402,40 +403,20 @@ def check_historical_data_access():
         "error": None,
     }
 
+    if not is_influxdb_configured():
+        config_check["status"] = "NOT_CONFIGURED"
+        config_check["formatted_value"] = "Not configured (optional)"
+        logger.info("InfluxDB is not configured — skipping (optional component)")
+        result["checks"].append(config_check)
+        result["status"] = "NOT_CONFIGURED"
+        return [result]
+
     try:
         config = get_influxdb_config()
-
-        placeholder_values = {"your_db_username_here", "your_db_password_here"}
-        has_placeholders = (
-            config["username"] in placeholder_values
-            or config["password"] in placeholder_values
-        )
-
-        if has_placeholders:
-            config_check["status"] = "WARNING"
-            config_check["value"] = f"URL: {config['url']}"
-            config_check["formatted_value"] = f"URL: {config['url']}"
-            config_check["error"] = (
-                "InfluxDB credentials are still set to placeholder values — InfluxDB is not configured"
-            )
-            logger.warning(
-                "InfluxDB credentials are still set to placeholder values — InfluxDB is not configured"
-            )
-        elif config["url"] and config["username"] and config["password"]:
-            config_check["status"] = "OK"
-            config_check["value"] = f"URL: {config['url']}"
-            config_check["formatted_value"] = f"URL: {config['url']}"
-            logger.info("InfluxDB credentials configured")
-        else:
-            config_check["status"] = "ERROR"
-            missing = []
-            if not config["url"]:
-                missing.append("URL")
-            if not config["username"]:
-                missing.append("Username")
-            if not config["password"]:
-                missing.append("Password")
-            config_check["error"] = f"Missing configuration: {', '.join(missing)}"
+        config_check["status"] = "OK"
+        config_check["value"] = f"URL: {config['url']}"
+        config_check["formatted_value"] = f"URL: {config['url']}"
+        logger.info("InfluxDB credentials configured")
     except Exception as e:
         config_check["status"] = "ERROR"
         config_check["error"] = f"Failed to load InfluxDB configuration: {e}"

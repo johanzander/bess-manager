@@ -4,6 +4,22 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.1.0] - 2026-06-08
+
+### Added
+
+- **AI Analyst chat panel** — Embedded AI analyst in the web UI. Ask questions about battery performance, optimization decisions, savings, and configuration from a floating chat panel on any page. Responses stream in real-time via SSE. The AI has full source code access (reads files, searches code) and uses live system data (sensors, schedules, prediction snapshots, logs) as context. Requires a Claude API key configured in Settings > AI Analyst. Prompt caching reduces follow-up message costs by ~90%.
+- **Period-level retry with user-facing banners** — When HA supervisor is temporarily unresponsive, per-period hardware writes retry after 3 and 8 minutes instead of waiting 15 minutes for the next cycle. Dashboard shows clear banners like "Period 68 (17:00): Could not apply optimization to inverter, retrying in 3 min".
+- **Startup progress spinner** — Dashboard shows live initialization progress instead of 502 Bad Gateway.
+
+### Fixed
+
+- **AI chat showed wrong savings numbers** — The AI analyst saw battery-only savings instead of the total savings shown on the dashboard. Fixed to match UI definition. Also clarified savings definitions (total vs battery-only) in domain knowledge.
+- **Schedule bar showed "Charging from Grid" during solar charging** — Intent classifier now compares dominant energy source (`grid_to_battery > solar_to_battery`) instead of using a near-zero threshold that triggered on any tiny grid supplement.
+- **Cryptic error messages on inverter write failures** — Hardware write operations now include descriptive operation labels instead of generic "Call number.set_value" messages.
+- **502 Bad Gateway on startup** — Moved initialization to a background thread so the web server binds immediately.
+- **InfluxDB warnings on startup when not configured** — Unconfigured InfluxDB state now detected early and handled gracefully.
+
 ## [9.0.0] - 2026-06-04
 
 ### Added

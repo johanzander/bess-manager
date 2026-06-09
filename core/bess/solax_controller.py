@@ -92,7 +92,7 @@ class SolaxController(InverterController):
 
     def _write_period_to_hardware(
         self, controller, grid_charge: bool, discharge_rate: int
-    ) -> None:
+    ) -> tuple[bool, str]:
         """Issue a SolaX VPP command for the current period.
 
         Derives the power target in watts from the two abstract control
@@ -106,17 +106,25 @@ class SolaxController(InverterController):
             controller: HomeAssistantAPIController instance.
             grid_charge: Whether grid charging is requested.
             discharge_rate: Discharge power as a percentage (0-100).
+
+        Returns:
+            Tuple of (success, error_message). error_message is empty on success.
         """
-        if not grid_charge and discharge_rate == 0:
-            controller.set_solax_vpp_disabled()
-        elif grid_charge:
-            target_watts = int(self.max_charge_power_kw * 1000)
-            controller.set_solax_active_power_control(target_watts)
-        else:
-            target_watts = -int(
-                self.max_discharge_power_kw * discharge_rate / 100 * 1000
-            )
-            controller.set_solax_active_power_control(target_watts)
+        try:
+            if not grid_charge and discharge_rate == 0:
+                controller.set_solax_vpp_disabled()
+            elif grid_charge:
+                target_watts = int(self.max_charge_power_kw * 1000)
+                controller.set_solax_active_power_control(target_watts)
+            else:
+                target_watts = -int(
+                    self.max_discharge_power_kw * discharge_rate / 100 * 1000
+                )
+                controller.set_solax_active_power_control(target_watts)
+            return True, ""
+        except Exception as e:
+            logger.error("FAILED: SolaX VPP period write: %s", e)
+            return False, str(e)
 
     def write_schedule_to_hardware(
         self,

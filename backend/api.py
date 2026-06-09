@@ -122,6 +122,11 @@ def _require_configured_system(bess_controller) -> None:
             status_code=503,
             detail="System not configured. Complete the setup wizard first.",
         )
+    if not bess_controller.startup_complete:
+        raise HTTPException(
+            status_code=503,
+            detail="System is starting up. Please wait.",
+        )
 
 
 def _refresh_health(bess_controller) -> None:
@@ -150,6 +155,7 @@ _SECTION_MAP: dict[str, str] = {
     "growatt": "growatt",
     "inverter": "inverter",
     "sensors": "sensors",
+    "aiAnalyst": "ai_analyst",
 }
 
 # Derived from the BatterySettings dataclass — fields with init=True are the
@@ -519,12 +525,30 @@ async def get_dashboard_data(
     """
     from app import bess_controller
 
-    _require_configured_system(bess_controller)
+    # On a fresh install, the system is unconfigured — 503 so the frontend
+    # redirects to the setup wizard.
+    if not bess_controller.system.is_configured:
+        raise HTTPException(
+            status_code=503,
+            detail="System not configured. Complete the setup wizard first.",
+        )
+
+    # During startup (configured system, background init still running) or
+    # post-wizard backfill, return an "initializing" response so the
+    # frontend shows a spinner instead of an error.
+    if not bess_controller.startup_complete:
+        logger.info("Dashboard requested during startup — returning initializing state")
+        return {
+            "error": "initializing",
+            "message": "System is starting up. The optimization schedule will be ready shortly.",
+            "status": bess_controller.startup_status,
+        }
 
     try:
         logger.debug(f"Starting dashboard data retrieval with resolution={resolution}")
 
-        # Guard: if no schedule exists yet the system is still initializing.
+        # Guard: if no schedule exists yet the system is still initializing
+        # (post-wizard backfill running in background).
         if not bess_controller.system.schedule_store.get_latest_schedule():
             logger.info(
                 "Dashboard requested before schedule is ready — returning initializing state"
@@ -1808,6 +1832,21 @@ async def get_dashboard_health_summary():
     """Get lightweight health summary for dashboard alert banner - only critical issues."""
     from app import bess_controller
 
+    # During background startup, return a clean summary — health checks
+    # haven't run yet so there's nothing meaningful to report.  This check
+    # must come before _require_configured_system which would 503 during startup.
+    if bess_controller.system.is_configured and not bess_controller.startup_complete:
+        return convert_keys_to_camel_case(
+            {
+                "has_critical_errors": False,
+                "has_warnings": False,
+                "critical_issues": [],
+                "total_critical_issues": 0,
+                "timestamp": datetime.now().isoformat(),
+                "system_mode": "initializing",
+            }
+        )
+
     _require_configured_system(bess_controller)
 
     try:
@@ -1924,6 +1963,20 @@ async def get_historical_data_status():
     dashboard accuracy and optimization quality.
     """
     from app import bess_controller
+
+    # During background startup, historical data hasn't been fetched yet.
+    if bess_controller.system.is_configured and not bess_controller.startup_complete:
+        return convert_keys_to_camel_case(
+            {
+                "is_incomplete": False,
+                "missing_hours": [],
+                "completed_hours": [],
+                "total_missing": 0,
+                "total_completed": 0,
+                "message": "System is starting up.",
+                "timestamp": datetime.now().isoformat(),
+            }
+        )
 
     _require_configured_system(bess_controller)
 
@@ -2560,6 +2613,96 @@ async def dismiss_all_runtime_failures():
     except Exception as e:
         logger.error(f"Error dismissing all runtime failures: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+# ---------------------------------------------------------------------------
+# AI Analyst chat endpoints
+# ---------------------------------------------------------------------------
+
+
+def _get_ai_service():
+    """Lazy-initialise and return the shared AIAnalystService."""
+    from app import bess_controller
+
+    if not hasattr(bess_controller, "_ai_analyst_service"):
+        from ai_chat import AIAnalystService
+
+        bess_controller._ai_analyst_service = AIAnalystService(
+            bess_controller.settings_store
+        )
+    return bess_controller._ai_analyst_service, bess_controller
+
+
+@router.get("/api/ai/chat/status")
+async def ai_chat_status():
+    """Check whether the AI analyst is configured and enabled."""
+    service, _ = _get_ai_service()
+    return service.get_status()
+
+
+@router.post("/api/ai/chat/start")
+async def ai_chat_start():
+    """Start a new AI chat session with fresh system context."""
+    service, ctrl = _get_ai_service()
+
+    status = service.get_status()
+    if not status["configured"]:
+        raise HTTPException(
+            status_code=400,
+            detail="AI Analyst not configured. Add an API key in Settings.",
+        )
+
+    result = service.start_session(ctrl.system)
+    return result
+
+
+@router.post("/api/ai/chat/stream")
+async def ai_chat_stream(body: dict):
+    """Stream an AI response as Server-Sent Events.
+
+    Body:
+        sessionId: Active session UUID.
+        message: The user's question.
+
+    Returns:
+        StreamingResponse with text/event-stream media type.
+    """
+    from fastapi.responses import StreamingResponse
+
+    service, _ = _get_ai_service()
+    session_id = body.get("sessionId", "")
+    message = body.get("message", "").strip()
+
+    if not session_id or not message:
+        raise HTTPException(
+            status_code=400, detail="sessionId and message are required"
+        )
+
+    return StreamingResponse(
+        service.stream_response(session_id, message),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.post("/api/ai/chat/refresh")
+async def ai_chat_refresh(body: dict):
+    """Refresh the system context for an existing chat session."""
+    service, ctrl = _get_ai_service()
+    session_id = body.get("sessionId", "")
+
+    if not session_id:
+        raise HTTPException(status_code=400, detail="sessionId is required")
+
+    try:
+        return service.refresh_context(session_id, ctrl.system)
+    except KeyError as err:
+        raise HTTPException(
+            status_code=404, detail="Session not found or expired"
+        ) from err
 
 
 @router.get("/api/setup/status")

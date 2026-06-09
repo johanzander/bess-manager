@@ -556,19 +556,33 @@ This eliminates the `required_methods` parameter entirely and makes the policy s
 - `lifetime_self_consumption` — derived as `load - import` when missing
 - `lifetime_load_consumption` — derived as `solar + import - export` when missing
 
-These sensors remain in `ENTITY_SUFFIX_MAP` / `SOLAX_ENTITY_SUFFIX_MAP`, get discovered, appear in the wizard sensor list, and are saved to config, but nothing reads them at runtime. Remove them from the suffix maps and `sensorDefinitions.ts` to reduce wizard clutter and avoid confusion about which sensors actually matter.
+These sensors remain in the per-platform suffix maps (`GROWATT_MIN_SUFFIX_MAP`, `GROWATT_SPH_SUFFIX_MAP`, etc.), get discovered, appear in the wizard sensor list, and are saved to config, but nothing reads them at runtime. Remove them from the suffix maps and `sensorDefinitions.ts` to reduce wizard clutter and avoid confusion about which sensors actually matter.
 
-**Files**: `core/bess/ha_api_controller.py` (`ENTITY_SUFFIX_MAP`, `SOLAX_ENTITY_SUFFIX_MAP`), `frontend/src/lib/sensorDefinitions.ts`
+**Files**: `core/bess/ha_api_controller.py` (per-platform suffix maps), `frontend/src/lib/sensorDefinitions.ts`
 
 ---
 
-### Clean up `ENTITY_SUFFIX_MAP` dead entries
+### Clean up suffix map dead entries
 
 **Impact**: Low | **Effort**: Low | **Dependencies**: `ha_api_controller.py`
 
-**Description**: `ENTITY_SUFFIX_MAP` contains `battery_discharge_soc_limit_on_grid` which never matches any real `unique_id` suffix. The actual `growatt_server` unique_id for this entity uses the shorter suffix `soc_limit_on_grid` (added separately). Audit the full suffix map for other entries that exist only because they matched entity_id patterns but have no corresponding unique_id in any real integration. Discovery matches exclusively on `unique_id` via `_map_registry_entities`, so entity_id-shaped suffixes are dead code.
+**Description**: `GROWATT_MIN_SUFFIX_MAP` contains `battery_discharge_soc_limit_on_grid` which never matches any real `unique_id` suffix. The actual `growatt_server` unique_id for this entity uses the shorter suffix `soc_limit_on_grid` (added separately). Audit all per-platform suffix maps for other entries that exist only because they matched entity_id patterns but have no corresponding unique_id in any real integration. Discovery matches exclusively on `unique_id` via `_map_registry_entities`, so entity_id-shaped suffixes are dead code.
 
-**Files**: `core/bess/ha_api_controller.py` (`ENTITY_SUFFIX_MAP`, `SOLAX_ENTITY_SUFFIX_MAP`)
+**Files**: `core/bess/ha_api_controller.py` (per-platform suffix maps)
+
+---
+
+### Consolidate Growatt MIN/SPH detection into a single path
+
+**Impact**: Low | **Effort**: Low | **Dependencies**: `ha_api_controller.py`
+
+**Description**: There are two separate heuristics for distinguishing Growatt MIN vs SPH:
+1. `_parse_ha_metadata()` (line ~2163): binary check for `-tlx_` in any unique_id
+2. `discover_sensors_from_registry()` (line ~2725): runs both suffix maps and picks the one with more matches
+
+Both are called sequentially from `run_setup_discovery()` in `api.py`. They serve different stages (platform identification vs sensor mapping), but having two heuristics for the same question is fragile — they could theoretically disagree. Consolidate by deriving the platform list from the suffix map match results instead of the separate `has_tlx` check.
+
+**Files**: `core/bess/ha_api_controller.py` (`_parse_ha_metadata`, `discover_sensors_from_registry`), `backend/api.py` (`run_setup_discovery`)
 
 ### Other Technical Debt
 

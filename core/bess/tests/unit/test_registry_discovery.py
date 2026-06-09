@@ -575,12 +575,26 @@ class TestMapRegistryEntities:
         assert result["import_power"] == f"sensor.{sn}_import_from_grid"
         assert result["export_power"] == f"sensor.{sn}_export_to_grid"
         assert result["pv_power"] == f"sensor.{sn}_all_pv_wattage"
-        assert result["lifetime_battery_charged"] == f"sensor.{sn}_lifetime_battery_charged"
-        assert result["lifetime_battery_discharged"] == f"sensor.{sn}_lifetime_battery_discharged"
+        assert (
+            result["lifetime_battery_charged"]
+            == f"sensor.{sn}_lifetime_battery_charged"
+        )
+        assert (
+            result["lifetime_battery_discharged"]
+            == f"sensor.{sn}_lifetime_battery_discharged"
+        )
         assert result["lifetime_solar_energy"] == f"sensor.{sn}_lifetime_solar_energy"
-        assert result["lifetime_export_to_grid"] == f"sensor.{sn}_lifetime_export_to_grid"
-        assert result["lifetime_import_from_grid"] == f"sensor.{sn}_lifetime_import_from_grid"
-        assert result["lifetime_load_consumption"] == f"sensor.{sn}_lifetime_load_consumption"
+        assert (
+            result["lifetime_export_to_grid"] == f"sensor.{sn}_lifetime_export_to_grid"
+        )
+        assert (
+            result["lifetime_import_from_grid"]
+            == f"sensor.{sn}_lifetime_import_from_grid"
+        )
+        assert (
+            result["lifetime_load_consumption"]
+            == f"sensor.{sn}_lifetime_load_consumption"
+        )
         # SPH has no number/switch entities
         assert "grid_charge" not in result
         assert "battery_charging_power_rate" not in result
@@ -595,7 +609,10 @@ class TestMapRegistryEntities:
         )
         # entity_id-based suffixes might get partial matches, but the key
         # sensors mapped via mix_* unique_ids should not appear
-        assert "battery_soc" not in result or result.get("battery_soc") != "sensor.egm2h4l0g0_state_of_charge"
+        assert (
+            "battery_soc" not in result
+            or result.get("battery_soc") != "sensor.egm2h4l0g0_state_of_charge"
+        )
 
     def test_sph_map_does_not_match_min_entities(self):
         """SPH suffix map should not match MIN tlx_* unique_ids."""

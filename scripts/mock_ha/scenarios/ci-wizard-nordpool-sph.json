@@ -1,117 +1,54 @@
 {
   "name": "CI Wizard: Nordpool + SPH inverter",
-  "description": "Setup wizard scenario — Swedish user, Nordpool Official, SPH (DC-coupled) inverter, 3-phase.",
+  "description": "Setup wizard scenario — Swedish user, Nordpool Official, SPH (DC-coupled) inverter, 3-phase. SPH uses mix_* sensor keys and has NO number/switch entities.",
   "mock_time": "@2025-01-15 08:30:00",
   "timezone": "Europe/Stockholm",
   "sensors": {
-    "sensor.xyz9876543_state_of_charge_soc": {
+    "sensor.xyz9876543_state_of_charge": {
       "state": "60",
       "attributes": {
         "unit_of_measurement": "%",
-        "friendly_name": "State of charge (SoC)"
+        "friendly_name": "State of charge"
       }
     },
-    "sensor.xyz9876543_battery_1_charging_w": {
+    "sensor.xyz9876543_battery_charging": {
       "state": "0",
       "attributes": {
         "unit_of_measurement": "W"
       }
     },
-    "sensor.xyz9876543_battery_1_discharging_w": {
+    "sensor.xyz9876543_battery_discharging_w": {
       "state": "300",
       "attributes": {
         "unit_of_measurement": "W"
       }
     },
-    "sensor.xyz9876543_import_power": {
+    "sensor.xyz9876543_import_from_grid": {
       "state": "0",
       "attributes": {
         "unit_of_measurement": "W"
       }
     },
-    "sensor.xyz9876543_export_power": {
+    "sensor.xyz9876543_export_to_grid": {
       "state": "0",
       "attributes": {
         "unit_of_measurement": "W"
       }
     },
-    "sensor.xyz9876543_internal_wattage": {
+    "sensor.xyz9876543_all_pv_wattage": {
       "state": "0",
       "attributes": {
         "unit_of_measurement": "W"
       }
-    },
-    "sensor.xyz9876543_local_load_power": {
-      "state": "1200",
-      "attributes": {
-        "unit_of_measurement": "W"
-      }
-    },
-    "number.xyz9876543_battery_charge_power_limit": {
-      "state": "100",
-      "attributes": {
-        "unit_of_measurement": "%",
-        "min": 0,
-        "max": 100
-      }
-    },
-    "number.xyz9876543_battery_discharge_power_limit": {
-      "state": "100",
-      "attributes": {
-        "unit_of_measurement": "%",
-        "min": 0,
-        "max": 100
-      }
-    },
-    "number.xyz9876543_battery_charge_soc_limit": {
-      "state": "95",
-      "attributes": {
-        "unit_of_measurement": "%",
-        "min": 0,
-        "max": 100
-      }
-    },
-    "number.xyz9876543_battery_discharge_soc_limit": {
-      "state": "15",
-      "attributes": {
-        "unit_of_measurement": "%",
-        "min": 0,
-        "max": 100
-      }
-    },
-    "switch.xyz9876543_charge_from_grid": {
-      "state": "off",
-      "attributes": {}
     },
     "sensor.nordpool_kwh_se3_sek_3_10_025": {
       "state": "0.92",
       "attributes": {
         "unit_of_measurement": "SEK/kWh",
         "today": [
-          0.55,
-          0.45,
-          0.35,
-          0.3,
-          0.28,
-          0.45,
-          0.75,
-          0.95,
-          1.15,
-          1.25,
-          1.35,
-          1.45,
-          1.35,
-          1.25,
-          1.15,
-          1.35,
-          1.45,
-          1.55,
-          1.65,
-          1.55,
-          1.35,
-          0.95,
-          0.75,
-          0.65
+          0.55, 0.45, 0.35, 0.3, 0.28, 0.45, 0.75, 0.95,
+          1.15, 1.25, 1.35, 1.45, 1.35, 1.25, 1.15, 1.35,
+          1.45, 1.55, 1.65, 1.55, 1.35, 0.95, 0.75, 0.65
         ],
         "tomorrow": []
       }
@@ -137,7 +74,7 @@
         "device_class": "current"
       }
     },
-    "sensor.xyz9876543_lifetime_total_all_batteries_charged": {
+    "sensor.xyz9876543_lifetime_battery_charged": {
       "state": "5234.5",
       "attributes": {
         "unit_of_measurement": "kWh",
@@ -145,7 +82,7 @@
         "state_class": "total_increasing"
       }
     },
-    "sensor.xyz9876543_lifetime_total_all_batteries_discharged": {
+    "sensor.xyz9876543_lifetime_battery_discharged": {
       "state": "4812.3",
       "attributes": {
         "unit_of_measurement": "kWh",
@@ -153,7 +90,7 @@
         "state_class": "total_increasing"
       }
     },
-    "sensor.xyz9876543_lifetime_total_solar_energy": {
+    "sensor.xyz9876543_lifetime_solar_energy": {
       "state": "12450.7",
       "attributes": {
         "unit_of_measurement": "kWh",
@@ -161,7 +98,7 @@
         "state_class": "total_increasing"
       }
     },
-    "sensor.xyz9876543_lifetime_total_export_to_grid": {
+    "sensor.xyz9876543_lifetime_export_to_grid": {
       "state": "3120.4",
       "attributes": {
         "unit_of_measurement": "kWh",
@@ -177,7 +114,7 @@
         "state_class": "total_increasing"
       }
     },
-    "sensor.xyz9876543_lifetime_total_load_consumption": {
+    "sensor.xyz9876543_lifetime_load_consumption": {
       "state": "15230.1",
       "attributes": {
         "unit_of_measurement": "kWh",
@@ -218,6 +155,78 @@
   },
   "entity_registry": [
     {
+      "entity_id": "sensor.xyz9876543_state_of_charge",
+      "platform": "growatt_server",
+      "config_entry_id": "mock_growatt_config_entry",
+      "unique_id": "xyz9876543-mix_statement_of_charge"
+    },
+    {
+      "entity_id": "sensor.xyz9876543_battery_charging",
+      "platform": "growatt_server",
+      "config_entry_id": "mock_growatt_config_entry",
+      "unique_id": "xyz9876543-mix_battery_charge"
+    },
+    {
+      "entity_id": "sensor.xyz9876543_battery_discharging_w",
+      "platform": "growatt_server",
+      "config_entry_id": "mock_growatt_config_entry",
+      "unique_id": "xyz9876543-mix_battery_discharge_w"
+    },
+    {
+      "entity_id": "sensor.xyz9876543_import_from_grid",
+      "platform": "growatt_server",
+      "config_entry_id": "mock_growatt_config_entry",
+      "unique_id": "xyz9876543-mix_import_from_grid"
+    },
+    {
+      "entity_id": "sensor.xyz9876543_export_to_grid",
+      "platform": "growatt_server",
+      "config_entry_id": "mock_growatt_config_entry",
+      "unique_id": "xyz9876543-mix_export_to_grid"
+    },
+    {
+      "entity_id": "sensor.xyz9876543_all_pv_wattage",
+      "platform": "growatt_server",
+      "config_entry_id": "mock_growatt_config_entry",
+      "unique_id": "xyz9876543-mix_wattage_pv_all"
+    },
+    {
+      "entity_id": "sensor.xyz9876543_lifetime_battery_charged",
+      "platform": "growatt_server",
+      "config_entry_id": "mock_growatt_config_entry",
+      "unique_id": "xyz9876543-mix_battery_charge_lifetime"
+    },
+    {
+      "entity_id": "sensor.xyz9876543_lifetime_battery_discharged",
+      "platform": "growatt_server",
+      "config_entry_id": "mock_growatt_config_entry",
+      "unique_id": "xyz9876543-mix_battery_discharge_lifetime"
+    },
+    {
+      "entity_id": "sensor.xyz9876543_lifetime_solar_energy",
+      "platform": "growatt_server",
+      "config_entry_id": "mock_growatt_config_entry",
+      "unique_id": "xyz9876543-mix_solar_generation_lifetime"
+    },
+    {
+      "entity_id": "sensor.xyz9876543_lifetime_export_to_grid",
+      "platform": "growatt_server",
+      "config_entry_id": "mock_growatt_config_entry",
+      "unique_id": "xyz9876543-mix_export_to_grid_lifetime"
+    },
+    {
+      "entity_id": "sensor.xyz9876543_lifetime_import_from_grid",
+      "platform": "growatt_server",
+      "config_entry_id": "mock_growatt_config_entry",
+      "unique_id": "xyz9876543-mix_import_from_grid_total"
+    },
+    {
+      "entity_id": "sensor.xyz9876543_lifetime_load_consumption",
+      "platform": "growatt_server",
+      "config_entry_id": "mock_growatt_config_entry",
+      "unique_id": "xyz9876543-mix_load_consumption_lifetime"
+    },
+    {
       "entity_id": "sensor.nordpool_kwh_se3_sek_3_10_025",
       "platform": "nordpool",
       "config_entry_id": "mock_nordpool_config_entry",
@@ -228,30 +237,9 @@
   "ac_discharge_times": [],
   "price_data": {
     "today": [
-      0.55,
-      0.45,
-      0.35,
-      0.3,
-      0.28,
-      0.45,
-      0.75,
-      0.95,
-      1.15,
-      1.25,
-      1.35,
-      1.45,
-      1.35,
-      1.25,
-      1.15,
-      1.35,
-      1.45,
-      1.55,
-      1.65,
-      1.55,
-      1.35,
-      0.95,
-      0.75,
-      0.65
+      0.55, 0.45, 0.35, 0.3, 0.28, 0.45, 0.75, 0.95,
+      1.15, 1.25, 1.35, 1.45, 1.35, 1.25, 1.15, 1.35,
+      1.45, 1.55, 1.65, 1.55, 1.35, 0.95, 0.75, 0.65
     ],
     "tomorrow": []
   },
@@ -265,7 +253,21 @@
     "octopus_found": false,
     "currency": "SEK",
     "vat_multiplier": 1.25,
-    "detected_platform": null
+    "detected_platform": "growatt_server_sph",
+    "required_sensors_growatt_server_sph": [
+      "battery_soc",
+      "battery_charge_power",
+      "battery_discharge_power",
+      "import_power",
+      "export_power",
+      "pv_power",
+      "lifetime_battery_charged",
+      "lifetime_battery_discharged",
+      "lifetime_solar_energy",
+      "lifetime_export_to_grid",
+      "lifetime_import_from_grid",
+      "lifetime_load_consumption"
+    ]
   },
   "inverter_platform": "growatt_server_sph"
 }

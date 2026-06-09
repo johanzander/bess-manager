@@ -59,86 +59,68 @@
         "unit_of_measurement": "%"
       }
     },
-    "sensor.egm2h4l0g0_battery_1_charging_w": {
+    "sensor.egm2h4l0g0_battery_charge": {
       "state": "0",
       "attributes": {
         "unit_of_measurement": "W"
       }
     },
-    "sensor.egm2h4l0g0_battery_1_discharging_w": {
+    "sensor.egm2h4l0g0_battery_discharge": {
       "state": "850",
       "attributes": {
         "unit_of_measurement": "W"
       }
     },
-    "sensor.egm2h4l0g0_import_power": {
+    "sensor.egm2h4l0g0_import_from_grid": {
       "state": "1200",
       "attributes": {
         "unit_of_measurement": "W"
       }
     },
-    "sensor.egm2h4l0g0_export_power": {
+    "sensor.egm2h4l0g0_export_to_grid": {
       "state": "0",
       "attributes": {
         "unit_of_measurement": "W"
       }
     },
-    "sensor.egm2h4l0g0_internal_wattage": {
+    "sensor.egm2h4l0g0_wattage_pv_all": {
       "state": "1500",
       "attributes": {
         "unit_of_measurement": "W"
       }
     },
-    "sensor.egm2h4l0g0_local_load_power": {
-      "state": "3550",
-      "attributes": {
-        "unit_of_measurement": "W"
-      }
-    },
-    "sensor.egm2h4l0g0_lifetime_total_all_batteries_charged": {
+    "sensor.egm2h4l0g0_battery_charge_lifetime": {
       "state": "8500",
       "attributes": {
         "unit_of_measurement": "kWh"
       }
     },
-    "sensor.egm2h4l0g0_lifetime_total_all_batteries_discharged": {
+    "sensor.egm2h4l0g0_battery_discharge_lifetime": {
       "state": "7800",
       "attributes": {
         "unit_of_measurement": "kWh"
       }
     },
-    "sensor.egm2h4l0g0_lifetime_total_solar_energy": {
+    "sensor.egm2h4l0g0_solar_generation_lifetime": {
       "state": "12000",
       "attributes": {
         "unit_of_measurement": "kWh"
       }
     },
-    "sensor.egm2h4l0g0_lifetime_total_export_to_grid": {
+    "sensor.egm2h4l0g0_export_to_grid_lifetime": {
       "state": "4200",
       "attributes": {
         "unit_of_measurement": "kWh"
       }
     },
-    "sensor.egm2h4l0g0_lifetime_import_from_grid": {
+    "sensor.egm2h4l0g0_import_from_grid_total": {
       "state": "18000",
       "attributes": {
         "unit_of_measurement": "kWh"
       }
     },
-    "sensor.egm2h4l0g0_lifetime_total_load_consumption": {
+    "sensor.egm2h4l0g0_load_consumption_lifetime": {
       "state": "25000",
-      "attributes": {
-        "unit_of_measurement": "kWh"
-      }
-    },
-    "sensor.egm2h4l0g0_lifetime_system_production": {
-      "state": "12000",
-      "attributes": {
-        "unit_of_measurement": "kWh"
-      }
-    },
-    "sensor.egm2h4l0g0_lifetime_self_consumption": {
-      "state": "7800",
       "attributes": {
         "unit_of_measurement": "kWh"
       }
@@ -1200,6 +1182,12 @@
       "device_id": "dev-growatt-001"
     },
     {
+      "entity_id": "sensor.egm2h4l0g0_import_from_grid_total",
+      "platform": "growatt_server",
+      "unique_id": "EGM2H4L0G0-mix_import_from_grid_total",
+      "device_id": "dev-growatt-001"
+    },
+    {
       "entity_id": "sensor.egm2h4l0g0_grid_frequency",
       "platform": "growatt_server",
       "unique_id": "EGM2H4L0G0-sph_grid_frequency",
@@ -1314,7 +1302,21 @@
     "octopus_found": true,
     "currency": "GBP",
     "vat_multiplier": 1.0,
-    "detected_platform": "growatt_server_min"
+    "detected_platform": "growatt_server_sph",
+    "required_sensors_growatt_server_sph": [
+      "battery_soc",
+      "battery_charge_power",
+      "battery_discharge_power",
+      "import_power",
+      "export_power",
+      "pv_power",
+      "lifetime_battery_charged",
+      "lifetime_battery_discharged",
+      "lifetime_solar_energy",
+      "lifetime_export_to_grid",
+      "lifetime_import_from_grid",
+      "lifetime_load_consumption"
+    ]
   },
   "expected_wizard": {
     "growatt_cloud": {
@@ -1322,18 +1324,17 @@
       "payload": {
         "sensors": {
           "battery_soc": "sensor.egm2h4l0g0_state_of_charge_soc",
-          "battery_charge_power": "sensor.egm2h4l0g0_battery_1_charging_w",
-          "battery_discharge_power": "sensor.egm2h4l0g0_battery_1_discharging_w",
-          "import_power": "sensor.egm2h4l0g0_import_power",
-          "export_power": "sensor.egm2h4l0g0_export_power",
-          "pv_power": "sensor.egm2h4l0g0_internal_wattage",
-          "local_load_power": "sensor.egm2h4l0g0_local_load_power",
-          "lifetime_battery_charged": "sensor.egm2h4l0g0_lifetime_total_all_batteries_charged",
-          "lifetime_battery_discharged": "sensor.egm2h4l0g0_lifetime_total_all_batteries_discharged",
-          "lifetime_solar_energy": "sensor.egm2h4l0g0_lifetime_total_solar_energy",
-          "lifetime_import_from_grid": "sensor.egm2h4l0g0_lifetime_import_from_grid",
-          "lifetime_export_to_grid": "sensor.egm2h4l0g0_lifetime_total_export_to_grid",
-          "lifetime_load_consumption": "sensor.egm2h4l0g0_lifetime_total_load_consumption"
+          "battery_charge_power": "sensor.egm2h4l0g0_battery_charge",
+          "battery_discharge_power": "sensor.egm2h4l0g0_battery_discharge",
+          "import_power": "sensor.egm2h4l0g0_import_from_grid",
+          "export_power": "sensor.egm2h4l0g0_export_to_grid",
+          "pv_power": "sensor.egm2h4l0g0_wattage_pv_all",
+          "lifetime_battery_charged": "sensor.egm2h4l0g0_battery_charge_lifetime",
+          "lifetime_battery_discharged": "sensor.egm2h4l0g0_battery_discharge_lifetime",
+          "lifetime_solar_energy": "sensor.egm2h4l0g0_solar_generation_lifetime",
+          "lifetime_import_from_grid": "sensor.egm2h4l0g0_import_from_grid_total",
+          "lifetime_export_to_grid": "sensor.egm2h4l0g0_export_to_grid_lifetime",
+          "lifetime_load_consumption": "sensor.egm2h4l0g0_load_consumption_lifetime"
         },
         "growattDeviceId": "dev-growatt-001",
         "totalCapacity": 30.0,
@@ -1393,7 +1394,7 @@
         },
         "sensors": {
           "battery_soc": "sensor.egm2h4l0g0_state_of_charge_soc",
-          "pv_power": "sensor.egm2h4l0g0_internal_wattage"
+          "pv_power": "sensor.egm2h4l0g0_wattage_pv_all"
         }
       },
       "expected_absent_sections": [],

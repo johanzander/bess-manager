@@ -404,21 +404,28 @@ class HomeAssistantAPIController:
     # tou_time_N_update              —                                  solax_time_N_update
     # ───────────────────────────────────────────────────────────────────────────
 
-    # Maps unique_id suffix → BESS sensor key for growatt_server entities.
-    # Used by _map_registry_entities() for registry-based discovery.
-    # Maps unique_id suffix → BESS sensor key for growatt_server entities.
-    # Used by _map_registry_entities() for registry-based discovery.
+    # ── Per-platform suffix maps for growatt_server discovery ─────────────
     #
-    # The growatt_server integration uses TWO different unique_id formats:
-    #   - Number/switch entities: "{SN}_{key}" e.g. "RKM0D7N04X_battery_charge_power_limit"
-    #   - Sensor entities: "{SN}-{sensor_key}" e.g. "RKM0D7N04X-tlx_battery_1_charge_w"
+    # The growatt_server HA integration uses different sensor key prefixes
+    # depending on the Growatt Cloud device_type:
+    #   - "min"/"tlx" (AC-coupled) → sensors from tlx.py → unique_id "{SN}-tlx_*"
+    #   - "mix"/"sph" (DC-coupled) → sensors from sph.py → unique_id "{SN}-mix_*"
     #
-    # The sensor key (e.g. "tlx_battery_1_charge_w") differs from the entity_id suffix
-    # (e.g. "battery_1_charging_w") because HA generates entity IDs from the slugified
-    # translation name, not the key.
+    # Number/switch entities (battery limits, grid charge) exist ONLY for
+    # MIN inverters (V1 API).  SPH has no number/switch entities.
     #
-    # Both formats are included below to support matching on unique_id.
-    ENTITY_SUFFIX_MAP: ClassVar[dict[str, str]] = {
+    # unique_id formats:
+    #   - Sensor entities: "{SN}-{sensor_key}" (hyphen separator)
+    #   - Number/switch entities: "{SN}_{key}" (underscore separator)
+    #
+    # The sensor key differs from the entity_id suffix because HA generates
+    # entity IDs from the slugified translation name, not the key.
+    #
+    # Each map includes both entity_id-based suffixes (for fallback matching)
+    # and unique_id sensor keys (for reliable matching).
+
+    # Growatt MIN/TLX (AC-coupled) via growatt_server cloud integration
+    GROWATT_MIN_SUFFIX_MAP: ClassVar[dict[str, str]] = {
         # ── SOC ──────────────────────────────────────────────────────────
         "state_of_charge_soc": "battery_soc",  # entity_id suffix (current translation)
         "statement_of_charge_soc": "battery_soc",  # entity_id suffix (old translation)
@@ -429,17 +436,17 @@ class HomeAssistantAPIController:
         "battery_1_discharging_w": "battery_discharge_power",  # entity_id suffix
         "tlx_battery_1_discharge_w": "battery_discharge_power",  # unique_id sensor key
         "import_power": "import_power",  # entity_id suffix
-        "tlx_pac_to_user_total": "import_power",  # unique_id sensor key (MIN)
+        "tlx_pac_to_user_total": "import_power",  # unique_id sensor key
         "export_power": "export_power",  # entity_id suffix
-        "tlx_pac_to_grid_total": "export_power",  # unique_id sensor key (MIN)
+        "tlx_pac_to_grid_total": "export_power",  # unique_id sensor key
         "local_load_power": "local_load_power",  # entity_id suffix
         "tlx_pac_to_local_load": "local_load_power",  # unique_id sensor key
         "internal_wattage": "pv_power",  # entity_id suffix
         "tlx_internal_wattage": "pv_power",  # unique_id sensor key
-        # ── Grid charge switch ───────────────────────────────────────────
+        # ── Grid charge switch (MIN only, V1 API) ────────────────────────
         "charge_from_grid": "grid_charge",  # entity_id suffix (translation name)
         "ac_charge": "grid_charge",  # unique_id key / old entity_id suffix
-        # ── Number entities (unique_id matches entity_id suffix) ─────────
+        # ── Number entities (MIN only, V1 API) ──────────────────────────
         "battery_charge_power_limit": "battery_charging_power_rate",
         "battery_discharge_power_limit": "battery_discharging_power_rate",
         "battery_charge_soc_limit": "battery_charge_stop_soc",
@@ -458,11 +465,46 @@ class HomeAssistantAPIController:
         "lifetime_import_from_grid": "lifetime_import_from_grid",
         "tlx_import_from_grid_total": "lifetime_import_from_grid",
         "lifetime_total_load_consumption": "lifetime_load_consumption",
-        "mix_load_consumption_total": "lifetime_load_consumption",  # unique_id uses mix_ prefix
+        "mix_load_consumption_total": "lifetime_load_consumption",  # TLX reuses mix_ key
         "lifetime_system_production": "lifetime_system_production",
         "tlx_system_production_total": "lifetime_system_production",
         "lifetime_self_consumption": "lifetime_self_consumption",
         "tlx_self_consumption_total": "lifetime_self_consumption",
+    }
+
+    # Growatt MIX/SPH (DC-coupled) via growatt_server cloud integration
+    # SPH reuses mix_ sensor key names from the HA integration.
+    # SPH power sensors are in W; MIX power sensors are in kW (but both
+    # use the same unique_id keys — the unit difference is in the API response).
+    # SPH has NO number/switch entities — battery control is via service calls.
+    GROWATT_SPH_SUFFIX_MAP: ClassVar[dict[str, str]] = {
+        # ── SOC ──────────────────────────────────────────────────────────
+        "state_of_charge": "battery_soc",  # entity_id suffix (SPH translation)
+        "mix_statement_of_charge": "battery_soc",  # unique_id sensor key
+        # ── Real-time power sensors ──────────────────────────────────────
+        "battery_charging": "battery_charge_power",  # entity_id suffix
+        "mix_battery_charge": "battery_charge_power",  # unique_id sensor key
+        "battery_discharging_w": "battery_discharge_power",  # entity_id suffix
+        "mix_battery_discharge_w": "battery_discharge_power",  # unique_id sensor key
+        "import_from_grid": "import_power",  # entity_id suffix
+        "mix_import_from_grid": "import_power",  # unique_id sensor key
+        "export_to_grid": "export_power",  # entity_id suffix
+        "mix_export_to_grid": "export_power",  # unique_id sensor key
+        "all_pv_wattage": "pv_power",  # entity_id suffix
+        "mix_wattage_pv_all": "pv_power",  # unique_id sensor key
+        # ── Lifetime energy sensors ──────────────────────────────────────
+        "lifetime_battery_charged": "lifetime_battery_charged",  # entity_id suffix
+        "mix_battery_charge_lifetime": "lifetime_battery_charged",  # unique_id sensor key
+        "lifetime_battery_discharged": "lifetime_battery_discharged",  # entity_id suffix
+        "mix_battery_discharge_lifetime": "lifetime_battery_discharged",  # unique_id
+        "lifetime_solar_energy": "lifetime_solar_energy",  # entity_id suffix
+        "mix_solar_generation_lifetime": "lifetime_solar_energy",  # unique_id sensor key
+        "lifetime_export_to_grid": "lifetime_export_to_grid",  # entity_id suffix
+        "mix_export_to_grid_lifetime": "lifetime_export_to_grid",  # unique_id sensor key
+        "lifetime_import_from_grid": "lifetime_import_from_grid",  # entity_id suffix
+        "mix_import_from_grid_total": "lifetime_import_from_grid",  # unique_id sensor key
+        "lifetime_load_consumption": "lifetime_load_consumption",  # entity_id suffix
+        "mix_load_consumption_lifetime": "lifetime_load_consumption",  # unique_id sensor key
     }
 
     # ── Per-platform suffix maps for solax_modbus discovery ─────────────
@@ -2681,17 +2723,25 @@ class HomeAssistantAPIController:
         detected_platform: str | None = None
 
         if inverter_detected.get("growatt"):
-            growatt_sensors = self._map_registry_entities(
+            min_sensors = self._map_registry_entities(
                 entities,
                 ["growatt_server"],
-                self.ENTITY_SUFFIX_MAP,
+                self.GROWATT_MIN_SUFFIX_MAP,
             )
-            # Both MIN and SPH use the same Growatt Server cloud entities —
-            # the difference is in the service calls, not the sensors.
-            # Return both so the frontend can show either without re-discovery.
-            platform_sensors["growatt_server_min"] = dict(growatt_sensors)
-            platform_sensors["growatt_server_sph"] = dict(growatt_sensors)
-            detected_platform = "growatt_server_min"
+            sph_sensors = self._map_registry_entities(
+                entities,
+                ["growatt_server"],
+                self.GROWATT_SPH_SUFFIX_MAP,
+            )
+            if min_sensors:
+                platform_sensors["growatt_server_min"] = min_sensors
+            if sph_sensors:
+                platform_sensors["growatt_server_sph"] = sph_sensors
+            # Pick the platform that matched more sensors
+            if len(min_sensors) >= len(sph_sensors):
+                detected_platform = "growatt_server_min"
+            else:
+                detected_platform = "growatt_server_sph"
 
         if inverter_detected.get("solax"):
             solax_platforms = ["solax_modbus", "solax"]

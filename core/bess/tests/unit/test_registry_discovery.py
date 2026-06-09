@@ -127,6 +127,86 @@ def _growatt_registry() -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# Growatt SPH entity registry: growatt_server platform (DC-coupled, mix_ keys)
+# Based on real entity registry from issue #60 (GraemeDBlue, EGM2H4L0G0).
+# SPH has NO number/switch entities — battery control is via service calls.
+# unique_id format: "{SN}-{sensor_key}" (hyphen separator, mix_ prefix).
+# ---------------------------------------------------------------------------
+
+
+def _growatt_sph_registry() -> list[dict]:
+    """Entity registry for a Growatt SPH inverter via growatt_server."""
+    sn = "egm2h4l0g0"
+    return [
+        # ── SOC ──────────────────────────────────────────────────────
+        _entity(
+            f"sensor.{sn}_state_of_charge",
+            "growatt_server",
+            f"{sn}-mix_statement_of_charge",
+        ),
+        # ── Real-time power sensors ──────────────────────────────────
+        _entity(
+            f"sensor.{sn}_battery_charging",
+            "growatt_server",
+            f"{sn}-mix_battery_charge",
+        ),
+        _entity(
+            f"sensor.{sn}_battery_discharging_w",
+            "growatt_server",
+            f"{sn}-mix_battery_discharge_w",
+        ),
+        _entity(
+            f"sensor.{sn}_import_from_grid",
+            "growatt_server",
+            f"{sn}-mix_import_from_grid",
+        ),
+        _entity(
+            f"sensor.{sn}_export_to_grid",
+            "growatt_server",
+            f"{sn}-mix_export_to_grid",
+        ),
+        _entity(
+            f"sensor.{sn}_all_pv_wattage",
+            "growatt_server",
+            f"{sn}-mix_wattage_pv_all",
+        ),
+        # ── Lifetime energy sensors ──────────────────────────────────
+        _entity(
+            f"sensor.{sn}_lifetime_battery_charged",
+            "growatt_server",
+            f"{sn}-mix_battery_charge_lifetime",
+        ),
+        _entity(
+            f"sensor.{sn}_lifetime_battery_discharged",
+            "growatt_server",
+            f"{sn}-mix_battery_discharge_lifetime",
+        ),
+        _entity(
+            f"sensor.{sn}_lifetime_solar_energy",
+            "growatt_server",
+            f"{sn}-mix_solar_generation_lifetime",
+        ),
+        _entity(
+            f"sensor.{sn}_lifetime_export_to_grid",
+            "growatt_server",
+            f"{sn}-mix_export_to_grid_lifetime",
+        ),
+        _entity(
+            f"sensor.{sn}_lifetime_import_from_grid",
+            "growatt_server",
+            f"{sn}-mix_import_from_grid_total",
+        ),
+        _entity(
+            f"sensor.{sn}_lifetime_load_consumption",
+            "growatt_server",
+            f"{sn}-mix_load_consumption_lifetime",
+        ),
+        # Unrelated integration — should be ignored
+        _entity("sensor.nordpool_kwh_se4_sek", "nordpool", "nordpool_kwh_se4_sek"),
+    ]
+
+
+# ---------------------------------------------------------------------------
 # SolaX entity registry: native SolaX inverter via solax_modbus
 # ---------------------------------------------------------------------------
 
@@ -465,7 +545,7 @@ class TestMapRegistryEntities:
         result = self.ctrl._map_registry_entities(
             _growatt_registry(),
             ["growatt_server"],
-            self.ctrl.ENTITY_SUFFIX_MAP,
+            self.ctrl.GROWATT_MIN_SUFFIX_MAP,
         )
         assert result["battery_soc"] == "sensor.rkm0d7n04x_state_of_charge_soc"
         assert (
@@ -479,14 +559,62 @@ class TestMapRegistryEntities:
         assert result["export_power"] == "sensor.rkm0d7n04x_export_power"
         assert result["pv_power"] == "sensor.rkm0d7n04x_internal_wattage"
         assert result["grid_charge"] == "switch.rkm0d7n04x_charge_from_grid"
-        assert len(result) == 20  # all Growatt entities mapped
+        assert len(result) == 20  # all Growatt MIN entities mapped
+
+    def test_growatt_sph_entities(self):
+        """SPH entities match via mix_* unique_id sensor keys."""
+        result = self.ctrl._map_registry_entities(
+            _growatt_sph_registry(),
+            ["growatt_server"],
+            self.ctrl.GROWATT_SPH_SUFFIX_MAP,
+        )
+        sn = "egm2h4l0g0"
+        assert result["battery_soc"] == f"sensor.{sn}_state_of_charge"
+        assert result["battery_charge_power"] == f"sensor.{sn}_battery_charging"
+        assert result["battery_discharge_power"] == f"sensor.{sn}_battery_discharging_w"
+        assert result["import_power"] == f"sensor.{sn}_import_from_grid"
+        assert result["export_power"] == f"sensor.{sn}_export_to_grid"
+        assert result["pv_power"] == f"sensor.{sn}_all_pv_wattage"
+        assert result["lifetime_battery_charged"] == f"sensor.{sn}_lifetime_battery_charged"
+        assert result["lifetime_battery_discharged"] == f"sensor.{sn}_lifetime_battery_discharged"
+        assert result["lifetime_solar_energy"] == f"sensor.{sn}_lifetime_solar_energy"
+        assert result["lifetime_export_to_grid"] == f"sensor.{sn}_lifetime_export_to_grid"
+        assert result["lifetime_import_from_grid"] == f"sensor.{sn}_lifetime_import_from_grid"
+        assert result["lifetime_load_consumption"] == f"sensor.{sn}_lifetime_load_consumption"
+        # SPH has no number/switch entities
+        assert "grid_charge" not in result
+        assert "battery_charging_power_rate" not in result
+        assert len(result) == 12  # all SPH sensors, no number/switch
+
+    def test_min_map_does_not_match_sph_entities(self):
+        """MIN suffix map should not match SPH mix_* unique_ids."""
+        result = self.ctrl._map_registry_entities(
+            _growatt_sph_registry(),
+            ["growatt_server"],
+            self.ctrl.GROWATT_MIN_SUFFIX_MAP,
+        )
+        # entity_id-based suffixes might get partial matches, but the key
+        # sensors mapped via mix_* unique_ids should not appear
+        assert "battery_soc" not in result or result.get("battery_soc") != "sensor.egm2h4l0g0_state_of_charge"
+
+    def test_sph_map_does_not_match_min_entities(self):
+        """SPH suffix map should not match MIN tlx_* unique_ids."""
+        result = self.ctrl._map_registry_entities(
+            _growatt_registry(),
+            ["growatt_server"],
+            self.ctrl.GROWATT_SPH_SUFFIX_MAP,
+        )
+        # MIN entities use tlx_* keys and entity_id patterns that don't
+        # exist in the SPH map — most sensors should not match
+        assert "grid_charge" not in result
+        assert "battery_charging_power_rate" not in result
 
     def test_growatt_renamed_entities_still_match(self):
         """User-renamed entity IDs still match via unique_id."""
         result = self.ctrl._map_registry_entities(
             _growatt_renamed_registry(),
             ["growatt_server"],
-            self.ctrl.ENTITY_SUFFIX_MAP,
+            self.ctrl.GROWATT_MIN_SUFFIX_MAP,
         )
         # entity_id is the renamed version, but discovery found it via unique_id
         assert result["battery_soc"] == "sensor.my_battery_soc"
@@ -555,7 +683,7 @@ class TestMapRegistryEntities:
         result = self.ctrl._map_registry_entities(
             _growatt_registry(),
             ["solax_modbus"],
-            self.ctrl.ENTITY_SUFFIX_MAP,
+            self.ctrl.GROWATT_MIN_SUFFIX_MAP,
         )
         assert len(result) == 0
 
@@ -564,7 +692,7 @@ class TestMapRegistryEntities:
         result = self.ctrl._map_registry_entities(
             _growatt_registry(),
             ["growatt_server"],
-            self.ctrl.ENTITY_SUFFIX_MAP,
+            self.ctrl.GROWATT_MIN_SUFFIX_MAP,
         )
         assert "nordpool_kwh_se4_sek" not in result.values()
 
@@ -572,7 +700,7 @@ class TestMapRegistryEntities:
         result = self.ctrl._map_registry_entities(
             [],
             ["growatt_server"],
-            self.ctrl.ENTITY_SUFFIX_MAP,
+            self.ctrl.GROWATT_MIN_SUFFIX_MAP,
         )
         assert result == {}
 
@@ -625,16 +753,35 @@ class TestDiscoverSensorsFromRegistry:
     def setup_method(self):
         self.ctrl = _make_controller()
 
-    def test_growatt_only(self):
-        """When only growatt_server entities exist, detected_platform is growatt_server_min."""
+    def test_growatt_min_only(self):
+        """MIN registry → detected_platform is growatt_server_min, MIN has more sensors."""
         sensors, platform = self.ctrl.discover_sensors_from_registry(
             _growatt_registry()
         )
         assert platform == "growatt_server_min"
         assert "growatt_server_min" in sensors
-        assert "growatt_server_sph" in sensors
         assert len(sensors["growatt_server_min"]) == 20
-        assert len(sensors["growatt_server_sph"]) == 20
+        # SPH map may partially match some entity_id-based lifetime suffixes,
+        # but MIN must have strictly more matches
+        assert len(sensors["growatt_server_min"]) > len(
+            sensors.get("growatt_server_sph", {})
+        )
+
+    def test_growatt_sph_only(self):
+        """SPH registry → detected_platform is growatt_server_sph, all 12 sensors mapped."""
+        sensors, platform = self.ctrl.discover_sensors_from_registry(
+            _growatt_sph_registry()
+        )
+        assert platform == "growatt_server_sph"
+        assert "growatt_server_sph" in sensors
+        assert len(sensors["growatt_server_sph"]) == 12
+        # No number/switch entities for SPH
+        assert "grid_charge" not in sensors["growatt_server_sph"]
+        assert "battery_charging_power_rate" not in sensors["growatt_server_sph"]
+        # SPH should have more matches than MIN map
+        assert len(sensors["growatt_server_sph"]) > len(
+            sensors.get("growatt_server_min", {})
+        )
 
     def test_solax_native_only(self):
         """When only native SolaX entities exist, detected_platform is solax."""
@@ -684,7 +831,6 @@ class TestDiscoverSensorsFromRegistry:
         sensors, platform = self.ctrl.discover_sensors_from_registry(combined)
         assert platform == "growatt_server_min"
         assert "growatt_server_min" in sensors
-        assert "growatt_server_sph" in sensors
         assert "solax_modbus_native" in sensors
         assert len(sensors["growatt_server_min"]) == 20
 

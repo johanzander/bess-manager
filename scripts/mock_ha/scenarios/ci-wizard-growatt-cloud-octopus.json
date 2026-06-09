@@ -1314,7 +1314,7 @@
     "octopus_found": true,
     "currency": "GBP",
     "vat_multiplier": 1.0,
-    "detected_platform": "growatt_server_min"
+    "detected_platform": "growatt_server_sph"
   },
   "expected_wizard": {
     "growatt_cloud": {

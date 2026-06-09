@@ -2787,13 +2787,13 @@ async def run_setup_discovery():
                 effective_platform = "solax_modbus_growatt_sph"
             sensors = dict(platform_sensors.get(effective_platform, {}))
             _suffix_maps = {
-                "growatt_server_min": ha.ENTITY_SUFFIX_MAP,
-                "growatt_server_sph": ha.ENTITY_SUFFIX_MAP,
+                "growatt_server_min": ha.GROWATT_MIN_SUFFIX_MAP,
+                "growatt_server_sph": ha.GROWATT_SPH_SUFFIX_MAP,
                 "solax_modbus_growatt_min": ha.SOLAX_GROWATT_MIN_SUFFIX_MAP,
                 "solax_modbus_growatt_sph": ha.SOLAX_GROWATT_SPH_SUFFIX_MAP,
                 "solax_modbus_native": ha.SOLAX_NATIVE_SUFFIX_MAP,
             }
-            suffix_map = _suffix_maps.get(effective_platform, ha.ENTITY_SUFFIX_MAP)
+            suffix_map = _suffix_maps.get(effective_platform, ha.GROWATT_MIN_SUFFIX_MAP)
             all_bess_keys = list(set(suffix_map.values()))
             # Single-segment TOU: Modbus GEN4 only needs slot 1 entities
             if effective_platform == "solax_modbus_growatt_min":

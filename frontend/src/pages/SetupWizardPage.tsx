@@ -30,8 +30,6 @@ const SetupWizardPage: React.FC = () => {
   const [scanError, setScanError] = useState<string | null>(null);
   const [discovery, setDiscovery] = useState<DiscoveryResult | null>(null);
   const [sensors, setSensors] = useState<PerPlatformSensors>(emptyPerPlatformSensors());
-  const [confirming, setConfirming] = useState(false);
-  const [confirmError, setConfirmError] = useState<string | null>(null);
   const [completing, setCompleting] = useState(false);
   const [completeError, setCompleteError] = useState<string | null>(null);
   const existingSensorsRef = useRef<PerPlatformSensors>(emptyPerPlatformSensors());
@@ -251,24 +249,9 @@ const SetupWizardPage: React.FC = () => {
     });
   }, [handleScan]);
 
-  const handleConfirm = async () => {
+  const handleConfirm = () => {
     if (!discovery) return;
-    setConfirming(true);
-    setConfirmError(null);
-    try {
-      await api.post('/api/setup/confirm', {
-        sensors: getActiveSensorsFlat(sensors),
-        nordpool_area: discovery.nordpoolArea,
-        // Prefer the user-entered form value; fall back to auto-detected value
-        nordpool_config_entry_id: pricingForm.nordpoolConfigEntryId || discovery.nordpoolConfigEntryId,
-        growatt_device_id: inverterForm.deviceId || discovery.growattDeviceId,
-      });
-      setStep(2);
-    } catch (err: unknown) {
-      setConfirmError(err instanceof Error ? err.message : 'Configuration failed');
-    } finally {
-      setConfirming(false);
-    }
+    setStep(2);
   };
 
   const handleComplete = async () => {
@@ -443,18 +426,13 @@ const SetupWizardPage: React.FC = () => {
               </button>
               <button
                 onClick={handleConfirm}
-                disabled={confirming || !allRequiredFilled}
+                disabled={!allRequiredFilled}
                 className="flex items-center space-x-2 px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 font-medium disabled:opacity-60"
               >
-                {confirming && <div className="h-4 w-4 border-2 border-white rounded-full border-t-transparent animate-spin" />}
                 <span>Next: Electricity Pricing</span>
                 <ChevronRight className="h-4 w-4" />
               </button>
             </div>
-
-            {confirmError && (
-              <p className="text-sm text-red-600 dark:text-red-400 text-center">{confirmError}</p>
-            )}
           </div>
         )}
 

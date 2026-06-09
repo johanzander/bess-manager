@@ -187,34 +187,6 @@ class TestGetSetupStatus:
         assert body["configuredSensors"] == 1
 
 
-class TestConfirmSetup:
-    """POST /api/setup/confirm."""
-
-    def test_rejects_invalid_entity_ids(self, mock_controller):
-        resp = _client.post(
-            "/api/setup/confirm",
-            json={"sensors": {"battery_soc": "not-valid-format"}},
-        )
-        assert resp.status_code == 422
-
-    def test_accepts_valid_entity_ids(self, mock_controller):
-        mock_controller.ha_controller.apply_discovered_config = MagicMock()
-        resp = _client.post(
-            "/api/setup/confirm",
-            json={
-                "sensors": {"battery_soc": "sensor.growatt_battery_soc"},
-                "nordpool_area": "SE4",
-                "nordpool_config_entry_id": "abc-123",
-            },
-        )
-        assert resp.status_code == 200
-
-    def test_accepts_empty_sensors(self, mock_controller):
-        mock_controller.ha_controller.apply_discovered_config = MagicMock()
-        resp = _client.post("/api/setup/confirm", json={"sensors": {}})
-        assert resp.status_code == 200
-
-
 class TestSetupCompleteLegacy:
     """POST /api/setup/complete — legacy persistence tests."""
 

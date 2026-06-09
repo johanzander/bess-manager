@@ -977,3 +977,100 @@ class TestDerivedLifetimeSensors:
         """Returns None when neither direct nor fallback is available."""
         with self._mock_sensor({}):
             assert self.ctrl.get_system_production_lifetime() is None
+
+
+# ---------------------------------------------------------------------------
+# Octopus Energy entity discovery from registry
+# ---------------------------------------------------------------------------
+
+
+class TestDiscoverOctopusEntities:
+    """discover_octopus_entities uses platform field, not entity_id substring."""
+
+    def setup_method(self):
+        self.ctrl = _make_controller()
+
+    def _octopus_registry(self) -> list[dict]:
+        """Typical Octopus Energy registry with all 4 rate entities."""
+        return [
+            _entity(
+                "event.octopus_energy_electricity_current_day_rates",
+                "octopus_energy",
+                "oe_current_day_rates",
+            ),
+            _entity(
+                "event.octopus_energy_electricity_next_day_rates",
+                "octopus_energy",
+                "oe_next_day_rates",
+            ),
+            _entity(
+                "event.octopus_energy_electricity_export_current_day_rates",
+                "octopus_energy",
+                "oe_export_current_day_rates",
+            ),
+            _entity(
+                "event.octopus_energy_electricity_export_next_day_rates",
+                "octopus_energy",
+                "oe_export_next_day_rates",
+            ),
+            # Non-Octopus entity should be ignored
+            _entity(
+                "sensor.growatt_battery_soc",
+                "growatt_server",
+                "growatt_battery_soc",
+            ),
+        ]
+
+    def test_all_four_fields_discovered(self):
+        result = self.ctrl.discover_octopus_entities(self._octopus_registry())
+        assert result == {
+            "importToday": "event.octopus_energy_electricity_current_day_rates",
+            "importTomorrow": "event.octopus_energy_electricity_next_day_rates",
+            "exportToday": "event.octopus_energy_electricity_export_current_day_rates",
+            "exportTomorrow": "event.octopus_energy_electricity_export_next_day_rates",
+        }
+
+    def test_empty_registry(self):
+        assert self.ctrl.discover_octopus_entities([]) == {}
+
+    def test_no_octopus_entities(self):
+        registry = [
+            _entity("sensor.growatt_battery_soc", "growatt_server", "soc"),
+        ]
+        assert self.ctrl.discover_octopus_entities(registry) == {}
+
+    def test_renamed_entities_still_matched(self):
+        """Platform field is immutable — renamed entity_ids are still found."""
+        registry = [
+            _entity(
+                "event.my_custom_name_current_day_rates",
+                "octopus_energy",
+                "oe_current_day_rates",
+            ),
+        ]
+        result = self.ctrl.discover_octopus_entities(registry)
+        assert result == {
+            "importToday": "event.my_custom_name_current_day_rates",
+        }
+
+    def test_partial_discovery(self):
+        """Only import entities present — export keys absent."""
+        registry = [
+            _entity(
+                "event.octopus_energy_electricity_current_day_rates",
+                "octopus_energy",
+                "oe_current_day_rates",
+            ),
+            _entity(
+                "event.octopus_energy_electricity_next_day_rates",
+                "octopus_energy",
+                "oe_next_day_rates",
+            ),
+        ]
+        result = self.ctrl.discover_octopus_entities(registry)
+        assert result == {
+            "importToday": "event.octopus_energy_electricity_current_day_rates",
+            "importTomorrow": "event.octopus_energy_electricity_next_day_rates",
+        }
+        assert "exportToday" not in result
+        assert "exportTomorrow" not in result

@@ -4,6 +4,14 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.2.0] - 2026-06-09
+
+### Fixed
+
+- **SPH inverter discovery failed** — ENTITY_SUFFIX_MAP only had MIN (tlx_*) keys, missing SPH (mix_*) keys. Split into per-platform suffix maps; discovery now picks the platform with more matches. (#111)
+- **Wizard /api/setup/confirm endpoint was fragile** — Removed partial-state persistence endpoint; wizard now saves all settings atomically via /api/setup/complete. Octopus discovery rewritten to use entity registry platform field instead of string-matching entity_ids. (#112)
+- **Non-Swedish locale defaults not persisted** — Bootstrap hardcoded SEK/1.25 VAT/Swedish grid costs for all users. Discovery now persists currency, VAT, and pricing defaults immediately for detected locale. (#113)
+
 ## [9.1.0] - 2026-06-08
 
 ### Added

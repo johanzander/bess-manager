@@ -25,7 +25,6 @@ from api_dataclasses import (
 )
 from fastapi import APIRouter, HTTPException, Query
 from loguru import logger
-from pydantic import BaseModel, field_validator
 from settings_store import VALID_PLATFORMS
 
 from core.bess import time_utils
@@ -2816,7 +2815,7 @@ async def run_setup_discovery():
                 sensors[key] = entity_id
 
         # Discover Octopus Energy entity IDs for pricing form auto-fill
-        octopus_entities = ha.discover_octopus_entities(states)
+        octopus_entities = ha.discover_octopus_entities(registry)
 
         # Convert top-level keys to camelCase but preserve sensor keys as
         # snake_case since they are BESS config keys, not API field names.
@@ -2861,55 +2860,6 @@ async def run_setup_discovery():
         return result
     except Exception as e:
         logger.error(f"Error during setup discovery: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
-
-
-class ConfirmSetupPayload(BaseModel):
-    """Request body for POST /api/setup/confirm."""
-
-    sensors: dict[str, str] = {}
-    nordpool_area: str | None = None
-    nordpool_config_entry_id: str | None = None
-    growatt_device_id: str | None = None
-
-    @field_validator("sensors")
-    @classmethod
-    def validate_entity_ids(cls, sensors: dict[str, str]) -> dict[str, str]:
-        for value in sensors.values():
-            if value and not _ENTITY_ID_RE.match(value):
-                raise ValueError(f"Invalid entity ID format: {value}")
-        return sensors
-
-
-@router.post("/api/setup/confirm")
-async def confirm_setup(payload: ConfirmSetupPayload):
-    """Persist and apply discovered sensor configuration.
-
-    Saves the confirmed sensor mapping to /data/bess_discovered_config.json and
-    applies the configuration to the running ha_controller so BESS operations
-    can start immediately without a restart.
-
-    Args:
-        payload: ConfirmSetupPayload with sensors (bess_key → entity_id) and
-                 optional nordpool_area, nordpool_config_entry_id, growatt_device_id
-
-    Returns:
-        dict: success confirmation
-    """
-    from app import bess_controller
-
-    try:
-        bess_controller.apply_discovered_config(
-            sensor_map=payload.sensors,
-            nordpool_area=payload.nordpool_area,
-            nordpool_config_entry_id=payload.nordpool_config_entry_id,
-            growatt_device_id=payload.growatt_device_id,
-        )
-
-        logger.info(f"Setup confirmed: applied {len(payload.sensors)} sensor mappings")
-        return {"success": True, "applied_sensors": len(payload.sensors)}
-    except Exception as e:
-        logger.error(f"Error confirming setup: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 

@@ -2444,25 +2444,25 @@ class HomeAssistantAPIController:
 
         return None
 
-    def discover_octopus_entities(self, states: list[dict]) -> dict[str, str]:
-        """Discover Octopus Energy pricing entity IDs.
+    def discover_octopus_entities(self, entity_registry: list[dict]) -> dict[str, str]:
+        """Discover Octopus Energy pricing entity IDs from the entity registry.
 
-        Scans entity states for Octopus Energy event entities that provide
-        half-hourly rate data. These map to the 4 pricing form fields:
-        importToday, importTomorrow, exportToday, exportTomorrow.
+        Uses the immutable ``platform`` field (same approach as Growatt/SolaX
+        discovery) so renamed entities are still found.  Classifies each entity
+        by keywords in the ``entity_id``.
 
         Args:
-            states: List of state dicts from /api/states
+            entity_registry: Entity registry list from HA WebSocket API.
 
         Returns:
             dict mapping form field keys to entity_ids, empty if not found
         """
         result: dict[str, str] = {}
-        for state in states:
-            entity_id = str(state.get("entity_id", ""))
-            lower_id = entity_id.lower()
-            if "octopus_energy" not in lower_id:
+        for entry in entity_registry:
+            if entry.get("platform") != "octopus_energy":
                 continue
+            entity_id = str(entry.get("entity_id", ""))
+            lower_id = entity_id.lower()
             if "export" in lower_id:
                 if "next_day" in lower_id:
                     result["exportTomorrow"] = entity_id

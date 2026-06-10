@@ -57,6 +57,18 @@ class GrowattSphController(InverterController):
         self._charge_periods: list[dict] = []
         self._discharge_periods: list[dict] = []
 
+    def _write_period_to_hardware(
+        self, controller, grid_charge: bool, discharge_rate: int
+    ) -> tuple[bool, str]:
+        """No-op: SPH deploys the full schedule atomically via service calls.
+
+        SPH inverters have no per-period entity controls (grid_charge switch,
+        discharge rate number).  The entire schedule is written in
+        ``write_schedule_to_hardware`` using ``write_ac_charge_times`` /
+        ``write_ac_discharge_times``.
+        """
+        return True, ""
+
     @property
     def active_tou_intervals(self) -> list[dict]:
         """All TOU intervals are active for SPH (no 9-slot hardware constraint)."""

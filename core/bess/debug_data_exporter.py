@@ -95,13 +95,13 @@ _WS_TARGET_DOMAINS = frozenset(
 
 # Domains whose entities are captured from the entity registry.
 _ENTITY_REGISTRY_DOMAINS = frozenset(
-    {"growatt_server", "solax_modbus", "solax", "nordpool"}
+    {"growatt_server", "solax_modbus", "solax", "nordpool", "octopus_energy"}
 )
 
 # Keywords matched against entity_id and unique_id to capture entities
 # that belong to BESS-relevant integrations even if they register under
 # an unexpected platform name.
-_ENTITY_REGISTRY_KEYWORDS = ("growatt", "solax", "nordpool")
+_ENTITY_REGISTRY_KEYWORDS = ("growatt", "solax", "nordpool", "octopus")
 
 # Entity registry fields that are useful for debugging discovery and
 # sensor mapping. unique_id is redacted (last-4) since it often contains

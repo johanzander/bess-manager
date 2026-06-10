@@ -507,6 +507,37 @@ class HomeAssistantAPIController:
         "mix_load_consumption_lifetime": "lifetime_load_consumption",  # unique_id sensor key
     }
 
+    # ── Octopus Energy rate event patterns ────────────────────────────────
+    #
+    # The Octopus Energy integration (BottlecapDave/HomeAssistant-OctopusEnergy)
+    # creates event entities for electricity and gas rate data.  unique_id format:
+    #
+    #   Electricity import:  octopus_energy_electricity_{serial}_{mpan}_current_day_rates
+    #   Electricity export:  octopus_energy_electricity_{serial}_{mpan}_export_current_day_rates
+    #   Gas:                 octopus_energy_gas_{serial}_{mprn}_current_day_rates
+    #
+    # Discovery uses regex on unique_id to match electricity entities only
+    # (gas entities are excluded by the ``_electricity_`` requirement).
+    # Named groups map directly to the BESS form field keys.
+    _OCTOPUS_RATE_PATTERNS: ClassVar[list[tuple[re.Pattern, str]]] = [
+        (
+            re.compile(r"octopus_energy_electricity_.+_export_current_day_rates$"),
+            "exportToday",
+        ),
+        (
+            re.compile(r"octopus_energy_electricity_.+_export_next_day_rates$"),
+            "exportTomorrow",
+        ),
+        (
+            re.compile(r"octopus_energy_electricity_.+(?<!export)_current_day_rates$"),
+            "importToday",
+        ),
+        (
+            re.compile(r"octopus_energy_electricity_.+(?<!export)_next_day_rates$"),
+            "importTomorrow",
+        ),
+    ]
+
     # ── Per-platform suffix maps for solax_modbus discovery ─────────────
     #
     # The solax_modbus integration (github.com/wills106/homeassistant-solax-modbus)
@@ -2489,9 +2520,11 @@ class HomeAssistantAPIController:
     def discover_octopus_entities(self, entity_registry: list[dict]) -> dict[str, str]:
         """Discover Octopus Energy pricing entity IDs from the entity registry.
 
-        Uses the immutable ``platform`` field (same approach as Growatt/SolaX
-        discovery) so renamed entities are still found.  Classifies each entity
-        by keywords in the ``entity_id``.
+        Uses the immutable ``unique_id`` field (same approach as Growatt/SolaX
+        discovery) so renamed entities are still found.  Matches
+        ``_OCTOPUS_RATE_PATTERNS`` regex patterns against the unique_id to
+        identify electricity rate entities — gas entities are excluded by
+        requiring ``_electricity_`` in the unique_id pattern.
 
         Args:
             entity_registry: Entity registry list from HA WebSocket API.
@@ -2500,20 +2533,23 @@ class HomeAssistantAPIController:
             dict mapping form field keys to entity_ids, empty if not found
         """
         result: dict[str, str] = {}
+
         for entry in entity_registry:
             if entry.get("platform") != "octopus_energy":
                 continue
             entity_id = str(entry.get("entity_id", ""))
-            lower_id = entity_id.lower()
-            if "export" in lower_id:
-                if "next_day" in lower_id:
-                    result["exportTomorrow"] = entity_id
-                elif "current_day" in lower_id:
-                    result["exportToday"] = entity_id
-            elif "next_day" in lower_id and "rate" in lower_id:
-                result["importTomorrow"] = entity_id
-            elif "current_day" in lower_id and "rate" in lower_id:
-                result["importToday"] = entity_id
+            unique_id = str(entry.get("unique_id", ""))
+
+            for pattern, bess_key in self._OCTOPUS_RATE_PATTERNS:
+                if pattern.search(unique_id) and bess_key not in result:
+                    result[bess_key] = entity_id
+                    break
+
+        if result:
+            logger.info(
+                "Octopus discovery: matched %d entities from unique_id patterns",
+                len(result),
+            )
         return result
 
     def discover_optional_sensors(self, states: list[dict]) -> dict[str, str]:

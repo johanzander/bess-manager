@@ -73,7 +73,11 @@ class TestCrossPlatformHardwareWrites:
 
         platform_system._apply_period_schedule(PERIOD)
 
-        if _is_solax(platform_system):
+        if _is_sph(platform_system):
+            # SPH uses atomic schedule writes — no per-period hardware calls
+            assert mock_controller.calls["grid_charge"] == []
+            assert mock_controller.calls["discharge_rate"] == []
+        elif _is_solax(platform_system):
             assert len(mock_controller.calls["vpp_calls"]) == 1
             assert mock_controller.calls["vpp_calls"][0] > 0
         else:
@@ -85,7 +89,11 @@ class TestCrossPlatformHardwareWrites:
 
         platform_system._apply_period_schedule(PERIOD)
 
-        if _is_solax(platform_system):
+        if _is_sph(platform_system):
+            # SPH uses atomic schedule writes — no per-period hardware calls
+            assert mock_controller.calls["grid_charge"] == []
+            assert mock_controller.calls["discharge_rate"] == []
+        elif _is_solax(platform_system):
             assert len(mock_controller.calls["vpp_calls"]) == 1
             assert mock_controller.calls["vpp_calls"][0] < 0
         else:
@@ -98,7 +106,11 @@ class TestCrossPlatformHardwareWrites:
 
         platform_system._apply_period_schedule(PERIOD)
 
-        if _is_solax(platform_system):
+        if _is_sph(platform_system):
+            # SPH uses atomic schedule writes — no per-period hardware calls
+            assert mock_controller.calls["grid_charge"] == []
+            assert mock_controller.calls["discharge_rate"] == []
+        elif _is_solax(platform_system):
             assert len(mock_controller.calls["vpp_calls"]) == 1
             assert mock_controller.calls["vpp_calls"][0] < 0
         else:
@@ -110,7 +122,11 @@ class TestCrossPlatformHardwareWrites:
 
         platform_system._apply_period_schedule(PERIOD)
 
-        if _is_solax(platform_system):
+        if _is_sph(platform_system):
+            # SPH uses atomic schedule writes — no per-period hardware calls
+            assert mock_controller.calls["grid_charge"] == []
+            assert mock_controller.calls["discharge_rate"] == []
+        elif _is_solax(platform_system):
             assert len(mock_controller.calls["vpp_disabled"]) == 1
             assert len(mock_controller.calls["vpp_calls"]) == 0
         else:
@@ -124,7 +140,10 @@ class TestCrossPlatformHardwareWrites:
 
         platform_system._apply_period_schedule(PERIOD)
 
-        if _is_solax(platform_system):
+        if _is_sph(platform_system):
+            # SPH uses atomic schedule writes — no per-period hardware calls
+            assert mock_controller.calls["grid_charge"] == []
+        elif _is_solax(platform_system):
             assert len(mock_controller.calls["vpp_disabled"]) == 1
         else:
             assert mock_controller.calls["grid_charge"][-1] is False

@@ -991,27 +991,32 @@ class TestDiscoverOctopusEntities:
         self.ctrl = _make_controller()
 
     def _octopus_registry(self) -> list[dict]:
-        """Typical Octopus Energy registry with all 4 rate entities."""
+        """Typical Octopus Energy registry with all 4 rate entities.
+
+        Uses realistic unique_ids matching the BottlecapDave integration format:
+          octopus_energy_electricity_{serial}_{mpan}[_export]_{suffix}
+          octopus_energy_gas_{serial}_{mprn}_{suffix}
+        """
         return [
             _entity(
                 "event.octopus_energy_electricity_current_day_rates",
                 "octopus_energy",
-                "oe_current_day_rates",
+                "octopus_energy_electricity_21L4726831_2000023585834_current_day_rates",
             ),
             _entity(
                 "event.octopus_energy_electricity_next_day_rates",
                 "octopus_energy",
-                "oe_next_day_rates",
+                "octopus_energy_electricity_21L4726831_2000023585834_next_day_rates",
             ),
             _entity(
                 "event.octopus_energy_electricity_export_current_day_rates",
                 "octopus_energy",
-                "oe_export_current_day_rates",
+                "octopus_energy_electricity_21L4726831_2000023585834_export_current_day_rates",
             ),
             _entity(
                 "event.octopus_energy_electricity_export_next_day_rates",
                 "octopus_energy",
-                "oe_export_next_day_rates",
+                "octopus_energy_electricity_21L4726831_2000023585834_export_next_day_rates",
             ),
             # Non-Octopus entity should be ignored
             _entity(
@@ -1045,7 +1050,7 @@ class TestDiscoverOctopusEntities:
             _entity(
                 "event.my_custom_name_current_day_rates",
                 "octopus_energy",
-                "oe_current_day_rates",
+                "octopus_energy_electricity_21L4726831_2000023585834_current_day_rates",
             ),
         ]
         result = self.ctrl.discover_octopus_entities(registry)
@@ -1059,12 +1064,12 @@ class TestDiscoverOctopusEntities:
             _entity(
                 "event.octopus_energy_electricity_current_day_rates",
                 "octopus_energy",
-                "oe_current_day_rates",
+                "octopus_energy_electricity_21L4726831_2000023585834_current_day_rates",
             ),
             _entity(
                 "event.octopus_energy_electricity_next_day_rates",
                 "octopus_energy",
-                "oe_next_day_rates",
+                "octopus_energy_electricity_21L4726831_2000023585834_next_day_rates",
             ),
         ]
         result = self.ctrl.discover_octopus_entities(registry)
@@ -1074,3 +1079,65 @@ class TestDiscoverOctopusEntities:
         }
         assert "exportToday" not in result
         assert "exportTomorrow" not in result
+
+    def test_gas_entities_excluded(self):
+        """Gas rate entities must not be matched as electricity import."""
+        registry = [
+            _entity(
+                "event.current_day_rates_gas_E6S20077472161_3948152604",
+                "octopus_energy",
+                "octopus_energy_gas_E6S20077472161_3948152604_current_day_rates",
+            ),
+            _entity(
+                "event.next_day_rates_gas_E6S20077472161_3948152604",
+                "octopus_energy",
+                "octopus_energy_gas_E6S20077472161_3948152604_next_day_rates",
+            ),
+        ]
+        result = self.ctrl.discover_octopus_entities(registry)
+        assert result == {}
+
+    def test_gas_entities_excluded_electricity_still_matched(self):
+        """When both gas and electricity entities exist, only electricity is matched."""
+        registry = [
+            # Gas entities (should be excluded)
+            _entity(
+                "event.current_day_rates_gas_E6S20077472161_3948152604",
+                "octopus_energy",
+                "octopus_energy_gas_E6S20077472161_3948152604_current_day_rates",
+            ),
+            _entity(
+                "event.next_day_rates_gas_E6S20077472161_3948152604",
+                "octopus_energy",
+                "octopus_energy_gas_E6S20077472161_3948152604_next_day_rates",
+            ),
+            # Electricity export entities
+            _entity(
+                "event.current_day_rates_export_electricity_21L4726831_2000060563359",
+                "octopus_energy",
+                "octopus_energy_electricity_21L4726831_2000060563359_export_current_day_rates",
+            ),
+            _entity(
+                "event.next_day_rates_export_electricity_21L4726831_2000060563359",
+                "octopus_energy",
+                "octopus_energy_electricity_21L4726831_2000060563359_export_next_day_rates",
+            ),
+            # Electricity import entities
+            _entity(
+                "event.current_day_rates_electricity_21L4726831_2000023585834",
+                "octopus_energy",
+                "octopus_energy_electricity_21L4726831_2000023585834_current_day_rates",
+            ),
+            _entity(
+                "event.next_day_rates_electricity_21L4726831_2000023585834",
+                "octopus_energy",
+                "octopus_energy_electricity_21L4726831_2000023585834_next_day_rates",
+            ),
+        ]
+        result = self.ctrl.discover_octopus_entities(registry)
+        assert result == {
+            "importToday": "event.current_day_rates_electricity_21L4726831_2000023585834",
+            "importTomorrow": "event.next_day_rates_electricity_21L4726831_2000023585834",
+            "exportToday": "event.current_day_rates_export_electricity_21L4726831_2000060563359",
+            "exportTomorrow": "event.next_day_rates_export_electricity_21L4726831_2000060563359",
+        }

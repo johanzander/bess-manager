@@ -4,6 +4,14 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.2.1] - 2026-06-10
+
+### Fixed
+
+- **SPH per-period apply failed every 15 minutes** — `GrowattSphController` inherited base class `_write_period_to_hardware` which tried to set `grid_charge` and `discharging_power_rate` entities that don't exist for SPH. Added no-op override since SPH deploys the full schedule atomically via service calls. (#60)
+- **Octopus discovery picked gas entities for electricity import** — Discovery used keyword matching on `entity_id` instead of `unique_id` regex matching (like all other platforms). Gas rate entities matched the import pattern. Rewritten to use regex on `unique_id` requiring `octopus_energy_electricity_` prefix, which inherently excludes gas. (#60)
+- **Debug export missing Octopus Energy entities** — Added `octopus_energy` to entity registry export domains so Octopus entities appear in debug logs.
+
 ## [9.2.0] - 2026-06-09
 
 ### Fixed

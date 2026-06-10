@@ -6,65 +6,29 @@
 
 ---
 
-<table border="0" cellspacing="0" cellpadding="20"><tr>
-<td width="50%" valign="top">
-
 ### Setup in Minutes, Not Hours
 
 No YAML files. No manual entering of entity IDs. The setup wizard auto-discovers your inverter, price source, and solar forecast from Home Assistant — just confirm and go.
 
-</td>
-<td width="50%">
-
 ![Setup Wizard](./assets/wizard.png)
-
-</td>
-</tr></table>
-
-<table border="0" cellspacing="0" cellpadding="20"><tr>
-<td width="50%">
-
-![Scenario Comparison](./assets/scenario-analysis.png)
-
-</td>
-<td width="50%" valign="top">
 
 ### See Exactly Where Your Money Goes
 
 ChargeIQ tracks every kWh and every cent. Compare three scenarios side by side — what you'd pay with **grid only**, with **solar only**, and with **solar + optimized battery** — so you can see exactly how much value the battery adds.
 
-</td>
-</tr></table>
-
-<table border="0" cellspacing="0" cellpadding="20"><tr>
-<td width="50%" valign="top">
+![Scenario Comparison](./assets/scenario-analysis.png)
 
 ### Predictions You Can Trust
 
 See how accurate the forecasts are — solar, consumption, and savings — with predicted-vs-actual comparisons so you know it's working, not guessing.
 
-</td>
-<td width="50%">
-
 ![Insights](./assets/insights.png)
-
-</td>
-</tr></table>
-
-<table border="0" cellspacing="0" cellpadding="20"><tr>
-<td width="50%">
-
-<img src="./assets/bess-analyst.png" width="400" alt="AI Analyst">
-
-</td>
-<td width="50%" valign="top">
 
 ### Ask Your Battery Why
 
 Something look off? The built-in AI Analyst explains every decision in plain language. Ask "why did the battery charge at 3am?" or "why are today's savings lower than yesterday?" and get a real answer backed by actual system data.
 
-</td>
-</tr></table>
+<img src="./assets/bess-analyst.png" width="400" alt="AI Analyst">
 
 ---
 

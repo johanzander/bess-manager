@@ -358,25 +358,25 @@
       "entity_id": "event.octopus_energy_electricity_current_day_rates",
       "platform": "octopus_energy",
       "config_entry_id": "mock_octopus_config_entry",
-      "unique_id": "octopus-import-today"
+      "unique_id": "octopus_energy_electricity_21L4726831_2000023585834_current_day_rates"
     },
     {
       "entity_id": "event.octopus_energy_electricity_next_day_rates",
       "platform": "octopus_energy",
       "config_entry_id": "mock_octopus_config_entry",
-      "unique_id": "octopus-import-tomorrow"
+      "unique_id": "octopus_energy_electricity_21L4726831_2000023585834_next_day_rates"
     },
     {
       "entity_id": "event.octopus_energy_electricity_export_current_day_rates",
       "platform": "octopus_energy",
       "config_entry_id": "mock_octopus_config_entry",
-      "unique_id": "octopus-export-today"
+      "unique_id": "octopus_energy_electricity_21L4726831_2000060563359_export_current_day_rates"
     },
     {
       "entity_id": "event.octopus_energy_electricity_export_next_day_rates",
       "platform": "octopus_energy",
       "config_entry_id": "mock_octopus_config_entry",
-      "unique_id": "octopus-export-tomorrow"
+      "unique_id": "octopus_energy_electricity_21L4726831_2000060563359_export_next_day_rates"
     }
   ],
   "time_segments": [],

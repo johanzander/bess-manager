@@ -6,7 +6,7 @@
 
 ---
 
-<table><tr>
+<table border="0" cellspacing="0" cellpadding="20"><tr>
 <td width="50%" valign="top">
 
 ### Setup in Minutes, Not Hours
@@ -21,7 +21,7 @@ No YAML files. No manual entering of entity IDs. The setup wizard auto-discovers
 </td>
 </tr></table>
 
-<table><tr>
+<table border="0" cellspacing="0" cellpadding="20"><tr>
 <td width="50%">
 
 ![Scenario Comparison](./assets/scenario-analysis.png)
@@ -36,7 +36,7 @@ ChargeIQ tracks every kWh and every cent. Compare three scenarios side by side �
 </td>
 </tr></table>
 
-<table><tr>
+<table border="0" cellspacing="0" cellpadding="20"><tr>
 <td width="50%" valign="top">
 
 ### Predictions You Can Trust
@@ -51,7 +51,7 @@ See how accurate the forecasts are — solar, consumption, and savings — with 
 </td>
 </tr></table>
 
-<table><tr>
+<table border="0" cellspacing="0" cellpadding="20"><tr>
 <td width="50%">
 
 <img src="./assets/bess-analyst.png" width="400" alt="AI Analyst">

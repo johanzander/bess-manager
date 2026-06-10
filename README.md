@@ -1,102 +1,123 @@
-# BESS Battery Manager Add-on for Home Assistant
+# ChargeIQ — Smart Battery Optimization for Home Assistant
 
-Intelligent Battery Energy Storage System (BESS) management and optimization for Home Assistant.
-
-> **💰 Maximize your battery savings** by automatically optimizing your battery storage system with real-time price data, solar integration, and adaptive scheduling.
-
-## Overview
-
-The BESS Battery Manager is a sophisticated Home Assistant add-on that automatically optimizes battery storage systems using dynamic programming algorithms and electricity market pricing. It supports Growatt (MIC/MIN/MOD/MID and SPH) and SolaX inverters. It continuously analyzes published electricity prices, solar production forecasts, and consumption predictions to determine optimal charge/discharge schedules that minimize your electricity costs.
-
-The system requires a supported inverter integration (Growatt Server or SolaX Modbus), a price source (Nordpool or Octopus Energy), and optionally a solar forecast (e.g., Solcast) Home Assistant integration. InfluxDB is recommended for historical data storage. Unlike simple timer-based systems, BESS Manager makes intelligent decisions by weighing multiple factors: current battery state, published electricity prices, solar weather forecasts, consumption estimates, and battery degradation costs. The system updates its optimization strategy every hour as new sensor data becomes available, ensuring your battery always operates in the most economically beneficial way while respecting technical constraints like charge rates and depth-of-discharge limits.
-
-## Key Capabilities
-
-**Dynamic Programming Optimization**: Solves 24-hour battery scheduling as an optimization problem, considering electricity prices, solar forecasts, consumption patterns, and battery constraints to find the globally optimal charge/discharge schedule.
-
-**Electricity Market Integration**: Supports Nordpool (Nordic markets, 15-min resolution) and Octopus Energy Agile tariff (UK market, 30-min resolution with separate import/export rates).
-
-**Battery Wear Economics**: Incorporates battery degradation costs (cycle cost) into optimization calculations to balance immediate savings against long-term battery life.
-
-**Continuous Re-optimization**: Recalculates the optimal schedule every 15 minutes for as long as electricity prices are available, updating as predicted values become actual.
-
-**Adaptive Consumption Forecasting**: Builds a time-of-day consumption profile directly from Home Assistant's built-in Recorder statistics — captures your daily patterns (morning/evening peaks, overnight baseline) using a trimmed mean that filters out outlier spikes like EV charging. No external database required. Also supports InfluxDB, live sensor, and fixed-value strategies with a built-in comparison view to see which strategy best matches your actual usage.
-
-**Comprehensive Energy Tracking**: Tracks all energy flows (solar production, grid import/export, battery charge/discharge, home consumption) with detailed cost analysis and savings calculations.
-
-**Power Monitoring & Fuse Protection**: Monitors grid current to prevent overloading electrical fuses by limiting battery charging when household consumption is high.
-
-### Web Interface
-
-The BESS Manager provides a comprehensive web interface organized into focused pages:
-
-**Dashboard**: Real-time system overview with live energy flows, current battery optimization decisions, and today's performance summary.
-
-**Savings**: Financial analysis with daily savings breakdown, cost comparisons between grid-only vs solar-only vs optimized battery scenarios, and detailed hourly cost analysis.
-
-**Inverter**: Detailed information about your inverter including current status, active schedule, operating modes, and configuration settings.
-
-**Insights**: Understand the economic reasoning behind every battery decision - why the system chose to charge, discharge, or remain idle at any given time.
-
-**System Health**: Component status monitoring with sensor validation, integration health checks, and system diagnostics.
-
-**AI Analyst**: Built-in AI chat assistant that can answer questions about your battery system's performance, explain optimization decisions, and investigate issues. It has full access to the running system's state (sensor data, schedules, logs) and can read its own source code to give accurate, code-backed explanations. Requires a Claude API key configured in Settings.
-
-## Compatibility
-
-### Supported Battery Systems
-
-- ✅ **Growatt MIC/MIN/MOD/MID** — TOU schedule control via Growatt Server integration (cloud)
-- ✅ **Growatt MIC/MIN/MOD/MID** — TOU schedule control via homeassistant-solax-modbus Growatt plugin (local Modbus)
-- ✅ **Growatt SPH** — Charge/discharge period control via Growatt Server integration
-- ✅ **SolaX** — VPP active-power control via homeassistant-solax-modbus integration
-
-### Required Integrations
-
-- 📊 **Nordpool** or **Octopus Energy** integration for electricity prices
-- 🏠 **Growatt Server** or **SolaX Modbus** integration for battery control and energy monitoring
-
-### Optional Integrations
-
-- ☀️ **Solar forecast** integration (e.g., Solcast) for production predictions (optional)
-- 📈 **InfluxDB** integration - recommended to preserve historical data during server restarts
-- ⚡ **Tibber** integration  - optional for power monitoring and fuse protection
-
-## Screenshots
+**Install it, forget it, and slash your energy bills.** ChargeIQ continuously optimizes your battery against live electricity prices, solar forecasts, and your household patterns.
 
 ![Dashboard Overview](./assets/dashboard.png)
-*Beautiful energy flow visualization with real-time optimization results*
 
-![Savings Analysis](./assets/savings.png)
-*Detailed savings breakdown with battery actions and ROi calculations*
+---
 
-![Battery Schedule](.assets/battery-schedule.png)
-*Intelligent scheduling showing charge/discharge decisions with price predictions*
+<table><tr>
+<td width="50%" valign="top">
 
-![Scenario Comparison Analysis](./assets/scenario-analysis.png)
-*Compare Grid-only, Solar-only and Solar+Battery scenarios to see where your savings come from*
+### Setup in Minutes, Not Hours
 
-![BESS Analyst](./assets/bess-analyst.png)
-*Built-in AI analyst answers questions about your battery performance, savings and optimization decisions*
+No YAML files. No manual entering of entity IDs. The setup wizard auto-discovers your inverter, price source, and solar forecast from Home Assistant — just confirm and go.
+
+</td>
+<td width="50%">
+
+![Setup Wizard](./assets/wizard.png)
+
+</td>
+</tr></table>
+
+<table><tr>
+<td width="50%">
+
+![Scenario Comparison](./assets/scenario-analysis.png)
+
+</td>
+<td width="50%" valign="top">
+
+### See Exactly Where Your Money Goes
+
+ChargeIQ tracks every kWh and every cent. Compare three scenarios side by side — what you'd pay with **grid only**, with **solar only**, and with **solar + optimized battery** — so you can see exactly how much value the battery adds.
+
+</td>
+</tr></table>
+
+<table><tr>
+<td width="50%" valign="top">
+
+### Predictions You Can Trust
+
+See how accurate the forecasts are — solar, consumption, and savings — with predicted-vs-actual comparisons so you know it's working, not guessing.
+
+</td>
+<td width="50%">
+
+![Insights](./assets/insights.png)
+
+</td>
+</tr></table>
+
+<table><tr>
+<td width="50%">
+
+<img src="./assets/bess-analyst.png" width="400" alt="AI Analyst">
+
+</td>
+<td width="50%" valign="top">
+
+### Ask Your Battery Why
+
+Something look off? The built-in AI Analyst explains every decision in plain language. Ask "why did the battery charge at 3am?" or "why are today's savings lower than yesterday?" and get a real answer backed by actual system data.
+
+</td>
+</tr></table>
+
+---
+
+## Features
+
+| | |
+|---|---|
+| **Optimization** | Dynamic programming finds the mathematically optimal schedule — not a simulation, not a heuristic |
+| **Resolution** | 15-minute granularity (Nordpool) or 30-minute (Octopus) |
+| **Solar aware** | Integrates solar forecast to maximize self-consumption |
+| **Battery protection** | Models cycle degradation cost — won't chase marginal gains that wear out your battery |
+| **Fuse protection** | Monitors grid current and limits charging to prevent overloading your main fuse |
+| **EV aware** | Automatically pauses battery discharge when your EV is charging |
+| **Re-optimization** | Continuously updates as prices, solar, and consumption data change |
+| **AI Analyst** | Chat with your battery system — ask questions, get explanations |
+
+## Supported Hardware & Markets
+
+### Inverters
+- **Growatt MIC/MIN/MOD/MID** — via Growatt Server (cloud) or Modbus (local)
+- **Growatt SPH** — via Growatt Server(cloud) or Modbus (local)
+- **SolaX** — via Solax modbus integration
+
+### Electricity Markets
+- **Nordpool** — Nordic spot market (SE, NO, FI, DK, EE, LT, LV)
+- **Octopus Energy Agile** — UK market with separate import/export rates
+
+### Optional Integrations
+- **Solcast** or other solar forecast for production predictions
+- **InfluxDB** for historical data persistence
+- **Tibber** for power monitoring
+
+> **Want support for your inverter?** We're actively looking for testers with GivEnergy, Solis, Huawei, and other systems. [Open an issue](https://github.com/johanzander/bess-manager/issues) or join the discussion!
+
+## Installation
+
+1. Go to **Settings > Add-ons > Add-on Store** and add the repository URL
+2. Install and start ChargeIQ
+3. Open the web UI and follow the setup wizard
+
+Full instructions: **[Installation Guide](docs/INSTALLATION.md)**
 
 ## Documentation
 
-- 🔧 **[Installation Guide](docs/INSTALLATION.md)** - Complete setup instructions
-- 📚 **[User Guide](docs/USER_GUIDE.md)** - Understanding the interface and results
-- 🏗️ **[Software Architecture](docs/SOFTWARE_DESIGN.md)** - Technical design and system architecture
-- 👨‍💻 **[Development Guide](docs/DEVELOPMENT.md)** - Contributing and development setup
+- [Installation Guide](docs/INSTALLATION.md) — Getting started
+- [User Guide](docs/USER_GUIDE.md) — Understanding the interface
+- [Development Guide](docs/DEVELOPMENT.md) — Contributing
 
-## Community & Support
+## Community
 
-- 🐛 **Issues**: [GitHub Issues](https://github.com/johanzander/bess-manager/issues)
-- 💬 **Community**: [Home Assistant Community Forum](https://community.home-assistant.io/)
-- 📢 **Updates**: Follow repository for latest features
-- ⭐ **Like it?** Star the repository to support development!
-
-## Contributors
-
-- **[@pookey](https://github.com/pookey)** — Extended DP optimization horizon with tomorrow's prices (v7.3.0, [PR #22](https://github.com/johanzander/bess-manager/pull/22))
+- **Issues & feature requests**: [GitHub Issues](https://github.com/johanzander/bess-manager/issues)
+- **Discussion**: [Home Assistant Community Forum](https://community.home-assistant.io/)
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+MIT License — see [LICENSE](LICENSE) for details.

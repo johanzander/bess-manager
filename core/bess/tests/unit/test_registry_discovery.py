@@ -1253,7 +1253,6 @@ class TestFrontendSensorKeysMatchBackend:
         },
         "solax_modbus_growatt_min": {
             "lifetime_system_production",
-            "lifetime_load_consumption",  # discoverable but not in UI for GEN4 modbus
             *(
                 f"tou_time_{n}_{f}"
                 for n in range(2, 10)

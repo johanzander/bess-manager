@@ -114,6 +114,9 @@ export function toggle(label: string, value: boolean, onChange: (_: boolean) => 
       <span className={`text-sm font-medium ${disabled ? 'text-gray-400 dark:text-gray-500' : 'text-gray-700 dark:text-gray-300'}`}>{label}</span>
       <button
         type="button"
+        role="switch"
+        aria-checked={value}
+        aria-label={label}
         disabled={disabled}
         onClick={() => onChange(!value)}
         className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 ${disabled ? 'bg-gray-200 dark:bg-gray-700 cursor-not-allowed opacity-50' : value ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}

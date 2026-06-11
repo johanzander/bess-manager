@@ -13,7 +13,6 @@ from core.bess.inverter_controller import InverterController
 from core.bess.solax_controller import SolaxController
 from core.bess.solax_modbus_growatt_controller import SolaxModbusGrowattController
 
-
 # ── Capability declarations ──────────────────────────────────────────────────
 
 

@@ -263,7 +263,7 @@ test.describe('Setup Wizard', () => {
     }
 
     // Fuse protection toggle should be disabled on platforms without charge rate control
-    const fuseToggle = page.getByRole('button', { name: /Enable fuse protection/i });
+    const fuseToggle = page.getByRole('switch', { name: /Enable fuse protection/i });
     if (expectDisabled) {
       await expect(fuseToggle).toBeDisabled();
     } else {

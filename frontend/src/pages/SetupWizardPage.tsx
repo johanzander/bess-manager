@@ -508,7 +508,7 @@ const SetupWizardPage: React.FC = () => {
               </p>
             </div>
 
-            <HomeFormSection form={homeForm} onChange={setHomeForm} />
+            <HomeFormSection form={homeForm} onChange={setHomeForm} sensors={getActiveSensorsFlat(sensors)} />
 
             {completeError && (
               <p className="text-sm text-red-600 dark:text-red-400">{completeError}</p>

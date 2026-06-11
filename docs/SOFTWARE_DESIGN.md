@@ -384,6 +384,56 @@ The active platform is stored in `inverter.platform`. Switching platform at runt
 
 `GrowattSolaxModbusController` subclasses `GrowattMinController` — the scheduling algorithm (9 TOU slots, differential updates, corruption recovery) is identical. Only the hardware I/O differs: `growatt_server` uses a single service call per slot, while `solax_modbus` uses 4 entity writes (`select.select_option`) plus a button press per slot.
 
+### Platform Capabilities
+
+Different inverter platforms support different hardware features. The class hierarchy handles **behavioral** differences (TOU scheduling vs. period lists vs. VPP commands — genuinely different algorithms). Capabilities handle the narrower question: what does code *outside* the controller need to know about the platform?
+
+Currently only one capability exists: `charge_rate_control`. It is declared as a `ClassVar[bool]` on `InverterController` (default `True`) and overridden to `False` by subclasses whose hardware lacks per-period charge/discharge rate registers (SPH, SolaX native). BSM checks this flag to decide whether to initialize the power monitor and whether `adjust_charging_power()` should run.
+
+```python
+# inverter_controller.py (base class)
+supports_charge_rate_control: ClassVar[bool] = True
+
+# growatt_sph_controller.py
+supports_charge_rate_control: ClassVar[bool] = False
+
+# solax_controller.py
+supports_charge_rate_control: ClassVar[bool] = False
+```
+
+| Capability | Description | MIN | SPH | SolaX Native | Modbus Growatt MIN |
+|---|---|---|---|---|---|
+| `supports_charge_rate_control` | Per-period charge/discharge rate register | Yes | **No** | **No** | Yes |
+
+SPH controls charge power globally via `write_ac_charge_times(charge_power=100%)`. SolaX native uses VPP active-power commands. Neither has a per-period register that the power monitor can read/write, so fuse protection cannot function.
+
+#### Frontend Gating
+
+The frontend disables UI features based on **sensor presence**, which correlates with platform capabilities: if the platform lacks charge rate control, the corresponding sensor entity won't exist after discovery. This avoids needing a dedicated capabilities API endpoint — the sensor config already carries the signal.
+
+- Fuse protection toggle: disabled when `battery_charging_power_rate` sensor is not configured
+- InfluxDB consumption strategy: disabled when `local_load_power` sensor is not configured
+- HA Statistics strategy: disabled when `lifetime_load_consumption` sensor is not configured
+
+Sensor-based gating is the right default. A dedicated capabilities API should only be introduced when the frontend needs to gate on something that doesn't map to sensor presence.
+
+#### Evolution Path
+
+The single `ClassVar[bool]` is sufficient while capabilities are few and boolean. If the number of externally-queried capabilities grows beyond 2–3 flags, consolidate into a frozen `PlatformCapabilities` dataclass with typed fields (booleans, integers, Literals). The decision criteria: add a capability only when code **outside** the controller hierarchy needs to branch on it. Internal differences (schedule model, max slots, power control method) belong in the subclass, not the capability surface.
+
+#### Adding a New Capability
+
+1. Add `supports_foo: ClassVar[bool] = True` to `InverterController`
+2. Override to `False` on subclasses that lack the feature
+3. Gate the feature in BSM / frontend as appropriate
+
+#### Adding a New Inverter Platform
+
+1. Create an `InverterController` subclass implementing the abstract methods
+2. Override any `supports_*` flags where the platform differs from defaults
+3. Add the platform string to `VALID_PLATFORMS` and the factory in `_create_inverter_controller()`
+4. Add entity suffix map entries to `ha_api_controller.py` for sensor discovery
+
 ### Auto-Detection and Integration Discovery
 
 On first startup with no sensors configured, or when the user triggers discovery from the setup wizard or settings page, the system runs a multi-stage auto-detection process via `HAAPIController.discover_integrations()`.

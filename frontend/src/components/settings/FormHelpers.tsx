@@ -107,14 +107,16 @@ export function radioGroup<T extends string>(
   );
 }
 
-export function toggle(label: string, value: boolean, onChange: (_: boolean) => void) {
+export function toggle(label: string, value: boolean, onChange: (_: boolean) => void, opts?: { disabled?: boolean }) {
+  const disabled = opts?.disabled ?? false;
   return (
     <div className="flex items-center justify-between">
-      <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{label}</span>
+      <span className={`text-sm font-medium ${disabled ? 'text-gray-400 dark:text-gray-500' : 'text-gray-700 dark:text-gray-300'}`}>{label}</span>
       <button
         type="button"
+        disabled={disabled}
         onClick={() => onChange(!value)}
-        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 ${value ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 ${disabled ? 'bg-gray-200 dark:bg-gray-700 cursor-not-allowed opacity-50' : value ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}
       >
         <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${value ? 'translate-x-6' : 'translate-x-1'}`} />
       </button>

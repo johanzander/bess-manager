@@ -110,8 +110,6 @@ const GROWATT_CLOUD_LIFETIME: SensorGroup = {
     { key: 'lifetime_export_to_grid', label: 'Total Export to Grid', required: true },
     { key: 'lifetime_import_from_grid', label: 'Total Import from Grid', required: true },
     { key: 'lifetime_load_consumption', label: 'Total Load Consumption', required: true },
-    { key: 'lifetime_system_production', label: 'Total System Production', required: false },
-    { key: 'lifetime_self_consumption', label: 'Total Self Consumption', required: false },
   ],
 };
 
@@ -219,7 +217,6 @@ export const INTEGRATIONS: IntegrationDef[] = [
           { key: 'lifetime_solar_energy', label: 'Total Solar Energy', required: false },
           { key: 'lifetime_import_from_grid', label: 'Grid Import Total', required: false },
           { key: 'lifetime_export_to_grid', label: 'Grid Export Total', required: false },
-          { key: 'lifetime_system_production', label: 'Total Yield', required: false },
         ],
       },
       {
@@ -276,7 +273,6 @@ export const INTEGRATIONS: IntegrationDef[] = [
           { key: 'lifetime_solar_energy', label: 'Total Solar Energy', required: false },
           { key: 'lifetime_import_from_grid', label: 'Grid Import Total', required: false },
           { key: 'lifetime_export_to_grid', label: 'Grid Export Total', required: false },
-          { key: 'lifetime_system_production', label: 'Total Yield', required: false },
         ],
       },
       {

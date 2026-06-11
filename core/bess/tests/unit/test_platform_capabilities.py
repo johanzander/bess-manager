@@ -5,8 +5,6 @@ capabilities and that BatterySystemManager respects them (e.g. not
 initializing the power monitor on platforms without charge rate control).
 """
 
-import pytest  # type: ignore
-
 from core.bess.growatt_min_controller import GrowattMinController
 from core.bess.growatt_sph_controller import GrowattSphController
 from core.bess.inverter_controller import InverterController

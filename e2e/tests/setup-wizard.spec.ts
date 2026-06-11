@@ -240,8 +240,11 @@ test.describe('Setup Wizard', () => {
   });
 
   test('home step gates features by platform capabilities', async ({ page }) => {
+    // SPH lacks local_load_power; SolaX native has it (as house_load)
+    const platformsWithoutLocalLoad = ['growatt_server_sph'];
     const platformsWithoutChargeRate = ['growatt_server_sph', 'solax_modbus_native'];
-    const expectDisabled = platformsWithoutChargeRate.includes(expected.inverterPlatform);
+    const expectInfluxDisabled = platformsWithoutLocalLoad.includes(expected.inverterPlatform);
+    const expectFuseDisabled = platformsWithoutChargeRate.includes(expected.inverterPlatform);
 
     await page.goto('/setup');
     await expectActiveStep(page, 1);
@@ -256,7 +259,7 @@ test.describe('Setup Wizard', () => {
 
     // InfluxDB radio should be disabled on platforms without local_load_power
     const influxRadio = radioByLabel(page, 'InfluxDB (requires InfluxDB integration)');
-    if (expectDisabled) {
+    if (expectInfluxDisabled) {
       await expect(influxRadio).toBeDisabled();
     } else {
       await expect(influxRadio).toBeEnabled();
@@ -264,7 +267,7 @@ test.describe('Setup Wizard', () => {
 
     // Fuse protection toggle should be disabled on platforms without charge rate control
     const fuseToggle = page.getByRole('switch', { name: /Enable fuse protection/i });
-    if (expectDisabled) {
+    if (expectFuseDisabled) {
       await expect(fuseToggle).toBeDisabled();
     } else {
       await expect(fuseToggle).toBeEnabled();

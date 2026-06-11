@@ -1239,6 +1239,30 @@ class TestFrontendSensorKeysMatchBackend:
 
         return result
 
+    # Sensor keys that exist in backend suffix maps but are intentionally
+    # NOT shown in the frontend wizard UI.  Every entry needs a reason.
+    #
+    # - lifetime_system_production: discoverable but BESS derives it from
+    #   lifetime_solar_energy via EnergyFlowCalculator — no config needed.
+    # - lifetime_self_consumption: Growatt cloud only, always derived.
+    # - TOU time slots 2-9: managed by backend, only slot 1 shown in UI.
+    BACKEND_ONLY_KEYS: ClassVar[dict[str, set[str]]] = {
+        "growatt_server_min": {
+            "lifetime_system_production",
+            "lifetime_self_consumption",
+        },
+        "solax_modbus_growatt_min": {
+            "lifetime_system_production",
+            "lifetime_load_consumption",  # discoverable but not in UI for GEN4 modbus
+            *(
+                f"tou_time_{n}_{f}"
+                for n in range(2, 10)
+                for f in ("enabled", "begin", "end", "mode", "update")
+            ),
+        },
+        "solax_modbus_native": {"lifetime_system_production"},
+    }
+
     def test_all_frontend_keys_exist_in_suffix_map(self):
         """For each platform, every frontend sensor key must be discoverable."""
         frontend_keys = self._parse_frontend_sensor_keys()
@@ -1254,4 +1278,29 @@ class TestFrontendSensorKeysMatchBackend:
             assert not extra, (
                 f"{platform_id}: frontend shows sensors that the backend "
                 f"suffix map ({suffix_map_attr}) cannot discover: {sorted(extra)}"
+            )
+
+    def test_no_undeclared_backend_only_keys(self):
+        """Backend suffix map values not in the frontend must be in BACKEND_ONLY_KEYS.
+
+        Prevents "Not detected" phantom fields: if a new sensor is added to a
+        suffix map but not to the frontend, this test forces an explicit decision
+        — either add it to the UI or add it to BACKEND_ONLY_KEYS with a reason.
+        """
+        frontend_keys = self._parse_frontend_sensor_keys()
+
+        for platform_id, suffix_map_attr in self.PLATFORM_TO_SUFFIX_MAP.items():
+            suffix_map = getattr(HomeAssistantAPIController, suffix_map_attr)
+            backend_keys = set(suffix_map.values())
+
+            ui_keys = frontend_keys.get(platform_id, set())
+            allowed = self.BACKEND_ONLY_KEYS.get(platform_id, set())
+
+            backend_not_in_ui = backend_keys - ui_keys
+            undeclared = backend_not_in_ui - allowed
+            assert not undeclared, (
+                f"{platform_id}: backend suffix map ({suffix_map_attr}) has keys "
+                f"not shown in the frontend and not in BACKEND_ONLY_KEYS: "
+                f"{sorted(undeclared)}. Either add them to the frontend "
+                f"sensorDefinitions.ts or to BACKEND_ONLY_KEYS with a reason."
             )

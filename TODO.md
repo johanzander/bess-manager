@@ -584,6 +584,24 @@ Both are called sequentially from `run_setup_discovery()` in `api.py`. They serv
 
 **Files**: `core/bess/ha_api_controller.py` (`_parse_ha_metadata`, `discover_sensors_from_registry`), `backend/api.py` (`run_setup_discovery`)
 
+### Remove device_id discovery fallbacks and dead `device_sn` code
+
+**Impact**: Low | **Effort**: Low | **Dependencies**: `ha_api_controller.py`, `api.py`, `sensorDefinitions.ts`
+
+**Description**: Device ID discovery has two strategies: config_entry match (primary, always works) and identifiers/SN match (fallback). The fallback depends on `_extract_growatt_device_sn()`, which fragily parses SOC entity IDs to extract the serial number. Real HA devices always have `config_entries` on the device object, so the fallback is unnecessary.
+
+Additionally, `device_sn` is extracted, returned in the API response as `deviceSn`, and declared in the frontend `DiscoveryResult` type — but nothing in the frontend or backend ever reads it. It's dead code end to end.
+
+**What to remove**:
+- `_extract_growatt_device_sn()` method
+- Identifiers-based device_id fallback (strategy 2 in `_parse_ha_metadata`)
+- `device_sn` from discovery result dict and API response
+- `deviceSn` from frontend `DiscoveryResult` type
+
+**Files**: `core/bess/ha_api_controller.py`, `backend/api.py`, `frontend/src/components/settings/SensorConfigSection.tsx`
+
+---
+
 ### Other Technical Debt
 
 - Refactor all API endpoints to use dataclass-based serialization (with robust mapping for all field variants) for consistent, type-safe, and future-proof API responses. Ensure all details and fields are preserved as in the original dict-based implementation.

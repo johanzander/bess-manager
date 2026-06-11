@@ -169,7 +169,9 @@
       "id": "mock_solax_device_001",
       "name": "SolaX X1-Hybrid",
       "manufacturer": "SolaX Power",
-      "model": "X1-Hybrid-6.0"
+      "model": "X1-Hybrid-6.0",
+      "config_entries": ["mock_solax_config_entry"],
+      "identifiers": [["solax_modbus", "SolaX X1-Hybrid"]]
     }
   ],
   "services": {},

@@ -142,7 +142,9 @@
       "id": "mock_growatt_device_002",
       "name": "XYZ9876543",
       "manufacturer": "Growatt",
-      "model": "SPH 10000TL3-BH-UP"
+      "model": "SPH 10000TL3-BH-UP",
+      "config_entries": ["mock_growatt_config_entry"],
+      "identifiers": [["growatt_server", "XYZ9876543"]]
     }
   ],
   "services": {

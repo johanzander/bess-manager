@@ -76,11 +76,11 @@ def start() -> None
 
 **Algorithm Flow**:
 
-1. **State Initialization**: Start with current battery SOC and energy basis
-2. **Solar Integration**: Apply predicted solar charging (free energy)
-3. **Arbitrage Opportunities**: Find profitable charge/discharge pairs
-4. **Constraint Optimization**: Respect battery capacity, power limits, consumption needs
-5. **Economic Modeling**: Include battery cycle costs, price calculations
+1. **Discretization**: Battery state of energy (SOE) and power levels are discretized into fine-grained steps (0.1 kWh / 0.2 kW)
+2. **Backward Induction**: Starting from the last period, work backwards evaluating all feasible actions (charge/discharge/idle) at each (period, SOE) cell
+3. **Reward + Future Value**: For each action, compute the immediate reward (grid cost savings minus cycle cost) plus the optimal future value from the resulting SOE state
+4. **Policy Extraction**: Forward-simulate from the initial SOE, following the optimal action at each step to produce the final schedule
+5. **Profitability Gate**: Reject the schedule in favour of all-IDLE if total savings fall below a horizon-scaled minimum threshold
 
 **Inputs**:
 
@@ -304,20 +304,24 @@ grid_to_battery = max(0, battery_charged - solar_to_battery)
 
 Each optimization provides detailed economic reasoning:
 
-- **Immediate Value**: Direct economic impact of each hour's decisions
+- **Immediate Value**: Direct economic impact of each period's decisions
 - **Future Value**: Expected benefits from strategic energy storage
 - **Economic Chain**: Step-by-step profit/loss calculation explanation
-- **Alternative Analysis**: Why other strategies were not chosen
 
 ### Battery Action Intent Detection
 
-The system infers battery action intent solely from the energy flows computed by the DP algorithm. After each period is solved, the detailed flows in `EnergyData` are derived automatically and used to classify intent:
+The system classifies battery action intent using the battery power action as the primary discriminator, with energy flows as secondary input. Classification is performed by `classify_strategic_intent(power, energy_data)` in `decision_intelligence.py`:
 
-- **EXPORT_ARBITRAGE**: `battery_to_grid > 0.1 kWh`
-- **LOAD_SUPPORT**: `battery_to_home > 0.1 kWh` and `battery_to_grid <= 0.1 kWh`
-- **GRID_CHARGING**: `grid_to_battery >= 0.1 kWh`
-- **SOLAR_STORAGE**: `solar_to_battery > 0.1 kWh` and `grid_to_battery < 0.1 kWh`
-- **IDLE**: No significant battery activity in any flow
+- **Discharging** (power < −0.1 kW):
+  - **EXPORT_ARBITRAGE**: `battery_to_grid > 0.1 kWh`
+  - **LOAD_SUPPORT**: otherwise (discharge serves home load)
+- **Charging** (power > 0.1 kW):
+  - **GRID_CHARGING**: `grid_to_battery > solar_to_battery` (grid is dominant charge source)
+  - **SOLAR_STORAGE**: otherwise (solar is dominant charge source)
+- **Near-zero power** (fallthrough for passive flows):
+  - **SOLAR_STORAGE**: `battery_charged > 0.01 kWh` (passive solar charging)
+  - **LOAD_SUPPORT**: `battery_discharged > 0.01 kWh` (small residual discharge)
+  - **IDLE**: no significant battery activity
 
 ### TOU Schedule Generation
 

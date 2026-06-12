@@ -396,6 +396,6 @@ Access detailed explanations of optimization decisions:
 
 ---
 
-*For installation and configuration details, see [DEPLOYMENT.md](DEPLOYMENT.md)*
+*For installation and configuration details, see [INSTALLATION.md](INSTALLATION.md)*
 
 *For developers interested in contributing, see [DEVELOPMENT.md](DEVELOPMENT.md)*

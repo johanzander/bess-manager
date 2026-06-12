@@ -23,7 +23,7 @@ core/bess/                  ← Domain logic (no HA dependencies here)
   ha_api_controller.py       ← HA sensor/device interface + METHOD_SENSOR_MAP
   sensor_collector.py        ← Data aggregation from InfluxDB + HA
   price_manager.py           ← Electricity pricing (Nordpool / Octopus)
-  growatt_schedule.py        ← Inverter TOU schedule format (max 9 segments)
+  dp_schedule.py             ← Schedule data structures for DP optimization
   health_check.py            ← System validation utilities
   exceptions.py              ← All custom exception types (add new ones here)
         ↓
@@ -35,8 +35,8 @@ Home Assistant API + Growatt Inverter
 1. Scheduler triggers `BatterySystemManager.update_battery_schedule()`
 2. `SensorCollector` reads current energy data from InfluxDB + HA
 3. `PriceManager` fetches/caches electricity spot prices
-4. `DPBatteryAlgorithm` generates 24h optimal schedule
-5. `GrowattScheduleManager` converts schedule to TOU intervals
+4. `optimize_battery_schedule()` generates optimal schedule for remaining horizon
+5. `InverterController` subclass converts schedule to hardware-specific commands
 6. `HomeAssistantAPIController` sends commands to inverter
 
 ## API Structure

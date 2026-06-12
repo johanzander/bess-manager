@@ -1,0 +1,78 @@
+name: Release Add-on
+
+on:
+  release:
+    types: [published]
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build:
+    name: Build ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        arch:
+          - aarch64
+          - amd64
+          - armhf
+          - armv7
+          - i386
+        include:
+          - arch: aarch64
+            platform: linux/arm64
+            base_image: ghcr.io/home-assistant/aarch64-base:3.19
+          - arch: amd64
+            platform: linux/amd64
+            base_image: ghcr.io/home-assistant/amd64-base:3.19
+          - arch: armhf
+            platform: linux/arm/v6
+            base_image: ghcr.io/home-assistant/armhf-base:3.19
+          - arch: armv7
+            platform: linux/arm/v7
+            base_image: ghcr.io/home-assistant/armv7-base:3.19
+          - arch: i386
+            platform: linux/386
+            base_image: ghcr.io/home-assistant/i386-base:3.19
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: ${{ matrix.platform }}
+          push: true
+          build-args: |
+            BUILD_FROM=${{ matrix.base_image }}
+            BUILD_VERSION=${{ steps.version.outputs.version }}
+            BUILD_DATE=${{ github.event.release.published_at }}
+            BUILD_REF=${{ github.sha }}
+          tags: |
+            ${{ env.REGISTRY }}/johanzander/bess-manager-${{ matrix.arch }}:${{ steps.version.outputs.version }}
+            ${{ env.REGISTRY }}/johanzander/bess-manager-${{ matrix.arch }}:latest
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}

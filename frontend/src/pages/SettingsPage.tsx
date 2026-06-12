@@ -50,6 +50,7 @@ const EMPTY_PRICING: PricingForm = {
   nordpoolEntity: '',
   octopusImportTodayEntity: '', octopusImportTomorrowEntity: '',
   octopusExportTodayEntity: '', octopusExportTomorrowEntity: '',
+  entsoeEntity: '',
   area: '', markupRate: 0, vatMultiplier: 1.25, additionalCosts: 0,
   taxReduction: 0,
 };
@@ -150,6 +151,7 @@ const SettingsPage: React.FC = () => {
       const nordpool = prov_s.nordpoolOfficial ?? {};
       const nordpoolCustom = prov_s.nordpoolHacs ?? {};
       const octopus = prov_s.octopus ?? {};
+      const entsoe = prov_s.entsoe ?? {};
 
       const bat: BatteryForm = {
         totalCapacity: bat_s.totalCapacity ?? 0,
@@ -186,6 +188,7 @@ const SettingsPage: React.FC = () => {
         octopusImportTomorrowEntity: octopus.importTomorrowEntity ?? '',
         octopusExportTodayEntity: octopus.exportTodayEntity ?? '',
         octopusExportTomorrowEntity: octopus.exportTomorrowEntity ?? '',
+        entsoeEntity: entsoe.entity ?? '',
         area: elec_s.area ?? '',
         markupRate: elec_s.markupRate ?? 0,
         vatMultiplier: elec_s.vatMultiplier ?? 1.25,
@@ -401,6 +404,7 @@ const SettingsPage: React.FC = () => {
             exportTodayEntity: pricingForm.octopusExportTodayEntity,
             exportTomorrowEntity: pricingForm.octopusExportTomorrowEntity,
           },
+          entsoe: { entity: pricingForm.entsoeEntity },
         },
         home: { currency: pricingForm.currency },
       });
@@ -465,6 +469,7 @@ const SettingsPage: React.FC = () => {
             exportTodayEntity: pricingForm.octopusExportTodayEntity,
             exportTomorrowEntity: pricingForm.octopusExportTomorrowEntity,
           },
+          entsoe: { entity: pricingForm.entsoeEntity },
         },
       });
       savedSensors.current = stableStringify(sensors);

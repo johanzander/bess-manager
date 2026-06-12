@@ -1000,6 +1000,8 @@ class APISetupCompletePayload(BaseModel):
     octopusImportTomorrowEntity: str | None = None
     octopusExportTodayEntity: str | None = None
     octopusExportTomorrowEntity: str | None = None
+    # ENTSO-e Transparency Platform entity (required when provider == "entsoe")
+    entsoeEntity: str | None = None
     # Inverter
     inverterPlatform: str | None = None
 

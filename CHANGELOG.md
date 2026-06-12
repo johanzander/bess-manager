@@ -4,6 +4,12 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **ENTSO-e / Belpex price provider** — New `entsoe` energy provider reads day-ahead spot prices from the [ENTSO-e Transparency Platform](https://github.com/JaccoR/hass-entso-e) HA integration via the average-price sensor's `prices_today` / `prices_tomorrow` attributes. Supports both hourly (PT60M) and quarterly (PT15M) data, auto-detected by the setup wizard. Prices are treated as VAT-exclusive spot prices. Experimental — not yet real-world validated. (#126)
+
 ## [9.3.0] - 2026-06-12
 
 ### Changed

@@ -55,6 +55,7 @@ Something look off? The built-in AI Analyst explains every decision in plain lan
 ### Electricity Markets
 - **Nordpool** — Nordic spot market (SE, NO, FI, DK, EE, LT, LV)
 - **Octopus Energy Agile** — UK market with separate import/export rates
+- **ENTSO-e / Belpex** — European day-ahead spot prices via the ENTSO-e Transparency Platform (e.g. Belgian Belpex) *(experimental)*
 
 ### Optional Integrations
 - **Solcast** or other solar forecast for production predictions

@@ -86,22 +86,30 @@ _CONFIG_ENTRY_DATA_ALLOWLIST: dict[str, frozenset[str]] = {
     "growatt": frozenset({"name", "plant_id", "url"}),
     "solax_modbus": frozenset({"name"}),
     "solax": frozenset({"name"}),
+    "entsoe": frozenset({"area", "currency", "energy_scale", "name"}),
 }
 
 # Domains whose config entries are captured in the WS discovery dump.
 _WS_TARGET_DOMAINS = frozenset(
-    {"nordpool", "growatt", "growatt_server", "solax_modbus", "solax"}
+    {"nordpool", "growatt", "growatt_server", "solax_modbus", "solax", "entsoe"}
 )
 
 # Domains whose entities are captured from the entity registry.
 _ENTITY_REGISTRY_DOMAINS = frozenset(
-    {"growatt_server", "solax_modbus", "solax", "nordpool", "octopus_energy"}
+    {
+        "growatt_server",
+        "solax_modbus",
+        "solax",
+        "nordpool",
+        "octopus_energy",
+        "entsoe",
+    }
 )
 
 # Keywords matched against entity_id and unique_id to capture entities
 # that belong to BESS-relevant integrations even if they register under
 # an unexpected platform name.
-_ENTITY_REGISTRY_KEYWORDS = ("growatt", "solax", "nordpool", "octopus")
+_ENTITY_REGISTRY_KEYWORDS = ("growatt", "solax", "nordpool", "octopus", "entsoe")
 
 # Entity registry fields that are useful for debugging discovery and
 # sensor mapping. unique_id is redacted (last-4) since it often contains
@@ -710,6 +718,17 @@ class DebugDataAggregator:
                         logger.warning(
                             "Failed to fetch octopus entity %s: %s", entity_id, e
                         )
+
+        elif provider == "entsoe":
+            entsoe_cfg = config["entsoe"]
+            entity_id = entsoe_cfg.get("entity")
+            if entity_id:
+                try:
+                    state = controller.get_entity_state_raw(entity_id)
+                    if state:
+                        snapshot[entity_id] = self._strip_ha_metadata(state)
+                except Exception as e:
+                    logger.warning("Failed to fetch entsoe entity %s: %s", entity_id, e)
 
         elif provider != "nordpool_official":
             # nordpool_official uses service calls — no entity state to capture

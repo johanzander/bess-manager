@@ -19,6 +19,7 @@ from .dp_battery_algorithm import (
     print_optimization_results,
 )
 from .dp_schedule import DPSchedule
+from .entsoe_source import EntsoeSource
 from .exceptions import (
     HAStatisticsUnavailableError,
     SystemConfigurationError,
@@ -288,10 +289,11 @@ class BatterySystemManager:
     def _create_price_source(self, controller) -> PriceSource:
         """Create the appropriate price source based on energy_provider config.
 
-        Supports three price providers:
-        - "nordpool": Legacy custom Nordpool sensor component
+        Supports four price providers:
+        - "nordpool_hacs": Custom Nordpool sensor component (HACS)
         - "nordpool_official": Official HA Nordpool integration via service calls
         - "octopus": Octopus Energy Agile tariff via HA event entities
+        - "entsoe": ENTSO-e Transparency Platform sensor (e.g. Belpex)
 
         Args:
             controller: HomeAssistantAPIController instance
@@ -335,8 +337,16 @@ class BatterySystemManager:
                 entity=hacs_config["entity"],
             )
 
+        if provider == "entsoe":
+            entsoe_config = config["entsoe"]
+            logger.info("Using ENTSO-e Transparency Platform price source")
+            return EntsoeSource(
+                ha_controller=controller,
+                entity=entsoe_config["entity"],
+            )
+
         raise SystemConfigurationError(
-            message=f"Unknown energy provider: {provider!r}. Must be 'nordpool_hacs', 'nordpool_official', or 'octopus'."
+            message=f"Unknown energy provider: {provider!r}. Must be 'nordpool_hacs', 'nordpool_official', 'octopus', or 'entsoe'."
         )
 
     def _sync_soc_limits(self) -> None:

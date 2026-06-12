@@ -400,6 +400,7 @@ class SettingsStore:
                 "nordpool_official": {"config_entry_id": ""},
                 "nordpool_hacs": {"entity": ""},
                 "octopus": {},
+                "entsoe": {"entity": ""},
             },
             "growatt": {"inverter_type": "", "device_id": ""},
             "inverter": {"platform": "", "device_id": ""},

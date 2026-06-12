@@ -1141,3 +1141,84 @@ class TestDiscoverOctopusEntities:
             "exportToday": "event.current_day_rates_export_electricity_21L4726831_2000060563359",
             "exportTomorrow": "event.next_day_rates_export_electricity_21L4726831_2000060563359",
         }
+
+
+# ---------------------------------------------------------------------------
+# ENTSO-e Transparency Platform discovery
+# ---------------------------------------------------------------------------
+#
+# Registry shape verified against github.com/JaccoR/hass-entso-e sensor.py:
+#   _attr_unique_id = f"entsoe.{name}_{description.key}"   (key="avg_price")
+#   entity_id       = f"{DOMAIN}.{slugify(name)}_{slugify(description.name)}"
+# Only the avg_price sensor carries prices_today / prices_tomorrow attributes.
+# This mirrors issue #126 (user "Belpex H").
+
+
+def _entsoe_registry() -> list[dict]:
+    """Entity registry for the ENTSO-e integration with custom name 'Belpex H'."""
+    return [
+        _entity(
+            "sensor.belpex_h_current_electricity_market_price",
+            "entsoe",
+            "entsoe.Belpex H_current_price",
+        ),
+        _entity(
+            "sensor.belpex_h_average_electricity_price",
+            "entsoe",
+            "entsoe.Belpex H_avg_price",
+        ),
+        _entity(
+            "sensor.belpex_h_highest_energy_price",
+            "entsoe",
+            "entsoe.Belpex H_max_price",
+        ),
+    ]
+
+
+class TestDiscoverEntsoeEntity:
+    """Tests for ENTSO-e price sensor discovery."""
+
+    def setup_method(self):
+        self.ctrl = _make_controller()
+
+    def test_matches_avg_price_via_unique_id(self):
+        result = self.ctrl.discover_entsoe_entity(_entsoe_registry(), states=[])
+        assert result == "sensor.belpex_h_average_electricity_price"
+
+    def test_matches_default_unique_id_without_custom_name(self):
+        registry = [
+            _entity(
+                "sensor.current_electricity_market_price",
+                "entsoe",
+                "entsoe.current_price",
+            ),
+            _entity("sensor.average_electricity_price", "entsoe", "entsoe.avg_price"),
+        ]
+        result = self.ctrl.discover_entsoe_entity(registry, states=[])
+        assert result == "sensor.average_electricity_price"
+
+    def test_ignores_non_entsoe_platforms(self):
+        registry = [
+            _entity("sensor.something_avg_price", "other_platform", "other.avg_price"),
+        ]
+        assert self.ctrl.discover_entsoe_entity(registry, states=[]) is None
+
+    def test_attribute_shape_fallback_when_unique_id_absent(self):
+        """Detect by prices_today shape if the registry doesn't match (renamed/version drift)."""
+        states = [
+            {
+                "entity_id": "sensor.renamed_price_sensor",
+                "attributes": {
+                    "prices_today": [
+                        {"time": "2026-06-12T00:00:00", "price": 0.08555},
+                        {"time": "2026-06-12T01:00:00", "price": 0.08123},
+                    ]
+                },
+            }
+        ]
+        result = self.ctrl.discover_entsoe_entity(entity_registry=[], states=states)
+        assert result == "sensor.renamed_price_sensor"
+
+    def test_returns_none_when_nothing_matches(self):
+        states = [{"entity_id": "sensor.unrelated", "attributes": {"foo": "bar"}}]
+        assert self.ctrl.discover_entsoe_entity([], states) is None

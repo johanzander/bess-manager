@@ -16,6 +16,11 @@ import requests
 import websocket
 
 from .exceptions import SystemConfigurationError
+from .huawei_sensor_transform import (
+    HuaweiPowerSnapshot,
+    normalize_huawei_power,
+    parse_ha_numeric_power,
+)
 from .runtime_failure_tracker import RuntimeFailureTracker
 
 logger = logging.getLogger(__name__)
@@ -538,6 +543,13 @@ class HomeAssistantAPIController:
         ),
     ]
 
+    HUAWEI_SOLAR_SUFFIX_MAP: ClassVar[dict[str, str]] = {
+        "batteries_state_of_capacity": "battery_soc",
+        "batteries_charge_discharge_power": "huawei_battery_power",
+        "power_meter_active_power": "huawei_grid_power",
+        "inverter_input_power": "pv_power",
+    }
+
     # ── Per-platform suffix maps for solax_modbus discovery ─────────────
     #
     # The solax_modbus integration (github.com/wills106/homeassistant-solax-modbus)
@@ -738,6 +750,39 @@ class HomeAssistantAPIController:
             }
 
         sensor_key = str(method_info["sensor_key"])
+        if self._has_huawei_raw_power_config() and sensor_key in {
+            "battery_charge_power",
+            "battery_discharge_power",
+            "import_power",
+            "export_power",
+            "local_load_power",
+        }:
+            required_keys = ["huawei_battery_power", "huawei_grid_power", "pv_power"]
+            if sensor_key in {"battery_charge_power", "battery_discharge_power"}:
+                required_keys = ["huawei_battery_power"]
+            elif sensor_key in {"import_power", "export_power"}:
+                required_keys = ["huawei_grid_power"]
+            missing = [key for key in required_keys if key not in self.sensors]
+            if not missing:
+                return {
+                    "method_name": method_name,
+                    "name": method_info["name"],
+                    "sensor_key": sensor_key,
+                    "entity_id": ", ".join(self.sensors[key] for key in required_keys),
+                    "status": "ok",
+                    "error": None,
+                    "current_value": None,
+                    "resolution_method": "huawei_derived",
+                }
+            return {
+                "method_name": method_name,
+                "name": method_info["name"],
+                "sensor_key": sensor_key,
+                "entity_id": "Not configured",
+                "status": "not_configured",
+                "error": f"Missing Huawei raw sensors: {missing}",
+                "current_value": None,
+            }
         try:
             entity_id, resolution_method = self._resolve_entity_id(sensor_key)
         except ValueError as e:
@@ -1065,6 +1110,49 @@ class HomeAssistantAPIController:
             # duplicate the record_failure call here.
             return None
 
+    def _get_sensor_value_with_unit(
+        self, sensor_name: str
+    ) -> tuple[float | None, str | None]:
+        """Read a numeric HA state with its unit of measurement."""
+        try:
+            entity_id, _ = self._resolve_entity_id(sensor_name)
+        except ValueError:
+            return None, None
+        try:
+            response = self._api_request(
+                "get",
+                f"/api/states/{entity_id}",
+                operation=f"Read sensor '{sensor_name}'",
+                category=f"sensor_read:{sensor_name}",
+            )
+        except requests.RequestException as e:
+            logger.error("Error fetching sensor %s: %s", sensor_name, str(e))
+            return None, None
+        if not response or "state" not in response:
+            return None, None
+        unit = (response.get("attributes") or {}).get("unit_of_measurement")
+        return parse_ha_numeric_power(response.get("state"), unit), unit
+
+    def _has_huawei_raw_power_config(self) -> bool:
+        """Return True when the active sensor map contains Huawei raw inputs."""
+        return (
+            "huawei_battery_power" in self.sensors
+            or "huawei_grid_power" in self.sensors
+        )
+
+    def _get_huawei_normalized_power(self):
+        """Read and normalize Huawei raw power sensors for internal channels."""
+        battery_power, _ = self._get_sensor_value_with_unit("huawei_battery_power")
+        grid_power, _ = self._get_sensor_value_with_unit("huawei_grid_power")
+        pv_power, _ = self._get_sensor_value_with_unit("pv_power")
+        return normalize_huawei_power(
+            HuaweiPowerSnapshot(
+                battery_power_w=battery_power,
+                grid_power_w=grid_power,
+                pv_power_w=pv_power,
+            )
+        )
+
     def _get_sensor_value(self, sensor_name) -> float | None:
         """Get value from any sensor by name using unified entity resolution.
 
@@ -1195,10 +1283,14 @@ class HomeAssistantAPIController:
 
     def get_battery_charge_power(self):
         """Get current battery charging power in watts."""
+        if self._has_huawei_raw_power_config():
+            return self._get_huawei_normalized_power().battery_charge_power
         return self._get_sensor_value("battery_charge_power")
 
     def get_battery_discharge_power(self):
         """Get current battery discharging power in watts."""
+        if self._has_huawei_raw_power_config():
+            return self._get_huawei_normalized_power().battery_discharge_power
         return self._get_sensor_value("battery_discharge_power")
 
     def set_grid_charge(self, enable):
@@ -1831,18 +1923,27 @@ class HomeAssistantAPIController:
 
     def get_pv_power(self):
         """Get current solar PV power production in watts."""
+        if self._has_huawei_raw_power_config():
+            value, _ = self._get_sensor_value_with_unit("pv_power")
+            return value
         return self._get_sensor_value("pv_power")
 
     def get_import_power(self):
         """Get current grid import power in watts."""
+        if self._has_huawei_raw_power_config():
+            return self._get_huawei_normalized_power().import_power
         return self._get_sensor_value("import_power")
 
     def get_export_power(self):
         """Get current grid export power in watts."""
+        if self._has_huawei_raw_power_config():
+            return self._get_huawei_normalized_power().export_power
         return self._get_sensor_value("export_power")
 
     def get_local_load_power(self):
         """Get current home load power in watts."""
+        if self._has_huawei_raw_power_config():
+            return self._get_huawei_normalized_power().local_load_power
         return self._get_sensor_value("local_load_power")
 
     def get_net_battery_power(self):
@@ -2198,6 +2299,11 @@ class HomeAssistantAPIController:
             elif self._has_growatt_gen3_entities(entity_registry_result):
                 detected_platforms.append("solax_modbus_growatt_sph")
 
+        if any(
+            entry.get("platform") == "huawei_solar" for entry in entity_registry_result
+        ):
+            detected_platforms.append("huawei_solar")
+
         logger.info(
             "WS discovery: nordpool_config_entry_id=%s, nordpool_area=%s, "
             "growatt_device_id=%s, octopus_found=%s, "
@@ -2281,6 +2387,7 @@ class HomeAssistantAPIController:
             "device_sn": None,
             "growatt_device_id": None,
             "solax_found": False,
+            "huawei_solar_found": False,
             "nordpool_found": False,
             "nordpool_area": None,
             "nordpool_custom_area": None,
@@ -2316,6 +2423,7 @@ class HomeAssistantAPIController:
         inverter_detected = self.detect_inverter_integrations(registry)
         result["growatt_found"] = inverter_detected.get("growatt", False)
         result["solax_found"] = inverter_detected.get("solax", False)
+        result["huawei_solar_found"] = inverter_detected.get("huawei_solar", False)
 
         # ── States: Growatt device SN, Nordpool area ─────────────────────
         states = self._fetch_all_states()
@@ -2600,6 +2708,7 @@ class HomeAssistantAPIController:
     _INVERTER_PLATFORMS: ClassVar[dict[str, list[str]]] = {
         "growatt": ["growatt_server"],
         "solax": ["solax_modbus", "solax"],
+        "huawei_solar": ["huawei_solar"],
     }
     _PRICE_PLATFORMS: ClassVar[dict[str, list[str]]] = {
         "nordpool": ["nordpool"],
@@ -2766,6 +2875,30 @@ class HomeAssistantAPIController:
                 detected_platform = "growatt_server_min"
             else:
                 detected_platform = "growatt_server_sph"
+
+        if inverter_detected.get("huawei_solar"):
+            huawei_sensors = self._map_registry_entities(
+                entities, ["huawei_solar"], self.HUAWEI_SOLAR_SUFFIX_MAP
+            )
+            # Reference-installation fallback: only used after the entity
+            # registry has already identified the huawei_solar platform.
+            huawei_entity_fallbacks = {
+                "sensor.batteries_state_of_capacity": "battery_soc",
+                "sensor.batteries_charge_discharge_power": "huawei_battery_power",
+                "sensor.power_meter_active_power": "huawei_grid_power",
+                "sensor.inverter_input_power": "pv_power",
+            }
+            for entity in entities:
+                if entity.get("platform") != "huawei_solar":
+                    continue
+                entity_id = str(entity.get("entity_id", ""))
+                bess_key = huawei_entity_fallbacks.get(entity_id)
+                if bess_key and bess_key not in huawei_sensors:
+                    huawei_sensors[bess_key] = entity_id
+            if huawei_sensors:
+                platform_sensors["huawei_solar"] = huawei_sensors
+            if not detected_platform:
+                detected_platform = "huawei_solar"
 
         if inverter_detected.get("solax"):
             solax_platforms = ["solax_modbus", "solax"]

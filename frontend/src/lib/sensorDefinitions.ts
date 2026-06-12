@@ -27,6 +27,7 @@ export const INVERTER_INTEGRATION_IDS: Record<string, string> = {
   solax_modbus_growatt_min: 'solax_modbus_growatt_min',
   solax_modbus_growatt_sph: 'solax_modbus_growatt_sph',
   solax_modbus_native: 'solax_modbus_native',
+  huawei_solar: 'huawei_solar',
 };
 
 // Platform IDs are now used consistently at all layers — no conversion needed.
@@ -38,6 +39,7 @@ export const VALID_PLATFORMS = [
   'solax_modbus_growatt_min',
   'solax_modbus_growatt_sph',
   'solax_modbus_native',
+  'huawei_solar',
 ] as const;
 
 export type PlatformId = typeof VALID_PLATFORMS[number];
@@ -55,6 +57,7 @@ export interface PerPlatformSensors {
   solax_modbus_growatt_min: Record<string, string>;
   solax_modbus_growatt_sph: Record<string, string>;
   solax_modbus_native: Record<string, string>;
+  huawei_solar: Record<string, string>;
   shared: Record<string, string>;
 }
 
@@ -73,6 +76,7 @@ export function emptyPerPlatformSensors(platform = ''): PerPlatformSensors {
     solax_modbus_growatt_min: {},
     solax_modbus_growatt_sph: {},
     solax_modbus_native: {},
+    huawei_solar: {},
     shared: {},
   };
 }
@@ -172,6 +176,28 @@ const GROWATT_CLOUD_SPH_SENSOR_GROUPS: SensorGroup[] = [
 ];
 
 export const INTEGRATIONS: IntegrationDef[] = [
+
+  {
+    id: 'huawei_solar',
+    name: 'Huawei Solar (Experimental — read-only)',
+    required: true,
+    description: 'Experimental read-only Huawei Solar support. Battery, grid, PV, and calculated house-load monitoring are supported; active battery control is not implemented and no Huawei settings or entities will be written.',
+    sensorGroups: [
+      {
+        name: 'Raw Huawei Inputs',
+        sensors: [
+          { key: 'battery_soc', label: 'Battery SOC', required: true },
+          { key: 'huawei_battery_power', label: 'Battery Charge/Discharge Power (signed)', required: true },
+          { key: 'huawei_grid_power', label: 'Grid Active Power (signed)', required: true },
+          { key: 'pv_power', label: 'Inverter Input Power (PV)', required: true },
+        ],
+      },
+      {
+        name: 'Derived Internal Channels',
+        sensors: [],
+      },
+    ],
+  },
   {
     id: 'growatt_server_min',
     name: 'Growatt Cloud (MIN)',

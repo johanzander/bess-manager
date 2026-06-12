@@ -25,6 +25,7 @@ export interface DiscoveryResult {
   solaxFound: boolean;
   solaxHasGrowattTou: boolean;
   solaxHasGrowattGen3: boolean;
+  huaweiSolarFound?: boolean;
   nordpoolFound: boolean;
   nordpoolArea: string | null;
   nordpoolCustomArea: string | null;
@@ -73,6 +74,7 @@ function isIntegrationFound(
   if (id === 'solax_modbus_growatt_min') return discovery.solaxHasGrowattTou;
   if (id === 'solax_modbus_growatt_sph') return discovery.solaxHasGrowattGen3;
   if (id === 'solax_modbus_native') return discovery.solaxFound;
+  if (id === 'huawei_solar') return !!discovery.huaweiSolarFound || discovery.detectedInverterPlatforms?.includes('huawei_solar') === true;
   if (id === 'nordpool') return discovery.nordpoolFound;
   if (id === 'phase_current') {
     return !!(shared['current_l1'] || shared['current_l2'] || shared['current_l3']);
@@ -143,7 +145,7 @@ function healthDot(
 // ---------------------------------------------------------------------------
 
 // IDs of inverter integrations — only one should be visible at a time.
-const INVERTER_IDS = new Set(['growatt_server_min', 'growatt_server_sph', 'solax_modbus_growatt_min', 'solax_modbus_growatt_sph', 'solax_modbus_native']);
+const INVERTER_IDS = new Set(['growatt_server_min', 'growatt_server_sph', 'solax_modbus_growatt_min', 'solax_modbus_growatt_sph', 'solax_modbus_native', 'huawei_solar']);
 
 interface Props {
   sensors: PerPlatformSensors;
@@ -193,6 +195,9 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
   const solaxDetected = wizardMode
     ? Boolean(discovery.solaxFound && !discovery.solaxHasGrowattTou && !discovery.solaxHasGrowattGen3)
     : Boolean((sensors.solax_modbus_native ?? {})['solax_power_control_mode'] || (sensors.solax_modbus_native ?? {})['solax_active_power']);
+  const huaweiDetected = wizardMode
+    ? Boolean(discovery.huaweiSolarFound || discovery.detectedInverterPlatforms?.includes('huawei_solar'))
+    : Boolean((sensors.huawei_solar ?? {})['huawei_battery_power'] || (sensors.huawei_solar ?? {})['huawei_grid_power']);
 
   /** Update a sensor value in the correct sub-dict (platform or shared). */
   const handleSensorChange = (integrationId: string, sensorKey: string, value: string) => {
@@ -216,6 +221,7 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
   const isModbusActive = inverterForm.inverterPlatform === 'solax_modbus_growatt_min'
     || inverterForm.inverterPlatform === 'solax_modbus_growatt_sph'
     || inverterForm.inverterPlatform === 'solax_modbus_native';
+  const isHuaweiActive = inverterForm.inverterPlatform === 'huawei_solar';
 
   const handleIntegrationChange = (integration: 'cloud' | 'modbus') => {
     if (integration === 'cloud') {
@@ -373,6 +379,34 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
             </Tabs>
           );
         })()}
+
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            disabled={wizardMode && !huaweiDetected}
+            onClick={() => {
+              onInverterChange({ ...inverterForm, inverterPlatform: 'huawei_solar' });
+              onChange({ ...sensors, platform: 'huawei_solar' });
+            }}
+            className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+              (wizardMode && !huaweiDetected)
+                ? 'opacity-40 cursor-not-allowed bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 text-gray-400 dark:text-gray-500'
+                : isHuaweiActive
+                  ? 'bg-purple-50 dark:bg-purple-900/30 border-purple-300 dark:border-purple-600 text-purple-700 dark:text-purple-300'
+                  : 'bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-gray-300 dark:hover:border-gray-500'
+            }`}
+          >
+            <span className="flex items-center gap-1.5">
+              {wizardMode && <span className={`h-1.5 w-1.5 rounded-full flex-shrink-0 ${huaweiDetected ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-500'}`} />}
+              Huawei Solar — Experimental read-only
+            </span>
+          </button>
+        </div>
+        {isHuaweiActive && (
+          <div className="mt-3 rounded-lg border border-purple-200 dark:border-purple-800 bg-purple-50/70 dark:bg-purple-900/20 p-3 text-xs text-purple-800 dark:text-purple-200">
+            Battery monitoring, grid/PV monitoring, and calculated house-load monitoring are supported. Active battery control is not implemented. No Huawei settings or entities will be written.
+          </div>
+        )}
 
         {/* ── Active inverter sensor groups (inside platform section) ── */}
         {activeInverterIntegration && (() => {

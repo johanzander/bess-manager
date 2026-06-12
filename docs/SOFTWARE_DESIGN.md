@@ -789,3 +789,48 @@ mock-HA values so runtime collections work correctly. The mock is fully
 self-contained — no external database access required.
 
 This design reflects the current quarterly-native implementation as of the latest refactoring, focusing on simplicity and correctness across all time-based operations.
+
+## Experimental Huawei Solar read-only architecture
+
+Huawei Solar support is implemented as a read-only inverter platform named `huawei_solar`. It follows the existing inverter-controller interface so the runtime can instantiate a controller, accept strategic intents, and continue monitoring without attempting active control.
+
+### Controller behavior
+
+`HuaweiSolarController` is intentionally safe by design:
+
+- `write_schedule_to_hardware()` is a no-op.
+- `_write_period_to_hardware()` is a no-op.
+- `sync_soc_limits()` is a no-op.
+- `read_and_initialize_from_hardware()` logs that Huawei Solar support is experimental and read-only.
+- Health checks validate monitoring sensors and report missing battery-control capability as disabled/not implemented rather than as a critical inverter failure.
+
+The controller never calls a Huawei service, never writes a Home Assistant entity, and does not add direct Modbus communication.
+
+### Sensor transformation layer
+
+Huawei exposes signed raw power sensors while the rest of BESS Manager expects separate non-negative channels. The shared transformation layer in `core/bess/huawei_sensor_transform.py` owns the rules:
+
+```text
+battery_charge_power = max(huawei_battery_power, 0)
+battery_discharge_power = max(-huawei_battery_power, 0)
+import_power = max(-huawei_grid_power, 0)
+export_power = max(huawei_grid_power, 0)
+local_load_power = max(pv_power - huawei_grid_power - huawei_battery_power, 0)
+```
+
+This layer also parses Home Assistant sensor states safely. `unknown`, `unavailable`, `None`, empty strings, malformed values, and missing entities become unavailable values rather than exceptions. Units reported as `kW` are converted to `W`; `W` values are preserved.
+
+### Live and historical data paths
+
+The same Huawei transformation rules are used by:
+
+- live Home Assistant sensor reads in `HomeAssistantAPIController`,
+- realtime dashboard power status,
+- calculated house-load reads,
+- InfluxDB power-history gap filling in `SensorCollector`.
+
+For historical gap filling, signed Huawei battery and grid power are split into positive charged/discharged and imported/exported energy buckets after the power samples have been averaged and converted to period energy.
+
+### Sensor timing diagnostics
+
+Calculated load can be slightly negative when Huawei PV, grid, and battery sensors update at different times. A small tolerance clamps those timing artifacts to zero. Significantly negative calculated load is still clamped to zero for safety, but it emits a rate-limited diagnostic warning because it can indicate sensor timing problems or incorrect sign conventions.

@@ -356,3 +356,43 @@ entities in the HA registry are available for selection.
 
 Both options provide identical BESS functionality (9-slot TOU scheduling,
 per-period grid charge control, SOC limits).
+
+## Huawei Solar (`huawei_solar`) — Experimental read-only
+
+Huawei Solar support is currently experimental and monitoring-only. BESS Manager can read Home Assistant sensors from the `huawei_solar` integration, normalize Huawei's signed power values into BESS Manager's internal non-negative power channels, and display realtime/history power flows.
+
+### Required raw Home Assistant sensors
+
+Configure these raw Huawei sensors for the `huawei_solar` platform:
+
+| BESS key | Example entity | Unit | Huawei convention |
+| --- | --- | --- | --- |
+| `battery_soc` | `sensor.batteries_state_of_capacity` | `%` | Battery state of charge |
+| `huawei_battery_power` | `sensor.batteries_charge_discharge_power` | `W` or `kW` | Positive = charging, negative = discharging |
+| `huawei_grid_power` | `sensor.power_meter_active_power` | `W` or `kW` | Negative = grid import, positive = grid export |
+| `pv_power` | `sensor.inverter_input_power` | `W` or `kW` | Positive PV production |
+
+The example entity IDs are fallbacks for a known reference installation. Users may configure different entity IDs. Discovery prefers Home Assistant entity-registry entries whose `platform` is `huawei_solar`.
+
+### Internal normalized channels
+
+BESS Manager derives these internal channels from the raw Huawei values:
+
+```text
+battery_charge_power = max(huawei_battery_power, 0)
+battery_discharge_power = max(-huawei_battery_power, 0)
+import_power = max(-huawei_grid_power, 0)
+export_power = max(huawei_grid_power, 0)
+local_load_power = max(pv_power - huawei_grid_power - huawei_battery_power, 0)
+```
+
+The raw signed Huawei power entities remain separately configurable. The same raw entity is not configured directly as both positive internal channels; the shared Huawei normalization layer performs the sign split for live reads, realtime status, calculated house load, and power-history gap filling.
+
+### Limitations and caveats
+
+- No active battery control is implemented.
+- BESS Manager does not call Huawei services.
+- BESS Manager does not write Home Assistant entities for Huawei Solar.
+- BESS Manager does not use direct Modbus communication for Huawei Solar.
+- Historical gap filling uses the same sign split and calculated-load formula as live reads.
+- Huawei sensors can update at slightly different times. BESS Manager tolerates small negative calculated house-load values caused by timing skew, but significant negative results produce diagnostics because they can indicate incorrect sign conventions or stale sensor timing.

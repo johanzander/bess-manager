@@ -2831,6 +2831,7 @@ async def run_setup_discovery():
                 "solax_modbus_growatt_min": ha.SOLAX_GROWATT_MIN_SUFFIX_MAP,
                 "solax_modbus_growatt_sph": ha.SOLAX_GROWATT_SPH_SUFFIX_MAP,
                 "solax_modbus_native": ha.SOLAX_NATIVE_SUFFIX_MAP,
+                "huawei_solar": ha.HUAWEI_SOLAR_SUFFIX_MAP,
             }
             suffix_map = _suffix_maps.get(effective_platform, ha.GROWATT_MIN_SUFFIX_MAP)
             all_bess_keys = list(set(suffix_map.values()))
@@ -2869,6 +2870,7 @@ async def run_setup_discovery():
                 "device_sn": integrations["device_sn"],
                 "growatt_device_id": integrations["growatt_device_id"],
                 "solax_found": integrations["solax_found"],
+                "huawei_solar_found": integrations.get("huawei_solar_found", False),
                 "solax_has_growatt_tou": integrations.get(
                     "solax_has_growatt_tou", False
                 ),

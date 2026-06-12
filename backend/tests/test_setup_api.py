@@ -444,6 +444,41 @@ class TestSetupComplete:
         call_args = complete_controller.settings_store.save_all.call_args[0][0]
         assert call_args["inverter"]["platform"] == "solax_modbus_growatt_sph"
 
+    def test_inverter_platform_set_for_huawei_solar(self, complete_controller):
+        _client.post(
+            "/api/setup/complete",
+            json=_full_wizard_payload(inverterPlatform="huawei_solar"),
+        )
+        call_args = complete_controller.settings_store.save_all.call_args[0][0]
+        assert call_args["inverter"]["platform"] == "huawei_solar"
+
+    def test_huawei_sensors_persisted_under_platform(self, complete_controller):
+        payload = _full_wizard_payload(
+            inverterPlatform="huawei_solar",
+            sensors={
+                "platform": "huawei_solar",
+                "growatt_server_min": {},
+                "growatt_server_sph": {},
+                "solax_modbus_growatt_min": {},
+                "solax_modbus_growatt_sph": {},
+                "solax_modbus_native": {},
+                "huawei_solar": {
+                    "battery_soc": "sensor.batteries_state_of_capacity",
+                    "huawei_battery_power": "sensor.batteries_charge_discharge_power",
+                    "huawei_grid_power": "sensor.power_meter_active_power",
+                    "pv_power": "sensor.inverter_input_power",
+                },
+                "shared": {},
+            },
+        )
+        _client.post("/api/setup/complete", json=payload)
+        call_args = complete_controller.settings_store.save_all.call_args[0][0]
+        assert call_args["sensors"]["platform"] == "huawei_solar"
+        assert (
+            call_args["sensors"]["huawei_solar"]["huawei_grid_power"]
+            == "sensor.power_meter_active_power"
+        )
+
     def test_growatt_inverter_type_not_written(self, complete_controller):
         """Setup should not write legacy growatt.inverter_type for any platform."""
         # Clear pre-existing legacy field to verify setup doesn't add it

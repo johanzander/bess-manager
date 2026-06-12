@@ -38,6 +38,7 @@ VALID_PLATFORMS = (
     "solax_modbus_growatt_min",
     "solax_modbus_growatt_sph",
     "solax_modbus_native",
+    "huawei_solar",
 )
 
 # Sensor keys that are shared across all platforms (not inverter-specific).
@@ -61,6 +62,7 @@ VALID_PLATFORMS = (
     "solax_modbus_growatt_min",
     "solax_modbus_growatt_sph",
     "solax_modbus_native",
+    "huawei_solar",
 )
 
 # Sensor keys that are shared across all platforms (not inverter-specific).
@@ -410,6 +412,7 @@ class SettingsStore:
                 "solax_modbus_growatt_min": {},
                 "solax_modbus_growatt_sph": {},
                 "solax_modbus_native": {},
+                "huawei_solar": {},
                 "shared": {},
             },
         }

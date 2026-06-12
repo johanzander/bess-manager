@@ -8,6 +8,7 @@ from datetime import timedelta
 from . import time_utils
 from .energy_flow_calculator import EnergyFlowCalculator
 from .health_check import perform_health_check
+from .huawei_sensor_transform import HuaweiPowerSnapshot, normalize_huawei_power
 from .influxdb_helper import get_power_sensor_data_batch, get_sensor_data_batch
 from .models import EnergyData
 from .settings import BatterySettings
@@ -66,9 +67,26 @@ class SensorCollector:
             "battery_charge_power": "battery_charged",
             "battery_discharge_power": "battery_discharged",
         }
+        if self._is_huawei_platform():
+            # Huawei exposes signed raw channels. These are resolved and later
+            # normalized; they are not mapped directly to positive BESS flows.
+            self.power_sensor_flow_map = {
+                "pv_power": "huawei_pv_power",
+                "huawei_grid_power": "huawei_grid_power",
+                "huawei_battery_power": "huawei_battery_power",
+            }
         self.power_sensors = self._resolve_power_sensor_ids()
         self._power_batch_cache: dict = {}  # {date: {period: {sensor: kwh_value}}}
         self._power_batch_cache_loaded_on: dict = {}
+
+    def _is_huawei_platform(self) -> bool:
+        """Return True when the active sensor map is Huawei Solar shaped."""
+        sensors = (
+            getattr(self.ha_controller, "sensors", {}) if self.ha_controller else {}
+        )
+        if not isinstance(sensors, dict):
+            return False
+        return "huawei_battery_power" in sensors or "huawei_grid_power" in sensors
 
     def _resolve_sensor_entity_ids(self) -> list[str]:
         """Resolve sensor keys to entity IDs using the controller's abstraction layer.
@@ -545,12 +563,47 @@ class SensorCollector:
         if not flows:
             return None
 
+        if self._is_huawei_platform():
+            flows = self._normalize_huawei_power_flows(flows)
+            if not flows:
+                return None
+
         logger.debug(
             "Period %d: Power-based flows: %s",
             period,
             {k: f"{v:.4f}" for k, v in flows.items()},
         )
         return flows
+
+    def _normalize_huawei_power_flows(
+        self, raw_flows: dict[str, float]
+    ) -> dict[str, float]:
+        """Split Huawei signed power-derived kWh into BESS flow buckets."""
+        # get_power_sensor_data_batch already converts mean W to kWh for the
+        # 15-minute period. Applying the same sign equations to kWh preserves
+        # the live-read normalization semantics.
+        normalized = normalize_huawei_power(
+            HuaweiPowerSnapshot(
+                battery_power_w=raw_flows.get("huawei_battery_power"),
+                grid_power_w=raw_flows.get("huawei_grid_power"),
+                pv_power_w=raw_flows.get("huawei_pv_power"),
+            ),
+            load_tolerance_w=0.025,
+        )
+        result: dict[str, float] = {}
+        if raw_flows.get("huawei_pv_power") is not None:
+            result["solar_production"] = max(raw_flows["huawei_pv_power"], 0.0)
+        if normalized.import_power is not None:
+            result["import_from_grid"] = normalized.import_power
+        if normalized.export_power is not None:
+            result["export_to_grid"] = normalized.export_power
+        if normalized.battery_charge_power is not None:
+            result["battery_charged"] = normalized.battery_charge_power
+        if normalized.battery_discharge_power is not None:
+            result["battery_discharged"] = normalized.battery_discharge_power
+        if normalized.local_load_power is not None:
+            result["load_consumption"] = normalized.local_load_power
+        return result
 
     def _get_period_readings(
         self, period: int, date_offset: int = 0

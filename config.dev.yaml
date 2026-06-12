@@ -1,0 +1,35 @@
+name: "BESS Manager"
+description: "Battery Energy Storage System optimization and management"
+version: "9.3.0"
+slug: "bess_manager"
+init: false
+arch:
+  - aarch64
+  - amd64
+  - armhf
+  - armv7
+  - i386
+startup: application
+boot: auto
+ports:
+  8080/tcp: 8080
+ingress: true
+ingress_port: 8080
+panel_icon: mdi:battery-charging
+panel_title: BESS Manager
+panel_admin: true
+hassio_api: true
+homeassistant_api: true
+auth_api: true
+options:
+  influxdb:
+    url: "http://homeassistant.local:8086/api/v2/query"
+    bucket: "home_assistant/autogen" # Note: default (if not specified in HA) is homeassistant/autogen
+    username: "your_db_username_here"
+    password: "your_db_password_here"
+schema:
+  influxdb:
+    url: str
+    bucket: str
+    username: str
+    password: str

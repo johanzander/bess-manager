@@ -2,8 +2,8 @@
 # Script to build and package the BESS add-on for Home Assistant
 #
 # NOTE: This script is for LOCAL installation only.
-# For GitHub/HACS installation, Home Assistant will build directly from the
-# repository root when adding: https://github.com/johanzander/bess-manager
+# For GitHub-based installation, Home Assistant pulls pre-built images from GHCR
+# (configured via bess_manager/config.yaml image field).
 
 set -e
 
@@ -35,7 +35,7 @@ cp backend/settings_store.py "$BUILD_DIR/settings_store.py"
 cp backend/settings_store.py "$BUILD_DIR/settings_store.py"
 cp backend/requirements.txt "$BUILD_DIR/requirements.txt"
 cp backend/run.sh "$BUILD_DIR/run.sh"
-cp config.yaml "$BUILD_DIR/config.yaml"
+cp config.dev.yaml "$BUILD_DIR/config.yaml"
 cp README.md "$BUILD_DIR/README.md"
 cp CHANGELOG.md "$BUILD_DIR/CHANGELOG.md"
 

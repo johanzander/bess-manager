@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 UNAVAILABLE_STATES = {"", "unknown", "unavailable", "none", "null"}
 DEFAULT_LOAD_TOLERANCE_W = 100.0
 _WARNING_INTERVAL_SECONDS = 300.0
-_last_negative_load_warning = 0.0
+_last_negative_load_warning: float | None = None
 
 
 @dataclass(frozen=True)
@@ -115,9 +115,18 @@ def normalize_huawei_power(
     )
 
 
+def reset_warning_state() -> None:
+    """Reset module-level Huawei warning rate-limit state for isolated tests."""
+    global _last_negative_load_warning
+    _last_negative_load_warning = None
+
+
 def _rate_limited_warning(message: str) -> None:
     global _last_negative_load_warning
     now = monotonic()
-    if now - _last_negative_load_warning >= _WARNING_INTERVAL_SECONDS:
+    if (
+        _last_negative_load_warning is None
+        or now - _last_negative_load_warning >= _WARNING_INTERVAL_SECONDS
+    ):
         logger.warning(message)
         _last_negative_load_warning = now

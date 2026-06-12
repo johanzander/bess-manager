@@ -9,10 +9,19 @@ from core.bess.huawei_sensor_transform import (
     HuaweiPowerSnapshot,
     normalize_huawei_power,
     parse_ha_numeric_power,
+    reset_warning_state,
 )
 from core.bess.huawei_solar_controller import HuaweiSolarController
 from core.bess.sensor_collector import SensorCollector
 from core.bess.settings import BatterySettings
+
+
+@pytest.fixture(autouse=True)
+def reset_huawei_warning_rate_limits():
+    """Keep Huawei warning assertions independent of earlier tests."""
+    reset_warning_state()
+    yield
+    reset_warning_state()
 
 
 def test_huawei_platform_is_valid_and_controller_created():

@@ -132,7 +132,7 @@ class HomeAssistantAPIController:
 
         # Runtime failure tracker (injected by BatterySystemManager)
         self.failure_tracker = None
-        self._last_huawei_house_load_fallback_warning = 0.0
+        self._last_huawei_house_load_fallback_warning: float | None = None
 
         # Create persistent session for connection reuse (400x faster)
         self.session = requests.Session()
@@ -1193,7 +1193,8 @@ class HomeAssistantAPIController:
         """Log direct house-load fallback warnings without flooding the log."""
         now = time.monotonic()
         if (
-            now - self._last_huawei_house_load_fallback_warning
+            self._last_huawei_house_load_fallback_warning is None
+            or now - self._last_huawei_house_load_fallback_warning
             >= self.HUAWEI_HOUSE_LOAD_FALLBACK_WARNING_INTERVAL_SECONDS
         ):
             logger.warning(

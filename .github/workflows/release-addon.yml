@@ -55,6 +55,7 @@ jobs:
           file: Dockerfile
           platforms: ${{ matrix.platform }}
           push: true
+          provenance: false
           build-args: |
             BUILD_FROM=${{ matrix.base_image }}
             BUILD_VERSION=${{ steps.version.outputs.version }}

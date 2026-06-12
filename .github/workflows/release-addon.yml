@@ -20,7 +20,6 @@ jobs:
         arch:
           - aarch64
           - amd64
-          - armv7
         include:
           - arch: aarch64
             platform: linux/arm64
@@ -28,9 +27,6 @@ jobs:
           - arch: amd64
             platform: linux/amd64
             base_image: ghcr.io/home-assistant/amd64-base:3.19
-          - arch: armv7
-            platform: linux/arm/v7
-            base_image: ghcr.io/home-assistant/armv7-base:3.19
 
     steps:
       - uses: actions/checkout@v5

@@ -25,10 +25,10 @@ from .exceptions import (
 )
 from .growatt_min_controller import GrowattMinController
 from .growatt_sph_controller import GrowattSphController
-from .huawei_solar_controller import HuaweiSolarController
 from .ha_api_controller import HomeAssistantAPIController
 from .health_check import run_system_health_checks
 from .historical_data_store import HistoricalDataStore
+from .huawei_solar_controller import HuaweiSolarController
 from .influxdb_helper import get_power_sensor_data_batch, is_influxdb_configured
 from .inverter_controller import InverterController
 from .models import (

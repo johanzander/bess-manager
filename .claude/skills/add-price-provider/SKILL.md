@@ -94,10 +94,30 @@ We have beta testers who export their config + entity registry. The flow:
 12. **`backend/tests/test_settings_contracts.py`** + setup-wizard scenario test
     (`backend/tests/test_setup_wizard_scenarios.py`) for the new provider key.
 
+### Frontend E2E (Playwright wizard — don't skip this)
+
+The discovery regression test above is backend-only. The **full frontend flow**
+(auto-select provider, show provider-specific fields, complete + save) is
+covered by the Playwright wizard E2E, parameterised by the `SCENARIO` env var.
+Wire the new provider in:
+13a. **`scripts/mock_ha/scenarios/ci-wizard-<provider>.json`** — the mock-HA
+    scenario (already created as the regression fixture above; the same file
+    drives both the backend discovery test and this E2E).
+13b. **`e2e/tests/wizard-expectations.ts`** — add a `ci-wizard-<provider>`
+    expectation and extend the `autoSelectedProvider` union.
+13c. **`e2e/tests/setup-wizard.spec.ts`** — add the provider's radio label to
+    `PROVIDER_LABEL` and a branch in "provider-specific fields shown correctly".
+13d. **`e2e/run-e2e.sh`** `WIZARD_SCENARIOS` **and** `.github/workflows/ci.yml`
+    (per-scenario step) — run `SCENARIO=ci-wizard-<provider>`.
+    Verify locally: bring up `docker-compose.ci.yml` with the scenario, confirm
+    `POST /api/setup/discover` reports the provider, then
+    `cd e2e && BESS_PORT=8080 SCENARIO=ci-wizard-<provider> npx playwright test --project=wizard`.
+
 ### Docs
-13. **`docs/USER_GUIDE.md`** — add a "Provider: <name>" subsection (prereqs,
+14. **`docs/USER_GUIDE.md`** — add a "Provider: <name>" subsection (prereqs,
     entity, how it works) alongside the existing provider sections (~line 258).
-14. **`README.md`** — add the provider to the supported-providers list (~line 56).
+15. **`README.md`** — add the provider to the supported-providers list (~line 56).
+16. **`CHANGELOG.md`** — add an entry (project rule: never skip).
 
 ## Gate before commit / PR
 
@@ -129,4 +149,6 @@ confirms (per `docs/agents/memory/` maturity conventions).
 | Frontend wizard | `frontend/src/pages/SetupWizardPage.tsx` |
 | Discovery tests | `core/bess/tests/unit/test_registry_discovery.py`, `test_scenario_discovery.py` |
 | Settings tests | `backend/tests/test_settings_contracts.py`, `test_setup_wizard_scenarios.py` |
-| User docs | `docs/USER_GUIDE.md`, `README.md` |
+| Mock-HA scenario | `scripts/mock_ha/scenarios/ci-wizard-<provider>.json` |
+| Frontend E2E | `e2e/tests/wizard-expectations.ts`, `e2e/tests/setup-wizard.spec.ts`, `e2e/run-e2e.sh`, `.github/workflows/ci.yml` |
+| User docs | `docs/USER_GUIDE.md`, `README.md`, `CHANGELOG.md` |

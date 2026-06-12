@@ -97,7 +97,7 @@ function integrationSensorCounts(
   let missingRequired = 0;
   for (const group of integration.sensorGroups) {
     for (const s of group.sensors) {
-      total++;
+      if (s.required || sensorMap[s.key]) total++;
       if (sensorMap[s.key]) configured++;
       else if (s.required) missingRequired++;
     }
@@ -453,17 +453,32 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
                               <span className="text-[9px] text-orange-500 dark:text-orange-400 font-medium">*</span>
                             )}
                           </div>
-                          <input
-                            type="text"
-                            value={val}
-                            placeholder={isMissing ? 'Not detected — enter entity ID' : ''}
-                            onChange={e => handleSensorChange(intg.id, s.key, e.target.value)}
-                            className={`flex-1 text-xs px-2 py-1 rounded border font-mono ${
-                              isMissing && s.required
-                                ? 'border-orange-300 dark:border-orange-600 bg-white dark:bg-gray-800 text-orange-700 dark:text-orange-300 placeholder-orange-400'
-                                : 'border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200'
-                            } focus:outline-none focus:ring-1 focus:ring-blue-400`}
-                          />
+                          <div className="flex-1">
+                            <input
+                              type="text"
+                              value={val}
+                              placeholder={
+                                s.key === 'huawei_house_load_power_entity'
+                                  ? 'sensor.house_load_power_calc'
+                                  : isMissing
+                                    ? 'Not detected — enter entity ID'
+                                    : ''
+                              }
+                              onChange={e =>
+                                handleSensorChange(intg.id, s.key, e.target.value)
+                              }
+                              className={`w-full text-xs px-2 py-1 rounded border font-mono ${
+                                isMissing && s.required
+                                  ? 'border-orange-300 dark:border-orange-600 bg-white dark:bg-gray-800 text-orange-700 dark:text-orange-300 placeholder-orange-400'
+                                  : 'border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200'
+                              } focus:outline-none focus:ring-1 focus:ring-blue-400`}
+                            />
+                            {s.key === 'huawei_house_load_power_entity' && (
+                              <p className="mt-1 text-[10px] text-gray-500 dark:text-gray-400">
+                                Optional. Use a positive instantaneous house consumption power sensor in W; kW is also accepted and normalized internally. If empty or invalid, BESS calculates house load from the raw Huawei inputs.
+                              </p>
+                            )}
+                          </div>
                         </div>
                       );
                     })}
@@ -558,8 +573,16 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
                             <input
                               type="text"
                               value={val}
-                              placeholder={isMissing ? 'Not detected — enter entity ID' : ''}
-                              onChange={e => handleSensorChange(intg.id, s.key, e.target.value)}
+                              placeholder={
+                                s.key === 'huawei_house_load_power_entity'
+                                  ? 'sensor.house_load_power_calc'
+                                  : isMissing
+                                    ? 'Not detected — enter entity ID'
+                                    : ''
+                              }
+                              onChange={e =>
+                                handleSensorChange(intg.id, s.key, e.target.value)
+                              }
                               className={`flex-1 text-xs px-2 py-1 rounded border font-mono ${
                                 isMissing && s.required
                                   ? 'border-orange-300 dark:border-orange-600 bg-white dark:bg-gray-800 text-orange-700 dark:text-orange-300 placeholder-orange-400'

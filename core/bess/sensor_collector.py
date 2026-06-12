@@ -75,6 +75,12 @@ class SensorCollector:
                 "huawei_grid_power": "huawei_grid_power",
                 "huawei_battery_power": "huawei_battery_power",
             }
+            if getattr(self.ha_controller, "sensors", {}).get(
+                "huawei_house_load_power_entity"
+            ):
+                self.power_sensor_flow_map["huawei_house_load_power_entity"] = (
+                    "huawei_house_load_power"
+                )
         self.power_sensors = self._resolve_power_sensor_ids()
         self._power_batch_cache: dict = {}  # {date: {period: {sensor: kwh_value}}}
         self._power_batch_cache_loaded_on: dict = {}
@@ -587,6 +593,7 @@ class SensorCollector:
                 battery_power_w=raw_flows.get("huawei_battery_power"),
                 grid_power_w=raw_flows.get("huawei_grid_power"),
                 pv_power_w=raw_flows.get("huawei_pv_power"),
+                direct_house_load_power_w=raw_flows.get("huawei_house_load_power"),
             ),
             load_tolerance_w=0.025,
         )

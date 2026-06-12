@@ -132,6 +132,7 @@ class HomeAssistantAPIController:
 
         # Runtime failure tracker (injected by BatterySystemManager)
         self.failure_tracker = None
+        self._last_huawei_house_load_fallback_warning = 0.0
 
         # Create persistent session for connection reuse (400x faster)
         self.session = requests.Session()
@@ -549,6 +550,8 @@ class HomeAssistantAPIController:
         "power_meter_active_power": "huawei_grid_power",
         "inverter_input_power": "pv_power",
     }
+    HUAWEI_OPTIONAL_HOUSE_LOAD_KEY: ClassVar[str] = "huawei_house_load_power_entity"
+    HUAWEI_HOUSE_LOAD_FALLBACK_WARNING_INTERVAL_SECONDS: ClassVar[float] = 300.0
 
     # ── Per-platform suffix maps for solax_modbus discovery ─────────────
     #
@@ -1140,16 +1143,47 @@ class HomeAssistantAPIController:
             or "huawei_grid_power" in self.sensors
         )
 
+    def _get_huawei_direct_house_load_power(self) -> float | None:
+        """Return optional direct Huawei house load in W, or None to derive it."""
+        sensor_key = self.HUAWEI_OPTIONAL_HOUSE_LOAD_KEY
+        if not self.sensors.get(sensor_key):
+            return None
+
+        house_load, unit = self._get_sensor_value_with_unit(sensor_key)
+        if house_load is not None:
+            return abs(house_load)
+
+        self._warn_huawei_house_load_fallback(
+            f"optional house-load sensor {self.sensors.get(sensor_key)!r} "
+            f"returned no valid numeric W/kW state (unit={unit!r})"
+        )
+        return None
+
+    def _warn_huawei_house_load_fallback(self, reason: str) -> None:
+        """Log direct house-load fallback warnings without flooding the log."""
+        now = time.monotonic()
+        if (
+            now - self._last_huawei_house_load_fallback_warning
+            >= self.HUAWEI_HOUSE_LOAD_FALLBACK_WARNING_INTERVAL_SECONDS
+        ):
+            logger.warning(
+                "Huawei Solar: falling back to calculated house load because %s.",
+                reason,
+            )
+            self._last_huawei_house_load_fallback_warning = now
+
     def _get_huawei_normalized_power(self):
         """Read and normalize Huawei raw power sensors for internal channels."""
         battery_power, _ = self._get_sensor_value_with_unit("huawei_battery_power")
         grid_power, _ = self._get_sensor_value_with_unit("huawei_grid_power")
         pv_power, _ = self._get_sensor_value_with_unit("pv_power")
+        direct_house_load = self._get_huawei_direct_house_load_power()
         return normalize_huawei_power(
             HuaweiPowerSnapshot(
                 battery_power_w=battery_power,
                 grid_power_w=grid_power,
                 pv_power_w=pv_power,
+                direct_house_load_power_w=direct_house_load,
             )
         )
 

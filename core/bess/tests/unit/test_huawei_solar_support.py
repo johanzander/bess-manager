@@ -158,3 +158,162 @@ def test_huawei_history_signed_power_split_and_load_formula():
     assert flows["import_from_grid"] == pytest.approx(0.2)
     assert flows["export_to_grid"] == 0
     assert flows["load_consumption"] == pytest.approx(1.5)
+
+
+def _huawei_controller_with_states(states):
+    ha = HomeAssistantAPIController(
+        "http://ha",
+        "token",
+        sensor_config={
+            "huawei_battery_power": "sensor.battery",
+            "huawei_grid_power": "sensor.grid",
+            "pv_power": "sensor.pv",
+            "huawei_house_load_power_entity": "sensor.house_load",
+        },
+    )
+
+    def fake_api(method, path, **kwargs):
+        entity_id = path.rsplit("/", 1)[-1]
+        return states[entity_id]
+
+    ha._api_request = fake_api
+    return ha
+
+
+def test_huawei_direct_house_load_sensor_w_is_used():
+    ha = _huawei_controller_with_states(
+        {
+            "sensor.battery": {
+                "state": "200",
+                "attributes": {"unit_of_measurement": "W"},
+            },
+            "sensor.grid": {
+                "state": "-100",
+                "attributes": {"unit_of_measurement": "W"},
+            },
+            "sensor.pv": {"state": "1000", "attributes": {"unit_of_measurement": "W"}},
+            "sensor.house_load": {
+                "state": "1234",
+                "attributes": {"unit_of_measurement": "W"},
+            },
+        }
+    )
+
+    assert ha.get_local_load_power() == 1234
+
+
+def test_huawei_direct_house_load_sensor_kw_is_used_as_watts():
+    ha = _huawei_controller_with_states(
+        {
+            "sensor.battery": {
+                "state": "200",
+                "attributes": {"unit_of_measurement": "W"},
+            },
+            "sensor.grid": {
+                "state": "-100",
+                "attributes": {"unit_of_measurement": "W"},
+            },
+            "sensor.pv": {"state": "1000", "attributes": {"unit_of_measurement": "W"}},
+            "sensor.house_load": {
+                "state": "1.25",
+                "attributes": {"unit_of_measurement": "kW"},
+            },
+        }
+    )
+
+    assert ha.get_local_load_power() == 1250
+
+
+@pytest.mark.parametrize("state", ["unavailable", "not-a-number"])
+def test_huawei_invalid_direct_house_load_falls_back_to_calculated(state, caplog):
+    ha = _huawei_controller_with_states(
+        {
+            "sensor.battery": {
+                "state": "200",
+                "attributes": {"unit_of_measurement": "W"},
+            },
+            "sensor.grid": {
+                "state": "-100",
+                "attributes": {"unit_of_measurement": "W"},
+            },
+            "sensor.pv": {"state": "1000", "attributes": {"unit_of_measurement": "W"}},
+            "sensor.house_load": {
+                "state": state,
+                "attributes": {"unit_of_measurement": "W"},
+            },
+        }
+    )
+
+    with caplog.at_level(logging.WARNING):
+        assert ha.get_local_load_power() == 900
+    assert "falling back to calculated house load" in caplog.text
+
+
+def test_huawei_no_direct_house_load_preserves_calculated_behavior():
+    ha = HomeAssistantAPIController(
+        "http://ha",
+        "token",
+        sensor_config={
+            "huawei_battery_power": "sensor.battery",
+            "huawei_grid_power": "sensor.grid",
+            "pv_power": "sensor.pv",
+        },
+    )
+
+    def fake_api(method, path, **kwargs):
+        entity_id = path.rsplit("/", 1)[-1]
+        return {
+            "sensor.battery": {
+                "state": "200",
+                "attributes": {"unit_of_measurement": "W"},
+            },
+            "sensor.grid": {
+                "state": "-100",
+                "attributes": {"unit_of_measurement": "W"},
+            },
+            "sensor.pv": {"state": "1000", "attributes": {"unit_of_measurement": "W"}},
+        }[entity_id]
+
+    ha._api_request = fake_api
+
+    assert ha.get_local_load_power() == 900
+
+
+def test_huawei_house_load_sensor_not_required_by_health_validation():
+    ha = HomeAssistantAPIController(
+        "http://ha",
+        "token",
+        sensor_config={
+            "battery_soc": "sensor.soc",
+            "huawei_battery_power": "sensor.battery",
+            "huawei_grid_power": "sensor.grid",
+            "pv_power": "sensor.pv",
+        },
+    )
+
+    info = ha.get_method_sensor_info("get_local_load_power")
+
+    assert info["status"] == "ok"
+    assert "huawei_house_load_power_entity" not in info["entity_id"]
+
+
+def test_huawei_history_direct_house_load_overrides_formula():
+    ha = Mock()
+    ha.sensors = {
+        "huawei_battery_power": "sensor.battery",
+        "huawei_grid_power": "sensor.grid",
+        "pv_power": "sensor.pv",
+        "huawei_house_load_power_entity": "sensor.house_load",
+    }
+    collector = SensorCollector(ha, BatterySettings())
+
+    flows = collector._normalize_huawei_power_flows(
+        {
+            "huawei_battery_power": 0.2,
+            "huawei_grid_power": -0.1,
+            "huawei_pv_power": 1.0,
+            "huawei_house_load_power": 0.42,
+        }
+    )
+
+    assert flows["load_consumption"] == pytest.approx(0.42)

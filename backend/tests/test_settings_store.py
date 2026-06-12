@@ -248,6 +248,26 @@ class TestApplyDiscovered:
 
         assert store.get_active_sensors()["battery_soc"] == "sensor.battery_soc"
 
+    def test_huawei_optional_house_load_sensor_is_returned_when_active(
+        self, tmp_path, monkeypatch
+    ):
+        """Huawei optional direct house-load entity persists in active sensors."""
+        _patch_path(tmp_path, monkeypatch)
+        store = SettingsStore()
+        store.load({})
+        sensors = store.get_section("sensors")
+        sensors["platform"] = "huawei_solar"
+        sensors["huawei_solar"] = {
+            "battery_soc": "sensor.batteries_state_of_capacity",
+            "huawei_house_load_power_entity": "sensor.house_load_power_calc",
+        }
+        store.save_section("sensors", sensors)
+
+        assert (
+            store.get_active_sensors()["huawei_house_load_power_entity"]
+            == "sensor.house_load_power_calc"
+        )
+
     def test_discovery_overwrites_existing_sensor(self, tmp_path, monkeypatch):
         """A non-empty discovered entity ID replaces the existing sensor value.
 

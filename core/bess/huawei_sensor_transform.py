@@ -21,6 +21,7 @@ class HuaweiPowerSnapshot:
     battery_power_w: float | None = None
     grid_power_w: float | None = None
     pv_power_w: float | None = None
+    direct_house_load_power_w: float | None = None
 
 
 @dataclass(frozen=True)
@@ -71,6 +72,7 @@ def normalize_huawei_power(
     - battery power: positive = charging, negative = discharging
     - grid power: negative = import, positive = export
     - calculated load: pv - grid - battery
+    - optional direct house load: positive instantaneous consumption
     """
     battery_charge = battery_discharge = None
     if snapshot.battery_power_w is not None:
@@ -84,7 +86,9 @@ def normalize_huawei_power(
 
     local_load = None
     diagnostic = None
-    if (
+    if snapshot.direct_house_load_power_w is not None:
+        local_load = abs(snapshot.direct_house_load_power_w)
+    elif (
         snapshot.pv_power_w is not None
         and snapshot.grid_power_w is not None
         and snapshot.battery_power_w is not None

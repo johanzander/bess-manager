@@ -181,7 +181,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
     id: 'huawei_solar',
     name: 'Huawei Solar (Experimental — read-only)',
     required: true,
-    description: 'Experimental read-only Huawei Solar support. Battery, grid, PV, and calculated house-load monitoring are supported; active battery control is not implemented and no Huawei settings or entities will be written.',
+    description: 'Experimental read-only Huawei Solar support. Battery, grid, PV, and calculated house-load monitoring are supported; an optional direct house-load sensor can be used when available. Active battery control is not implemented and no Huawei settings or entities will be written.',
     sensorGroups: [
       {
         name: 'Raw Huawei Inputs',
@@ -193,8 +193,10 @@ export const INTEGRATIONS: IntegrationDef[] = [
         ],
       },
       {
-        name: 'Derived Internal Channels',
-        sensors: [],
+        name: 'Optional Direct House Load',
+        sensors: [
+          { key: 'huawei_house_load_power_entity', label: 'House Load Power', required: false },
+        ],
       },
     ],
   },

@@ -19,6 +19,8 @@ interface Props {
 
 export function HomeFormSection({ form, onChange, sensors }: Props) {
   const haStatsSensorConfigured = Boolean(sensors?.['lifetime_load_consumption']);
+  const localLoadSensorConfigured = Boolean(sensors?.['local_load_power']);
+  const chargeRateSensorConfigured = Boolean(sensors?.['battery_charging_power_rate']);
   return (
     <div className="space-y-3">
       <SectionCard
@@ -30,11 +32,17 @@ export function HomeFormSection({ form, onChange, sensors }: Props) {
           [
             { value: 'fixed', label: 'Fixed value' },
             { value: 'sensor', label: 'Home Assistant sensor' },
-            { value: 'influxdb_7d_avg', label: 'InfluxDB (requires InfluxDB integration)' },
+            { value: 'influxdb_7d_avg', label: 'InfluxDB (requires InfluxDB integration)', disabled: !localLoadSensorConfigured },
             { value: 'ha_statistics', label: 'HA Statistics (7-day hourly profile)', disabled: !haStatsSensorConfigured },
           ],
           form.consumptionStrategy,
           v => onChange({ ...form, consumptionStrategy: v }),
+        )}
+        {!localLoadSensorConfigured && (
+          <p className="text-xs text-amber-600 dark:text-amber-400 pt-1">
+            InfluxDB requires the <strong>Local Load Power</strong> sensor to be configured in the{' '}
+            <strong>Sensors</strong> tab. This sensor is not available on all inverter platforms (e.g. Growatt SPH).
+          </p>
         )}
         {!haStatsSensorConfigured && (
           <p className="text-xs text-amber-600 dark:text-amber-400 pt-1">
@@ -77,8 +85,15 @@ export function HomeFormSection({ form, onChange, sensors }: Props) {
         title="Power Monitoring"
         description="Monitors real-time load and limits battery charge power to prevent blowing the main fuse. Enable to configure."
       >
+        {!chargeRateSensorConfigured && (
+          <p className="text-xs text-amber-600 dark:text-amber-400">
+            Fuse protection requires a <strong>Battery Charging Power Rate</strong> entity, which is not
+            available on all inverter platforms (e.g. Growatt SPH).
+          </p>
+        )}
         {toggle('Enable fuse protection', form.powerMonitoringEnabled,
-          v => onChange({ ...form, powerMonitoringEnabled: v }))}
+          v => onChange({ ...form, powerMonitoringEnabled: v }),
+          { disabled: !chargeRateSensorConfigured })}
         {form.powerMonitoringEnabled && (
           <>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-1">

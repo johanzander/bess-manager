@@ -7,6 +7,7 @@ Tests cover:
 - Derived lifetime sensor fallbacks (GEN3/GEN4)
 """
 
+from typing import ClassVar
 from unittest.mock import patch
 
 from core.bess.ha_api_controller import HomeAssistantAPIController
@@ -1141,3 +1142,164 @@ class TestDiscoverOctopusEntities:
             "exportToday": "event.current_day_rates_export_electricity_21L4726831_2000060563359",
             "exportTomorrow": "event.next_day_rates_export_electricity_21L4726831_2000060563359",
         }
+
+
+# ---------------------------------------------------------------------------
+# Frontend ↔ backend sensor key consistency
+# ---------------------------------------------------------------------------
+
+
+class TestFrontendSensorKeysMatchBackend:
+    """Every sensor key shown in the frontend UI must exist in the backend suffix map.
+
+    Prevents showing "Not detected" fields for sensors that don't exist on a
+    platform (e.g. local_load_power on SPH cloud).
+    """
+
+    # Map frontend platform IDs to backend suffix map class attributes.
+    PLATFORM_TO_SUFFIX_MAP: ClassVar[dict[str, str]] = {
+        "growatt_server_min": "GROWATT_MIN_SUFFIX_MAP",
+        "growatt_server_sph": "GROWATT_SPH_SUFFIX_MAP",
+        "solax_modbus_native": "SOLAX_NATIVE_SUFFIX_MAP",
+        "solax_modbus_growatt_min": "SOLAX_GROWATT_MIN_SUFFIX_MAP",
+        "solax_modbus_growatt_sph": "SOLAX_GROWATT_SPH_SUFFIX_MAP",
+    }
+
+    @staticmethod
+    def _parse_frontend_sensor_keys() -> dict[str, set[str]]:
+        """Parse sensorDefinitions.ts to extract sensor keys per platform.
+
+        Returns dict mapping platform_id -> set of sensor keys shown in the UI.
+        """
+        import re
+        from pathlib import Path
+
+        ts_path = (
+            Path(__file__).parents[4]
+            / "frontend"
+            / "src"
+            / "lib"
+            / "sensorDefinitions.ts"
+        )
+        source = ts_path.read_text()
+
+        result: dict[str, set[str]] = {}
+
+        # Find all { id: 'xxx', ... sensorGroups: ... } blocks
+        # and extract key: 'yyy' from each.
+        blocks = re.split(r"\{\s*\n\s*id:\s*'", source)
+        for block in blocks[1:]:  # skip preamble before first id
+            platform_match = re.match(r"([^']+)'", block)
+            if not platform_match:
+                continue
+            platform_id = platform_match.group(1)
+
+            # Skip non-inverter integrations
+            if platform_id in (
+                "nordpool",
+                "solar_forecast",
+                "consumption_forecast",
+                "phase_current",
+                "discharge_inhibit",
+                "weather",
+            ):
+                continue
+
+            # Check if sensorGroups references a named constant
+            groups_ref = re.search(r"sensorGroups:\s*(\w+)", block)
+            if groups_ref:
+                const_name = groups_ref.group(1)
+                # Find the constant definition in the full source
+                const_match = re.search(
+                    rf"const\s+{const_name}.*?=\s*\[(.*?)\];",
+                    source,
+                    re.DOTALL,
+                )
+                if const_match:
+                    search_text = const_match.group(1)
+                    # The constant may reference other constants — expand them
+                    for ref in re.findall(
+                        r"\b([A-Z_]+(?:_MONITORING|_LIFETIME))\b", search_text
+                    ):
+                        ref_match = re.search(
+                            rf"const\s+{ref}.*?sensors:\s*\[(.*?)\]",
+                            source,
+                            re.DOTALL,
+                        )
+                        if ref_match:
+                            search_text += ref_match.group(1)
+                else:
+                    search_text = block
+            else:
+                search_text = block
+
+            keys = set(re.findall(r"key:\s*'([^']+)'", search_text))
+            if keys:
+                result[platform_id] = keys
+
+        return result
+
+    # Sensor keys that exist in backend suffix maps but are intentionally
+    # NOT shown in the frontend wizard UI.  Every entry needs a reason.
+    #
+    # - lifetime_system_production: discoverable but BESS derives it from
+    #   lifetime_solar_energy via EnergyFlowCalculator — no config needed.
+    # - lifetime_self_consumption: Growatt cloud only, always derived.
+    # - TOU time slots 2-9: managed by backend, only slot 1 shown in UI.
+    BACKEND_ONLY_KEYS: ClassVar[dict[str, set[str]]] = {
+        "growatt_server_min": {
+            "lifetime_system_production",
+            "lifetime_self_consumption",
+        },
+        "solax_modbus_growatt_min": {
+            "lifetime_system_production",
+            *(
+                f"tou_time_{n}_{f}"
+                for n in range(2, 10)
+                for f in ("enabled", "begin", "end", "mode", "update")
+            ),
+        },
+        "solax_modbus_native": {"lifetime_system_production"},
+    }
+
+    def test_all_frontend_keys_exist_in_suffix_map(self):
+        """For each platform, every frontend sensor key must be discoverable."""
+        frontend_keys = self._parse_frontend_sensor_keys()
+
+        for platform_id, suffix_map_attr in self.PLATFORM_TO_SUFFIX_MAP.items():
+            suffix_map = getattr(HomeAssistantAPIController, suffix_map_attr)
+            backend_keys = set(suffix_map.values())
+
+            ui_keys = frontend_keys.get(platform_id, set())
+            assert ui_keys, f"No frontend keys found for {platform_id} — parser broken?"
+
+            extra = ui_keys - backend_keys
+            assert not extra, (
+                f"{platform_id}: frontend shows sensors that the backend "
+                f"suffix map ({suffix_map_attr}) cannot discover: {sorted(extra)}"
+            )
+
+    def test_no_undeclared_backend_only_keys(self):
+        """Backend suffix map values not in the frontend must be in BACKEND_ONLY_KEYS.
+
+        Prevents "Not detected" phantom fields: if a new sensor is added to a
+        suffix map but not to the frontend, this test forces an explicit decision
+        — either add it to the UI or add it to BACKEND_ONLY_KEYS with a reason.
+        """
+        frontend_keys = self._parse_frontend_sensor_keys()
+
+        for platform_id, suffix_map_attr in self.PLATFORM_TO_SUFFIX_MAP.items():
+            suffix_map = getattr(HomeAssistantAPIController, suffix_map_attr)
+            backend_keys = set(suffix_map.values())
+
+            ui_keys = frontend_keys.get(platform_id, set())
+            allowed = self.BACKEND_ONLY_KEYS.get(platform_id, set())
+
+            backend_not_in_ui = backend_keys - ui_keys
+            undeclared = backend_not_in_ui - allowed
+            assert not undeclared, (
+                f"{platform_id}: backend suffix map ({suffix_map_attr}) has keys "
+                f"not shown in the frontend and not in BACKEND_ONLY_KEYS: "
+                f"{sorted(undeclared)}. Either add them to the frontend "
+                f"sensorDefinitions.ts or to BACKEND_ONLY_KEYS with a reason."
+            )

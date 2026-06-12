@@ -60,12 +60,16 @@ spends money on its own. Stage 1 is auto but cheap.
 2. **Fix minor issues** — apply small fixes directly; request changes for anything substantial
 3. **Update CHANGELOG** — add entry under new version heading, credit author:
    `(thanks [@username](https://github.com/username))`
-4. **Bump version** in `config.yaml`:
+4. **Bump version** in both `bess_manager/config.yaml` and `config.dev.yaml`:
    - `PATCH` (x.y.**Z**): bug fixes, doc/comment changes, no behavior change
    - `MINOR` (x.**Y**.0): new features, backwards-compatible
    - `MAJOR` (**X**.0.0): breaking changes
 5. **Merge** — squash merge; wait for explicit user approval
-6. **Tag** — after user confirms hardware test: `git tag vX.Y.Z && git push origin vX.Y.Z`
+6. **Release** — create a GitHub Release (tag `vX.Y.Z`, target `main`).
+   This triggers `release-addon.yml` which builds per-arch Docker images
+   (amd64 + aarch64) and pushes them to GHCR.
+7. **Verify** — wait for the release workflow to complete, then confirm
+   images are pullable: `docker pull ghcr.io/johanzander/bess-manager-amd64:X.Y.Z`
 
 Never tag or merge without explicit user instruction.
 

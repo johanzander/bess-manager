@@ -2145,14 +2145,16 @@ class HomeAssistantAPIController:
                 break
 
         # Find growatt device_id from device registry.
-        # Strategy 1: match by identifiers containing the device SN
-        #   (immutable, unaffected by user renames)
-        # Strategy 2: match by config_entry belonging to growatt_server
-        #   (works even without a detected SN)
-        # Strategy 3: match by device name equal to device SN
-        #   (legacy fallback)
+        # Primary: match by config_entry belonging to growatt_server
+        # Fallback: match by identifiers containing the device SN
         growatt_device_id: str | None = None
-        if device_sn:
+        if growatt_config_entry_id:
+            for device in devices_result:
+                if growatt_config_entry_id in device.get("config_entries", []):
+                    growatt_device_id = device["id"]
+                    break
+
+        if not growatt_device_id and device_sn:
             sn_upper = device_sn.upper()
             for device in devices_result:
                 for ident in device.get("identifiers", []):
@@ -2164,20 +2166,6 @@ class HomeAssistantAPIController:
                         growatt_device_id = device["id"]
                         break
                 if growatt_device_id:
-                    break
-
-        if not growatt_device_id and growatt_config_entry_id:
-            for device in devices_result:
-                if growatt_config_entry_id in device.get("config_entries", []):
-                    growatt_device_id = device["id"]
-                    break
-
-        if not growatt_device_id and device_sn:
-            sn_upper = device_sn.upper()
-            for device in devices_result:
-                name = str(device.get("name", "")).upper()
-                if name == sn_upper:
-                    growatt_device_id = device["id"]
                     break
 
         # Determine inverter type from entity registry unique_id prefixes.

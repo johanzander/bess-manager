@@ -79,14 +79,23 @@ provider together never silently break.
 
 ## Stage 4 — Re-ship, all tests pass
 
-1. Local gate: `pytest -m "not slow"`, `black`/`ruff`, `tsc`/`vitest`/build,
-   and the new scenario's wizard E2E.
-2. `release beta` again with the regression fixture included.
+This stage is usually a **loop of rapid minor fixes** (the feature can't be
+self-validated, so issues surface only against real configs). **Batch them** —
+do NOT cut a beta release + CHANGELOG entry per fix; that spams users and the
+changelog. Accumulate fixes as commits on the PR and cut a *consolidated* beta
+drop only at a meaningful checkpoint, with one combined CHANGELOG entry.
+
+1. Local gate on each iteration: `pytest -m "not slow"`, `black`/`ruff`,
+   `tsc`/`vitest`/build, and the new scenario's wizard E2E.
+2. At a checkpoint (not per fix): `release beta` with the accumulated fixes +
+   regression fixture, one consolidated CHANGELOG entry.
 3. **Poll CI** until green:
    ```
    gh pr checks <pr> --repo <repo> --watch
    ```
    On failure: `gh run view <id> --log-failed`, fix locally, re-push, re-poll.
+   Keep batching — fold the CI fix into the same checkpoint, don't cut a new
+   release for it.
 - **Exit:** beta CI green with the user's scenario in the matrix.
 
 ## Stage 5 — User confirms (GATE)

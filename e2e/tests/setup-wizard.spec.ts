@@ -33,6 +33,7 @@ const PROVIDER_LABEL: Record<string, string> = {
   nordpool_official: 'Nord Pool (official HA integration)',
   nordpool_hacs: 'Nord Pool (HACS custom sensor)',
   octopus: 'Octopus Energy',
+  entsoe: 'ENTSO-e / Belpex (Transparency Platform)',
 };
 
 // ---------------------------------------------------------------------------
@@ -124,6 +125,11 @@ test.describe('Setup Wizard', () => {
       await expect(fieldByLabel(page, 'Sensor')).not.toBeVisible();
     } else if (expected.autoSelectedProvider === 'nordpool_hacs') {
       // HACS Nordpool shows Sensor field, not Config Entry ID
+      await expect(fieldByLabel(page, 'Sensor')).toBeVisible();
+      await expect(fieldByLabel(page, 'Config Entry ID')).not.toBeVisible();
+      await expect(fieldByLabel(page, 'Import today')).not.toBeVisible();
+    } else if (expected.autoSelectedProvider === 'entsoe') {
+      // ENTSO-e shows a single Sensor field, not Config Entry ID or Octopus fields
       await expect(fieldByLabel(page, 'Sensor')).toBeVisible();
       await expect(fieldByLabel(page, 'Config Entry ID')).not.toBeVisible();
       await expect(fieldByLabel(page, 'Import today')).not.toBeVisible();

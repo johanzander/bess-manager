@@ -250,6 +250,17 @@ jobs:
         if: always() && env.RUN_E2E == 'true'
         run: docker compose -f docker-compose.ci.yml down
 
+      - name: "E2E: Wizard — ENTSO-e / Belpex + MIN"
+        if: always() && env.RUN_E2E == 'true'
+        run: |
+          echo '{}' > ./e2e/ci-wizard-settings.json
+          SCENARIO=ci-wizard-entsoe BESS_SETTINGS=./e2e/ci-wizard-settings.json BESS_OPTIONS=./e2e/ci-wizard-options.json docker compose -f docker-compose.ci.yml up -d
+          timeout 120 bash -c 'until curl -sf http://localhost:8080/api/setup/status > /dev/null 2>&1; do sleep 2; done'
+          cd e2e && SCENARIO=ci-wizard-entsoe npx playwright test --project=wizard
+      - name: "E2E: Stop wizard (ENTSO-e + MIN)"
+        if: always() && env.RUN_E2E == 'true'
+        run: docker compose -f docker-compose.ci.yml down
+
       - name: "E2E: Wizard — Full integrations"
         if: always() && env.RUN_E2E == 'true'
         run: |

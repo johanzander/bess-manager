@@ -79,6 +79,7 @@ if [ "$RUN_WIZARD" = true ]; then
     "ci-wizard-nordpool-sph"
     "ci-wizard-nordpool-solax"
     "ci-wizard-octopus"
+    "ci-wizard-entsoe"
     "ci-wizard-full"
     "ci-wizard-nordpool-hacs"
     "ci-wizard-octopus-sph"

@@ -317,3 +317,110 @@ def test_huawei_history_direct_house_load_overrides_formula():
     )
 
     assert flows["load_consumption"] == pytest.approx(0.42)
+
+
+def test_huawei_direct_house_load_display_uses_configured_entity():
+    ha = _huawei_controller_with_states(
+        {
+            "sensor.battery": {
+                "state": "200",
+                "attributes": {"unit_of_measurement": "W"},
+            },
+            "sensor.grid": {
+                "state": "-100",
+                "attributes": {"unit_of_measurement": "W"},
+            },
+            "sensor.pv": {"state": "1000", "attributes": {"unit_of_measurement": "W"}},
+            "sensor.house_load": {
+                "state": "1234",
+                "attributes": {"unit_of_measurement": "W"},
+            },
+        }
+    )
+
+    info = ha.get_method_sensor_info("get_local_load_power")
+
+    assert info["status"] == "ok"
+    assert info["entity_id"] == "sensor.house_load"
+    assert info["current_value"] == 1234
+    assert info["resolution_method"] == "huawei_direct_house_load"
+
+
+def test_huawei_direct_house_load_exposed_as_internal_local_load_power():
+    ha = _huawei_controller_with_states(
+        {
+            "sensor.battery": {
+                "state": "200",
+                "attributes": {"unit_of_measurement": "W"},
+            },
+            "sensor.grid": {
+                "state": "-100",
+                "attributes": {"unit_of_measurement": "W"},
+            },
+            "sensor.pv": {"state": "1000", "attributes": {"unit_of_measurement": "W"}},
+            "sensor.house_load": {
+                "state": "1234",
+                "attributes": {"unit_of_measurement": "W"},
+            },
+        }
+    )
+    collector = SensorCollector(ha, BatterySettings())
+
+    assert ha.resolve_sensor_for_influxdb("local_load_power") == "house_load"
+    assert (
+        collector.power_sensor_flow_map["local_load_power"] == "huawei_house_load_power"
+    )
+    assert "huawei_house_load_power_entity" not in collector.power_sensor_flow_map
+
+
+def test_influxdb_7d_avg_accepts_huawei_direct_house_load(monkeypatch):
+    ha = HomeAssistantAPIController(
+        "http://ha",
+        "token",
+        sensor_config={
+            "huawei_battery_power": "sensor.battery",
+            "huawei_grid_power": "sensor.grid",
+            "pv_power": "sensor.pv",
+            "huawei_house_load_power_entity": "sensor.house_load",
+        },
+    )
+    manager = BatterySystemManager(controller=ha, price_source=Mock())
+    captured = []
+
+    def fake_get_power_sensor_data_batch(sensors, target_date):
+        captured.append(sensors)
+        return {
+            "status": "success",
+            "data": {period: {"sensor.house_load": 0.25} for period in range(96)},
+        }
+
+    monkeypatch.setattr(
+        "core.bess.battery_system_manager.get_power_sensor_data_batch",
+        fake_get_power_sensor_data_batch,
+    )
+
+    forecast = manager._get_influxdb_7d_avg_forecast()
+
+    assert captured
+    assert all(sensors == ["house_load"] for sensors in captured)
+    assert forecast == [0.25] * 96
+
+
+def test_huawei_missing_lifetime_energy_sensors_are_not_critical():
+    ha = HomeAssistantAPIController(
+        "http://ha",
+        "token",
+        sensor_config={
+            "battery_soc": "sensor.soc",
+            "huawei_battery_power": "sensor.battery",
+            "huawei_grid_power": "sensor.grid",
+            "pv_power": "sensor.pv",
+        },
+    )
+    collector = SensorCollector(ha, BatterySettings())
+
+    health = collector.check_energy_health()
+
+    assert health["required"] is False
+    assert health["status"] == "OK"
+    assert {check["status"] for check in health["checks"]} == {"SKIPPED"}

@@ -708,6 +708,11 @@ class HomeAssistantAPIController:
         if not isinstance(sensor_key, str):
             raise TypeError(f"sensor_key must be a string, got {type(sensor_key)}")
 
+        if sensor_key == "local_load_power":
+            entity_id = self._get_huawei_direct_house_load_entity_id()
+            if entity_id:
+                return entity_id[7:] if entity_id.startswith("sensor.") else entity_id
+
         try:
             entity_id, _ = self._resolve_entity_id(sensor_key)
             return entity_id[7:] if entity_id.startswith("sensor.") else entity_id
@@ -753,6 +758,24 @@ class HomeAssistantAPIController:
             }
 
         sensor_key = str(method_info["sensor_key"])
+        if self._has_huawei_raw_power_config() and sensor_key == "local_load_power":
+            direct_entity_id = self._get_huawei_direct_house_load_entity_id()
+            if direct_entity_id:
+                direct_value, _ = self._get_sensor_value_with_unit(
+                    self.HUAWEI_OPTIONAL_HOUSE_LOAD_KEY
+                )
+                if direct_value is not None:
+                    return {
+                        "method_name": method_name,
+                        "name": method_info["name"],
+                        "sensor_key": sensor_key,
+                        "entity_id": direct_entity_id,
+                        "status": "ok",
+                        "error": None,
+                        "current_value": direct_value,
+                        "resolution_method": "huawei_direct_house_load",
+                    }
+
         if self._has_huawei_raw_power_config() and sensor_key in {
             "battery_charge_power",
             "battery_discharge_power",
@@ -1143,10 +1166,17 @@ class HomeAssistantAPIController:
             or "huawei_grid_power" in self.sensors
         )
 
+    def _get_huawei_direct_house_load_entity_id(self) -> str | None:
+        """Return configured Huawei direct house-load entity ID, if present."""
+        entity_id = self.sensors.get(self.HUAWEI_OPTIONAL_HOUSE_LOAD_KEY)
+        if not isinstance(entity_id, str) or not entity_id.strip():
+            return None
+        return entity_id
+
     def _get_huawei_direct_house_load_power(self) -> float | None:
         """Return optional direct Huawei house load in W, or None to derive it."""
         sensor_key = self.HUAWEI_OPTIONAL_HOUSE_LOAD_KEY
-        if not self.sensors.get(sensor_key):
+        if not self._get_huawei_direct_house_load_entity_id():
             return None
 
         house_load, unit = self._get_sensor_value_with_unit(sensor_key)

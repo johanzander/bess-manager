@@ -1033,7 +1033,7 @@ class BatterySystemManager:
         and returns the 96-value weekly average profile (kWh per 15-min period).
         """
         target_sensor = (
-            self._controller.sensors.get("local_load_power", "")
+            self._controller.resolve_sensor_for_influxdb("local_load_power")
             if self._controller
             else ""
         )

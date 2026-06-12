@@ -57,20 +57,17 @@ class SensorCollector:
         # Resolve to actual entity IDs for InfluxDB queries
         self.cumulative_sensors = self._resolve_sensor_entity_ids()
 
-        # Power sensors (W) for high-resolution gap-filling
-        # Maps power sensor keys to the same flow names used by energy_flow_calculator
-        self.power_sensor_flow_map: dict[str, str] = {
-            "pv_power": "solar_production",
-            "local_load_power": "load_consumption",
-            "import_power": "import_from_grid",
-            "export_power": "export_to_grid",
-            "battery_charge_power": "battery_charged",
-            "battery_discharge_power": "battery_discharged",
-        }
+        self.power_sensor_flow_map = self._build_power_sensor_flow_map()
+        self.power_sensors = self._resolve_power_sensor_ids()
+        self._power_batch_cache: dict = {}  # {date: {period: {sensor: kwh_value}}}
+        self._power_batch_cache_loaded_on: dict = {}
+
+    def _build_power_sensor_flow_map(self) -> dict[str, str]:
+        """Build power sensor mappings for historical gap-filling."""
         if self._is_huawei_platform():
             # Huawei exposes signed raw channels. These are resolved and later
             # normalized; they are not mapped directly to positive BESS flows.
-            self.power_sensor_flow_map = {
+            mapping = {
                 "pv_power": "huawei_pv_power",
                 "huawei_grid_power": "huawei_grid_power",
                 "huawei_battery_power": "huawei_battery_power",
@@ -78,12 +75,20 @@ class SensorCollector:
             if getattr(self.ha_controller, "sensors", {}).get(
                 "huawei_house_load_power_entity"
             ):
-                self.power_sensor_flow_map["huawei_house_load_power_entity"] = (
-                    "huawei_house_load_power"
-                )
-        self.power_sensors = self._resolve_power_sensor_ids()
-        self._power_batch_cache: dict = {}  # {date: {period: {sensor: kwh_value}}}
-        self._power_batch_cache_loaded_on: dict = {}
+                # Expose the optional direct Huawei house-load sensor through
+                # the standard internal local_load_power key so shared
+                # historical/consumption paths do not need a duplicate setting.
+                mapping["local_load_power"] = "huawei_house_load_power"
+            return mapping
+
+        return {
+            "pv_power": "solar_production",
+            "local_load_power": "load_consumption",
+            "import_power": "import_from_grid",
+            "export_power": "export_to_grid",
+            "battery_charge_power": "battery_charged",
+            "battery_discharge_power": "battery_discharged",
+        }
 
     def _is_huawei_platform(self) -> bool:
         """Return True when the active sensor map is Huawei Solar shaped."""
@@ -122,6 +127,7 @@ class SensorCollector:
         lists built at startup before sensors were configured.
         """
         self.cumulative_sensors = self._resolve_sensor_entity_ids()
+        self.power_sensor_flow_map = self._build_power_sensor_flow_map()
         self.power_sensors = self._resolve_power_sensor_ids()
         self.energy_flow_calculator.rebuild_sensor_mapping()
 
@@ -785,11 +791,11 @@ class SensorCollector:
         )
 
     def check_energy_health(self) -> dict:
-        """Check energy monitoring health, with all sensors required."""
+        """Check energy monitoring health, with Huawei lifetime sensors optional."""
         return perform_health_check(
             component_name="Energy Monitoring",
             description="Tracks energy flows and consumption patterns",
-            is_required=True,
+            is_required=not self._is_huawei_platform(),
             controller=self.ha_controller,
             all_methods=[
                 "get_grid_import_lifetime",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass
 from time import monotonic
 
@@ -52,6 +53,8 @@ def parse_ha_numeric_power(value, unit: str | None = None) -> float | None:
     try:
         numeric = float(value)
     except (TypeError, ValueError):
+        return None
+    if not math.isfinite(numeric):
         return None
 
     normalized_unit = (unit or "").strip().lower()

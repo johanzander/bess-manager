@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import { emptyPerPlatformSensors } from '../../lib/sensorDefinitions';
+import { emptyPerPlatformSensors, HUAWEI_SOLAR_DEFAULT_SENSORS, HUAWEI_SOLAR_DEFAULT_SHARED_SENSORS } from '../../lib/sensorDefinitions';
 import { SensorConfigSection, type InverterForm } from './SensorConfigSection';
 
 function renderSection(inverterForm: InverterForm = { inverterPlatform: 'growatt_server_min', deviceId: '' }) {
@@ -51,6 +51,11 @@ describe('SensorConfigSection inverter family selector', () => {
     await user.click(screen.getByRole('tab', { name: 'Huawei Solar' }));
 
     expect(onInverterChange).toHaveBeenCalledWith({ inverterPlatform: 'huawei_solar', deviceId: '' });
-    expect(onChange).toHaveBeenCalledWith({ ...sensors, platform: 'huawei_solar' });
+    expect(onChange).toHaveBeenCalledWith({
+      ...sensors,
+      platform: 'huawei_solar',
+      huawei_solar: HUAWEI_SOLAR_DEFAULT_SENSORS,
+      shared: HUAWEI_SOLAR_DEFAULT_SHARED_SENSORS,
+    });
   });
 });

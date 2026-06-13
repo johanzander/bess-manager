@@ -549,6 +549,17 @@ class HomeAssistantAPIController:
         "batteries_charge_discharge_power": "huawei_battery_power",
         "power_meter_active_power": "huawei_grid_power",
         "inverter_input_power": "pv_power",
+        "filtered_grid_import_power": "huawei_filtered_grid_import_power",
+    }
+    HUAWEI_DEFAULT_ENTITY_MAP: ClassVar[dict[str, str]] = {
+        "battery_soc": "sensor.batteries_state_of_capacity",
+        "huawei_battery_power": "sensor.batteries_charge_discharge_power",
+        "huawei_grid_power": "sensor.power_meter_active_power",
+        "pv_power": "sensor.inverter_input_power",
+        "huawei_filtered_grid_import_power": "sensor.filtered_grid_import_power",
+    }
+    HUAWEI_DEFAULT_SHARED_SENSOR_MAP: ClassVar[dict[str, str]] = {
+        "48h_avg_grid_import": "sensor.48h_average_grid_import_power",
     }
     HUAWEI_OPTIONAL_HOUSE_LOAD_KEY: ClassVar[str] = "huawei_house_load_power_entity"
     HUAWEI_HOUSE_LOAD_FALLBACK_WARNING_INTERVAL_SECONDS: ClassVar[float] = 300.0
@@ -2945,13 +2956,12 @@ class HomeAssistantAPIController:
             huawei_sensors = self._map_registry_entities(
                 entities, ["huawei_solar"], self.HUAWEI_SOLAR_SUFFIX_MAP
             )
-            # Reference-installation fallback: only used after the entity
-            # registry has already identified the huawei_solar platform.
+            # Huawei Solar support targets these exact default entities. The
+            # registry still wins for any manual/entity-registry variations, but
+            # a supported default setup should not require field-by-field entry.
             huawei_entity_fallbacks = {
-                "sensor.batteries_state_of_capacity": "battery_soc",
-                "sensor.batteries_charge_discharge_power": "huawei_battery_power",
-                "sensor.power_meter_active_power": "huawei_grid_power",
-                "sensor.inverter_input_power": "pv_power",
+                entity_id: key
+                for key, entity_id in self.HUAWEI_DEFAULT_ENTITY_MAP.items()
             }
             for entity in entities:
                 if entity.get("platform") != "huawei_solar":
@@ -2960,6 +2970,8 @@ class HomeAssistantAPIController:
                 bess_key = huawei_entity_fallbacks.get(entity_id)
                 if bess_key and bess_key not in huawei_sensors:
                     huawei_sensors[bess_key] = entity_id
+            for key, entity_id in self.HUAWEI_DEFAULT_ENTITY_MAP.items():
+                huawei_sensors.setdefault(key, entity_id)
             if huawei_sensors:
                 platform_sensors["huawei_solar"] = huawei_sensors
             if not detected_platform:

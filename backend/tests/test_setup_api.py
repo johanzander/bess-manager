@@ -467,8 +467,11 @@ class TestSetupComplete:
                     "huawei_battery_power": "sensor.batteries_charge_discharge_power",
                     "huawei_grid_power": "sensor.power_meter_active_power",
                     "pv_power": "sensor.inverter_input_power",
+                    "huawei_filtered_grid_import_power": "sensor.filtered_grid_import_power",
                 },
-                "shared": {},
+                "shared": {
+                    "48h_avg_grid_import": "sensor.48h_average_grid_import_power",
+                },
             },
         )
         _client.post("/api/setup/complete", json=payload)
@@ -477,6 +480,14 @@ class TestSetupComplete:
         assert (
             call_args["sensors"]["huawei_solar"]["huawei_grid_power"]
             == "sensor.power_meter_active_power"
+        )
+        assert (
+            call_args["sensors"]["huawei_solar"]["huawei_filtered_grid_import_power"]
+            == "sensor.filtered_grid_import_power"
+        )
+        assert (
+            call_args["sensors"]["shared"]["48h_avg_grid_import"]
+            == "sensor.48h_average_grid_import_power"
         )
 
     def test_growatt_inverter_type_not_written(self, complete_controller):
@@ -803,3 +814,64 @@ class TestDiscoverLocaleDefaults:
 
         assert store["home"]["currency"] == original_currency
         assert store["electricity_price"]["vat_multiplier"] == original_vat
+
+
+def test_setup_discover_returns_huawei_default_entities():
+    """Huawei Solar discovery returns the expected supported default entities."""
+    store = deepcopy(_PRE_EXISTING_STORE)
+    ctrl = _make_discover_controller(store)
+    ha = ctrl.ha_controller
+    integrations = {
+        "growatt_found": False,
+        "device_sn": None,
+        "growatt_device_id": None,
+        "solax_found": False,
+        "huawei_solar_found": True,
+        "solax_has_growatt_tou": False,
+        "solax_has_growatt_gen3": False,
+        "nordpool_found": False,
+        "nordpool_area": None,
+        "nordpool_custom_area": None,
+        "nordpool_custom_entity": None,
+        "nordpool_config_entry_id": None,
+        "octopus_found": False,
+        "detected_inverter_platforms": ["huawei_solar"],
+        "detected_phase_count": None,
+        "currency": "SEK",
+        "vat_multiplier": 1.25,
+    }
+    ha.discover_integrations.return_value = (integrations, [])
+    ha.fetch_entity_registry.return_value = []
+    huawei_sensors = {
+        "battery_soc": "sensor.batteries_state_of_capacity",
+        "huawei_battery_power": "sensor.batteries_charge_discharge_power",
+        "huawei_grid_power": "sensor.power_meter_active_power",
+        "pv_power": "sensor.inverter_input_power",
+        "huawei_filtered_grid_import_power": "sensor.filtered_grid_import_power",
+    }
+    ha.discover_sensors_from_registry.return_value = (
+        {"huawei_solar": huawei_sensors},
+        "huawei_solar",
+    )
+    ha.discover_current_sensors.return_value = {}
+    ha.discover_optional_sensors.return_value = {}
+    ha.discover_octopus_entities.return_value = {}
+    ha.GROWATT_MIN_SUFFIX_MAP = {}
+    ha.GROWATT_SPH_SUFFIX_MAP = {}
+    ha.SOLAX_GROWATT_MIN_SUFFIX_MAP = {}
+    ha.SOLAX_GROWATT_SPH_SUFFIX_MAP = {}
+    ha.SOLAX_NATIVE_SUFFIX_MAP = {}
+    ha.HUAWEI_SOLAR_SUFFIX_MAP = {key: key for key in huawei_sensors}
+    ha.HUAWEI_DEFAULT_SHARED_SENSOR_MAP = {
+        "48h_avg_grid_import": "sensor.48h_average_grid_import_power"
+    }
+    sys.modules["app"].bess_controller = ctrl
+
+    resp = _client.post("/api/setup/discover")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["platformSensors"]["huawei_solar"] == huawei_sensors
+    assert (
+        body["sensors"]["48h_avg_grid_import"] == "sensor.48h_average_grid_import_power"
+    )

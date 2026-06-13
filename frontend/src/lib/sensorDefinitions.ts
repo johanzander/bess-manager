@@ -67,6 +67,18 @@ export const SHARED_INTEGRATION_IDS = new Set([
   'phase_current', 'discharge_inhibit', 'weather',
 ]);
 
+export const HUAWEI_SOLAR_DEFAULT_SENSORS: Record<string, string> = {
+  battery_soc: 'sensor.batteries_state_of_capacity',
+  huawei_battery_power: 'sensor.batteries_charge_discharge_power',
+  huawei_grid_power: 'sensor.power_meter_active_power',
+  pv_power: 'sensor.inverter_input_power',
+  huawei_filtered_grid_import_power: 'sensor.filtered_grid_import_power',
+};
+
+export const HUAWEI_SOLAR_DEFAULT_SHARED_SENSORS: Record<string, string> = {
+  '48h_avg_grid_import': 'sensor.48h_average_grid_import_power',
+};
+
 /** Create an empty per-platform sensors structure. */
 export function emptyPerPlatformSensors(platform = ''): PerPlatformSensors {
   return {
@@ -76,8 +88,8 @@ export function emptyPerPlatformSensors(platform = ''): PerPlatformSensors {
     solax_modbus_growatt_min: {},
     solax_modbus_growatt_sph: {},
     solax_modbus_native: {},
-    huawei_solar: {},
-    shared: {},
+    huawei_solar: platform === 'huawei_solar' ? { ...HUAWEI_SOLAR_DEFAULT_SENSORS } : {},
+    shared: platform === 'huawei_solar' ? { ...HUAWEI_SOLAR_DEFAULT_SHARED_SENSORS } : {},
   };
 }
 
@@ -190,6 +202,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
           { key: 'huawei_battery_power', label: 'Battery Charge/Discharge Power (signed)', required: true },
           { key: 'huawei_grid_power', label: 'Grid Active Power (signed)', required: true },
           { key: 'pv_power', label: 'Inverter Input Power (PV)', required: true },
+          { key: 'huawei_filtered_grid_import_power', label: 'Filtered Grid Import Power', required: true },
         ],
       },
       {

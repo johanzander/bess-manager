@@ -1,7 +1,7 @@
 # Inverter Platforms
 
-BESS Manager supports four inverter platform configurations. Each combines a
-specific inverter hardware family with a Home Assistant integration for
+BESS Manager supports multiple inverter platform configurations. Each combines
+a specific inverter hardware family with a Home Assistant integration for
 communication.
 
 ## Supported Platforms
@@ -13,6 +13,7 @@ communication.
 | Growatt SPH (Cloud) | Growatt SPH | [Growatt Server](https://www.home-assistant.io/integrations/growatt_server/) | Cloud API | AC charge/discharge periods | — |
 | Growatt MIX/SPH (Local) | Growatt MIX/SPA/SPH | [solax_modbus](https://github.com/wills106/homeassistant-solax-modbus) Growatt plugin | Local Modbus | Mode-specific time slots | GEN3 |
 | SolaX | SolaX hybrid | [solax_modbus](https://github.com/wills106/homeassistant-solax-modbus) | Local Modbus | VPP active-power commands | — |
+| Huawei Solar (experimental) | Huawei SUN2000 + LUNA2000 | [Huawei Solar](https://github.com/wlcrs/huawei_solar) | Home Assistant sensors | Read-only monitoring | — |
 
 > **solax_modbus generation mapping:** The `wills106/homeassistant-solax-modbus`
 > Growatt plugin classifies inverters by generation. GEN4 = MIN/MOD/MID/TL-X
@@ -359,40 +360,78 @@ per-period grid charge control, SOC limits).
 
 ## Huawei Solar (`huawei_solar`) — Experimental read-only
 
-Huawei Solar support is currently experimental and monitoring-only. BESS Manager can read Home Assistant sensors from the `huawei_solar` integration, normalize Huawei's signed power values into BESS Manager's internal non-negative power channels, and display realtime/history power flows.
+Huawei Solar support is currently experimental and read-only. BESS Manager can
+monitor Huawei SUN2000 inverter and Huawei LUNA2000 battery systems through the
+Home Assistant Huawei Solar integration, normalize Huawei's signed power values
+into BESS Manager's existing internal non-negative power channels, and display
+realtime/history power flows. Active inverter control is not implemented.
 
-### Required raw Home Assistant sensors
+### Exact default Home Assistant entities
 
-Configure these raw Huawei sensors for the `huawei_solar` platform:
+These entity IDs are the supported Huawei Solar defaults, not random examples.
+Manual overrides remain possible through the normal sensor configuration UI, but
+the default Huawei setup is expected to work without selecting every entity by
+hand.
 
-| BESS key | Example entity | Unit | Huawei convention |
-| --- | --- | --- | --- |
-| `battery_soc` | `sensor.batteries_state_of_capacity` | `%` | Battery state of charge |
-| `huawei_battery_power` | `sensor.batteries_charge_discharge_power` | `W` or `kW` | Positive = charging, negative = discharging |
-| `huawei_grid_power` | `sensor.power_meter_active_power` | `W` or `kW` | Negative = grid import, positive = grid export |
-| `pv_power` | `sensor.inverter_input_power` | `W` or `kW` | Positive PV production |
+| Purpose | BESS key | Default entity ID | Unit | Huawei convention / use |
+| --- | --- | --- | --- | --- |
+| Battery SOC | `battery_soc` | `sensor.batteries_state_of_capacity` | `%` | Battery state of charge |
+| Battery power | `huawei_battery_power` | `sensor.batteries_charge_discharge_power` | `W` | Positive = battery charging; negative = battery discharging |
+| Realtime grid power | `huawei_grid_power` | `sensor.power_meter_active_power` | `W` | Negative = grid import; positive = grid export |
+| PV power | `pv_power` | `sensor.inverter_input_power` | `W` | Positive PV production |
+| Filtered grid import power | `huawei_filtered_grid_import_power` | `sensor.filtered_grid_import_power` | `W` | Positive battery-independent grid import/baseline-load signal created by the user in Home Assistant |
+| 48-hour average grid import power | `48h_avg_grid_import` | `sensor.48h_average_grid_import_power` | `W` | Positive historical average grid import used as the consumption forecast input |
 
-The example entity IDs are fallbacks for a known reference installation. Users may configure different entity IDs. Discovery prefers Home Assistant entity-registry entries whose `platform` is `huawei_solar`.
+### Raw, filtered, and historical grid sensors
+
+- `sensor.power_meter_active_power` remains the realtime bidirectional grid-flow
+  sensor. BESS uses it to derive current import and export channels; it is not
+  globally replaced by the filtered sensor.
+- `sensor.filtered_grid_import_power` is a current battery-independent grid
+  import/baseline-load sensor. The intended Home Assistant template holds the
+  previous value while the battery is actively charging or discharging, so it is
+  suitable for baseline-load monitoring rather than realtime bidirectional grid
+  flow.
+- `sensor.48h_average_grid_import_power` is the statistics sensor built from the
+  filtered import sensor. BESS uses it where the architecture expects a
+  historical average/fallback consumption forecast (`48h_avg_grid_import`).
 
 ### Internal normalized channels
 
-BESS Manager derives these internal channels from the raw Huawei values:
+BESS Manager keeps its existing internal sign convention and derives separate
+non-negative internal channels from the signed Huawei inputs:
 
 ```text
 battery_charge_power = max(huawei_battery_power, 0)
 battery_discharge_power = max(-huawei_battery_power, 0)
 import_power = max(-huawei_grid_power, 0)
 export_power = max(huawei_grid_power, 0)
-local_load_power = max(pv_power - huawei_grid_power - huawei_battery_power, 0)
+local_load_power = max(pv_power - huawei_battery_power - huawei_grid_power, 0)
 ```
 
-The raw signed Huawei power entities remain separately configurable. The same raw entity is not configured directly as both positive internal channels; the shared Huawei normalization layer performs the sign split for live reads, realtime status, calculated house load, and power-history gap filling.
+Physical Huawei house/load power is calculated as:
+
+```text
+house_load = pv_power - battery_power - grid_power
+```
+
+Calculated house load is clamped to zero when timing differences between Huawei
+sensors produce a negative value. Invalid states such as `unknown`,
+`unavailable`, empty values, non-numeric text, NaN, and infinite values are
+treated as missing data rather than valid power readings.
 
 ### Limitations and caveats
 
-- No active battery control is implemented.
+- Support level: experimental read-only monitoring.
 - BESS Manager does not call Huawei services.
 - BESS Manager does not write Home Assistant entities for Huawei Solar.
 - BESS Manager does not use direct Modbus communication for Huawei Solar.
-- Historical gap filling uses the same sign split and calculated-load formula as live reads.
-- Huawei sensors can update at slightly different times. BESS Manager tolerates small negative calculated house-load values caused by timing skew, but significant negative results produce diagnostics because they can indicate incorrect sign conventions or stale sensor timing.
+- Schedule writes, forced charging, forced discharging, per-period inverter
+  writes, SOC synchronization writes, and active inverter control are explicit
+  safe no-ops and should not be treated as critical inverter failures.
+- Historical gap filling uses the same sign split and calculated-load formula as
+  live reads.
+- Huawei sensors can update at slightly different times. BESS Manager tolerates
+  small negative calculated house-load values caused by timing skew, but
+  significant negative results produce diagnostics because they can indicate
+  incorrect sign conventions or stale sensor timing.

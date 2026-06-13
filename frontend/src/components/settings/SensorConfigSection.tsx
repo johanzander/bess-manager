@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { AlertCircle, CheckCircle, ChevronDown, ChevronUp } from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../ui/tabs';
-import { INTEGRATIONS, INVERTER_INTEGRATION_IDS, SHARED_INTEGRATION_IDS } from '../../lib/sensorDefinitions';
+import { INTEGRATIONS, INVERTER_INTEGRATION_IDS, SHARED_INTEGRATION_IDS, HUAWEI_SOLAR_DEFAULT_SENSORS, HUAWEI_SOLAR_DEFAULT_SHARED_SENSORS } from '../../lib/sensorDefinitions';
 import type { IntegrationDef, PerPlatformSensors } from '../../lib/sensorDefinitions';
 import type { HealthStatus } from '../../types';
 
@@ -229,7 +229,12 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
     if (integration === 'huawei') {
       const newType = 'huawei_solar';
       onInverterChange({ ...inverterForm, inverterPlatform: newType });
-      onChange({ ...sensors, platform: newType });
+      onChange({
+        ...sensors,
+        platform: newType,
+        huawei_solar: { ...HUAWEI_SOLAR_DEFAULT_SENSORS, ...(sensors.huawei_solar ?? {}) },
+        shared: { ...HUAWEI_SOLAR_DEFAULT_SHARED_SENSORS, ...(sensors.shared ?? {}) },
+      });
       return;
     }
 

@@ -2081,7 +2081,7 @@ async def get_prediction_timeline():
 async def get_prediction_comparison(
     snapshot_period: int = Query(
         ..., ge=0, le=95, description="Period index for snapshot"
-    )
+    ),
 ):
     """Compare snapshot predictions vs what actually happened."""
     from app import bess_controller
@@ -2843,6 +2843,9 @@ async def run_setup_discovery():
                     if not (k.startswith("tou_time_") and k[9:10] in "23456789")
                 ]
             missing_sensors = [k for k in all_bess_keys if k not in sensors]
+            if effective_platform == "huawei_solar":
+                for key, entity_id in ha.HUAWEI_DEFAULT_SHARED_SENSOR_MAP.items():
+                    sensors.setdefault(key, entity_id)
 
         current_sensors = ha.discover_current_sensors(states)
         for phase_key, entity_id in current_sensors.items():

@@ -101,6 +101,10 @@ def test_huawei_house_load_tolerance_and_significant_warning(caplog):
         (None, "W", None),
         ("", "W", None),
         ("not-a-number", "W", None),
+        ("nan", "W", None),
+        ("inf", "W", None),
+        (float("nan"), "W", None),
+        (float("inf"), "W", None),
     ],
 )
 def test_huawei_parse_units_and_invalid_values(value, unit, expected):
@@ -130,6 +134,11 @@ def test_huawei_registry_discovery_detects_integration_and_raw_sensors():
             "entity_id": "sensor.inverter_input_power",
             "unique_id": "inverter_input_power",
         },
+        {
+            "platform": "huawei_solar",
+            "entity_id": "sensor.filtered_grid_import_power",
+            "unique_id": "filtered_grid_import_power",
+        },
     ]
 
     detected = ha.detect_inverter_integrations(entities)
@@ -142,6 +151,7 @@ def test_huawei_registry_discovery_detects_integration_and_raw_sensors():
         "huawei_battery_power": "sensor.batteries_charge_discharge_power",
         "huawei_grid_power": "sensor.power_meter_active_power",
         "pv_power": "sensor.inverter_input_power",
+        "huawei_filtered_grid_import_power": "sensor.filtered_grid_import_power",
     }
 
 

@@ -233,6 +233,12 @@ class BatterySystemManager:
         )
         return platform
 
+    @property
+    def _supports_charge_rate_control(self) -> bool:
+        if not self._inverter_controller:
+            return False
+        return self._inverter_controller.supports_charge_rate_control
+
     def _create_inverter_controller(self) -> InverterController | None:
         """Create an inverter controller for ``self.inverter_platform``.
 
@@ -384,8 +390,12 @@ class BatterySystemManager:
 
         try:
             if self._controller:
-                # Initialize power monitor only when feature is enabled
-                if self.home_settings.power_monitoring_enabled:
+                # Initialize power monitor only when feature is enabled and
+                # the platform has per-period charge rate control
+                if (
+                    self.home_settings.power_monitoring_enabled
+                    and self._supports_charge_rate_control
+                ):
                     self._power_monitor = HomePowerMonitor(
                         self._controller,
                         home_settings=self.home_settings,
@@ -2709,12 +2719,12 @@ class BatterySystemManager:
     def adjust_charging_power(self) -> None:
         """Adjust charging power based on house consumption.
 
-        SolaX inverters control power via VPP commands, not charge rate registers,
-        so this method is a no-op for SolaX platforms.
+        Platforms that use atomic schedule writes (SPH, SolaX) have no
+        per-period charge rate register — skip entirely.
         """
         if not self.is_configured:
             return
-        if self.inverter_platform == "solax":
+        if not self._supports_charge_rate_control:
             return
 
         try:
@@ -2787,6 +2797,7 @@ class BatterySystemManager:
                     self.home_settings.power_monitoring_enabled
                     and self._power_monitor is None
                     and self._controller is not None
+                    and self._supports_charge_rate_control
                 ):
                     self._power_monitor = HomePowerMonitor(
                         self._controller,

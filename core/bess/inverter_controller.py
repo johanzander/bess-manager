@@ -64,6 +64,14 @@ class InverterController(ABC):
         "IDLE": "No significant battery activity",
     }
 
+    # ── Platform capabilities ──────────────────────────────────────────────
+    # Subclasses override to declare what the hardware supports.
+
+    # Per-period charge/discharge rate register that power monitoring can
+    # read and write.  False on platforms that bake power % into atomic
+    # TOU schedule writes (SPH, SolaX native).
+    supports_charge_rate_control: ClassVar[bool] = True
+
     def __init__(self, battery_settings: BatterySettings) -> None:
         """Initialize shared inverter controller state."""
         if battery_settings is None:

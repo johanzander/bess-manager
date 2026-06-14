@@ -265,7 +265,9 @@
       "id": "mock_growatt_device_001",
       "name": "ABC1234567",
       "manufacturer": "Growatt",
-      "model": "MIN 6000TL-XH"
+      "model": "MIN 6000TL-XH",
+      "config_entries": ["mock_growatt_config_entry"],
+      "identifiers": [["growatt_server", "ABC1234567"]]
     }
   ],
   "services": {

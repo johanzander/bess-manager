@@ -69,22 +69,26 @@ import json, sys
 d = json.load(open('$SCENARIO_FILE'))
 cfg = d.get('bess_config')
 if not cfg:
-    print('Error: No bess_config in scenario — regenerate with from_debug_log.py', file=sys.stderr)
-    sys.exit(1)
-json.dump(cfg, open('backend/dev-options.json', 'w'), indent=2)
+    # Wizard scenario — no existing config. Write minimal defaults so the
+    # backend starts in setup-wizard mode (no sensors configured).
+    print('Note: No bess_config — starting in setup-wizard mode (fresh setup)')
+    json.dump({}, open('backend/dev-options.json', 'w'), indent=2)
+    json.dump({}, open('backend/mock-bess-settings.json', 'w'), indent=2)
+else:
+    json.dump(cfg, open('backend/dev-options.json', 'w'), indent=2)
 
-# Reset dev-bess-settings.json from the scenario bess_config so stale sensor
-# state from a previous run cannot override this scenario's sensor mapping.
-OWNED = ('home', 'battery', 'electricity_price', 'energy_provider', 'growatt', 'inverter', 'sensors')
-bess_settings = {k: cfg[k] for k in OWNED if k in cfg}
+    # Reset dev-bess-settings.json from the scenario bess_config so stale sensor
+    # state from a previous run cannot override this scenario's sensor mapping.
+    OWNED = ('home', 'battery', 'electricity_price', 'energy_provider', 'growatt', 'inverter', 'sensors')
+    bess_settings = {k: cfg[k] for k in OWNED if k in cfg}
 
-# influxdb_7d_avg requires access to the original user's InfluxDB instance,
-# which is never available in mock mode. Always override to fixed.
-if bess_settings.get('home', {}).get('consumption_strategy') == 'influxdb_7d_avg':
-    bess_settings['home']['consumption_strategy'] = 'fixed'
-    print('Note: influxdb_7d_avg requires the original user\\'s InfluxDB — overriding to fixed for mock run.')
+    # influxdb_7d_avg requires access to the original user's InfluxDB instance,
+    # which is never available in mock mode. Always override to fixed.
+    if bess_settings.get('home', {}).get('consumption_strategy') == 'influxdb_7d_avg':
+        bess_settings['home']['consumption_strategy'] = 'fixed'
+        print('Note: influxdb_7d_avg requires the original user\\'s InfluxDB — overriding to fixed for mock run.')
 
-json.dump(bess_settings, open('backend/mock-bess-settings.json', 'w'), indent=2)
+    json.dump(bess_settings, open('backend/mock-bess-settings.json', 'w'), indent=2)
 " || exit 1
 
 # Always use the mock HA server, never the real one

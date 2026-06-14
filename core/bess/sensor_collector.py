@@ -7,6 +7,7 @@ from datetime import timedelta
 
 from . import time_utils
 from .energy_flow_calculator import EnergyFlowCalculator
+from .exceptions import HistoricalDataUnavailableError
 from .health_check import perform_health_check
 from .influxdb_helper import get_power_sensor_data_batch, get_sensor_data_batch
 from .models import EnergyData
@@ -163,7 +164,7 @@ class SensorCollector:
             # Get current period readings from InfluxDB
             current_readings = self._get_period_readings(period, date_offset=0)
             if not current_readings:
-                raise RuntimeError(
+                raise HistoricalDataUnavailableError(
                     f"No InfluxDB data available for period {period}. Cannot calculate energy flows."
                 )
 
@@ -181,7 +182,7 @@ class SensorCollector:
                 prev_period, date_offset=date_offset
             )
             if not previous_readings:
-                raise RuntimeError(
+                raise HistoricalDataUnavailableError(
                     f"No InfluxDB data available for period {prev_period} (date_offset={date_offset}). "
                     f"Cannot calculate delta for period {period}."
                 )
@@ -213,7 +214,7 @@ class SensorCollector:
                     prev_period, date_offset=date_offset
                 )
                 if not previous_readings:
-                    raise RuntimeError(
+                    raise HistoricalDataUnavailableError(
                         f"No InfluxDB data available for period {prev_period} (date_offset={date_offset})"
                     )
             else:

@@ -10,12 +10,48 @@ inverter counterpart of the `add-price-provider` skill; the generic
 `feature-lifecycle` skill orchestrates either one through the full
 experimental→stable lifecycle.
 
+## This skill in the lifecycle
+
+This is the **Stage 1 implementation** skill. It produces a working
+implementation + a **source-derived** regression fixture and ships it
+experimental. It does **not** own what comes after — and you will be
+**re-invoked** across those stages:
+
+- **User reports an issue → fix → re-ship.** Expected and normal. The
+  fix/iterate/release loop is `feature-lifecycle` **Stage 2 & 4**: a bug found
+  against a real config loops back here for a minimal fix; fixes are **batched**
+  into a single consolidated beta (not one release per fix). Don't treat the
+  first pass as final.
+- **Locking the real user config into the regression suite** is
+  `feature-lifecycle` **Stage 3** (after the user's debug log arrives) — see
+  "Regression fixtures" below.
+- **Graduation** (strip the `experimental` marker, promote to stable) is
+  `feature-lifecycle` **Stage 6**.
+
+The `release` skill owns beta/prod deploys. This skill owns only the code +
+tests + docs for one implementation pass.
+
 ## The non-negotiable discovery + control rule
 
 A new inverter platform has **two** halves that must both be derived from the
 integration's real source, never inferred from a sample entity:
 
-### 1. Discovery keys off the immutable `unique_id`
+### 1. Match the inverter to a control pattern (do this first)
+
+**Before anything else**, match the new inverter to one of the four control
+patterns catalogued in `docs/INVERTER_PLATFORMS.md` → **"Inverter Integration
+Patterns"** (A — Cloud TOU slots, B — Cloud charge/discharge period lists,
+C — Local-Modbus TOU entity writes, D — Local-Modbus ephemeral VPP). The matched
+pattern tells you **which existing controller to model on**, the **detection
+marker**, and the **suffix-map shape** — the rest of this checklist follows from
+it. Do not start writing a controller until the inverter is matched.
+
+If it matches **none** of A–D, it is a **new pattern** (a new control approach +
+a new controller class — rare and expensive). Add it as a new row in the catalog
+in `docs/INVERTER_PLATFORMS.md` first, and confirm with the maintainer before
+implementing. The safe interim is **monitoring-only** (see §3 below).
+
+### 2. Discovery keys off the immutable `unique_id`
 
 Inverter discovery keys off the **immutable `unique_id`** from the HA entity
 registry, filtered by the integration's `platform` (domain) field — this
@@ -34,23 +70,6 @@ from inference:
    `entity_id`, internal `key` drives `unique_id`) — BESS matches on `unique_id`.
    See the Growatt TOU note in `docs/INVERTER_PLATFORMS.md`.
 
-### 2. Identify the control paradigm BEFORE writing a controller
-
-Inverter families differ fundamentally in **how a schedule is applied**.
-Classify the new inverter into one of these, and model the new controller on the
-closest existing one:
-
-| Paradigm | Model controller | How control happens |
-|----------|------------------|---------------------|
-| Numbered TOU time slots (cloud) | `core/bess/growatt_min_controller.py` (`GrowattMinController`) | `growatt_server.update_time_segment` service calls |
-| Charge/discharge **period lists** | `core/bess/growatt_sph_controller.py` (`GrowattSphController`) | `write_ac_charge_times` / `write_ac_discharge_times` service calls |
-| Local-Modbus TOU slots (GEN4 single-segment / GEN3 mode slots) | `core/bess/solax_modbus_growatt_controller.py` (`SolaxModbusGrowattController`) | entity writes: `select`/`number`/`button` |
-| Ephemeral **VPP** power commands | `core/bess/solax_controller.py` (`SolaxController`) | VPP `select`/`number`/`button`, auto-expiring |
-
-Also determine whether control is via **HA service calls** or **entity writes**
-(select/number/button/switch) — this dictates how `write_schedule_to_hardware`
-and the per-period methods are built.
-
 ### 3. Monitoring-only is a valid first cut
 
 If the integration exposes monitoring entities but no usable control path,
@@ -59,24 +78,6 @@ implemented" — this is an existing, accepted state (precedent: Growatt GEN3 in
 `docs/INVERTER_PLATFORMS.md` → "Schedule control requires a dedicated controller
 (not yet implemented)"). Make this branch explicit in the PR. Never fake a
 control path; **no silent fallbacks** (`docs/agents/rules.md`).
-
-## Validate against a real beta-tester config
-
-We have beta testers who export their config + entity registry. The flow:
-
-1. Ask the beta tester to export a debug report (`docs/bess-debug-*.md`)
-   containing their real entity registry + the inverter's monitoring **and**
-   control entities.
-2. Build a **regression test fixture** from that real registry (not a
-   hand-invented one) so discovery is verified against production data and cannot
-   regress:
-   ```
-   python scripts/mock_ha/scenarios/from_debug_log.py docs/bess-debug-<ts>.md
-   ```
-   Mirror `core/bess/tests/unit/test_registry_discovery.py` and
-   `test_scenario_discovery.py`.
-3. Ensure the inverter's entities are captured by the **debug export**
-   (`core/bess/debug_data_exporter.py`) so future reports include them.
 
 ## Implementation checklist (in order)
 
@@ -140,7 +141,9 @@ We have beta testers who export their config + entity registry. The flow:
    `test_solax_modbus_growatt_single_segment.py` (pick by paradigm).
 10. **Discovery regression test** — add a `<platform>` case to
     `core/bess/tests/unit/test_registry_discovery.py` and
-    `test_scenario_discovery.py` **using the real beta-tester registry fixture**.
+    `test_scenario_discovery.py`. Use a **source-derived** fixture now (built from
+    the integration's verified `unique_id` shapes); the **real** beta-tester
+    registry replaces/augments it later — see "Regression fixtures" below.
 
 ### Frontend E2E (Playwright wizard — don't skip this)
 
@@ -172,6 +175,37 @@ covered by the Playwright wizard E2E, parameterised by the `SCENARIO` env var:
 14. **`CHANGELOG.md`** — add an entry (project rule: never skip).
 15. **Maturity memory** (`docs/agents/memory/`) — mark the platform
     **experimental / not real-world tested** until a beta tester confirms.
+
+## Regression fixtures: source-derived now, real-config later
+
+Validation happens in **two phases** — you do **not** wait for a real user config
+to implement, and you do **not** claim real-world validation until the user
+confirms.
+
+**Phase 1 — now (this skill, Stage 1).** With no real registry yet (the user
+typically hasn't installed), build a **source-derived** fixture from the
+integration's **verified** `unique_id`/attribute shapes (the ones you read from
+the integration source per the discovery rule). This drives the discovery
+regression test and the wizard E2E so the implementation can ship experimental.
+*(If the issue already contains the user's real entity IDs — as some do — use
+those directly and you have effectively done Phase 2 early.)*
+
+**Phase 2 — when the beta log arrives (`feature-lifecycle` Stage 2–3).** The user
+installs the experimental build and exports a debug report
+(`docs/bess-debug-*.md`) with their real registry + the inverter's monitoring
+**and** control entities. Then:
+
+1. Build the **real** fixture from that registry (not hand-invented):
+   ```
+   python scripts/mock_ha/scenarios/from_debug_log.py docs/bess-debug-<ts>.md
+   ```
+   and replace/augment the Phase-1 fixture in
+   `core/bess/tests/unit/test_registry_discovery.py` /
+   `test_scenario_discovery.py`.
+2. Ensure the inverter's entities are captured by the **debug export**
+   (`core/bess/debug_data_exporter.py`) so future reports include them.
+3. Any bug surfaced by the real config loops back through this skill for a
+   minimal fix, batched into a consolidated beta (lifecycle Stage 4).
 
 ## Gate before commit / PR
 

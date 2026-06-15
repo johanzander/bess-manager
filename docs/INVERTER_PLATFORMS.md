@@ -19,6 +19,27 @@ communication.
 > (AC-coupled, numbered TOU slots). GEN3 = MIX/SPA/SPH (DC-coupled, mode-specific
 > time slots). BESS detects the generation automatically from entity markers.
 
+## Inverter Integration Patterns
+
+Every supported platform falls into one of **four control patterns**. The five
+platforms map onto four controller classes — adding a new inverter starts by
+**matching it to one of these patterns** (or, rarely and expensively, declaring
+a new one). The pattern dictates which existing controller to model on, the
+detection marker, and the sensor-suffix map.
+
+| Pattern | Control mechanism | Model controller | HA integration | Detection marker / service | Suffix map | Matches if… |
+|---------|-------------------|------------------|----------------|----------------------------|-----------|-------------|
+| **A — Cloud TOU slots** | Numbered TOU time segments set via HA **service calls**; per-period grid-charge/rate via generic switch/number entities | `GrowattMinController` (`growatt_min_controller.py`) | `growatt_server` (cloud) | `growatt_server.update_time_segment` service present | `GROWATT_MIN_SUFFIX_MAP` | Cloud integration exposing numbered TOU segments + per-period entities |
+| **B — Cloud charge/discharge period lists** | Separate charge & discharge **period lists** (≤3 each) written wholesale; power/SOC embedded in the call params; **no** per-period entities | `GrowattSphController` (`growatt_sph_controller.py`) | `growatt_server` (cloud) | `growatt_server.write_ac_charge_times` service present | `GROWATT_SPH_SUFFIX_MAP` | Cloud integration with batched charge/discharge windows, control only via service-call params |
+| **C — Local-Modbus TOU entity writes** | TOU/time slots written as **entity values** (select/number) + a commit button; EMS rate/SOC via number/select. GEN4 = single-segment; GEN3 = mode-specific slots (GEN3 control not yet implemented) | `SolaxModbusGrowattController` (`solax_modbus_growatt_controller.py`) | `solax_modbus` (local) | `_GROWATT_TOU_MARKER_SUFFIX` (`time_1_enabled`, GEN4); `_GROWATT_GEN3_MARKER_SUFFIX` (GEN3) | `SOLAX_GROWATT_MIN_SUFFIX_MAP`, `SOLAX_GROWATT_SPH_SUFFIX_MAP` | Local-Modbus integration with **persistent** TOU/time-slot entities you write directly |
+| **D — Local-Modbus ephemeral VPP** | **No persistent schedule**; push an active-power setpoint each period boundary, auto-expires (`autorepeat_duration`), reverts to self-use | `SolaxController` (`solax_controller.py`) | `solax_modbus` (local, native SolaX) | `_SOLAX_NATIVE_MARKER_SUFFIX` (`remotecontrol_power_control`) | `SOLAX_NATIVE_SUFFIX_MAP` | Inverter has no persistent TOU; controlled via remote-control/VPP power setpoints |
+
+> **No match?** If the new inverter fits none of A–D, it is a **new pattern** —
+> a new control approach and a new controller class, not just a config tweak.
+> This is rare and expensive; document the new pattern as a fifth row here before
+> implementing it. A safe interim is **monitoring-only** (detection + sensors, no
+> schedule control), as GEN3 currently is.
+
 ## How BESS Controls Each Platform
 
 ### Growatt MIN (Cloud) — `growatt_min`

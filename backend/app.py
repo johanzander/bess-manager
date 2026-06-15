@@ -160,7 +160,9 @@ class BESSController:
         test_mode = env_test_mode or demo_mode
         if test_mode:
             source = "environment" if env_test_mode else "demo_mode setting"
-            logger.info("Enabling test mode (%s) - hardware writes will be simulated", source)
+            logger.info(
+                "Enabling test mode (%s) - hardware writes will be simulated", source
+            )
         self.ha_controller.set_test_mode(test_mode)
 
         # Extract energy provider configuration

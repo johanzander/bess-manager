@@ -133,7 +133,7 @@ interface SystemStatusCardProps {
 }
 
 
-const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "" }) => {
+const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", systemMode }) => {
   const { data: dashboardData, loading: dashboardLoading, error: dashboardError } = useDashboardData();
   const [inverterData, setInverterData] = useState<any>(null);
   const [inverterLoading, setInverterLoading] = useState(true);

@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Activity, Battery, Brain, Home, Settings, Settings2, Sun, Zap } from 'lucide-react';
+import { Activity, Battery, Download, Home, Settings, Sun, Zap } from 'lucide-react';
 import api from '../lib/api';
+import { downloadDebugBundle } from '../lib/reportProblem';
 import SystemHealthComponent from '../components/SystemHealth';
 import type { HealthStatus } from '../types';
 import { HomeFormSection } from '../components/settings/HomeFormSection';
@@ -21,7 +22,7 @@ import type { PerPlatformSensors } from '../lib/sensorDefinitions';
 // Local types
 // ---------------------------------------------------------------------------
 
-type Tab = 'home' | 'pricing' | 'battery' | 'sensors' | 'health' | 'ai' | 'system';
+type Tab = 'home' | 'pricing' | 'battery' | 'sensors' | 'system';
 
 interface Toast {
   type: 'success' | 'error';
@@ -74,7 +75,6 @@ const SettingsPage: React.FC = () => {
   const [aiForm, setAiForm] = useState<AIAnalystForm>({ apiKey: '', model: 'claude-sonnet-4-20250514', enabled: true });
   const [demoEnabled, setDemoEnabled] = useState(false);
   const [savedDemoEnabled, setSavedDemoEnabled] = useState(false);
-  const [savingDemo, setSavingDemo] = useState(false);
   const [showEnableDemoConfirm, setShowEnableDemoConfirm] = useState(false);
 
   // ── saved snapshots (for dirty detection) ──────────────────────────────
@@ -108,9 +108,7 @@ const SettingsPage: React.FC = () => {
       JSON.stringify(batteryForm) !== savedBattery.current ||
       JSON.stringify(inverterForm) !== savedInverter.current,
     sensors: stableStringify(sensors) !== savedSensors.current,
-    health: false,
-    ai: JSON.stringify(aiForm) !== savedAi.current,
-    system: demoEnabled !== savedDemoEnabled,
+    system: demoEnabled !== savedDemoEnabled || JSON.stringify(aiForm) !== savedAi.current,
   };
 
   // ── loading / saving / error state ────────────────────────────────────
@@ -494,29 +492,21 @@ const SettingsPage: React.FC = () => {
     }
   };
 
-  const saveAi = async () => {
+  const saveSystem = async () => {
     setSaving(true);
     try {
-      await api.patch('/api/settings', { aiAnalyst: aiForm });
-      savedAi.current = JSON.stringify(aiForm);
-      setToast({ type: 'success', message: 'AI Analyst settings saved.' });
-    } catch (err) {
-      setToast({ type: 'error', message: err instanceof Error ? err.message : 'Save failed.' });
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const saveDemo = async () => {
-    setSavingDemo(true);
-    try {
-      await api.patch('/api/settings', { demoMode: { enabled: demoEnabled } });
+      await api.patch('/api/settings', {
+        demoMode: { enabled: demoEnabled },
+        aiAnalyst: aiForm,
+      });
       setSavedDemoEnabled(demoEnabled);
+      savedAi.current = JSON.stringify(aiForm);
+      window.dispatchEvent(new Event('bess:demo-mode-changed'));
       setToast({ type: 'success', message: 'System settings saved.' });
     } catch (err) {
       setToast({ type: 'error', message: err instanceof Error ? err.message : 'Save failed.' });
     } finally {
-      setSavingDemo(false);
+      setSaving(false);
     }
   };
 
@@ -525,9 +515,7 @@ const SettingsPage: React.FC = () => {
     pricing: savePricing,
     battery: saveBattery,
     sensors: saveSensors,
-    health: null,
-    ai: saveAi,
-    system: saveDemo,
+    system: saveSystem,
   };
 
   // ── tab definitions ───────────────────────────────────────────────────
@@ -536,9 +524,7 @@ const SettingsPage: React.FC = () => {
     { id: 'pricing', label: 'Electricity Pricing', icon: <Zap className="h-4 w-4" /> },
     { id: 'battery', label: 'Battery', icon: <Battery className="h-4 w-4" /> },
     { id: 'home', label: 'Home', icon: <Home className="h-4 w-4" /> },
-    { id: 'health', label: 'Health', icon: <Activity className="h-4 w-4" /> },
-    { id: 'ai', label: 'AI Analyst', icon: <Brain className="h-4 w-4" /> },
-    { id: 'system', label: 'System', icon: <Settings2 className="h-4 w-4" /> },
+    { id: 'system', label: 'System', icon: <Activity className="h-4 w-4" /> },
   ];
 
   // ── render ────────────────────────────────────────────────────────────
@@ -611,9 +597,7 @@ const SettingsPage: React.FC = () => {
                 {tab === 'pricing' && 'Electricity price source and cost calculation (markup, VAT, tax reduction).'}
                 {tab === 'battery' && 'Growatt inverter type and battery parameters.'}
                 {tab === 'sensors' && 'Inverter platform selection and sensor entity IDs for each integration.'}
-                {tab === 'health' && 'System component health and diagnostics.'}
-                {tab === 'ai' && 'Claude API key and model for the AI analyst chat.'}
-                {tab === 'system' && 'System operation mode and control settings.'}
+                {tab === 'system' && 'Demo mode, AI analyst, diagnostics and debug tools.'}
               </p>
               <div className="flex items-center gap-2 flex-shrink-0">
                 <button
@@ -677,47 +661,16 @@ const SettingsPage: React.FC = () => {
             </div>
           )}
 
-          {/* ── Health ───────────────────────────────────────────────────── */}
-          {tab === 'health' && (
-            <div className="space-y-4">
-              <SystemHealthComponent />
-
-              <div className="bg-gray-100 dark:bg-gray-800/50 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
-                <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Status Indicators</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                  <ul className="space-y-1 text-gray-600 dark:text-gray-400">
-                    <li><span className="text-green-600 dark:text-green-400 font-medium">OK</span>: Component is fully functional with all required sensors.</li>
-                    <li><span className="text-amber-600 dark:text-amber-400 font-medium">WARNING</span>: Component has minor issues but can operate with limitations.</li>
-                    <li><span className="text-red-600 dark:text-red-400 font-medium">ERROR</span>: Component has critical issues and may not function correctly.</li>
-                  </ul>
-                  <ul className="space-y-1 text-gray-600 dark:text-gray-400">
-                    <li><span className="font-medium">Required</span>: Essential for basic system operation.</li>
-                    <li><span className="font-medium">Optional</span>: Enhances functionality but not essential for basic operation.</li>
-                  </ul>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ── AI Analyst ─────────────────────────────────────────────── */}
-          {tab === 'ai' && (
-            <AIAnalystSettings form={aiForm} onChange={setAiForm} />
-          )}
-
           {/* ── System ───────────────────────────────────────────────────── */}
           {tab === 'system' && (
-            <div className="space-y-4">
-              <p className="text-sm text-gray-500 dark:text-gray-400">
-                System operation mode and control settings.
-              </p>
-              <div className="bg-white dark:bg-gray-700 rounded-lg p-4">
+            <div className="space-y-6">
+              {/* Demo Mode */}
+              <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-4 space-y-3">
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Demo Mode</h3>
                 <div className="flex items-center justify-between">
-                  <div>
-                    <div className="font-medium text-gray-900 dark:text-white">Demo Mode</div>
-                    <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                      Read-only — optimizer runs but does not control the inverter
-                    </div>
-                  </div>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    Read-only — optimizer runs but does not control the inverter
+                  </p>
                   <button
                     onClick={() => {
                       if (!demoEnabled) {
@@ -726,7 +679,7 @@ const SettingsPage: React.FC = () => {
                         setDemoEnabled(false);
                       }
                     }}
-                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                    className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${
                       demoEnabled ? 'bg-blue-600' : 'bg-gray-400'
                     }`}
                     role="switch"
@@ -740,35 +693,59 @@ const SettingsPage: React.FC = () => {
                   </button>
                 </div>
                 {demoEnabled && (
-                  <div className="mt-3 p-2 bg-blue-900/20 border border-blue-700 rounded-md text-xs text-blue-300">
+                  <div className="p-2 bg-blue-900/20 border border-blue-700 rounded-md text-xs text-blue-300">
                     Currently in demo mode. Savings shown are theoretical estimates.
+                  </div>
+                )}
+                {showEnableDemoConfirm && (
+                  <div className="bg-yellow-900/20 border border-yellow-700 rounded-lg p-4">
+                    <p className="text-sm text-yellow-300 font-medium">Switch to demo mode?</p>
+                    <p className="text-xs text-gray-400 mt-1">The inverter will be set to a safe idle state.</p>
+                    <div className="flex gap-2 mt-3">
+                      <button
+                        onClick={() => setShowEnableDemoConfirm(false)}
+                        className="px-3 py-1.5 text-xs text-gray-400 bg-gray-700 rounded hover:bg-gray-600"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={() => {
+                          setDemoEnabled(true);
+                          setShowEnableDemoConfirm(false);
+                        }}
+                        className="px-3 py-1.5 text-xs text-white bg-blue-600 rounded hover:bg-blue-500"
+                      >
+                        Enable Demo Mode
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
 
-              {showEnableDemoConfirm && (
-                <div className="bg-yellow-900/20 border border-yellow-700 rounded-lg p-4">
-                  <p className="text-sm text-yellow-300 font-medium">Switch to demo mode?</p>
-                  <p className="text-xs text-gray-400 mt-1">The inverter will be set to a safe idle state.</p>
-                  <div className="flex gap-2 mt-3">
-                    <button
-                      onClick={() => setShowEnableDemoConfirm(false)}
-                      className="px-3 py-1.5 text-xs text-gray-400 bg-gray-700 rounded hover:bg-gray-600"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={() => {
-                        setDemoEnabled(true);
-                        setShowEnableDemoConfirm(false);
-                      }}
-                      className="px-3 py-1.5 text-xs text-white bg-blue-600 rounded hover:bg-blue-500"
-                    >
-                      Enable Demo Mode
-                    </button>
-                  </div>
+              {/* AI Analyst */}
+              <AIAnalystSettings form={aiForm} onChange={setAiForm} />
+
+              {/* Diagnostics */}
+              <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-4 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Diagnostics</h3>
+                  <button
+                    onClick={async () => {
+                      try {
+                        const filename = await downloadDebugBundle();
+                        setToast({ type: 'success', message: `Debug export saved as ${filename}` });
+                      } catch {
+                        setToast({ type: 'error', message: 'Failed to download debug export.' });
+                      }
+                    }}
+                    className="px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 flex items-center gap-1.5"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    <span>Export Debug Data</span>
+                  </button>
                 </div>
-              )}
+                <SystemHealthComponent />
+              </div>
             </div>
           )}
         </>

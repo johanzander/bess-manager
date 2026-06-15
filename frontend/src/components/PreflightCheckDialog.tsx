@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { CheckCircle, XCircle, Loader2 } from 'lucide-react';
+import { CheckCircle, XCircle } from 'lucide-react';
 import api from '../lib/api';
 
 interface PreflightCheck {
@@ -72,7 +72,7 @@ export default function PreflightCheckDialog({ open, onClose, onConfirm }: Prefl
         <div className="mt-4 space-y-2">
           {loading ? (
             <div className="flex items-center gap-2 text-gray-400">
-              <Loader2 className="h-4 w-4 animate-spin" />
+              <div className="h-4 w-4 border-2 border-gray-400 rounded-full border-t-transparent animate-spin" />
               <span className="text-sm">Checking system health...</span>
             </div>
           ) : (

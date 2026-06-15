@@ -198,10 +198,17 @@ function App() {
   const [isDemoMode, setIsDemoMode] = useState(false);
   const [showPreflightDialog, setShowPreflightDialog] = useState(false);
 
-  useEffect(() => {
+  const refreshDemoMode = () => {
     api.get('/api/dashboard-health-summary')
       .then(({ data }) => setIsDemoMode(data.systemMode === 'demo'))
       .catch(() => {});
+  };
+
+  useEffect(() => {
+    refreshDemoMode();
+    const handler = () => refreshDemoMode();
+    window.addEventListener('bess:demo-mode-changed', handler);
+    return () => window.removeEventListener('bess:demo-mode-changed', handler);
   }, []);
 
   // Hook calls must be at the top level - never inside try-catch blocks

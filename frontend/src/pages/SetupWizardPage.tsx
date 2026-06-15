@@ -302,6 +302,7 @@ const SetupWizardPage: React.FC = () => {
         // Control mode
         demoMode: controlMode === 'demo',
       });
+      window.dispatchEvent(new Event('bess:demo-mode-changed'));
       setStep(6);
     } catch (err: unknown) {
       setCompleteError(err instanceof Error ? err.message : 'Setup failed');

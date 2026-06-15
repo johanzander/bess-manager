@@ -12,6 +12,7 @@ import api from './lib/api';
 import { ReportProblemProvider } from './components/ReportProblemContext';
 import ReportProblemButton from './components/ReportProblemButton';
 import AIChatPanel from './components/AIChatPanel';
+import DemoModeBanner from './components/DemoModeBanner';
 
 // An ErrorBoundary component to catch rendering errors
 class ErrorBoundary extends React.Component<
@@ -193,6 +194,15 @@ function App() {
     return () => mediaQuery.removeEventListener('change', handleSystemThemeChange);
   }, []);
 
+  const [isDemoMode, setIsDemoMode] = useState(false);
+  const [showPreflightDialog, setShowPreflightDialog] = useState(false);
+
+  useEffect(() => {
+    api.get('/api/dashboard-health-summary')
+      .then(({ data }) => setIsDemoMode(data.systemMode === 'demo'))
+      .catch(() => {});
+  }, []);
+
   // Hook calls must be at the top level - never inside try-catch blocks
   const {
     batterySettings,
@@ -273,7 +283,11 @@ function App() {
               </div>
             </div>
           </header>
-          
+
+          {isDemoMode && (
+            <DemoModeBanner onGoLive={() => setShowPreflightDialog(true)} />
+          )}
+
           <main className="flex-1 w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
             {settingsError && (
               <div className="bg-red-50 dark:bg-red-900/10 p-6 rounded-lg shadow mb-6">

@@ -1400,25 +1400,12 @@ class BatterySystemManager:
                     raise RuntimeError(
                         f"Failed to store energy data for period {prev_period}"
                     )
-
-                # Reconstruction succeeded — clear any prior unavailable banner
-                self._runtime_failure_tracker.dismiss_by_category(
-                    "HISTORICAL_DATA_UNAVAILABLE"
-                )
             except HistoricalDataUnavailableError as e:
-                # Optional dependency: keep optimizing, but surface the gap so the
-                # user knows actuals/savings are incomplete (e.g. InfluxDB broken
-                # by an HA update). record_failure_once coalesces the recurring
-                # per-cycle failure into a single banner.
-                self._runtime_failure_tracker.record_failure_once(
-                    category="HISTORICAL_DATA_UNAVAILABLE",
-                    operation=(
-                        "Historical energy-flow reconstruction from InfluxDB — "
-                        "skipping actuals for this period; optimization continues "
-                        "on live SOC and forecast"
-                    ),
-                    error=e,
-                )
+                # Optional dependency: keep optimizing on live SOC + forecast.
+                # The gap is already surfaced to the user by the dedicated
+                # "Incomplete Historical Data" dashboard banner, so we do not
+                # also raise a runtime-error alert here — that panel is reserved
+                # for unexpected, actionable failures.
                 logger.warning(
                     "Historical data unavailable for period %d (%s): %s — "
                     "skipping actuals, optimization continues",

@@ -534,3 +534,25 @@ class TestSchemaMigration:
         home = store.get_section("home")
         assert "consumption" not in home
         assert "safety_margin_factor" not in home
+
+
+# ---------------------------------------------------------------------------
+# demo_mode section
+# ---------------------------------------------------------------------------
+
+
+def test_bootstrap_defaults_include_demo_mode():
+    defaults = SettingsStore._bootstrap_defaults()
+    assert "demo_mode" in defaults
+    assert defaults["demo_mode"] == {"enabled": False}
+
+
+def test_migrate_schema_adds_demo_mode_to_old_config(tmp_path, monkeypatch):
+    _patch_path(tmp_path, monkeypatch)
+    store = SettingsStore()
+    store.data = {
+        "battery": {"total_capacity": 10.0},
+        "home": {"currency": "SEK"},
+    }
+    store._migrate_schema()
+    assert store.data.get("demo_mode") == {"enabled": False}

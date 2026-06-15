@@ -1896,14 +1896,17 @@ async def get_dashboard_health_summary():
                 logger.warning(
                     "No cached health results available, returning minimal response"
                 )
-                return {
+                summary = {
                     "has_critical_errors": False,
                     "has_warnings": False,
                     "critical_issues": [],
                     "total_critical_issues": 0,
                     "timestamp": datetime.now().isoformat(),
-                    "system_mode": "unknown",
+                    "system_mode": (
+                        "demo" if bess_controller.ha_controller.test_mode else "unknown"
+                    ),
                 }
+                return convert_keys_to_camel_case(summary)
 
             # Extract critical and warning information
             critical_issues = []

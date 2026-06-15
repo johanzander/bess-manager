@@ -340,6 +340,7 @@ function App() {
           onConfirm={() => {
             setShowPreflightDialog(false);
             setIsDemoMode(false);
+            window.dispatchEvent(new Event('bess:demo-mode-changed'));
           }}
         />
         </ReportProblemProvider>

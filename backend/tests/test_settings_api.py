@@ -530,3 +530,35 @@ class TestDemoMode:
         mock_controller.settings_store.data["demo_mode"] = {"enabled": True}
         _client.patch("/api/settings", json={"demoMode": {"enabled": False}})
         mock_controller.ha_controller.set_test_mode.assert_called_with(False)
+
+    def test_get_settings_returns_demo_mode_enabled(self, mock_controller):
+        """GET /api/settings round-trips demoMode after enabling it."""
+        _client.patch("/api/settings", json={"demoMode": {"enabled": True}})
+        resp = _client.get("/api/settings")
+        assert resp.json()["demoMode"]["enabled"] is True
+
+    def test_get_settings_returns_demo_mode_disabled_after_toggle(self, mock_controller):
+        """Enable then disable — GET must reflect the final state."""
+        _client.patch("/api/settings", json={"demoMode": {"enabled": True}})
+        _client.patch("/api/settings", json={"demoMode": {"enabled": False}})
+        resp = _client.get("/api/settings")
+        assert resp.json()["demoMode"]["enabled"] is False
+
+    def test_patch_demo_mode_enable_triggers_idle_handoff(self, mock_controller):
+        """Enabling demo mode should set inverter to safe idle."""
+        inv = MagicMock()
+        mock_controller.system.inverter_controller = inv
+        _client.patch("/api/settings", json={"demoMode": {"enabled": True}})
+        inv.apply_period.assert_called_once_with(
+            mock_controller.ha_controller,
+            grid_charge=False,
+            discharge_rate=0,
+        )
+
+    def test_patch_demo_mode_disable_does_not_trigger_idle(self, mock_controller):
+        """Disabling demo mode should NOT call apply_period."""
+        inv = MagicMock()
+        mock_controller.system.inverter_controller = inv
+        mock_controller.settings_store.data["demo_mode"] = {"enabled": True}
+        _client.patch("/api/settings", json={"demoMode": {"enabled": False}})
+        inv.apply_period.assert_not_called()

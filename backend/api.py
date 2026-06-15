@@ -3046,6 +3046,10 @@ async def setup_complete(payload: APISetupCompletePayload):
                 growatt_section["device_id"] = payload.growattDeviceId
                 sections["growatt"] = growatt_section
 
+        # --- demo mode ---
+        if payload.demoMode is not None:
+            sections["demo_mode"] = {"enabled": payload.demoMode}
+
         # Persist all sections atomically
         bess_controller.settings_store.save_all(sections)
 
@@ -3117,6 +3121,10 @@ async def setup_complete(payload: APISetupCompletePayload):
             bess_controller.system.update_settings(
                 {"energy_provider": sections["energy_provider"]}
             )
+
+        # Apply demo mode live
+        if payload.demoMode is not None:
+            bess_controller.ha_controller.set_test_mode(payload.demoMode)
 
         # Backfill historical data in the background (may take many seconds for 20+
         # InfluxDB queries), then build the schedule with correct historical context.

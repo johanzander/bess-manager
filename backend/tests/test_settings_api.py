@@ -69,6 +69,7 @@ _DEFAULT_STORE: dict = {
         "nordpool_official": {"config_entry_id": "abc-123"},
     },
     "growatt": {"device_id": "dev-1"},
+    "demo_mode": {"enabled": False},
     "sensors": {
         "platform": "growatt_server_min",
         "growatt_server_min": {},
@@ -505,3 +506,50 @@ class TestPatchSettingsResponse:
         mock_controller.ha_controller.sensors = {"battery_soc": "sensor.batt"}
         resp = _client.patch("/api/settings", json={"home": {}})
         assert "sensors" in resp.json()
+
+
+# ===========================================================================
+# PATCH /api/settings — demoMode section
+# ===========================================================================
+
+
+class TestDemoMode:
+    """PATCH /api/settings with demoMode section."""
+
+    def test_patch_demo_mode_persists(self, mock_controller):
+        resp = _client.patch("/api/settings", json={"demoMode": {"enabled": True}})
+        assert resp.status_code == 200
+        stored = mock_controller.settings_store.data.get("demo_mode", {})
+        assert stored["enabled"] is True
+
+    def test_patch_demo_mode_applies_test_mode(self, mock_controller):
+        _client.patch("/api/settings", json={"demoMode": {"enabled": True}})
+        mock_controller.ha_controller.set_test_mode.assert_called_with(True)
+
+    def test_patch_demo_mode_disable_applies_test_mode_false(self, mock_controller):
+        mock_controller.settings_store.data["demo_mode"] = {"enabled": True}
+        _client.patch("/api/settings", json={"demoMode": {"enabled": False}})
+        mock_controller.ha_controller.set_test_mode.assert_called_with(False)
+
+    def test_get_settings_returns_demo_mode_enabled(self, mock_controller):
+        """GET /api/settings round-trips demoMode after enabling it."""
+        _client.patch("/api/settings", json={"demoMode": {"enabled": True}})
+        resp = _client.get("/api/settings")
+        assert resp.json()["demoMode"]["enabled"] is True
+
+    def test_get_settings_returns_demo_mode_disabled_after_toggle(
+        self, mock_controller
+    ):
+        """Enable then disable — GET must reflect the final state."""
+        _client.patch("/api/settings", json={"demoMode": {"enabled": True}})
+        _client.patch("/api/settings", json={"demoMode": {"enabled": False}})
+        resp = _client.get("/api/settings")
+        assert resp.json()["demoMode"]["enabled"] is False
+
+    def test_patch_demo_mode_does_not_write_to_inverter(self, mock_controller):
+        """Toggling demo mode must not call apply_period (no hardware writes)."""
+        inv = MagicMock()
+        mock_controller.system.inverter_controller = inv
+        _client.patch("/api/settings", json={"demoMode": {"enabled": True}})
+        _client.patch("/api/settings", json={"demoMode": {"enabled": False}})
+        inv.apply_period.assert_not_called()

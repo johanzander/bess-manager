@@ -594,6 +594,21 @@ class TestSetupComplete:
         call_args = complete_controller.settings_store.save_all.call_args[0][0]
         assert "battery" not in call_args
 
+    def test_setup_complete_with_demo_mode(self, complete_controller):
+        resp = _client.post(
+            "/api/setup/complete",
+            json={
+                "sensors": {"platform": "growatt_server_min"},
+                "totalCapacity": 10.0,
+                "inverterPlatform": "growatt_server_min",
+                "demoMode": True,
+            },
+        )
+        assert resp.status_code == 200
+        stored = complete_controller.settings_store.data.get("demo_mode", {})
+        assert stored["enabled"] is True
+        complete_controller.ha_controller.set_test_mode.assert_called_with(True)
+
 
 # ---------------------------------------------------------------------------
 # Discovery locale persistence (#113)

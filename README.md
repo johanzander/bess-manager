@@ -65,8 +65,8 @@ Something look off? The built-in AI Analyst explains every decision in plain lan
 
 ## Installation
 
-1. Go to **Settings > Add-ons > Add-on Store** and add the repository URL
-2. Install and start ChargeIQ
+1. In Home Assistant, go to **Settings → Add-ons → Add-on Store**, click the menu (⋮) → **Repositories**, and add: `https://github.com/johanzander/bess-manager`
+2. Find **BESS Battery Manager** in the store, click **Install**, then **Start**
 3. Open the web UI and follow the setup wizard
 
 Full instructions: **[Installation Guide](docs/INSTALLATION.md)**

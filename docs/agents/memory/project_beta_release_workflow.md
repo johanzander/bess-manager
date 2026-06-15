@@ -6,7 +6,7 @@ originSessionId: 65d25685-af51-429c-80ea-1d6975329e1d
 ---
 HA Supervisor has built-in beta channel support based on version string conventions.
 
-**Beta release**: set `version` in `bess_manager/config.yaml` and `config.dev.yaml` to e.g. `"9.0.0b11"`, tag as `v9.0.0b11`.
+**Beta release**: set `version` in `bess_manager/config.yaml` to e.g. `"9.0.0b11"`, tag as `v9.0.0b11`.
 **Stable release**: set `version` to `"9.0.0"`, tag as `v9.0.0`.
 
 Only users who enable "Show beta and dev channel releases" in the add-on UI will see beta versions.
@@ -25,4 +25,4 @@ Branch protection is enabled on `beta/main` requiring these CI checks to pass.
 
 **Why:** Direct pushes skip CI validation. A prior release (v9.0.0b11) was pushed without CI. PRs ensure all tests run before code reaches users. Pre-built Docker images (since v9.3.0) replaced source-based builds for faster installs and no build failures on user hardware.
 
-**How to apply:** Version in `bess_manager/config.yaml` and `config.dev.yaml` must match the git tag. Always verify GHCR images are pullable after the release workflow completes.
+**How to apply:** Version in `bess_manager/config.yaml` must match the git tag. Always verify GHCR images are pullable after the release workflow completes.

@@ -65,3 +65,4 @@ backend/mock-bess-settings.json
 # Claude Code (temporary/session-specific)
 .claude/worktrees/
 .claude/scheduled_tasks.lock
+.superpowers/

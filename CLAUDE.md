@@ -145,7 +145,7 @@ of `analyzed`.
 
 - **Sensors**: battery SOC/power, solar production, grid import/export, pricing
 - **Device**: Growatt inverter (TOU schedule control)
-- **Add-on config**: `config.yaml` in root (version field, HA schema)
+- **Add-on config**: `bess_manager/config.yaml` (version field, HA schema)
 - **Pricing sources**: Nordpool and Octopus Energy
 
 ## Configuration Files
@@ -153,4 +153,4 @@ of `analyzed`.
 - `pyproject.toml` — Black, Ruff, mypy settings
 - `frontend/package.json` — React/TypeScript dependencies
 - `docker-compose.yml` — development environment
-- `config.yaml` — HA add-on schema and current version
+- `bess_manager/config.yaml` — HA add-on schema and current version (single source of truth)

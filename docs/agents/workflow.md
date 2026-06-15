@@ -60,7 +60,7 @@ spends money on its own. Stage 1 is auto but cheap.
 2. **Fix minor issues** — apply small fixes directly; request changes for anything substantial
 3. **Update CHANGELOG** — add entry under new version heading, credit author:
    `(thanks [@username](https://github.com/username))`
-4. **Bump version** in both `bess_manager/config.yaml` and `config.dev.yaml`:
+4. **Bump version** in `bess_manager/config.yaml` (single source of truth):
    - `PATCH` (x.y.**Z**): bug fixes, doc/comment changes, no behavior change
    - `MINOR` (x.**Y**.0): new features, backwards-compatible
    - `MAJOR` (**X**.0.0): breaking changes

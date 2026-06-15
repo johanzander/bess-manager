@@ -1,14 +1,25 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { DetailedSavingsAnalysis } from '../components/DetailedSavingsAnalysis';
 import { SavingsOverview } from '../components/SavingsOverview';
 import { useSettings } from '../hooks/useSettings';
 import { useUserPreferences } from '../hooks/useUserPreferences';
 import { Eye, Table2 } from 'lucide-react';
+import api from '../lib/api';
 
 const SavingsPage: React.FC = () => {
   const { batterySettings } = useSettings();
   const { dataResolution, setDataResolution } = useUserPreferences();
   const [viewMode, setViewMode] = useState<'simple' | 'detailed'>('simple');
+  const [systemMode, setSystemMode] = useState<string>('normal');
+
+  useEffect(() => {
+    api.get('/api/settings')
+      .then(({ data }) => {
+        const dm = data.demoMode || data.demo_mode || {};
+        setSystemMode(dm.enabled ? 'demo' : 'normal');
+      })
+      .catch(() => {});
+  }, []);
 
   // Create merged settings with defaults for the table
   const mergedSettings = {
@@ -40,6 +51,11 @@ const SavingsPage: React.FC = () => {
             <p className="text-gray-600 dark:text-gray-300">
               Compare how your battery system optimizes energy costs and increases solar utilization.
             </p>
+            {systemMode === 'demo' && (
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                All savings are theoretical estimates based on optimization plans
+              </p>
+            )}
           </div>
           
           {/* View Mode Switcher */}

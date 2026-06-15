@@ -199,8 +199,11 @@ function App() {
   const [showPreflightDialog, setShowPreflightDialog] = useState(false);
 
   const refreshDemoMode = () => {
-    api.get('/api/dashboard-health-summary')
-      .then(({ data }) => setIsDemoMode(data.systemMode === 'demo'))
+    api.get('/api/settings')
+      .then(({ data }) => {
+        const dm = data.demoMode || data.demo_mode || {};
+        setIsDemoMode(dm.enabled === true);
+      })
       .catch(() => {});
   };
 

@@ -13,8 +13,11 @@ const SavingsPage: React.FC = () => {
   const [systemMode, setSystemMode] = useState<string>('normal');
 
   useEffect(() => {
-    api.get('/api/dashboard-health-summary')
-      .then(({ data }) => setSystemMode(data.systemMode || 'normal'))
+    api.get('/api/settings')
+      .then(({ data }) => {
+        const dm = data.demoMode || data.demo_mode || {};
+        setSystemMode(dm.enabled ? 'demo' : 'normal');
+      })
       .catch(() => {});
   }, []);
 

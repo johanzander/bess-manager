@@ -92,11 +92,11 @@ export default function DashboardPage({
     }>;
     totalCriticalIssues: number;
     timestamp: string;
-    systemMode: string;
   }
   
   const [healthSummary, setHealthSummary] = useState<HealthSummary | null>(null);
   const [dismissedBanner, setDismissedBanner] = useState(false);
+  const [demoMode, setDemoMode] = useState(false);
 
   // Runtime failures state
   const { failures, dismissFailure, dismissAllFailures } = useRuntimeFailures();
@@ -135,10 +135,11 @@ export default function DashboardPage({
 
     try {
       // Fetch dashboard data, health summary, and historical data status concurrently
-      const [dashboardResponse, healthResponse, historicalResponse] = await Promise.all([
+      const [dashboardResponse, healthResponse, historicalResponse, settingsResponse] = await Promise.all([
         api.get('/api/dashboard', { params: { resolution: dataResolution } }),
         api.get('/api/dashboard-health-summary'),
-        api.get('/api/historical-data-status')
+        api.get('/api/historical-data-status'),
+        api.get('/api/settings').catch(() => ({ data: null })),
       ]);
 
       const response = dashboardResponse;
@@ -181,6 +182,11 @@ export default function DashboardPage({
         if (historicalResponse.data.isIncomplete) {
           setDismissedHistoricalWarning(false);
         }
+      }
+
+      if (settingsResponse?.data) {
+        const dm = settingsResponse.data.demoMode || settingsResponse.data.demo_mode || {};
+        setDemoMode(dm.enabled === true);
       }
 
       setLastUpdate(new Date());
@@ -353,7 +359,7 @@ export default function DashboardPage({
           <div className="space-y-6">
             <div>
               <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">System Overview</h2>
-              <SystemStatusCard systemMode={healthSummary?.systemMode} />
+              <SystemStatusCard systemMode={demoMode ? 'demo' : undefined} />
             </div>
           </div>
 

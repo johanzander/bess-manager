@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Activity, Battery, Brain, Home, Settings, Sun, Zap } from 'lucide-react';
+import { Activity, Battery, Brain, Home, Settings, Settings2, Sun, Zap } from 'lucide-react';
 import api from '../lib/api';
 import SystemHealthComponent from '../components/SystemHealth';
 import type { HealthStatus } from '../types';
@@ -21,7 +21,7 @@ import type { PerPlatformSensors } from '../lib/sensorDefinitions';
 // Local types
 // ---------------------------------------------------------------------------
 
-type Tab = 'home' | 'pricing' | 'battery' | 'sensors' | 'health' | 'ai';
+type Tab = 'home' | 'pricing' | 'battery' | 'sensors' | 'health' | 'ai' | 'system';
 
 interface Toast {
   type: 'success' | 'error';
@@ -72,6 +72,10 @@ const SettingsPage: React.FC = () => {
   const [inverterForm, setInverterForm] = useState<InverterForm>(EMPTY_INVERTER);
   const [sensors, setSensors] = useState<PerPlatformSensors>(emptyPerPlatformSensors());
   const [aiForm, setAiForm] = useState<AIAnalystForm>({ apiKey: '', model: 'claude-sonnet-4-20250514', enabled: true });
+  const [demoEnabled, setDemoEnabled] = useState(false);
+  const [savedDemoEnabled, setSavedDemoEnabled] = useState(false);
+  const [savingDemo, setSavingDemo] = useState(false);
+  const [showEnableDemoConfirm, setShowEnableDemoConfirm] = useState(false);
 
   // ── saved snapshots (for dirty detection) ──────────────────────────────
   const savedBattery = useRef<string>('');
@@ -106,6 +110,7 @@ const SettingsPage: React.FC = () => {
     sensors: stableStringify(sensors) !== savedSensors.current,
     health: false,
     ai: JSON.stringify(aiForm) !== savedAi.current,
+    system: demoEnabled !== savedDemoEnabled,
   };
 
   // ── loading / saving / error state ────────────────────────────────────
@@ -218,6 +223,10 @@ const SettingsPage: React.FC = () => {
       };
       setAiForm(ai);
       savedAi.current = JSON.stringify(ai);
+
+      const dm = s.demoMode || s.demo_mode || {};
+      setDemoEnabled(dm.enabled ?? false);
+      setSavedDemoEnabled(dm.enabled ?? false);
 
       if (healthRes.data?.checks) {
         const map: Record<string, HealthStatus> = {};
@@ -498,6 +507,19 @@ const SettingsPage: React.FC = () => {
     }
   };
 
+  const saveDemo = async () => {
+    setSavingDemo(true);
+    try {
+      await api.patch('/api/settings', { demoMode: { enabled: demoEnabled } });
+      setSavedDemoEnabled(demoEnabled);
+      setToast({ type: 'success', message: 'System settings saved.' });
+    } catch (err) {
+      setToast({ type: 'error', message: err instanceof Error ? err.message : 'Save failed.' });
+    } finally {
+      setSavingDemo(false);
+    }
+  };
+
   const saveHandlers: Record<Tab, (() => Promise<void>) | null> = {
     home: saveHome,
     pricing: savePricing,
@@ -505,6 +527,7 @@ const SettingsPage: React.FC = () => {
     sensors: saveSensors,
     health: null,
     ai: saveAi,
+    system: saveDemo,
   };
 
   // ── tab definitions ───────────────────────────────────────────────────
@@ -515,6 +538,7 @@ const SettingsPage: React.FC = () => {
     { id: 'home', label: 'Home', icon: <Home className="h-4 w-4" /> },
     { id: 'health', label: 'Health', icon: <Activity className="h-4 w-4" /> },
     { id: 'ai', label: 'AI Analyst', icon: <Brain className="h-4 w-4" /> },
+    { id: 'system', label: 'System', icon: <Settings2 className="h-4 w-4" /> },
   ];
 
   // ── render ────────────────────────────────────────────────────────────
@@ -589,6 +613,7 @@ const SettingsPage: React.FC = () => {
                 {tab === 'sensors' && 'Inverter platform selection and sensor entity IDs for each integration.'}
                 {tab === 'health' && 'System component health and diagnostics.'}
                 {tab === 'ai' && 'Claude API key and model for the AI analyst chat.'}
+                {tab === 'system' && 'System operation mode and control settings.'}
               </p>
               <div className="flex items-center gap-2 flex-shrink-0">
                 <button
@@ -677,6 +702,74 @@ const SettingsPage: React.FC = () => {
           {/* ── AI Analyst ─────────────────────────────────────────────── */}
           {tab === 'ai' && (
             <AIAnalystSettings form={aiForm} onChange={setAiForm} />
+          )}
+
+          {/* ── System ───────────────────────────────────────────────────── */}
+          {tab === 'system' && (
+            <div className="space-y-4">
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                System operation mode and control settings.
+              </p>
+              <div className="bg-white dark:bg-gray-700 rounded-lg p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="font-medium text-gray-900 dark:text-white">Demo Mode</div>
+                    <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                      Read-only — optimizer runs but does not control the inverter
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => {
+                      if (!demoEnabled) {
+                        setShowEnableDemoConfirm(true);
+                      } else {
+                        setDemoEnabled(false);
+                      }
+                    }}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                      demoEnabled ? 'bg-blue-600' : 'bg-gray-400'
+                    }`}
+                    role="switch"
+                    aria-checked={demoEnabled}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                        demoEnabled ? 'translate-x-6' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
+                </div>
+                {demoEnabled && (
+                  <div className="mt-3 p-2 bg-blue-900/20 border border-blue-700 rounded-md text-xs text-blue-300">
+                    Currently in demo mode. Savings shown are theoretical estimates.
+                  </div>
+                )}
+              </div>
+
+              {showEnableDemoConfirm && (
+                <div className="bg-yellow-900/20 border border-yellow-700 rounded-lg p-4">
+                  <p className="text-sm text-yellow-300 font-medium">Switch to demo mode?</p>
+                  <p className="text-xs text-gray-400 mt-1">The inverter will be set to a safe idle state.</p>
+                  <div className="flex gap-2 mt-3">
+                    <button
+                      onClick={() => setShowEnableDemoConfirm(false)}
+                      className="px-3 py-1.5 text-xs text-gray-400 bg-gray-700 rounded hover:bg-gray-600"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => {
+                        setDemoEnabled(true);
+                        setShowEnableDemoConfirm(false);
+                      }}
+                      className="px-3 py-1.5 text-xs text-white bg-blue-600 rounded hover:bg-blue-500"
+                    >
+                      Enable Demo Mode
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           )}
         </>
       )}

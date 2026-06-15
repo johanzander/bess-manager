@@ -4,6 +4,12 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.5.0] - 2026-06-15
+
+### Added
+
+- **Demo Mode** — New users can observe how BESS Manager would optimize their battery without actually controlling the inverter. The setup wizard now offers a "Demo Mode" vs "Live Control" choice as the final step. While in demo mode, the optimizer runs normally but all inverter writes are blocked; savings are labeled as theoretical estimates. A persistent banner shows the current mode with a "Go Live" button that triggers a pre-flight health check (inverter reachable, sensors responding, price data available) before enabling live control. Demo mode is also available as a toggle in the new System tab on the Settings page.
+
 ## [9.4.3] - 2026-06-15
 
 ### Fixed

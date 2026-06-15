@@ -163,21 +163,17 @@ checkpoint (Stage 4) without a manual nudge. This completes full autonomy.
 **Exit:** an inverter request issue can reach a graduated stable release with
 human input only at the two real gates.
 
-## Open decisions
+## Decisions (resolved 2026-06-15)
 
-- **D1 — Lifecycle host:** run `feature-lifecycle` directly from the workflow
-  prompt (recommended) vs. a dedicated `inverter-integrator` subagent.
-  *Recommendation:* direct, reusing existing skills; revisit only if the prompt
-  grows unwieldy.
-- **D2 — Where the skills land:** merge the existing
-  `feature/entsoe-belpex-price-source` lifecycle skills to `main` as part of
-  Stage B, vs. cherry-pick just the skill files. *Recommendation:* cherry-pick
-  the `.claude/skills/` files so Stage B doesn't drag in unrelated provider code.
-- **D3 — First live run:** after Stage A, do we immediately drive Solis #130
-  through the lifecycle manually (proving the skill before automating), or wait
-  until Stage C? *Recommendation:* manual Solis run after Stage A — it validates
-  the skill and delivers #130, and is the same "prove manually, then automate"
-  path #126 followed.
+- **D1 — Lifecycle host:** **Decided — run `feature-lifecycle` directly** from
+  the workflow prompt. No dedicated `inverter-integrator` subagent unless the
+  prompt later grows unwieldy.
+- **D2 — Where the skills land (Stage B):** **Decided — cherry-pick just the
+  `.claude/skills/` files** to `main`, so Stage B doesn't drag in unrelated
+  provider code from `feature/entsoe-belpex-price-source`.
+- **D3 — First live run:** **Decided — drive Solis #130 through the lifecycle
+  manually right after Stage A**, proving the skill and delivering #130 before
+  automating (the same "prove manually, then automate" path #126 followed).
 
 ## Risks
 

@@ -35,7 +35,9 @@ cp backend/settings_store.py "$BUILD_DIR/settings_store.py"
 cp backend/settings_store.py "$BUILD_DIR/settings_store.py"
 cp backend/requirements.txt "$BUILD_DIR/requirements.txt"
 cp backend/run.sh "$BUILD_DIR/run.sh"
-cp config.dev.yaml "$BUILD_DIR/config.yaml"
+# Use bess_manager/config.yaml as single source of truth, strip the GHCR
+# image line so HA builds locally instead of pulling from the registry.
+sed '/^image:/d' bess_manager/config.yaml > "$BUILD_DIR/config.yaml"
 cp README.md "$BUILD_DIR/README.md"
 cp CHANGELOG.md "$BUILD_DIR/CHANGELOG.md"
 

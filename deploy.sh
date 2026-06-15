@@ -13,7 +13,7 @@ fi
 # Auto-increment patch version if deploying same version
 if [ -f "$TARGET_PATH/config.yaml" ]; then
     CURRENT_VERSION=$(grep "^version:" "$TARGET_PATH/config.yaml" | cut -d'"' -f2)
-    BUILD_VERSION=$(grep "^version:" "config.dev.yaml" | cut -d'"' -f2)
+    BUILD_VERSION=$(grep "^version:" "bess_manager/config.yaml" | cut -d'"' -f2)
 
     if [ "$CURRENT_VERSION" = "$BUILD_VERSION" ]; then
         echo "Same version detected ($BUILD_VERSION), auto-incrementing patch version..."
@@ -35,8 +35,8 @@ if [ -f "$TARGET_PATH/config.yaml" ]; then
         NEW_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
 
         echo "Updating version: $BUILD_VERSION → $NEW_VERSION"
-        sed -i '' "s/version: \"$BUILD_VERSION\"/version: \"$NEW_VERSION\"/" config.dev.yaml
-        echo "Updated config.dev.yaml"
+        sed -i '' "s/version: \"$BUILD_VERSION\"/version: \"$NEW_VERSION\"/" bess_manager/config.yaml
+        echo "Updated bess_manager/config.yaml"
     fi
 fi
 

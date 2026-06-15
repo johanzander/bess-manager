@@ -155,6 +155,7 @@ _SECTION_MAP: dict[str, str] = {
     "inverter": "inverter",
     "sensors": "sensors",
     "aiAnalyst": "ai_analyst",
+    "demoMode": "demo_mode",
 }
 
 # Derived from the BatterySettings dataclass — fields with init=True are the
@@ -314,6 +315,19 @@ async def patch_settings(updates: dict):
                 bess_controller.ha_controller.sensors = {
                     k: v for k, v in active.items() if v
                 }
+
+            elif store_key == "demo_mode":
+                enabled = section.get("enabled", False)
+                if enabled:
+                    # Graceful handoff: set inverter to safe idle before blocking writes
+                    inv = bess_controller.system.inverter_controller
+                    if inv is not None:
+                        inv.apply_period(
+                            bess_controller.ha_controller,
+                            grid_charge=False,
+                            discharge_rate=0,
+                        )
+                bess_controller.ha_controller.set_test_mode(enabled)
 
         _refresh_health(bess_controller)
         return await get_settings()

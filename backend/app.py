@@ -149,14 +149,18 @@ class BESSController:
         except Exception as e:
             logger.warning(f"Could not read timezone from HA, using default: {e}")
 
-        # Enable test mode based on environment variable (defaults to False for production)
-        test_mode = os.environ.get("HA_TEST_MODE", "false").lower() in (
+        # Enable test mode from environment variable OR persisted demo_mode setting.
+        # Environment variable takes precedence (for dev/CI use).
+        env_test_mode = os.environ.get("HA_TEST_MODE", "false").lower() in (
             "true",
             "1",
             "yes",
         )
+        demo_mode = self.settings_store.get_section("demo_mode").get("enabled", False)
+        test_mode = env_test_mode or demo_mode
         if test_mode:
-            logger.info("Enabling test mode - hardware writes will be simulated")
+            source = "environment" if env_test_mode else "demo_mode setting"
+            logger.info("Enabling test mode (%s) - hardware writes will be simulated", source)
         self.ha_controller.set_test_mode(test_mode)
 
         # Extract energy provider configuration

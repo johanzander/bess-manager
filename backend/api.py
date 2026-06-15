@@ -1939,9 +1939,6 @@ async def get_dashboard_health_summary():
                 "system_mode": health_results.get("system_mode", "normal"),
             }
 
-        if bess_controller.ha_controller.test_mode:
-            summary["system_mode"] = "demo"
-
         logger.debug(f"Dashboard health summary: {summary}")
         return convert_keys_to_camel_case(summary)
 

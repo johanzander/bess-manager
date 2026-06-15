@@ -26,13 +26,7 @@ cd ..
 # Copy base files - make sure these match what Dockerfile expects
 cp backend/Dockerfile "$BUILD_DIR/Dockerfile"
 cp build.json "$BUILD_DIR/build.json"
-cp backend/app.py "$BUILD_DIR/app.py"
-cp backend/api.py "$BUILD_DIR/api.py"
-cp backend/api_conversion.py "$BUILD_DIR/api_conversion.py"
-cp backend/api_dataclasses.py "$BUILD_DIR/api_dataclasses.py"
-cp backend/log_config.py "$BUILD_DIR/log_config.py"
-cp backend/settings_store.py "$BUILD_DIR/settings_store.py"
-cp backend/settings_store.py "$BUILD_DIR/settings_store.py"
+cp backend/*.py "$BUILD_DIR/"
 cp backend/requirements.txt "$BUILD_DIR/requirements.txt"
 cp backend/run.sh "$BUILD_DIR/run.sh"
 # Use bess_manager/config.yaml as single source of truth, strip the GHCR

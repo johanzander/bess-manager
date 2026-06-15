@@ -53,14 +53,16 @@ BESS works without solar panels or a solar forecast. If you have PV and want sol
 
 ## Step 1: Install the Add-on
 
-1. Add the repository to Home Assistant:
-   - Go to Settings → Add-ons → Add-on Store
-   - Click menu (⋮) → Repositories
-   - Add: `https://github.com/johanzander/bess-manager`
-
-2. Install BESS Manager:
-   - Find "BESS Battery Manager" in the add-on store
-   - Click "Install"
+1. Open your Home Assistant web interface
+2. Go to **Settings → Add-ons** (in the left sidebar, click Settings, then Add-ons)
+3. Click the **Add-on Store** button (bottom-right)
+4. Click the overflow menu (**⋮**) in the top-right corner, then **Repositories**
+5. Paste the repository URL and click Add:
+   ```
+   https://github.com/johanzander/bess-manager
+   ```
+6. Close the dialog — **BESS Battery Manager** now appears in the store
+7. Click it, then click **Install**
 
 ## Step 2: Set Up InfluxDB (Optional but Recommended)
 
@@ -148,7 +150,7 @@ influxdb:
 
 ### 2f: Verify the Connection
 
-After starting BESS, go to **Settings → Health** in the web interface. The
+After starting BESS, go to **Settings → System** in the web interface. The
 **Historical Data Access** component should show **OK**. If it shows a warning like
 *"returned no valid data"*, the most likely cause is an incorrect bucket name — double-check
 that you have used `homeassistant/autogen` and not just `homeassistant`.
@@ -213,11 +215,11 @@ If you need to re-run the wizard later, click **Auto-Configure** on the **Settin
 
 All settings are available under the **Settings** page in the top navigation. There are five tabs:
 
-- **Home** — Consumption, currency, fuse size, voltage, phase count, safety margin
-- **Pricing** — Nordpool/Octopus provider, price area, VAT, markup, additional costs, tax reduction
+- **Integrations** — Inverter platform selection and sensor entity IDs for each integration
+- **Electricity Pricing** — Nordpool/Octopus provider, price area, VAT, markup, additional costs, tax reduction
 - **Battery** — Capacity, power limits, SOC range, cycle cost, min action profit threshold
-- **Sensors** — All sensor entity IDs grouped by integration (Growatt/SolaX, Nordpool, Solcast, etc.)
-- **Health** — Live component health check and debug export
+- **Home** — Consumption, currency, fuse size, voltage, phase count, safety margin
+- **System** — Demo mode, AI analyst, diagnostics and debug export
 
 The sections below describe the key values you need to fill in.
 
@@ -470,7 +472,7 @@ Not `homeassistant`, not `home_assistant` — it must include `/autogen`.
 
 ### Check Sensor Health
 
-Go to **Settings → Health** in the BESS web interface to verify all sensors are working correctly.
+Go to **Settings → System** in the BESS web interface to verify all sensors are working correctly.
 The health tab shows OK / WARNING / ERROR for each integration and lets you export debug data.
 
 ### View Add-on Logs

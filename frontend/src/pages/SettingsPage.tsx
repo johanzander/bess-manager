@@ -693,18 +693,18 @@ const SettingsPage: React.FC = () => {
                   </button>
                 </div>
                 {demoEnabled && (
-                  <div className="p-2 bg-blue-900/20 border border-blue-700 rounded-md text-xs text-blue-300">
+                  <div className="p-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-md text-xs text-blue-700 dark:text-blue-300">
                     Currently in demo mode. Savings shown are theoretical estimates.
                   </div>
                 )}
                 {showEnableDemoConfirm && (
-                  <div className="bg-yellow-900/20 border border-yellow-700 rounded-lg p-4">
-                    <p className="text-sm text-yellow-300 font-medium">Switch to demo mode?</p>
-                    <p className="text-xs text-gray-400 mt-1">The inverter will be set to a safe idle state.</p>
+                  <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-300 dark:border-yellow-700 rounded-lg p-4">
+                    <p className="text-sm text-yellow-800 dark:text-yellow-300 font-medium">Switch to demo mode?</p>
+                    <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">The system will stop sending commands to your inverter.</p>
                     <div className="flex gap-2 mt-3">
                       <button
                         onClick={() => setShowEnableDemoConfirm(false)}
-                        className="px-3 py-1.5 text-xs text-gray-400 bg-gray-700 rounded hover:bg-gray-600"
+                        className="px-3 py-1.5 text-xs text-gray-600 dark:text-gray-400 bg-gray-200 dark:bg-gray-700 rounded hover:bg-gray-300 dark:hover:bg-gray-600"
                       >
                         Cancel
                       </button>

@@ -537,7 +537,9 @@ class TestDemoMode:
         resp = _client.get("/api/settings")
         assert resp.json()["demoMode"]["enabled"] is True
 
-    def test_get_settings_returns_demo_mode_disabled_after_toggle(self, mock_controller):
+    def test_get_settings_returns_demo_mode_disabled_after_toggle(
+        self, mock_controller
+    ):
         """Enable then disable — GET must reflect the final state."""
         _client.patch("/api/settings", json={"demoMode": {"enabled": True}})
         _client.patch("/api/settings", json={"demoMode": {"enabled": False}})

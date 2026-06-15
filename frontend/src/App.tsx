@@ -13,6 +13,7 @@ import { ReportProblemProvider } from './components/ReportProblemContext';
 import ReportProblemButton from './components/ReportProblemButton';
 import AIChatPanel from './components/AIChatPanel';
 import DemoModeBanner from './components/DemoModeBanner';
+import PreflightCheckDialog from './components/PreflightCheckDialog';
 
 // An ErrorBoundary component to catch rendering errors
 class ErrorBoundary extends React.Component<
@@ -326,6 +327,14 @@ function App() {
           </main>
         </div>
         <AIChatPanel />
+        <PreflightCheckDialog
+          open={showPreflightDialog}
+          onClose={() => setShowPreflightDialog(false)}
+          onConfirm={() => {
+            setShowPreflightDialog(false);
+            setIsDemoMode(false);
+          }}
+        />
         </ReportProblemProvider>
       </Router>
     );

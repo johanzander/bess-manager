@@ -353,7 +353,7 @@ export default function DashboardPage({
           <div className="space-y-6">
             <div>
               <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">System Overview</h2>
-              <SystemStatusCard />
+              <SystemStatusCard systemMode={healthSummary?.systemMode} />
             </div>
           </div>
 

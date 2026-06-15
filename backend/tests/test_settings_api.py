@@ -544,21 +544,10 @@ class TestDemoMode:
         resp = _client.get("/api/settings")
         assert resp.json()["demoMode"]["enabled"] is False
 
-    def test_patch_demo_mode_enable_triggers_idle_handoff(self, mock_controller):
-        """Enabling demo mode should set inverter to safe idle."""
+    def test_patch_demo_mode_does_not_write_to_inverter(self, mock_controller):
+        """Toggling demo mode must not call apply_period (no hardware writes)."""
         inv = MagicMock()
         mock_controller.system.inverter_controller = inv
         _client.patch("/api/settings", json={"demoMode": {"enabled": True}})
-        inv.apply_period.assert_called_once_with(
-            mock_controller.ha_controller,
-            grid_charge=False,
-            discharge_rate=0,
-        )
-
-    def test_patch_demo_mode_disable_does_not_trigger_idle(self, mock_controller):
-        """Disabling demo mode should NOT call apply_period."""
-        inv = MagicMock()
-        mock_controller.system.inverter_controller = inv
-        mock_controller.settings_store.data["demo_mode"] = {"enabled": True}
         _client.patch("/api/settings", json={"demoMode": {"enabled": False}})
         inv.apply_period.assert_not_called()

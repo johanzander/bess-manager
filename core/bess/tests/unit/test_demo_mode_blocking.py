@@ -28,22 +28,21 @@ class TestDenyByDefaultBlocking:
     @pytest.mark.parametrize(
         "domain,service",
         [
+            # Growatt MIN (cloud) — TOU segment writes
+            ("growatt_server", "update_time_segment"),
+            # Growatt SPH (cloud) — AC charge/discharge schedule writes
+            ("growatt_server", "write_ac_charge_times"),
+            ("growatt_server", "write_ac_discharge_times"),
+            # solax_modbus Growatt — TOU via entity writes
             ("select", "select_option"),
             ("button", "press"),
+            # SolaX VPP — power control
+            ("number", "set_value"),
+            # All platforms — grid charge toggle
             ("switch", "turn_on"),
             ("switch", "turn_off"),
-            ("number", "set_value"),
-            ("growatt_server", "update_tlx_inverter_time_segment"),
+            # Deny-by-default: unknown services must also be blocked
             ("some_future_integration", "write_something"),
-        ],
-        ids=[
-            "select.select_option (solax_modbus TOU)",
-            "button.press (solax_modbus TOU commit)",
-            "switch.turn_on (grid charge)",
-            "switch.turn_off (grid charge)",
-            "number.set_value (power rate)",
-            "growatt_server.update_tlx_inverter_time_segment (cloud TOU)",
-            "unknown service (deny-by-default)",
         ],
     )
     def test_blocks_write_operations(self, controller, domain, service):
@@ -55,11 +54,13 @@ class TestDenyByDefaultBlocking:
     @pytest.mark.parametrize(
         "domain,service",
         [
+            ("growatt_server", "update_time_segment"),
+            ("growatt_server", "write_ac_charge_times"),
+            ("growatt_server", "write_ac_discharge_times"),
             ("select", "select_option"),
             ("button", "press"),
-            ("switch", "turn_on"),
             ("number", "set_value"),
-            ("growatt_server", "update_tlx_inverter_time_segment"),
+            ("switch", "turn_on"),
         ],
     )
     def test_no_http_call_made(self, controller, domain, service):

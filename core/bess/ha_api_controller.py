@@ -451,7 +451,6 @@ class HomeAssistantAPIController:
         "battery_discharge_power_limit": "battery_discharging_power_rate",
         "battery_charge_soc_limit": "battery_charge_stop_soc",
         "battery_discharge_soc_limit": "battery_discharge_stop_soc",
-        "battery_discharge_soc_limit_on_grid": "battery_discharge_stop_soc",
         "soc_limit_on_grid": "battery_discharge_stop_soc",
         # ── Lifetime energy sensors ──────────────────────────────────────
         "lifetime_total_all_batteries_charged": "lifetime_battery_charged",
@@ -844,27 +843,6 @@ class HomeAssistantAPIController:
             requests.RequestException: If all retries fail
 
         """
-        # List of operations that modify state (write operations)
-        write_operations = [
-            ("post", "/api/services/growatt_server/update_tlx_inverter_time_segment"),
-            ("post", "/api/services/switch/turn_on"),
-            ("post", "/api/services/switch/turn_off"),
-            ("post", "/api/services/number/set_value"),
-        ]
-
-        # Check if this is a write operation and we're in test mode
-        is_write_operation = (method.lower(), path) in write_operations
-
-        # Test mode only blocks write operations, never read operations
-        if self.test_mode and is_write_operation:
-            logger.info(
-                "[TEST MODE] Would call %s %s with args: %s",
-                method.upper(),
-                path,
-                kwargs.get("json", {}),
-            )
-            return None
-
         url = f"{self.base_url}{path}"
         logger.debug("Making API request to %s %s", method.upper(), url)
         for attempt in range(self.max_attempts):

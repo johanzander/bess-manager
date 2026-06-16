@@ -155,14 +155,66 @@ After starting BESS, go to **Settings → System** in the web interface. The
 *"returned no valid data"*, the most likely cause is an incorrect bucket name — double-check
 that you have used `homeassistant/autogen` and not just `homeassistant`.
 
-## Step 3: Create Home Consumption Sensor
+## Step 3: Choose a Home Consumption Forecast
 
-BESS needs a consumption sensor. How to predict home energy consumption is outside the scope of this AddOn.
-Here is an example of a template sensor that predicts the future consumption based on last 48h consumption average. This approach is sufficient for good optimization perfomrance.
+BESS needs a forecast of your home consumption to plan the battery schedule.
+This is selected with the `consumption_strategy` setting in the BESS Manager
+web interface (**Settings → Home**). Four strategies are available.
 
-### Example sensor
+**Recommended: `ha_statistics`.** It is the most accurate option that needs no
+manual sensor setup — see below.
 
-Add to `configuration.yaml`:
+### Strategy comparison
+
+| Strategy | Accuracy | What you must configure |
+|----------|----------|-------------------------|
+| **`ha_statistics`** ✅ recommended | High — real home consumption (incl. solar self-use), time-of-day shaped | Nothing beyond selecting it. Needs the inverter's lifetime load-consumption sensor (auto-discovered) and ~7 days of HA history |
+| `influxdb_7d_avg` | High — same data source, 15-min resolution | Requires an InfluxDB instance (Step 2) and the `local_load_power` sensor |
+| `fixed` | Low — a single flat number, does not adapt | Manually enter a kWh/hour value (`home.default_hourly`) |
+| `sensor` (legacy) | Low — grid-import proxy that ignores solar self-consumption, so it under-estimates load on sunny days | Requires a hand-written template sensor in `configuration.yaml` (see below) |
+
+#### `ha_statistics` (recommended)
+
+Builds a 24-hour consumption profile from Home Assistant's built-in Recorder
+long-term statistics for the inverter's load-consumption sensor, averaged over
+the past 7 days (with outlier trimming to absorb occasional EV/heat-pump
+spikes). This reflects **actual** household consumption — including the part
+covered by your own solar — and varies by time of day (e.g. higher in the evening,
+lower overnight).
+
+To enable it, just set `consumption_strategy` to `ha_statistics` in the web
+interface. No template sensor, no `configuration.yaml` edits, no InfluxDB. Until
+HA has accumulated enough statistics, BESS temporarily falls back to the fixed
+`home.default_hourly` value and tells you so in the UI.
+
+> **Requirement:** the inverter's load-consumption sensor must be set up
+> correctly in Home Assistant's **Energy** dashboard (**Settings → Dashboards →
+> Energy**), so HA records the long-term statistics this strategy reads. If
+> consumption is not configured there, no statistics exist to query and BESS
+> stays on the fixed fallback. Allow ~7 days after setup for enough history to
+> accumulate.
+
+#### `influxdb_7d_avg`
+
+Same idea, but reads the `local_load_power` sensor from InfluxDB at 15-minute
+resolution. Equally accurate; choose this over `ha_statistics` only if you
+already run InfluxDB and want the finer resolution. Requires Step 2 and the
+`local_load_power` sensor configured.
+
+#### `fixed`
+
+Uses a single flat kWh/hour value (`home.default_hourly`). Simple fallback for
+very predictable homes; does not adapt to actual usage.
+
+#### `sensor` (legacy)
+
+> **Not recommended.** This is the original strategy. It approximates
+> consumption from *grid import power* and therefore **does not account for
+> solar self-consumption** — on sunny days it under-estimates real consumption.
+> It also requires a hand-written template sensor. Prefer `ha_statistics`.
+
+If you still want it, BESS reads a sensor named `*48h_avg*grid_import*`
+(auto-discovered by name). Create it in `configuration.yaml`:
 
 ```yaml
 template:
@@ -188,11 +240,17 @@ sensor:
       hours: 48
 ```
 
-> **Note:** Replace `rkm0d7n04x_battery_1_charging_w`, `rkm0d7n04x_battery_1_discharging_w`, and `rkm0d7n04x_import_power` with your actual sensor entity IDs from your inverter integration.
+> **Note:** Replace `rkm0d7n04x_battery_1_charging_w`, `rkm0d7n04x_battery_1_discharging_w`, and `rkm0d7n04x_import_power` with your actual sensor entity IDs from your inverter integration. The filter holds the previous value while the battery is active (>400 W) so the 48h average reflects pure home consumption.
 
-**Why filter?** When battery is active (>400W), the sensor holds its previous value instead of updating. This ensures the 48h average only includes periods of pure home consumption, excluding battery operations.
-
-**EV charging:** Exclude if managed separately. Include if you want BESS to optimize around it.
+> **Tip — average measured home load instead of grid import.** If you want to
+> stay on the `sensor` strategy but avoid the solar blind spot, point the 48h
+> statistics average directly at your inverter's home **load power** sensor
+> (e.g. `local_load_power`) rather than the grid-import template. That value is
+> already true home consumption (solar self-use included) and needs no battery
+> filter — drop the `template:` block entirely and set
+> `entity_id: sensor.<your_local_load_power>` on the statistics sensor. Keep the
+> friendly name containing `48h` and `grid import` so BESS still auto-discovers
+> it. This is the cleaner way to do it if you must use `sensor`.
 
 ## Step 4: Configure BESS Manager
 
@@ -407,7 +465,7 @@ This setting controls when the battery should be used. The optimization algorith
 
 **Problem:** Missing consumption data
 
-**Solution:** Check 48h average sensor is working (Step 3)
+**Solution:** Check your consumption forecast strategy (Step 3). For `ha_statistics`, allow ~7 days for HA to accumulate statistics; for the legacy `sensor` strategy, check the `48h_avg_grid_import` template sensor is working.
 
 **Problem:** Battery charges during expensive hours, discharges during cheap hours
 

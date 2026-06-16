@@ -261,6 +261,16 @@ But at noon every day we get tomorrows schedule. We could use this information t
 
 **Files**: `core/bess/battery_system_manager.py` (`_get_ha_statistics_forecast`)
 
+### **Change default consumption_strategy from `sensor` to `ha_statistics`**
+
+**Impact**: Medium | **Effort**: Low | **Dependencies**: `settings.py`, `settings_store.py`
+
+**Description**: The default `consumption_strategy` is still `sensor` (the legacy grid-import proxy that ignores solar self-consumption and requires a hand-written template sensor). `ha_statistics` is more accurate and needs no manual sensor setup, so it should be the default. Depends on `ha_statistics` working on all platforms (see above) so the default doesn't silently fall back to `fixed`.
+
+**Fix**: Change `DEFAULT` / `consumption_strategy` default to `ha_statistics` in `core/bess/settings.py:183` and the settings-store defaults; update `docs/USER_GUIDE.md` (currently labels `sensor` as "(default)").
+
+**Files**: `core/bess/settings.py`, `backend/settings_store.py`, `docs/USER_GUIDE.md`
+
 ### **Suppress retry warnings for expected Nordpool "tomorrow not available" responses**
 
 **Impact**: Low | **Effort**: Low | **Dependencies**: `official_nordpool_source.py`, `ha_api_controller.py`

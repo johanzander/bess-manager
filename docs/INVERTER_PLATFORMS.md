@@ -21,24 +21,77 @@ communication.
 
 ## Inverter Integration Patterns
 
-Every supported platform falls into one of **four control patterns**. The five
-platforms map onto four controller classes — adding a new inverter starts by
-**matching it to one of these patterns** (or, rarely and expensively, declaring
-a new one). The pattern dictates which existing controller to model on, the
-detection marker, and the sensor-suffix map.
+Inverter control is **not** a single flat list of patterns — it is **two
+orthogonal axes** plus a shared vocabulary of control primitives. (This mirrors
+how cross-inverter optimizers like Predbat abstract ~20 brands: a *transport*
+capability set × a *common control vocabulary*, not a per-brand enumeration.)
+Adding a new inverter means placing it on both axes and listing which primitives
+it supports — that determines which existing controller to model on and how much
+is new.
 
-| Pattern | Control mechanism | Model controller | HA integration | Detection marker / service | Suffix map | Matches if… |
-|---------|-------------------|------------------|----------------|----------------------------|-----------|-------------|
-| **A — Cloud TOU slots** | Numbered TOU time segments set via HA **service calls**; per-period grid-charge/rate via generic switch/number entities | `GrowattMinController` (`growatt_min_controller.py`) | `growatt_server` (cloud) | `growatt_server.update_time_segment` service present | `GROWATT_MIN_SUFFIX_MAP` | Cloud integration exposing numbered TOU segments + per-period entities |
-| **B — Cloud charge/discharge period lists** | Separate charge & discharge **period lists** (≤3 each) written wholesale; power/SOC embedded in the call params; **no** per-period entities | `GrowattSphController` (`growatt_sph_controller.py`) | `growatt_server` (cloud) | `growatt_server.write_ac_charge_times` service present | `GROWATT_SPH_SUFFIX_MAP` | Cloud integration with batched charge/discharge windows, control only via service-call params |
-| **C — Local-Modbus TOU entity writes** | TOU/time slots written as **entity values** (select/number) + a commit button; EMS rate/SOC via number/select. GEN4 = single-segment; GEN3 = mode-specific slots (GEN3 control not yet implemented) | `SolaxModbusGrowattController` (`solax_modbus_growatt_controller.py`) | `solax_modbus` (local) | `_GROWATT_TOU_MARKER_SUFFIX` (`time_1_enabled`, GEN4); `_GROWATT_GEN3_MARKER_SUFFIX` (GEN3) | `SOLAX_GROWATT_MIN_SUFFIX_MAP`, `SOLAX_GROWATT_SPH_SUFFIX_MAP` | Local-Modbus integration with **persistent** TOU/time-slot entities you write directly |
-| **D — Local-Modbus ephemeral VPP** | **No persistent schedule**; push an active-power setpoint each period boundary, auto-expires (`autorepeat_duration`), reverts to self-use | `SolaxController` (`solax_controller.py`) | `solax_modbus` (local, native SolaX) | `_SOLAX_NATIVE_MARKER_SUFFIX` (`remotecontrol_power_control`) | `SOLAX_NATIVE_SUFFIX_MAP` | Inverter has no persistent TOU; controlled via remote-control/VPP power setpoints |
+### Axis 1 — Transport (how commands reach the inverter)
 
-> **No match?** If the new inverter fits none of A–D, it is a **new pattern** —
-> a new control approach and a new controller class, not just a config tweak.
-> This is rare and expensive; document the new pattern as a fifth row here before
-> implementing it. A safe interim is **monitoring-only** (detection + sensors, no
-> schedule control), as GEN3 currently is.
+| Transport | HA integration(s) | Mechanism | Implemented today | Model controller(s) |
+|-----------|-------------------|-----------|-------------------|---------------------|
+| **TX-Cloud** | `growatt_server` | Vendor cloud API via HA **service calls** | ✅ | `GrowattMinController`, `GrowattSphController` |
+| **TX-Modbus** | `solax_modbus` (multi-brand: SolaX, Solis, Growatt, Sofar, AlphaESS, …) | Local Modbus **entity writes** (select/number/button) | ✅ | `SolaxModbusGrowattController`, `SolaxController` |
+| **TX-Vendor-service** | `huawei_solar` (and similar) | Local vendor integration: entity writes **+** ephemeral **service calls** (`forcible_charge`) | ❌ not yet | *(would model on `SolaxController` for the ephemeral half)* |
+| **TX-REST / TX-MQTT** | GivTCP, Solar Assistant, Sofar2mqtt | REST API / MQTT | ❌ not planned | — |
+
+`solax_modbus` is a **generic transport**, not a Growatt thing — the same channel
+serves SolaX, Solis, Growatt, Sofar, etc. via per-brand register/entity names.
+
+### Axis 2 — Scheduling model (how a plan is expressed)
+
+| Scheduling model | Description | Implemented example |
+|------------------|-------------|---------------------|
+| **SM-TOU-numbered** | Persistent **numbered** TOU slots (start/end/mode) | Growatt MIN (cloud & GEN4 single-segment) |
+| **SM-Period-lists** | Persistent **charge/discharge period lists** (≤N each), power/SOC in the write | Growatt SPH (cloud) |
+| **SM-Mode-slots** | Persistent **mode-specific** time slots | Growatt MIX/SPH GEN3 (monitoring-only today) |
+| **SM-Ephemeral** | **No persistent schedule** — push a duration-bounded command that auto-expires | SolaX VPP; Huawei `forcible_charge` would land here |
+
+### Common control primitives (the shared vocabulary)
+
+Regardless of transport/model, a controller works in these terms (each platform
+declares which it supports, mapped to BESS sensor keys): **charge window**
+(start/end) · **discharge window** · **target / charge-stop SOC** ·
+**reserve / discharge-stop SOC** · **charge rate** · **discharge rate** ·
+**grid-charge enable**.
+
+### The five existing platforms as coordinates
+
+| Platform | Transport | Scheduling model | Controller | Detection marker / service | Suffix map |
+|----------|-----------|------------------|------------|----------------------------|-----------|
+| `growatt_server_min` | TX-Cloud | SM-TOU-numbered | `GrowattMinController` | `growatt_server.update_time_segment` | `GROWATT_MIN_SUFFIX_MAP` |
+| `growatt_server_sph` | TX-Cloud | SM-Period-lists | `GrowattSphController` | `growatt_server.write_ac_charge_times` | `GROWATT_SPH_SUFFIX_MAP` |
+| `solax_modbus_growatt_min` | TX-Modbus | SM-TOU-numbered (single-segment) | `SolaxModbusGrowattController` | `_GROWATT_TOU_MARKER_SUFFIX` (`time_1_enabled`) | `SOLAX_GROWATT_MIN_SUFFIX_MAP` |
+| `solax_modbus_growatt_sph` | TX-Modbus | SM-Mode-slots (GEN3, monitoring-only) | `SolaxModbusGrowattController` | `_GROWATT_GEN3_MARKER_SUFFIX` | `SOLAX_GROWATT_SPH_SUFFIX_MAP` |
+| `solax_modbus_native` | TX-Modbus | SM-Ephemeral (VPP) | `SolaxController` | `_SOLAX_NATIVE_MARKER_SUFFIX` (`remotecontrol_power_control`) | `SOLAX_NATIVE_SUFFIX_MAP` |
+
+### Worked examples for new inverters
+
+- **Solis (Modbus)** = **TX-Modbus (existing)** × persistent timed charge/discharge
+  (≈ SM-Period-lists / SM-TOU). Rides the existing `solax_modbus` transport →
+  needs a new `SolisController`, a `SOLIS_SUFFIX_MAP`, and a detection branch
+  **before** the `solax_modbus_native` fallback. **Additive — no new transport,
+  no ABC change.**
+- **Huawei** = **TX-Vendor-service (NEW)** × SM-Ephemeral (`forcible_charge`,
+  plus a persistent TOU working-mode). Needs a new `huawei_solar` transport
+  branch in detection + a `forcible_charge` service helper + a `HuaweiController`
+  modeled on `SolaxController`. **Additive, but the first platform to use a third
+  integration** (touches the detection dispatch).
+
+> **Both axes new?** A coordinate that needs a **new transport AND a new
+> scheduling model** is the expensive case. The safe interim for any new inverter
+> is **monitoring-only** (detection + sensors, no schedule control), as Growatt
+> GEN3 currently is.
+
+> **Note on the controller ABC:** `InverterController`'s method names are
+> TOU-centric (`get_all_tou_segments`, `get_daily_TOU_settings`,
+> `log_current_TOU_schedule`) and `_write_period_to_hardware` defaults to the
+> Growatt register interface. SM-Ephemeral inverters (SolaX today, Huawei later)
+> implement these by synthesizing "segments." It works; renaming to neutral terms
+> is an optional future cleanup, not a prerequisite.
 
 ## How BESS Controls Each Platform
 

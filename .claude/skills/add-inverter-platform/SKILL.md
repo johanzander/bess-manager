@@ -36,20 +36,34 @@ tests + docs for one implementation pass.
 A new inverter platform has **two** halves that must both be derived from the
 integration's real source, never inferred from a sample entity:
 
-### 1. Match the inverter to a control pattern (do this first)
+### 1. Place the inverter on the two control axes (do this first)
 
-**Before anything else**, match the new inverter to one of the four control
-patterns catalogued in `docs/INVERTER_PLATFORMS.md` → **"Inverter Integration
-Patterns"** (A — Cloud TOU slots, B — Cloud charge/discharge period lists,
-C — Local-Modbus TOU entity writes, D — Local-Modbus ephemeral VPP). The matched
-pattern tells you **which existing controller to model on**, the **detection
-marker**, and the **suffix-map shape** — the rest of this checklist follows from
-it. Do not start writing a controller until the inverter is matched.
+**Before anything else**, locate the new inverter on the **two orthogonal axes**
+in `docs/INVERTER_PLATFORMS.md` → **"Inverter Integration Patterns"**:
 
-If it matches **none** of A–D, it is a **new pattern** (a new control approach +
-a new controller class — rare and expensive). Add it as a new row in the catalog
-in `docs/INVERTER_PLATFORMS.md` first, and confirm with the maintainer before
-implementing. The safe interim is **monitoring-only** (see §3 below).
+- **Transport** — how commands reach it: **TX-Cloud** (`growatt_server` service
+  calls), **TX-Modbus** (`solax_modbus`, multi-brand entity writes — SolaX,
+  Solis, Growatt, Sofar…), **TX-Vendor-service** (e.g. `huawei_solar`), or a new
+  transport.
+- **Scheduling model** — how a plan is expressed: **SM-TOU-numbered**,
+  **SM-Period-lists**, **SM-Mode-slots**, or **SM-Ephemeral** (duration-bounded,
+  auto-expiring).
+
+The (transport × scheduling-model) coordinate tells you **which existing
+controller to model on**, the **detection marker**, and the **suffix-map shape**,
+and how much is new:
+
+- **Existing transport + existing model** (e.g. Solis on TX-Modbus) → purely
+  **additive**: new controller subclass + suffix map + a detection branch. No ABC
+  change.
+- **New transport** (e.g. Huawei `huawei_solar`) → additive too, but adds a new
+  integration branch in detection and a new service/command helper in
+  `ha_api_controller.py`.
+- **New transport AND new scheduling model** → the expensive case; confirm with
+  the maintainer. The safe interim is always **monitoring-only** (see §3 below).
+
+Do not start writing a controller until the inverter is placed on both axes. Add
+its coordinate row to the catalog in `docs/INVERTER_PLATFORMS.md` as you go.
 
 ### 2. Discovery keys off the immutable `unique_id`
 

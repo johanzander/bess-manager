@@ -12,6 +12,8 @@ import api from './lib/api';
 import { ReportProblemProvider } from './components/ReportProblemContext';
 import ReportProblemButton from './components/ReportProblemButton';
 import AIChatPanel from './components/AIChatPanel';
+import DemoModeBanner from './components/DemoModeBanner';
+import PreflightCheckDialog from './components/PreflightCheckDialog';
 
 // An ErrorBoundary component to catch rendering errors
 class ErrorBoundary extends React.Component<
@@ -193,6 +195,25 @@ function App() {
     return () => mediaQuery.removeEventListener('change', handleSystemThemeChange);
   }, []);
 
+  const [isDemoMode, setIsDemoMode] = useState(false);
+  const [showPreflightDialog, setShowPreflightDialog] = useState(false);
+
+  const refreshDemoMode = () => {
+    api.get('/api/settings')
+      .then(({ data }) => {
+        const dm = data.demoMode || data.demo_mode || {};
+        setIsDemoMode(dm.enabled === true);
+      })
+      .catch(() => {});
+  };
+
+  useEffect(() => {
+    refreshDemoMode();
+    const handler = () => refreshDemoMode();
+    window.addEventListener('bess:demo-mode-changed', handler);
+    return () => window.removeEventListener('bess:demo-mode-changed', handler);
+  }, []);
+
   // Hook calls must be at the top level - never inside try-catch blocks
   const {
     batterySettings,
@@ -273,7 +294,11 @@ function App() {
               </div>
             </div>
           </header>
-          
+
+          {isDemoMode && (
+            <DemoModeBanner onGoLive={() => setShowPreflightDialog(true)} />
+          )}
+
           <main className="flex-1 w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
             {settingsError && (
               <div className="bg-red-50 dark:bg-red-900/10 p-6 rounded-lg shadow mb-6">
@@ -312,6 +337,15 @@ function App() {
           </main>
         </div>
         <AIChatPanel />
+        <PreflightCheckDialog
+          open={showPreflightDialog}
+          onClose={() => setShowPreflightDialog(false)}
+          onConfirm={() => {
+            setShowPreflightDialog(false);
+            setIsDemoMode(false);
+            window.dispatchEvent(new Event('bess:demo-mode-changed'));
+          }}
+        />
         </ReportProblemProvider>
       </Router>
     );

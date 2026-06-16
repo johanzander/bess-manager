@@ -12,7 +12,7 @@ test.describe('Settings Page', () => {
     await expect(page.getByRole('button', { name: 'Electricity Pricing', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Battery', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Home', exact: true })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Health', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'System', exact: true })).toBeVisible();
   });
 
   test('sensors tab shows sensor groups', async ({ page }) => {
@@ -91,15 +91,14 @@ test.describe('Settings Page', () => {
     await expect(page.getByText(/saved|success/i).first()).toBeVisible({ timeout: 5_000 });
   });
 
-  test('health tab shows system status', async ({ page }) => {
+  test('system tab shows diagnostics', async ({ page }) => {
     await page.goto('/settings');
     await expect(page.getByText('Loading settings')).not.toBeVisible({ timeout: 15_000 });
 
-    await page.getByRole('button', { name: 'Health', exact: true }).click();
+    await page.getByRole('button', { name: 'System', exact: true }).click();
 
-    // Health component shows "System Status" heading or "Error" if health check fails
-    await expect(
-      page.getByRole('heading', { name: /System Status|Error/i }).first()
-    ).toBeVisible({ timeout: 10_000 });
+    // System tab has Demo Mode section and Diagnostics section
+    await expect(page.getByText('Demo Mode').first()).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText('Diagnostics').first()).toBeVisible({ timeout: 10_000 });
   });
 });

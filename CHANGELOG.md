@@ -4,6 +4,48 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.5.0] - 2026-06-15
+
+### Added
+
+- **Demo Mode** — New users can observe how BESS Manager would optimize their battery without actually controlling the inverter. The setup wizard now offers a "Demo Mode" vs "Live Control" choice as the final step. While in demo mode, the optimizer runs normally but all inverter writes are blocked; savings are labeled as theoretical estimates. A persistent banner shows the current mode with a "Go Live" button that triggers a pre-flight health check before enabling live control. Demo mode is also available as a toggle in the new **System** tab on the Settings page.
+- **Settings page consolidation** — The Settings page now has five tabs: Integrations, Electricity Pricing, Battery, Home, and System. The old Health tab has been replaced by System, which combines demo mode toggle, AI analyst settings, and diagnostics (health checks + debug export).
+
+### Fixed
+
+- **Dockerfile and package script now auto-include new backend modules** — Previously each Python file had to be listed by name in both `Dockerfile` and `package-addon.sh`; new files (like `ai_chat.py`) were silently excluded from builds, causing `ModuleNotFoundError` at runtime. Both now use a `*.py` glob.
+- **Removed legacy `config.dev.yaml`** — `bess_manager/config.yaml` is the single source of truth for version and add-on metadata.
+
+### Improved
+
+- **Installation instructions** — Expanded Step 1 in README and Installation Guide with explicit navigation steps for first-time Home Assistant users.
+
+## [9.4.3] - 2026-06-15
+
+### Fixed
+
+- **Single changelog source of truth** — `bess_manager/CHANGELOG.md` is now a symlink to the repository-root `CHANGELOG.md` instead of a hand-maintained copy. The duplicate had drifted (it stopped at 9.4.0), so the Home Assistant add-on Changelog tab was showing outdated release notes; it now always reflects the canonical changelog.
+
+## [9.4.2] - 2026-06-15
+
+### Fixed
+
+- **Removed duplicate "Runtime Errors" alert for unavailable InfluxDB history** — When InfluxDB historical data is missing, the dedicated "Incomplete Historical Data" dashboard banner already informs the user. v9.4.1 additionally recorded the same condition in the runtime-failure tracker, so it also appeared in the "Runtime Errors" panel — alarming, since that panel is meant for unexpected, actionable failures and the condition is benign (optimization continues normally). The redundant runtime-error alert is no longer raised; the friendly banner remains the single source of truth.
+
+## [9.4.1] - 2026-06-14
+
+### Fixed
+
+- **Optimization no longer freezes when InfluxDB history is unavailable** — Historical reconstruction from InfluxDB is an optional enhancement (it backfills the actuals/savings view) and is never required to run the optimization, which uses live battery SOC plus the configured forecast. Previously a broken InfluxDB connection (e.g. after a Home Assistant update) raised a fatal error that aborted every re-optimization, silently freezing the battery on the midnight forecast for the whole day. The missing-history condition is now surfaced as a runtime failure banner and the hourly optimization continues. Note: the `influxdb_7d_avg` consumption strategy still genuinely requires InfluxDB.
+
+## [9.4.0] - 2026-06-12
+
+### Fixed
+
+- **SPH platform capability gating** — UI and backend now disable features unsupported by SPH inverters (grid charge toggle, discharge power rate, fuse protection). Prevents "No entity ID configured for Grid Charge Enabled" errors. (#60)
+- **SPH sensor definitions and device discovery** — Fixed sensor key mappings and discovery logic for SPH inverters. UI no longer incorrectly shows "solax" for SPH configurations. (#60)
+- **Dead lifetime sensors removed** — Removed non-existent lifetime sensor keys from all platform UI definitions.
+
 ## [9.3.0] - 2026-06-12
 
 ### Changed

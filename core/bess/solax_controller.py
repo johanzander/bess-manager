@@ -48,6 +48,8 @@ class SolaxController(InverterController):
     push to the inverter.
     """
 
+    supports_charge_rate_control: ClassVar[bool] = False
+
     def __init__(self, battery_settings: BatterySettings) -> None:
         """Initialise the SolaX controller."""
         super().__init__(battery_settings)

@@ -155,6 +155,7 @@ _SECTION_MAP: dict[str, str] = {
     "inverter": "inverter",
     "sensors": "sensors",
     "aiAnalyst": "ai_analyst",
+    "demoMode": "demo_mode",
 }
 
 # Derived from the BatterySettings dataclass — fields with init=True are the
@@ -314,6 +315,10 @@ async def patch_settings(updates: dict):
                 bess_controller.ha_controller.sensors = {
                     k: v for k, v in active.items() if v
                 }
+
+            elif store_key == "demo_mode":
+                enabled = section.get("enabled", False)
+                bess_controller.ha_controller.set_test_mode(enabled)
 
         _refresh_health(bess_controller)
         return await get_settings()
@@ -1882,14 +1887,17 @@ async def get_dashboard_health_summary():
                 logger.warning(
                     "No cached health results available, returning minimal response"
                 )
-                return {
+                summary = {
                     "has_critical_errors": False,
                     "has_warnings": False,
                     "critical_issues": [],
                     "total_critical_issues": 0,
                     "timestamp": datetime.now().isoformat(),
-                    "system_mode": "unknown",
+                    "system_mode": (
+                        "demo" if bess_controller.ha_controller.test_mode else "unknown"
+                    ),
                 }
+                return convert_keys_to_camel_case(summary)
 
             # Extract critical and warning information
             critical_issues = []
@@ -3032,6 +3040,10 @@ async def setup_complete(payload: APISetupCompletePayload):
                 growatt_section["device_id"] = payload.growattDeviceId
                 sections["growatt"] = growatt_section
 
+        # --- demo mode ---
+        if payload.demoMode is not None:
+            sections["demo_mode"] = {"enabled": payload.demoMode}
+
         # Persist all sections atomically
         bess_controller.settings_store.save_all(sections)
 
@@ -3103,6 +3115,10 @@ async def setup_complete(payload: APISetupCompletePayload):
             bess_controller.system.update_settings(
                 {"energy_provider": sections["energy_provider"]}
             )
+
+        # Apply demo mode live
+        if payload.demoMode is not None:
+            bess_controller.ha_controller.set_test_mode(payload.demoMode)
 
         # Backfill historical data in the background (may take many seconds for 20+
         # InfluxDB queries), then build the schedule with correct historical context.

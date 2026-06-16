@@ -110,8 +110,6 @@ const GROWATT_CLOUD_LIFETIME: SensorGroup = {
     { key: 'lifetime_export_to_grid', label: 'Total Export to Grid', required: true },
     { key: 'lifetime_import_from_grid', label: 'Total Import from Grid', required: true },
     { key: 'lifetime_load_consumption', label: 'Total Load Consumption', required: true },
-    { key: 'lifetime_system_production', label: 'Total System Production', required: false },
-    { key: 'lifetime_self_consumption', label: 'Total Self Consumption', required: false },
   ],
 };
 
@@ -137,6 +135,29 @@ const GROWATT_CLOUD_MIN_SENSOR_GROUPS: SensorGroup[] = [
 // SPH cloud: the growatt_server integration exposes NO number or switch
 // entities for SPH — all control is via service calls (write_ac_charge_times,
 // write_ac_discharge_times).  Only sensors (SOC, power, lifetime) exist.
+// SPH also lacks local_load_power (no pac_to_local_load register),
+// lifetime_system_production, and lifetime_self_consumption.
+const GROWATT_CLOUD_SPH_POWER_MONITORING: SensorGroup = {
+  name: 'Power Monitoring',
+  sensors: [
+    { key: 'pv_power', label: 'Solar PV Power', required: false },
+    { key: 'import_power', label: 'Grid Import Power', required: false },
+    { key: 'export_power', label: 'Grid Export Power', required: false },
+  ],
+};
+
+const GROWATT_CLOUD_SPH_LIFETIME: SensorGroup = {
+  name: 'Lifetime Energy Totals',
+  sensors: [
+    { key: 'lifetime_battery_charged', label: 'Total Battery Charged', required: true },
+    { key: 'lifetime_battery_discharged', label: 'Total Battery Discharged', required: true },
+    { key: 'lifetime_solar_energy', label: 'Total Solar Energy', required: true },
+    { key: 'lifetime_export_to_grid', label: 'Total Export to Grid', required: true },
+    { key: 'lifetime_import_from_grid', label: 'Total Import from Grid', required: true },
+    { key: 'lifetime_load_consumption', label: 'Total Load Consumption', required: true },
+  ],
+};
+
 const GROWATT_CLOUD_SPH_SENSOR_GROUPS: SensorGroup[] = [
   {
     name: 'Battery Monitoring',
@@ -146,8 +167,8 @@ const GROWATT_CLOUD_SPH_SENSOR_GROUPS: SensorGroup[] = [
       { key: 'battery_discharge_power', label: 'Discharging Power', required: true },
     ],
   },
-  GROWATT_POWER_MONITORING,
-  GROWATT_CLOUD_LIFETIME,
+  GROWATT_CLOUD_SPH_POWER_MONITORING,
+  GROWATT_CLOUD_SPH_LIFETIME,
 ];
 
 export const INTEGRATIONS: IntegrationDef[] = [
@@ -196,7 +217,6 @@ export const INTEGRATIONS: IntegrationDef[] = [
           { key: 'lifetime_solar_energy', label: 'Total Solar Energy', required: false },
           { key: 'lifetime_import_from_grid', label: 'Grid Import Total', required: false },
           { key: 'lifetime_export_to_grid', label: 'Grid Export Total', required: false },
-          { key: 'lifetime_system_production', label: 'Total Yield', required: false },
         ],
       },
       {
@@ -253,7 +273,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
           { key: 'lifetime_solar_energy', label: 'Total Solar Energy', required: false },
           { key: 'lifetime_import_from_grid', label: 'Grid Import Total', required: false },
           { key: 'lifetime_export_to_grid', label: 'Grid Export Total', required: false },
-          { key: 'lifetime_system_production', label: 'Total Yield', required: false },
+          { key: 'lifetime_load_consumption', label: 'Total Load Energy', required: false },
         ],
       },
       {

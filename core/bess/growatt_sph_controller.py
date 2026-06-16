@@ -34,6 +34,8 @@ class GrowattSphController(InverterController):
     BatterySystemManager can use either interchangeably via InverterController.
     """
 
+    supports_charge_rate_control: ClassVar[bool] = False
+
     MAX_CHARGE_PERIODS = 3
     MAX_DISCHARGE_PERIODS = 3
 

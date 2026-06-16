@@ -261,6 +261,16 @@ But at noon every day we get tomorrows schedule. We could use this information t
 
 **Files**: `core/bess/battery_system_manager.py` (`_get_ha_statistics_forecast`)
 
+### **Change default consumption_strategy from `sensor` to `ha_statistics`**
+
+**Impact**: Medium | **Effort**: Low | **Dependencies**: `settings.py`, `settings_store.py`
+
+**Description**: The default `consumption_strategy` is still `sensor` (the legacy grid-import proxy that ignores solar self-consumption and requires a hand-written template sensor). `ha_statistics` is more accurate and needs no manual sensor setup, so it should be the default. Depends on `ha_statistics` working on all platforms (see above) so the default doesn't silently fall back to `fixed`.
+
+**Fix**: Change `DEFAULT` / `consumption_strategy` default to `ha_statistics` in `core/bess/settings.py:183` and the settings-store defaults; update `docs/USER_GUIDE.md` (currently labels `sensor` as "(default)").
+
+**Files**: `core/bess/settings.py`, `backend/settings_store.py`, `docs/USER_GUIDE.md`
+
 ### **Suppress retry warnings for expected Nordpool "tomorrow not available" responses**
 
 **Impact**: Low | **Effort**: Low | **Dependencies**: `official_nordpool_source.py`, `ha_api_controller.py`
@@ -583,6 +593,24 @@ These sensors remain in the per-platform suffix maps (`GROWATT_MIN_SUFFIX_MAP`, 
 Both are called sequentially from `run_setup_discovery()` in `api.py`. They serve different stages (platform identification vs sensor mapping), but having two heuristics for the same question is fragile — they could theoretically disagree. Consolidate by deriving the platform list from the suffix map match results instead of the separate `has_tlx` check.
 
 **Files**: `core/bess/ha_api_controller.py` (`_parse_ha_metadata`, `discover_sensors_from_registry`), `backend/api.py` (`run_setup_discovery`)
+
+### Remove device_id discovery fallbacks and dead `device_sn` code
+
+**Impact**: Low | **Effort**: Low | **Dependencies**: `ha_api_controller.py`, `api.py`, `sensorDefinitions.ts`
+
+**Description**: Device ID discovery has two strategies: config_entry match (primary, always works) and identifiers/SN match (fallback). The fallback depends on `_extract_growatt_device_sn()`, which fragily parses SOC entity IDs to extract the serial number. Real HA devices always have `config_entries` on the device object, so the fallback is unnecessary.
+
+Additionally, `device_sn` is extracted, returned in the API response as `deviceSn`, and declared in the frontend `DiscoveryResult` type — but nothing in the frontend or backend ever reads it. It's dead code end to end.
+
+**What to remove**:
+- `_extract_growatt_device_sn()` method
+- Identifiers-based device_id fallback (strategy 2 in `_parse_ha_metadata`)
+- `device_sn` from discovery result dict and API response
+- `deviceSn` from frontend `DiscoveryResult` type
+
+**Files**: `core/bess/ha_api_controller.py`, `backend/api.py`, `frontend/src/components/settings/SensorConfigSection.tsx`
+
+---
 
 ### Other Technical Debt
 

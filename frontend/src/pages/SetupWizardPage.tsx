@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CheckCircle, ChevronRight, ChevronLeft, Zap } from 'lucide-react';
+import { CheckCircle, ChevronRight, ChevronLeft, Zap, Eye } from 'lucide-react';
 import api from '../lib/api';
 import { INTEGRATIONS, INVERTER_INTEGRATION_IDS, SHARED_INTEGRATION_IDS, emptyPerPlatformSensors, getActiveSensorsFlat } from '../lib/sensorDefinitions';
 import type { PerPlatformSensors } from '../lib/sensorDefinitions';
@@ -17,7 +17,7 @@ import type { DiscoveryResult, InverterForm } from '../components/settings/Senso
 // Constants
 // ---------------------------------------------------------------------------
 
-const STEPS = ['Scan', 'Review Sensors', 'Electricity Pricing', 'Battery', 'Home', 'Done'];
+const STEPS = ['Scan', 'Review Sensors', 'Electricity Pricing', 'Battery', 'Home', 'Control Mode', 'Done'];
 
 // ---------------------------------------------------------------------------
 // Component
@@ -32,6 +32,7 @@ const SetupWizardPage: React.FC = () => {
   const [sensors, setSensors] = useState<PerPlatformSensors>(emptyPerPlatformSensors());
   const [completing, setCompleting] = useState(false);
   const [completeError, setCompleteError] = useState<string | null>(null);
+  const [controlMode, setControlMode] = useState<'demo' | 'live' | null>(null);
   const existingSensorsRef = useRef<PerPlatformSensors>(emptyPerPlatformSensors());
 
   const [batteryForm, setBatteryForm] = useState<BatteryForm>({
@@ -298,8 +299,11 @@ const SetupWizardPage: React.FC = () => {
         octopusExportTomorrowEntity: pricingForm.octopusExportTomorrowEntity || undefined,
         // Inverter
         inverterPlatform: inverterForm.inverterPlatform,
+        // Control mode
+        demoMode: controlMode === 'demo',
       });
-      setStep(5);
+      window.dispatchEvent(new Event('bess:demo-mode-changed'));
+      setStep(6);
     } catch (err: unknown) {
       setCompleteError(err instanceof Error ? err.message : 'Setup failed');
     } finally {
@@ -508,40 +512,28 @@ const SetupWizardPage: React.FC = () => {
               </p>
             </div>
 
-            <HomeFormSection form={homeForm} onChange={setHomeForm} />
+            <HomeFormSection form={homeForm} onChange={setHomeForm} sensors={getActiveSensorsFlat(sensors)} />
 
-            {completeError && (
-              <p className="text-sm text-red-600 dark:text-red-400">{completeError}</p>
-            )}
             <div className="flex justify-between pt-2">
               <button onClick={() => setStep(3)}
                 className="flex items-center space-x-1 px-4 py-2 text-gray-600 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700">
                 <ChevronLeft className="h-4 w-4" /><span>Back</span>
               </button>
               <button
-                onClick={handleComplete}
-                disabled={completing}
-                className="flex items-center space-x-2 px-6 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 font-medium disabled:opacity-60"
+                onClick={() => setStep(5)}
+                className="flex items-center space-x-2 px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 font-medium"
               >
-                {completing && <div className="h-4 w-4 border-2 border-white rounded-full border-t-transparent animate-spin" />}
-                <span>Finish Setup</span><ChevronRight className="h-4 w-4" />
+                <span>Next: Control Mode</span><ChevronRight className="h-4 w-4" />
               </button>
             </div>
           </div>
         )}
 
-        {/* ── Step 5: Done ── */}
+        {/* ── Step 5: Control Mode ── */}
         {step === 5 && (
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
-            <div className="text-center py-6">
-              <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4" />
-              <h2 className="text-xl font-bold text-gray-900 dark:text-white">Setup Complete!</h2>
-              <p className="text-gray-600 dark:text-gray-400 mt-2">
-                BESS Manager is configured and ready to optimize your battery.
-              </p>
-            </div>
-
-            <div className="mt-2 rounded-lg bg-gray-50 dark:bg-gray-700 p-4 space-y-2 text-sm">
+            {/* Config summary */}
+            <div className="rounded-lg bg-gray-50 dark:bg-gray-700 p-4 space-y-2 text-sm mb-6">
               <div className="flex justify-between">
                 <span className="text-gray-500 dark:text-gray-400">Battery capacity</span>
                 <span className="font-medium text-gray-900 dark:text-white">{batteryForm.totalCapacity} kWh</span>
@@ -559,19 +551,87 @@ const SetupWizardPage: React.FC = () => {
                 <span className="font-medium text-gray-900 dark:text-white">{inverterForm.inverterPlatform}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-gray-500 dark:text-gray-400">Currency</span>
-                <span className="font-medium text-gray-900 dark:text-white">{pricingForm.currency}</span>
-              </div>
-              <div className="flex justify-between">
                 <span className="text-gray-500 dark:text-gray-400">Price provider</span>
                 <span className="font-medium text-gray-900 dark:text-white">{pricingForm.provider}</span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-gray-500 dark:text-gray-400">VAT multiplier</span>
-                <span className="font-medium text-gray-900 dark:text-white">{pricingForm.vatMultiplier}</span>
-              </div>
             </div>
 
+            {/* Control mode choice */}
+            <h2 className="text-lg font-bold text-gray-900 dark:text-white">How would you like to start?</h2>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 mb-4">You can change this anytime in Settings.</p>
+
+            <div className="space-y-3">
+              <button
+                onClick={() => setControlMode('demo')}
+                className={`w-full text-left rounded-lg border-2 p-4 flex items-start gap-3 transition-colors ${
+                  controlMode === 'demo'
+                    ? 'border-blue-500 bg-blue-900/10'
+                    : 'border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500'
+                }`}
+              >
+                <div className={`mt-0.5 w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${
+                  controlMode === 'demo' ? 'border-blue-500 bg-blue-500' : 'border-gray-400 dark:border-gray-500'
+                }`}>
+                  {controlMode === 'demo' && <CheckCircle className="h-3 w-3 text-white" />}
+                </div>
+                <div>
+                  <div className="font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                    <Eye className="h-4 w-4" /> Demo Mode
+                  </div>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                    Watch how the system would optimize your battery. No commands sent to inverter.
+                  </p>
+                </div>
+              </button>
+
+              <button
+                onClick={() => setControlMode('live')}
+                className={`w-full text-left rounded-lg border-2 p-4 flex items-start gap-3 transition-colors ${
+                  controlMode === 'live'
+                    ? 'border-green-500 bg-green-900/10'
+                    : 'border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500'
+                }`}
+              >
+                <div className={`mt-0.5 w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${
+                  controlMode === 'live' ? 'border-green-500 bg-green-500' : 'border-gray-400 dark:border-gray-500'
+                }`}>
+                  {controlMode === 'live' && <CheckCircle className="h-3 w-3 text-white" />}
+                </div>
+                <div>
+                  <div className="font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                    <Zap className="h-4 w-4" /> Live Control
+                  </div>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                    Start optimizing immediately. Sends charge/discharge commands to your inverter.
+                  </p>
+                </div>
+              </button>
+            </div>
+
+            <button
+              onClick={handleComplete}
+              disabled={controlMode === null || completing}
+              className="mt-6 w-full px-8 py-3 bg-green-500 text-white rounded-lg hover:bg-green-600 font-semibold text-base disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {completing ? 'Completing...' : controlMode === null ? 'Select a mode to continue' : 'Complete Setup'}
+            </button>
+
+            {completeError && (
+              <p className="mt-2 text-sm text-red-500">{completeError}</p>
+            )}
+          </div>
+        )}
+
+        {/* ── Step 6: Done ── */}
+        {step === 6 && (
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 text-center py-8">
+            <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4" />
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white">Setup Complete!</h2>
+            <p className="text-gray-600 dark:text-gray-400 mt-2">
+              {controlMode === 'demo'
+                ? 'BESS Manager is running in demo mode. You can switch to live control anytime in Settings.'
+                : 'BESS Manager is configured and ready to optimize your battery.'}
+            </p>
             <button
               onClick={() => navigate('/', { replace: true })}
               className="mt-6 w-full px-8 py-3 bg-green-500 text-white rounded-lg hover:bg-green-600 font-semibold text-base"

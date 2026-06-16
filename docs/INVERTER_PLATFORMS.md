@@ -70,11 +70,23 @@ declares which it supports, mapped to BESS sensor keys): **charge window**
 
 ### Worked examples for new inverters
 
-- **Solis (Modbus)** = **TX-Modbus (existing)** × persistent timed charge/discharge
-  (≈ SM-Period-lists / SM-TOU). Rides the existing `solax_modbus` transport →
-  needs a new `SolisController`, a `SOLIS_SUFFIX_MAP`, and a detection branch
-  **before** the `solax_modbus_native` fallback. **Additive — no new transport,
-  no ABC change.**
+- **Solis** (issue #130) — same **scheduling model** (persistent timed
+  charge/discharge slots + charge/discharge current) regardless of integration,
+  but Solis has several HA integrations across **both** transports. We support
+  **one of two** (chosen per the reporter's actual setup; **`solax_modbus` is the
+  default priority** because we already support that transport):
+  - **`solax_modbus`** (TX-Modbus, local; 491★ multi-brand, the community
+    standard) → **most additive**: new `SolisController` + `SOLIS_SUFFIX_MAP` + a
+    detection branch **before** the `solax_modbus_native` fallback. No new
+    transport, no ABC change.
+  - **`solis-cloud-control`** (TX-Cloud, SolisCloud Control API; easiest
+    onboarding, no wiring, but a young integration) → adds a **new TX-Cloud
+    domain** (detection branch + cloud service helpers), like Growatt cloud.
+    Treat as **experimental**.
+
+  *Not supported:* `solis-sensor` (monitoring-only) and `Pho3niX90/solis_modbus`
+  (redundant with `solax_modbus`'s local niche). **Decision: ask the reporter
+  which of the two they run, implement that one, default to `solax_modbus`.**
 - **Huawei** = **TX-Vendor-service (NEW)** × SM-Ephemeral (`forcible_charge`,
   plus a persistent TOU working-mode). Needs a new `huawei_solar` transport
   branch in detection + a `forcible_charge` service helper + a `HuaweiController`

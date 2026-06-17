@@ -1,0 +1,56 @@
+# Integration Lifecycle (gated)
+#
+# Triggered manually with `@claude-bot integrate` on a new-integration issue
+# (a new inverter platform or price provider). Drives the issue through the
+# feature-lifecycle skill, ONE stage per invocation, resuming from the PR-body
+# checklist. Re-issue `@claude-bot integrate` to advance to the next stage.
+
+name: Integration Lifecycle
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  integrate:
+    name: Integration Lifecycle
+    if: |
+      github.event.comment.user.login == github.repository_owner &&
+      github.event.issue.pull_request == null &&
+      contains(github.event.comment.body, '@claude-bot integrate')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/create-github-app-token@v2
+        id: app-token
+        with:
+          app-id: ${{ secrets.CLAUDE_REVIEWER_APP_ID }}
+          private-key: ${{ secrets.CLAUDE_REVIEWER_PRIVATE_KEY }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ steps.app-token.outputs.token }}
+          trigger_phrase: "@claude-bot integrate"
+          claude_args: "--max-turns 200 --permission-mode bypassPermissions"
+          prompt: |
+            PLACEHOLDER_PROMPT

@@ -130,6 +130,10 @@ class BatterySettings:
     max_soe_kwh: float = field(init=False)
 
     def __post_init__(self):
+        if self.total_capacity <= 0:
+            raise ValueError(
+                f"total_capacity must be positive, got {self.total_capacity}"
+            )
         self.min_soe_kwh = self.total_capacity * self.min_soc / 100.0
         self.max_soe_kwh = self.total_capacity * self.max_soc / 100.0
         self.reserved_capacity = self.min_soe_kwh

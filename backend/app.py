@@ -223,24 +223,6 @@ class BESSController:
             growatt_device_id=growatt_device_id,
         )
 
-    def _load_and_apply_settings(self):
-        """Load options and apply settings.
-
-        This method is kept for backwards compatibility, but all settings should now be
-        applied early during initialization using _apply_settings().
-        """
-        try:
-            options = self._load_options()
-            if options:
-                logger.debug(
-                    "Reapplying settings from _load_and_apply_settings (redundant)"
-                )
-                self._apply_settings(options)
-            else:
-                logger.warning("No options found when reapplying settings")
-        except Exception as e:
-            logger.error(f"Error reloading settings: {e}", exc_info=True)
-
     def _load_options(self):
         """Load InfluxDB options from /data/options.json.
 
@@ -266,14 +248,6 @@ class BESSController:
             )
             options = {}
 
-        return options
-
-    def _load_discovered_config(self) -> dict | None:
-        """Deprecated — discovery is now handled by SettingsStore."""
-        return None
-
-    def _merge_discovered_config(self, options: dict, _discovered: dict) -> dict:
-        """Deprecated — discovery is now handled by SettingsStore."""
         return options
 
     def apply_discovered_config(
@@ -311,21 +285,6 @@ class BESSController:
             price_source = self.system.price_manager.price_source
             if isinstance(price_source, OfficialNordpoolSource):
                 price_source.config_entry_id = nordpool_config_entry_id
-
-    def _save_discovered_config(
-        self,
-        sensor_map: dict,
-        nordpool_area: str | None = None,
-        nordpool_config_entry_id: str | None = None,
-        growatt_device_id: str | None = None,
-    ) -> None:
-        """Deprecated — persistence is now handled by SettingsStore.apply_discovered."""
-        self.settings_store.apply_discovered(
-            sensor_map=sensor_map,
-            nordpool_area=nordpool_area,
-            nordpool_config_entry_id=nordpool_config_entry_id,
-            growatt_device_id=growatt_device_id,
-        )
 
     def start_scheduler(self) -> None:
         """Start the periodic scheduler if it is not already running.

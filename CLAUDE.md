@@ -141,7 +141,13 @@ of `analyzed`.
 
 ## Worktree Conventions
 
-- Create worktrees as sibling folders to the main repo (e.g., `../repo-feature/`), NOT inside `.claude/worktrees/`, so they open cleanly in VS Code
+- **Default (Agent View / parallel sessions):** use native Claude Code worktrees.
+  `claude agents` and the built-in `--worktree` flag isolate each background
+  session under `.claude/worktrees/` automatically — manage them in Agent View
+  instead of separate editor windows.
+- **Legacy (separate VS Code windows):** create worktrees as sibling folders
+  (e.g. `../bess-manager-feature/`), NOT inside `.claude/worktrees/`, so each
+  opens cleanly in its own VS Code window. Only needed when not using Agent View.
 
 ## Home Assistant Integration
 

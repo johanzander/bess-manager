@@ -102,6 +102,28 @@ existing controller to model on and how much is new. The architecture
 `/api/services/{domain}/{name}` layer) absorbs new inverters **additively** — no
 core refactor required.
 
+## Running the work: two tracks
+
+Agent work runs on two complementary tracks — pick by whether the work is
+unattended or hands-on. They are not competing; the interactive track is how you
+*build* the autonomous one.
+
+| | Autonomous track | Interactive track |
+|---|---|---|
+| Runtime | GitHub Actions (`claude-code-action`) | Local Claude Code |
+| Trigger | `@claude-bot integrate` on an issue | You, via Agent View (`claude agents`) |
+| Parallelism | one runner per issue (automatic) | many background sessions in Agent View |
+| Isolation | the CI checkout | native worktrees (`.claude/worktrees/`) |
+| Manage via | issues / PRs / Actions tab | the Agent View dashboard |
+| Best for | unattended, user-gated lifecycles | hands-on dev you supervise |
+
+The autonomous track is the `feature-lifecycle` pipeline described above
+(`issue-integrate.yml`). The interactive track is **Agent View** (`claude agents`,
+Claude Code v2.1.139+): dispatch parallel background sessions and triage them by
+status (Needs input / Working / Completed) instead of juggling editor windows.
+See [Worktree Conventions](../../CLAUDE.md) — native `.claude/worktrees/` is the
+default for Agent View sessions.
+
 ## Where to go next
 
 | Concern | File |

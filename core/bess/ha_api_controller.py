@@ -66,33 +66,6 @@ class HomeAssistantAPIController:
             description = self._get_sensor_display_name(sensor_key)
             raise ValueError(f"No entity ID configured for {description}") from e
 
-    def _get_sensor_key(self, method_name: str) -> str | None:
-        """Get the sensor key for a method - compatibility method for existing code."""
-        return self.get_method_sensor_key(method_name)
-
-    @classmethod
-    def get_method_info(cls, method_name: str) -> dict[str, object] | None:
-        """Get method information including sensor key and display name."""
-        return cls.METHOD_SENSOR_MAP.get(method_name)
-
-    @classmethod
-    def get_method_name(cls, method_name: str) -> str | None:
-        """Get the display name for a method."""
-        method_info = cls.METHOD_SENSOR_MAP.get(method_name)
-        if method_info:
-            name = method_info["name"]
-            return str(name) if name else None
-        return None
-
-    @classmethod
-    def get_method_sensor_key(cls, method_name: str) -> str | None:
-        """Get the sensor key for a method."""
-        method_info = cls.METHOD_SENSOR_MAP.get(method_name)
-        if method_info:
-            sensor_key = method_info["sensor_key"]
-            return str(sensor_key) if sensor_key else None
-        return None
-
     def __init__(
         self,
         ha_url: str,
@@ -1108,7 +1081,8 @@ class HomeAssistantAPIController:
             SystemConfigurationError: If sensor data is unavailable
         """
         raw_value = self._get_sensor_value("48h_avg_grid_import")
-        assert raw_value is not None, "48h_avg_grid_import sensor not available"
+        if raw_value is None:
+            raise SystemConfigurationError("48h_avg_grid_import sensor not available")
         avg_hourly_consumption = raw_value / 1000
 
         # Convert hourly average to quarterly by dividing by 4
@@ -1126,7 +1100,8 @@ class HomeAssistantAPIController:
             operation="Read HA config",
             category="config",
         )
-        assert response is not None, "HA /api/config returned no data"
+        if response is None:
+            raise SystemConfigurationError("HA /api/config returned no data")
         return response
 
     def get_battery_soc(self):
@@ -2231,7 +2206,8 @@ class HomeAssistantAPIController:
             operation="Fetch all entity states",
             category="config",
         )
-        assert states is not None, "HA /api/states returned no data"
+        if states is None:
+            raise SystemConfigurationError("HA /api/states returned no data")
         return states
 
     # Maps Nordpool area code prefix → (currency, vat_multiplier).

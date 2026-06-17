@@ -120,14 +120,15 @@ class TestApiRequest:
         assert len(failures) == 1
         assert "Read SOC" in failures[0].operation
 
-    def test_test_mode_blocks_write_operations(self, ctrl):
+    def test_test_mode_does_not_block_at_api_request_level(self, ctrl):
         ctrl.test_mode = True
-        ctrl.session.post = _session_method_mock("post")
-        result = ctrl._api_request(
+        ctrl.session.post = _session_method_mock(
+            "post", return_value=_mock_response(None)
+        )
+        ctrl._api_request(
             "post", "/api/services/switch/turn_on", json={"entity_id": "switch.x"}
         )
-        assert result is None
-        ctrl.session.post.assert_not_called()
+        ctrl.session.post.assert_called_once()
 
     def test_test_mode_allows_read_operations(self, ctrl):
         ctrl.test_mode = True

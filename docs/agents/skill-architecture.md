@@ -46,9 +46,12 @@ prompt running on `anthropics/claude-code-action@v1`, gated on an owner
 | `issue-analyze.yml` | `@claude-bot analyze` | deep root-cause; dispatches the **`bess-analyst`** subagent |
 | `issue-fix.yml` | `@claude-bot fix` | minimal bug fix → draft PR |
 | `pr-review.yml` | `@claude-bot` on a PR | review the diff against the rules |
+| `issue-integrate.yml` | `@claude-bot integrate` | drive a new-integration issue through `feature-lifecycle`, one stage per invocation (resumes from the PR checklist) |
 
-This pipeline is built for **minimal bug fixes → one PR**. Integration work
-(multi-day, human-gated) is driven by the skill layer, not these workflows.
+The first four workflows are built for **minimal bug fixes → one PR**.
+`issue-integrate.yml` is the bridge between the GitHub pipeline and the skill
+layer: it runs `feature-lifecycle` (via read-the-file), resuming from the PR-body
+checklist, one human-gated stage at a time.
 
 ### Subagents
 

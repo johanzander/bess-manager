@@ -46,9 +46,12 @@ prompt running on `anthropics/claude-code-action@v1`, gated on an owner
 | `issue-analyze.yml` | `@claude-bot analyze` | deep root-cause; dispatches the **`bess-analyst`** subagent |
 | `issue-fix.yml` | `@claude-bot fix` | minimal bug fix → draft PR |
 | `pr-review.yml` | `@claude-bot` on a PR | review the diff against the rules |
+| `issue-integrate.yml` | `@claude-bot integrate` | drive a new-integration issue through `feature-lifecycle`, one stage per invocation (resumes from the PR checklist) |
 
-This pipeline is built for **minimal bug fixes → one PR**. Integration work
-(multi-day, human-gated) is driven by the skill layer, not these workflows.
+The first four workflows are built for **minimal bug fixes → one PR**.
+`issue-integrate.yml` is the bridge between the GitHub pipeline and the skill
+layer: it runs `feature-lifecycle` (via read-the-file), resuming from the PR-body
+checklist, one human-gated stage at a time.
 
 ### Subagents
 
@@ -98,6 +101,30 @@ existing controller to model on and how much is new. The architecture
 (`InverterController` ABC + per-platform suffix maps + a generic
 `/api/services/{domain}/{name}` layer) absorbs new inverters **additively** — no
 core refactor required.
+
+## Running the work: two tracks
+
+Agent work runs on two complementary tracks — pick by whether the work is
+unattended or hands-on. They are not competing; the interactive track is how you
+*build* the autonomous one.
+
+| | Autonomous track | Interactive track |
+|---|---|---|
+| Runtime | GitHub Actions (`claude-code-action`) | Local Claude Code |
+| Trigger | `@claude-bot integrate` on an issue | You, via Agent View (`claude agents`) |
+| Parallelism | one runner per issue (automatic) | many background sessions in Agent View |
+| Isolation | the CI checkout | git worktrees — sibling **or** native `.claude/worktrees/` |
+| Manage via | issues / PRs / Actions tab | the Agent View dashboard |
+| Best for | unattended, user-gated lifecycles | hands-on dev you supervise |
+
+The autonomous track is the `feature-lifecycle` pipeline described above
+(`issue-integrate.yml`). The interactive track is **Agent View** (`claude agents`,
+Claude Code v2.1.139+): dispatch parallel background sessions and triage them by
+status (Needs input / Working / Completed) instead of juggling editor windows.
+Agent View is a dashboard, not an IDE — each session's worktree is a real folder
+you open in VS Code or `cd` into to run tests/scripts. **Sibling and native
+worktrees are both first-class** (siblings only drop out of the *project-scoped*
+view); see [Worktree Conventions](../../CLAUDE.md).
 
 ## Where to go next
 

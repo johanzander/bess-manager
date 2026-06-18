@@ -4,6 +4,13 @@
 **Investigation:** [`../../investigations/intent-dither-morning.md`](../../investigations/intent-dither-morning.md)
 **Related PR:** #141
 
+> **BLOCKED — do not implement yet.** This change alters the *applied* inverter
+> modes, and the system currently has **no way to verify the realized economic
+> impact** of a control change (every savings figure is the optimizer's open-loop
+> plan; mock-HA is record/replay). Implementation is gated on the
+> [closed-loop savings simulator](2026-06-18-closed-loop-savings-simulator-design.md)
+> (PR #144), which provides the A/B economic verification this fix must pass.
+
 ## Problem
 
 When the battery sits near its SoE floor (or any level the optimal control wants

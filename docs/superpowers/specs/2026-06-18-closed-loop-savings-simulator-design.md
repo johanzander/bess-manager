@@ -46,7 +46,9 @@ that a control change (the hysteresis) doesn't alter that.
   (`EnergyData` / `EconomicData`) **and the same discretization** as the
   optimizer — so that faithful control yields cent-exact equality and any residual
   difference is meaningful, not a numerical artifact.
-- Per-platform mode semantics for the **Growatt MIN / modbus** path first.
+- Per-platform mode semantics for the **Growatt MIN (cloud)** inverter first. (The
+  modeled physics is the same MIN-inverter behaviour regardless of cloud vs modbus
+  delivery; only the comms path differs.)
 
 **Out (v1) — explicit non-goals:**
 - **Validation against real-world logs / measured hardware data.** Out of scope —
@@ -163,12 +165,16 @@ Add a *dithering* scenario (the reproduction day, generatable via
 - **Scope creep** toward the full re-optimization feedback loop — explicitly
   deferred; v1 is execution-only.
 
-## Decisions to confirm
+## Decisions (confirmed 2026-06-18)
 
-1. **Platform scope v1 = Growatt MIN / modbus only** (the reproduction platform).
-   Agree?
-2. **v1 is execution-only** (no optimizer re-run feedback loop). Agree to defer the
-   full loop?
-3. **Pure simulation, no real-world/log calibration** in scope; verification is
-   scenario-based and **cent-exact** (`R == P`, and A/B `delta == 0`), with any
-   mismatch treated as a finding. Agree?
+1. **Platform scope v1 = Growatt MIN (cloud).** ✅ The mode→flow *physics* modeled
+   here is the same for the MIN inverter regardless of whether commands are
+   delivered via cloud or modbus (the reproduction log used the modbus path); the
+   comms path does not change what `grid_first`/`load_first` physically do, which
+   is all the simulator models.
+2. **v1 is execution-only** (single optimizer pass; no re-run feedback loop). ✅
+   Sufficient for `R == P` and the immediate A/B economic delta; cross-hour drift
+   is deferred to a possible v2 / beta validation.
+3. **Pure simulation, no real-world/log calibration**; verification is
+   scenario-based and **cent-exact** (`R == P`, and A/B `delta == 0`), any mismatch
+   treated as a finding. ✅

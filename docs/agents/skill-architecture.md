@@ -113,7 +113,7 @@ unattended or hands-on. They are not competing; the interactive track is how you
 | Runtime | GitHub Actions (`claude-code-action`) | Local Claude Code |
 | Trigger | `@claude-bot integrate` on an issue | You, via Agent View (`claude agents`) |
 | Parallelism | one runner per issue (automatic) | many background sessions in Agent View |
-| Isolation | the CI checkout | native worktrees (`.claude/worktrees/`) |
+| Isolation | the CI checkout | git worktrees — sibling **or** native `.claude/worktrees/` |
 | Manage via | issues / PRs / Actions tab | the Agent View dashboard |
 | Best for | unattended, user-gated lifecycles | hands-on dev you supervise |
 
@@ -121,8 +121,10 @@ The autonomous track is the `feature-lifecycle` pipeline described above
 (`issue-integrate.yml`). The interactive track is **Agent View** (`claude agents`,
 Claude Code v2.1.139+): dispatch parallel background sessions and triage them by
 status (Needs input / Working / Completed) instead of juggling editor windows.
-See [Worktree Conventions](../../CLAUDE.md) — native `.claude/worktrees/` is the
-default for Agent View sessions.
+Agent View is a dashboard, not an IDE — each session's worktree is a real folder
+you open in VS Code or `cd` into to run tests/scripts. **Sibling and native
+worktrees are both first-class** (siblings only drop out of the *project-scoped*
+view); see [Worktree Conventions](../../CLAUDE.md).
 
 ## Where to go next
 

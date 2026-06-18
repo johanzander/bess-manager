@@ -141,13 +141,23 @@ of `analyzed`.
 
 ## Worktree Conventions
 
-- **Default (Agent View / parallel sessions):** use native Claude Code worktrees.
-  `claude agents` and the built-in `--worktree` flag isolate each background
-  session under `.claude/worktrees/` automatically — manage them in Agent View
-  instead of separate editor windows.
-- **Legacy (separate VS Code windows):** create worktrees as sibling folders
-  (e.g. `../bess-manager-feature/`), NOT inside `.claude/worktrees/`, so each
-  opens cleanly in its own VS Code window. Only needed when not using Agent View.
+Both layouts are first-class — either way the worktree is a normal git checkout,
+so per-agent inspect / test / run (`./deploy.sh`, `pytest`, the app) works the
+same. Choose by how you want to reach an agent's work:
+
+- **Sibling folders** (e.g. `../bess-manager-feature/`) — open cleanly in their
+  own VS Code window; this is the go-to when you actively inspect code and run
+  scripts per agent. They work with Agent View too: start the background session
+  *inside* the sibling (it's a linked git worktree, so Claude won't relocate it).
+  Caveat: a sibling only appears in **unscoped** `claude agents` (or
+  `--cwd ~/GitHub`), not in the project-scoped `claude agents --cwd <repo>` view.
+- **Native `.claude/worktrees/`** (`claude agents` / `--worktree` /
+  `EnterWorktree`) — auto-created for background sessions and visible in the
+  **project-scoped** Agent View. Still a real checkout: `code
+  <repo>/.claude/worktrees/<name>` or `cd` into it to run tests/scripts.
+
+Find any session's worktree path by peeking/attaching it in Agent View, or via
+`claude agents --json` (the `cwd` field).
 
 ## Home Assistant Integration
 

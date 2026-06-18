@@ -25,29 +25,35 @@ prerequisite for the intent-dither fix (PR #141).
 
 ## Goal
 
-A faithful, validated simulator that takes a sequence of **applied control
-commands** + **real conditions** and returns **realized energy flows and
-savings** — enabling A/B comparison of two command sequences (e.g. optimizer's
-raw modes vs hysteresis-stabilized modes) with a trustworthy savings delta.
+A simulator that, on the **same scenario inputs** the optimizer used (solar, home
+consumption, buy/sell prices), takes the **applied control commands** derived from
+a plan and returns the **realized energy flows and savings** of executing those
+commands. The bar: executing the plan's control should reproduce the plan's
+economic output **exactly** — and any gap is a finding, not noise.
+
+This is a **pure simulation**. We are not comparing against real hardware or
+measured logs; there is no "reality" to calibrate against here. We are verifying
+that the **control layer faithfully executes what the optimizer planned**, and
+that a control change (the hysteresis) doesn't alter that.
 
 ## Scope
 
 **In (v1):**
-- Sequential within-day SoC evolution under applied inverter modes (SoC carries
-  forward period to period — this is the "closed loop" for state).
+- Sequential within-scenario SoC evolution under applied inverter modes (SoC
+  carries forward period to period).
 - Realized flows (solar→home/battery/grid, grid→home/battery, battery→home/grid)
-  and realized cost/savings using the **existing** price/cost accounting
-  (`EnergyData` / `EconomicData`) so results are apples-to-apples with reported
-  planned savings.
-- Per-platform mode semantics for the **Growatt MIN / modbus** path first (the
-  platform in the reproduction log and one of the only real-world-tested
-  platforms).
-- A **calibration/validation harness** against real debug logs.
+  and realized cost/savings using the **same** price/cost accounting
+  (`EnergyData` / `EconomicData`) **and the same discretization** as the
+  optimizer — so that faithful control yields cent-exact equality and any residual
+  difference is meaningful, not a numerical artifact.
+- Per-platform mode semantics for the **Growatt MIN / modbus** path first.
 
 **Out (v1) — explicit non-goals:**
+- **Validation against real-world logs / measured hardware data.** Out of scope —
+  this is a scenario-driven simulation, not a hardware-fidelity exercise.
 - Re-running the optimizer with simulated actuals (the full re-optimization
   feedback loop). v1 simulates *execution* of a fixed command sequence; it does
-  not close the loop back into planning. Flagged as a later extension.
+  not close the loop back into planning.
 - Platforms beyond Growatt MIN (SPH, SolaX) — add once the core is validated.
 - Battery degradation beyond the existing cycle-cost model.
 
@@ -74,64 +80,60 @@ raw modes vs hysteresis-stabilized modes) with a trustworthy savings delta.
   surplus; `GRID_CHARGING→battery_first` charges from grid). This mode→behaviour
   mapping is the genuinely new logic and the main fidelity risk.
 
-## Validation — three checks, only one of which is a tolerance
+## Validation — two exact checks, no tolerances
 
-These are deliberately separated; conflating them hides real economic effects.
+Both checks are **cent-exact**. There is no tolerance anywhere: this is a pure
+simulation sharing the optimizer's accounting and discretization, so a faithful
+result is an *exact* result. A mismatch is a finding to investigate, never a band
+to widen.
 
-### 1. Exact internal consistency (to the cent)
+### 1. Plan-faithfulness — realized economics == planned economics (the core bar)
 
-The simulator shares `EnergyData` / `EconomicData` and the price/cost accounting
-with the optimizer. Therefore, where an applied mode maps to an **unambiguous**
-battery action, the simulator must reproduce the optimizer's per-period flows and
-`economic.hourly_cost` **exactly** (within float rounding). This proves the
-accounting is wired identically and is a no-tolerance unit/integration test.
+For each scenario, run the optimizer to get the plan and its economic output `P`,
+derive the applied control commands from the plan, simulate executing those
+commands on the **same scenario inputs**, and assert the realized economic output
+`R == P` **exactly**.
 
-### 2. The A/B economic gate (to the cent — this is what gates a control change)
+This is the central claim you are asserting and I now agree with: *if the control
+layer faithfully executes the plan, the simulated economics must equal the planned
+economics.* So:
+
+- `R == P` ⇒ the control layer faithfully realizes the plan. ✅
+- `R != P` ⇒ a **finding**: the modes/TOU commands do **not** losslessly carry the
+  optimizer's planned control. This is more fundamental than the dither symptom —
+  it would mean part of the optimizer's claimed savings is not realizable as
+  written — and it is exactly the kind of thing this simulator exists to surface.
+  We investigate and resolve the gap; we do not absorb it into a tolerance.
+
+(Implementation note: the simulator must use the **same discretization** as the
+optimizer so that a faithful control produces *exactly* `P`, with no spurious
+rounding gap — otherwise an `R != P` could be a numerical artifact rather than a
+real finding. Getting this right is part of the work.)
+
+### 2. The A/B economic gate (what gates a control change — also exact)
 
 A control change (e.g. the hysteresis) is judged by the **delta of realized
-savings** between two command sequences run through the **same** simulator under
-the **same** conditions:
+savings** between two command sequences run through the **same** simulator on the
+**same** scenario inputs:
 
 ```
 delta = realized_savings(modified modes) − realized_savings(baseline modes)
 ```
 
-Because simulator-vs-reality error is identical on both sides, **it cancels in the
-delta** — so this is reported and asserted **exactly, to the cent**, not within a
-percentage band. A band here would *mask* a real loss. If `delta == 0` the change
-is provably economically neutral; if non-zero, the exact figure is surfaced for an
-explicit accept/reject decision. **No tolerance.**
-
-> Note: `realized != planned` in general, and that is expected — inverter modes
-> are *policies* (`grid_first`/`load_first`), not power setpoints, so the executed
-> power is whatever conditions dictate under the policy, not the optimizer's exact
-> planned power. This plan-vs-execution gap **pre-exists** any control change; the
-> gate above compares realized-vs-realized, not realized-vs-planned.
-
-### 3. Model-fidelity calibration vs real logs (the only tolerance, and it is not the gate)
-
-To trust that our `mode → flow` *policy model* matches the real inverter, feed the
-simulator the **actually-applied modes + actual conditions** from real debug logs
-and check it reproduces the **measured** SoC/flows. Reality carries weather
-deviation, measurement noise, and unmodeled losses, so this check is inherently
-**within a tolerance** (starting point, to be tightened empirically: per-period
-SoC ±0.2 kWh, per-period grid energy ±0.2 kWh). This validates the *model*, not a
-control change. If it cannot reproduce actuals within tolerance, that is itself a
-finding — our mode→behaviour understanding is incomplete — and must be resolved
-before checks 1–2 can be trusted.
+Asserted **exactly, to the cent**. `delta == 0` ⇒ the change is provably
+economically neutral; a non-zero delta is the exact economic impact, surfaced for
+an explicit accept/reject decision. **No band** — a band would mask a real loss.
 
 ## How it unblocks the intent-dither hysteresis
 
-A/B harness, once the simulator is fidelity-validated (check 3):
+Once plan-faithfulness (check 1) holds on representative scenarios:
 
-1. Day conditions → `optimize_battery_schedule` → schedule.
+1. Scenario inputs → `optimize_battery_schedule` → schedule + planned economics.
 2. Derive (a) baseline applied modes and (b) hysteresis-stabilized modes.
-3. Simulate both → realized savings A and B (same simulator, same conditions).
-4. Report `delta = B − A` **exactly, to the cent** (check 2). `delta == 0` ⇒ the
-   hysteresis is provably economically neutral; a non-zero delta is the exact
-   economic impact, surfaced for an explicit accept/reject decision — never hidden
-   in a tolerance band. Evaluated across the reproduction day and a set of
-   scenarios.
+3. Simulate both → realized savings A and B (same simulator, same inputs).
+4. Assert `delta = B − A == 0` exactly (check 2). Non-zero ⇒ the exact economic
+   impact, surfaced for explicit accept/reject. Evaluated across the dithering
+   reproduction scenario and a set of others.
 
 This is the economic verification that is currently impossible.
 
@@ -139,18 +141,25 @@ This is the economic verification that is currently impossible.
 
 The existing scenario JSONs already feed the optimizer (`base_prices`,
 `home_consumption`, `solar_production`, `battery`). The simulator tests reuse them:
-optimizer → derive modes → simulate. Lock regressions by extending the schema with
-`expected_planned_savings` and `expected_realized_savings`; A/B fixtures assert
-`realized(baseline) == realized(hysteresis)` exactly. Add a *dithering* scenario
-(the reproduction day, generatable via `scripts/mock_ha/scenarios/from_debug_log.py`)
-and *calibration* scenarios that carry the **measured actual** flows for check 3.
+optimizer → derive modes → simulate. Lock regressions with a **single**
+`expected_savings` field per scenario — the test asserts `planned == expected_savings`
+(regression lock) **and** `realized == planned` (the faithfulness relation, which
+needs no stored number). Two separate planned/realized fields would be redundant
+and could drift apart, masking exactly the `R != P` finding check 1 exists to
+catch. A/B fixtures assert `realized(baseline) == realized(hysteresis)` exactly.
+Add a *dithering* scenario (the reproduction day, generatable via
+`scripts/mock_ha/scenarios/from_debug_log.py`).
 
 ## Risks
 
-- **Fidelity of mode→behaviour modeling** (per platform) is the hard part —
-  mitigated by the calibration gate against real logs (no calibration, no trust).
-- **Tolerance choice** trades sensitivity vs false alarms; start loose, tighten as
-  the model proves out against multiple logs.
+- **Plan-faithfulness may not hold today.** If the simulator shows `R != P` for the
+  current control, that is a genuine (and more fundamental) finding — the coarse
+  mode/TOU commands don't losslessly carry the optimizer's fine-grained planned
+  power. That would reframe the dither work: the real issue would be the
+  optimizer↔control contract, not a downstream label filter. We must be prepared
+  for this outcome.
+- **Mode→behaviour modeling** (per platform) is the substantive logic; encoded
+  explicitly from the controller mappings and verified by check 1.
 - **Scope creep** toward the full re-optimization feedback loop — explicitly
   deferred; v1 is execution-only.
 
@@ -160,6 +169,6 @@ and *calibration* scenarios that carry the **measured actual** flows for check 3
    Agree?
 2. **v1 is execution-only** (no optimizer re-run feedback loop). Agree to defer the
    full loop?
-3. The **A/B economic gate is exact (to the cent)** — no tolerance; a tolerance
-   exists *only* for model-fidelity calibration vs noisy real logs (check 3).
-   Agree with this split?
+3. **Pure simulation, no real-world/log calibration** in scope; verification is
+   scenario-based and **cent-exact** (`R == P`, and A/B `delta == 0`), with any
+   mismatch treated as a finding. Agree?

@@ -164,17 +164,3 @@ Add a *dithering* scenario (the reproduction day, generatable via
   explicitly from the controller mappings and verified by check 1.
 - **Scope creep** toward the full re-optimization feedback loop — explicitly
   deferred; v1 is execution-only.
-
-## Decisions (confirmed 2026-06-18)
-
-1. **Platform scope v1 = Growatt MIN (cloud).** ✅ The mode→flow *physics* modeled
-   here is the same for the MIN inverter regardless of whether commands are
-   delivered via cloud or modbus (the reproduction log used the modbus path); the
-   comms path does not change what `grid_first`/`load_first` physically do, which
-   is all the simulator models.
-2. **v1 is execution-only** (single optimizer pass; no re-run feedback loop). ✅
-   Sufficient for `R == P` and the immediate A/B economic delta; cross-hour drift
-   is deferred to a possible v2 / beta validation.
-3. **Pure simulation, no real-world/log calibration**; verification is
-   scenario-based and **cent-exact** (`R == P`, and A/B `delta == 0`), any mismatch
-   treated as a finding. ✅

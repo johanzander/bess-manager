@@ -5,6 +5,7 @@ from core.bess.simulation.inverter_simulator import (
     ControlCommand,
     derive_control_command,
     mode_to_power,
+    simulate,
 )
 from core.bess.tests.helpers import make_battery_settings
 
@@ -75,3 +76,25 @@ def test_battery_first_charges_at_max_rate():
     cmd = ControlCommand("battery_first", discharge_rate_pct=0, grid_charge=True)
     p = mode_to_power(cmd, solar=0.0, home=0.0, soe=5.0, settings=bs, dt=0.25)
     assert p == 10.0
+
+
+# ---------------------------------------------------------------------------
+# Task 3: simulate
+# ---------------------------------------------------------------------------
+
+
+def test_simulate_idle_day_costs_grid_import_only():
+    bs = make_battery_settings()
+    n = 4
+    commands = [ControlCommand("load_first", 0, False)] * n  # idle/store
+    solar = [0.0] * n
+    home = [1.0] * n
+    buy = [2.0] * n
+    sell = [1.0] * n
+    res = simulate(
+        commands, solar, home, buy, sell, initial_soe=3.0, settings=bs, dt=0.25
+    )
+    # no solar, no battery action -> all home from grid: 4 * 1.0 kWh * 2.0 = 8.0
+    assert res.realized_cost == 8.0
+    assert len(res.period_data) == n
+    assert res.period_data[0].energy.battery_soe_start == 3.0

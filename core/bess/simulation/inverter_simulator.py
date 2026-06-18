@@ -5,9 +5,11 @@ Reuses the optimizer's own primitives (_state_transition, _build_period_data)
 so that faithful control yields cent-exact equality with the plan.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
+from core.bess.dp_battery_algorithm import _build_period_data, _state_transition
 from core.bess.inverter_controller import InverterController
+from core.bess.models import PeriodData  # noqa: F401  (type clarity)
 from core.bess.settings import BatterySettings
 
 
@@ -98,3 +100,57 @@ def mode_to_power(
 
     # SOLAR_STORAGE / IDLE: power 0 -> _state_transition stores surplus solar passively
     return 0.0
+
+
+@dataclass
+class SimulationResult:
+    period_data: list = field(default_factory=list)  # list[PeriodData]
+    realized_cost: float = 0.0  # sum of economic.hourly_cost
+
+
+def simulate(
+    commands: list[ControlCommand],
+    solar_production: list[float],
+    home_consumption: list[float],
+    buy_price: list[float],
+    sell_price: list[float],
+    initial_soe: float,
+    settings: BatterySettings,
+    dt: float,
+    currency: str = "SEK",
+) -> SimulationResult:
+    """Execute the command sequence period-by-period, carrying SoC forward, using
+    the optimizer's own _state_transition + _build_period_data for accounting
+    parity. Returns realized PeriodData and total realized cost."""
+    soe = initial_soe
+    period_data = []
+    for t, cmd in enumerate(commands):
+        power = mode_to_power(
+            cmd, solar_production[t], home_consumption[t], soe, settings, dt
+        )
+        next_soe = _state_transition(
+            soe,
+            power,
+            settings,
+            dt,
+            solar_production=solar_production[t],
+            home_consumption=home_consumption[t],
+        )
+        pd = _build_period_data(
+            power=power,
+            soe=soe,
+            next_soe=next_soe,
+            period=t,
+            home_consumption=home_consumption[t],
+            battery_settings=settings,
+            dt=dt,
+            buy_price=buy_price,
+            sell_price=sell_price,
+            solar_production=solar_production[t],
+            new_cost_basis=settings.cycle_cost_per_kwh,
+            currency=currency,
+        )
+        period_data.append(pd)
+        soe = next_soe
+    realized_cost = sum(pd.economic.hourly_cost for pd in period_data)
+    return SimulationResult(period_data=period_data, realized_cost=realized_cost)

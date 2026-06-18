@@ -58,3 +58,43 @@ def _map_rates(
             rate = 0
         return False, rate
     raise ValueError(f"Unknown strategic intent: {intent}")
+
+
+def mode_to_power(
+    command: ControlCommand,
+    solar: float,
+    home: float,
+    soe: float,
+    settings: BatterySettings,
+    dt: float,
+) -> float:
+    """Battery power (kW; + charge, - discharge) the Growatt MIN inverter applies
+    for one period under the given command and conditions. This is the v1 mode
+    policy; check 1 (plan-faithfulness) validates/refines it."""
+    if command.battery_mode == "battery_first":  # grid charging
+        room = settings.max_soe_kwh - soe
+        max_charge_kwh = min(
+            settings.max_charge_power_kw * dt, room / settings.efficiency_charge
+        )
+        return max(0.0, max_charge_kwh) / dt
+
+    if (
+        command.battery_mode == "grid_first"
+    ):  # export arbitrage: discharge to grid at rate
+        available = max(0.0, soe - settings.min_soe_kwh)
+        rate_kw = settings.max_discharge_power_kw * command.discharge_rate_pct / 100.0
+        delivered_kwh = min(rate_kw * dt, available * settings.efficiency_discharge)
+        return -delivered_kwh / dt
+
+    # load_first
+    if command.discharge_rate_pct > 0:  # LOAD_SUPPORT: cover home deficit
+        deficit = max(0.0, home - solar)
+        available = max(0.0, soe - settings.min_soe_kwh)
+        rate_kw = settings.max_discharge_power_kw * command.discharge_rate_pct / 100.0
+        delivered_kwh = min(
+            deficit, rate_kw * dt, available * settings.efficiency_discharge
+        )
+        return -delivered_kwh / dt
+
+    # SOLAR_STORAGE / IDLE: power 0 -> _state_transition stores surplus solar passively
+    return 0.0

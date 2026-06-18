@@ -46,9 +46,9 @@ that a control change (the hysteresis) doesn't alter that.
   (`EnergyData` / `EconomicData`) **and the same discretization** as the
   optimizer — so that faithful control yields cent-exact equality and any residual
   difference is meaningful, not a numerical artifact.
-- Per-platform mode semantics for the **Growatt MIN (cloud)** inverter first. (The
-  modeled physics is the same MIN-inverter behaviour regardless of cloud vs modbus
-  delivery; only the comms path differs.)
+- Mode semantics for the **Growatt MIN (cloud)** inverter. The model is the
+  MIN-inverter's physical mode behaviour, independent of the command-delivery path
+  (cloud or modbus).
 
 **Out (v1) — explicit non-goals:**
 - **Validation against real-world logs / measured hardware data.** Out of scope —
@@ -96,11 +96,10 @@ derive the applied control commands from the plan, simulate executing those
 commands on the **same scenario inputs**, and assert the realized economic output
 `R == P` **exactly**.
 
-This is the central claim you are asserting and I now agree with: *if the control
-layer faithfully executes the plan, the simulated economics must equal the planned
-economics.* So:
+The principle: *if the control layer faithfully executes the plan, the simulated
+economics must equal the planned economics.* So:
 
-- `R == P` ⇒ the control layer faithfully realizes the plan. ✅
+- `R == P` ⇒ the control layer faithfully realizes the plan.
 - `R != P` ⇒ a **finding**: the modes/TOU commands do **not** losslessly carry the
   optimizer's planned control. This is more fundamental than the dither symptom —
   it would mean part of the optimizer's claimed savings is not realizable as

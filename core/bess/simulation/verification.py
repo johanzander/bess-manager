@@ -3,6 +3,7 @@
 from core.bess.dp_battery_algorithm import optimize_battery_schedule
 from core.bess.settings import BatterySettings
 from core.bess.simulation.inverter_simulator import (
+    ControlCommand,
     derive_control_command,
     simulate,
 )
@@ -48,3 +49,26 @@ def verify_plan_faithfulness(
         for i in range(len(result.period_data))
     ]
     return planned_cost, realized_cost, per_period_deltas
+
+
+def ab_compare(
+    baseline_commands: list[ControlCommand],
+    modified_commands: list[ControlCommand],
+    solar,
+    home,
+    buy_price,
+    sell_price,
+    initial_soe: float,
+    settings: BatterySettings,
+    dt: float,
+) -> float:
+    """Realized-savings delta (modified - baseline) under identical conditions.
+    Both run through the same simulator, so simulator error cancels: assert exactly."""
+    base = simulate(
+        baseline_commands, solar, home, buy_price, sell_price, initial_soe, settings, dt
+    )
+    mod = simulate(
+        modified_commands, solar, home, buy_price, sell_price, initial_soe, settings, dt
+    )
+    # cost delta; savings delta is the negation. Positive cost delta = modified costs more.
+    return mod.realized_cost - base.realized_cost

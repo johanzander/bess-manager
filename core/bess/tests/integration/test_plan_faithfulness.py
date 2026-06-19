@@ -43,3 +43,20 @@ def test_realized_equals_planned_on_controlled_scenario():
     assert round(realized_cost, 2) == round(
         planned_cost, 2
     ), f"R={realized_cost} != P={planned_cost}; per-period deltas: {per_period}"
+
+
+def test_identical_command_sequences_have_zero_delta():
+    from core.bess.simulation.inverter_simulator import ControlCommand
+    from core.bess.simulation.verification import ab_compare
+
+    bs = make_battery_settings()
+    n = 6
+    buy = [1.0] * n
+    sell = [0.8] * n
+    solar = [0.5] * n
+    home = [0.3] * n
+    base = [ControlCommand("load_first", 0, False)] * n
+    delta = ab_compare(
+        base, base, solar, home, buy, sell, initial_soe=5.0, settings=bs, dt=1.0
+    )
+    assert delta == 0.0

@@ -63,3 +63,28 @@ def test_charge_stores_all_surplus_not_a_fraction():
     # surplus all stored, 0 exported; only wear cost = 1.4 * cycle_cost
     # reward = -(0 import - 0 export + 1.4*cycle_cost)
     assert round(reward, 4) == round(-(1.4 * bs.cycle_cost_per_kwh), 4)
+
+
+def test_build_period_data_store_disposition_flows():
+    from core.bess.dp_battery_algorithm import _build_period_data, _state_transition
+
+    bs = make_battery_settings(max_charge_power_kw=10.0, efficiency_charge=1.0)
+    nxt = _state_transition(
+        5.0, 0.4, bs, DT, solar_production=1.5, home_consumption=0.1
+    )
+    pd = _build_period_data(
+        power=0.4,
+        soe=5.0,
+        next_soe=nxt,
+        period=0,
+        home_consumption=0.1,
+        battery_settings=bs,
+        dt=DT,
+        buy_price=PRICES_BUY,
+        sell_price=PRICES_SELL,
+        solar_production=1.5,
+        new_cost_basis=bs.cycle_cost_per_kwh,
+        currency="SEK",
+    )
+    assert round(pd.energy.battery_charged, 4) == 1.4  # stored all surplus
+    assert round(pd.energy.grid_exported, 4) == 0.0  # nothing exported

@@ -403,13 +403,23 @@ def _build_period_data(
     current_buy_price = buy_price[period]
     current_sell_price = sell_price[period]
 
-    if power > POWER_TOLERANCE_KW:  # Active charging
-        battery_charged = power * dt
+    if power > POWER_TOLERANCE_KW:  # STORE disposition (+ optional grid charge)
+        surplus = max(0.0, solar_production - home_consumption)
+        room_throughput = (
+            battery_settings.max_soe_kwh - soe
+        ) / battery_settings.efficiency_charge
+        rate_throughput = battery_settings.max_charge_power_kw * dt
+        solar_to_battery = min(surplus, rate_throughput, room_throughput)
+        remaining_rate = max(
+            0.0, min(rate_throughput, room_throughput) - solar_to_battery
+        )
+        grid_to_battery = min(max(0.0, power * dt - surplus), remaining_rate)
+        battery_charged = solar_to_battery + grid_to_battery
         battery_discharged = 0.0
     elif power < -POWER_TOLERANCE_KW:  # Active discharging
         battery_charged = 0.0
         battery_discharged = abs(power) * dt
-    else:  # IDLE — passive solar charging
+    else:  # IDLE — EXPORT disposition: battery holds, surplus exported
         battery_charged, battery_discharged = _idle_battery_flows(
             soe, next_soe, battery_settings
         )
@@ -431,19 +441,9 @@ def _build_period_data(
         battery_soe_end=next_soe,
     )
 
-    if power > POWER_TOLERANCE_KW:  # Active charging
-        energy_stored = power * dt * battery_settings.efficiency_charge
+    if power > POWER_TOLERANCE_KW:  # STORE disposition
+        energy_stored = next_soe - soe
         battery_wear_cost = energy_stored * battery_settings.cycle_cost_per_kwh
-
-        expected_stored = next_soe - soe
-        if abs(energy_stored - expected_stored) > 0.01:
-            logger.warning(
-                f"Energy stored mismatch: calculated={energy_stored:.3f}, "
-                f"SOE delta={expected_stored:.3f}"
-            )
-    elif abs(power) <= POWER_TOLERANCE_KW and next_soe > soe:  # Passive solar charging
-        passive_energy_stored = next_soe - soe
-        battery_wear_cost = passive_energy_stored * battery_settings.cycle_cost_per_kwh
     else:
         battery_wear_cost = 0.0
 

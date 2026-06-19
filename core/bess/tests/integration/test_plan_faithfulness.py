@@ -17,16 +17,6 @@ def _controlled_scenario():
     return buy, sell, solar, home
 
 
-@pytest.mark.xfail(
-    strict=False,
-    reason=(
-        "Known control-fidelity gap: battery_first always charges at max rate, "
-        "so the per-period SoC trajectory diverges from the optimizer's planned "
-        "partial-charge split (7.4 kWh vs 10.0 kWh in P0/P1). "
-        "This is the anticipated finding the simulator exists to expose — "
-        "do NOT fix by weakening the assertion or patching mode_to_power."
-    ),
-)
 def test_realized_equals_planned_on_controlled_scenario():
     bs = make_battery_settings()
     buy, sell, solar, home = _controlled_scenario()

@@ -194,3 +194,22 @@ def test_store_with_surplus_no_grid_top_up():
     assert (
         round(pd.energy.battery_charged, 4) == 0.5
     ), f"Expected battery_charged=0.5 (surplus only) but got {pd.energy.battery_charged}"
+
+
+def test_small_surplus_at_idle_classifies_as_export_arbitrage():
+    """A power-0 period with even a SMALL exportable surplus must classify as
+    EXPORT_ARBITRAGE (grid_first), not IDLE — otherwise IDLE->load_first stores
+    it instead of exporting (#145 residual). Threshold must catch ~0.1 kWh."""
+    from core.bess.decision_intelligence import classify_strategic_intent
+
+    ed = EnergyData(
+        solar_production=0.3,
+        home_consumption=0.2,
+        battery_charged=0.0,
+        battery_discharged=0.0,
+        grid_imported=0.0,
+        grid_exported=0.1,
+        battery_soe_start=5.0,
+        battery_soe_end=5.0,
+    )
+    assert classify_strategic_intent(0.0, ed) == "EXPORT_ARBITRAGE"

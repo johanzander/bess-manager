@@ -3,6 +3,7 @@ Issue #145. Tests in the CURRENT section document today's behaviour and will be
 updated to the target behaviour in Task 2/3 (the change is intentional)."""
 
 from core.bess.dp_battery_algorithm import _compute_reward, _state_transition
+from core.bess.models import EnergyData
 from core.bess.tests.helpers import make_battery_settings
 
 DT = 0.25
@@ -88,3 +89,53 @@ def test_build_period_data_store_disposition_flows():
     )
     assert round(pd.energy.battery_charged, 4) == 1.4  # stored all surplus
     assert round(pd.energy.grid_exported, 4) == 0.0  # nothing exported
+
+
+# ---------------------------------------------------------------------------
+# Task 4a: EXPORT disposition classifies as EXPORT_ARBITRAGE (not IDLE)
+# ---------------------------------------------------------------------------
+
+
+def test_idle_with_surplus_classifies_as_export_arbitrage():
+    from core.bess.decision_intelligence import classify_strategic_intent
+
+    # power 0, surplus exported, battery holds
+    ed = EnergyData(
+        solar_production=1.5,
+        home_consumption=0.1,
+        battery_charged=0.0,
+        battery_discharged=0.0,
+        grid_imported=0.0,
+        grid_exported=1.4,
+        battery_soe_start=5.0,
+        battery_soe_end=5.0,
+    )
+    assert classify_strategic_intent(0.0, ed) == "EXPORT_ARBITRAGE"
+    ed2 = EnergyData(
+        solar_production=0.1,
+        home_consumption=0.1,
+        battery_charged=0.0,
+        battery_discharged=0.0,
+        grid_imported=0.0,
+        grid_exported=0.0,
+        battery_soe_start=5.0,
+        battery_soe_end=5.0,
+    )
+    assert classify_strategic_intent(0.0, ed2) == "IDLE"
+
+
+# ---------------------------------------------------------------------------
+# Task 4b: EXPORT_ARBITRAGE maps to grid_first + hold (no discharge)
+# ---------------------------------------------------------------------------
+
+
+def test_export_arbitrage_maps_to_grid_first_hold():
+    from core.bess.inverter_controller import InverterController
+    from core.bess.simulation.inverter_simulator import derive_control_command
+
+    bs = make_battery_settings()
+    assert InverterController.INTENT_TO_MODE["EXPORT_ARBITRAGE"] == "grid_first"
+    cmd = derive_control_command("EXPORT_ARBITRAGE", battery_action_kw=0.0, settings=bs)
+    assert cmd.battery_mode == "grid_first"
+    assert cmd.grid_charge is False
+    assert cmd.discharge_rate_pct == 0

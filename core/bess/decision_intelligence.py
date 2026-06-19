@@ -440,6 +440,8 @@ def classify_strategic_intent(power: float, energy_data: EnergyData) -> str:
         return "SOLAR_STORAGE"
     elif energy_data.battery_discharged > 0.01:
         return "LOAD_SUPPORT"
+    elif energy_data.grid_exported > 0.1 and energy_data.solar_to_grid > 0.1:
+        return "EXPORT_ARBITRAGE"
     return "IDLE"
 
 

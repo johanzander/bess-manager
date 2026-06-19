@@ -196,6 +196,42 @@ def test_store_with_surplus_no_grid_top_up():
     ), f"Expected battery_charged=0.5 (surplus only) but got {pd.energy.battery_charged}"
 
 
+# ---------------------------------------------------------------------------
+# Task: GRID_CHARGING charges at max rate (binary, mirrors solar fix)
+# ---------------------------------------------------------------------------
+
+
+def test_grid_charging_charges_at_max_rate_not_fractional():
+    """TARGET (#145): a charge action with NO solar surplus (grid-charging case)
+    must charge at MAX rate (remaining_rate = min(rate_throughput, room_throughput)),
+    NOT at the fractional power*dt that the DP planned.
+
+    Hardware: GRID_CHARGING → battery_first charges at MAX rate regardless of the
+    planned action magnitude.
+
+    Scenario: solar=0, home=0 → no surplus. power=0.4 kW (small planned action).
+    max_charge_power_kw=10, dt=0.25 → max charge = 2.5 kWh.
+    Starting at soe=2.0 with max_soe=20.0 → room=18.0, room_throughput=18.0.
+    Expected: next_soe - soe == min(10*0.25, 18.0) == 2.5, NOT 0.4*0.25 == 0.1.
+    """
+    bs = make_battery_settings(
+        total_capacity=20.0,
+        min_soc=0.0,
+        max_soc=100.0,
+        max_charge_power_kw=10.0,
+        efficiency_charge=1.0,
+    )
+    soe = 2.0
+    next_soe = _state_transition(
+        soe, 0.4, bs, DT, solar_production=0.0, home_consumption=0.0
+    )
+    expected_delta = min(10.0 * DT, bs.max_soe_kwh - soe)  # 2.5 kWh (rate limited)
+    assert round(next_soe - soe, 6) == round(expected_delta, 6), (
+        f"Expected grid-charge at max rate ({expected_delta} kWh) "
+        f"but got {next_soe - soe} kWh (= power*dt = 0.4*0.25 = 0.1 kWh)"
+    )
+
+
 def test_small_surplus_at_idle_classifies_as_export_arbitrage():
     """A power-0 period with even a SMALL exportable surplus must classify as
     EXPORT_ARBITRAGE (grid_first), not IDLE — otherwise IDLE->load_first stores

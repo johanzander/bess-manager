@@ -199,11 +199,11 @@ def _state_transition(
             0.0, min(rate_throughput, room_throughput) - solar_to_battery
         )
         if surplus > POWER_TOLERANCE_KW:
-            grid_to_battery = 0.0  # SOLAR_STORAGE / load_first charges from solar only
+            grid_to_battery = 0.0  # SOLAR_STORAGE: solar only, no grid top-up
         else:
-            grid_to_battery = min(
-                power * dt, remaining_rate
-            )  # GRID_CHARGING / battery_first (no solar)
+            grid_to_battery = (
+                remaining_rate  # GRID_CHARGING / battery_first: charge at max rate
+            )
         charge_energy = (
             solar_to_battery + grid_to_battery
         ) * battery_settings.efficiency_charge
@@ -302,11 +302,11 @@ def _compute_reward(
             0.0, min(rate_throughput, room_throughput) - solar_to_battery
         )
         if surplus > POWER_TOLERANCE_KW:
-            grid_to_battery = 0.0  # SOLAR_STORAGE / load_first charges from solar only
+            grid_to_battery = 0.0  # SOLAR_STORAGE: solar only, no grid top-up
         else:
-            grid_to_battery = min(
-                power * dt, remaining_rate
-            )  # GRID_CHARGING / battery_first (no solar)
+            grid_to_battery = (
+                remaining_rate  # GRID_CHARGING / battery_first: charge at max rate
+            )
 
         energy_stored = (
             solar_to_battery + grid_to_battery
@@ -424,11 +424,11 @@ def _build_period_data(
             0.0, min(rate_throughput, room_throughput) - solar_to_battery
         )
         if surplus > POWER_TOLERANCE_KW:
-            grid_to_battery = 0.0  # SOLAR_STORAGE / load_first charges from solar only
+            grid_to_battery = 0.0  # SOLAR_STORAGE: solar only, no grid top-up
         else:
-            grid_to_battery = min(
-                power * dt, remaining_rate
-            )  # GRID_CHARGING / battery_first (no solar)
+            grid_to_battery = (
+                remaining_rate  # GRID_CHARGING / battery_first: charge at max rate
+            )
         battery_charged = solar_to_battery + grid_to_battery
         battery_discharged = 0.0
     elif power < -POWER_TOLERANCE_KW:  # Active discharging

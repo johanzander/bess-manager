@@ -188,9 +188,20 @@ def _state_transition(
     the economically correct baseline: free solar energy is more valuable stored
     for later use than exported at the (typically lower) sell price.
     """
-    if power > POWER_TOLERANCE_KW:  # Charging
-        # Energy stored = power throughput x charging efficiency
-        charge_energy = power * dt * battery_settings.efficiency_charge
+    if power > POWER_TOLERANCE_KW:  # STORE disposition (+ optional grid charge)
+        surplus = max(0.0, solar_production - home_consumption)
+        room_throughput = (
+            battery_settings.max_soe_kwh - soe
+        ) / battery_settings.efficiency_charge
+        rate_throughput = battery_settings.max_charge_power_kw * dt
+        solar_to_battery = min(surplus, rate_throughput, room_throughput)
+        remaining_rate = max(
+            0.0, min(rate_throughput, room_throughput) - solar_to_battery
+        )
+        grid_to_battery = min(max(0.0, power * dt - surplus), remaining_rate)
+        charge_energy = (
+            solar_to_battery + grid_to_battery
+        ) * battery_settings.efficiency_charge
         next_soe = min(battery_settings.max_soe_kwh, soe + charge_energy)
 
     elif power < -POWER_TOLERANCE_KW:  # Discharging
@@ -275,17 +286,31 @@ def _compute_reward(
     # ============================================================================
     new_cost_basis = cost_basis
 
-    if power > POWER_TOLERANCE_KW:  # Active charging
-        energy_stored = power * dt * battery_settings.efficiency_charge
+    if power > POWER_TOLERANCE_KW:  # STORE disposition
+        surplus = max(0.0, solar_production - home_consumption)
+        room_throughput = (
+            battery_settings.max_soe_kwh - soe
+        ) / battery_settings.efficiency_charge
+        rate_throughput = battery_settings.max_charge_power_kw * dt
+        solar_to_battery = min(surplus, rate_throughput, room_throughput)
+        remaining_rate = max(
+            0.0, min(rate_throughput, room_throughput) - solar_to_battery
+        )
+        grid_to_battery = min(max(0.0, power * dt - surplus), remaining_rate)
+
+        energy_stored = (
+            solar_to_battery + grid_to_battery
+        ) * battery_settings.efficiency_charge
         battery_wear_cost = energy_stored * battery_settings.cycle_cost_per_kwh
 
-        solar_available = max(0, solar_production - home_consumption)
-        solar_to_battery = min(solar_available, power * dt)
-        grid_to_battery = max(0, (power * dt) - solar_to_battery)
-        grid_energy_cost = grid_to_battery * current_buy_price
-        solar_opportunity_cost = solar_to_battery * current_sell_price
-        total_new_cost = grid_energy_cost + solar_opportunity_cost + battery_wear_cost
+        # genuine excess solar (above rate/room) is exported; deliberate grid top-up imported
+        surplus_exported = max(0.0, surplus - solar_to_battery)
+        grid_imported = grid_to_battery + max(0.0, home_consumption - solar_production)
+        grid_exported = surplus_exported
 
+        solar_opportunity_cost = solar_to_battery * current_sell_price
+        grid_energy_cost = grid_to_battery * current_buy_price
+        total_new_cost = grid_energy_cost + solar_opportunity_cost + battery_wear_cost
         if next_soe > battery_settings.min_soe_kwh:
             existing_cost = soe * cost_basis
             new_cost_basis = (existing_cost + total_new_cost) / next_soe
@@ -293,6 +318,13 @@ def _compute_reward(
             new_cost_basis = (
                 (total_new_cost / energy_stored) if energy_stored > 0 else cost_basis
             )
+
+        total_cost = (
+            grid_imported * current_buy_price
+            - grid_exported * current_sell_price
+            + battery_wear_cost
+        )
+        return -total_cost, new_cost_basis
 
     elif power < -POWER_TOLERANCE_KW:  # Discharging
         battery_wear_cost = 0.0

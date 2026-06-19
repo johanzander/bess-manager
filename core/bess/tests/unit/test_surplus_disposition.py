@@ -139,3 +139,58 @@ def test_export_arbitrage_maps_to_grid_first_hold():
     assert cmd.battery_mode == "grid_first"
     assert cmd.grid_charge is False
     assert cmd.discharge_rate_pct == 0
+
+
+# ---------------------------------------------------------------------------
+# Task: SOLAR_STORAGE charges from solar only — no grid top-up when surplus
+# ---------------------------------------------------------------------------
+
+
+def test_store_with_surplus_no_grid_top_up():
+    """TARGET (#145): when surplus > 0 a STORE action may NOT draw from the grid.
+
+    Scenario: solar=2.0, home=1.5 → surplus=0.5 kWh.
+    power=4.0 kW, dt=0.25 → power*dt=1.0 kWh > surplus.
+    The algorithm must store ONLY the 0.5 kWh solar surplus; grid_imported must be 0.
+    (Previously the code computed grid_to_battery = power*dt - surplus = 0.5 kWh,
+    which hardware cannot do in load_first/solar-storage mode.)
+    """
+    from core.bess.dp_battery_algorithm import _build_period_data, _state_transition
+
+    bs = make_battery_settings(max_charge_power_kw=10.0, efficiency_charge=1.0)
+    solar_production = 2.0
+    home_consumption = 1.5  # surplus = 0.5 kWh
+    power = 4.0  # power*dt = 1.0 kWh > surplus
+
+    next_soe = _state_transition(
+        5.0,
+        power,
+        bs,
+        DT,
+        solar_production=solar_production,
+        home_consumption=home_consumption,
+    )
+
+    pd = _build_period_data(
+        power=power,
+        soe=5.0,
+        next_soe=next_soe,
+        period=0,
+        home_consumption=home_consumption,
+        battery_settings=bs,
+        dt=DT,
+        buy_price=PRICES_BUY,
+        sell_price=PRICES_SELL,
+        solar_production=solar_production,
+        new_cost_basis=bs.cycle_cost_per_kwh,
+        currency="SEK",
+    )
+
+    # Only solar surplus should be stored — no grid draw when surplus is present
+    assert (
+        pd.energy.grid_imported == 0.0
+    ), f"Expected grid_imported=0 (solar-only charging) but got {pd.energy.grid_imported}"
+    # The stored amount is exactly the solar surplus
+    assert (
+        round(pd.energy.battery_charged, 4) == 0.5
+    ), f"Expected battery_charged=0.5 (surplus only) but got {pd.energy.battery_charged}"

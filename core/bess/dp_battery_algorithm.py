@@ -1067,8 +1067,8 @@ def optimize_battery_schedule(
         f"Starting direct optimization: horizon={horizon}, initial_soe={initial_soe:.1f}, initial_cost_basis={initial_cost_basis:.3f}"
     )
 
-    # Step 1: Run DP with PeriodData storage
-    _, _, _, stored_period_data = _run_dynamic_programming(
+    # Step 1: Run DP — capture policy for continuous reconstruction
+    _, policy, _, _ = _run_dynamic_programming(
         horizon=horizon,
         buy_price=buy_price,
         sell_price=sell_price,
@@ -1083,9 +1083,14 @@ def optimize_battery_schedule(
         max_charge_power_per_period=max_charge_power_per_period,
     )
 
-    # Step 2: Extract optimal path results directly from stored DP data
+    # Step 2: Reconstruct the optimal path with continuous SoE propagation.
+    # The old approach read period_data from stored_period_data[(t, i)], which
+    # reported grid-snapped SoE values (battery_soe_end = soe_levels[next_i]).
+    # Here we carry the exact floating-point SoE forward each period so the
+    # reported trajectory matches what the simulator will produce (R == P).
     hourly_results = []
     current_soe = initial_soe
+    current_cost_basis = initial_cost_basis
     soe_levels = np.arange(
         battery_settings.min_soe_kwh,
         battery_settings.max_soe_kwh + SOE_STEP_KWH,
@@ -1093,20 +1098,57 @@ def optimize_battery_schedule(
     )
 
     for t in range(horizon):
-        # Find current state index (same logic as simulation)
+        # Map continuous SoE to the nearest grid index to look up the policy action
         i = round((current_soe - battery_settings.min_soe_kwh) / SOE_STEP_KWH)
         i = min(max(0, i), len(soe_levels) - 1)
+        action = float(policy[t, i])
 
-        # Get the PeriodData from DP results - should always exist with valid inputs
-        if (t, i) not in stored_period_data:
-            raise RuntimeError(
-                f"Missing DP result for hour {t}, state {i} (SOE={current_soe:.1f}). "
-                f"This indicates a bug in the DP algorithm or invalid inputs."
-            )
+        # Propagate SoE continuously using the exact same physics as the simulator
+        next_soe = _state_transition(
+            current_soe,
+            action,
+            battery_settings,
+            dt,
+            solar_production=solar_production[t],
+            home_consumption=home_consumption[t],
+        )
 
-        period_data = stored_period_data[(t, i)]
+        # Thread cost_basis continuously forward
+        reward, new_cost_basis = _compute_reward(
+            power=action,
+            soe=current_soe,
+            next_soe=next_soe,
+            period=t,
+            home_consumption=home_consumption[t],
+            battery_settings=battery_settings,
+            dt=dt,
+            buy_price=buy_price,
+            sell_price=sell_price,
+            solar_production=solar_production[t],
+            cost_basis=current_cost_basis,
+        )
+        # _compute_reward returns (-inf, cost_basis) for a blocked discharge; when
+        # replaying the already-chosen policy action just keep the current basis.
+        if reward == float("-inf"):
+            new_cost_basis = current_cost_basis
+
+        period_data = _build_period_data(
+            power=action,
+            soe=current_soe,
+            next_soe=next_soe,
+            period=t,
+            home_consumption=home_consumption[t],
+            battery_settings=battery_settings,
+            dt=dt,
+            buy_price=buy_price,
+            sell_price=sell_price,
+            solar_production=solar_production[t],
+            new_cost_basis=new_cost_basis,
+            currency=currency,
+        )
         hourly_results.append(period_data)
-        current_soe = period_data.energy.battery_soe_end
+        current_soe = next_soe
+        current_cost_basis = new_cost_basis
 
     # Step 3: Calculate economic summary directly from PeriodData
     total_base_cost = sum(

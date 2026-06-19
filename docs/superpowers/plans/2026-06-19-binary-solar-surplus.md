@@ -431,3 +431,78 @@ git commit -m "style: format binary-surplus changes (#145)" || echo "nothing to 
 **Type consistency:** `realized_under_solar_error` returns a float (realized cost); `derive_control_command(intent, action_kw, settings)` and `simulate(...)` signatures match PR #144. The Conventions formulas are reused verbatim in `_state_transition`, `_compute_reward`, and `_build_period_data` so the three agree.
 
 **Open risk to watch during execution:** the STORE branch decouples `next_soe` from the action magnitude (stores all surplus). Confirm the DP's `next_i = round((next_soe - min)/SOE_STEP)` indexing still lands on a valid grid state for all charge actions (it should — `next_soe` is clamped to `[min, max]`), and that collapsing many charge power-levels to the same `next_soe` doesn't break action selection (it only makes some actions redundant). If the slow suite reveals a deeper coupling, stop and escalate before forcing fixes.
+
+---
+
+## Plan extension: control vocabulary (added 2026-06-19 after Tasks 1–4)
+
+The DP change (Tasks 1–4) is not yet executable: `IDLE` (now = export/hold) and
+`SOLAR_STORAGE` (now = store) both map to the identical command (`load_first`,
+charge 100%, discharge 0), which physically **stores** surplus. The export
+disposition must route to `grid_first`. These tasks (**4a–4c**) must complete
+**before** Tasks 6–8 (the `R==P` and financial gates). Confirmed mode behaviour:
+`load_first` stores surplus until full, then exports the overflow; `grid_first`
+exports (and discharges battery for export); only `grid_first` exports while the
+battery is not full.
+
+### Task 4a: route the EXPORT disposition through `EXPORT_ARBITRAGE`/grid_first
+
+**Files:** `core/bess/decision_intelligence.py` (`classify_strategic_intent`); test in `core/bess/tests/unit/test_surplus_disposition.py`.
+
+- [ ] **Failing test:** a power≈0 period with exportable surplus classifies as `EXPORT_ARBITRAGE` (not `IDLE`); a power≈0 period with no surplus stays `IDLE`.
+
+```python
+def test_idle_with_surplus_classifies_as_export_arbitrage():
+    from core.bess.decision_intelligence import classify_strategic_intent
+    from core.bess.models import EnergyData
+    # power 0, surplus exported, battery holds
+    ed = EnergyData(solar_production=1.5, home_consumption=0.1, battery_charged=0.0,
+                    battery_discharged=0.0, grid_imported=0.0, grid_exported=1.4,
+                    battery_soe_start=5.0, battery_soe_end=5.0)
+    assert classify_strategic_intent(0.0, ed) == "EXPORT_ARBITRAGE"
+    ed2 = EnergyData(solar_production=0.1, home_consumption=0.1, battery_charged=0.0,
+                     battery_discharged=0.0, grid_imported=0.0, grid_exported=0.0,
+                     battery_soe_start=5.0, battery_soe_end=5.0)
+    assert classify_strategic_intent(0.0, ed2) == "IDLE"
+```
+
+- [ ] **Implement:** in the power≈0 fallthrough of `classify_strategic_intent`, add — *before* the existing IDLE return — a branch: if `energy_data.grid_exported > 0.1 and energy_data.solar_to_grid > 0.1` (exporting surplus solar, battery not charging) → return `"EXPORT_ARBITRAGE"`. Keep the existing `battery_charged>0.01 → SOLAR_STORAGE` / `battery_discharged>0.01 → LOAD_SUPPORT` branches; final fallthrough stays `IDLE`.
+- [ ] Run the test (pass), commit: `feat(dp): power-0 surplus export classifies as EXPORT_ARBITRAGE/grid_first (#145)`.
+
+### Task 4b: confirm control mapping routes export to grid_first
+
+**Files:** `core/bess/inverter_controller.py` (verify only).
+
+- [ ] Confirm `INTENT_TO_MODE["EXPORT_ARBITRAGE"] == "grid_first"` and that `_map_intent_to_rates("EXPORT_ARBITRAGE", action_kw≈0)` returns `(grid_charge=False, discharge_rate=0)` — i.e. grid_first + no battery discharge = "export surplus, hold battery." No code change expected; add a short behavioural test asserting this if one doesn't exist. Commit if changed.
+
+### Task 4c: make the simulator's `mode_to_power` faithful to the two dispositions
+
+**Files:** `core/bess/simulation/inverter_simulator.py` (`mode_to_power`); test in `core/bess/tests/unit/test_inverter_simulator.py`.
+
+- [ ] **Failing tests:**
+  - `load_first` + discharge 0 with surplus → returns a charge power that stores **all** surplus (so `_state_transition`'s STORE branch charges it): `mode_to_power(load_first,0) for solar 1.6/home 0.2 → (1.6-0.2)/dt`.
+  - `grid_first` + discharge 0 → returns `0.0` (export surplus via energy balance, battery holds).
+  - `load_first` + discharge 0 with **no** surplus → `0.0` (hold).
+
+```python
+def test_mode_to_power_load_first_stores_all_surplus():
+    bs = make_battery_settings(max_charge_power_kw=10.0)
+    cmd = ControlCommand("load_first", 0, False)
+    assert mode_to_power(cmd, solar=1.6, home=0.2, soe=5.0, settings=bs, dt=0.25) == (1.6 - 0.2) / 0.25
+
+def test_mode_to_power_grid_first_no_discharge_holds_and_exports():
+    bs = make_battery_settings()
+    cmd = ControlCommand("grid_first", 0, False)
+    assert mode_to_power(cmd, solar=1.6, home=0.2, soe=5.0, settings=bs, dt=0.25) == 0.0
+```
+
+- [ ] **Implement:** update `mode_to_power` so the `load_first` store branch (discharge_rate 0) returns `max(0, solar - home) / dt` (store all surplus solar; `_state_transition`'s STORE branch caps at rate/room and adds no grid top-up since `power*dt == surplus`), returning `0.0` when there's no surplus. `grid_first` and `load_first`+discharge branches unchanged in intent (grid_first with discharge 0 returns 0.0 → holds and exports surplus via the energy balance).
+- [ ] Run the simulator unit tests (pass), commit: `feat(sim): mode_to_power models load_first store-all vs grid_first export (#145)`.
+
+### Acceptance for the extension
+
+After 4a–4c, re-run the reproduction-day `verify_plan_faithfulness`: the gap should
+collapse toward **`R ≈ P`** (from +4.07 SEK). If it does not, **stop and report the
+residual per-period deltas** — do not force it; it means another disposition is still
+mismodelled. Only once `R == P` holds do Tasks 6–8 (xfail flip, forecast A/B, full
+gate incl. `realized(new) ≥ realized(old)`) make sense.

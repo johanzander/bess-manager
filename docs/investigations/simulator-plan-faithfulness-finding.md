@@ -81,3 +81,21 @@ The right sequence is: decide on this finding first.
 The simulator itself (PR #144) is complete and working: it did exactly its job —
 surface, quantify, and localize a control-fidelity gap that no existing test could
 see.
+
+## Update (2026-06-19): root cause confirmed → issue #145
+
+Maintainer confirmed the Growatt MIN mode behaviour: modes are **priority orders**,
+and `load_first` *does* export the excess (home → battery → grid), so this is **not**
+about export being impossible in `load_first`. The mechanism is purely that
+**applied charge ≠ planned charge**: `SOLAR_STORAGE`/`GRID_CHARGING` apply a fixed
+`charge_rate = 100%`, so the battery charges *all* surplus up to its rate instead of
+the optimizer's planned partial amount. On this day surplus (~1.5–1.9 kWh/period) is
+below the charge rate, so `load_first` stores it all and exports ~nothing — over-store
+confirmed.
+
+**Fix (in issue #145):** scale `charge_rate` from the planned charge power, mirroring
+the existing `discharge_rate` scaling for `EXPORT_ARBITRAGE`. Restore the invariant
+*applied battery power == planned battery power, every period*; grid export then falls
+out of the energy balance correctly in any mode — no export-by-mode gating and no
+edge-case special-casing. This fixes the **economics** (`R == P`); the cosmetic
+mode-dither (#141) is separate and lower priority.

@@ -200,15 +200,8 @@ def _state_transition(
         actual_discharge = min(discharge_energy, available_energy)
         next_soe = soe - actual_discharge
 
-    else:  # Hold / IDLE — passive solar charging
-        excess_solar = max(0.0, solar_production - home_consumption)
-        # Clamp to inverter max charge rate (excess_solar is kWh, limit is kW * dt = kWh)
-        max_passive_energy = battery_settings.max_charge_power_kw * dt
-        clamped_solar = min(excess_solar, max_passive_energy)
-        passive_charge = clamped_solar * battery_settings.efficiency_charge
-        available_capacity = battery_settings.max_soe_kwh - soe
-        actual_passive = min(passive_charge, available_capacity)
-        next_soe = soe + actual_passive
+    else:  # Hold / IDLE — EXPORT disposition: surplus is exported, battery holds
+        next_soe = soe
 
     # Ensure SOE stays within physical bounds
     next_soe = min(
@@ -339,22 +332,11 @@ def _compute_reward(
         if effective_value_per_kwh_stored <= effective_cost_basis:
             return float("-inf"), cost_basis
 
-    else:  # IDLE — passive solar charging
-        passive_energy_stored = next_soe - soe
-        battery_wear_cost = passive_energy_stored * battery_settings.cycle_cost_per_kwh
-        # Solar opportunity cost: stored solar could have been exported at sell price
-        passive_throughput = (
-            passive_energy_stored / battery_settings.efficiency_charge
-            if passive_energy_stored > 0
-            else 0.0
-        )
-        solar_opportunity_cost = passive_throughput * current_sell_price
-
-        if passive_energy_stored > 0 and next_soe > battery_settings.min_soe_kwh:
-            existing_cost = soe * cost_basis
-            new_cost_basis = (
-                existing_cost + solar_opportunity_cost + battery_wear_cost
-            ) / next_soe
+    else:  # IDLE — EXPORT disposition: battery holds, surplus exported
+        battery_wear_cost = 0.0
+        # battery_charged/battery_discharged already 0 from _idle_battery_flows;
+        # with next_soe == soe, _idle_battery_flows returns (0.0, 0.0), so the
+        # energy_balance below exports the full surplus and credits it.
 
     # ============================================================================
     # REWARD CALCULATION

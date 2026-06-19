@@ -94,6 +94,14 @@ disposition-agnostic energy balance.**
    (`simulate()` already takes its own `solar_production`, so this only needs a
    harness that decouples forecast from actual.)
 
+**Hard merge condition (financial safety):** ship **only if
+`realized(new) ≥ realized(old)`** across the scenario set (same-solar *and*
+more-solar-than-planned). The change must never reduce *realized* savings — the
+reported (planned) savings dropping to the truthful, executable figure is expected
+and is **not** a regression; a drop in *realized* savings **is**, and blocks merge.
+This is the simulator-verified answer to "could the binary model cost money?" — it
+cannot ship if it does.
+
 ## Relationship to #141
 
 This addresses the **economic** root cause. If, as expected, binary dispositions

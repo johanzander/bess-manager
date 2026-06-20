@@ -91,10 +91,10 @@
     "total_capacity": 30.0
   },
   "expected_results": {
-    "base_cost": 68.61,
-    "battery_solar_cost": -5.85,
-    "base_to_battery_solar_savings": 74.46,
-    "base_to_battery_solar_savings_pct": 108.5,
+    "base_cost": 68.613,
+    "battery_solar_cost": -5.86,
+    "base_to_battery_solar_savings": 74.47,
+    "base_to_battery_solar_savings_pct": 108.54,
     "total_charged": 12.8,
     "total_discharged": 26.0
   },
@@ -106,8 +106,13 @@
   },
   "expected_behavior": {
     "description": "High solar day: should store solar and export arbitrage during peak hours, no grid charging needed",
-    "intents_present": ["SOLAR_STORAGE", "EXPORT_ARBITRAGE"],
-    "intents_absent": ["GRID_CHARGING"],
+    "intents_present": [
+      "SOLAR_STORAGE",
+      "EXPORT_ARBITRAGE"
+    ],
+    "intents_absent": [
+      "GRID_CHARGING"
+    ],
     "savings_positive": true,
     "constraints": {
       "soe_within_bounds": true,

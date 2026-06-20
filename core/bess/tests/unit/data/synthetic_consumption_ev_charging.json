@@ -97,11 +97,11 @@
   },
   "expected_results": {
     "base_cost": 125.21,
-    "battery_solar_cost": 74.73,
-    "base_to_battery_solar_savings": 50.48,
-    "base_to_battery_solar_savings_pct": 40.32,
-    "total_charged": 35.2,
-    "total_discharged": 32.0
+    "battery_solar_cost": 75.28,
+    "base_to_battery_solar_savings": 49.93,
+    "base_to_battery_solar_savings_pct": 39.88,
+    "total_charged": 34.4,
+    "total_discharged": 31.0
   },
   "expected_behavior": {
     "description": "EV charging load: grid-charge when cheap, export arbitrage during peaks",

@@ -90,12 +90,12 @@
     "max_discharge_power_kw": 6.0
   },
   "expected_results": {
-    "base_cost": 282.79,
-    "battery_solar_cost": 282.26,
-    "base_to_battery_solar_savings": 0.53,
-    "base_to_battery_solar_savings_pct": 0.19,
-    "total_charged": 8.0,
-    "total_discharged": 7.6
+    "base_cost": 282.789,
+    "battery_solar_cost": 282.789,
+    "base_to_battery_solar_savings": 0.0,
+    "base_to_battery_solar_savings_pct": 0.0,
+    "total_charged": 0.0,
+    "total_discharged": 0.0
   },
   "price_data": {
     "markup_rate": 0.08,
@@ -106,14 +106,13 @@
   "expected_behavior": {
     "description": "Flat prices, no solar: minimal arbitrage opportunity, mostly idle with some load support",
     "intents_present": [
-      "IDLE",
-      "LOAD_SUPPORT"
+      "IDLE"
     ],
     "intents_absent": [
       "SOLAR_STORAGE",
       "EXPORT_ARBITRAGE"
     ],
-    "savings_positive": true,
+    "savings_positive": false,
     "constraints": {
       "soe_within_bounds": true,
       "power_within_limits": true

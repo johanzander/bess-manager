@@ -97,11 +97,11 @@
   },
   "expected_results": {
     "base_cost": 149.98,
-    "battery_solar_cost": 128.44,
-    "base_to_battery_solar_savings": 21.54,
-    "base_to_battery_solar_savings_pct": 14.36,
-    "total_charged": 29.2,
-    "total_discharged": 26.6
+    "battery_solar_cost": 129.0347,
+    "base_to_battery_solar_savings": 20.9453,
+    "base_to_battery_solar_savings_pct": 13.9654,
+    "total_charged": 28.4,
+    "total_discharged": 25.6
   },
   "expected_behavior": {
     "description": "High consumption without solar: grid-charge off-peak, support heavy loads",

@@ -375,11 +375,33 @@ def test_defers_charging_to_cheaper_overnight_window():
         f"propagating future export value in the backward pass."
     )
 
-    # Export arbitrage must still be executed at the high-price window
-    export_intents = [p.decision.strategic_intent for p in results.period_data[77:84]]
-    assert any(i == "EXPORT_ARBITRAGE" for i in export_intents), (
-        f"Expected EXPORT_ARBITRAGE at periods 77-83 (buy=2.10 SEK). "
-        f"Got: {export_intents}"
+    # The battery must be actively used during the expensive 77-83 window
+    # (buy=2.10 SEK) to avoid those purchases — the optimizer must NOT bail to
+    # an all-IDLE schedule (the regression this test guards against: V[0] fell
+    # below the always-achievable IDLE floor and the profitability gate rejected
+    # the plan).
+    #
+    # NOTE: this previously asserted EXPORT_ARBITRAGE, which encoded the
+    # pre-#145 solar-export over-crediting model. Under the faithful binary
+    # store/export model (R == P), exporting at sell=1.44 SEK energy that was
+    # grid-charged at 1.13 SEK is a *loss* (1.13/eff_c + 0.40 cycle, delivered
+    # via /eff_d ≈ 1.65/kWh > 1.44*eff_d = 1.37/kWh). Executing the old
+    # exporting plan through the faithful simulator realizes -6.02 SEK vs
+    # grid-only, whereas covering the 2.10 SEK load from the battery
+    # (LOAD_SUPPORT) realizes +12.28 SEK. The economically correct faithful
+    # action here is to discharge to serve load, not to export.
+    window = results.period_data[77:84]
+    discharged_in_window = sum(p.energy.battery_discharged for p in window)
+    assert discharged_in_window > 0.0, (
+        f"Optimizer did not use the battery during the expensive 77-83 window "
+        f"(buy=2.10 SEK); intents={[p.decision.strategic_intent for p in window]}. "
+        f"This is the all-IDLE bail regression (V below the IDLE floor)."
+    )
+    assert results.economic_summary.grid_to_battery_solar_savings > 5.0, (
+        f"Optimization rejected to near-zero savings "
+        f"({results.economic_summary.grid_to_battery_solar_savings:.2f} SEK) — "
+        f"the profitability gate bailed to all-IDLE instead of capturing the "
+        f"price-arbitrage value."
     )
 
 

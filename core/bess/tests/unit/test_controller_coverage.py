@@ -424,6 +424,29 @@ class TestComputeRatesForPeriod:
         assert grid_charge is False
         assert discharge_rate == 0
 
+    def test_load_support_partial_discharge(self, min_ctrl):
+        # 1.5 kW of 15.0 kW max → 10%
+        min_ctrl.strategic_intents = ["LOAD_SUPPORT"] * 4
+        grid_charge, discharge_rate = min_ctrl.compute_rates_for_period(
+            0, battery_action_kw=-1.5
+        )
+        assert grid_charge is False
+        assert discharge_rate == 10
+
+    def test_load_support_full_discharge(self, min_ctrl):
+        min_ctrl.strategic_intents = ["LOAD_SUPPORT"] * 4
+        _grid_charge, discharge_rate = min_ctrl.compute_rates_for_period(
+            0, battery_action_kw=-min_ctrl.max_discharge_power_kw
+        )
+        assert discharge_rate == 100
+
+    def test_load_support_zero_action(self, min_ctrl):
+        min_ctrl.strategic_intents = ["LOAD_SUPPORT"] * 4
+        _grid_charge, discharge_rate = min_ctrl.compute_rates_for_period(
+            0, battery_action_kw=0.0
+        )
+        assert discharge_rate == 0
+
 
 # ── SolaxController ──────────────────────────────────────────────────────────
 

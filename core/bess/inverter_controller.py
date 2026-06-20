@@ -130,7 +130,17 @@ class InverterController(ABC):
         elif intent == "SOLAR_STORAGE":
             return False, 0
         elif intent == "LOAD_SUPPORT":
-            return False, 100
+            if battery_action_kw < -0.01:
+                discharge_rate = min(
+                    100,
+                    max(
+                        0,
+                        int(abs(battery_action_kw) / self.max_discharge_power_kw * 100),
+                    ),
+                )
+            else:
+                discharge_rate = 0
+            return False, discharge_rate
         elif intent == "EXPORT_ARBITRAGE":
             if battery_action_kw < -0.01:
                 discharge_rate = min(

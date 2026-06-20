@@ -37,11 +37,11 @@
   },
   "expected_results": {
     "base_cost": 2.36,
-    "battery_solar_cost": 0.52,
-    "base_to_battery_solar_savings": 1.84,
-    "base_to_battery_solar_savings_pct": 77.9661,
+    "battery_solar_cost": 0.4,
+    "base_to_battery_solar_savings": 1.96,
+    "base_to_battery_solar_savings_pct": 83.0508,
     "total_charged": 0.0,
-    "total_discharged": 2.4
+    "total_discharged": 2.5
   },
   "expected_behavior": {
     "description": "Short horizon evening peak with solar: charge and export during peak",

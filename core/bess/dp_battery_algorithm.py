@@ -140,6 +140,16 @@ def _discretize_state_action_space(
         POWER_STEP_KW,
     )
 
+    # Guarantee IDLE (power=0) is an available action. The arange above is
+    # offset so it never lands exactly on zero, and under the #146 binary-store
+    # semantics ("any positive power charges at max rate") the smallest positive
+    # grid power is a full-rate grid charge — not a hold. Without an explicit
+    # IDLE action the value iteration cannot represent holding the battery, so
+    # the always-achievable IDLE floor (V[t,i] >= idle_reward + V[t+1,i]) is
+    # unreachable and V collapses below it.
+    if not np.any(np.abs(power_levels) <= POWER_TOLERANCE_KW):
+        power_levels = np.sort(np.append(power_levels, 0.0))
+
     return soe_levels, power_levels
 
 

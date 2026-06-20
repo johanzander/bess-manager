@@ -120,7 +120,7 @@ class InverterController(ABC):
 
         Args:
             intent: Strategic intent string
-            battery_action_kw: Battery power in kW (used for EXPORT_ARBITRAGE scaling)
+            battery_action_kw: Battery power in kW (used for EXPORT_ARBITRAGE and LOAD_SUPPORT scaling)
 
         Returns:
             Tuple of (grid_charge, discharge_rate_percent)

@@ -84,6 +84,24 @@ spends money on its own. Stage 1 is auto but cheap.
 
 Never tag or merge without explicit user instruction.
 
+## Spec & Plan Lifecycle
+
+Superpowers produces two documents per feature: a **spec**
+(`docs/superpowers/specs/`) and a **plan** (`docs/superpowers/plans/`).
+
+- The **spec** is the durable design record — the *what and why* (problem,
+  approach, decisions, trade-offs, acceptance criteria). Keep it, and keep it
+  accurate; treat it like an ADR.
+- The **plan** is execution scaffolding — the *how*, a step-by-step build
+  checklist. Once the feature ships, the code and tests are the source of truth
+  and the plan only drifts (it keeps referencing intermediate stubs that were
+  deleted during implementation).
+
+**Policy: when a feature is implemented and merged, delete its plan; keep its
+spec.** The `finishing-a-development-branch` step should drop the plan as part of
+completion. A completed feature's record is its spec + the code/tests, not the
+build checklist.
+
 ## CHANGELOG Format
 
 ```markdown

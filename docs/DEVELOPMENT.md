@@ -196,6 +196,23 @@ Tests are split using `pytest.mark.slow`. The fast set covers backend API and
 non-optimizer unit tests. The slow set runs the full DP algorithm and integration
 scenarios.
 
+#### Plan-faithfulness simulator (`R == P`)
+
+The savings the optimizer reports are a *plan* — derived from the battery
+*actions* it chooses. The real inverter is driven by coarse *modes*
+(`load_first` / `grid_first` / `battery_first`), which are policies, not exact
+power setpoints, so a plan can claim economics the hardware can't actually
+deliver. The plan-faithfulness simulator in `core/bess/simulation/` executes a
+plan through a model of the inverter and computes the **realized** economics,
+asserting they match the plan (`R == P`). It runs as a pure unit test — no
+hardware, no mock HA.
+
+This is a strong correctness tool: it already caught the solar-export
+over-crediting bug (savings inflated ~8–16% on sunny days, fixed in 9.6.0) and a
+discharge-pacing limitation — both invisible to plan-only tests. If you change
+the optimizer or inverter control, verify `R == P` still holds. Deep reference:
+[`docs/agents/simulator.md`](agents/simulator.md).
+
 ### E2E Tests (Playwright)
 
 End-to-end tests run a full browser against the backend + mock HA stack:

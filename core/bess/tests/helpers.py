@@ -164,6 +164,25 @@ def assert_physical_constraints(result, battery: dict) -> None:
                 ), f"Period {pd.period}: discharge {abs(action):.2f} kW > max {battery['max_discharge_power_kw']} kW"
 
 
+def make_battery_settings(**overrides):
+    """Create a BatterySettings instance with sensible test defaults.
+
+    Accepts keyword overrides for any BatterySettings field.
+    """
+    defaults = {
+        "total_capacity": 20.0,
+        "min_soc": 11.0,
+        "max_soc": 100.0,
+        "max_charge_power_kw": 10.0,
+        "max_discharge_power_kw": 10.0,
+        "efficiency_charge": 0.97,
+        "efficiency_discharge": 0.95,
+        "cycle_cost_per_kwh": 0.40,
+    }
+    defaults.update(overrides)
+    return BatterySettings(**defaults)
+
+
 def assert_savings_positive(result) -> None:
     """Assert the optimization produces positive savings vs grid-only."""
     savings = result.economic_summary.grid_to_battery_solar_savings

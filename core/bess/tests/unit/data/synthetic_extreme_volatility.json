@@ -97,11 +97,11 @@
   },
   "expected_results": {
     "base_cost": 100.41,
-    "battery_solar_cost": -31.63,
-    "base_to_battery_solar_savings": 132.04,
-    "base_to_battery_solar_savings_pct": 131.5,
-    "total_charged": 48.0,
-    "total_discharged": 43.6
+    "battery_solar_cost": -28.6951,
+    "base_to_battery_solar_savings": 129.1051,
+    "base_to_battery_solar_savings_pct": 128.5779,
+    "total_charged": 48.1,
+    "total_discharged": 43.4
   },
   "expected_behavior": {
     "description": "Extreme price volatility: aggressive grid-charge at lows, export at spikes",

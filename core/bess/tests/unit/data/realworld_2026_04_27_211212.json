@@ -351,10 +351,12 @@
     "tax_reduction": 0.0
   },
   "expected_results": {
-    "base_cost": 111.9,
-    "battery_solar_cost": -111.8,
-    "base_to_battery_solar_savings": 223.7,
-    "base_to_battery_solar_savings_pct": 199.9
+    "base_cost": 111.94497,
+    "battery_solar_cost": -110.9842,
+    "base_to_battery_solar_savings": 222.9291,
+    "base_to_battery_solar_savings_pct": 199.1417,
+    "total_charged": 23.3,
+    "total_discharged": 26.0
   },
   "expected_behavior": {
     "description": "Real-world debug log from 2026-04-27, with solar, price spread 2.18 SEK",

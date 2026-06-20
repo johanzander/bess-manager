@@ -354,6 +354,24 @@ class TestGetPeriodSettings:
         with pytest.raises(ValueError):
             min_ctrl.get_period_settings(10)
 
+    def test_uses_actual_discharge_rate_when_schedule_available(self, min_ctrl):
+        from unittest.mock import MagicMock
+
+        min_ctrl.strategic_intents = ["LOAD_SUPPORT"] * 4
+        mock_schedule = MagicMock()
+        # 96 periods, LOAD_SUPPORT action at period 0: -1.5 kWh → -6 kW → round(6/15*100)=40
+        mock_schedule.actions = [-1.5] + [0.0] * 95
+        min_ctrl.current_schedule = mock_schedule
+        result = min_ctrl.get_period_settings(0)
+        assert result["discharge_rate"] == 40
+        assert result["grid_charge"] is False
+
+    def test_falls_back_to_static_dict_when_no_schedule(self, min_ctrl):
+        min_ctrl.strategic_intents = ["LOAD_SUPPORT"] * 4
+        min_ctrl.current_schedule = None
+        result = min_ctrl.get_period_settings(0)
+        assert result["discharge_rate"] == 100  # static dict fallback
+
 
 class TestGetStrategicIntentSummary:
     def test_empty_when_no_intents(self, min_ctrl):

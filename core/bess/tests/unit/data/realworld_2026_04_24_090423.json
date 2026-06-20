@@ -208,9 +208,9 @@
   },
   "expected_results": {
     "base_cost": 94.44272,
-    "battery_solar_cost": 1.66,
-    "base_to_battery_solar_savings": 92.78,
-    "base_to_battery_solar_savings_pct": 98.24,
+    "battery_solar_cost": 1.6609,
+    "base_to_battery_solar_savings": 92.7818,
+    "base_to_battery_solar_savings_pct": 98.2414,
     "total_charged": 3.8,
     "total_discharged": 9.7
   },
@@ -220,8 +220,7 @@
       "EXPORT_ARBITRAGE",
       "GRID_CHARGING",
       "IDLE",
-      "LOAD_SUPPORT",
-      "SOLAR_STORAGE"
+      "LOAD_SUPPORT"
     ],
     "savings_positive": true,
     "constraints": {

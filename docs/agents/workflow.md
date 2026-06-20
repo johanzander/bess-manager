@@ -64,7 +64,18 @@ spends money on its own. Stage 1 is auto but cheap.
    - `PATCH` (x.y.**Z**): bug fixes, doc/comment changes, no behavior change
    - `MINOR` (x.**Y**.0): new features, backwards-compatible
    - `MAJOR` (**X**.0.0): breaking changes
-5. **Merge** — squash merge; wait for explicit user approval
+5. **Merge** — squash merge, only after **both** preconditions hold:
+   - **a) All CI checks green**, including the Algorithm (slow) job (~30–46 min)
+     when `core/bess/` changed. The **Merge gate** check (`ci-gate` job in
+     `ci.yml`) aggregates every job and is the single required status check on
+     `main` — it is green only when nothing genuinely failed.
+   - **b) Explicit user approval** for this specific merge.
+
+   Never use `gh pr merge --auto`. With branch protection it merges
+   automatically the moment the required checks pass — removing the human
+   "merge this PR now" decision (precondition **b**); and without protection
+   (as was the case for #146) it merges *immediately*, bypassing CI entirely.
+   Merge manually with `gh pr merge --squash` once green **and** approved.
 6. **Release** — create a GitHub Release (tag `vX.Y.Z`, target `main`).
    This triggers `release-addon.yml` which builds per-arch Docker images
    (amd64 + aarch64) and pushes them to GHCR.

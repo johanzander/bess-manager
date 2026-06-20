@@ -4,6 +4,20 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.6.0] - 2026-06-20
+
+### Fixed
+
+- **Solar-export savings over-crediting** — On sunny days the optimizer booked revenue for exporting surplus solar that the inverter actually stores in the battery (a `load_first` "store" period stores *all* surplus), inflating reported savings by roughly 8–16%. Surplus handling is now modelled as a binary per-period choice — store all surplus (no phantom export) or export all surplus — and export is credited per disposition, so reported savings match what the hardware can actually deliver. Verified end-to-end by a new closed-loop plan-faithfulness simulator that confirms planned and realized economics agree to the öre. This also removes the morning charge/export "dithering" some users observed.
+- **Production-safety hardening** — Guard against a `ZeroDivisionError` when battery `total_capacity` is 0; replace `assert`-based validation of production data with explicit `SystemConfigurationError` (so the checks survive Python's `-O` optimization flag); and harden inverter TOU time-range parsing against malformed values.
+### Changed
+
+- **Battery surplus handling is now a binary store/export decision per period** — Schedules may differ from previous versions: instead of partial solar-to-battery splits, each period either stores all surplus solar or exports all of it. This is forecast-robust by construction — bonus solar beyond the forecast is always captured or exported, never wasted.
+
+### Improved
+
+- **Installation guide — consumption forecast (Step 3)** — Reworked into a comparison of all four consumption strategies with a clear recommendation to use `ha_statistics` (most accurate, no manual sensor setup), including the Home Assistant Energy-dashboard requirement and the ~7-day warm-up behaviour.
+
 ## [9.5.0] - 2026-06-15
 
 ### Added

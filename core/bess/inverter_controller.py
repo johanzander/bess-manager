@@ -135,7 +135,9 @@ class InverterController(ABC):
                     100,
                     max(
                         0,
-                        int(abs(battery_action_kw) / self.max_discharge_power_kw * 100),
+                        round(
+                            abs(battery_action_kw) / self.max_discharge_power_kw * 100
+                        ),
                     ),
                 )
             else:
@@ -147,7 +149,9 @@ class InverterController(ABC):
                     100,
                     max(
                         0,
-                        int(abs(battery_action_kw) / self.max_discharge_power_kw * 100),
+                        round(
+                            abs(battery_action_kw) / self.max_discharge_power_kw * 100
+                        ),
                     ),
                 )
             else:

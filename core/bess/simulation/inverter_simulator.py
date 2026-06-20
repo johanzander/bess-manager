@@ -53,7 +53,7 @@ def _map_rates(
         if action_kw < -0.01:
             rate = min(
                 100,
-                max(0, int(abs(action_kw) / settings.max_discharge_power_kw * 100)),
+                max(0, round(abs(action_kw) / settings.max_discharge_power_kw * 100)),
             )
         else:
             rate = 0
@@ -61,7 +61,8 @@ def _map_rates(
     if intent == "EXPORT_ARBITRAGE":
         if action_kw < -0.01:
             rate = min(
-                100, max(0, int(abs(action_kw) / settings.max_discharge_power_kw * 100))
+                100,
+                max(0, round(abs(action_kw) / settings.max_discharge_power_kw * 100)),
             )
         else:
             rate = 0

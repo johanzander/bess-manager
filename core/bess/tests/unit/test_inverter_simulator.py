@@ -55,12 +55,29 @@ def test_grid_first_discharges_to_grid_at_rate():
     assert p == -5.0
 
 
-def test_load_first_no_discharge_passively_stores_surplus_power_zero():
+def test_load_first_no_discharge_no_surplus_returns_zero():
     bs = make_battery_settings()
     cmd = ControlCommand("load_first", discharge_rate_pct=0, grid_charge=False)
-    # SOLAR_STORAGE/IDLE: power 0; _state_transition does the passive solar charge
-    p = mode_to_power(cmd, solar=1.9, home=0.2, soe=3.0, settings=bs, dt=0.25)
+    # No surplus (home >= solar): load_first holds battery, power = 0
+    p = mode_to_power(cmd, solar=0.2, home=1.9, soe=3.0, settings=bs, dt=0.25)
     assert p == 0.0
+
+
+def test_mode_to_power_load_first_stores_all_surplus():
+    """Task 4c: load_first + no discharge + surplus -> return all-surplus charge power."""
+    bs = make_battery_settings(max_charge_power_kw=10.0)
+    cmd = ControlCommand("load_first", 0, False)
+    assert (
+        mode_to_power(cmd, solar=1.6, home=0.2, soe=5.0, settings=bs, dt=0.25)
+        == (1.6 - 0.2) / 0.25
+    )
+
+
+def test_mode_to_power_grid_first_no_discharge_holds_and_exports():
+    """Task 4c: grid_first + discharge_rate 0 -> returns 0.0 (export via energy balance)."""
+    bs = make_battery_settings()
+    cmd = ControlCommand("grid_first", 0, False)
+    assert mode_to_power(cmd, solar=1.6, home=0.2, soe=5.0, settings=bs, dt=0.25) == 0.0
 
 
 def test_load_support_discharges_to_cover_home_deficit():

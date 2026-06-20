@@ -90,12 +90,12 @@
     "max_discharge_power_kw": 6.0
   },
   "expected_results": {
-    "base_cost": 300.96,
-    "battery_solar_cost": 230.41,
-    "base_to_battery_solar_savings": 70.54,
-    "base_to_battery_solar_savings_pct": 23.4,
-    "total_charged": 44.8,
-    "total_discharged": 44.8
+    "base_cost": 300.95585,
+    "battery_solar_cost": 230.4346,
+    "base_to_battery_solar_savings": 70.5212,
+    "base_to_battery_solar_savings_pct": 23.4324,
+    "total_charged": 45.0,
+    "total_discharged": 45.0
   },
   "price_data": {
     "markup_rate": 0.08,
@@ -105,8 +105,13 @@
   },
   "expected_behavior": {
     "description": "High price spread without solar: should grid-charge at night lows and discharge during evening peaks",
-    "intents_present": ["GRID_CHARGING", "LOAD_SUPPORT"],
-    "intents_absent": ["SOLAR_STORAGE"],
+    "intents_present": [
+      "GRID_CHARGING",
+      "LOAD_SUPPORT"
+    ],
+    "intents_absent": [
+      "SOLAR_STORAGE"
+    ],
     "savings_positive": true,
     "constraints": {
       "soe_within_bounds": true,

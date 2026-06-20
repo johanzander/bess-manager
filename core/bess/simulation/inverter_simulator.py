@@ -98,10 +98,8 @@ def mode_to_power(
         )
         return -delivered_kwh / dt
 
-    # SOLAR_STORAGE (load_first + no discharge): STORE disposition — charge all surplus.
-    # _state_transition's STORE branch caps at rate/room; no grid top-up since power*dt==surplus.
-    surplus = max(0.0, solar - home)
-    return surplus / dt
+    # SOLAR_STORAGE / IDLE: power 0 -> _state_transition stores surplus solar passively
+    return 0.0
 
 
 @dataclass

@@ -37,15 +37,16 @@
   },
   "expected_results": {
     "base_cost": 2.11,
-    "battery_solar_cost": -0.53,
-    "base_to_battery_solar_savings": 2.64,
-    "base_to_battery_solar_savings_pct": 125.1185,
-    "total_charged": 0.0,
-    "total_discharged": 2.6
+    "battery_solar_cost": -0.67,
+    "base_to_battery_solar_savings": 2.78,
+    "base_to_battery_solar_savings_pct": 131.56,
+    "total_charged": 1.6,
+    "total_discharged": 4.0
   },
   "expected_behavior": {
     "description": "Short horizon high spread with solar: charge and export",
     "intents_present": [
+      "GRID_CHARGING",
       "EXPORT_ARBITRAGE"
     ],
     "savings_positive": true,

@@ -1,10 +1,7 @@
 """Shared test utilities for battery optimization tests.
 
 Reduces boilerplate across test files by providing:
-- run_scenario(): one-liner to run optimization from a scenario dict (plan, P)
-- run_scenario_realized(): also executes the plan through the inverter simulator,
-  returning the *realized* economics (R) so scenarios can verify the plan is
-  faithfully executable (R == P), not just that the plan claims a number.
+- run_scenario(): one-liner to run optimization from a scenario dict
 - Behavioral assertion helpers for strategic intents and physical constraints
 """
 
@@ -17,13 +14,16 @@ from core.bess.settings import (
     VAT_MULTIPLIER,
     BatterySettings,
 )
-from core.bess.simulation.inverter_simulator import derive_control_command, simulate
 
 
-def _scenario_inputs(scenario: dict):
-    """Build optimizer inputs from a scenario dict. Shared by run_scenario and
-    run_scenario_realized so plan (P) and realized (R) use identical inputs."""
+def run_scenario(scenario: dict):
+    """Run optimization from a scenario dict (same format as JSON test data files).
+
+    Returns the OptimizationResult from optimize_battery_schedule.
+    """
     base_prices = scenario["base_prices"]
+    home_consumption = scenario["home_consumption"]
+    solar_production = scenario["solar_production"]
     battery = scenario["battery"]
     price_data = scenario.get("price_data")
 
@@ -57,51 +57,21 @@ def _scenario_inputs(scenario: dict):
         tax_reduction=tax_reduction,
         area="SE4",
     )
-    return {
-        "buy_price": price_manager.get_buy_prices(raw_prices=base_prices),
-        "sell_price": price_manager.get_sell_prices(raw_prices=base_prices),
-        "home_consumption": scenario["home_consumption"],
-        "solar_production": scenario["solar_production"],
-        "initial_soe": battery["initial_soe"],
-        "battery_settings": battery_settings,
-        "period_duration_hours": scenario.get("period_duration_hours", 1.0),
-    }
 
+    buy_prices = price_manager.get_buy_prices(raw_prices=base_prices)
+    sell_prices = price_manager.get_sell_prices(raw_prices=base_prices)
 
-def run_scenario(scenario: dict):
-    """Run optimization from a scenario dict. Returns the OptimizationResult (plan, P)."""
-    return optimize_battery_schedule(**_scenario_inputs(scenario))
+    period_duration_hours = scenario.get("period_duration_hours", 1.0)
 
-
-def run_scenario_realized(scenario: dict) -> tuple:
-    """Run the optimizer AND execute its plan through the inverter simulator.
-
-    Returns ``(result, realized_cost)`` where ``result.economic_summary.battery_solar_cost``
-    is the planned cost (P) and ``realized_cost`` is what the derived inverter
-    commands actually achieve (R). For an executable plan these are equal to the
-    cent; a gap is a control-fidelity finding.
-    """
-    inp = _scenario_inputs(scenario)
-    result = optimize_battery_schedule(**inp)
-    dt = inp["period_duration_hours"]
-    settings = inp["battery_settings"]
-    commands = [
-        derive_control_command(
-            pd.decision.strategic_intent, pd.decision.battery_action / dt, settings
-        )
-        for pd in result.period_data
-    ]
-    sim = simulate(
-        commands,
-        inp["solar_production"],
-        inp["home_consumption"],
-        inp["buy_price"],
-        inp["sell_price"],
-        inp["initial_soe"],
-        settings,
-        dt,
+    return optimize_battery_schedule(
+        buy_price=buy_prices,
+        sell_price=sell_prices,
+        home_consumption=home_consumption,
+        solar_production=solar_production,
+        initial_soe=battery["initial_soe"],
+        battery_settings=battery_settings,
+        period_duration_hours=period_duration_hours,
     )
-    return result, sim.realized_cost
 
 
 def get_intent_distribution(result) -> dict[str, int]:

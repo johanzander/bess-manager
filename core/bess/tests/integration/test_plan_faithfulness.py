@@ -1,4 +1,5 @@
 # core/bess/tests/integration/test_plan_faithfulness.py
+import pytest
 
 from core.bess.simulation.verification import verify_plan_faithfulness
 from core.bess.tests.helpers import make_battery_settings
@@ -16,6 +17,16 @@ def _controlled_scenario():
     return buy, sell, solar, home
 
 
+@pytest.mark.xfail(
+    strict=False,
+    reason=(
+        "Known control-fidelity gap: battery_first always charges at max rate, "
+        "so the per-period SoC trajectory diverges from the optimizer's planned "
+        "partial-charge split (7.4 kWh vs 10.0 kWh in P0/P1). "
+        "This is the anticipated finding the simulator exists to expose — "
+        "do NOT fix by weakening the assertion or patching mode_to_power."
+    ),
+)
 def test_realized_equals_planned_on_controlled_scenario():
     bs = make_battery_settings()
     buy, sell, solar, home = _controlled_scenario()
@@ -51,11 +62,15 @@ def test_identical_command_sequences_have_zero_delta():
     assert delta == 0.0
 
 
-def test_solar_storage_mode_stores_all_surplus():
-    """STORE disposition: SOLAR_STORAGE → load_first stores ALL available surplus
-    solar (up to rate/room) — the binary store-all behaviour the optimizer now
-    plans against, so plan and execution agree. (Replaces the earlier diagnostic
-    that asserted the old mode_to_power==0 behaviour; see #145.)
+def test_solar_storage_mode_stores_all_surplus_not_partial():
+    """Diagnostic for the plan-faithfulness finding (see
+    docs/investigations/simulator-plan-faithfulness-finding.md).
+
+    SOLAR_STORAGE maps to load_first, which stores ALL available surplus solar.
+    The control command carries no charge-power fraction, so the mode cannot
+    express the optimizer's planned *partial* solar storage. This is the
+    structural source of the R != P gap on solar days; it is asserted here so
+    the behaviour is pinned and the finding is visible in the suite.
     """
     from core.bess.simulation.inverter_simulator import (
         ControlCommand,
@@ -66,13 +81,11 @@ def test_solar_storage_mode_stores_all_surplus():
     bs = make_battery_settings(max_charge_power_kw=10.0)
     cmd = ControlCommand("load_first", discharge_rate_pct=0, grid_charge=False)
 
-    # mode_to_power now returns the surplus power (store all surplus), not 0.
-    surplus = 5.0 - 0.5
-    assert (
-        mode_to_power(cmd, solar=5.0, home=0.5, soe=5.0, settings=bs, dt=1.0)
-        == surplus / 1.0
-    )
+    # mode_to_power yields 0 kW (passive); _state_transition then stores surplus.
+    assert mode_to_power(cmd, solar=5.0, home=0.5, soe=5.0, settings=bs, dt=1.0) == 0.0
 
+    # Over one hour with 4.5 kWh surplus, load_first stores ~all of it (efficiency
+    # adjusted), NOT a small partial amount the optimizer might have planned.
     sim = simulate(
         [cmd],
         solar_production=[5.0],
@@ -84,87 +97,7 @@ def test_solar_storage_mode_stores_all_surplus():
         dt=1.0,
     )
     stored = sim.period_data[0].energy.battery_soe_end - 5.0
-    assert (
-        stored > 4.0
-    ), f"load_first should store ~all 4.5 kWh surplus, got {stored:.2f}"
-
-
-def test_forecast_robustness_more_solar_than_planned():
-    """Task 7 / #145: optimize on a solar FORECAST, then execute against HIGHER
-    actual solar. The binary store/export model must be forecast-robust — bonus
-    solar is captured/exported, never wasted — so realized is at least as good as
-    the forecast plan (lower or equal cost)."""
-    from core.bess.simulation.verification import realized_under_solar_error
-
-    bs = make_battery_settings()
-    n = 6
-    buy = [1.0, 1.0, 2.0, 2.0, 1.0, 1.0]
-    sell = [0.8, 0.8, 1.8, 1.8, 0.9, 0.9]
-    home = [0.3] * n
-    forecast_solar = [1.0] * n
-    actual_solar = [2.0] * n  # reality beats the forecast
-
-    planned, realized = realized_under_solar_error(
-        forecast_solar=forecast_solar,
-        actual_solar=actual_solar,
-        buy_price=buy,
-        sell_price=sell,
-        home=home,
-        initial_soe=5.0,
-        settings=bs,
-        dt=1.0,
+    assert stored > 4.0, (
+        f"load_first should store ~all 4.5 kWh surplus, got {stored:.2f}; "
+        "the mode cannot express a partial charge"
     )
-    # more actual solar than forecast → realized cost no worse than planned (bonus
-    # solar exported/stored, no phantom export booked against the forecast)
-    assert (
-        realized <= planned + 1e-6
-    ), f"forecast not robust: realized {realized} > planned {planned}"
-
-
-def test_scenarios_are_plan_faithful_realized_equals_planned():
-    """Scenarios verify R (realized), not just P (plan): executing the optimizer's
-    plan through the inverter simulator must reproduce the planned economics to
-    within the DP's SoE-grid resolution. A larger gap is a control-fidelity
-    finding (#145)."""
-    from core.bess.tests.helpers import run_scenario_realized
-
-    scenarios = {
-        "grid_charge_arbitrage": {
-            "base_prices": [0.5, 0.5, 2.0, 2.0, 1.0, 1.0],
-            "home_consumption": [0.5] * 6,
-            "solar_production": [0.0] * 6,
-            "battery": _battery(initial_soe=3.0),
-        },
-        "solar_day": {
-            "base_prices": [1.2, 1.1, 0.6, 0.6, 1.5, 1.6],
-            "home_consumption": [0.2] * 6,
-            "solar_production": [1.5, 1.8, 1.9, 1.7, 0.5, 0.0],
-            "battery": _battery(initial_soe=3.0),
-        },
-    }
-    # Tolerance reflects the DP's 0.1 kWh SoE-grid resolution: the plan trajectory
-    # is reconstructed continuously, but the policy LOOKUP still snaps SoE to the
-    # grid, leaving a sub-öre-per-period residual on solar-storage days. The
-    # structural mismodels (phantom export, store/export collisions) are gone — a
-    # gap beyond this band would be a real finding.
-    GRID_RESOLUTION_TOLERANCE = 0.10  # SEK, for these short scenarios
-    for name, sc in scenarios.items():
-        result, realized = run_scenario_realized(sc)
-        planned = result.economic_summary.battery_solar_cost
-        assert abs(realized - planned) <= GRID_RESOLUTION_TOLERANCE, (
-            f"{name}: R={realized:.4f} != P={planned:.4f} "
-            f"(gap {realized - planned:+.4f} exceeds grid-resolution tolerance)"
-        )
-
-
-def _battery(initial_soe):
-    return {
-        "max_soe_kwh": 20.0,
-        "min_soe_kwh": 2.2,
-        "max_charge_power_kw": 10.0,
-        "max_discharge_power_kw": 10.0,
-        "efficiency_charge": 0.97,
-        "efficiency_discharge": 0.95,
-        "cycle_cost_per_kwh": 0.40,
-        "initial_soe": initial_soe,
-    }

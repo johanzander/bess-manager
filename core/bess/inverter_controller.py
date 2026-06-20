@@ -198,13 +198,31 @@ class InverterController(ABC):
             )
 
         intent = self.strategic_intents[period]
-        control = self.INTENT_TO_CONTROL[intent]
         mode = self.INTENT_TO_MODE[intent]
 
+        if (
+            self.current_schedule is not None
+            and self.current_schedule.actions
+            and period < len(self.current_schedule.actions)
+        ):
+            battery_action_kwh = self.current_schedule.actions[period]
+            num_periods = len(self.current_schedule.actions)
+            period_duration_hours = 24.0 / num_periods
+            battery_action_kw = battery_action_kwh / period_duration_hours
+            grid_charge, discharge_rate = self.compute_rates_for_period(
+                period, battery_action_kw
+            )
+            charge_rate = self.INTENT_TO_CONTROL[intent]["charge_rate"]
+        else:
+            control = self.INTENT_TO_CONTROL[intent]
+            grid_charge = control["grid_charge"]
+            charge_rate = control["charge_rate"]
+            discharge_rate = control["discharge_rate"]
+
         return {
-            "grid_charge": control["grid_charge"],
-            "charge_rate": control["charge_rate"],
-            "discharge_rate": control["discharge_rate"],
+            "grid_charge": grid_charge,
+            "charge_rate": charge_rate,
+            "discharge_rate": discharge_rate,
             "strategic_intent": intent,
             "batt_mode": mode,
         }

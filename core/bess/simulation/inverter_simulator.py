@@ -50,7 +50,14 @@ def _map_rates(
     if intent in ("SOLAR_STORAGE", "IDLE"):
         return False, 0
     if intent == "LOAD_SUPPORT":
-        return False, 100
+        if action_kw < -0.01:
+            rate = min(
+                100,
+                max(0, int(abs(action_kw) / settings.max_discharge_power_kw * 100)),
+            )
+        else:
+            rate = 0
+        return False, rate
     if intent == "EXPORT_ARBITRAGE":
         if action_kw < -0.01:
             rate = min(

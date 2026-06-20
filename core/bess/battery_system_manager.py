@@ -1522,7 +1522,17 @@ class BatterySystemManager:
                 if self._consumption_predictions
                 else self._get_consumption_forecast()
             )
-            solar_predictions = self.controller.get_solar_forecast()
+            # The next-day schedule must be built from tomorrow's solar forecast,
+            # not today's. Mirror the extended-horizon branch's zeros fallback when
+            # tomorrow's forecast is unavailable.
+            try:
+                solar_predictions = self.controller.get_solar_forecast_tomorrow()
+            except SystemConfigurationError:
+                tomorrow_date = date.today() + timedelta(days=1)
+                solar_predictions = [0.0] * get_period_count(tomorrow_date)
+                logger.info(
+                    "Tomorrow's solar forecast unavailable, using zeros for next-day schedule"
+                )
 
             consumption_data = consumption_predictions
             solar_data = solar_predictions

@@ -4,6 +4,12 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Next-day schedule used today's solar forecast** — The `prepare_next_day` optimization built tomorrow's battery schedule from *today's* Solcast forecast instead of tomorrow's, so the plan written to the inverter could be optimized against substantially wrong solar production (e.g. 28.5 kWh today vs 64.8 kWh forecast for the next day). It now uses `get_solar_forecast_tomorrow()`, mirroring the extended-horizon path, with the same zeros fallback when tomorrow's forecast is unavailable.
+
 ## [9.6.0] - 2026-06-20
 
 ### Fixed

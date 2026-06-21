@@ -404,6 +404,16 @@ class TestSetupComplete:
         assert elec["additional_costs"] == 0.77
         assert elec["tax_reduction"] == 0.20
 
+    def test_price_fields_saved_without_markup_or_vat(self, complete_controller):
+        """additionalCosts/taxReduction must be persisted even without markupRate/vatMultiplier."""
+        payload = {"additionalCosts": 0.99, "taxReduction": 0.25}
+        resp = _client.post("/api/setup/complete", json=payload)
+        assert resp.status_code == 200
+        call_args = complete_controller.settings_store.save_all.call_args[0][0]
+        elec = call_args["electricity_price"]
+        assert elec["additional_costs"] == 0.99
+        assert elec["tax_reduction"] == 0.25
+
     # -- Energy provider persistence --
 
     def test_energy_provider_persisted(self, complete_controller):

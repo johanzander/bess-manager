@@ -1537,9 +1537,10 @@ class BatterySystemManager:
             consumption_data = consumption_predictions
             solar_data = solar_predictions
 
-            # Initialize all periods with minimal SOC for next day
-            initial_soe = self.battery_settings.min_soe_kwh
-            combined_soe = [initial_soe] * period_count
+            # Seed the next-day plan from the real current SOC. This runs at
+            # 23:55, so current SOC is ~= tomorrow's starting SOC; assuming min
+            # SOC here would discard energy actually in the battery.
+            combined_soe = [current_soe] * period_count
 
             optimization_period = 0
 

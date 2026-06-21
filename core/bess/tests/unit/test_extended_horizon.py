@@ -233,6 +233,29 @@ class TestGatherOptimizationDataExtended:
         # Solar must come from the tomorrow forecast, not today's
         assert all(v == 2.0 for v in data["full_solar"])
 
+    def test_prepare_next_day_starts_from_real_soc(self):
+        """Next-day plan must seed initial SOE from the real current SOC.
+
+        Regression: the prepare_next_day run (cron at 23:55, when current SOC is
+        known and ~= tomorrow's starting SOC) discarded current_soc and assumed
+        min SOC, so any night the battery wasn't actually empty the next-day plan
+        started from a wrong state.
+        """
+        controller = MockHomeAssistantController()
+        source = MockSource([0.5] * 96)
+        system = _make_system(source, controller)
+
+        result = system._gather_optimization_data(
+            period=0, current_soc=50.0, prepare_next_day=True, period_count=96
+        )
+
+        assert result is not None
+        _, data = result
+        expected_soe = 50.0 / 100.0 * system.battery_settings.total_capacity
+        # Must reflect real SOC, not min_soe_kwh
+        assert expected_soe != system.battery_settings.min_soe_kwh
+        assert data["combined_soe"][0] == expected_soe
+
     def test_prepare_next_day_solar_falls_back_to_zeros_on_error(self):
         """If tomorrow's solar forecast is unavailable, next-day uses zeros."""
         from core.bess.exceptions import SystemConfigurationError

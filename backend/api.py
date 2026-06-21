@@ -2947,7 +2947,17 @@ async def setup_complete(payload: APISetupCompletePayload):
         # are preserved when save_all replaces the section.
 
         # --- battery ---
-        if payload.totalCapacity is not None:
+        if any(
+            f is not None
+            for f in [
+                payload.totalCapacity,
+                payload.minSoc,
+                payload.maxSoc,
+                payload.maxChargeDischargePower,
+                payload.cycleCost,
+                payload.minActionProfitThreshold,
+            ]
+        ):
             battery = bess_controller.settings_store.get_section("battery")
             battery["total_capacity"] = payload.totalCapacity
             if payload.minSoc is not None:
@@ -2966,7 +2976,19 @@ async def setup_complete(payload: APISetupCompletePayload):
             sections["battery"] = battery
 
         # --- home ---
-        if payload.currency is not None or payload.consumption is not None:
+        if any(
+            f is not None
+            for f in [
+                payload.currency,
+                payload.consumption,
+                payload.consumptionStrategy,
+                payload.maxFuseCurrent,
+                payload.voltage,
+                payload.safetyMarginFactor,
+                payload.phaseCount,
+                payload.powerMonitoringEnabled,
+            ]
+        ):
             home = bess_controller.settings_store.get_section("home")
             if payload.consumption is not None:
                 home["default_hourly"] = payload.consumption
@@ -2987,7 +3009,16 @@ async def setup_complete(payload: APISetupCompletePayload):
             sections["home"] = home
 
         # --- electricity price ---
-        if payload.markupRate is not None or payload.vatMultiplier is not None:
+        if any(
+            f is not None
+            for f in [
+                payload.markupRate,
+                payload.vatMultiplier,
+                payload.additionalCosts,
+                payload.taxReduction,
+                payload.area,
+            ]
+        ):
             elec = bess_controller.settings_store.get_section("electricity_price")
             area = payload.area or payload.nordpoolArea
             if area:

@@ -2945,61 +2945,66 @@ async def setup_complete(payload: APISetupCompletePayload):
         # All sections use read-modify-write so that keys not managed by the wizard
         # (e.g. temperature_derating in battery, config_entry_id in energy_provider)
         # are preserved when save_all replaces the section.
+        #
+        # Each section is driven by a mapping of payload-field-name → store-key.
+        # Adding a new wizard field only requires adding one entry to the mapping;
+        # the guard and the write are both derived from it automatically.
 
         # --- battery ---
-        if payload.totalCapacity is not None:
+        # maxChargeDischargePower maps to two store keys — handled separately below.
+        _BATTERY_MAP = {
+            "totalCapacity": "total_capacity",
+            "minSoc": "min_soc",
+            "maxSoc": "max_soc",
+            "cycleCost": "cycle_cost_per_kwh",
+            "minActionProfitThreshold": "min_action_profit_threshold",
+        }
+        if any(getattr(payload, f) is not None for f in _BATTERY_MAP) or (
+            payload.maxChargeDischargePower is not None
+        ):
             battery = bess_controller.settings_store.get_section("battery")
-            battery["total_capacity"] = payload.totalCapacity
-            if payload.minSoc is not None:
-                battery["min_soc"] = payload.minSoc
-            if payload.maxSoc is not None:
-                battery["max_soc"] = payload.maxSoc
+            for field, key in _BATTERY_MAP.items():
+                if getattr(payload, field) is not None:
+                    battery[key] = getattr(payload, field)
             if payload.maxChargeDischargePower is not None:
                 battery["max_charge_power_kw"] = payload.maxChargeDischargePower
                 battery["max_discharge_power_kw"] = payload.maxChargeDischargePower
-            if payload.cycleCost is not None:
-                battery["cycle_cost_per_kwh"] = payload.cycleCost
-            if payload.minActionProfitThreshold is not None:
-                battery["min_action_profit_threshold"] = (
-                    payload.minActionProfitThreshold
-                )
             sections["battery"] = battery
 
         # --- home ---
-        if payload.currency is not None or payload.consumption is not None:
+        _HOME_MAP = {
+            "consumption": "default_hourly",
+            "currency": "currency",
+            "consumptionStrategy": "consumption_strategy",
+            "maxFuseCurrent": "max_fuse_current",
+            "voltage": "voltage",
+            "safetyMarginFactor": "safety_margin",
+            "phaseCount": "phase_count",
+            "powerMonitoringEnabled": "power_monitoring_enabled",
+        }
+        if any(getattr(payload, f) is not None for f in _HOME_MAP):
             home = bess_controller.settings_store.get_section("home")
-            if payload.consumption is not None:
-                home["default_hourly"] = payload.consumption
-            if payload.currency is not None:
-                home["currency"] = payload.currency
-            if payload.consumptionStrategy is not None:
-                home["consumption_strategy"] = payload.consumptionStrategy
-            if payload.maxFuseCurrent is not None:
-                home["max_fuse_current"] = payload.maxFuseCurrent
-            if payload.voltage is not None:
-                home["voltage"] = payload.voltage
-            if payload.safetyMarginFactor is not None:
-                home["safety_margin"] = payload.safetyMarginFactor
-            if payload.phaseCount is not None:
-                home["phase_count"] = payload.phaseCount
-            if payload.powerMonitoringEnabled is not None:
-                home["power_monitoring_enabled"] = payload.powerMonitoringEnabled
+            for field, key in _HOME_MAP.items():
+                if getattr(payload, field) is not None:
+                    home[key] = getattr(payload, field)
             sections["home"] = home
 
         # --- electricity price ---
-        if payload.markupRate is not None or payload.vatMultiplier is not None:
+        # area can also come from nordpoolArea (discovery) — handled separately.
+        _PRICE_MAP = {
+            "markupRate": "markup_rate",
+            "vatMultiplier": "vat_multiplier",
+            "additionalCosts": "additional_costs",
+            "taxReduction": "tax_reduction",
+        }
+        area = payload.area or payload.nordpoolArea
+        if any(getattr(payload, f) is not None for f in _PRICE_MAP) or area:
             elec = bess_controller.settings_store.get_section("electricity_price")
-            area = payload.area or payload.nordpoolArea
             if area:
                 elec["area"] = area
-            if payload.markupRate is not None:
-                elec["markup_rate"] = payload.markupRate
-            if payload.vatMultiplier is not None:
-                elec["vat_multiplier"] = payload.vatMultiplier
-            if payload.additionalCosts is not None:
-                elec["additional_costs"] = payload.additionalCosts
-            if payload.taxReduction is not None:
-                elec["tax_reduction"] = payload.taxReduction
+            for field, key in _PRICE_MAP.items():
+                if getattr(payload, field) is not None:
+                    elec[key] = getattr(payload, field)
             sections["electricity_price"] = elec
 
         # --- energy provider ---

@@ -2787,6 +2787,7 @@ class BatterySystemManager:
                 self.battery_settings.update(**settings["battery"])
 
             if "home" in settings:
+                prev_strategy = self.home_settings.consumption_strategy
                 self.home_settings.update(**settings["home"])
                 # If power monitoring was just enabled and the monitor hasn't been
                 # created yet (disabled at startup), instantiate it now so it takes
@@ -2802,6 +2803,10 @@ class BatterySystemManager:
                         home_settings=self.home_settings,
                         battery_settings=self.battery_settings,
                     )
+                # Refresh the prediction cache immediately when the consumption
+                # strategy changes so the next optimization uses the new source.
+                if self.home_settings.consumption_strategy != prev_strategy:
+                    self._consumption_predictions = None
 
             if "price" in settings:
                 self.price_settings.update(**settings["price"])

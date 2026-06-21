@@ -120,7 +120,7 @@ class InverterController(ABC):
 
         Args:
             intent: Strategic intent string
-            battery_action_kw: Battery power in kW (used for EXPORT_ARBITRAGE scaling)
+            battery_action_kw: Battery power in kW (used for EXPORT_ARBITRAGE and LOAD_SUPPORT scaling)
 
         Returns:
             Tuple of (grid_charge, discharge_rate_percent)
@@ -130,14 +130,28 @@ class InverterController(ABC):
         elif intent == "SOLAR_STORAGE":
             return False, 0
         elif intent == "LOAD_SUPPORT":
-            return False, 100
+            if battery_action_kw < -0.01:
+                discharge_rate = min(
+                    100,
+                    max(
+                        0,
+                        round(
+                            abs(battery_action_kw) / self.max_discharge_power_kw * 100
+                        ),
+                    ),
+                )
+            else:
+                discharge_rate = 0
+            return False, discharge_rate
         elif intent == "EXPORT_ARBITRAGE":
             if battery_action_kw < -0.01:
                 discharge_rate = min(
                     100,
                     max(
                         0,
-                        int(abs(battery_action_kw) / self.max_discharge_power_kw * 100),
+                        round(
+                            abs(battery_action_kw) / self.max_discharge_power_kw * 100
+                        ),
                     ),
                 )
             else:
@@ -184,13 +198,31 @@ class InverterController(ABC):
             )
 
         intent = self.strategic_intents[period]
-        control = self.INTENT_TO_CONTROL[intent]
         mode = self.INTENT_TO_MODE[intent]
 
+        if (
+            self.current_schedule is not None
+            and self.current_schedule.actions
+            and period < len(self.current_schedule.actions)
+        ):
+            battery_action_kwh = self.current_schedule.actions[period]
+            num_periods = len(self.current_schedule.actions)
+            period_duration_hours = 24.0 / num_periods
+            battery_action_kw = battery_action_kwh / period_duration_hours
+            grid_charge, discharge_rate = self.compute_rates_for_period(
+                period, battery_action_kw
+            )
+            charge_rate = self.INTENT_TO_CONTROL[intent]["charge_rate"]
+        else:
+            control = self.INTENT_TO_CONTROL[intent]
+            grid_charge = control["grid_charge"]
+            charge_rate = control["charge_rate"]
+            discharge_rate = control["discharge_rate"]
+
         return {
-            "grid_charge": control["grid_charge"],
-            "charge_rate": control["charge_rate"],
-            "discharge_rate": control["discharge_rate"],
+            "grid_charge": grid_charge,
+            "charge_rate": charge_rate,
+            "discharge_rate": discharge_rate,
             "strategic_intent": intent,
             "batt_mode": mode,
         }

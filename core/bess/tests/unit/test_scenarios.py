@@ -289,20 +289,6 @@ def test_all_scenarios(scenario_name):
     planned_cost = result.economic_summary.battery_solar_cost
     gap = sim.realized_cost - planned_cost
 
-    # Known control-fidelity gap: LOAD_SUPPORT cannot pace battery discharge for
-    # home support, so deep-evening-peak high-consumption days realize worse than
-    # planned. Tracked in #147 — xfail (not silently tolerated) until fixed.
-    DISCHARGE_PACING_SCENARIOS = {
-        "synthetic_consumption_high_no_solar",
-        "synthetic_seasonal_winter",
-        "synthetic_consumption_ev_charging",
-        "historical_2025_01_12_evening_peak_no_solar",
-    }
-    if scenario_name in DISCHARGE_PACING_SCENARIOS:
-        pytest.xfail(
-            f"discharge cannot be paced for home support (R-P={gap:+.2f} SEK) — #147"
-        )
-
     tol = max(0.5, 0.01 * abs(planned_cost))
     assert abs(gap) <= tol, (
         f"{scenario_name}: realized != planned — R={sim.realized_cost:.2f}, "

@@ -354,6 +354,24 @@ class TestGetPeriodSettings:
         with pytest.raises(ValueError):
             min_ctrl.get_period_settings(10)
 
+    def test_uses_actual_discharge_rate_when_schedule_available(self, min_ctrl):
+        from unittest.mock import MagicMock
+
+        min_ctrl.strategic_intents = ["LOAD_SUPPORT"] * 4
+        mock_schedule = MagicMock()
+        # 96 periods, LOAD_SUPPORT action at period 0: -1.5 kWh → -6 kW → round(6/15*100)=40
+        mock_schedule.actions = [-1.5] + [0.0] * 95
+        min_ctrl.current_schedule = mock_schedule
+        result = min_ctrl.get_period_settings(0)
+        assert result["discharge_rate"] == 40
+        assert result["grid_charge"] is False
+
+    def test_falls_back_to_static_dict_when_no_schedule(self, min_ctrl):
+        min_ctrl.strategic_intents = ["LOAD_SUPPORT"] * 4
+        min_ctrl.current_schedule = None
+        result = min_ctrl.get_period_settings(0)
+        assert result["discharge_rate"] == 100  # static dict fallback
+
 
 class TestGetStrategicIntentSummary:
     def test_empty_when_no_intents(self, min_ctrl):
@@ -423,6 +441,58 @@ class TestComputeRatesForPeriod:
         )
         assert grid_charge is False
         assert discharge_rate == 0
+
+    def test_load_support_partial_discharge(self, min_ctrl):
+        # 1.5 kW of 15.0 kW max → 10%
+        min_ctrl.strategic_intents = ["LOAD_SUPPORT"] * 4
+        grid_charge, discharge_rate = min_ctrl.compute_rates_for_period(
+            0, battery_action_kw=-1.5
+        )
+        assert grid_charge is False
+        assert discharge_rate == 10
+
+    def test_load_support_full_discharge(self, min_ctrl):
+        min_ctrl.strategic_intents = ["LOAD_SUPPORT"] * 4
+        _grid_charge, discharge_rate = min_ctrl.compute_rates_for_period(
+            0, battery_action_kw=-min_ctrl.max_discharge_power_kw
+        )
+        assert discharge_rate == 100
+
+    def test_load_support_zero_action(self, min_ctrl):
+        min_ctrl.strategic_intents = ["LOAD_SUPPORT"] * 4
+        _grid_charge, discharge_rate = min_ctrl.compute_rates_for_period(
+            0, battery_action_kw=0.0
+        )
+        assert discharge_rate == 0
+
+
+class TestSimulatorMapRates:
+    """_map_rates must mirror _map_intent_to_rates for every intent."""
+
+    def _settings(self):
+        return BatterySettings()
+
+    def test_load_support_partial(self):
+        from core.bess.simulation.inverter_simulator import _map_rates
+
+        grid_charge, rate = _map_rates("LOAD_SUPPORT", -1.5, self._settings())
+        assert grid_charge is False
+        assert rate == 10  # 1.5 / 15.0 * 100 = 10
+
+    def test_load_support_full(self):
+        from core.bess.simulation.inverter_simulator import _map_rates
+
+        s = self._settings()
+        grid_charge, rate = _map_rates("LOAD_SUPPORT", -s.max_discharge_power_kw, s)
+        assert grid_charge is False
+        assert rate == 100
+
+    def test_load_support_zero(self):
+        from core.bess.simulation.inverter_simulator import _map_rates
+
+        grid_charge, rate = _map_rates("LOAD_SUPPORT", 0.0, self._settings())
+        assert grid_charge is False
+        assert rate == 0
 
 
 # ── SolaxController ──────────────────────────────────────────────────────────

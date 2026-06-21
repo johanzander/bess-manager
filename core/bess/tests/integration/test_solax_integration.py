@@ -92,6 +92,9 @@ class TestSolaxVppCommandsPerIntent:
     def test_load_support_period_sends_negative_watts(self) -> None:
         bsm, hw = _make_bsm_solax()
         _set_intent(bsm, PERIOD, "LOAD_SUPPORT")
+        _set_action(
+            bsm, PERIOD, -3.75
+        )  # -3.75 kWh / 0.25h = -15 kW → 100% → negative VPP watts
 
         bsm._apply_period_schedule(PERIOD)
 

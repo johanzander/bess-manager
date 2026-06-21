@@ -62,6 +62,7 @@ class TestDischargeInhibitSuppressesDischarge:
     def test_load_support_discharges_when_inhibit_inactive(self):
         bsm, controller = _make_bsm(inhibit_active=False)
         _set_intent(bsm, PERIOD, "LOAD_SUPPORT")
+        _set_discharge_action(bsm, PERIOD, -3.75)  # -3.75 kWh / 0.25h = -15 kW → 100%
 
         bsm._apply_period_schedule(PERIOD)
 
@@ -128,6 +129,7 @@ class TestApplyDischargeInhibit:
         """Inhibit becoming active mid-period must stop discharge within 1 minute."""
         bsm, controller = _make_bsm(inhibit_active=False)
         _set_intent(bsm, PERIOD, "LOAD_SUPPORT")
+        _set_discharge_action(bsm, PERIOD, -3.75)  # -3.75 kWh / 0.25h = -15 kW → 100%
         bsm._apply_period_schedule(PERIOD)  # Sets desired=100, applied=100
         assert controller.calls["discharge_rate"][-1] == 100
 
@@ -140,6 +142,7 @@ class TestApplyDischargeInhibit:
         """Discharge must resume at the scheduled rate once inhibit clears."""
         bsm, controller = _make_bsm(inhibit_active=True)
         _set_intent(bsm, PERIOD, "LOAD_SUPPORT")
+        _set_discharge_action(bsm, PERIOD, -3.75)  # -3.75 kWh / 0.25h = -15 kW → 100%
         bsm._apply_period_schedule(PERIOD)  # Sets desired=100, applied=0 (inhibited)
 
         controller.inhibit_active = False
@@ -177,6 +180,7 @@ class TestApplyDischargeInhibit:
 
         # First period: LOAD_SUPPORT (desired=100), inhibit active → applied=0
         _set_intent(bsm, PERIOD, "LOAD_SUPPORT")
+        _set_discharge_action(bsm, PERIOD, -3.75)  # -3.75 kWh / 0.25h = -15 kW → 100%
         bsm._apply_period_schedule(PERIOD)
         assert bsm._desired_discharge_rate == 100
 

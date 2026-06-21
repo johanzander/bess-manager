@@ -86,6 +86,7 @@ class TestCrossPlatformHardwareWrites:
     def test_discharge_commands_hardware(self, platform_system, mock_controller):
         """LOAD_SUPPORT produces a discharge command for each platform."""
         _set_intent(platform_system, PERIOD, "LOAD_SUPPORT")
+        _set_action(platform_system, PERIOD, -3.75)  # -3.75 kWh / 0.25h = -15 kW → 100%
 
         platform_system._apply_period_schedule(PERIOD)
 

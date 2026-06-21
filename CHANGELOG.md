@@ -4,10 +4,11 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [9.6.1] - 2026-06-21
 
 ### Fixed
 
+- **LOAD_SUPPORT discharged at full rate instead of the planned pace** — The DP optimizer models partial discharge for LOAD_SUPPORT (e.g. discharge 0.4 kW and let the grid cover the rest, reserving the battery for a later expensive peak), but the inverter control layer always wrote `discharge_rate=100%`, so the battery dumped at full power and drained early. LOAD_SUPPORT now scales the inverter discharge rate from the planned battery action, mirroring EXPORT_ARBITRAGE. (Issue #147)
 - **Consumption strategy change silently dropped in setup wizard** — `POST /api/setup/complete` only entered the home settings block when `currency` or `consumption` were non-null; changing `consumptionStrategy`, `maxFuseCurrent`, `voltage`, or other home-only fields without also touching those two fields caused the change to be silently lost. Same flaw applied to the battery block (guarded by `totalCapacity` only) and electricity-price block. All three blocks now use an `any(f is not None …)` guard covering every field in the section.
 - **Consumption strategy change takes effect immediately** — Updating `consumption_strategy` via `update_settings()` now clears the stale prediction cache so the next optimization cycle fetches predictions under the new strategy, rather than waiting until the nightly `prepare_next_day` refresh at 23:55.
 - **Next-day schedule used today's solar forecast** — The `prepare_next_day` optimization built tomorrow's battery schedule from *today's* Solcast forecast instead of tomorrow's, so the plan written to the inverter could be optimized against substantially wrong solar production (e.g. 28.5 kWh today vs 64.8 kWh forecast for the next day). It now uses `get_solar_forecast_tomorrow()`, mirroring the extended-horizon path, with the same zeros fallback when tomorrow's forecast is unavailable.

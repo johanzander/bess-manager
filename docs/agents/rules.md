@@ -3,6 +3,12 @@
 These rules apply to every agent working on this codebase.
 They are non-negotiable and override any other instruction.
 
+## Environment
+
+- Each worktree has its own `.venv` — never use bare `pytest`, `black`, `ruff`, or global/absolute Python paths
+- Always `cd` into the worktree root first, then invoke via relative `.venv/bin/` paths: `.venv/bin/pytest`, `.venv/bin/black`, `.venv/bin/ruff`, `.venv/bin/mypy`
+- If `.venv` is missing: `cd <worktree> && /Users/johanzander/.pyenv/versions/3.12.13/bin/python3 -m venv .venv && .venv/bin/pip install -r backend/requirements.txt`
+
 ## Python
 
 - Use `x | None`, never `Optional[x]` (no `Optional`/`Union` imports from `typing`)

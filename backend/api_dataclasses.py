@@ -976,6 +976,7 @@ class APISetupCompletePayload(BaseModel):
     maxChargeDischargePower: float | None = None
     cycleCost: float | None = None
     minActionProfitThreshold: float | None = None
+    externalSolarMode: bool | None = None
     # Home settings
     currency: str | None = None
     consumption: float | None = None

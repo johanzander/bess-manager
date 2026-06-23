@@ -2958,6 +2958,7 @@ async def setup_complete(payload: APISetupCompletePayload):
             "maxSoc": "max_soc",
             "cycleCost": "cycle_cost_per_kwh",
             "minActionProfitThreshold": "min_action_profit_threshold",
+            "externalSolarMode": "external_solar_mode",
         }
         if any(getattr(payload, f) is not None for f in _BATTERY_MAP) or (
             payload.maxChargeDischargePower is not None
@@ -3086,6 +3087,7 @@ async def setup_complete(payload: APISetupCompletePayload):
                     "maxDischargePowerKw": payload.maxChargeDischargePower,
                     "cycleCostPerKwh": payload.cycleCost,
                     "minActionProfitThreshold": payload.minActionProfitThreshold,
+                    "externalSolarMode": payload.externalSolarMode,
                 }
             )
         if "home" in sections:

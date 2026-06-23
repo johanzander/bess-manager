@@ -378,6 +378,7 @@ class SettingsStore:
                 "max_discharge_power_kw": BATTERY_MAX_CHARGE_DISCHARGE_POWER_KW,
                 "cycle_cost_per_kwh": BATTERY_CHARGE_CYCLE_COST,
                 "min_action_profit_threshold": BATTERY_MIN_ACTION_PROFIT_THRESHOLD,
+                "external_solar_mode": False,
             },
             "home": {
                 "default_hourly": HOME_HOURLY_CONSUMPTION_KWH,
@@ -465,6 +466,7 @@ class SettingsStore:
                 ("charging_power_rate", BATTERY_DEFAULT_CHARGING_POWER_RATE),
                 ("efficiency_charge", BATTERY_EFFICIENCY_CHARGE),
                 ("efficiency_discharge", BATTERY_EFFICIENCY_DISCHARGE),
+                ("external_solar_mode", False),
             ):
                 if key not in battery:
                     battery[key] = default

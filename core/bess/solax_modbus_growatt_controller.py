@@ -120,6 +120,7 @@ class SolaxModbusGrowattController(GrowattMinController):
         now = time_utils.now()
         current_period = now.hour * 4 + now.minute // 15
 
+        mode = "load_first"
         if current_period < len(self.strategic_intents):
             intent = self.strategic_intents[current_period]
             mode = self.INTENT_TO_MODE.get(intent, "load_first")
@@ -147,12 +148,14 @@ class SolaxModbusGrowattController(GrowattMinController):
                     logger.error("FAILED: set TOU segment mode to %s: %s", mode, e)
                     errors.append(str(e))
 
-        # Set grid charge and discharge rate (same as parent)
-        success, error_msg = self._write_period_to_hardware(
-            controller, grid_charge, discharge_rate
-        )
-        if not success:
-            errors.append(error_msg)
+        # load_first uses inverter-native discharge control; touching the EMS
+        # discharge rate register (even with 0) disables discharge entirely.
+        if mode != "load_first":
+            success, error_msg = self._write_period_to_hardware(
+                controller, grid_charge, discharge_rate
+            )
+            if not success:
+                errors.append(error_msg)
 
         if errors:
             return False, "; ".join(errors)

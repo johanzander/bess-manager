@@ -3,6 +3,7 @@
   "permissions": {
     "allow": [
       "Read",
+      "Skill",
       "Glob",
       "Grep",
       "Bash(.venv/bin/pytest *)",
@@ -18,7 +19,19 @@
       "Bash(colima stop *)",
       "Bash(colima stop)",
       "Bash(git commit:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(git status)",
+      "Bash(git status *)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git branch *)",
+      "Bash(find *)",
+      "Bash(ls *)",
+      "Bash(ls)",
+      "Bash(scripts/gh-agent.sh *)",
+      "Bash(gh issue *)",
+      "Bash(gh pr *)",
+      "Bash(gh api *)"
     ],
     "deny": [
       "Bash(colima delete *)",

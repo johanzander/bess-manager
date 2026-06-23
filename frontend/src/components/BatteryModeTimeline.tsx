@@ -44,7 +44,9 @@ function buildSegments(
   const segments: Segment[] = [];
 
   for (let i = 0; i < hourlyData.length; i++) {
-    const intent = (hourlyData[i].strategicIntent as StrategicIntent) || 'IDLE';
+    const h = hourlyData[i];
+    const rawIntent = (h.dataSource === 'actual' && h.observedIntent) ? h.observedIntent : h.strategicIntent;
+    const intent = (rawIntent as StrategicIntent) || 'IDLE';
     const startHour = resolution === 'quarter-hourly' ? i * 0.25 : i;
     const endHour = startHour + step;
 

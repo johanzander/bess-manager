@@ -167,6 +167,12 @@ def _idle_battery_flows(
     Returns:
         (battery_charged, battery_discharged) in kWh throughput.
     """
+    # When soe is already below the minimum floor, _state_transition clamps
+    # next_soe up to min_soe_kwh. That delta is a floor artefact, not solar
+    # production — treating it as charging would misclassify the period as
+    # SOLAR_STORAGE even at 2 am with no sun.
+    if soe < battery_settings.min_soe_kwh:
+        return 0.0, 0.0
     passive_energy_stored = next_soe - soe
     battery_charged = (
         passive_energy_stored / battery_settings.efficiency_charge

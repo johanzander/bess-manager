@@ -8,10 +8,13 @@ parametrized ``platform_system`` fixture.
 Tests verify BEHAVIOR (what the system does) not IMPLEMENTATION (how it does it).
 """
 
+from datetime import datetime
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from core.bess.growatt_sph_controller import GrowattSphController
 from core.bess.solax_controller import SolaxController
+from core.bess.solax_modbus_growatt_controller import SolaxModbusGrowattController
 
 PERIOD = 20  # Arbitrary test period (quarter-hour slot)
 
@@ -46,6 +49,28 @@ def _is_sph(system) -> bool:
     return isinstance(system._inverter_controller, GrowattSphController)
 
 
+def _is_solax_modbus(system) -> bool:
+    return isinstance(system._inverter_controller, SolaxModbusGrowattController)
+
+
+def _apply_at_period(platform_system, period: int) -> None:
+    """Apply period schedule, mocking system time to the given period for SolaxModbus.
+
+    SolaxModbusGrowattController.apply_period() uses time_utils.now() to determine
+    the current period (not the period argument). Without this wrapper, tests run
+    at an arbitrary real time and always resolve to IDLE → load_first, making
+    non-load_first intent tests unreliable.
+    """
+    if _is_solax_modbus(platform_system):
+        hour = period // 4
+        minute = (period % 4) * 15
+        with patch("core.bess.solax_modbus_growatt_controller.time_utils") as mock_time:
+            mock_time.now.return_value = datetime(2026, 5, 20, hour, minute, 0)
+            platform_system._apply_period_schedule(period)
+    else:
+        platform_system._apply_period_schedule(period)
+
+
 # ── Schedule creation ────────────────────────────────────────────────────────
 
 
@@ -71,7 +96,7 @@ class TestCrossPlatformHardwareWrites:
         """GRID_CHARGING produces the correct hardware call for each platform."""
         _set_intent(platform_system, PERIOD, "GRID_CHARGING")
 
-        platform_system._apply_period_schedule(PERIOD)
+        _apply_at_period(platform_system, PERIOD)
 
         if _is_sph(platform_system):
             # SPH uses atomic schedule writes — no per-period hardware calls
@@ -88,7 +113,7 @@ class TestCrossPlatformHardwareWrites:
         _set_intent(platform_system, PERIOD, "LOAD_SUPPORT")
         _set_action(platform_system, PERIOD, -3.75)  # -3.75 kWh / 0.25h = -15 kW → 100%
 
-        platform_system._apply_period_schedule(PERIOD)
+        _apply_at_period(platform_system, PERIOD)
 
         if _is_sph(platform_system):
             # SPH uses atomic schedule writes — no per-period hardware calls
@@ -97,6 +122,9 @@ class TestCrossPlatformHardwareWrites:
         elif _is_solax(platform_system):
             assert len(mock_controller.calls["vpp_calls"]) == 1
             assert mock_controller.calls["vpp_calls"][0] < 0
+        elif _is_solax_modbus(platform_system):
+            # LOAD_SUPPORT → load_first; inverter-native discharge, EMS register not written
+            assert mock_controller.calls["discharge_rate"] == []
         else:
             assert any(r > 0 for r in mock_controller.calls["discharge_rate"])
 
@@ -105,7 +133,7 @@ class TestCrossPlatformHardwareWrites:
         _set_intent(platform_system, PERIOD, "EXPORT_ARBITRAGE")
         _set_action(platform_system, PERIOD, -2.0)
 
-        platform_system._apply_period_schedule(PERIOD)
+        _apply_at_period(platform_system, PERIOD)
 
         if _is_sph(platform_system):
             # SPH uses atomic schedule writes — no per-period hardware calls
@@ -121,7 +149,7 @@ class TestCrossPlatformHardwareWrites:
         """IDLE does not issue charge or discharge commands."""
         _set_intent(platform_system, PERIOD, "IDLE")
 
-        platform_system._apply_period_schedule(PERIOD)
+        _apply_at_period(platform_system, PERIOD)
 
         if _is_sph(platform_system):
             # SPH uses atomic schedule writes — no per-period hardware calls
@@ -130,6 +158,10 @@ class TestCrossPlatformHardwareWrites:
         elif _is_solax(platform_system):
             assert len(mock_controller.calls["vpp_disabled"]) == 1
             assert len(mock_controller.calls["vpp_calls"]) == 0
+        elif _is_solax_modbus(platform_system):
+            # IDLE → load_first; inverter-native control, EMS registers not written
+            assert mock_controller.calls["grid_charge"] == []
+            assert mock_controller.calls["discharge_rate"] == []
         else:
             # IDLE: grid_charge=False and discharge_rate=0
             assert mock_controller.calls["grid_charge"][-1] is False
@@ -139,13 +171,16 @@ class TestCrossPlatformHardwareWrites:
         """SOLAR_STORAGE does not enable grid charging."""
         _set_intent(platform_system, PERIOD, "SOLAR_STORAGE")
 
-        platform_system._apply_period_schedule(PERIOD)
+        _apply_at_period(platform_system, PERIOD)
 
         if _is_sph(platform_system):
             # SPH uses atomic schedule writes — no per-period hardware calls
             assert mock_controller.calls["grid_charge"] == []
         elif _is_solax(platform_system):
             assert len(mock_controller.calls["vpp_disabled"]) == 1
+        elif _is_solax_modbus(platform_system):
+            # SOLAR_STORAGE → load_first; inverter-native control, EMS register not written
+            assert mock_controller.calls["grid_charge"] == []
         else:
             assert mock_controller.calls["grid_charge"][-1] is False
 

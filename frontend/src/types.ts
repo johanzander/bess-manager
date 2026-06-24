@@ -39,6 +39,7 @@ export interface HourlyData {
 
   // Control and decision fields
   strategicIntent?: string;    // strategy name
+  observedIntent?: string;     // what actually happened (set for past periods only)
 
   // All user-facing data via FormattedValue - canonical naming
   buyPrice?: FormattedValue;

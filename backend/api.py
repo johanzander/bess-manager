@@ -318,7 +318,7 @@ async def patch_settings(updates: dict):
 
             elif store_key == "demo_mode":
                 enabled = section.get("enabled", False)
-                bess_controller.ha_controller.set_test_mode(enabled)
+                bess_controller.system.set_demo_mode(enabled)
 
         _refresh_health(bess_controller)
         return await get_settings()
@@ -3125,7 +3125,7 @@ async def setup_complete(payload: APISetupCompletePayload):
 
         # Apply demo mode live
         if payload.demoMode is not None:
-            bess_controller.ha_controller.set_test_mode(payload.demoMode)
+            bess_controller.system.set_demo_mode(payload.demoMode)
 
         # Backfill historical data in the background (may take many seconds for 20+
         # InfluxDB queries), then build the schedule with correct historical context.

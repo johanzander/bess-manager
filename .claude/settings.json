@@ -1,30 +1,35 @@
 {
+  "model": "sonnet",
   "permissions": {
     "allow": [
       "Read",
+      "Skill",
       "Glob",
       "Grep",
-      "Bash(pytest:*)",
-      "Bash(python3 -m pytest:*)",
-      "Bash(python -m pytest:*)",
-      "Bash(./.venv/bin/pytest:*)",
-      "Bash(./.venv/bin/python -m pytest:*)",
+      "Bash(.venv/bin/pytest *)",
+      "Bash(.venv/bin/pytest)",
+      "Bash(.venv/bin/black *)",
+      "Bash(.venv/bin/ruff *)",
+      "Bash(.venv/bin/mypy *)",
+      "Bash(.venv/bin/pip install *)",
+      "Bash(.venv/bin/pip show *)",
+      "Bash(.venv/bin/pip list)",
       "Bash(colima start *)",
       "Bash(colima start)",
       "Bash(colima stop *)",
-      "Bash(colima stop)"
+      "Bash(colima stop)",
+      "Bash(git commit *)",
+      "Bash(git push *)"
     ],
     "deny": [
       "Bash(colima delete *)",
       "Bash(colima delete)"
     ],
     "ask": [
-      "Bash(git commit:*)",
-      "Bash(git push:*)",
-      "Bash(git reset:*)",
-      "Bash(git rebase:*)",
-      "Bash(git merge:*)",
-      "Bash(rm:*)",
+      "Bash(git reset *)",
+      "Bash(git rebase *)",
+      "Bash(git merge *)",
+      "Bash(rm *)",
       "Bash(rm -rf *)",
       "Bash(git push --force *)",
       "Bash(git reset --hard *)"

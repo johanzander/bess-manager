@@ -338,6 +338,7 @@ class APIDashboardHourlyData:
 
     # Raw values for logic only
     strategicIntent: str
+    observedIntent: str | None
     directSolar: float
 
     @classmethod
@@ -461,6 +462,7 @@ class APIDashboardHourlyData:
             ),
             # Raw values for logic
             strategicIntent=hourly.decision.strategic_intent,
+            observedIntent=hourly.decision.observed_intent,
             directSolar=direct_solar,
         )
 

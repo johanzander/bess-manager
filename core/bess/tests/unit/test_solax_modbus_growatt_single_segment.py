@@ -205,6 +205,22 @@ class TestApplyPeriod:
         assert mock_ha.calls["grid_charge"][-1] is True
         assert len(mock_ha.calls["discharge_rate"]) == 1
 
+    def test_load_first_skips_ems_discharge_write(self, controller, mock_ha):
+        """EMS discharge rate must not be written in load_first mode.
+
+        Writing discharge_rate=0 to the EMS register disables inverter discharge,
+        defeating Load First's inverter-native discharge control.
+        """
+        intents = hourly_to_quarterly({0: "IDLE"})
+        schedule = make_schedule(intents)
+        controller.create_schedule(schedule, current_period=0)
+        controller._last_written_tou_mode = "load_first"
+
+        self._apply_at_period(controller, mock_ha, 0, "IDLE")
+
+        assert len(mock_ha.calls["discharge_rate"]) == 0
+        assert len(mock_ha.calls["grid_charge"]) == 0
+
 
 class TestWriteScheduleToHardware:
     """Test write_schedule_to_hardware initialises segment 1."""
@@ -310,7 +326,7 @@ class TestReadAndInitialize:
             },
         ]
 
-        controller.read_and_initialize_from_hardware(mock_ha, current_hour=10)
+        controller.initialize_hardware(mock_ha)
 
         # Segments 2 and 3 should have been disabled
         disable_calls = [
@@ -341,7 +357,7 @@ class TestReadAndInitialize:
             },
         ]
 
-        controller.read_and_initialize_from_hardware(mock_ha, current_hour=10)
+        controller.initialize_hardware(mock_ha)
 
         # No disable writes should have been made (both already disabled)
         assert len(mock_ha.calls["tou_segments"]) == 0

@@ -165,25 +165,34 @@ If using VS Code with Remote-Containers:
    npm run build
 ```text
 
+### Python Environment
+
+Each worktree requires its own `.venv`. Venvs contain absolute paths and cannot be shared or copied between machines/worktrees.
+
+```bash
+# Create .venv (run once per worktree, or after cloning/rsyncing to a new machine)
+python3 -m venv .venv && .venv/bin/pip install -r backend/requirements.txt
+```
+
 ### Testing
 
 ```bash
 # Fast tests only (recommended during development, ~3s)
-pytest -m "not slow"
+.venv/bin/pytest -m "not slow"
 
 # Algorithm/integration tests (full optimizer, ~30min)
-pytest -m slow
+.venv/bin/pytest -m slow
 
 # Run all tests
-pytest
+.venv/bin/pytest
 
 # Run specific categories
-pytest core/bess/tests/unit/
-pytest core/bess/tests/integration/
-pytest backend/tests/
+.venv/bin/pytest core/bess/tests/unit/
+.venv/bin/pytest core/bess/tests/integration/
+.venv/bin/pytest backend/tests/
 
 # Run with coverage
-pytest --cov=core.bess
+.venv/bin/pytest --cov=core.bess
 
 # Frontend unit tests
 cd frontend && npm test

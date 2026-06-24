@@ -60,6 +60,32 @@ class TestHintsFromNordpoolArea:
         hints = self.ctrl._hints_from_nordpool_area("GB")
         assert hints == {"currency": "GBP", "vat_multiplier": 1.0}
 
+    def test_nl_area_returns_eur_21vat(self):
+        hints = self.ctrl._hints_from_nordpool_area("NL")
+        assert hints == {"currency": "EUR", "vat_multiplier": 1.21}
+
+    def test_be_area_returns_eur_21vat(self):
+        hints = self.ctrl._hints_from_nordpool_area("BE")
+        assert hints == {"currency": "EUR", "vat_multiplier": 1.21}
+
+    def test_de_lu_area_returns_eur_19vat(self):
+        # Nord Pool publishes the German bidding zone as "DE-LU"; the prefix
+        # parser must take the first two characters and map to DE.
+        hints = self.ctrl._hints_from_nordpool_area("DE-LU")
+        assert hints == {"currency": "EUR", "vat_multiplier": 1.19}
+
+    def test_fr_area_returns_eur_20vat(self):
+        hints = self.ctrl._hints_from_nordpool_area("FR")
+        assert hints == {"currency": "EUR", "vat_multiplier": 1.20}
+
+    def test_at_area_returns_eur_20vat(self):
+        hints = self.ctrl._hints_from_nordpool_area("AT")
+        assert hints == {"currency": "EUR", "vat_multiplier": 1.20}
+
+    def test_pl_area_returns_pln_23vat(self):
+        hints = self.ctrl._hints_from_nordpool_area("PL")
+        assert hints == {"currency": "PLN", "vat_multiplier": 1.23}
+
     def test_unknown_area_returns_empty(self):
         hints = self.ctrl._hints_from_nordpool_area("XX99")
         assert hints == {}

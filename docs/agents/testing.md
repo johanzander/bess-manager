@@ -11,6 +11,17 @@
 A test that breaks when you swap two equivalent algorithms is a bad test.
 A test that passes after the swap — because the observable outcome is the same — is a good test.
 
+### Before writing the RED test for a bug fix
+
+Identify the **correct design** before writing any test. A test written against the wrong design locks in that design and makes the correct fix harder to reach.
+
+Ask before writing:
+- Should this method be called from this caller at all, or is there a better owner?
+- Is there an existing lifecycle path (`start()`, `__init__`) that already handles this? Why is it failing there?
+- Does the test assert a specific internal call chain — and if so, is that call chain the right architecture?
+
+If you can't answer these, stop and reason through the design first. A test that says "call `_foo()` from layer X" may be specifying bad architecture, not good behavior.
+
 ## What to Test
 
 ### Business behavior

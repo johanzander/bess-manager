@@ -2200,6 +2200,13 @@ class HomeAssistantAPIController:
         "LT": ("EUR", 1.21),
         "LV": ("EUR", 1.21),
         "GB": ("GBP", 1.0),
+        # Continental Nord Pool day-ahead areas (post-expansion):
+        "NL": ("EUR", 1.21),
+        "BE": ("EUR", 1.21),
+        "DE": ("EUR", 1.19),
+        "FR": ("EUR", 1.20),
+        "AT": ("EUR", 1.20),
+        "PL": ("PLN", 1.23),
     }
 
     def _hints_from_nordpool_area(self, area: str | None) -> dict:

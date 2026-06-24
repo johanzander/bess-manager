@@ -346,24 +346,6 @@ class BatterySystemManager:
             message=f"Unknown energy provider: {provider!r}. Must be 'nordpool_hacs', 'nordpool_official', or 'octopus'."
         )
 
-    def _sync_soc_limits(self) -> None:
-        """Sync SOC limits from config to inverter hardware.
-
-        Delegates to the schedule manager which handles the inverter-specific
-        mechanism (entity writes for MIN, service calls for SPH).
-        Config values are the single source of truth.
-        """
-        logger.info("Syncing SOC limits from config to inverter...")
-        try:
-            self._inverter_controller.sync_soc_limits(self.controller)
-        except Exception as e:
-            logger.warning(
-                "Could not sync SOC limits to inverter at startup "
-                "(inverter may be temporarily unreachable): %s. "
-                "Inverter will retain its current limits. System startup will continue.",
-                e,
-            )
-
     def start(self, status_callback=None) -> None:
         """Start the system - preserves original functionality.
 
@@ -411,9 +393,17 @@ class BatterySystemManager:
                 _status("Reading inverter schedule...")
                 self._initialize_tou_schedule_from_inverter()
 
-                # Sync SOC limits from config to inverter (config as master)
+                # Write initial hardware config (SOC limits, legacy slot cleanup, etc.)
                 _status("Syncing battery limits...")
-                self._sync_soc_limits()
+                try:
+                    self._inverter_controller.initialize_hardware(self._controller)
+                except Exception as e:
+                    logger.warning(
+                        "Could not complete hardware initialization at startup "
+                        "(inverter may be temporarily unreachable): %s. "
+                        "Inverter will retain its current settings. System startup will continue.",
+                        e,
+                    )
 
                 # Initialize historical data - using improved sensor collector
                 _status("Fetching historical data...")
@@ -431,6 +421,26 @@ class BatterySystemManager:
         except Exception as e:
             logger.error(f"Failed to start BatterySystemManager: {e}")
             raise
+
+    def set_demo_mode(self, enabled: bool) -> None:
+        """Switch between demo and live mode.
+
+        Sets the HA controller's test mode flag. When going live, mirrors the
+        startup sequence: read current inverter state first (required by some
+        controllers before they can write SOC limits), then run hardware init.
+        """
+        self._controller.set_test_mode(enabled)
+        if not enabled and self._inverter_controller is not None:
+            try:
+                self._initialize_tou_schedule_from_inverter()
+                self._inverter_controller.initialize_hardware(self._controller)
+            except Exception as e:
+                logger.warning(
+                    "Could not complete hardware initialization on transition to live "
+                    "(inverter may be temporarily unreachable): %s. "
+                    "Inverter will retain its current settings.",
+                    e,
+                )
 
     def reinitialize_historical_data(self) -> None:
         """Re-run the historical InfluxDB backfill.

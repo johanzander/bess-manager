@@ -402,6 +402,15 @@ class InverterController(ABC):
     def sync_soc_limits(self, controller) -> None:
         """Sync SOC limits from config to inverter hardware."""
 
+    def initialize_hardware(self, controller) -> None:  # noqa: B027
+        """Write initial hardware configuration required before normal operation.
+
+        Called once at startup (after demo mode blocks are cleared). Subclasses
+        override to perform whatever one-time writes their hardware requires.
+        The default is a no-op so controllers with no startup writes need not
+        override it.
+        """
+
     def _write_period_to_hardware(
         self, controller, grid_charge: bool, discharge_rate: int
     ) -> tuple[bool, str]:

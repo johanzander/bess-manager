@@ -1352,6 +1352,9 @@ class GrowattMinController(InverterController):
                 actual_max_soc,
             )
 
+    def initialize_hardware(self, controller) -> None:
+        self.sync_soc_limits(controller)
+
     def read_and_initialize_from_hardware(self, controller, current_hour: int) -> None:
         """Read current TOU schedule from inverter and initialize this controller.
 

@@ -284,3 +284,33 @@ class TestShouldApplySchedule:
         )
         assert result is True
         assert "Retry" in reason
+
+
+class TestSetDemoMode:
+    """set_demo_mode delegates hardware initialization to the inverter controller."""
+
+    def test_enable_sets_test_mode_true(self, system, mock_controller):
+        system.set_demo_mode(True)
+        assert mock_controller.test_mode is True
+
+    def test_disable_sets_test_mode_false(self, system, mock_controller):
+        system.set_demo_mode(False)
+        assert mock_controller.test_mode is False
+
+    def test_going_live_calls_initialize_hardware_on_inverter(self, system):
+        """Going live delegates to the inverter controller's public method."""
+        from unittest.mock import MagicMock
+
+        system._inverter_controller.initialize_hardware = MagicMock()
+        system.set_demo_mode(False)
+        system._inverter_controller.initialize_hardware.assert_called_once_with(
+            system._controller
+        )
+
+    def test_enabling_demo_skips_initialize_hardware(self, system):
+        """Enabling demo mode must NOT trigger hardware initialization."""
+        from unittest.mock import MagicMock
+
+        system._inverter_controller.initialize_hardware = MagicMock()
+        system.set_demo_mode(True)
+        system._inverter_controller.initialize_hardware.assert_not_called()

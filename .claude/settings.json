@@ -17,18 +17,18 @@
       "Bash(colima start)",
       "Bash(colima stop *)",
       "Bash(colima stop)",
-      "Bash(git commit:*)",
-      "Bash(git push:*)"
+      "Bash(git commit *)",
+      "Bash(git push *)"
     ],
     "deny": [
       "Bash(colima delete *)",
       "Bash(colima delete)"
     ],
     "ask": [
-      "Bash(git reset:*)",
-      "Bash(git rebase:*)",
-      "Bash(git merge:*)",
-      "Bash(rm:*)",
+      "Bash(git reset *)",
+      "Bash(git rebase *)",
+      "Bash(git merge *)",
+      "Bash(rm *)",
       "Bash(rm -rf *)",
       "Bash(git push --force *)",
       "Bash(git reset --hard *)"

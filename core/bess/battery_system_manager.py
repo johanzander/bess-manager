@@ -425,12 +425,14 @@ class BatterySystemManager:
     def set_demo_mode(self, enabled: bool) -> None:
         """Switch between demo and live mode.
 
-        Sets the HA controller's test mode flag. When going live, delegates
-        one-time hardware initialization to the inverter controller.
+        Sets the HA controller's test mode flag. When going live, mirrors the
+        startup sequence: read current inverter state first (required by some
+        controllers before they can write SOC limits), then run hardware init.
         """
         self._controller.set_test_mode(enabled)
         if not enabled and self._inverter_controller is not None:
             try:
+                self._initialize_tou_schedule_from_inverter()
                 self._inverter_controller.initialize_hardware(self._controller)
             except Exception as e:
                 logger.warning(

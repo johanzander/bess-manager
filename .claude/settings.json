@@ -3,6 +3,7 @@
   "permissions": {
     "allow": [
       "Read",
+      "Skill",
       "Glob",
       "Grep",
       "Bash(.venv/bin/pytest *)",

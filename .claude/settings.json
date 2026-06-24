@@ -18,30 +18,18 @@
       "Bash(colima start)",
       "Bash(colima stop *)",
       "Bash(colima stop)",
-      "Bash(git commit:*)",
-      "Bash(git push:*)",
-      "Bash(git status)",
-      "Bash(git status *)",
-      "Bash(git diff *)",
-      "Bash(git log *)",
-      "Bash(git branch *)",
-      "Bash(find *)",
-      "Bash(ls *)",
-      "Bash(ls)",
-      "Bash(scripts/gh-agent.sh *)",
-      "Bash(gh issue *)",
-      "Bash(gh pr *)",
-      "Bash(gh api *)"
+      "Bash(git commit *)",
+      "Bash(git push *)"
     ],
     "deny": [
       "Bash(colima delete *)",
       "Bash(colima delete)"
     ],
     "ask": [
-      "Bash(git reset:*)",
-      "Bash(git rebase:*)",
-      "Bash(git merge:*)",
-      "Bash(rm:*)",
+      "Bash(git reset *)",
+      "Bash(git rebase *)",
+      "Bash(git merge *)",
+      "Bash(rm *)",
       "Bash(rm -rf *)",
       "Bash(git push --force *)",
       "Bash(git reset --hard *)"

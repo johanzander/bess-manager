@@ -63,12 +63,14 @@ When fixing bugs, follow this two-phase approach:
 1. Reproduce or verify the bug from logs/error output — do not guess at root causes
 2. Read the relevant source code and cite file:line for each finding
 3. List all callers and consumers of the affected code path (blast radius)
-4. Present findings as a numbered evidence sheet
+4. **Trace the full lifecycle**: for any initialization or setup failure, find the lifecycle method (`start()`, `__init__`, `setup()`) that already handles the responsibility. Ask explicitly: "is there code that already does this? Why is it not working?" Do not propose a new code path until you can answer why the existing one failed.
+5. Present findings as a numbered evidence sheet
 
 **Phase 2 — Fix proposal (still no edits):**
-5. Propose the minimal fix with rationale based on verified facts
-6. Flag any assumptions you could NOT verify
-7. Wait for approval before writing code
+6. Propose the minimal fix with rationale based on verified facts
+7. Flag any assumptions you could NOT verify
+8. **Red flag — shadow initialization**: if the proposed fix adds a new trigger for something already done in a lifecycle method, stop. The root cause is that the lifecycle method failed, not that a second path is needed. Fix the lifecycle method (or the reason it was skipped/blocked) instead.
+9. Wait for approval before writing code
 
 If a fix reveals another bug, fix it in the same cycle before releasing.
 Do not use beta releases as test runs — batch fixes locally until all tests pass.

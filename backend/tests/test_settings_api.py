@@ -522,14 +522,14 @@ class TestDemoMode:
         stored = mock_controller.settings_store.data.get("demo_mode", {})
         assert stored["enabled"] is True
 
-    def test_patch_demo_mode_applies_test_mode(self, mock_controller):
+    def test_patch_demo_mode_enable_calls_set_demo_mode(self, mock_controller):
         _client.patch("/api/settings", json={"demoMode": {"enabled": True}})
-        mock_controller.ha_controller.set_test_mode.assert_called_with(True)
+        mock_controller.system.set_demo_mode.assert_called_once_with(True)
 
-    def test_patch_demo_mode_disable_applies_test_mode_false(self, mock_controller):
+    def test_patch_demo_mode_disable_calls_set_demo_mode(self, mock_controller):
         mock_controller.settings_store.data["demo_mode"] = {"enabled": True}
         _client.patch("/api/settings", json={"demoMode": {"enabled": False}})
-        mock_controller.ha_controller.set_test_mode.assert_called_with(False)
+        mock_controller.system.set_demo_mode.assert_called_once_with(False)
 
     def test_get_settings_returns_demo_mode_enabled(self, mock_controller):
         """GET /api/settings round-trips demoMode after enabling it."""

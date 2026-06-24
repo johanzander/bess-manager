@@ -206,11 +206,10 @@ class SolaxModbusGrowattController(GrowattMinController):
         return 1, 0
 
     def read_and_initialize_from_hardware(self, controller, current_hour: int) -> None:
-        """Read TOU state from hardware, disable legacy segments 2-9, seed mode tracker.
+        """Read TOU state from hardware and seed the mode tracker.
 
-        On startup, reads all available TOU slots (1-9).  Any slot 2-9 that is
-        found and enabled gets disabled — this handles migration from the old
-        9-segment approach regardless of how many slots the user had enabled.
+        Reads all available TOU slots to determine segment 1's current mode
+        and sets up internal display state.  Pure read — no hardware writes.
 
         Args:
             controller: HomeAssistantAPIController instance
@@ -219,7 +218,31 @@ class SolaxModbusGrowattController(GrowattMinController):
         self.current_hour = current_hour
         segments = controller.read_tou_segments_from_entities()
 
-        # Disable any legacy segments 2-9 that are still enabled
+        # Seed mode tracker from segment 1
+        seg1 = next((s for s in segments if s["segment_id"] == 1), None)
+        if seg1 and seg1.get("enabled"):
+            self._last_written_tou_mode = seg1["batt_mode"]
+            logger.info(
+                "Modbus: initialised from hardware — segment 1 mode=%s",
+                self._last_written_tou_mode,
+            )
+        else:
+            self._last_written_tou_mode = "load_first"
+            logger.info(
+                "Modbus: initialised from hardware — no active TOU segment, defaulting to load_first"
+            )
+
+        # Set display state
+        self._update_tou_display_state()
+
+    def _disable_legacy_tou_slots(self, controller) -> None:
+        """Disable any TOU slots 2-9 still enabled from a previous 9-segment config.
+
+        On startup, reads all available TOU slots (1-9).  Any slot 2-9 that is
+        found enabled gets disabled — handles migration from the old 9-segment
+        approach regardless of how many slots the user had enabled.
+        """
+        segments = controller.read_tou_segments_from_entities()
         disabled_count = 0
         for seg in segments:
             if seg["segment_id"] >= 2 and seg.get("enabled", False):
@@ -243,22 +266,9 @@ class SolaxModbusGrowattController(GrowattMinController):
         if disabled_count > 0:
             logger.info("Migration: disabled %d legacy TOU slot(s)", disabled_count)
 
-        # Seed mode tracker from segment 1
-        seg1 = next((s for s in segments if s["segment_id"] == 1), None)
-        if seg1 and seg1.get("enabled"):
-            self._last_written_tou_mode = seg1["batt_mode"]
-            logger.info(
-                "Modbus: initialised from hardware — segment 1 mode=%s",
-                self._last_written_tou_mode,
-            )
-        else:
-            self._last_written_tou_mode = "load_first"
-            logger.info(
-                "Modbus: initialised from hardware — no active TOU segment, defaulting to load_first"
-            )
-
-        # Set display state
-        self._update_tou_display_state()
+    def initialize_hardware(self, controller) -> None:
+        self._disable_legacy_tou_slots(controller)
+        super().initialize_hardware(controller)
 
     # ── Schedule comparison ──────────────────────────────────────────────────
 
@@ -301,15 +311,6 @@ class SolaxModbusGrowattController(GrowattMinController):
 
         logger.info("DECISION: Modbus schedules match")
         return False, ""
-
-    # ── SOC limits ───────────────────────────────────────────────────────────
-
-    def sync_soc_limits(self, controller) -> None:
-        """Sync SOC limits from config to inverter hardware via entity writes.
-
-        Inherited from GrowattMinController — no change needed.
-        """
-        super().sync_soc_limits(controller)
 
     # ── TOU display ──────────────────────────────────────────────────────────
 

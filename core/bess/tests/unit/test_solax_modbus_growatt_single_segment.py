@@ -326,7 +326,7 @@ class TestReadAndInitialize:
             },
         ]
 
-        controller.read_and_initialize_from_hardware(mock_ha, current_hour=10)
+        controller.initialize_hardware(mock_ha)
 
         # Segments 2 and 3 should have been disabled
         disable_calls = [
@@ -357,7 +357,7 @@ class TestReadAndInitialize:
             },
         ]
 
-        controller.read_and_initialize_from_hardware(mock_ha, current_hour=10)
+        controller.initialize_hardware(mock_ha)
 
         # No disable writes should have been made (both already disabled)
         assert len(mock_ha.calls["tou_segments"]) == 0

@@ -4,6 +4,16 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.6.2] - 2026-06-24
+
+### Fixed
+
+- **SolaxModbus (GEN4): Load First defeated by EMS discharge register** — `apply_period()` was writing `discharge_rate=0` to the EMS register for all modes including `load_first`, overriding the inverter's own Load First logic and causing grid imports during periods that should rely on the battery. The EMS discharge register is now only written for `battery_first` and `grid_first` modes. (#166)
+- **SolaxModbus: optional preflight checks blocked "Enable Live Control"** — The `PreflightCheckDialog` treated `NOT_CONFIGURED` optional components (e.g. Solcast) as errors, preventing users from enabling live control when non-required integrations were absent. Optional checks are now correctly non-blocking. (#169)
+- **SolaxModbus: demo→live transition left inverter in bad state** — Switching from demo mode to live control skipped hardware initialization: TOU slots 2–9 from any prior 9-segment configuration were never cleaned up and SOC limits were never written, so the single-segment SolaxModbus controller could not start cleanly. Hardware initialization (disable legacy TOU slots, sync SOC limits) is now always performed on demo→live transition. (#169)
+- **Nordpool continental areas locked to SEK currency** — The discovery hint map only covered original Nord Pool members (SE/NO/DK/FI/EE/LT/LV/GB). For post-expansion areas (NL, BE, DE-LU, FR, AT, PL) no currency hint was returned, the SEK bootstrap default from `config.yaml` stayed in place, and the Settings UI locked the Currency field to SEK. Continental day-ahead areas are now mapped with their correct currency and VAT rate. (#163)
+- **SOLAR_STORAGE shown overnight when battery starts below minimum SOE** — When initial SOE was below `min_soe_kwh`, `_state_transition` clamped the next SOE up to the floor during IDLE periods. `_idle_battery_flows` was interpreting that clamp delta as passive solar charging, causing every overnight IDLE period to display as SOLAR_STORAGE even at 2 am with no solar production. Fixed by returning zero flows when `soe < min_soe_kwh`. (#161)
+
 ## [9.6.1] - 2026-06-21
 
 ### Fixed

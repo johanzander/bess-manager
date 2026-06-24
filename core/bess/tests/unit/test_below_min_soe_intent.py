@@ -43,7 +43,7 @@ def test_no_solar_storage_intent_when_initial_soe_below_minimum():
     )
 
     for pd in result.period_data:
-        assert pd.decision.strategic_intent != "SOLAR_STORAGE", (
+        assert pd.energy.battery_charged == pytest.approx(0.0), (
             f"Period {pd.period}: soe_start={pd.energy.battery_soe_start:.2f} kWh "
-            f"with zero solar must not be classified as SOLAR_STORAGE"
+            f"with zero solar must not register phantom battery charging"
         )

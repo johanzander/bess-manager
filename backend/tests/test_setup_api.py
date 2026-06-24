@@ -645,7 +645,7 @@ class TestSetupComplete:
         assert resp.status_code == 200
         stored = complete_controller.settings_store.data.get("demo_mode", {})
         assert stored["enabled"] is True
-        complete_controller.ha_controller.set_test_mode.assert_called_with(True)
+        complete_controller.system.set_demo_mode.assert_called_with(True)
 
 
 # ---------------------------------------------------------------------------
@@ -821,3 +821,30 @@ class TestDiscoverLocaleDefaults:
 
         assert store["home"]["currency"] == original_currency
         assert store["electricity_price"]["vat_multiplier"] == original_vat
+
+
+# ===========================================================================
+# POST /api/setup/complete — demo mode TOU reinitialization
+# ===========================================================================
+
+
+class TestSetupCompleteDemoMode:
+    """setup/complete must delegate demo mode changes to system.set_demo_mode."""
+
+    def test_disabling_demo_calls_set_demo_mode_false(self, complete_controller):
+        """demoMode=False in wizard payload must call set_demo_mode(False)."""
+        payload = _full_wizard_payload(demoMode=False)
+        _client.post("/api/setup/complete", json=payload)
+        complete_controller.system.set_demo_mode.assert_called_once_with(False)
+
+    def test_enabling_demo_calls_set_demo_mode_true(self, complete_controller):
+        """demoMode=True in wizard payload must call set_demo_mode(True)."""
+        payload = _full_wizard_payload(demoMode=True)
+        _client.post("/api/setup/complete", json=payload)
+        complete_controller.system.set_demo_mode.assert_called_once_with(True)
+
+    def test_absent_demo_mode_does_not_call_set_demo_mode(self, complete_controller):
+        """No demoMode in payload must NOT call set_demo_mode."""
+        payload = _full_wizard_payload()  # no demoMode key
+        _client.post("/api/setup/complete", json=payload)
+        complete_controller.system.set_demo_mode.assert_not_called()

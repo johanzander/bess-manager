@@ -34,12 +34,11 @@ interface for managing battery schedules and monitoring energy flows.
 ### Backend (Python)
 
 ```bash
-pip install -r backend/requirements.txt
-pytest -m "not slow"           # fast tests (~3s, recommended)
-pytest -m slow                 # algorithm/integration tests (~30min)
-pytest                         # run all tests
-black . && ruff check --fix .  # format and lint
-./scripts/quality-check.sh     # full quality gate
+.venv/bin/pytest -m "not slow"           # fast tests (~3s, recommended)
+.venv/bin/pytest -m slow                 # algorithm/integration tests (~30min)
+.venv/bin/pytest                         # run all tests
+.venv/bin/black . && .venv/bin/ruff check --fix .  # format and lint
+./scripts/quality-check.sh               # full quality gate
 ```
 
 ### Frontend (React/TypeScript)
@@ -138,6 +137,22 @@ of `analyzed`.
 - Do not revert intentional linter changes or simplifications without explicit instruction
 - After editing, list every file and symbol changed so the user can confirm nothing unrelated was touched
 - Never add speculative fallbacks, defensive error handling, or "robustness" improvements beyond what was asked
+
+## Cost Discipline
+
+The user pays per token. A long Opus session that re-reads a large context after
+every multi-minute wait is what runs up the bill — not the work itself.
+
+- **Default to Sonnet** (set in `.claude/settings.json`). Use Opus only for a
+  genuinely hard reasoning step, say so, and drop back. Don't run routine
+  coordination, iteration, CI-watching, or file edits on Opus.
+- **Never spawn Opus subagents**, and avoid agents for long-running watches
+  entirely; if delegation is truly needed, use a cheap model.
+- **Don't hold one big session across many long CI/test waits.** The prompt
+  cache expires after ~5 min, so each long wait forces a full uncached re-read
+  of the entire context. Prefer `/clear` between unrelated chunks, or let the
+  session sit idle rather than re-engaging every few minutes.
+- Don't re-dump large files or logs into context.
 
 ## Worktree Conventions
 

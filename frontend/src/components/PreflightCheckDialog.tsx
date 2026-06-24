@@ -27,9 +27,11 @@ export default function PreflightCheckDialog({ open, onClose, onConfirm }: Prefl
 
     api.get('/api/system-health')
       .then(({ data }) => {
-        const results: PreflightCheck[] = (data.checks || []).map((c: { name: string; status: string; description?: string }) => ({
+        const results: PreflightCheck[] = (data.checks || []).map((c: { name: string; status: string; description?: string; required?: boolean }) => ({
           name: c.name,
-          status: c.status === 'OK' ? 'ok' as const : 'error' as const,
+          // Optional components (required=false) never block live control,
+          // regardless of status (e.g. NOT_CONFIGURED for InfluxDB).
+          status: (c.status === 'OK' || c.required === false) ? 'ok' as const : 'error' as const,
           description: c.description,
         }));
         setChecks(results);

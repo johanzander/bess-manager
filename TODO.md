@@ -348,6 +348,38 @@ Report:
 
 ---
 
+## 🔵 **KNOWN ISSUES** (From Code Review — 2026-06-24)
+
+### Event Loop Blocking in demo→live Transition
+
+**Impact**: Low (only at mode switch) | **Effort**: Medium
+
+**Description**: `reinitialize_tou_schedule()` is called directly inside the `async def patch_settings` handler, which blocks the event loop while performing up to 36 synchronous HTTP calls to Home Assistant (reading all 9 TOU slots × 4 entities each). Should be offloaded to a background thread or thread pool executor.
+
+**File**: `backend/api.py` — `patch_settings` / `setup_complete`, `core/bess/ha_api_controller.py` — `read_tou_segments_from_entities`
+
+---
+
+### Startup Race: Concurrent `_initialize_tou_schedule_from_inverter` Calls
+
+**Impact**: Low | **Effort**: Low
+
+**Description**: `BatterySystemManager.start()` calls `_initialize_tou_schedule_from_inverter()` at startup, and the same underlying path is triggered again by `reinitialize_tou_schedule()` when switching demo→live. There is no threading lock protecting against concurrent calls. If both happen in rapid succession (fast live switch during startup), both threads may issue overlapping hardware writes.
+
+**File**: `core/bess/battery_system_manager.py`
+
+---
+
+### Optional Components with ERROR Status Shown as Green in PreflightCheckDialog
+
+**Impact**: Low | **Effort**: Low
+
+**Description**: `PreflightCheckDialog.tsx` maps `required=false` checks unconditionally to `status: 'ok'` (green CheckCircle). An InfluxDB component in a genuine ERROR state (misconfigured, not just NOT_CONFIGURED) would appear green, masking the problem. Consider using a neutral/warning icon (e.g. `AlertCircle`) for optional components that are ERROR, reserving green for OK status only.
+
+**File**: `frontend/src/components/PreflightCheckDialog.tsx` line 34
+
+---
+
 ## 🔄 **ARCHITECTURAL IMPROVEMENTS** (From Historical Design Analysis)
 
 ### 10. **Machine Learning Predictions**

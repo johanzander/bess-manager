@@ -64,8 +64,9 @@ export function AIAnalystSettings({ form, onChange }: Props) {
               onChange={e => onChange({ ...form, model: e.target.value })}
               className="mt-1 block w-full rounded-lg border bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
-              <option value="claude-sonnet-4-20250514">Claude Sonnet 4 (fast, recommended)</option>
-              <option value="claude-opus-4-20250514">Claude Opus 4 (deeper analysis, slower)</option>
+              <option value="claude-sonnet-4-6">Claude Sonnet 4.6 (fast, recommended)</option>
+              <option value="claude-opus-4-8">Claude Opus 4.8 (deeper analysis, slower)</option>
+              <option value="claude-haiku-4-5">Claude Haiku 4.5 (cheapest)</option>
             </select>
           </label>
 

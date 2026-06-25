@@ -4,6 +4,12 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Energy Prediction health check validates active consumption strategy** — The health check was hardcoded to validate `get_estimated_consumption` (the `sensor` strategy sensor) regardless of which strategy was configured, producing false-positive warnings for users running `fixed`, `influxdb_7d_avg`, or `ha_statistics`. The check now only validates `get_estimated_consumption` when `sensor` is the active strategy; solar forecast validation is unchanged. (#160)
+
 ## [9.6.2] - 2026-06-24
 
 ### Fixed

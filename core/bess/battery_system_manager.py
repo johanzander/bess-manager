@@ -1861,7 +1861,9 @@ class BatterySystemManager:
             )
 
             # Add timestamps to period data (algorithm is time-agnostic, operates on relative indices)
-            self._add_timestamps_to_period_data(result, optimization_period)
+            self._add_timestamps_to_period_data(
+                result, optimization_period, next_day=prepare_next_day
+            )
 
             # Print results table with strategic intents
             print_optimization_results(result, buy_prices, sell_prices)
@@ -1879,7 +1881,10 @@ class BatterySystemManager:
             return None
 
     def _add_timestamps_to_period_data(
-        self, result: OptimizationResult, optimization_period: int
+        self,
+        result: OptimizationResult,
+        optimization_period: int,
+        next_day: bool = False,
     ) -> None:
         """
         Add timestamps and correct period indices in period data after optimization.
@@ -1887,16 +1892,26 @@ class BatterySystemManager:
         The DP algorithm is time-agnostic and operates on relative period indices (0 to horizon-1).
         This method maps those relative indices to actual timestamps and period indices based on optimization_period.
 
+        When next_day=True the period indices (0-95) refer to tomorrow, so we offset
+        by today's period count before calling period_index_to_timestamp so that the
+        returned timestamps carry tomorrow's date instead of today's.
+
         Args:
             result: OptimizationResult containing period_data with relative periods (0, 1, 2, ...) and None timestamps
             optimization_period: The actual period index where optimization started (0-95 for today, 96-191 for tomorrow, etc.)
+            next_day: True when generating timestamps for the next-day schedule (prepare_next_day path)
         """
+        # For next-day schedules, period 0 means tomorrow 00:00.  period_index_to_timestamp
+        # anchors index 0 to today, so we shift by today's period count to land in tomorrow.
+        timestamp_offset = get_period_count(time_utils.today()) if next_day else 0
+
         for i, period_data in enumerate(result.period_data):
-            # Calculate actual period index
+            # Calculate actual period index (within the schedule's own day)
             actual_period = optimization_period + i
 
-            # Convert period index to timezone-aware timestamp using DST-safe utility
-            timestamp = period_index_to_timestamp(actual_period)
+            # Convert period index to timezone-aware timestamp using DST-safe utility.
+            # Add timestamp_offset so next-day periods resolve to tomorrow's date.
+            timestamp = period_index_to_timestamp(actual_period + timestamp_offset)
 
             # Update the period_data with correct period index and timestamp (dataclass is mutable)
             period_data.period = actual_period

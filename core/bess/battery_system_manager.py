@@ -1505,7 +1505,9 @@ class BatterySystemManager:
         except SystemConfigurationError:
             tomorrow_date = date.today() + timedelta(days=1)
             forecast = [0.0] * get_period_count(tomorrow_date)
-            logger.info("Tomorrow's solar forecast unavailable, using zeros")
+            logger.warning(
+                "Tomorrow's solar forecast unavailable (no solar sensor configured), using zeros"
+            )
             return forecast
 
     def _gather_optimization_data(
@@ -1552,13 +1554,23 @@ class BatterySystemManager:
             )
 
         if period_count > len(solar_predictions):
-            # Solar: use tomorrow's forecast if available, else zeros
-            tomorrow_solar = self._fetch_tomorrow_solar_forecast()
-            logger.info(
-                "Extended solar predictions with tomorrow's forecast (%d periods)",
-                len(tomorrow_solar),
-            )
-            solar_predictions = solar_predictions + tomorrow_solar
+            if prepare_next_day:
+                # prepare_next_day already fetched tomorrow's forecast.
+                # Extra periods are the DST fall-back hour (overnight → zero solar).
+                extra = period_count - len(solar_predictions)
+                solar_predictions = solar_predictions + [0.0] * extra
+                logger.info(
+                    "Extended solar predictions with %d zeros for DST fall-back extra periods",
+                    extra,
+                )
+            else:
+                # Extended horizon: fetch tomorrow's actual solar forecast for better optimization.
+                tomorrow_solar = self._fetch_tomorrow_solar_forecast()
+                logger.info(
+                    "Extended solar predictions with tomorrow's forecast (%d periods)",
+                    len(tomorrow_solar),
+                )
+                solar_predictions = solar_predictions + tomorrow_solar
 
         # --- Build data arrays ---
         consumption_data = [0.0] * period_count

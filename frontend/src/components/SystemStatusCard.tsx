@@ -133,8 +133,10 @@ interface SystemStatusCardProps {
 }
 
 
+const DASHBOARD_REFRESH_MS = 60000;
+
 const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", systemMode }) => {
-  const { data: dashboardData, loading: dashboardLoading, error: dashboardError } = useDashboardData();
+  const { data: dashboardData, loading: dashboardLoading, error: dashboardError } = useDashboardData(undefined, 'quarter-hourly', DASHBOARD_REFRESH_MS);
   const [inverterData, setInverterData] = useState<any>(null);
   const [inverterLoading, setInverterLoading] = useState(true);
   const [inverterError, setInverterError] = useState<string | null>(null);
@@ -156,6 +158,8 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", sys
     };
 
     fetchInverterData();
+    const interval = setInterval(fetchInverterData, DASHBOARD_REFRESH_MS);
+    return () => clearInterval(interval);
   }, []);
 
   const statusData = useMemo(() => {

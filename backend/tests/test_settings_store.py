@@ -556,3 +556,50 @@ def test_migrate_schema_adds_demo_mode_to_old_config(tmp_path, monkeypatch):
     }
     store._migrate_schema()
     assert store.data.get("demo_mode") == {"enabled": False}
+
+
+# ---------------------------------------------------------------------------
+# ai_analyst.model migration (legacy Claude 4.0 launch IDs → current)
+# ---------------------------------------------------------------------------
+
+
+def test_migrate_schema_rewrites_legacy_sonnet_4_id(tmp_path, monkeypatch):
+    _patch_path(tmp_path, monkeypatch)
+    store = SettingsStore()
+    store.data = {
+        "battery": {"total_capacity": 10.0},
+        "ai_analyst": {
+            "api_key": "sk-ant-xyz",
+            "model": "claude-sonnet-4-20250514",
+            "enabled": True,
+        },
+    }
+    store._migrate_schema()
+    assert store.data["ai_analyst"]["model"] == "claude-sonnet-4-6"
+    # Other fields are untouched
+    assert store.data["ai_analyst"]["api_key"] == "sk-ant-xyz"
+    assert store.data["ai_analyst"]["enabled"] is True
+
+
+def test_migrate_schema_rewrites_legacy_opus_4_id(tmp_path, monkeypatch):
+    _patch_path(tmp_path, monkeypatch)
+    store = SettingsStore()
+    store.data = {"ai_analyst": {"model": "claude-opus-4-20250514"}}
+    store._migrate_schema()
+    assert store.data["ai_analyst"]["model"] == "claude-opus-4-8"
+
+
+def test_migrate_schema_leaves_current_model_alone(tmp_path, monkeypatch):
+    _patch_path(tmp_path, monkeypatch)
+    store = SettingsStore()
+    store.data = {"ai_analyst": {"model": "claude-sonnet-4-6"}}
+    store._migrate_schema()
+    assert store.data["ai_analyst"]["model"] == "claude-sonnet-4-6"
+
+
+def test_migrate_schema_handles_missing_ai_analyst_section(tmp_path, monkeypatch):
+    _patch_path(tmp_path, monkeypatch)
+    store = SettingsStore()
+    store.data = {"battery": {"total_capacity": 10.0}}
+    store._migrate_schema()  # must not raise
+    assert "ai_analyst" not in store.data

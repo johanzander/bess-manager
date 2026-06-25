@@ -2358,9 +2358,12 @@ class HomeAssistantAPIController:
         - sensor.nordpool_kwh_se4_sek_2_10_025 -> SE4  (custom integration)
         - sensor.nordpool_kwh_no1_nok_3_10_025 -> NO1  (custom integration)
         - sensor.nord_pool_se3_current_price    -> SE3  (official HA)
+        - sensor.nordpool_kwh_nl_eur_2_10_025  -> NL   (HACS continental)
+        - nordpool_kwh_de-lu_eur_2_10_025      -> DE-LU (HACS DE-LU zone)
         """
         match = re.search(
-            r"(?:^|_)(se[1-4]|no[1-5]|dk[12]|fi|ee|lt|lv)(?:_|$)", entity_id
+            r"(?:^|_)(se[1-4]|no[1-5]|dk[12]|fi|ee|lt|lv|nl|be|de(?:-lu)?|fr|at|pl)(?:_|$)",
+            entity_id,
         )
         if match:
             return match.group(1).upper()

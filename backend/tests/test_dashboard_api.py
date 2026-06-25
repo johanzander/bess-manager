@@ -9,7 +9,6 @@ import sys
 from datetime import date, datetime
 from unittest.mock import MagicMock
 
-import pytest
 from api import router
 from fastapi import FastAPI
 from fastapi.testclient import TestClient

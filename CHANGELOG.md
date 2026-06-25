@@ -10,6 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- **Dashboard hourly view returned 500** — `_aggregate_quarterly_to_hourly` was never updated when `observedIntent` was added to `APIDashboardHourlyData` in 9.6.2, so every call to `GET /api/dashboard?resolution=hourly` crashed with a missing required argument.
 - **Inverter platform badge always showed "SolaX Modbus"** — `InverterStatusDashboard.tsx` compared `platform` against legacy short strings (`growatt_min`, `growatt_sph`, `solax`) that never matched the actual API values (`growatt_server_min`, `growatt_server_sph`, etc.), so every user fell through to the else branch and saw "SolaX Modbus". String matching is updated to the current API values. (#60)
 - **Growatt SPH TOU intervals rendered "Segment #undefined"** — `GrowattSphController.build_schedule` built `tou_intervals` without `segment_id` or `is_default` fields. The frontend template assumed both were always present, causing `isDefault` to render as falsy and the segment label to show as undefined. Both fields are now included. (#60)
 - **AI Analyst returned 404 errors on deprecated model IDs** — The AI Analyst feature used `claude-sonnet-4-20250514` and `claude-opus-4-20250514`, the Claude 4.0 launch IDs from May 2025. Anthropic deprecated these IDs (retirement date June 15 2026), causing 404 errors for all users. Updated to `claude-sonnet-4-6` and `claude-opus-4-8`. (#180)

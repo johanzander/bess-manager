@@ -328,7 +328,7 @@ function App() {
                   <Route path="/savings" element={<SavingsAnalysisPage />} />
                   <Route path="/inverter" element={<InverterPage />} />
                   <Route path="/settings" element={<SettingsPage />} />
-                  <Route path="/system-health" element={<Navigate to="/settings" replace />} />
+                  <Route path="/system-health" element={<Navigate to="/settings?tab=system" replace />} />
                   {/* Catch-all route: redirect any unmatched paths to dashboard */}
                   <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>

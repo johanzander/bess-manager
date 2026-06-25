@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Activity, Battery, Download, Home, Settings, Sun, Zap } from 'lucide-react';
 import api from '../lib/api';
 import { downloadDebugBundle } from '../lib/reportProblem';
@@ -62,9 +62,12 @@ const EMPTY_INVERTER: InverterForm = { inverterPlatform: 'growatt_server_min', d
 
 const SettingsPage: React.FC = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   // ── active tab ─────────────────────────────────────────────────────────
-  const [tab, setTab] = useState<Tab>('sensors');
+  const validTabs: Tab[] = ['home', 'pricing', 'battery', 'sensors', 'system'];
+  const initialTab = searchParams.get('tab') as Tab;
+  const [tab, setTab] = useState<Tab>(validTabs.includes(initialTab) ? initialTab : 'sensors');
 
   // ── form state ─────────────────────────────────────────────────────────
   const [batteryForm, setBatteryForm] = useState<BatteryForm>(EMPTY_BATTERY);

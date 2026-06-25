@@ -1347,6 +1347,16 @@ class HomeAssistantAPIController:
                 option=option,
             )
 
+            # SolaxModbus + Growatt MID workaround (issue #181):
+            # the select.<prefix>_begin/end entities are permanently `unavailable`
+            # with restored:true, and the integration silently drops writes to
+            # them while still returning success at HA's service layer. The
+            # parallel time.<X>_begin/end entities accept writes correctly.
+            # Mirror the begin/end write to the time.* entity if it exists;
+            # other entity_writes (enabled/mode) go through select.* fine.
+            if sensor_key.endswith("_begin") or sensor_key.endswith("_end"):
+                self._mirror_tou_time_to_time_entity(entity_id, option, sensor_key)
+
         # Press update button to commit the slot to inverter
         update_entity_id = self._get_entity_for_service(f"{prefix}_update")
         self._service_call_with_retry(
@@ -1355,6 +1365,49 @@ class HomeAssistantAPIController:
             operation=f"TOU slot {segment_id} commit",
             entity_id=update_entity_id,
         )
+
+    def _mirror_tou_time_to_time_entity(
+        self, select_entity_id: str, hhmm_value: str, sensor_key: str
+    ) -> None:
+        """Mirror a TOU begin/end select-write to the parallel time.* entity.
+
+        The SolaxModbus integration exposes time slot begin/end as both a
+        ``select.*_inverter_time_N_begin/end`` (broken on Growatt MID — writes
+        silently dropped) and a ``time.*_time_N_begin/end`` (works).  Derive
+        the time-domain entity_id from the select-domain one and write via
+        ``time.set_value``.  Skip silently if the time entity is missing or
+        the call errors — the select.* write is still attempted upstream so
+        platforms where it works are unaffected.
+        """
+        if not select_entity_id.startswith("select."):
+            return
+        time_entity_id = select_entity_id.replace("select.", "time.", 1).replace(
+            "_inverter_", "_", 1
+        )
+        # time.set_value expects HH:MM:SS
+        time_value = hhmm_value if hhmm_value.count(":") == 2 else f"{hhmm_value}:00"
+        try:
+            state = self._api_request(
+                "get", f"/api/states/{time_entity_id}", category="config"
+            )
+        except Exception:
+            return
+        if state is None or state.get("state") in ("unavailable", "unknown", None):
+            return
+        try:
+            self._service_call_with_retry(
+                "time",
+                "set_value",
+                operation=f"TOU {sensor_key} mirror → {time_entity_id}={time_value}",
+                entity_id=time_entity_id,
+                time=time_value,
+            )
+        except Exception as e:
+            logger.debug(
+                "TOU time.set_value mirror failed for %s: %s — relying on select.* path",
+                time_entity_id,
+                e,
+            )
 
     def read_tou_segments_from_entities(self) -> list[dict]:
         """Read all 9 TOU segments from solax_modbus entity states.

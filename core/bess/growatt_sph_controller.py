@@ -219,6 +219,7 @@ class GrowattSphController(InverterController):
                     "end_time": p["end_time"],
                     "batt_mode": "battery_first",
                     "enabled": True,
+                    "is_default": False,
                     "strategic_intent": "GRID_CHARGING",
                 }
             )
@@ -229,11 +230,14 @@ class GrowattSphController(InverterController):
                     "end_time": p["end_time"],
                     "batt_mode": "grid_first",
                     "enabled": True,
+                    "is_default": False,
                     "strategic_intent": "LOAD_SUPPORT/EXPORT_ARBITRAGE",
                 }
             )
-        # Sort by start time for display
+        # Sort by start time for display, then assign 1-based segment IDs
         self.tou_intervals.sort(key=lambda x: x["start_time"])
+        for idx, interval in enumerate(self.tou_intervals):
+            interval["segment_id"] = idx + 1
 
         logger.info(
             "SPH periods built: %d charge period(s), %d discharge period(s)",

@@ -13,6 +13,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - **Nord Pool Currency field always read-only in UI** — Both Nord Pool provider variants rendered the Currency input with `readOnly: true` unconditionally, preventing users from correcting a wrong auto-detected currency. The field is now editable when area or currency detection has not produced a value. (#171)
 - **Next-day schedule timestamps stamped with today's date** — The `prepare_next_day` path set `optimization_period=0` and then called `period_index_to_timestamp(0..95)`, which anchors index 0 to today. Period timestamps in the next-day schedule were therefore labeled `YYYY-MM-DD (today) HH:MM` instead of `YYYY-MM-DD (tomorrow) HH:MM`. `_add_timestamps_to_period_data` now accepts a `next_day` flag that offsets the period index by today's period count before timestamp conversion, so all periods resolve to tomorrow's date. (#155)
 
+### Refactored
+
+- **Unified `prepare_next_day` and extended-horizon data paths** — `_gather_optimization_data` previously had two independent branches that each fetched tomorrow's solar forecast and the consumption forecast separately. Any bug had to be fixed twice. The two branches now share a single fetch stage (`_fetch_tomorrow_solar_forecast` helper + cache-first consumption fetch) before diverging only for array-building. The 23:55 next-day publish and the rolling hourly run behave identically to before; only the duplication is removed. (#157)
+
 ## [9.6.2] - 2026-06-24
 
 ### Fixed

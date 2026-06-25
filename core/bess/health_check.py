@@ -323,7 +323,10 @@ def run_system_health_checks(system_manager):
     all_component_checks.extend(inverter_checks)
 
     # 3. & 4. SensorCollector (Battery Monitoring + Energy Monitoring) - operational sensors
-    sensor_collector_health = system_manager.sensor_collector.check_health()
+    active_consumption_strategy = system_manager.home_settings.consumption_strategy
+    sensor_collector_health = system_manager.sensor_collector.check_health(
+        active_consumption_strategy
+    )
     all_component_checks.extend(sensor_collector_health)
 
     # 5. Power Monitor (Power Monitoring) - real-time power flow tracking

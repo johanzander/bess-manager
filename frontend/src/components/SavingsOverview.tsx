@@ -282,10 +282,17 @@ export const SavingsOverview: React.FC<SavingsOverviewProps> = ({ resolution }) 
                 </td>
                 
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
-                  <div className={`font-medium ${getNumericValue(hour.gridExported) > 0 ? 'text-green-600 dark:text-green-400' : 'text-gray-400 dark:text-gray-500'}`}>
-                    {getDisplayValue(hour.gridExported)}
+                  <div className="flex flex-col items-center">
+                    <div className={`font-medium ${getNumericValue(hour.gridExported) > 0 ? 'text-green-600 dark:text-green-400' : 'text-gray-400 dark:text-gray-500'}`}>
+                      {getDisplayValue(hour.gridExported)}
+                    </div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(hour.gridExported)}</div>
+                    {(hour.batteryToGrid?.value ?? 0) > 0.05 && (
+                      <span className="mt-1 text-xs font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 px-1.5 py-0.5 rounded">
+                        BAT {hour.batteryToGrid?.display}
+                      </span>
+                    )}
                   </div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(hour.gridExported)}</div>
                 </td>
                 
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">

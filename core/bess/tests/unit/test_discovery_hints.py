@@ -355,6 +355,19 @@ class TestDiscoverHaMetadataNordpoolArea:
         result = self.ctrl.discover_ha_metadata(None)
         assert result["nordpool_area"] == "DE-LU"
 
+    def test_hacs_de_lu_underscore_entity_id_normalised(self, monkeypatch):
+        """Issue #171: HA slugifies DE-LU to 'de_lu', so entity IDs use underscore.
+
+        'nordpool_kwh_de_lu_eur_2_10_025' must be parsed to 'DE_LU', not 'DE'
+        (which would leave '_lu_eur_...' unmatched) and must not fall back to
+        raw.upper() which would alias to 'NO' (Norway) via the 2-char prefix.
+        """
+        entry = {"domain": "nordpool", "state": "loaded", "entry_id": "abc"}
+        devices = [self._nordpool_device("nordpool_kwh_de_lu_eur_2_10_025")]
+        monkeypatch.setattr(self.ctrl, "_ws_query", self._ws_stub([entry], devices))
+        result = self.ctrl.discover_ha_metadata(None)
+        assert result["nordpool_area"] == "DE_LU"
+
     def test_hacs_fr_identifier_normalised(self, monkeypatch):
         """Issue #171: HACS 'nordpool_kwh_fr_eur_2_10_025' → 'FR'."""
         entry = {"domain": "nordpool", "state": "loaded", "entry_id": "abc"}

@@ -57,7 +57,7 @@ export function PricingFormSection({ form, onChange }: Props) {
               {txtInput('Price Area', form.area, () => {}, 'Auto-detected…', { readOnly: true })}
               {txtInput('Currency', form.currency,
                 v => onChange({ ...form, currency: v }), 'Auto-detected…',
-                { readOnly: !!(form.area && form.currency) })}
+                { readOnly: !!(form.area && form.area.length <= 5 && form.currency) })}
             </div>
           </div>
         )}
@@ -70,7 +70,7 @@ export function PricingFormSection({ form, onChange }: Props) {
               {txtInput('Price Area', form.area, () => {}, 'Auto-detected…', { readOnly: true })}
               {txtInput('Currency', form.currency,
                 v => onChange({ ...form, currency: v }), 'Auto-detected…',
-                { readOnly: !!(form.area && form.currency) })}
+                { readOnly: !!(form.area && form.area.length <= 5 && form.currency) })}
             </div>
           </div>
         )}

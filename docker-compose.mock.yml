@@ -12,10 +12,10 @@ services:
       - HA_TOKEN=mock_token
       - HA_TEST_MODE=false
       - BESS_HISTORICAL_SEED_FILE=${BESS_HISTORICAL_SEED_FILE:-}
-      - HA_DB_URL=${HA_DB_URL:-}
-      - HA_DB_BUCKET=${HA_DB_BUCKET:-}
-      - HA_DB_USER_NAME=${HA_DB_USER_NAME:-}
-      - HA_DB_PASSWORD=${HA_DB_PASSWORD:-}
+      - HA_DB_URL=
+      - HA_DB_BUCKET=
+      - HA_DB_USER_NAME=
+      - HA_DB_PASSWORD=
       - FAKETIME=${MOCK_TIME:-}
     depends_on:
       - mock-ha

@@ -36,12 +36,8 @@ _CODEBASE_ROOT = _APP_DIR  # Docker: /app/
 if not (_CODEBASE_ROOT / "core" / "bess").exists():
     _CODEBASE_ROOT = _APP_DIR.parent  # Local dev: repo root
 
-# Domain knowledge file location.
-# In Docker: /app/agents/bess-knowledge.md  (copied from docs/agents/)
-# Local dev: <repo>/docs/agents/bess-knowledge.md
+# Domain knowledge file — mounted at the same path in dev and prod.
 _KNOWLEDGE_MD_PATH = _APP_DIR / "agents" / "bess-knowledge.md"
-if not _KNOWLEDGE_MD_PATH.exists():
-    _KNOWLEDGE_MD_PATH = _APP_DIR.parent / "docs" / "agents" / "bess-knowledge.md"
 
 # Directories the AI is allowed to read (relative to _CODEBASE_ROOT).
 _ALLOWED_DIRS = ("core/", "backend/", "docs/", "scripts/", ".claude/agents/")

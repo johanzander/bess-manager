@@ -393,7 +393,9 @@ class TestTouIntervalsStructure:
     them produces "Segment #undefined" and broken isDefault styling.
     """
 
-    def test_charge_interval_has_segment_id(self, manager: GrowattSphController) -> None:
+    def test_charge_interval_has_segment_id(
+        self, manager: GrowattSphController
+    ) -> None:
         intents = make_intents({2: "GRID_CHARGING", 3: "GRID_CHARGING"})
         manager.create_schedule(make_schedule_mock(intents))
 
@@ -403,7 +405,9 @@ class TestTouIntervalsStructure:
             assert isinstance(interval["segment_id"], int)
             assert interval["segment_id"] >= 1
 
-    def test_discharge_interval_has_segment_id(self, manager: GrowattSphController) -> None:
+    def test_discharge_interval_has_segment_id(
+        self, manager: GrowattSphController
+    ) -> None:
         intents = make_intents({18: "LOAD_SUPPORT", 19: "LOAD_SUPPORT"})
         manager.create_schedule(make_schedule_mock(intents))
 
@@ -413,7 +417,9 @@ class TestTouIntervalsStructure:
             assert isinstance(interval["segment_id"], int)
             assert interval["segment_id"] >= 1
 
-    def test_active_intervals_have_is_default_false(self, manager: GrowattSphController) -> None:
+    def test_active_intervals_have_is_default_false(
+        self, manager: GrowattSphController
+    ) -> None:
         intents = make_intents({2: "GRID_CHARGING", 18: "LOAD_SUPPORT"})
         manager.create_schedule(make_schedule_mock(intents))
 
@@ -421,8 +427,12 @@ class TestTouIntervalsStructure:
             assert "is_default" in interval, "tou_intervals entry missing is_default"
             assert interval["is_default"] is False
 
-    def test_segment_ids_are_sequential_from_one(self, manager: GrowattSphController) -> None:
-        intents = make_intents({2: "GRID_CHARGING", 14: "GRID_CHARGING", 18: "LOAD_SUPPORT"})
+    def test_segment_ids_are_sequential_from_one(
+        self, manager: GrowattSphController
+    ) -> None:
+        intents = make_intents(
+            {2: "GRID_CHARGING", 14: "GRID_CHARGING", 18: "LOAD_SUPPORT"}
+        )
         manager.create_schedule(make_schedule_mock(intents))
 
         ids = [i["segment_id"] for i in manager.tou_intervals]

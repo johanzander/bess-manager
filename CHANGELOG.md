@@ -9,6 +9,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ### Fixed
 
 - **Energy Prediction health check validates active consumption strategy** — The health check was hardcoded to validate `get_estimated_consumption` (the `sensor` strategy sensor) regardless of which strategy was configured, producing false-positive warnings for users running `fixed`, `influxdb_7d_avg`, or `ha_statistics`. The check now only validates `get_estimated_consumption` when `sensor` is the active strategy; solar forecast validation is unchanged. (#160)
+- **Nord Pool HACS continental areas mapped to Norway** — The entity-id regex in `_parse_nordpool_area_from_entity_id` only matched original Nord Pool members (SE/NO/DK/FI/EE/LT/LV). HACS users with continental area codes (NL, BE, DE, DE-LU, FR, AT, PL) got `None` from the parser; the `raw.upper()` fallback produced a long string starting with "NO", so `_hints_from_nordpool_area` read the "NO" prefix and returned Norwegian krone instead of the correct currency. The regex is extended to cover all continental areas. (#171)
+- **Nord Pool Currency field always read-only in UI** — Both Nord Pool provider variants rendered the Currency input with `readOnly: true` unconditionally, preventing users from correcting a wrong auto-detected currency. The field is now editable when area or currency detection has not produced a value. (#171)
 
 ## [9.6.2] - 2026-06-24
 

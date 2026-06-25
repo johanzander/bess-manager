@@ -473,7 +473,7 @@ class AIAnalystService:
         return {
             "configured": bool(api_key),
             "enabled": cfg.get("enabled", True),
-            "model": cfg.get("model", "claude-sonnet-4-20250514"),
+            "model": cfg.get("model", "claude-sonnet-4-6"),
         }
 
     def start_session(self, system_manager) -> dict:
@@ -538,7 +538,7 @@ class AIAnalystService:
             )
             return
 
-        model = cfg.get("model", "claude-sonnet-4-20250514")
+        model = cfg.get("model", "claude-sonnet-4-6")
         system_prompt = self._build_full_system_prompt(session.system_context)
 
         try:

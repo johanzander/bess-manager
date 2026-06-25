@@ -572,6 +572,27 @@ class SettingsStore:
             self.data["demo_mode"] = {"enabled": False}
             changed = True
 
+        # --- ai_analyst: rewrite deprecated Claude 4.0 launch model IDs ---
+        # claude-{sonnet,opus}-4-20250514 return 404 ahead of their 2026-06-15
+        # retirement; rewrite persisted configs so existing users don't have to
+        # touch Settings → System → AI Analyst manually.
+        ai_analyst = self.data.get("ai_analyst")
+        if isinstance(ai_analyst, dict):
+            _AI_MODEL_RENAMES = {
+                "claude-sonnet-4-20250514": "claude-sonnet-4-6",
+                "claude-opus-4-20250514": "claude-opus-4-8",
+            }
+            current_model = ai_analyst.get("model")
+            if current_model in _AI_MODEL_RENAMES:
+                new_model = _AI_MODEL_RENAMES[current_model]
+                ai_analyst["model"] = new_model
+                logger.info(
+                    "Schema migration: ai_analyst.model %s → %s (legacy ID retired)",
+                    current_model,
+                    new_model,
+                )
+                changed = True
+
         if changed:
             self._write(self.data)
 

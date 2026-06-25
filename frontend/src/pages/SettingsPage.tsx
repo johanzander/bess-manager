@@ -72,7 +72,7 @@ const SettingsPage: React.FC = () => {
   const [pricingForm, setPricingForm] = useState<PricingForm>(EMPTY_PRICING);
   const [inverterForm, setInverterForm] = useState<InverterForm>(EMPTY_INVERTER);
   const [sensors, setSensors] = useState<PerPlatformSensors>(emptyPerPlatformSensors());
-  const [aiForm, setAiForm] = useState<AIAnalystForm>({ apiKey: '', model: 'claude-sonnet-4-20250514', enabled: true });
+  const [aiForm, setAiForm] = useState<AIAnalystForm>({ apiKey: '', model: 'claude-sonnet-4-6', enabled: true });
   const [demoEnabled, setDemoEnabled] = useState(false);
   const [savedDemoEnabled, setSavedDemoEnabled] = useState(false);
   const [showEnableDemoConfirm, setShowEnableDemoConfirm] = useState(false);
@@ -216,7 +216,7 @@ const SettingsPage: React.FC = () => {
       const ai_s = s.aiAnalyst ?? {};
       const ai: AIAnalystForm = {
         apiKey: ai_s.apiKey ?? '',
-        model: ai_s.model ?? 'claude-sonnet-4-20250514',
+        model: ai_s.model ?? 'claude-sonnet-4-6',
         enabled: ai_s.enabled ?? true,
       };
       setAiForm(ai);

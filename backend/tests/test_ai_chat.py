@@ -85,13 +85,13 @@ class TestGetStatus:
         service = _make_service(
             {
                 "api_key": "sk-ant-test",
-                "model": "claude-opus-4-20250514",
+                "model": "claude-opus-4-8",
                 "enabled": True,
             }
         )
         status = service.get_status()
         assert status["configured"] is True
-        assert status["model"] == "claude-opus-4-20250514"
+        assert status["model"] == "claude-opus-4-8"
 
     def test_disabled(self):
         service = _make_service({"api_key": "sk-ant-test", "enabled": False})

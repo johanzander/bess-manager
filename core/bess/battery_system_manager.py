@@ -1498,6 +1498,18 @@ class BatterySystemManager:
             logger.error(f"Failed to get battery SOC: {e}")
             return None
 
+    def _fetch_tomorrow_solar_forecast(self) -> list[float]:
+        """Fetch tomorrow's solar forecast, falling back to zeros if unavailable."""
+        try:
+            return self.controller.get_solar_forecast_tomorrow()
+        except SystemConfigurationError:
+            tomorrow_date = date.today() + timedelta(days=1)
+            forecast = [0.0] * get_period_count(tomorrow_date)
+            logger.warning(
+                "Tomorrow's solar forecast unavailable (no solar sensor configured), using zeros"
+            )
+            return forecast
+
     def _gather_optimization_data(
         self, period: int, current_soc: float, prepare_next_day: bool, period_count: int
     ) -> tuple[int, dict[str, list[float]]] | None:
@@ -1516,7 +1528,51 @@ class BatterySystemManager:
 
         current_soe = current_soc / 100.0 * self.battery_settings.total_capacity
 
-        # Build arrays dynamically based on period_count (handles DST)
+        # --- Fetch predictions (shared, cache-first) ---
+        # Use cached predictions when available to avoid re-fetching
+        # expensive data sources (e.g. InfluxDB 7-day avg) every cycle
+        consumption_predictions = (
+            self._consumption_predictions
+            if self._consumption_predictions
+            else self._get_consumption_forecast()
+        )
+
+        if prepare_next_day:
+            # The next-day schedule must be built from tomorrow's solar forecast, not today's.
+            solar_predictions = self._fetch_tomorrow_solar_forecast()
+        else:
+            solar_predictions = self.controller.get_solar_forecast()
+
+        # --- Extend arrays to match period_count when horizon spans tomorrow ---
+        if period_count > len(consumption_predictions):
+            # Consumption: repeat today's uniform pattern for tomorrow
+            tomorrow_consumption = consumption_predictions.copy()
+            consumption_predictions = consumption_predictions + tomorrow_consumption
+            logger.info(
+                "Extended consumption predictions to %d periods for tomorrow horizon",
+                len(consumption_predictions),
+            )
+
+        if period_count > len(solar_predictions):
+            if prepare_next_day:
+                # prepare_next_day already fetched tomorrow's forecast.
+                # Extra periods are the DST fall-back hour (overnight → zero solar).
+                extra = period_count - len(solar_predictions)
+                solar_predictions = solar_predictions + [0.0] * extra
+                logger.info(
+                    "Extended solar predictions with %d zeros for DST fall-back extra periods",
+                    extra,
+                )
+            else:
+                # Extended horizon: fetch tomorrow's actual solar forecast for better optimization.
+                tomorrow_solar = self._fetch_tomorrow_solar_forecast()
+                logger.info(
+                    "Extended solar predictions with tomorrow's forecast (%d periods)",
+                    len(tomorrow_solar),
+                )
+                solar_predictions = solar_predictions + tomorrow_solar
+
+        # --- Build data arrays ---
         consumption_data = [0.0] * period_count
         solar_data = [0.0] * period_count
         combined_soe = [0.0] * period_count
@@ -1524,78 +1580,21 @@ class BatterySystemManager:
         solar_charged = [0.0] * period_count
 
         if prepare_next_day:
-            # For next day, use predictions only
-            # Use cached predictions when available to avoid re-fetching
-            # expensive data sources (e.g. InfluxDB 7-day avg) every cycle
-            consumption_predictions = (
-                self._consumption_predictions
-                if self._consumption_predictions
-                else self._get_consumption_forecast()
-            )
-            # The next-day schedule must be built from tomorrow's solar forecast,
-            # not today's. Mirror the extended-horizon branch's zeros fallback when
-            # tomorrow's forecast is unavailable.
-            try:
-                solar_predictions = self.controller.get_solar_forecast_tomorrow()
-            except SystemConfigurationError:
-                tomorrow_date = date.today() + timedelta(days=1)
-                solar_predictions = [0.0] * get_period_count(tomorrow_date)
-                logger.info(
-                    "Tomorrow's solar forecast unavailable, using zeros for next-day schedule"
-                )
-
-            consumption_data = consumption_predictions
-            solar_data = solar_predictions
-
-            # Seed the next-day plan from the real current SOC. This runs at
-            # 23:55, so current SOC is ~= tomorrow's starting SOC; assuming min
-            # SOC here would discard energy actually in the battery.
+            # Next-day plan: all periods are predictions (no actuals for tomorrow).
+            # Seed from real current SOC — at 23:55, current SOC ≈ tomorrow's starting SOC.
+            consumption_data = list(consumption_predictions[:period_count])
+            solar_data = list(solar_predictions[:period_count])
             combined_soe = [current_soe] * period_count
-
             optimization_period = 0
 
         else:
-            # For today, properly calculate SOC progression
+            # Regular run: use actuals for past periods, predictions for current + future
             today_periods = self.historical_store.get_today_periods()
             completed_periods = [
                 i for i, p in enumerate(today_periods) if p is not None
             ]
-            # Use cached predictions when available to avoid re-fetching
-            # expensive data sources (e.g. InfluxDB 7-day avg) every cycle
-            predictions_consumption = (
-                self._consumption_predictions
-                if self._consumption_predictions
-                else self._get_consumption_forecast()
-            )
-            predictions_solar = self.controller.get_solar_forecast()
 
-            # Extend predictions for tomorrow when horizon exceeds today
-            if period_count > len(predictions_consumption):
-                # Consumption: repeat today's uniform pattern for tomorrow
-                tomorrow_consumption = predictions_consumption.copy()
-                predictions_consumption = predictions_consumption + tomorrow_consumption
-                logger.info(
-                    "Extended consumption predictions to %d periods for tomorrow horizon",
-                    len(predictions_consumption),
-                )
-
-            if period_count > len(predictions_solar):
-                # Solar: use tomorrow's forecast if available, else zeros
-                try:
-                    tomorrow_solar = self.controller.get_solar_forecast_tomorrow()
-                    logger.info(
-                        "Extended solar predictions with tomorrow's forecast (%d periods)",
-                        len(tomorrow_solar),
-                    )
-                except SystemConfigurationError:
-                    tomorrow_date = date.today() + timedelta(days=1)
-                    tomorrow_solar = [0.0] * get_period_count(tomorrow_date)
-                    logger.info(
-                        "Tomorrow's solar forecast unavailable, using zeros for extended horizon"
-                    )
-                predictions_solar = predictions_solar + tomorrow_solar
-
-            # Track running SOC for proper progression
+            # Track running SOC for proper SOE progression
             running_soe = current_soe
 
             for p in range(period_count):
@@ -1618,24 +1617,24 @@ class BatterySystemManager:
                     else:
                         # Fallback to predictions if event missing
                         consumption_data[p] = (
-                            predictions_consumption[p]
-                            if p < len(predictions_consumption)
+                            consumption_predictions[p]
+                            if p < len(consumption_predictions)
                             else 1.0
                         )
                         solar_data[p] = (
-                            predictions_solar[p] if p < len(predictions_solar) else 0.0
+                            solar_predictions[p] if p < len(solar_predictions) else 0.0
                         )
                         # Use the last known SOE for missing data
                         combined_soe[p] = running_soe
                 else:
                     # Use predictions for current and future periods
                     consumption_data[p] = (
-                        predictions_consumption[p]
-                        if p < len(predictions_consumption)
+                        consumption_predictions[p]
+                        if p < len(consumption_predictions)
                         else 1.0
                     )
                     solar_data[p] = (
-                        predictions_solar[p] if p < len(predictions_solar) else 0.0
+                        solar_predictions[p] if p < len(solar_predictions) else 0.0
                     )
 
                     # Set correct SOE for optimization starting point
@@ -1861,7 +1860,9 @@ class BatterySystemManager:
             )
 
             # Add timestamps to period data (algorithm is time-agnostic, operates on relative indices)
-            self._add_timestamps_to_period_data(result, optimization_period)
+            self._add_timestamps_to_period_data(
+                result, optimization_period, next_day=prepare_next_day
+            )
 
             # Print results table with strategic intents
             print_optimization_results(result, buy_prices, sell_prices)
@@ -1879,24 +1880,41 @@ class BatterySystemManager:
             return None
 
     def _add_timestamps_to_period_data(
-        self, result: OptimizationResult, optimization_period: int
+        self,
+        result: OptimizationResult,
+        optimization_period: int,
+        next_day: bool = False,
     ) -> None:
         """
         Add timestamps and correct period indices in period data after optimization.
 
         The DP algorithm is time-agnostic and operates on relative period indices (0 to horizon-1).
-        This method maps those relative indices to actual timestamps and period indices based on optimization_period.
+        This method maps those relative indices to actual timestamps and period indices based on
+        optimization_period.
+
+        For next-day plans (prepare_next_day=True), pass timestamp_base=today_period_count so
+        that timestamps land on tomorrow's date rather than today's (fixes issue #155).
+
+        When next_day=True the period indices (0-95) refer to tomorrow, so we offset
+        by today's period count before calling period_index_to_timestamp so that the
+        returned timestamps carry tomorrow's date instead of today's.
 
         Args:
             result: OptimizationResult containing period_data with relative periods (0, 1, 2, ...) and None timestamps
             optimization_period: The actual period index where optimization started (0-95 for today, 96-191 for tomorrow, etc.)
+            next_day: True when generating timestamps for the next-day schedule (prepare_next_day path)
         """
+        # For next-day schedules, period 0 means tomorrow 00:00.  period_index_to_timestamp
+        # anchors index 0 to today, so we shift by today's period count to land in tomorrow.
+        timestamp_offset = get_period_count(time_utils.today()) if next_day else 0
+
         for i, period_data in enumerate(result.period_data):
-            # Calculate actual period index
+            # Calculate actual period index (within the schedule's own day)
             actual_period = optimization_period + i
 
-            # Convert period index to timezone-aware timestamp using DST-safe utility
-            timestamp = period_index_to_timestamp(actual_period)
+            # Convert period index to timezone-aware timestamp using DST-safe utility.
+            # Add timestamp_offset so next-day periods resolve to tomorrow's date.
+            timestamp = period_index_to_timestamp(actual_period + timestamp_offset)
 
             # Update the period_data with correct period index and timestamp (dataclass is mutable)
             period_data.period = actual_period

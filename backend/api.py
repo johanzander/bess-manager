@@ -606,11 +606,28 @@ async def get_dashboard_data(
                     time_utils.today() + timedelta(days=1)
                 )
                 tomorrow_periods = []
+                # Standalone next-day schedule (prepare_next_day path): opt_period=0
+                # and period_data[0] carries tomorrow's date. In that case
+                # period_data[0..95] maps to tomorrow's periods 0..95, so the anchor
+                # is today_period_count rather than opt_period.
+                # Regular schedules (including midnight runs with extended horizon)
+                # have opt_period > 0 or period_data large enough to include tomorrow,
+                # so they continue to use opt_period as the anchor.
+                is_next_day_only = (
+                    opt_period == 0
+                    and bool(opt_result.period_data)
+                    and opt_result.period_data[0].timestamp is not None
+                    and opt_result.period_data[0].timestamp.date()
+                    == time_utils.today() + timedelta(days=1)
+                )
+                period_data_anchor = (
+                    today_period_count if is_next_day_only else opt_period
+                )
                 for period_idx in range(
                     today_period_count,
                     today_period_count + tomorrow_period_count,
                 ):
-                    data_idx = period_idx - opt_period
+                    data_idx = period_idx - period_data_anchor
                     if 0 <= data_idx < len(opt_result.period_data):
                         tomorrow_periods.append(opt_result.period_data[data_idx])
                 if tomorrow_periods:
@@ -1603,11 +1620,22 @@ async def get_growatt_detailed_schedule():
                     time_utils.today() + timedelta(days=1)
                 )
                 tomorrow_intents = []
+                # Standalone next-day schedule: same anchor adjustment as dashboard.
+                is_next_day_only = (
+                    opt_period == 0
+                    and bool(opt_result.period_data)
+                    and opt_result.period_data[0].timestamp is not None
+                    and opt_result.period_data[0].timestamp.date()
+                    == time_utils.today() + timedelta(days=1)
+                )
+                period_data_anchor = (
+                    today_period_count if is_next_day_only else opt_period
+                )
                 for period_idx in range(
                     today_period_count,
                     today_period_count + tomorrow_period_count,
                 ):
-                    data_idx = period_idx - opt_period
+                    data_idx = period_idx - period_data_anchor
                     if 0 <= data_idx < len(opt_result.period_data):
                         tomorrow_intents.append(
                             opt_result.period_data[data_idx].decision.strategic_intent

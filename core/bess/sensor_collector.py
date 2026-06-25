@@ -742,23 +742,29 @@ class SensorCollector:
             ],
         )
 
-    def check_prediction_health(self) -> dict:
-        """Check prediction health, with no sensors required (nice-to-have for optimization)."""
+    def check_prediction_health(self, consumption_strategy: str = "sensor") -> dict:
+        """Check prediction health for the active consumption strategy.
+
+        Only validates the ``get_estimated_consumption`` sensor when the
+        ``sensor`` strategy is active — other strategies (fixed,
+        influxdb_7d_avg, ha_statistics) do not rely on that HA sensor.
+        """
+        all_methods = ["get_solar_forecast"]
+        if consumption_strategy == "sensor":
+            all_methods = ["get_estimated_consumption", *all_methods]
+
         return perform_health_check(
             component_name="Energy Prediction",
             description="Solar and consumption forecasting for optimization",
             is_required=False,
             controller=self.ha_controller,
-            all_methods=[
-                "get_estimated_consumption",
-                "get_solar_forecast",
-            ],
+            all_methods=all_methods,
         )
 
-    def check_health(self) -> list:
+    def check_health(self, consumption_strategy: str = "sensor") -> list:
         """Check ALL sensor data collection capabilities - returns list of separate checks."""
         return [
             self.check_battery_health(),
             self.check_energy_health(),
-            self.check_prediction_health(),
+            self.check_prediction_health(consumption_strategy),
         ]

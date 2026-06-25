@@ -4,13 +4,20 @@ These tests exercise orchestration methods that do NOT require the DP optimizer,
 using MockHomeAssistantController from conftest.
 """
 
+from datetime import datetime, timedelta
 from unittest.mock import patch
 
 import pytest
 
 from core.bess.battery_system_manager import BatterySystemManager
 from core.bess.exceptions import SystemConfigurationError
+from core.bess.models import (
+    EnergyData,
+    OptimizationResult,
+    PeriodData,
+)
 from core.bess.price_manager import MockSource
+from core.bess.time_utils import TIMEZONE
 
 _DEFAULT_OPTIONS = {"inverter": {"platform": "growatt_server_min"}}
 
@@ -314,3 +321,68 @@ class TestSetDemoMode:
         system._inverter_controller.initialize_hardware = MagicMock()
         system.set_demo_mode(True)
         system._inverter_controller.initialize_hardware.assert_not_called()
+
+
+def _make_minimal_optimization_result(count: int) -> OptimizationResult:
+    """Build a minimal OptimizationResult with *count* PeriodData entries."""
+    energy = EnergyData(
+        solar_production=0.0,
+        home_consumption=0.5,
+        battery_charged=0.0,
+        battery_discharged=0.0,
+        grid_imported=0.5,
+        grid_exported=0.0,
+        battery_soe_start=5.0,
+        battery_soe_end=5.0,
+    )
+    return OptimizationResult(
+        input_data={},
+        period_data=[
+            PeriodData(period=i, energy=energy, timestamp=None) for i in range(count)
+        ],
+    )
+
+
+class TestAddTimestampsToPeriodData:
+    """_add_timestamps_to_period_data must stamp next-day schedules with tomorrow's date.
+
+    Regression for issue #155: the prepare_next_day path set optimization_period=0
+    and called period_index_to_timestamp(0..95), which resolves to today's date.
+    The fix offsets by today's period count so the timestamps land on tomorrow.
+    """
+
+    @patch("core.bess.time_utils.datetime")
+    def test_next_day_timestamps_carry_tomorrows_date(self, mock_datetime, system):
+        """When next_day=True, every period timestamp must have tomorrow's date."""
+        fixed_now = datetime(2025, 11, 15, 23, 55, tzinfo=TIMEZONE)
+        mock_datetime.now.return_value = fixed_now
+        mock_datetime.combine = datetime.combine
+
+        result = _make_minimal_optimization_result(4)
+        system._add_timestamps_to_period_data(
+            result, optimization_period=0, next_day=True
+        )
+
+        expected_date = fixed_now.date() + timedelta(days=1)
+        for pd in result.period_data:
+            assert pd.timestamp is not None
+            assert (
+                pd.timestamp.date() == expected_date
+            ), f"Period {pd.period}: got {pd.timestamp.date()}, want {expected_date}"
+
+    @patch("core.bess.time_utils.datetime")
+    def test_today_timestamps_carry_todays_date(self, mock_datetime, system):
+        """When next_day=False, every period timestamp must have today's date."""
+        fixed_now = datetime(2025, 11, 15, 12, 0, tzinfo=TIMEZONE)
+        mock_datetime.now.return_value = fixed_now
+        mock_datetime.combine = datetime.combine
+
+        result = _make_minimal_optimization_result(4)
+        system._add_timestamps_to_period_data(
+            result, optimization_period=0, next_day=False
+        )
+
+        expected_date = fixed_now.date()
+        for pd in result.period_data:
+            assert pd.timestamp is not None
+            assert pd.timestamp.date() == expected_date

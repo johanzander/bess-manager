@@ -131,7 +131,7 @@ interface EnergyFlowCardsProps {
 }
 
 const EnergyFlowCards: React.FC<EnergyFlowCardsProps> = ({ className = "" }) => {
-  const { data: apiData, loading: isLoading, error } = useDashboardData();
+  const { data: apiData, loading: isLoading, error } = useDashboardData(undefined, 'quarter-hourly', 60000);
 
   if (isLoading) {
     return (

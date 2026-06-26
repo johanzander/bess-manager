@@ -233,8 +233,15 @@ def _state_transition(
         actual_discharge = min(discharge_energy, available_energy)
         next_soe = soe - actual_discharge
 
-    else:  # Hold / IDLE — EXPORT disposition: surplus is exported, battery holds
-        next_soe = soe
+    else:  # IDLE — passive solar charging (mirrors load_first hardware behavior)
+        surplus = max(0.0, solar_production - home_consumption)
+        room_throughput = (
+            battery_settings.max_soe_kwh - soe
+        ) / battery_settings.efficiency_charge
+        rate_throughput = battery_settings.max_charge_power_kw * dt
+        solar_to_battery = min(surplus, rate_throughput, room_throughput)
+        charge_energy = solar_to_battery * battery_settings.efficiency_charge
+        next_soe = min(battery_settings.max_soe_kwh, soe + charge_energy)
 
     # Ensure SOE stays within physical bounds
     next_soe = min(
@@ -391,11 +398,14 @@ def _compute_reward(
         if effective_value_per_kwh_stored <= effective_cost_basis:
             return float("-inf"), cost_basis
 
-    else:  # IDLE — EXPORT disposition: battery holds, surplus exported
-        battery_wear_cost = 0.0
-        # battery_charged/battery_discharged already 0 from _idle_battery_flows;
-        # with next_soe == soe, _idle_battery_flows returns (0.0, 0.0), so the
-        # energy_balance below exports the full surplus and credits it.
+    else:  # IDLE — passive solar charging
+        energy_stored = next_soe - soe  # kWh stored in battery after efficiency
+        battery_wear_cost = energy_stored * battery_settings.cycle_cost_per_kwh
+        if energy_stored > 0 and next_soe > battery_settings.min_soe_kwh:
+            solar_opportunity_cost = battery_charged * current_sell_price
+            new_cost_basis = (
+                soe * cost_basis + solar_opportunity_cost + battery_wear_cost
+            ) / next_soe
 
     # ============================================================================
     # REWARD CALCULATION
@@ -473,11 +483,8 @@ def _build_period_data(
         battery_soe_end=next_soe,
     )
 
-    if power > POWER_TOLERANCE_KW:  # STORE disposition
-        energy_stored = next_soe - soe
-        battery_wear_cost = energy_stored * battery_settings.cycle_cost_per_kwh
-    else:
-        battery_wear_cost = 0.0
+    energy_stored = max(0.0, next_soe - soe)
+    battery_wear_cost = energy_stored * battery_settings.cycle_cost_per_kwh
 
     import_cost = grid_imported * current_buy_price
     export_revenue = grid_exported * current_sell_price

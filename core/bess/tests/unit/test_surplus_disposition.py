@@ -11,19 +11,21 @@ PRICES_BUY = [1.0]
 PRICES_SELL = [0.8]
 
 
-def test_idle_exports_surplus_and_holds_battery():
-    """TARGET: idle (power=0) is the EXPORT disposition — surplus is exported,
-    battery holds (does NOT passively store)."""
+def test_idle_passively_charges_from_solar_surplus():
+    """idle (power=0) mirrors load_first hardware: surplus charges the battery
+    passively up to max_charge_rate/room; only overflow exports to grid."""
     bs = make_battery_settings(max_charge_power_kw=10.0)
+    # surplus = 1.5 - 0.1 = 1.4 kWh; rate_throughput = 10*0.25 = 2.5 kWh; all fits
     next_soe = _state_transition(
         5.0, 0.0, bs, DT, solar_production=1.5, home_consumption=0.1
     )
-    assert next_soe == 5.0  # battery holds; surplus exported, not stored
+    expected_stored = 1.4 * bs.efficiency_charge  # 1.4 * 0.97 = 1.358
+    assert round(next_soe - 5.0, 4) == round(expected_stored, 4)
 
     reward, _ = _compute_reward(
         power=0.0,
         soe=5.0,
-        next_soe=5.0,
+        next_soe=next_soe,
         period=0,
         home_consumption=0.1,
         battery_settings=bs,
@@ -33,7 +35,35 @@ def test_idle_exports_surplus_and_holds_battery():
         solar_production=1.5,
         cost_basis=bs.cycle_cost_per_kwh,
     )
-    # surplus 1.4 kWh exported @ 0.8 → reward = +1.4*0.8 = 1.12 (cost = -1.12)
+    # all surplus stored, grid_exported = 0; cost = battery_wear_cost only
+    battery_wear = expected_stored * bs.cycle_cost_per_kwh
+    assert round(reward, 4) == round(-battery_wear, 4)
+
+
+def test_idle_exports_when_battery_full():
+    """idle (power=0) with a full battery: no passive charging possible,
+    all surplus exports to grid — SOLAR_EXPORT semantics."""
+    bs = make_battery_settings(max_charge_power_kw=10.0)
+    full_soe = bs.max_soe_kwh  # 20.0 kWh
+    next_soe = _state_transition(
+        full_soe, 0.0, bs, DT, solar_production=1.5, home_consumption=0.1
+    )
+    assert next_soe == full_soe  # battery full, cannot charge
+
+    reward, _ = _compute_reward(
+        power=0.0,
+        soe=full_soe,
+        next_soe=full_soe,
+        period=0,
+        home_consumption=0.1,
+        battery_settings=bs,
+        dt=DT,
+        buy_price=PRICES_BUY,
+        sell_price=PRICES_SELL,
+        solar_production=1.5,
+        cost_basis=bs.cycle_cost_per_kwh,
+    )
+    # surplus 1.4 kWh exported at sell_price → reward = +1.4*0.8
     assert round(reward, 4) == round(1.4 * 0.8, 4)
 
 
@@ -99,7 +129,7 @@ def test_build_period_data_store_disposition_flows():
 def test_idle_with_solar_surplus_classifies_as_solar_export():
     from core.bess.decision_intelligence import classify_strategic_intent
 
-    # power 0, surplus exported, battery idle → SOLAR_EXPORT (load_first, not grid_first)
+    # power 0, battery full (no passive charging), surplus exported → SOLAR_EXPORT
     ed = EnergyData(
         solar_production=1.5,
         home_consumption=0.1,

@@ -2,8 +2,8 @@
 
 import pytest
 
-from core.bess.growatt_min_controller import GrowattMinController
 from core.bess.dp_schedule import DPSchedule
+from core.bess.growatt_min_controller import GrowattMinController
 from core.bess.settings import BatterySettings
 
 

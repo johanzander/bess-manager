@@ -263,43 +263,34 @@ def test_all_scenarios(scenario_name):
     # Executing the optimizer's plan through the inverter simulator must reproduce
     # the planned economics within the DP's SoE/power-grid resolution. A larger gap
     # is a control-fidelity finding, not just discretization.
-    #
-    # Scenarios with SOLAR_EXPORT periods are excluded: the optimizer plans
-    # power=0 (hold) for those periods, but the hardware in load_first mode
-    # charges the battery from solar surplus. The deviation is expected and
-    # correct — the optimizer re-plans on the next cycle with the updated SOC.
-    has_solar_export = any(
-        pd.decision.strategic_intent == "SOLAR_EXPORT" for pd in result.period_data
+    from core.bess.simulation.inverter_simulator import (
+        derive_control_command,
+        simulate,
     )
-    if not has_solar_export:
-        from core.bess.simulation.inverter_simulator import (
-            derive_control_command,
-            simulate,
-        )
 
-        commands = [
-            derive_control_command(
-                pd.decision.strategic_intent,
-                pd.decision.battery_action / period_duration_hours,
-                battery_settings,
-            )
-            for pd in result.period_data
-        ]
-        sim = simulate(
-            commands,
-            solar_production,
-            home_consumption,
-            buy_prices,
-            sell_prices,
-            battery["initial_soe"],
+    commands = [
+        derive_control_command(
+            pd.decision.strategic_intent,
+            pd.decision.battery_action / period_duration_hours,
             battery_settings,
-            period_duration_hours,
         )
-        planned_cost = result.economic_summary.battery_solar_cost
-        gap = sim.realized_cost - planned_cost
+        for pd in result.period_data
+    ]
+    sim = simulate(
+        commands,
+        solar_production,
+        home_consumption,
+        buy_prices,
+        sell_prices,
+        battery["initial_soe"],
+        battery_settings,
+        period_duration_hours,
+    )
+    planned_cost = result.economic_summary.battery_solar_cost
+    gap = sim.realized_cost - planned_cost
 
-        tol = max(0.5, 0.01 * abs(planned_cost))
-        assert abs(gap) <= tol, (
-            f"{scenario_name}: realized != planned — R={sim.realized_cost:.2f}, "
-            f"P={planned_cost:.2f}, gap {gap:+.3f} SEK exceeds tolerance {tol:.2f}"
-        )
+    tol = max(0.5, 0.01 * abs(planned_cost))
+    assert abs(gap) <= tol, (
+        f"{scenario_name}: realized != planned — R={sim.realized_cost:.2f}, "
+        f"P={planned_cost:.2f}, gap {gap:+.3f} SEK exceeds tolerance {tol:.2f}"
+    )

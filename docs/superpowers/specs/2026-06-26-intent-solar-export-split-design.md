@@ -34,16 +34,18 @@ Split `EXPORT_ARBITRAGE` into two intents with different semantics and the same 
 
 ## Intent Table (complete, post-change)
 
-| Intent | Trigger | Mode | Grid charge | Charge rate | Discharge rate |
-|---|---|---|---|---|---|
-| `GRID_CHARGING` | `grid_to_battery > solar_to_battery` | `battery_first` | On | 100% | 0% |
-| `SOLAR_STORAGE` | charging from solar | `load_first` | Off | 100% | 0% |
-| `LOAD_SUPPORT` | `battery_to_home > 0.1 kWh` | `load_first` | Off | 0% | action-derived |
-| `BATTERY_EXPORT` | `battery_to_grid > 0.1 kWh` | `grid_first` | Off | 0% | action-derived |
-| `SOLAR_EXPORT` | solar exporting, battery idle | `load_first` | Off | 100% | 0% |
-| `IDLE` | no significant battery activity | `load_first` | Off | 100% | 0% |
+| Intent | Trigger | Mode | Grid charge | Discharge rate |
+|---|---|---|---|---|
+| `GRID_CHARGING` | `grid_to_battery > solar_to_battery` | `battery_first` | On | 0% |
+| `SOLAR_STORAGE` | charging from solar | `load_first` | Off | 0% |
+| `LOAD_SUPPORT` | `battery_to_home > 0.1 kWh` | `load_first` | Off | action-derived |
+| `BATTERY_EXPORT` | `battery_to_grid > 0.1 kWh` | `grid_first` | Off | action-derived |
+| `SOLAR_EXPORT` | solar exporting, battery idle | `load_first` | Off | 0% |
+| `IDLE` | no significant battery activity | `load_first` | Off | 0% |
 
-`SOLAR_EXPORT` uses the same hardware settings as `IDLE` (solar exports naturally in `load_first` when surplus exceeds consumption — no special mode needed). It exists as a distinct intent purely for display and future UI distinction between "solar exporting" and "truly nothing happening."
+**Note on charge rate**: `INTENT_TO_CONTROL` in `inverter_controller.py` includes a `charge_rate` field, but this is used only for the schedule display table (`get_detailed_period_groups()`). The actual hardware control path — `_map_intent_to_rates` and its mirror `_map_rates` in `inverter_simulator.py` — returns only `(grid_charge, discharge_rate)`. Charge rate is not written per-period to hardware.
+
+`SOLAR_EXPORT` uses the same hardware control as `IDLE`: `(grid_charge=False, discharge_rate=0)`. Solar exports naturally in `load_first` when surplus exceeds consumption — no special mode needed. It exists as a distinct intent purely for display and future UI distinction between "solar exporting" and "truly nothing happening."
 
 ## Changes
 
@@ -70,7 +72,15 @@ Split `EXPORT_ARBITRAGE` into two intents with different semantics and the same 
 - Rename `EXPORT_ARBITRAGE` string literal in `StrategicIntent` enum → `BATTERY_EXPORT`
 - Rename all string references throughout
 
-### 5. Remaining backend files (mechanical rename only)
+### 5. `core/bess/simulation/inverter_simulator.py`
+
+This file contains `_map_rates`, a standalone mirror of `_map_intent_to_rates` used by the simulator and plan-faithfulness tests. It must stay in sync:
+
+- Rename `"EXPORT_ARBITRAGE"` → `"BATTERY_EXPORT"` in the `if intent == "EXPORT_ARBITRAGE":` branch
+- Add `"SOLAR_EXPORT"` to the `("SOLAR_STORAGE", "IDLE")` tuple so it returns `(False, 0)` — same as IDLE
+- `derive_control_command` already reads `INTENT_TO_MODE` from the production controller, so adding `SOLAR_EXPORT` there is sufficient for mode mapping
+
+### 6. Remaining backend files (mechanical rename only)
 
 `models.py`, `growatt_min_controller.py`, `growatt_sph_controller.py`, `solax_modbus_growatt_controller.py`, `solax_controller.py`, `battery_system_manager.py`, `debug_data_exporter.py`, `schedule_store.py`, `daily_view_builder.py`, `ai_chat.py`, `api_dataclasses.py`, `api.py`, `scripts/bess-mcp-server.py` — rename `EXPORT_ARBITRAGE` → `BATTERY_EXPORT` everywhere.
 
@@ -80,15 +90,17 @@ Split `EXPORT_ARBITRAGE` into two intents with different semantics and the same 
 - `SystemStatusCard.tsx`: rename `EXPORT_ARBITRAGE` key; add `SOLAR_EXPORT: 'Solar Exporting'`
 - `InverterStatusDashboard.tsx`: rename key; add `SOLAR_EXPORT` with appropriate colour class
 
-### 7. Tests (17 files, ~97 occurrences)
+### 8. Tests (17 files, ~97 occurrences)
 
-- Mechanical rename: `EXPORT_ARBITRAGE` → `BATTERY_EXPORT` throughout
+- Mechanical rename: `EXPORT_ARBITRAGE` → `BATTERY_EXPORT` throughout all 17 files
+- In `test_inverter_simulator.py`: rename `test_derive_command_export_arbitrage_scales_discharge` → `test_derive_command_battery_export_scales_discharge`; add `test_derive_command_solar_export_is_load_first_no_discharge`
 - New tests in `test_optimization_algorithm.py` or `test_surplus_disposition.py`:
-  - `test_classify_solar_export_no_battery`: power=0, solar_to_grid>0 → `SOLAR_EXPORT`
+  - `test_classify_solar_export_no_battery`: power=0, solar_to_grid>0.01, grid_exported>0.01 → `SOLAR_EXPORT`
   - `test_classify_battery_export_requires_discharge`: power=-1kW, battery_to_grid>0.1 → `BATTERY_EXPORT`
-  - `test_solar_export_maps_to_load_first`: `SOLAR_EXPORT` intent → `load_first` mode
+  - `test_solar_export_maps_to_load_first`: `SOLAR_EXPORT` intent → `load_first` mode, discharge_rate=0
   - `test_battery_export_maps_to_grid_first`: `BATTERY_EXPORT` intent → `grid_first` mode
-- Update `test_period_groups.py` and `test_min_schedule_e2e.py`: any assertion that previously expected `EXPORT_ARBITRAGE` for a zero-action solar period should now expect `SOLAR_EXPORT` or `IDLE`
+- Update `test_period_groups.py` and `test_min_schedule_e2e.py`: any assertion that previously expected `EXPORT_ARBITRAGE` for a zero-action solar period should now expect `SOLAR_EXPORT`
+- `test_plan_faithfulness.py`: no assertion changes expected (tests use `ControlCommand` directly, not intent strings), but re-run to confirm
 
 ### 8. Docs
 

@@ -107,7 +107,7 @@
     "description": "Spring day: solar storage and export arbitrage with grid charging backup",
     "intents_present": [
       "GRID_CHARGING",
-      "EXPORT_ARBITRAGE"
+      "BATTERY_EXPORT"
     ],
     "savings_positive": true,
     "constraints": {

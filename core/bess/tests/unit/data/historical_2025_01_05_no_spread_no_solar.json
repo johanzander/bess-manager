@@ -110,7 +110,7 @@
     ],
     "intents_absent": [
       "SOLAR_STORAGE",
-      "EXPORT_ARBITRAGE"
+      "BATTERY_EXPORT"
     ],
     "savings_positive": false,
     "constraints": {

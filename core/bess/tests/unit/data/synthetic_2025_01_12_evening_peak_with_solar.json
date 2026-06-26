@@ -107,7 +107,7 @@
     "description": "Evening peak with solar: grid-charge off-peak, export during peak hours",
     "intents_present": [
       "GRID_CHARGING",
-      "EXPORT_ARBITRAGE"
+      "BATTERY_EXPORT"
     ],
     "savings_positive": true,
     "constraints": {

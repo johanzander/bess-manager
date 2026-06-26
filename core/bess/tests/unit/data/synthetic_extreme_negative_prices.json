@@ -107,7 +107,7 @@
     "description": "Negative prices: should aggressively grid-charge during negative-price hours and export during positive peaks",
     "intents_present": [
       "GRID_CHARGING",
-      "EXPORT_ARBITRAGE"
+      "BATTERY_EXPORT"
     ],
     "savings_positive": true,
     "constraints": {

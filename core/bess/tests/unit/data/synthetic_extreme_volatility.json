@@ -107,7 +107,7 @@
     "description": "Extreme price volatility: aggressive grid-charge at lows, export at spikes",
     "intents_present": [
       "GRID_CHARGING",
-      "EXPORT_ARBITRAGE"
+      "BATTERY_EXPORT"
     ],
     "savings_positive": true,
     "constraints": {

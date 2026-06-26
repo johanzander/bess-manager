@@ -107,7 +107,7 @@
     "description": "High price spread with solar: grid-charge at lows, export arbitrage at peaks",
     "intents_present": [
       "GRID_CHARGING",
-      "EXPORT_ARBITRAGE"
+      "BATTERY_EXPORT"
     ],
     "savings_positive": true,
     "constraints": {

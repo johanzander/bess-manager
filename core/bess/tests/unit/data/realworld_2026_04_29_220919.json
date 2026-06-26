@@ -349,7 +349,7 @@
   "expected_behavior": {
     "description": "Real-world debug log from 2026-04-29, with solar, price spread 1.87 SEK",
     "intents_present": [
-      "EXPORT_ARBITRAGE",
+      "BATTERY_EXPORT",
       "GRID_CHARGING",
       "IDLE",
       "LOAD_SUPPORT",

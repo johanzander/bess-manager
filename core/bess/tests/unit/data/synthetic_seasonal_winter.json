@@ -107,7 +107,7 @@
     "description": "Winter day: no solar, grid-charge at night lows, export during peaks",
     "intents_present": [
       "GRID_CHARGING",
-      "EXPORT_ARBITRAGE"
+      "BATTERY_EXPORT"
     ],
     "intents_absent": [
       "SOLAR_STORAGE"

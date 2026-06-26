@@ -107,7 +107,7 @@
     "description": "EV charging load: grid-charge when cheap, export arbitrage during peaks",
     "intents_present": [
       "GRID_CHARGING",
-      "EXPORT_ARBITRAGE"
+      "BATTERY_EXPORT"
     ],
     "savings_positive": true,
     "constraints": {

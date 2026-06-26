@@ -108,7 +108,7 @@
     "description": "High solar day: should store solar and export arbitrage during peak hours, no grid charging needed",
     "intents_present": [
       "SOLAR_STORAGE",
-      "EXPORT_ARBITRAGE"
+      "BATTERY_EXPORT"
     ],
     "intents_absent": [
       "GRID_CHARGING"

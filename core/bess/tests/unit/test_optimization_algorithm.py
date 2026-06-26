@@ -226,6 +226,7 @@ def SKIP_test_strategic_intent_assignment():  # TODO: Improve test to validate c
         "SOLAR_STORAGE",
         "LOAD_SUPPORT",
         "BATTERY_EXPORT",
+        "SOLAR_EXPORT",
     }
     for intent in intents:
         assert intent in valid_intents, f"Invalid strategic intent: {intent}"

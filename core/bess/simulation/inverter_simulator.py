@@ -47,7 +47,7 @@ def _map_rates(
     controller instance (that method is an instance method bound to hardware)."""
     if intent == "GRID_CHARGING":
         return True, 0
-    if intent in ("SOLAR_STORAGE", "IDLE"):
+    if intent in ("SOLAR_STORAGE", "IDLE", "SOLAR_EXPORT"):
         return False, 0
     if intent == "LOAD_SUPPORT":
         if action_kw < -0.01:

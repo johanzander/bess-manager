@@ -130,6 +130,28 @@ class InverterController(ABC):
             return True
         return grid_charge
 
+    def _effective_mode_for_intent(self, intent: str, default_mode: str) -> str:
+        """Apply the external_solar_mode override for the battery mode.
+
+        For DC-coupled setups, Load First mode is correct for SOLAR_STORAGE
+        because the inverter naturally routes surplus solar (seen on its own
+        MPPT) to the battery.  On AC-coupled setups the battery inverter has
+        no DC solar input, so Load First mode produces no charging action
+        even with grid_charge enabled — the EMS waits for a trigger that
+        never comes.  Switching SOLAR_STORAGE to Battery First makes the
+        inverter actively charge from the AC side during the planned solar
+        window.
+
+        Trade-off: Battery First charges at the configured rate regardless
+        of actual solar surplus, so during a SOLAR_STORAGE period with
+        insufficient solar export the battery will draw from the grid.
+        BESS only plans SOLAR_STORAGE when the forecast shows surplus, so
+        the risk is bounded by forecast accuracy.
+        """
+        if intent == "SOLAR_STORAGE" and self.battery_settings.external_solar_mode:
+            return "battery_first"
+        return default_mode
+
     def _map_intent_to_rates(
         self, intent: str, battery_action_kw: float
     ) -> tuple[bool, int]:
@@ -217,7 +239,7 @@ class InverterController(ABC):
             )
 
         intent = self.strategic_intents[period]
-        mode = self.INTENT_TO_MODE[intent]
+        mode = self._effective_mode_for_intent(intent, self.INTENT_TO_MODE[intent])
 
         if (
             self.current_schedule is not None
@@ -327,7 +349,9 @@ class InverterController(ABC):
         period_settings = []
         for period in range(num_periods):
             intent = effective_intents[period]
-            mode = self.INTENT_TO_MODE.get(intent, "load_first")
+            mode = self._effective_mode_for_intent(
+                intent, self.INTENT_TO_MODE.get(intent, "load_first")
+            )
             control = self.INTENT_TO_CONTROL.get(
                 intent,
                 {"grid_charge": False, "charge_rate": 100, "discharge_rate": 0},

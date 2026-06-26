@@ -228,6 +228,7 @@ class TestDataStructureConsistency:
                 "SOLAR_STORAGE",
                 "LOAD_SUPPORT",
                 "BATTERY_EXPORT",
+                "SOLAR_EXPORT",
                 "IDLE",
             }
 

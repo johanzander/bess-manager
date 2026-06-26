@@ -78,3 +78,51 @@ class TestExternalSolarModeOverride:
         settings = ctrl.get_period_settings(period=10)
         assert settings["grid_charge"] is True
         assert settings["strategic_intent"] == "SOLAR_STORAGE"
+
+
+class TestExternalSolarModeBattModeOverride:
+    """external_solar_mode should also flip SOLAR_STORAGE's mode to battery_first.
+
+    On AC-coupled setups, Load First mode does not initiate battery charging
+    even with grid_charge enabled — the EMS waits for a trigger that never
+    comes.  Battery First mode makes the inverter actively charge from the
+    AC side.
+    """
+
+    def test_solar_storage_mode_is_load_first_when_disabled(self) -> None:
+        ctrl = SolaxController(battery_settings=_settings(external_solar_mode=False))
+        ctrl.strategic_intents = ["SOLAR_STORAGE"] * 96
+        settings = ctrl.get_period_settings(period=10)
+        assert settings["batt_mode"] == "load_first"
+
+    def test_solar_storage_mode_is_battery_first_when_enabled(self) -> None:
+        ctrl = SolaxController(battery_settings=_settings(external_solar_mode=True))
+        ctrl.strategic_intents = ["SOLAR_STORAGE"] * 96
+        settings = ctrl.get_period_settings(period=10)
+        assert settings["batt_mode"] == "battery_first"
+
+    @pytest.mark.parametrize(
+        "intent,expected_mode",
+        [
+            ("GRID_CHARGING", "battery_first"),
+            ("LOAD_SUPPORT", "load_first"),
+            ("EXPORT_ARBITRAGE", "grid_first"),
+            ("IDLE", "load_first"),
+        ],
+    )
+    def test_other_intents_unaffected_when_enabled(
+        self, intent: str, expected_mode: str
+    ) -> None:
+        ctrl = SolaxController(battery_settings=_settings(external_solar_mode=True))
+        ctrl.strategic_intents = [intent] * 96
+        settings = ctrl.get_period_settings(period=10)
+        assert settings["batt_mode"] == expected_mode
+
+    def test_detailed_period_groups_apply_mode_override(self) -> None:
+        ctrl = SolaxController(battery_settings=_settings(external_solar_mode=True))
+        ctrl.strategic_intents = ["SOLAR_STORAGE"] * 96
+        groups = ctrl.get_detailed_period_groups()
+        assert groups, "expected at least one period group"
+        for group in groups:
+            assert group["mode"] == "battery_first"
+            assert group["grid_charge"] is True

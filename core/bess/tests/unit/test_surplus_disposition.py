@@ -92,14 +92,14 @@ def test_build_period_data_store_disposition_flows():
 
 
 # ---------------------------------------------------------------------------
-# Task 4a: EXPORT disposition classifies as BATTERY_EXPORT (not IDLE)
+# Task 4a: EXPORT disposition classifies as SOLAR_EXPORT (not BATTERY_EXPORT or IDLE)
 # ---------------------------------------------------------------------------
 
 
-def test_idle_with_surplus_classifies_as_export_arbitrage():
+def test_idle_with_solar_surplus_classifies_as_solar_export():
     from core.bess.decision_intelligence import classify_strategic_intent
 
-    # power 0, surplus exported, battery holds
+    # power 0, surplus exported, battery idle → SOLAR_EXPORT (load_first, not grid_first)
     ed = EnergyData(
         solar_production=1.5,
         home_consumption=0.1,
@@ -110,7 +110,7 @@ def test_idle_with_surplus_classifies_as_export_arbitrage():
         battery_soe_start=5.0,
         battery_soe_end=5.0,
     )
-    assert classify_strategic_intent(0.0, ed) == "BATTERY_EXPORT"
+    assert classify_strategic_intent(0.0, ed) == "SOLAR_EXPORT"
     ed2 = EnergyData(
         solar_production=0.1,
         home_consumption=0.1,
@@ -129,7 +129,7 @@ def test_idle_with_surplus_classifies_as_export_arbitrage():
 # ---------------------------------------------------------------------------
 
 
-def test_export_arbitrage_maps_to_grid_first_hold():
+def test_battery_export_maps_to_grid_first_hold():
     from core.bess.inverter_controller import InverterController
     from core.bess.simulation.inverter_simulator import derive_control_command
 
@@ -232,10 +232,10 @@ def test_grid_charging_charges_at_max_rate_not_fractional():
     )
 
 
-def test_small_surplus_at_idle_classifies_as_export_arbitrage():
-    """A power-0 period with even a SMALL exportable surplus must classify as
-    BATTERY_EXPORT (grid_first), not IDLE — otherwise IDLE->load_first stores
-    it instead of exporting (#145 residual). Threshold must catch ~0.1 kWh."""
+def test_small_solar_surplus_at_idle_classifies_as_solar_export():
+    """A power-0 period with solar surplus classifies as SOLAR_EXPORT (load_first).
+    grid_first is only for active battery discharge — idle periods must use
+    load_first so the battery can support house load when solar is insufficient."""
     from core.bess.decision_intelligence import classify_strategic_intent
 
     ed = EnergyData(
@@ -248,4 +248,27 @@ def test_small_surplus_at_idle_classifies_as_export_arbitrage():
         battery_soe_start=5.0,
         battery_soe_end=5.0,
     )
-    assert classify_strategic_intent(0.0, ed) == "BATTERY_EXPORT"
+    assert classify_strategic_intent(0.0, ed) == "SOLAR_EXPORT"
+
+
+def test_solar_export_maps_to_load_first():
+    from core.bess.inverter_controller import InverterController
+    from core.bess.simulation.inverter_simulator import derive_control_command
+
+    bs = make_battery_settings()
+    assert InverterController.INTENT_TO_MODE["SOLAR_EXPORT"] == "load_first"
+    cmd = derive_control_command("SOLAR_EXPORT", battery_action_kw=0.0, settings=bs)
+    assert cmd.battery_mode == "load_first"
+    assert cmd.grid_charge is False
+    assert cmd.discharge_rate_pct == 0
+
+
+def test_battery_export_active_discharge_still_grid_first():
+    """BATTERY_EXPORT with real discharge action → grid_first + action-derived rate."""
+    from core.bess.simulation.inverter_simulator import derive_control_command
+
+    bs = make_battery_settings()
+    cmd = derive_control_command("BATTERY_EXPORT", battery_action_kw=-5.0, settings=bs)
+    assert cmd.battery_mode == "grid_first"
+    assert cmd.discharge_rate_pct == 50
+    assert cmd.grid_charge is False

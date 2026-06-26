@@ -426,7 +426,7 @@ def classify_strategic_intent(power: float, energy_data: EnergyData) -> str:
         energy_data: Complete energy flow data for the period.
 
     Returns:
-        One of: GRID_CHARGING, SOLAR_STORAGE, LOAD_SUPPORT, BATTERY_EXPORT, IDLE.
+        One of: GRID_CHARGING, SOLAR_STORAGE, LOAD_SUPPORT, BATTERY_EXPORT, SOLAR_EXPORT, IDLE.
     """
     if power < -_POWER_THRESHOLD_KW:  # Discharging
         if energy_data.battery_to_grid > 0.1:
@@ -441,7 +441,7 @@ def classify_strategic_intent(power: float, energy_data: EnergyData) -> str:
     elif energy_data.battery_discharged > 0.01:
         return "LOAD_SUPPORT"
     elif energy_data.grid_exported > 0.01 and energy_data.solar_to_grid > 0.01:
-        return "BATTERY_EXPORT"
+        return "SOLAR_EXPORT"
     return "IDLE"
 
 

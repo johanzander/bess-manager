@@ -123,4 +123,14 @@ Run after implementation:
 .venv/bin/pytest -m slow         # algorithm + E2E (includes inverter platform tests)
 ```
 
-All 17 test files touching `EXPORT_ARBITRAGE` must pass with the renamed `BATTERY_EXPORT`. The new `SOLAR_EXPORT` tests must pass. No existing algorithm behaviour changes — only intent labels and inverter mode for zero-action solar-export periods.
+All 17 test files touching `EXPORT_ARBITRAGE` must pass with the renamed `BATTERY_EXPORT`. The new `SOLAR_EXPORT` tests must pass.
+
+### What changes and what doesn't
+
+**DP algorithm cost numbers**: unchanged. The DP optimizer does not use intent labels for cost computation; intent is classified after the action is chosen.
+
+**Intent label assertions**: will change — all `EXPORT_ARBITRAGE` → `BATTERY_EXPORT` (mechanical rename), and any period with power≈0 + solar_to_grid>0 will now assert `SOLAR_EXPORT` instead of `EXPORT_ARBITRAGE`.
+
+**Plan-faithfulness / simulator tests**: there is a subtle behavioral difference. `mode_to_power` with `load_first + discharge_rate=0` falls through to the SOLAR_STORAGE path and returns `surplus / dt` (charges battery from solar). The previous `grid_first + discharge_rate=0` returned 0 (no battery action). This means simulator results *can* differ for SOLAR_EXPORT periods where battery has room — the simulator now charges from solar surplus instead of exporting it, which changes the realised cost vs the planned cost (which assumed export revenue).
+
+The natural escape hatch: SOLAR_EXPORT most commonly fires when the battery is already full (`room = 0`), in which case `mode_to_power` returns 0 regardless of mode. The main `test_plan_faithfulness` scenario uses `solar = [0.0] * n` so it is unaffected. Any scenario with solar surplus and a non-full battery that the optimizer chose not to charge could show a difference. Inspect any failing plan-faithfulness assertions carefully — they may reflect a correctness improvement, not a regression.

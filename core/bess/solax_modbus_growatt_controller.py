@@ -99,6 +99,45 @@ class SolaxModbusGrowattController(GrowattMinController):
 
     # ── Hardware interface ────────────────────────────────────────────────────
 
+    def _vpp_available(self, controller) -> bool:
+        """Check whether the Growatt VPP entities are configured.
+
+        Returns True when ``vpp_power``, ``vpp_time``, and
+        ``vpp_allow_ac_charging`` are all resolvable in the sensor map.
+        """
+        for sensor_key in ("vpp_power", "vpp_time", "vpp_allow_ac_charging"):
+            try:
+                controller._get_entity_for_service(sensor_key)
+            except (ValueError, AttributeError):
+                return False
+        return True
+
+    def _apply_period_vpp(
+        self, controller, grid_charge: bool, discharge_rate: int
+    ) -> tuple[bool, str]:
+        """Apply the current period via Growatt VPP active-power command.
+
+        Direct power control bypasses TOU complexity:
+          - ``grid_charge=True``  → charge at max charge power, allow AC charging
+          - ``grid_charge=False, discharge_rate>0`` → discharge at the given rate
+          - ``grid_charge=False, discharge_rate=0`` → VPP idle (power=0)
+        """
+        try:
+            if grid_charge:
+                target_w = int(self.max_charge_power_kw * 1000)
+                controller.set_growatt_vpp(target_w, allow_ac_charging=True)
+            elif discharge_rate > 0:
+                target_w = -int(
+                    self.max_discharge_power_kw * discharge_rate / 100 * 1000
+                )
+                controller.set_growatt_vpp(target_w, allow_ac_charging=False)
+            else:
+                controller.set_growatt_vpp_disabled()
+            return True, ""
+        except Exception as e:
+            logger.error("FAILED: Growatt VPP period write: %s", e)
+            return False, str(e)
+
     def apply_period(
         self, controller, grid_charge: bool, discharge_rate: int
     ) -> tuple[bool, str]:
@@ -108,6 +147,10 @@ class SolaxModbusGrowattController(GrowattMinController):
         Only writes the TOU segment when the mode actually changes, minimising
         inverter writes.
 
+        On AC-coupled setups (``external_solar_mode=True``) where the Growatt
+        VPP entities are configured, takes the VPP fast-path instead — direct
+        power command, no TOU.  This is the upstream-#118 control model.
+
         Args:
             controller: HomeAssistantAPIController instance
             grid_charge: Whether to enable grid charging
@@ -116,6 +159,11 @@ class SolaxModbusGrowattController(GrowattMinController):
         Returns:
             Tuple of (success, error_message). error_message is empty on success.
         """
+        if self.battery_settings.external_solar_mode and self._vpp_available(
+            controller
+        ):
+            return self._apply_period_vpp(controller, grid_charge, discharge_rate)
+
         errors = []
         now = time_utils.now()
         current_period = now.hour * 4 + now.minute // 15
@@ -183,6 +231,31 @@ class SolaxModbusGrowattController(GrowattMinController):
         Returns:
             Tuple of (segments_updated, segments_disabled)
         """
+        # VPP fast-path: when external_solar_mode is on AND VPP entities are
+        # configured, the controller commands the inverter directly each
+        # period — no TOU slot to push at startup.  Also explicitly disable
+        # TOU slot 1 so a stale slot from a previous TOU-mode run can't fight
+        # the VPP command.
+        if self.battery_settings.external_solar_mode and self._vpp_available(
+            controller
+        ):
+            logger.info(
+                "Modbus: VPP control mode — skipping TOU init, disabling slot 1"
+            )
+            try:
+                controller.set_tou_segment_via_entities(
+                    segment_id=1,
+                    batt_mode="load_first",
+                    start_time="00:00",
+                    end_time="23:59",
+                    enabled=False,
+                )
+            except Exception as e:
+                logger.warning("Could not disable TOU slot 1 in VPP mode: %s", e)
+            self._last_written_tou_mode = "load_first"
+            self._update_tou_display_state()
+            return 0, 1
+
         mode = "load_first"
         if effective_period < len(self.strategic_intents):
             intent = self.strategic_intents[effective_period]

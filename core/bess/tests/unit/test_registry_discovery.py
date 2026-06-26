@@ -1258,6 +1258,12 @@ class TestFrontendSensorKeysMatchBackend:
                 for n in range(2, 10)
                 for f in ("enabled", "begin", "end", "mode", "update")
             ),
+            # VPP control entities (jvdd fork — issue #118).  These are
+            # written directly by the controller; not user-configurable in
+            # the Settings UI.
+            "vpp_power",
+            "vpp_time",
+            "vpp_allow_ac_charging",
         },
         "solax_modbus_native": {"lifetime_system_production"},
     }

@@ -593,6 +593,10 @@ class HomeAssistantAPIController:
         "time_9_end": "tou_time_9_end",
         "time_9_mode": "tou_time_9_mode",
         "time_9_update": "tou_time_9_update",
+        # VPP active-power control (jvdd fork — issue #118)
+        "vpp_power": "vpp_power",
+        "vpp_time": "vpp_time",
+        "vpp_allow_ac_charging": "vpp_allow_ac_charging",
     }
 
     # Growatt GEN3 (MIX/SPA/SPH) via solax_modbus Growatt plugin
@@ -1650,6 +1654,72 @@ class HomeAssistantAPIController:
             entity_id=mode_entity,
             option="Disabled",
         )
+
+    # ── Growatt VPP control (jvdd fork — see upstream issue #118) ────────
+    #
+    # Growatt MIN/MID inverters expose a VPP register block via the SolaxModbus
+    # integration that lets us command a direct power target instead of
+    # juggling TOU slots.  Three writable entities, plus a global remote-control
+    # gate that must be Enabled (the integration usually sets this to Enabled
+    # by default — we don't toggle it here):
+    #
+    #   number.<prefix>_vpp_power            signed W (+ charge, − discharge, 0 idle)
+    #   number.<prefix>_vpp_time             seconds (0 = continuous until overridden)
+    #   select.<prefix>_vpp_allow_ac_charging Enabled / Disabled
+    #
+    # This is the same control surface SolaxController already uses for the
+    # native SolaX inverters (via different entities), so the pattern is
+    # well-understood.
+
+    def set_growatt_vpp(self, watts: int, allow_ac_charging: bool) -> None:
+        """Issue a Growatt VPP active-power command.
+
+        Args:
+            watts: Target power in watts (signed; positive = charge,
+                   negative = discharge, 0 = idle).
+            allow_ac_charging: Gate the AC-grid charging path.  Required
+                Enabled before a positive ``watts`` will actually pull from
+                grid; safe to leave Disabled for discharge / idle commands.
+        """
+        gate_entity = self._get_entity_for_service("vpp_allow_ac_charging")
+        power_entity = self._get_entity_for_service("vpp_power")
+        time_entity = self._get_entity_for_service("vpp_time")
+
+        logger.info(
+            "Growatt VPP: power=%d W, allow_ac_charging=%s",
+            watts,
+            allow_ac_charging,
+        )
+
+        self._service_call_with_retry(
+            "select",
+            "select_option",
+            operation=f"Growatt VPP allow_ac_charging={allow_ac_charging}",
+            entity_id=gate_entity,
+            option="Enabled" if allow_ac_charging else "Disabled",
+        )
+        self._service_call_with_retry(
+            "number",
+            "set_value",
+            operation=f"Growatt VPP power={watts}",
+            entity_id=power_entity,
+            value=watts,
+        )
+        # 0 = continuous (holds until the next write overrides).  Could also
+        # use a finite duration for autorepeat-style safety; not needed here
+        # because BESS rewrites at every period boundary.
+        self._service_call_with_retry(
+            "number",
+            "set_value",
+            operation="Growatt VPP time=0 (continuous)",
+            entity_id=time_entity,
+            value=0,
+        )
+
+    def set_growatt_vpp_disabled(self) -> None:
+        """Stop active Growatt VPP control (set power=0, gate disabled)."""
+        logger.info("Growatt VPP: disabling active power command")
+        self.set_growatt_vpp(0, allow_ac_charging=False)
 
     def set_solax_min_soc(self, min_soc: int) -> None:
         """Write the battery minimum SOC to the SolaX inverter.

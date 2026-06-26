@@ -195,9 +195,7 @@ class TestEndToEndIntentExecution:
 
         for hour in range(24):
             quarter_intents = set(intents[hour * 4 : (hour + 1) * 4])
-            if len(intents) >= (hour + 1) * 4 and quarter_intents == {
-                "BATTERY_EXPORT"
-            }:
+            if len(intents) >= (hour + 1) * 4 and quarter_intents == {"BATTERY_EXPORT"}:
                 assert scheduler.is_hour_configured_for_export(hour), (
                     f"{scenario_name}: hour {hour} has all BATTERY_EXPORT periods "
                     f"but is not configured for export"

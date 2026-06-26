@@ -33,9 +33,17 @@ class InverterController(ABC):
     # Shared across all inverter types: determines grid_charge, charge_rate, discharge_rate.
     INTENT_TO_CONTROL: ClassVar[dict[str, dict[str, bool | int]]] = {
         "GRID_CHARGING": {"grid_charge": True, "charge_rate": 100, "discharge_rate": 0},
-        "SOLAR_STORAGE": {"grid_charge": False, "charge_rate": 100, "discharge_rate": 0},
+        "SOLAR_STORAGE": {
+            "grid_charge": False,
+            "charge_rate": 100,
+            "discharge_rate": 0,
+        },
         "LOAD_SUPPORT": {"grid_charge": False, "charge_rate": 0, "discharge_rate": 100},
-        "BATTERY_EXPORT": {"grid_charge": False, "charge_rate": 0, "discharge_rate": 100},
+        "BATTERY_EXPORT": {
+            "grid_charge": False,
+            "charge_rate": 0,
+            "discharge_rate": 100,
+        },
         "SOLAR_EXPORT": {"grid_charge": False, "charge_rate": 100, "discharge_rate": 0},
         "IDLE": {"grid_charge": False, "charge_rate": 100, "discharge_rate": 0},
     }

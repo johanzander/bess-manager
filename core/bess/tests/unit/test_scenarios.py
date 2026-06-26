@@ -269,8 +269,7 @@ def test_all_scenarios(scenario_name):
     # charges the battery from solar surplus. The deviation is expected and
     # correct — the optimizer re-plans on the next cycle with the updated SOC.
     has_solar_export = any(
-        pd.decision.strategic_intent == "SOLAR_EXPORT"
-        for pd in result.period_data
+        pd.decision.strategic_intent == "SOLAR_EXPORT" for pd in result.period_data
     )
     if not has_solar_export:
         from core.bess.simulation.inverter_simulator import (

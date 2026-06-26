@@ -112,12 +112,12 @@ class StrategicIntent(Enum):
     """Strategic intents for battery actions, determined at decision time."""
 
     # Primary intents (mutually exclusive)
-    GRID_CHARGING = "GRID_CHARGING"    # Storing cheap grid energy for arbitrage
-    SOLAR_STORAGE = "SOLAR_STORAGE"    # Storing excess solar for later use
-    LOAD_SUPPORT = "LOAD_SUPPORT"      # Discharging to meet home load
+    GRID_CHARGING = "GRID_CHARGING"  # Storing cheap grid energy for arbitrage
+    SOLAR_STORAGE = "SOLAR_STORAGE"  # Storing excess solar for later use
+    LOAD_SUPPORT = "LOAD_SUPPORT"  # Discharging to meet home load
     BATTERY_EXPORT = "BATTERY_EXPORT"  # Discharging battery to grid for profit
-    SOLAR_EXPORT = "SOLAR_EXPORT"      # Solar surplus exporting to grid, battery idle
-    IDLE = "IDLE"                      # No significant action
+    SOLAR_EXPORT = "SOLAR_EXPORT"  # Solar surplus exporting to grid, battery idle
+    IDLE = "IDLE"  # No significant action
 
 
 def _discretize_state_action_space(

@@ -17,9 +17,7 @@ from core.bess.tests.helpers import make_battery_settings
 def test_derive_command_battery_export_scales_discharge():
     bs = make_battery_settings(max_discharge_power_kw=10.0)
     # planned discharge of 5 kW -> grid_first, discharge ~50%
-    cmd = derive_control_command(
-        "BATTERY_EXPORT", battery_action_kw=-5.0, settings=bs
-    )
+    cmd = derive_control_command("BATTERY_EXPORT", battery_action_kw=-5.0, settings=bs)
     assert cmd.battery_mode == "grid_first"
     assert cmd.discharge_rate_pct == 50
     assert cmd.grid_charge is False

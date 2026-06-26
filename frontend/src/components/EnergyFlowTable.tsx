@@ -124,7 +124,7 @@ export const EnergyFlowTable: React.FC<EnergyFlowTableProps> = ({ resolution }) 
             }
 
             return (
-              <React.Fragment key={index}>
+              <React.Fragment key={hour.period}>
                 <tr className={rowClass} onClick={() => toggleRow(hour.period)}>
                   <td className={firstCellClass}>
                     <div className="flex items-center gap-1">

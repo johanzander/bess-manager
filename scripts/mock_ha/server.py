@@ -462,8 +462,15 @@ async def ha_websocket(ws: WebSocket) -> None:
                 "config/entity_registry/list": _entity_registry,
             }
 
-            result = _WS_HANDLERS.get(cmd_type)
-            if result is not None:
+            if cmd_type == "recorder/statistics_during_period":
+                # Return empty statistics — mock has no recorder DB.
+                # Backend gracefully handles missing statistics.
+                empty = {sid: [] for sid in msg.get("statistic_ids", [])}
+                await ws.send_json(
+                    {"id": cmd_id, "type": "result", "success": True, "result": empty}
+                )
+                logger.info("WS %-40s → empty (no recorder in mock)", cmd_type)
+            elif (result := _WS_HANDLERS.get(cmd_type)) is not None:
                 await ws.send_json(
                     {"id": cmd_id, "type": "result", "success": True, "result": result}
                 )

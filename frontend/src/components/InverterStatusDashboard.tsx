@@ -889,8 +889,8 @@ const InverterStatusDashboard: React.FC = () => {
 
       {/* Hardware Schedule Section — platform-aware */}
       {(() => {
-        const platform = inverterSchedule?.inverterPlatform ?? inverterStatus?.inverterPlatform ?? 'growatt_min';
-        const isSolax = platform === 'solax';
+        const platform = inverterSchedule?.inverterPlatform ?? inverterStatus?.inverterPlatform ?? 'growatt_server_min';
+        const isSolax = platform === 'solax_modbus_native';
 
         return (
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
@@ -903,7 +903,12 @@ const InverterStatusDashboard: React.FC = () => {
                   </h3>
                 </div>
                 <span className="text-xs px-2 py-1 rounded-full font-medium bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300">
-                  {platform === 'growatt_min' ? 'Growatt MIN' : platform === 'growatt_sph' ? 'Growatt SPH' : 'SolaX Modbus'}
+                  {platform === 'growatt_server_min' ? 'Growatt MIN'
+                    : platform === 'growatt_server_sph' ? 'Growatt SPH'
+                    : platform === 'solax_modbus_native' ? 'SolaX Modbus'
+                    : platform === 'solax_modbus_growatt_min' ? 'SolaX/Growatt MIN'
+                    : platform === 'solax_modbus_growatt_sph' ? 'SolaX/Growatt SPH'
+                    : platform}
                 </span>
               </div>
 

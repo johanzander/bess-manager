@@ -90,17 +90,17 @@ export const EXPECTATIONS: Record<string, WizardExpectation> = {
     dischargeInhibitFound: false,
     weatherFound: true,
   },
-  'ci-wizard-octopus-sph': {
+  'ci-wizard-growatt-sph-cloud-octopus': {
     growattFound: true,
     solaxFound: false,
     inverterPlatform: 'growatt_server_sph',
     nordpoolFound: false,
     octopusFound: true,
     autoSelectedProvider: 'octopus',
-    phaseCount: 3,
+    phaseCount: null,
     solcastFound: false,
-    consumptionForecastFound: true,
-    dischargeInhibitFound: true,
+    consumptionForecastFound: false,
+    dischargeInhibitFound: false,
     weatherFound: false,
   },
   'ci-wizard-both-providers': {

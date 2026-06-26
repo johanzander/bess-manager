@@ -510,6 +510,7 @@ def _aggregate_quarterly_to_hourly(
             ),
             # Use dominant strategic intent with tie-breaking (same logic as Growatt schedule)
             strategicIntent=dominant_intent,
+            observedIntent=last_period.observedIntent,
             directSolar=sum(p.directSolar for p in quarter_periods),
         )
 

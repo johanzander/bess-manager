@@ -1984,7 +1984,7 @@ class BatterySystemManager:
 
             # Create strategic intents array from OptimizationResult
             # DP intents are authoritative - do NOT override with inferred intents from historical data
-            # (that causes feedback loop: export → inferred EXPORT_ARBITRAGE → grid_first mode → more export)
+            # (that causes feedback loop: export → inferred BATTERY_EXPORT → grid_first mode → more export)
             #
             # IMPORTANT: Preserve previous strategic intents for past periods (0 to optimization_period-1)
             # to avoid the "majority IDLE" bug where updating at :45 (period 3 of an hour) causes
@@ -2765,7 +2765,7 @@ class BatterySystemManager:
             else:
                 # Power monitor disabled — write charge rate directly so the
                 # inverter register is not left at a stale value (e.g. 0% from a
-                # preceding LOAD_SUPPORT or EXPORT_ARBITRAGE period).
+                # preceding LOAD_SUPPORT or BATTERY_EXPORT period).
                 self.controller.set_charging_power_rate(int(charge_rate))
 
         except (AttributeError, ValueError, KeyError) as e:

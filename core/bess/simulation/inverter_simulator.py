@@ -58,7 +58,7 @@ def _map_rates(
         else:
             rate = 0
         return False, rate
-    if intent == "EXPORT_ARBITRAGE":
+    if intent == "BATTERY_EXPORT":
         if action_kw < -0.01:
             rate = min(
                 100,

@@ -58,7 +58,7 @@ test.describe('Inverter Page', () => {
     ).toBeVisible({ timeout: 15_000 });
 
     // At least one strategic intent should be visible in the schedule
-    const intentPattern = /GRID_CHARGING|SOLAR_CHARGING|IDLE|EXPORT_ARBITRAGE|SELF_CONSUMPTION|LOAD_SUPPORT|SOLAR_STORAGE/;
+    const intentPattern = /GRID_CHARGING|SOLAR_CHARGING|IDLE|BATTERY_EXPORT|SELF_CONSUMPTION|LOAD_SUPPORT|SOLAR_STORAGE/;
     await expect(page.getByText(intentPattern).first()).toBeVisible();
   });
 });

@@ -119,7 +119,7 @@ def generate_strategic_pattern_name(
         return "Grid Charging Strategy"
     elif strategic_intent == "SOLAR_STORAGE":
         return "Solar Storage Strategy"
-    elif strategic_intent == "EXPORT_ARBITRAGE":
+    elif strategic_intent == "BATTERY_EXPORT":
         if energy_data.battery_to_grid > energy_data.battery_to_home:
             return "Peak Export Arbitrage"
         else:
@@ -269,7 +269,7 @@ def generate_economic_chain(
                 f"{immediate_value + future_value:+.2f} {c}"
             )
 
-    elif strategic_intent == "EXPORT_ARBITRAGE":
+    elif strategic_intent == "BATTERY_EXPORT":
         if energy_data.battery_to_grid > 0.1:
             export_amount = energy_data.battery_to_grid
             return (
@@ -426,11 +426,11 @@ def classify_strategic_intent(power: float, energy_data: EnergyData) -> str:
         energy_data: Complete energy flow data for the period.
 
     Returns:
-        One of: GRID_CHARGING, SOLAR_STORAGE, LOAD_SUPPORT, EXPORT_ARBITRAGE, IDLE.
+        One of: GRID_CHARGING, SOLAR_STORAGE, LOAD_SUPPORT, BATTERY_EXPORT, IDLE.
     """
     if power < -_POWER_THRESHOLD_KW:  # Discharging
         if energy_data.battery_to_grid > 0.1:
-            return "EXPORT_ARBITRAGE"
+            return "BATTERY_EXPORT"
         return "LOAD_SUPPORT"
     elif power > _POWER_THRESHOLD_KW:  # Charging
         if energy_data.grid_to_battery > energy_data.solar_to_battery:
@@ -441,7 +441,7 @@ def classify_strategic_intent(power: float, energy_data: EnergyData) -> str:
     elif energy_data.battery_discharged > 0.01:
         return "LOAD_SUPPORT"
     elif energy_data.grid_exported > 0.01 and energy_data.solar_to_grid > 0.01:
-        return "EXPORT_ARBITRAGE"
+        return "BATTERY_EXPORT"
     return "IDLE"
 
 
@@ -526,7 +526,7 @@ def create_decision_data(
     if strategic_intent in ["GRID_CHARGING", "SOLAR_STORAGE"]:
         # For charging strategies, target typical high-price evening hours
         future_target_hours = [18, 19, 20, 21]
-    elif strategic_intent == "EXPORT_ARBITRAGE":
+    elif strategic_intent == "BATTERY_EXPORT":
         # For export strategies, this is the realization hour
         future_target_hours = [hour]
 

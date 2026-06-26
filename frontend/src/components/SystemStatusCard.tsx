@@ -237,7 +237,7 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", sys
       GRID_CHARGING: 'Charging from Grid',
       SOLAR_STORAGE: 'Storing Solar',
       LOAD_SUPPORT: 'Powering Home',
-      EXPORT_ARBITRAGE: 'Selling to Grid',
+      BATTERY_EXPORT: 'Selling to Grid',
       IDLE: 'Standby',
     };
     const rawIntent = currentHourData.strategicIntent?.toUpperCase().replace(/ /g, '_') ?? 'IDLE';

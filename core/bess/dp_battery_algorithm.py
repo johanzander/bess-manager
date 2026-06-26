@@ -47,7 +47,7 @@ The algorithm now captures the strategic reasoning behind each decision:
 - GRID_CHARGING: Storing cheap grid energy for arbitrage
 - SOLAR_STORAGE: Storing excess solar for later use
 - LOAD_SUPPORT: Discharging to meet home load
-- EXPORT_ARBITRAGE: Discharging to grid for profit
+- BATTERY_EXPORT: Discharging to grid for profit
 - IDLE: No significant activity
 
 ENERGY FLOW MODELING:
@@ -115,7 +115,7 @@ class StrategicIntent(Enum):
     GRID_CHARGING = "GRID_CHARGING"  # Storing cheap grid energy for arbitrage
     SOLAR_STORAGE = "SOLAR_STORAGE"  # Storing excess solar for later use
     LOAD_SUPPORT = "LOAD_SUPPORT"  # Discharging to meet home load
-    EXPORT_ARBITRAGE = "EXPORT_ARBITRAGE"  # Discharging to grid for profit
+    BATTERY_EXPORT = "BATTERY_EXPORT"  # Discharging to grid for profit
     IDLE = "IDLE"  # No significant action (includes natural solar export)
 
 

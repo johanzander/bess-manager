@@ -78,7 +78,7 @@ class DPSchedule:
         elif intent == "LOAD_SUPPORT":
             state = "discharging"
             grid_charge = False
-        elif intent == "EXPORT_ARBITRAGE":
+        elif intent == "BATTERY_EXPORT":
             state = "grid_first"  # Priority to grid export
             grid_charge = False
         else:  # IDLE

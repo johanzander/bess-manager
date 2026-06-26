@@ -225,7 +225,7 @@ def SKIP_test_strategic_intent_assignment():  # TODO: Improve test to validate c
         "GRID_CHARGING",
         "SOLAR_STORAGE",
         "LOAD_SUPPORT",
-        "EXPORT_ARBITRAGE",
+        "BATTERY_EXPORT",
     }
     for intent in intents:
         assert intent in valid_intents, f"Invalid strategic intent: {intent}"
@@ -381,7 +381,7 @@ def test_defers_charging_to_cheaper_overnight_window():
     # below the always-achievable IDLE floor and the profitability gate rejected
     # the plan).
     #
-    # NOTE: this previously asserted EXPORT_ARBITRAGE, which encoded the
+    # NOTE: this previously asserted BATTERY_EXPORT, which encoded the
     # pre-#145 solar-export over-crediting model. Under the faithful binary
     # store/export model (R == P), exporting at sell=1.44 SEK energy that was
     # grid-charged at 1.13 SEK is a *loss* (1.13/eff_c + 0.40 cycle, delivered

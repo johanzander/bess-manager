@@ -6,7 +6,7 @@ They should remain stable even if the internal algorithm changes (fixed slots, t
 as long as the business requirements are met.
 
 Key Principles:
-- Test strategic intent execution (does EXPORT_ARBITRAGE enable battery discharge?)
+- Test strategic intent execution (does BATTERY_EXPORT enable battery discharge?)
 - Test hardware constraints (no overlaps, chronological order)
 - Test operational efficiency (minimal writes)
 - Test business logic (IDLE uses default mode)
@@ -62,12 +62,12 @@ class TestStrategicIntentExecution:
     """Test that strategic intents are executed correctly in terms of battery behavior."""
 
     def test_export_arbitrage_enables_battery_discharge(self, scheduler):
-        """Test that EXPORT_ARBITRAGE strategic intent enables battery discharge during target hours."""
+        """Test that BATTERY_EXPORT strategic intent enables battery discharge during target hours."""
         strategic_intents = hourly_to_quarterly(
             {
-                20: "EXPORT_ARBITRAGE",
-                21: "EXPORT_ARBITRAGE",
-                22: "EXPORT_ARBITRAGE",
+                20: "BATTERY_EXPORT",
+                21: "BATTERY_EXPORT",
+                22: "BATTERY_EXPORT",
             }
         )
 
@@ -156,8 +156,8 @@ class TestStrategicIntentExecution:
             {
                 3: "GRID_CHARGING",
                 12: "SOLAR_STORAGE",
-                19: "EXPORT_ARBITRAGE",
-                20: "EXPORT_ARBITRAGE",
+                19: "BATTERY_EXPORT",
+                20: "BATTERY_EXPORT",
             }
         )
 
@@ -242,7 +242,7 @@ class TestHardwareConstraints:
         strategic_intents = hourly_to_quarterly(
             {
                 10: "GRID_CHARGING",
-                15: "EXPORT_ARBITRAGE",
+                15: "BATTERY_EXPORT",
             }
         )
 
@@ -260,9 +260,9 @@ class TestHardwareConstraints:
                 0: "GRID_CHARGING",
                 5: "GRID_CHARGING",
                 6: "SOLAR_STORAGE",
-                19: "EXPORT_ARBITRAGE",
-                20: "EXPORT_ARBITRAGE",
-                23: "EXPORT_ARBITRAGE",
+                19: "BATTERY_EXPORT",
+                20: "BATTERY_EXPORT",
+                23: "BATTERY_EXPORT",
             }
         )
 
@@ -280,8 +280,8 @@ class TestHardwareConstraints:
         strategic_intents = hourly_to_quarterly(
             {
                 3: "GRID_CHARGING",
-                15: "EXPORT_ARBITRAGE",
-                22: "EXPORT_ARBITRAGE",
+                15: "BATTERY_EXPORT",
+                22: "BATTERY_EXPORT",
             }
         )
 
@@ -298,7 +298,7 @@ class TestHardwareConstraints:
         """Test that chronological order is maintained even with out-of-order strategic intents."""
         strategic_intents = hourly_to_quarterly(
             {
-                23: "EXPORT_ARBITRAGE",
+                23: "BATTERY_EXPORT",
                 1: "GRID_CHARGING",
                 12: "SOLAR_STORAGE",
                 5: "GRID_CHARGING",
@@ -318,7 +318,7 @@ class TestHardwareConstraints:
         """Test that strategic intents spanning midnight work correctly."""
         strategic_intents = hourly_to_quarterly(
             {
-                23: "EXPORT_ARBITRAGE",
+                23: "BATTERY_EXPORT",
                 0: "GRID_CHARGING",
                 1: "GRID_CHARGING",
             }
@@ -366,7 +366,7 @@ class TestOperationalEfficiency:
         new_intents = hourly_to_quarterly(
             {
                 10: "GRID_CHARGING",
-                20: "EXPORT_ARBITRAGE",
+                20: "BATTERY_EXPORT",
             }
         )
 
@@ -386,7 +386,7 @@ class TestOperationalEfficiency:
         strategic_intents = hourly_to_quarterly(
             {
                 10: "GRID_CHARGING",
-                20: "EXPORT_ARBITRAGE",
+                20: "BATTERY_EXPORT",
             }
         )
 
@@ -434,7 +434,7 @@ class TestEdgeCases:
 
     def test_all_strategic_schedule(self, scheduler):
         """Test schedule with all strategic (non-IDLE) intents."""
-        strategic_intents = ["EXPORT_ARBITRAGE"] * 96
+        strategic_intents = ["BATTERY_EXPORT"] * 96
 
         scheduler.current_hour = 0
         scheduler.strategic_intents = strategic_intents
@@ -458,9 +458,9 @@ class TestEdgeCases:
         """Test that consecutive strategic periods are handled correctly."""
         strategic_intents = hourly_to_quarterly(
             {
-                20: "EXPORT_ARBITRAGE",
-                21: "EXPORT_ARBITRAGE",
-                22: "EXPORT_ARBITRAGE",
+                20: "BATTERY_EXPORT",
+                21: "BATTERY_EXPORT",
+                22: "BATTERY_EXPORT",
             }
         )
 
@@ -646,7 +646,7 @@ class TestScheduleIntegrity:
         afternoon_intents = hourly_to_quarterly(
             {
                 10: "GRID_CHARGING",
-                20: "EXPORT_ARBITRAGE",
+                20: "BATTERY_EXPORT",
             }
         )
 
@@ -678,10 +678,10 @@ class TestScheduleIntegrity:
                 5: "GRID_CHARGING",
                 8: "GRID_CHARGING",
                 11: "GRID_CHARGING",
-                14: "EXPORT_ARBITRAGE",
-                17: "EXPORT_ARBITRAGE",
-                20: "EXPORT_ARBITRAGE",
-                23: "EXPORT_ARBITRAGE",
+                14: "BATTERY_EXPORT",
+                17: "BATTERY_EXPORT",
+                20: "BATTERY_EXPORT",
+                23: "BATTERY_EXPORT",
             }
         )
 
@@ -716,11 +716,11 @@ _OVERCAPACITY_INTENTS = hourly_to_quarterly(
         5: "GRID_CHARGING",
         7: "GRID_CHARGING",
         9: "GRID_CHARGING",
-        11: "EXPORT_ARBITRAGE",
-        13: "EXPORT_ARBITRAGE",
-        15: "EXPORT_ARBITRAGE",
-        17: "EXPORT_ARBITRAGE",
-        19: "EXPORT_ARBITRAGE",
+        11: "BATTERY_EXPORT",
+        13: "BATTERY_EXPORT",
+        15: "BATTERY_EXPORT",
+        17: "BATTERY_EXPORT",
+        19: "BATTERY_EXPORT",
     }
 )
 

@@ -227,7 +227,7 @@ class TestDataStructureConsistency:
                 "GRID_CHARGING",
                 "SOLAR_STORAGE",
                 "LOAD_SUPPORT",
-                "EXPORT_ARBITRAGE",
+                "BATTERY_EXPORT",
                 "IDLE",
             }
 

@@ -97,7 +97,7 @@ class TestStrategicIntentClassification:
             "GRID_CHARGING",
             "SOLAR_STORAGE",
             "LOAD_SUPPORT",
-            "EXPORT_ARBITRAGE",
+            "BATTERY_EXPORT",
             "IDLE",
         }
         assert unique_intents.issubset(
@@ -126,7 +126,7 @@ class TestStrategicIntentClassification:
         ), "Should classify grid charging during cheap hours"
 
     def test_export_arbitrage_intent(self, battery_system_with_arbitrage):
-        """Test that EXPORT_ARBITRAGE intent is classified correctly."""
+        """Test that BATTERY_EXPORT intent is classified correctly."""
         success = battery_system_with_arbitrage.update_battery_schedule(
             0, prepare_next_day=True
         )
@@ -141,7 +141,7 @@ class TestStrategicIntentClassification:
         peak_intents = [h.decision.strategic_intent for h in peak_hours]
 
         # Should potentially have export arbitrage during expensive hours
-        export_arbitrage_count = peak_intents.count("EXPORT_ARBITRAGE")
+        export_arbitrage_count = peak_intents.count("BATTERY_EXPORT")
         assert (
             export_arbitrage_count >= 0
         ), "Should classify export arbitrage during expensive hours"
@@ -379,7 +379,7 @@ class TestScheduleValidation:
 class TestChargeRateHardwareWrite:
     """Charge rate must be written to the inverter register unconditionally.
 
-    Bug scenario: a LOAD_SUPPORT or EXPORT_ARBITRAGE period sets charge_rate=0
+    Bug scenario: a LOAD_SUPPORT or BATTERY_EXPORT period sets charge_rate=0
     on the inverter. A subsequent SOLAR_STORAGE period (load_first mode) must
     overwrite that register with 100% — otherwise the inverter runs in
     load_first with 0% charge power and exports excess solar instead of

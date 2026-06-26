@@ -507,7 +507,7 @@ const InverterStatusDashboard: React.FC = () => {
     const colors: Record<string, string> = {
       'SOLAR_STORAGE': 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300',
       'LOAD_SUPPORT': 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300',
-      'EXPORT_ARBITRAGE': 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300',
+      'BATTERY_EXPORT': 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300',
       'GRID_CHARGING': 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300',
       'IDLE': 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300'
     };

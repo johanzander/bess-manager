@@ -114,7 +114,7 @@ class TestSolarStorageIsIdle:
         assert len(manager._discharge_periods) == 0
 
 
-# ── LOAD_SUPPORT / EXPORT_ARBITRAGE → discharge period ───────────────────────
+# ── LOAD_SUPPORT / BATTERY_EXPORT → discharge period ───────────────────────
 
 
 class TestDischargeIntentsProduceDischargeperiod:
@@ -129,7 +129,7 @@ class TestDischargeIntentsProduceDischargeperiod:
     def test_export_arbitrage_produces_discharge_period(
         self, manager: GrowattSphController
     ) -> None:
-        intents = make_intents({20: "EXPORT_ARBITRAGE"})
+        intents = make_intents({20: "BATTERY_EXPORT"})
         manager.create_schedule(make_schedule_mock(intents))
 
         assert len(manager._discharge_periods) == 1
@@ -137,9 +137,9 @@ class TestDischargeIntentsProduceDischargeperiod:
     def test_consecutive_mixed_discharge_intents_merge_into_one_period(
         self, manager: GrowattSphController
     ) -> None:
-        # LOAD_SUPPORT followed immediately by EXPORT_ARBITRAGE → both are in
+        # LOAD_SUPPORT followed immediately by BATTERY_EXPORT → both are in
         # DISCHARGE_INTENTS, so they merge into a single continuous discharge period.
-        intents = make_intents({18: "LOAD_SUPPORT", 19: "EXPORT_ARBITRAGE"})
+        intents = make_intents({18: "LOAD_SUPPORT", 19: "BATTERY_EXPORT"})
         manager.create_schedule(make_schedule_mock(intents))
 
         assert len(manager._discharge_periods) == 1
@@ -149,7 +149,7 @@ class TestDischargeIntentsProduceDischargeperiod:
     def test_discharge_period_writes_discharge_call_to_controller(
         self, manager: GrowattSphController
     ) -> None:
-        intents = make_intents({20: "EXPORT_ARBITRAGE"})
+        intents = make_intents({20: "BATTERY_EXPORT"})
         manager.create_schedule(make_schedule_mock(intents))
 
         controller = MagicMock()

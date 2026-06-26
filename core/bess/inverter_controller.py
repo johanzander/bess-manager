@@ -265,7 +265,7 @@ class InverterController(ABC):
         return self.INTENT_DESCRIPTIONS.get(intent, "Unknown intent")
 
     def get_detailed_period_groups(
-        self, intents: list[str] | None = None
+        self, intents: list[str] | None = None, actions: list[float] | None = None
     ) -> list[dict]:
         """Get period groups with full control parameters for display/API.
 
@@ -275,6 +275,9 @@ class InverterController(ABC):
         Args:
             intents: Optional list of strategic intents to group. If None,
                      uses self.strategic_intents (today's schedule).
+            actions: Optional list of battery actions in kWh per period (negative=discharge).
+                     If None, reads from self.current_schedule.actions. If current_schedule
+                     is also None or the period is out of range, action defaults to 0.0.
 
         Returns:
             List of period groups with all control parameters and time strings
@@ -285,6 +288,12 @@ class InverterController(ABC):
 
         num_periods = len(effective_intents)
 
+        schedule_actions: list[float] | None = None
+        if actions is not None:
+            schedule_actions = actions
+        elif self.current_schedule is not None:
+            schedule_actions = self.current_schedule.actions
+
         period_settings = []
         for period in range(num_periods):
             intent = effective_intents[period]
@@ -293,6 +302,14 @@ class InverterController(ABC):
                 intent,
                 {"grid_charge": False, "charge_rate": 100, "discharge_rate": 0},
             )
+
+            action_kwh = 0.0
+            if schedule_actions is not None and period < len(schedule_actions):
+                action_kwh = schedule_actions[period]
+            action_kw = action_kwh / 0.25
+
+            _, discharge_rate = self._map_intent_to_rates(intent, action_kw)
+
             period_settings.append(
                 {
                     "period": period,
@@ -300,7 +317,7 @@ class InverterController(ABC):
                     "mode": mode,
                     "grid_charge": control["grid_charge"],
                     "charge_rate": control["charge_rate"],
-                    "discharge_rate": control["discharge_rate"],
+                    "discharge_rate": discharge_rate,
                 }
             )
 

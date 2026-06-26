@@ -75,14 +75,15 @@ optimizer chose.  These are classified from the actual flow pattern:
 | **GRID_CHARGING** | grid_to_battery >= 0.1 kWh | Buying cheap grid electricity to store in battery |
 | **SOLAR_STORAGE** | solar_to_battery > 0.1 kWh, grid_to_battery < 0.1 | Storing excess solar production for later |
 | **LOAD_SUPPORT** | battery_to_home > 0.1 kWh, battery_to_grid <= 0.1 | Using battery to power home (avoid expensive grid) |
-| **EXPORT_ARBITRAGE** | battery_to_grid > 0.1 kWh | Selling stored energy to grid at high prices |
+| **BATTERY_EXPORT** | battery_to_grid > 0.1 kWh | Selling stored battery energy to grid at high prices |
+| **SOLAR_EXPORT** | power ≈ 0, solar_to_grid > 0.01 kWh | Solar surplus exporting directly to grid, battery idle |
 | **IDLE** | No significant battery flows | No profitable action — direct solar/grid consumption |
 
 **Hardware mapping**: Intents control actual inverter behavior:
 - GRID_CHARGING → battery_first mode + grid charge ON
 - LOAD_SUPPORT → load_first mode
-- EXPORT_ARBITRAGE → grid_first mode (enables grid export)
-- SOLAR_STORAGE / IDLE → load_first mode (solar serves home first)
+- BATTERY_EXPORT → grid_first mode (battery discharge to grid)
+- SOLAR_STORAGE / SOLAR_EXPORT / IDLE → load_first mode (solar serves home first)
 
 
 ## Price Calculation

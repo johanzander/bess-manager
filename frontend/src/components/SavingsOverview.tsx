@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ChevronRight, Zap } from 'lucide-react';
+import { Battery, ChevronRight, Zap } from 'lucide-react';
 import { FormattedValue } from '../types';
 import FormattedValueComponent from './FormattedValue';
 import { useDashboardData } from '../hooks/useDashboardData';
@@ -288,13 +288,14 @@ export const SavingsOverview: React.FC<SavingsOverviewProps> = ({ resolution }) 
                     </div>
                     <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(hour.gridExported)}</div>
                     {(hour.batteryToGrid?.value ?? 0) > 0.05 && (
-                      <span className="mt-1 text-xs font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 px-1.5 py-0.5 rounded">
-                        BAT {hour.batteryToGrid?.display}
+                      <span className="mt-1 text-xs font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 px-1.5 py-0.5 rounded flex items-center gap-0.5">
+                        <Battery className="h-3 w-3" />
+                        {hour.batteryToGrid?.display}
                       </span>
                     )}
                   </div>
                 </td>
-                
+
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
                   <div className={`font-medium ${
                     Math.abs(getNumericValue(hour.hourlyCost)) < 0.01 ? 'text-gray-900 dark:text-white' :
@@ -577,8 +578,9 @@ export const SavingsOverview: React.FC<SavingsOverviewProps> = ({ resolution }) 
                             </div>
                             <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(hour.gridExported)}</div>
                             {(hour.batteryToGrid?.value ?? 0) > 0.05 && (
-                              <span className="mt-1 text-xs font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 px-1.5 py-0.5 rounded">
-                                BAT {hour.batteryToGrid?.display}
+                              <span className="mt-1 text-xs font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 px-1.5 py-0.5 rounded flex items-center gap-0.5">
+                                <Battery className="h-3 w-3" />
+                                {hour.batteryToGrid?.display}
                               </span>
                             )}
                           </div>

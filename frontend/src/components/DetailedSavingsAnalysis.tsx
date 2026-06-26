@@ -415,7 +415,7 @@ export const DetailedSavingsAnalysis: React.FC<DetailedSavingsAnalysisProps> = (
                 </td>
                 {/* Bat→Grid */}
                 <td className="px-3 py-2 whitespace-nowrap text-sm border border-gray-300 dark:border-gray-600 bg-orange-50 dark:bg-orange-900/20 text-center">
-                  <div className={`font-medium ${(hour.batteryToGrid?.value ?? 0) > 0.05 ? 'text-green-600 dark:text-green-400' : 'text-gray-400 dark:text-gray-500'}`}>
+                  <div className={`font-medium ${(hour.batteryToGrid?.value ?? 0) > 0.05 ? 'text-orange-600 dark:text-orange-400' : 'text-gray-400 dark:text-gray-500'}`}>
                     {hour.batteryToGrid?.display || '0.0'}
                   </div>
                   <div className="text-xs text-gray-500 dark:text-gray-400">kWh</div>

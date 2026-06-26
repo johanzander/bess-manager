@@ -1438,6 +1438,7 @@ async def get_inverter_status():
             "charge_stop_soc": battery_settings.max_soc,
             "discharge_stop_soc": battery_settings.min_soc,
             "discharge_power_rate": discharge_power_rate,
+            "discharge_inhibit_active": controller.get_discharge_inhibit_active(),
             "inverter_platform": inverter_platform,
             "timestamp": datetime.now().isoformat(),
         }

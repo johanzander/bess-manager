@@ -26,6 +26,7 @@ interface InverterStatus {
   chargeStopSoc: number;
   dischargeStopSoc: number;
   dischargePowerRate: number;
+  dischargeInhibitActive?: boolean;
   maxChargingPower: number;
   maxDischargingPower: number;
   gridChargeEnabled: boolean;
@@ -110,6 +111,8 @@ interface StatusCardProps {
     unit: string;
     icon?: React.ComponentType<{ className?: string }>;
     color?: 'green' | 'red' | 'yellow' | 'blue';
+    dimmed?: boolean;
+    badge?: { text: string; color: 'yellow' | 'red' };
   }>;
   color: 'blue' | 'green' | 'yellow' | 'red' | 'purple';
   icon: React.ComponentType<{ className?: string }>;
@@ -192,17 +195,31 @@ const StatusCard: React.FC<StatusCardProps> = ({
       {/* Metrics */}
       <div className="space-y-3">
         {metrics.map((metric, index) => (
-          <div key={index} className="flex items-center justify-between">
+          <div
+            key={index}
+            className={`flex items-center justify-between ${metric.dimmed ? 'opacity-40' : ''}`}
+          >
             <div className="flex items-center">
               {metric.icon && <metric.icon className="h-4 w-4 mr-2 text-gray-500 dark:text-gray-400" />}
               <span className="text-sm text-gray-700 dark:text-gray-300">{metric.label}</span>
             </div>
-            <span className={`text-sm font-semibold ${
-              metric.color ? metricColorClasses[metric.color] : 'text-gray-900 dark:text-gray-100'
-            }`}>
-              {metric.value}
-              {metric.unit && <span className="opacity-70 ml-1">{metric.unit}</span>}
-            </span>
+            <div className="flex items-center gap-2">
+              {metric.badge && (
+                <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${
+                  metric.badge.color === 'yellow'
+                    ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400'
+                    : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'
+                }`}>
+                  {metric.badge.text}
+                </span>
+              )}
+              <span className={`text-sm font-semibold ${
+                metric.color ? metricColorClasses[metric.color] : 'text-gray-900 dark:text-gray-100'
+              }`}>
+                {metric.value}
+                {metric.unit && <span className="opacity-70 ml-1">{metric.unit}</span>}
+              </span>
+            </div>
           </div>
         ))}
       </div>
@@ -674,7 +691,11 @@ const InverterStatusDashboard: React.FC = () => {
               label: "Discharge Power Rate",
               value: inverterStatus?.dischargePowerRate || 0,
               unit: "%",
-              icon: TrendingDown
+              icon: TrendingDown,
+              dimmed: inverterStatus?.dischargeInhibitActive,
+              badge: inverterStatus?.dischargeInhibitActive
+                ? { text: 'Inhibited', color: 'yellow' as const }
+                : undefined,
             }
           ]}
         />

@@ -1461,6 +1461,7 @@ async def get_growatt_detailed_schedule():
 
     try:
         schedule_manager = bess_controller.system._inverter_controller
+        battery_settings = bess_controller.system.battery_settings
         current_hour = time_utils.now().hour
 
         # Get TOU intervals directly from schedule manager
@@ -1593,6 +1594,7 @@ async def get_growatt_detailed_schedule():
                 bess_controller.system.schedule_store.get_latest_schedule()
             )
             today_soc_values: list[float | None] = []
+            today_actions: list[float] = []
             if stored_schedule_for_today:
                 opt_result_today = stored_schedule_for_today.optimization_result
                 opt_period_today = stored_schedule_for_today.optimization_period
@@ -1600,15 +1602,28 @@ async def get_growatt_detailed_schedule():
                 for period_idx in range(today_period_count_local):
                     data_idx = period_idx - opt_period_today
                     if 0 <= data_idx < len(opt_result_today.period_data):
+                        pd_today = opt_result_today.period_data[data_idx]
+                        soe = pd_today.energy.battery_soe_end
                         today_soc_values.append(
-                            opt_result_today.period_data[data_idx].energy.battery_soe_end
+                            (soe / battery_settings.total_capacity * 100.0)
+                            if battery_settings.total_capacity > 0
+                            else None
                         )
+                        today_actions.append(pd_today.decision.battery_action or 0.0)
                     else:
                         today_soc_values.append(None)
+                        today_actions.append(0.0)
             raw_groups = schedule_manager.get_detailed_period_groups(
-                soc_values=today_soc_values if today_soc_values else None
+                actions=today_actions if today_actions else None,
+                soc_values=today_soc_values if today_soc_values else None,
             )
+            prev_soc: float | None = None
             for group in raw_groups:
+                soc_end = group["soc_end_pct"]
+                soc_delta_kwh: float | None = None
+                if soc_end is not None and prev_soc is not None and battery_settings.total_capacity > 0:
+                    soc_delta_kwh = (soc_end - prev_soc) / 100.0 * battery_settings.total_capacity
+                prev_soc = soc_end
                 period_groups.append(
                     {
                         "start_time": group["start_time"],
@@ -1622,7 +1637,8 @@ async def get_growatt_detailed_schedule():
                         "discharge_power_rate": group["discharge_rate"],
                         "grid_charge": group["grid_charge"],
                         "total_action_kwh": group["total_action_kwh"],
-                        "soc_end_pct": group["soc_end_pct"],
+                        "soc_end_pct": soc_end,
+                        "soc_delta_kwh": soc_delta_kwh,
                     }
                 )
         except (ValueError, KeyError, AttributeError) as e:
@@ -1664,7 +1680,12 @@ async def get_growatt_detailed_schedule():
                         pd = opt_result.period_data[data_idx]
                         tomorrow_intents.append(pd.decision.strategic_intent)
                         tomorrow_actions.append(pd.decision.battery_action or 0.0)
-                        tomorrow_soc_values.append(pd.energy.battery_soe_end)
+                        soe = pd.energy.battery_soe_end
+                        tomorrow_soc_values.append(
+                            (soe / battery_settings.total_capacity * 100.0)
+                            if battery_settings.total_capacity > 0
+                            else None
+                        )
                     else:
                         tomorrow_soc_values.append(None)
                 if tomorrow_intents:
@@ -1674,7 +1695,13 @@ async def get_growatt_detailed_schedule():
                         soc_values=tomorrow_soc_values,
                     )
                     tomorrow_period_groups = []
+                    prev_soc_tmr: float | None = None
                     for group in raw_tomorrow_groups:
+                        soc_end = group["soc_end_pct"]
+                        soc_delta_kwh_tmr: float | None = None
+                        if soc_end is not None and prev_soc_tmr is not None and battery_settings.total_capacity > 0:
+                            soc_delta_kwh_tmr = (soc_end - prev_soc_tmr) / 100.0 * battery_settings.total_capacity
+                        prev_soc_tmr = soc_end
                         tomorrow_period_groups.append(
                             {
                                 "start_time": group["start_time"],
@@ -1690,7 +1717,8 @@ async def get_growatt_detailed_schedule():
                                 "discharge_power_rate": group["discharge_rate"],
                                 "grid_charge": group["grid_charge"],
                                 "total_action_kwh": group["total_action_kwh"],
-                                "soc_end_pct": group["soc_end_pct"],
+                                "soc_end_pct": soc_end,
+                                "soc_delta_kwh": soc_delta_kwh_tmr,
                             }
                         )
         except (AttributeError, KeyError, ValueError) as e:

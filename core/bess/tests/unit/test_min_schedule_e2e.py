@@ -223,7 +223,7 @@ class TestEndToEndChargeDischargeRates:
 
     @pytest.mark.parametrize("scenario_name", _get_realworld_scenarios())
     def test_grid_charging_periods_have_correct_rates(self, scenario_name):
-        """GRID_CHARGING: grid_charge=True, charge_rate=100%, discharge_rate=0%."""
+        """GRID_CHARGING: grid_charge=True, charge_rate=1..100% (action-derived), discharge_rate=0%."""
         scheduler, _ = _run_and_build_schedule(scenario_name)
 
         for period in range(len(scheduler.strategic_intents)):
@@ -233,8 +233,8 @@ class TestEndToEndChargeDischargeRates:
                     settings["grid_charge"] is True
                 ), f"{scenario_name} period {period}: GRID_CHARGING must have grid_charge=True"
                 assert (
-                    settings["charge_rate"] == 100
-                ), f"{scenario_name} period {period}: GRID_CHARGING charge_rate={settings['charge_rate']}, expected 100"
+                    0 < settings["charge_rate"] <= 100
+                ), f"{scenario_name} period {period}: GRID_CHARGING charge_rate={settings['charge_rate']}, expected 1..100"
                 assert (
                     settings["discharge_rate"] == 0
                 ), f"{scenario_name} period {period}: GRID_CHARGING discharge_rate={settings['discharge_rate']}, expected 0"

@@ -1,16 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { DetailedSavingsAnalysis } from '../components/DetailedSavingsAnalysis';
 import { SavingsOverview } from '../components/SavingsOverview';
-import { EnergyFlowTable } from '../components/EnergyFlowTable';
 import { useSettings } from '../hooks/useSettings';
 import { useUserPreferences } from '../hooks/useUserPreferences';
-import { Activity, Eye, Table2 } from 'lucide-react';
+import { Eye, Table2 } from 'lucide-react';
 import api from '../lib/api';
 
 const SavingsPage: React.FC = () => {
   const { batterySettings } = useSettings();
   const { dataResolution, setDataResolution } = useUserPreferences();
-  const [viewMode, setViewMode] = useState<'overview' | 'scenario' | 'energy-flow'>('overview');
+  const [viewMode, setViewMode] = useState<'overview' | 'scenario'>('overview');
   const [systemMode, setSystemMode] = useState<string>('normal');
 
   useEffect(() => {
@@ -82,17 +81,6 @@ const SavingsPage: React.FC = () => {
               <Table2 className="h-4 w-4 mr-2" />
               Scenario Comparison
             </button>
-            <button
-              onClick={() => setViewMode('energy-flow')}
-              className={`flex items-center px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                viewMode === 'energy-flow'
-                  ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm'
-                  : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
-              }`}
-            >
-              <Activity className="h-4 w-4 mr-2" />
-              Energy Flow
-            </button>
           </div>
         </div>
 
@@ -125,10 +113,8 @@ const SavingsPage: React.FC = () => {
 
       {viewMode === 'overview' ? (
         <SavingsOverview resolution={dataResolution} />
-      ) : viewMode === 'scenario' ? (
-        <DetailedSavingsAnalysis settings={mergedSettings} resolution={dataResolution} />
       ) : (
-        <EnergyFlowTable resolution={dataResolution} />
+        <DetailedSavingsAnalysis settings={mergedSettings} resolution={dataResolution} />
       )}
     </div>
   );

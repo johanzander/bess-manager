@@ -597,6 +597,7 @@ class HomeAssistantAPIController:
         "vpp_power": "vpp_power",
         "vpp_time": "vpp_time",
         "vpp_allow_ac_charging": "vpp_allow_ac_charging",
+        "vpp_status": "vpp_status",
     }
 
     # Growatt GEN3 (MIX/SPA/SPH) via solax_modbus Growatt plugin
@@ -1677,12 +1678,22 @@ class HomeAssistantAPIController:
     #   number.<*>_vpp_power: min=-100, max=100, step=5, unit="%"
     #   number.<*>_vpp_time:  min=0,    max=1440, step=5, unit="min"
     # Writing watts yields 500 Internal Server Error.
+    # The fourth required entity is ``select.<*>_vpp_status``: it is the
+    # actual VPP activate/deactivate switch.  Writing power+time+allow alone
+    # leaves the values in the buffer but the inverter ignores them until
+    # vpp_status is set to "Enabled".  ``vpp_remote_control`` is a separate
+    # tenant-side opt-in (allow remote control at all) and is typically
+    # left Enabled by the integration; we don't toggle it here.
     _VPP_TIME_MIN = 20  # autorepeat duration in minutes (covers a 15-min
     # period with margin; BESS rewrites at each boundary, so this is a safety
     # belt rather than the primary mechanism)
 
     def set_growatt_vpp(self, power_percent: int, allow_ac_charging: bool) -> None:
         """Issue a Growatt VPP active-power command.
+
+        Sequence: configure power / time / ac-charging first, then flip
+        ``vpp_status`` to Enabled last so the inverter sees a coherent
+        config when it activates.
 
         Args:
             power_percent: Target power as percent of inverter nominal AC
@@ -1696,13 +1707,14 @@ class HomeAssistantAPIController:
         gate_entity = self._get_entity_for_service("vpp_allow_ac_charging")
         power_entity = self._get_entity_for_service("vpp_power")
         time_entity = self._get_entity_for_service("vpp_time")
+        status_entity = self._get_entity_for_service("vpp_status")
 
         # Clamp to ±100 and snap to step=5; out-of-range values 500 server-side.
         clamped = max(-100, min(100, int(power_percent)))
         snapped = int(round(clamped / 5) * 5)
 
         logger.info(
-            "Growatt VPP: power=%d%%, allow_ac_charging=%s, time=%d min",
+            "Growatt VPP: power=%d%%, allow_ac_charging=%s, time=%d min, status=Enabled",
             snapped,
             allow_ac_charging,
             self._VPP_TIME_MIN,
@@ -1729,11 +1741,44 @@ class HomeAssistantAPIController:
             entity_id=time_entity,
             value=self._VPP_TIME_MIN,
         )
+        # Activate VPP — last so the inverter sees a coherent config.
+        self._service_call_with_retry(
+            "select",
+            "select_option",
+            operation="Growatt VPP status=Enabled",
+            entity_id=status_entity,
+            option="Enabled",
+        )
 
     def set_growatt_vpp_disabled(self) -> None:
-        """Stop active Growatt VPP control (set power=0, gate disabled)."""
-        logger.info("Growatt VPP: disabling active power command")
-        self.set_growatt_vpp(0, allow_ac_charging=False)
+        """Stop active Growatt VPP control.
+
+        Flips ``vpp_status`` to Disabled so the inverter falls back to its
+        default (TOU / self-use) behaviour.  Also resets the power command
+        to 0 for clarity, but on Disabled status the inverter ignores it.
+        """
+        try:
+            status_entity = self._get_entity_for_service("vpp_status")
+            power_entity = self._get_entity_for_service("vpp_power")
+        except ValueError:
+            return
+
+        logger.info("Growatt VPP: status=Disabled (deactivating)")
+
+        self._service_call_with_retry(
+            "select",
+            "select_option",
+            operation="Growatt VPP status=Disabled",
+            entity_id=status_entity,
+            option="Disabled",
+        )
+        self._service_call_with_retry(
+            "number",
+            "set_value",
+            operation="Growatt VPP power=0",
+            entity_id=power_entity,
+            value=0,
+        )
 
     def set_solax_min_soc(self, min_soc: int) -> None:
         """Write the battery minimum SOC to the SolaX inverter.

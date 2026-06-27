@@ -105,7 +105,12 @@ class SolaxModbusGrowattController(GrowattMinController):
         Returns True when ``vpp_power``, ``vpp_time``, and
         ``vpp_allow_ac_charging`` are all resolvable in the sensor map.
         """
-        for sensor_key in ("vpp_power", "vpp_time", "vpp_allow_ac_charging"):
+        for sensor_key in (
+            "vpp_power",
+            "vpp_time",
+            "vpp_allow_ac_charging",
+            "vpp_status",
+        ):
             try:
                 controller._get_entity_for_service(sensor_key)
             except (ValueError, AttributeError):

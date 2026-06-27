@@ -1264,6 +1264,7 @@ class TestFrontendSensorKeysMatchBackend:
             "vpp_power",
             "vpp_time",
             "vpp_allow_ac_charging",
+            "vpp_status",
         },
         "solax_modbus_native": {"lifetime_system_production"},
     }

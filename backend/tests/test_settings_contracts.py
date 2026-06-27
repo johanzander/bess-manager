@@ -60,6 +60,8 @@ def _valid_options() -> dict:
             "max_charge_power_kw": 15.0,
             "max_discharge_power_kw": 15.0,
             "min_action_profit_threshold": 0.0,
+            "external_solar_mode": False,
+            "vpp_mode": False,
         },
         "home": {
             "default_hourly": 3.5,

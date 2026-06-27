@@ -29,6 +29,11 @@ BATTERY_STORE_TO_API: dict[str, str] = {
     "max_charge_power_kw": "maxChargePowerKw",
     "max_discharge_power_kw": "maxDischargePowerKw",
     "min_action_profit_threshold": "minActionProfitThreshold",
+    # Fork-only fields (jvdd).  The settings_store schema migration adds these
+    # with default False on existing installs so the required-field check in
+    # build_system_settings() still passes.
+    "external_solar_mode": "externalSolarMode",
+    "vpp_mode": "vppMode",
 }
 
 HOME_STORE_TO_API: dict[str, str] = {

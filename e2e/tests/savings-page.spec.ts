@@ -24,11 +24,11 @@ test.describe('Savings Page', () => {
     ).toBeVisible({ timeout: 15_000 });
   });
 
-  test('shows view mode switcher (Standard / Detailed)', async ({ page }) => {
+  test('shows view mode switcher (Overview / Scenario Comparison)', async ({ page }) => {
     await waitForSavingsPage(page);
 
-    await expect(page.getByRole('button', { name: /Standard View/i })).toBeVisible();
-    await expect(page.getByRole('button', { name: /Detailed View/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Overview/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Scenario Comparison/i })).toBeVisible();
   });
 
   test('shows resolution selector (60 min / 15 min)', async ({ page }) => {
@@ -50,15 +50,15 @@ test.describe('Savings Page', () => {
     expect(hasChart || noData || loadingState || errorState).toBe(true);
   });
 
-  test('switching to detailed view shows table or handles no data', async ({ page }) => {
+  test('switching to scenario comparison shows table or handles no data', async ({ page }) => {
     await waitForSavingsPage(page);
 
-    await page.getByRole('button', { name: /Detailed View/i }).click();
+    await page.getByRole('button', { name: /Scenario Comparison/i }).click();
 
     // At minimum the page should not crash
     await expect(page.getByRole('heading', { name: /Financial Analysis/i })).toBeVisible();
 
-    // Wait for the detailed view to settle — either a table or a no-data message
+    // Wait for the scenario comparison view to settle — either a table or a no-data message
     await expect(
       page.locator('table').first().or(page.getByText(/No schedule data|no.*data/i))
     ).toBeVisible({ timeout: 10_000 });
@@ -90,11 +90,11 @@ test.describe('Savings Page', () => {
     await expect(page.getByText('Something went wrong')).not.toBeVisible();
   });
 
-  test('detailed view at 60 min shows table when data available', async ({ page }) => {
+  test('scenario comparison at 60 min shows table when data available', async ({ page }) => {
     await waitForSavingsPage(page);
 
     await page.getByRole('button', { name: '60 min' }).click();
-    await page.getByRole('button', { name: /Detailed View/i }).click();
+    await page.getByRole('button', { name: /Scenario Comparison/i }).click();
 
     // Wait for either table or no-data state
     await page.waitForTimeout(2000);
@@ -111,12 +111,12 @@ test.describe('Savings Page', () => {
     }
   });
 
-  test('15 min detailed view has more rows than 60 min when data available', async ({ page }) => {
+  test('15 min scenario comparison has more rows than 60 min when data available', async ({ page }) => {
     await waitForSavingsPage(page);
 
     // Get row count at 60 min
     await page.getByRole('button', { name: '60 min' }).click();
-    await page.getByRole('button', { name: /Detailed View/i }).click();
+    await page.getByRole('button', { name: /Scenario Comparison/i }).click();
     await page.waitForTimeout(2000);
 
     const table = page.locator('table').first();

@@ -67,16 +67,25 @@ def test_idle_exports_when_battery_full():
     assert round(reward, 4) == round(1.4 * 0.8, 4)
 
 
-def test_charge_stores_all_surplus_not_a_fraction():
-    """TARGET: a charge action is the STORE disposition — it stores ALL surplus
-    (up to rate/room), exporting only genuine excess, regardless of the action's
-    magnitude. So a tiny charge action still stores all surplus."""
+def test_store_action_charges_at_max_rate_solar_plus_grid():
+    """TARGET: a STORE action charges at MAX rate — solar fills first, grid tops up.
+
+    Renamed from test_charge_stores_all_surplus_not_a_fraction after the 2026-06-27
+    fix that allows simultaneous solar+grid charging during surplus hours.
+
+    Scenario: solar=1.5, home=0.1 → surplus=1.4 kWh. rate_throughput=2.5 kWh.
+    Solar covers 1.4 kWh; grid covers the remaining 1.1 kWh.
+    power magnitude (0.4) is still ignored — any positive power = STORE at max rate.
+    """
     bs = make_battery_settings(max_charge_power_kw=10.0, efficiency_charge=1.0)
-    # surplus 1.4 kWh, rate_throughput = 2.5 kWh, plenty of room -> store all 1.4
     next_soe = _state_transition(
         5.0, 0.4, bs, DT, solar_production=1.5, home_consumption=0.1
     )
-    assert round(next_soe - 5.0, 4) == 1.4  # stored all surplus, not 0.4*0.25
+    # Solar covers 1.4 kWh, grid covers 1.1 kWh → total = 2.5 kWh stored (rate-limited)
+    assert round(next_soe - 5.0, 4) == 2.5, (
+        f"Expected STORE at max rate (2.5 kWh = solar 1.4 + grid 1.1) "
+        f"but got {next_soe - 5.0:.4f} kWh"
+    )
 
     reward, _ = _compute_reward(
         power=0.4,
@@ -91,9 +100,12 @@ def test_charge_stores_all_surplus_not_a_fraction():
         solar_production=1.5,
         cost_basis=bs.cycle_cost_per_kwh,
     )
-    # surplus all stored, 0 exported; only wear cost = 1.4 * cycle_cost
-    # reward = -(0 import - 0 export + 1.4*cycle_cost)
-    assert round(reward, 4) == round(-(1.4 * bs.cycle_cost_per_kwh), 4)
+    # grid_to_battery=1.1 kWh at buy_price=1.0; wear=2.5*cycle_cost; export=0
+    # total_cost = 1.1*1.0 + 2.5*cycle_cost_per_kwh
+    expected_cost = 1.1 * PRICES_BUY[0] + 2.5 * bs.cycle_cost_per_kwh
+    assert round(reward, 4) == round(-expected_cost, 4), (
+        f"Expected reward={-expected_cost:.4f} but got {reward:.4f}"
+    )
 
 
 def test_build_period_data_store_disposition_flows():
@@ -117,8 +129,16 @@ def test_build_period_data_store_disposition_flows():
         new_cost_basis=bs.cycle_cost_per_kwh,
         currency="SEK",
     )
-    assert round(pd.energy.battery_charged, 4) == 1.4  # stored all surplus
-    assert round(pd.energy.grid_exported, 4) == 0.0  # nothing exported
+    # After fix: solar covers 1.4 kWh, grid covers 1.1 kWh → max rate 2.5 kWh stored
+    assert round(pd.energy.battery_charged, 4) == 2.5, (
+        f"Expected battery_charged=2.5 (solar 1.4 + grid 1.1) but got {pd.energy.battery_charged:.4f}"
+    )
+    assert round(pd.energy.grid_exported, 4) == 0.0, (
+        f"Expected grid_exported=0 but got {pd.energy.grid_exported:.4f}"
+    )
+    assert round(pd.energy.grid_imported, 4) == 1.1, (
+        f"Expected grid_imported=1.1 (grid top-up) but got {pd.energy.grid_imported:.4f}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -176,21 +196,24 @@ def test_battery_export_maps_to_grid_first_hold():
 # ---------------------------------------------------------------------------
 
 
-def test_store_with_surplus_no_grid_top_up():
-    """TARGET (#145): when surplus > 0 a STORE action may NOT draw from the grid.
+def test_store_with_surplus_draws_grid_to_fill_remaining_rate():
+    """After 2026-06-27 fix: STORE action during solar surplus charges at MAX rate.
+    Solar fills first; grid covers remaining capacity up to max charge rate.
 
-    Scenario: solar=2.0, home=1.5 → surplus=0.5 kWh.
-    power=4.0 kW, dt=0.25 → power*dt=1.0 kWh > surplus.
-    The algorithm must store ONLY the 0.5 kWh solar surplus; grid_imported must be 0.
-    (Previously the code computed grid_to_battery = power*dt - surplus = 0.5 kWh,
-    which hardware cannot do in load_first/solar-storage mode.)
+    This replaced test_store_with_surplus_no_grid_top_up which encoded the old
+    SOLAR_STORAGE-only constraint (grid_to_battery=0 when surplus>0). The old
+    constraint prevented the optimizer from using cheap solar-surplus hours for
+    grid arbitrage, causing it to charge at more expensive no-surplus hours.
+
+    Scenario: solar=2.0, home=1.5 → surplus=0.5 kWh. rate_throughput=2.5 kWh.
+    Solar covers 0.5 kWh; grid draws 2.0 kWh; total charged = 2.5 kWh.
     """
     from core.bess.dp_battery_algorithm import _build_period_data, _state_transition
 
     bs = make_battery_settings(max_charge_power_kw=10.0, efficiency_charge=1.0)
     solar_production = 2.0
     home_consumption = 1.5  # surplus = 0.5 kWh
-    power = 4.0  # power*dt = 1.0 kWh > surplus
+    power = 4.0  # any positive value → STORE at max rate
 
     next_soe = _state_transition(
         5.0,
@@ -199,6 +222,12 @@ def test_store_with_surplus_no_grid_top_up():
         DT,
         solar_production=solar_production,
         home_consumption=home_consumption,
+    )
+
+    # After fix: solar 0.5 + grid 2.0 = 2.5 kWh total (rate-limited)
+    assert round(next_soe - 5.0, 4) == 2.5, (
+        f"Expected STORE at max rate (2.5 kWh) but got {next_soe - 5.0:.4f}. "
+        f"Surplus gate may still be blocking grid charging."
     )
 
     pd = _build_period_data(
@@ -216,14 +245,13 @@ def test_store_with_surplus_no_grid_top_up():
         currency="SEK",
     )
 
-    # Only solar surplus should be stored — no grid draw when surplus is present
-    assert (
-        pd.energy.grid_imported == 0.0
-    ), f"Expected grid_imported=0 (solar-only charging) but got {pd.energy.grid_imported}"
-    # The stored amount is exactly the solar surplus
-    assert (
-        round(pd.energy.battery_charged, 4) == 0.5
-    ), f"Expected battery_charged=0.5 (surplus only) but got {pd.energy.battery_charged}"
+    # Grid draws 2.0 kWh to top up the remaining capacity after solar
+    assert round(pd.energy.grid_imported, 4) == 2.0, (
+        f"Expected grid_imported=2.0 (grid top-up) but got {pd.energy.grid_imported:.4f}"
+    )
+    assert round(pd.energy.battery_charged, 4) == 2.5, (
+        f"Expected battery_charged=2.5 but got {pd.energy.battery_charged:.4f}"
+    )
 
 
 # ---------------------------------------------------------------------------

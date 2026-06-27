@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+## [9.8.0] - 2026-06-27
+
+### Added
+
+- **Redesigned inverter schedule table** — The schedule table in the Inverter Status Dashboard is rebuilt as a single unified table with consistent column widths across today and tomorrow. Intent is now split into separate **Solar** (amber) and **Grid/Discharge** (green/orange) power columns so it's immediately clear which source is charging or discharging. A **Target SOC** column replaces the old SOC field and shows the end-of-period state of charge as a percentage. Pre-optimization (past) rows are greyed out to indicate they are no longer accurate. Inverter Configuration columns (Mode, Charge%, Discharge%, Grid Charge) are hidden for SolaX VPP (`solax_modbus_native`), which does not use TOU-based control. (#194)
+
 ## [9.7.1] - 2026-06-27
 
 ### Added

@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+## [9.7.1] - 2026-06-27
+
+### Added
+
+- **Energy Flow expandable rows in Savings Overview** — Each row in the Savings Overview table now expands to show a detail panel with per-interval solar, battery, and grid flows. Grid Import and Grid Export cells also display compact sub-flow badges (gridToHome, gridToBattery, solarToGrid, batteryToGrid) to the right of the main value. (#188)
+- **Action-derived charge rate for GRID_CHARGING periods** — The inverter now receives a proportional charge rate command instead of always 100%. For small top-up periods (e.g. filling the last 0.17 kWh at 99.4% SOC) the rate is scaled from the DP algorithm's planned action, matching what was actually optimised. All other intents (SOLAR_STORAGE, IDLE, SOLAR_EXPORT) continue to charge at 100% to accept solar at full rate. (#191)
+
 ## [9.7.0] - 2026-06-27
 
 ### Fixed

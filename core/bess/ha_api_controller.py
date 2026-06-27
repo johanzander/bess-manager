@@ -1691,9 +1691,19 @@ class HomeAssistantAPIController:
     def set_growatt_vpp(self, power_percent: int, allow_ac_charging: bool) -> None:
         """Issue a Growatt VPP active-power command.
 
-        Sequence: configure power / time / ac-charging first, then flip
-        ``vpp_status`` to Enabled last so the inverter sees a coherent
-        config when it activates.
+        Sequence: ``vpp_status`` is **always** first flipped to Disabled so
+        the subsequent Enabled write is a genuine Disabled→Enabled edge.
+        Live testing on Growatt MID 15KTL3-XH showed that writing Enabled
+        while already Enabled does not retrigger the inverter — the command
+        sits in the buffer and the inverter keeps following its previous
+        state.  The Disabled→Enabled cycle is the only reliable activation.
+
+        Order:
+          1. status → Disabled            (pre-arm; ensures next Enabled is an edge)
+          2. allow_ac_charging → set
+          3. power → set
+          4. time → set
+          5. status → Enabled              (trigger; inverter picks up new command)
 
         Args:
             power_percent: Target power as percent of inverter nominal AC
@@ -1714,12 +1724,22 @@ class HomeAssistantAPIController:
         snapped = int(round(clamped / 5) * 5)
 
         logger.info(
-            "Growatt VPP: power=%d%%, allow_ac_charging=%s, time=%d min, status=Enabled",
+            "Growatt VPP: power=%d%%, allow_ac_charging=%s, time=%d min (edge-triggered)",
             snapped,
             allow_ac_charging,
             self._VPP_TIME_MIN,
         )
 
+        # Step 1: pre-arm — force a Disabled state so the final Enabled is
+        # a real transition the inverter notices.
+        self._service_call_with_retry(
+            "select",
+            "select_option",
+            operation="Growatt VPP status=Disabled (pre-arm)",
+            entity_id=status_entity,
+            option="Disabled",
+        )
+        # Step 2-4: configure the command.
         self._service_call_with_retry(
             "select",
             "select_option",
@@ -1741,11 +1761,11 @@ class HomeAssistantAPIController:
             entity_id=time_entity,
             value=self._VPP_TIME_MIN,
         )
-        # Activate VPP — last so the inverter sees a coherent config.
+        # Step 5: activate — Disabled→Enabled edge triggers the inverter.
         self._service_call_with_retry(
             "select",
             "select_option",
-            operation="Growatt VPP status=Enabled",
+            operation="Growatt VPP status=Enabled (trigger)",
             entity_id=status_entity,
             option="Enabled",
         )

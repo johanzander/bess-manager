@@ -518,24 +518,33 @@ class TestSimulatorMapRates:
     def test_load_support_partial(self):
         from core.bess.simulation.inverter_simulator import _map_rates
 
-        grid_charge, rate = _map_rates("LOAD_SUPPORT", -1.5, self._settings())
+        grid_charge, rate, charge_rate = _map_rates(
+            "LOAD_SUPPORT", -1.5, self._settings()
+        )
         assert grid_charge is False
         assert rate == 10  # 1.5 / 15.0 * 100 = 10
+        assert charge_rate == 100
 
     def test_load_support_full(self):
         from core.bess.simulation.inverter_simulator import _map_rates
 
         s = self._settings()
-        grid_charge, rate = _map_rates("LOAD_SUPPORT", -s.max_discharge_power_kw, s)
+        grid_charge, rate, charge_rate = _map_rates(
+            "LOAD_SUPPORT", -s.max_discharge_power_kw, s
+        )
         assert grid_charge is False
         assert rate == 100
+        assert charge_rate == 100
 
     def test_load_support_zero(self):
         from core.bess.simulation.inverter_simulator import _map_rates
 
-        grid_charge, rate = _map_rates("LOAD_SUPPORT", 0.0, self._settings())
+        grid_charge, rate, charge_rate = _map_rates(
+            "LOAD_SUPPORT", 0.0, self._settings()
+        )
         assert grid_charge is False
         assert rate == 0
+        assert charge_rate == 100
 
 
 # ── SolaxController ──────────────────────────────────────────────────────────

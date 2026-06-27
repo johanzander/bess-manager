@@ -1539,7 +1539,7 @@ async def get_growatt_detailed_schedule():
                         "dischargePowerRate": hourly_settings.get(
                             "discharge_rate", 100
                         ),
-                        "chargePowerRate": 100,
+                        "chargePowerRate": hourly_settings.get("charge_rate", 100),
                         "strategic_intent": strategic_intent,
                         "intent_description": schedule_manager._get_intent_description(
                             strategic_intent

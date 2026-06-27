@@ -1671,24 +1671,41 @@ class HomeAssistantAPIController:
     # native SolaX inverters (via different entities), so the pattern is
     # well-understood.
 
-    def set_growatt_vpp(self, watts: int, allow_ac_charging: bool) -> None:
+    # SolaxModbus number entities for Growatt VPP use percentage of inverter
+    # nominal AC power and minutes for time — NOT watts/seconds.  Verified on
+    # Growatt MID 15KTL3-XH (entity attributes):
+    #   number.<*>_vpp_power: min=-100, max=100, step=5, unit="%"
+    #   number.<*>_vpp_time:  min=0,    max=1440, step=5, unit="min"
+    # Writing watts yields 500 Internal Server Error.
+    _VPP_TIME_MIN = 20  # autorepeat duration in minutes (covers a 15-min
+    # period with margin; BESS rewrites at each boundary, so this is a safety
+    # belt rather than the primary mechanism)
+
+    def set_growatt_vpp(self, power_percent: int, allow_ac_charging: bool) -> None:
         """Issue a Growatt VPP active-power command.
 
         Args:
-            watts: Target power in watts (signed; positive = charge,
-                   negative = discharge, 0 = idle).
+            power_percent: Target power as percent of inverter nominal AC
+                power, signed.  Positive = charge from grid, negative =
+                discharge to grid, 0 = idle.  Clamped to ±100 and snapped to
+                the entity's step of 5.
             allow_ac_charging: Gate the AC-grid charging path.  Required
-                Enabled before a positive ``watts`` will actually pull from
-                grid; safe to leave Disabled for discharge / idle commands.
+                Enabled before a positive ``power_percent`` will actually
+                pull from grid; safe to leave Disabled for discharge / idle.
         """
         gate_entity = self._get_entity_for_service("vpp_allow_ac_charging")
         power_entity = self._get_entity_for_service("vpp_power")
         time_entity = self._get_entity_for_service("vpp_time")
 
+        # Clamp to ±100 and snap to step=5; out-of-range values 500 server-side.
+        clamped = max(-100, min(100, int(power_percent)))
+        snapped = int(round(clamped / 5) * 5)
+
         logger.info(
-            "Growatt VPP: power=%d W, allow_ac_charging=%s",
-            watts,
+            "Growatt VPP: power=%d%%, allow_ac_charging=%s, time=%d min",
+            snapped,
             allow_ac_charging,
+            self._VPP_TIME_MIN,
         )
 
         self._service_call_with_retry(
@@ -1701,19 +1718,16 @@ class HomeAssistantAPIController:
         self._service_call_with_retry(
             "number",
             "set_value",
-            operation=f"Growatt VPP power={watts}",
+            operation=f"Growatt VPP power={snapped}%",
             entity_id=power_entity,
-            value=watts,
+            value=snapped,
         )
-        # 0 = continuous (holds until the next write overrides).  Could also
-        # use a finite duration for autorepeat-style safety; not needed here
-        # because BESS rewrites at every period boundary.
         self._service_call_with_retry(
             "number",
             "set_value",
-            operation="Growatt VPP time=0 (continuous)",
+            operation=f"Growatt VPP time={self._VPP_TIME_MIN} min",
             entity_id=time_entity,
-            value=0,
+            value=self._VPP_TIME_MIN,
         )
 
     def set_growatt_vpp_disabled(self) -> None:

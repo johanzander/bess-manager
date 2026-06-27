@@ -117,20 +117,19 @@ class SolaxModbusGrowattController(GrowattMinController):
     ) -> tuple[bool, str]:
         """Apply the current period via Growatt VPP active-power command.
 
-        Direct power control bypasses TOU complexity:
-          - ``grid_charge=True``  → charge at max charge power, allow AC charging
-          - ``grid_charge=False, discharge_rate>0`` → discharge at the given rate
-          - ``grid_charge=False, discharge_rate=0`` → VPP idle (power=0)
+        The Growatt VPP ``number.*_vpp_power`` entity is a percentage of
+        inverter nominal AC power (range −100..100, step 5), NOT watts.
+
+          - ``grid_charge=True``  → +100% (max charge), allow AC charging
+          - ``grid_charge=False, discharge_rate>0`` → -discharge_rate %
+          - ``grid_charge=False, discharge_rate=0`` → 0 % (VPP idle)
         """
         try:
             if grid_charge:
-                target_w = int(self.max_charge_power_kw * 1000)
-                controller.set_growatt_vpp(target_w, allow_ac_charging=True)
+                controller.set_growatt_vpp(100, allow_ac_charging=True)
             elif discharge_rate > 0:
-                target_w = -int(
-                    self.max_discharge_power_kw * discharge_rate / 100 * 1000
-                )
-                controller.set_growatt_vpp(target_w, allow_ac_charging=False)
+                # discharge_rate is already a percentage (0-100); negate
+                controller.set_growatt_vpp(-discharge_rate, allow_ac_charging=False)
             else:
                 controller.set_growatt_vpp_disabled()
             return True, ""

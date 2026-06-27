@@ -478,7 +478,7 @@ const InverterStatusDashboard: React.FC = () => {
       action: scheduleHour?.action || 'IDLE',
       actionColor: scheduleHour?.actionColor || 'gray',
       dischargePowerRate: scheduleHour?.dischargePowerRate || 0,
-      chargePowerRate: scheduleHour?.chargePowerRate || 100,
+      chargePowerRate: scheduleHour?.chargePowerRate ?? 100,
       gridCharge: scheduleHour?.gridCharge || false,
       batteryMode: scheduleHour?.batteryMode || 'load_first',
       // Add formatted fields from dashboard data (they ARE the FormattedValue objects)

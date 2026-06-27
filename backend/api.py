@@ -1621,8 +1621,14 @@ async def get_growatt_detailed_schedule():
             for group in raw_groups:
                 soc_end = group["soc_end_pct"]
                 soc_delta_kwh: float | None = None
-                if soc_end is not None and prev_soc is not None and battery_settings.total_capacity > 0:
-                    soc_delta_kwh = (soc_end - prev_soc) / 100.0 * battery_settings.total_capacity
+                if (
+                    soc_end is not None
+                    and prev_soc is not None
+                    and battery_settings.total_capacity > 0
+                ):
+                    soc_delta_kwh = (
+                        (soc_end - prev_soc) / 100.0 * battery_settings.total_capacity
+                    )
                 prev_soc = soc_end
                 period_groups.append(
                     {
@@ -1699,8 +1705,16 @@ async def get_growatt_detailed_schedule():
                     for group in raw_tomorrow_groups:
                         soc_end = group["soc_end_pct"]
                         soc_delta_kwh_tmr: float | None = None
-                        if soc_end is not None and prev_soc_tmr is not None and battery_settings.total_capacity > 0:
-                            soc_delta_kwh_tmr = (soc_end - prev_soc_tmr) / 100.0 * battery_settings.total_capacity
+                        if (
+                            soc_end is not None
+                            and prev_soc_tmr is not None
+                            and battery_settings.total_capacity > 0
+                        ):
+                            soc_delta_kwh_tmr = (
+                                (soc_end - prev_soc_tmr)
+                                / 100.0
+                                * battery_settings.total_capacity
+                            )
                         prev_soc_tmr = soc_end
                         tomorrow_period_groups.append(
                             {

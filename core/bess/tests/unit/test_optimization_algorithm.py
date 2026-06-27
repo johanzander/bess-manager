@@ -444,7 +444,7 @@ def test_grid_charges_during_solar_surplus_when_price_is_cheaper():
     """
     settings = BatterySettings(
         total_capacity=20.0,
-        min_soc=10.0,   # min_soe = 2.0 kWh
+        min_soc=10.0,  # min_soe = 2.0 kWh
         max_soc=100.0,  # max_soe = 20.0 kWh
         max_charge_power_kw=10.0,
         max_discharge_power_kw=10.0,
@@ -459,10 +459,10 @@ def test_grid_charges_during_solar_surplus_when_price_is_cheaper():
     #                   buy=1.76 SEK — EXPENSIVE, was the first grid-charge slot before fix
     # Period 2 (18:00): expensive peak (buy=3.50) — discharge opportunity
     # Period 3 (19:00): idle (buy=1.20)
-    solar =       [0.9958, 0.7076, 0.0,  0.0]
-    consumption = [0.8300, 0.9250, 2.0,  1.0]
-    buy_price =   [1.01,   1.76,   3.50, 1.20]
-    sell_price =  [0.50,   0.70,   1.60, 0.60]
+    solar = [0.9958, 0.7076, 0.0, 0.0]
+    consumption = [0.8300, 0.9250, 2.0, 1.0]
+    buy_price = [1.01, 1.76, 3.50, 1.20]
+    sell_price = [0.50, 0.70, 1.60, 0.60]
 
     results = optimize_battery_schedule(
         buy_price=buy_price,

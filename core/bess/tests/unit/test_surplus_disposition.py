@@ -103,9 +103,9 @@ def test_store_action_charges_at_max_rate_solar_plus_grid():
     # grid_to_battery=1.1 kWh at buy_price=1.0; wear=2.5*cycle_cost; export=0
     # total_cost = 1.1*1.0 + 2.5*cycle_cost_per_kwh
     expected_cost = 1.1 * PRICES_BUY[0] + 2.5 * bs.cycle_cost_per_kwh
-    assert round(reward, 4) == round(-expected_cost, 4), (
-        f"Expected reward={-expected_cost:.4f} but got {reward:.4f}"
-    )
+    assert round(reward, 4) == round(
+        -expected_cost, 4
+    ), f"Expected reward={-expected_cost:.4f} but got {reward:.4f}"
 
 
 def test_build_period_data_store_disposition_flows():
@@ -130,15 +130,15 @@ def test_build_period_data_store_disposition_flows():
         currency="SEK",
     )
     # After fix: solar covers 1.4 kWh, grid covers 1.1 kWh → max rate 2.5 kWh stored
-    assert round(pd.energy.battery_charged, 4) == 2.5, (
-        f"Expected battery_charged=2.5 (solar 1.4 + grid 1.1) but got {pd.energy.battery_charged:.4f}"
-    )
-    assert round(pd.energy.grid_exported, 4) == 0.0, (
-        f"Expected grid_exported=0 but got {pd.energy.grid_exported:.4f}"
-    )
-    assert round(pd.energy.grid_imported, 4) == 1.1, (
-        f"Expected grid_imported=1.1 (grid top-up) but got {pd.energy.grid_imported:.4f}"
-    )
+    assert (
+        round(pd.energy.battery_charged, 4) == 2.5
+    ), f"Expected battery_charged=2.5 (solar 1.4 + grid 1.1) but got {pd.energy.battery_charged:.4f}"
+    assert (
+        round(pd.energy.grid_exported, 4) == 0.0
+    ), f"Expected grid_exported=0 but got {pd.energy.grid_exported:.4f}"
+    assert (
+        round(pd.energy.grid_imported, 4) == 1.1
+    ), f"Expected grid_imported=1.1 (grid top-up) but got {pd.energy.grid_imported:.4f}"
 
 
 # ---------------------------------------------------------------------------
@@ -246,12 +246,12 @@ def test_store_with_surplus_draws_grid_to_fill_remaining_rate():
     )
 
     # Grid draws 2.0 kWh to top up the remaining capacity after solar
-    assert round(pd.energy.grid_imported, 4) == 2.0, (
-        f"Expected grid_imported=2.0 (grid top-up) but got {pd.energy.grid_imported:.4f}"
-    )
-    assert round(pd.energy.battery_charged, 4) == 2.5, (
-        f"Expected battery_charged=2.5 but got {pd.energy.battery_charged:.4f}"
-    )
+    assert (
+        round(pd.energy.grid_imported, 4) == 2.0
+    ), f"Expected grid_imported=2.0 (grid top-up) but got {pd.energy.grid_imported:.4f}"
+    assert (
+        round(pd.energy.battery_charged, 4) == 2.5
+    ), f"Expected battery_charged=2.5 but got {pd.energy.battery_charged:.4f}"
 
 
 # ---------------------------------------------------------------------------

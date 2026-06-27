@@ -28,14 +28,14 @@ export interface HourlyData {
   batterySoeStart?: number;    // kWh
   batterySoeEnd?: number;      // kWh
 
-  // Detailed energy flows
-  solarToHome?: number;        // kWh
-  solarToBattery?: number;     // kWh
-  solarToGrid?: number;        // kWh
-  gridToHome?: number;         // kWh
-  gridToBattery?: number;      // kWh
-  batteryToHome?: number;      // kWh
-  batteryToGrid?: number;      // kWh
+  // Detailed energy flows (all FormattedValue — backend serializes via safe_format)
+  solarToHome?: FormattedValue;
+  solarToBattery?: FormattedValue;
+  solarToGrid?: FormattedValue;
+  gridToHome?: FormattedValue;
+  gridToBattery?: FormattedValue;
+  batteryToHome?: FormattedValue;
+  batteryToGrid?: FormattedValue;
 
   // Control and decision fields
   strategicIntent?: string;    // strategy name

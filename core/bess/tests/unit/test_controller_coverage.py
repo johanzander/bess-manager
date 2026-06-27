@@ -372,6 +372,49 @@ class TestGetPeriodSettings:
         result = min_ctrl.get_period_settings(0)
         assert result["discharge_rate"] == 100  # static dict fallback
 
+    def test_action_derived_charge_rate_for_grid_charging(self, min_ctrl):
+        from unittest.mock import MagicMock
+
+        min_ctrl.strategic_intents = ["GRID_CHARGING"] * 96
+        mock_schedule = MagicMock()
+        # 0.17 kWh in 15 min → 0.68 kW → round(0.68 / 15.0 * 100) = 5
+        mock_schedule.actions = [0.17] + [0.0] * 95
+        min_ctrl.current_schedule = mock_schedule
+
+        result = min_ctrl.get_period_settings(0)
+        assert result["charge_rate"] == 5
+        assert result["grid_charge"] is True
+
+    def test_grid_charging_full_rate_at_max_action(self, min_ctrl):
+        from unittest.mock import MagicMock
+
+        min_ctrl.strategic_intents = ["GRID_CHARGING"] * 96
+        mock_schedule = MagicMock()
+        # 3.75 kWh in 15 min → 15.0 kW → round(15.0 / 15.0 * 100) = 100
+        mock_schedule.actions = [3.75] + [0.0] * 95
+        min_ctrl.current_schedule = mock_schedule
+
+        result = min_ctrl.get_period_settings(0)
+        assert result["charge_rate"] == 100
+
+    def test_solar_storage_charge_rate_always_100(self, min_ctrl):
+        from unittest.mock import MagicMock
+
+        min_ctrl.strategic_intents = ["SOLAR_STORAGE"] * 96
+        mock_schedule = MagicMock()
+        mock_schedule.actions = [0.5] * 96
+        min_ctrl.current_schedule = mock_schedule
+
+        result = min_ctrl.get_period_settings(0)
+        assert result["charge_rate"] == 100
+
+    def test_grid_charging_falls_back_to_100_without_schedule(self, min_ctrl):
+        min_ctrl.strategic_intents = ["GRID_CHARGING"] * 4
+        min_ctrl.current_schedule = None
+
+        result = min_ctrl.get_period_settings(0)
+        assert result["charge_rate"] == 100
+
 
 class TestGetStrategicIntentSummary:
     def test_empty_when_no_intents(self, min_ctrl):

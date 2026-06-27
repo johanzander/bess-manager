@@ -215,12 +215,7 @@ def _state_transition(
         remaining_rate = max(
             0.0, min(rate_throughput, room_throughput) - solar_to_battery
         )
-        if surplus > POWER_TOLERANCE_KW:
-            grid_to_battery = 0.0  # SOLAR_STORAGE: solar only, no grid top-up
-        else:
-            grid_to_battery = (
-                remaining_rate  # GRID_CHARGING / battery_first: charge at max rate
-            )
+        grid_to_battery = remaining_rate  # solar fills first, grid tops up the rest
         charge_energy = (
             solar_to_battery + grid_to_battery
         ) * battery_settings.efficiency_charge
@@ -325,12 +320,7 @@ def _compute_reward(
         remaining_rate = max(
             0.0, min(rate_throughput, room_throughput) - solar_to_battery
         )
-        if surplus > POWER_TOLERANCE_KW:
-            grid_to_battery = 0.0  # SOLAR_STORAGE: solar only, no grid top-up
-        else:
-            grid_to_battery = (
-                remaining_rate  # GRID_CHARGING / battery_first: charge at max rate
-            )
+        grid_to_battery = remaining_rate  # solar fills first, grid tops up the rest
 
         energy_stored = (
             solar_to_battery + grid_to_battery
@@ -450,12 +440,7 @@ def _build_period_data(
         remaining_rate = max(
             0.0, min(rate_throughput, room_throughput) - solar_to_battery
         )
-        if surplus > POWER_TOLERANCE_KW:
-            grid_to_battery = 0.0  # SOLAR_STORAGE: solar only, no grid top-up
-        else:
-            grid_to_battery = (
-                remaining_rate  # GRID_CHARGING / battery_first: charge at max rate
-            )
+        grid_to_battery = remaining_rate  # solar fills first, grid tops up the rest
         battery_charged = solar_to_battery + grid_to_battery
         battery_discharged = 0.0
     elif power < -POWER_TOLERANCE_KW:  # Active discharging

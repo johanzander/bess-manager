@@ -69,14 +69,17 @@ def test_load_first_no_discharge_no_surplus_returns_zero():
     assert p == 0.0
 
 
-def test_mode_to_power_load_first_stores_all_surplus():
-    """Task 4c: load_first + no discharge + surplus -> return all-surplus charge power."""
+def test_mode_to_power_load_first_surplus_returns_zero():
+    """load_first + no discharge + surplus -> return 0.0 (IDLE branch).
+
+    The old code returned surplus/dt here, which coincidentally matched IDLE when
+    grid_to_battery was gated to 0. After removing the surplus gate in dp_battery_algorithm,
+    mode_to_power must return 0.0 so _state_transition uses the IDLE branch (passive solar
+    charging, no grid draw) instead of the STORE branch (which now adds grid top-up).
+    """
     bs = make_battery_settings(max_charge_power_kw=10.0)
     cmd = ControlCommand("load_first", 0, False)
-    assert (
-        mode_to_power(cmd, solar=1.6, home=0.2, soe=5.0, settings=bs, dt=0.25)
-        == (1.6 - 0.2) / 0.25
-    )
+    assert mode_to_power(cmd, solar=1.6, home=0.2, soe=5.0, settings=bs, dt=0.25) == 0.0
 
 
 def test_mode_to_power_grid_first_no_discharge_holds_and_exports():

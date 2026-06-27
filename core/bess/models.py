@@ -280,6 +280,10 @@ class DecisionData:
         None  # kWh per period - planned battery energy action (+ charge, - discharge)
     )
     cost_basis: float = 0.0  # per kWh - cost basis of stored energy
+    shadow_price: float = (
+        0.0  # SEK per kWh of SoE - marginal opportunity value of stored energy
+        # (DP value-function gradient dV/dSoE). Used to gate SOLAR_EXPORT discharge.
+    )
 
     # Enhanced intelligence fields (optional)
     pattern_name: str = ""  # Name of detected pattern

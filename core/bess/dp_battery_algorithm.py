@@ -1091,8 +1091,9 @@ def optimize_battery_schedule(
         f"Starting direct optimization: horizon={horizon}, initial_soe={initial_soe:.1f}, initial_cost_basis={initial_cost_basis:.3f}"
     )
 
-    # Step 1: Run DP — capture policy for continuous reconstruction
-    _, policy, _, _ = _run_dynamic_programming(
+    # Step 1: Run DP — capture policy for continuous reconstruction and the
+    # value-to-go array V for the per-period shadow price (dV/dSoE).
+    V, policy, _, _ = _run_dynamic_programming(
         horizon=horizon,
         buy_price=buy_price,
         sell_price=sell_price,
@@ -1170,6 +1171,18 @@ def optimize_battery_schedule(
             new_cost_basis=new_cost_basis,
             currency=currency,
         )
+
+        # Shadow price = marginal opportunity value of stored energy (dV/dSoE),
+        # by backward difference at the chosen grid level i (the kWh we would
+        # remove by discharging). V is in reward units (SEK, higher = better),
+        # increasing in SoE, so this is positive. Exact at a full battery
+        # (i = len-1); undefined at i = 0 (nothing to discharge) -> leave 0.0.
+        # Used downstream to gate intra-period SOLAR_EXPORT discharge.
+        if i > 0:
+            period_data.decision.shadow_price = float(
+                (V[t, i] - V[t, i - 1]) / SOE_STEP_KWH
+            )
+
         hourly_results.append(period_data)
         current_soe = next_soe
         current_cost_basis = new_cost_basis

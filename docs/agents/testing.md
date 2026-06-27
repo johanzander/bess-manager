@@ -29,7 +29,7 @@ If you can't answer these, stop and reason through the design first. A test that
 ```python
 # Good: test what users care about
 def test_high_price_hour_triggers_discharge():
-    strategic_intents[20] = "EXPORT_ARBITRAGE"
+    strategic_intents[20] = "BATTERY_EXPORT"
     scheduler.apply_schedule(strategic_intents)
     assert scheduler.is_hour_configured_for_export(20)
 ```

@@ -107,7 +107,7 @@
     "description": "Efficient consumption with solar: store solar and export during high prices",
     "intents_present": [
       "GRID_CHARGING",
-      "EXPORT_ARBITRAGE"
+      "BATTERY_EXPORT"
     ],
     "savings_positive": true,
     "constraints": {

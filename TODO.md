@@ -7,7 +7,7 @@
 
 **Impact**: High | **Effort**: Medium | **Dependencies**: Growatt inverter control
 
-**Description**: Discharge power seems to always be 100% leading to higher export than intended during EXPORT_ARBITRAGE operations.
+**Description**: Discharge power seems to always be 100% leading to higher export than intended during BATTERY_EXPORT operations.
 
 ### **Charging power rate setting has no effect**
 

@@ -167,7 +167,7 @@ class TestWritePeriodToHardwareGridCharging:
         assert watts == expected_watts
 
 
-# ── _write_period_to_hardware: LOAD_SUPPORT / EXPORT_ARBITRAGE ───────────────
+# ── _write_period_to_hardware: LOAD_SUPPORT / BATTERY_EXPORT ───────────────
 
 
 class TestWritePeriodToHardwareDischarge:

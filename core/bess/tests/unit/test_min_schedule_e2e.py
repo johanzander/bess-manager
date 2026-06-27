@@ -36,7 +36,7 @@ DATA_DIR = Path(__file__).parent / "data"
 
 # Intent → expected schedule behavior mapping
 CHARGING_INTENTS = {"GRID_CHARGING"}
-EXPORT_INTENTS = {"EXPORT_ARBITRAGE"}
+EXPORT_INTENTS = {"BATTERY_EXPORT"}
 DEFAULT_MODE_INTENTS = {"IDLE", "SOLAR_STORAGE", "LOAD_SUPPORT"}
 
 
@@ -190,16 +190,14 @@ class TestEndToEndIntentExecution:
 
     @pytest.mark.parametrize("scenario_name", _get_realworld_scenarios())
     def test_export_intents_produce_export_config(self, scenario_name):
-        """Hours with EXPORT_ARBITRAGE intent must be configured for export."""
+        """Hours with BATTERY_EXPORT intent must be configured for export."""
         scheduler, intents = _run_and_build_schedule(scenario_name)
 
         for hour in range(24):
             quarter_intents = set(intents[hour * 4 : (hour + 1) * 4])
-            if len(intents) >= (hour + 1) * 4 and quarter_intents == {
-                "EXPORT_ARBITRAGE"
-            }:
+            if len(intents) >= (hour + 1) * 4 and quarter_intents == {"BATTERY_EXPORT"}:
                 assert scheduler.is_hour_configured_for_export(hour), (
-                    f"{scenario_name}: hour {hour} has all EXPORT_ARBITRAGE periods "
+                    f"{scenario_name}: hour {hour} has all BATTERY_EXPORT periods "
                     f"but is not configured for export"
                 )
 
@@ -243,18 +241,18 @@ class TestEndToEndChargeDischargeRates:
 
     @pytest.mark.parametrize("scenario_name", _get_realworld_scenarios())
     def test_export_arbitrage_periods_have_correct_rates(self, scenario_name):
-        """EXPORT_ARBITRAGE: grid_charge=False, charge_rate=0%, discharge_rate=100%."""
+        """BATTERY_EXPORT: grid_charge=False, charge_rate=0%, discharge_rate=100%."""
         scheduler, _ = _run_and_build_schedule(scenario_name)
 
         for period in range(len(scheduler.strategic_intents)):
             settings = scheduler.get_period_settings(period)
-            if settings["strategic_intent"] == "EXPORT_ARBITRAGE":
+            if settings["strategic_intent"] == "BATTERY_EXPORT":
                 assert (
                     settings["grid_charge"] is False
-                ), f"{scenario_name} period {period}: EXPORT_ARBITRAGE must have grid_charge=False"
+                ), f"{scenario_name} period {period}: BATTERY_EXPORT must have grid_charge=False"
                 assert (
                     settings["charge_rate"] == 0
-                ), f"{scenario_name} period {period}: EXPORT_ARBITRAGE charge_rate={settings['charge_rate']}, expected 0"
+                ), f"{scenario_name} period {period}: BATTERY_EXPORT charge_rate={settings['charge_rate']}, expected 0"
                 assert (
                     0 <= settings["discharge_rate"] <= 100
                 )  # dynamic: rate derived from planned action, not hardcoded

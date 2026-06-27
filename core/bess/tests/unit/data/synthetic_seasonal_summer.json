@@ -107,7 +107,7 @@
     "description": "Summer day: abundant solar, mostly idle with some grid charging and export",
     "intents_present": [
       "IDLE",
-      "EXPORT_ARBITRAGE"
+      "BATTERY_EXPORT"
     ],
     "savings_positive": true,
     "constraints": {

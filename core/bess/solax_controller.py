@@ -20,7 +20,7 @@ Intent-to-power mapping:
 - GRID_CHARGING    → +max_charge_W    (charge from grid at max rate)
 - SOLAR_STORAGE    → disable VPP      (let solar charge naturally)
 - LOAD_SUPPORT     -> -(rate% x max_discharge_W)  (discharge to cover load)
-- EXPORT_ARBITRAGE -> -max_discharge_W (full discharge for export)
+- BATTERY_EXPORT -> -max_discharge_W (full discharge for export)
 - IDLE             → disable VPP      (no battery action)
 """
 

@@ -335,14 +335,14 @@ class TestSphCompareSchedules:
 
 class TestGetPeriodSettings:
     def test_returns_correct_settings(self, min_ctrl):
-        min_ctrl.strategic_intents = ["GRID_CHARGING"] * 4 + ["EXPORT_ARBITRAGE"] * 4
+        min_ctrl.strategic_intents = ["GRID_CHARGING"] * 4 + ["BATTERY_EXPORT"] * 4
         result = min_ctrl.get_period_settings(0)
         assert result["grid_charge"] is True
         assert result["strategic_intent"] == "GRID_CHARGING"
 
         result = min_ctrl.get_period_settings(4)
         assert result["grid_charge"] is False
-        assert result["strategic_intent"] == "EXPORT_ARBITRAGE"
+        assert result["strategic_intent"] == "BATTERY_EXPORT"
         assert result["discharge_rate"] == 100
 
     def test_no_intents_raises(self, min_ctrl):
@@ -379,14 +379,14 @@ class TestGetStrategicIntentSummary:
 
     def test_summarizes_by_hour(self, min_ctrl):
         min_ctrl.strategic_intents = (
-            ["GRID_CHARGING"] * 4 + ["IDLE"] * 4 + ["EXPORT_ARBITRAGE"] * 4
+            ["GRID_CHARGING"] * 4 + ["IDLE"] * 4 + ["BATTERY_EXPORT"] * 4
         )
         summary = min_ctrl.get_strategic_intent_summary()
         assert "GRID_CHARGING" in summary
         assert summary["GRID_CHARGING"]["count"] == 1
         assert 0 in summary["GRID_CHARGING"]["hours"]
         assert "IDLE" in summary
-        assert "EXPORT_ARBITRAGE" in summary
+        assert "BATTERY_EXPORT" in summary
 
 
 class TestApplyPeriod:
@@ -420,7 +420,7 @@ class TestComputeRatesForPeriod:
         assert discharge_rate == 0
 
     def test_export_arbitrage_intent(self, min_ctrl):
-        min_ctrl.strategic_intents = ["EXPORT_ARBITRAGE"] * 4
+        min_ctrl.strategic_intents = ["BATTERY_EXPORT"] * 4
         grid_charge, discharge_rate = min_ctrl.compute_rates_for_period(
             0, battery_action_kw=-3.0
         )
@@ -428,7 +428,7 @@ class TestComputeRatesForPeriod:
         assert discharge_rate > 0
 
     def test_export_arbitrage_full_power(self, min_ctrl):
-        min_ctrl.strategic_intents = ["EXPORT_ARBITRAGE"] * 4
+        min_ctrl.strategic_intents = ["BATTERY_EXPORT"] * 4
         _grid_charge, discharge_rate = min_ctrl.compute_rates_for_period(
             0, battery_action_kw=-min_ctrl.max_discharge_power_kw
         )
@@ -518,7 +518,7 @@ class TestSolaxLogSchedule:
         solax_ctrl.strategic_intents = (
             ["GRID_CHARGING"] * 8
             + ["SOLAR_STORAGE"] * 40
-            + ["EXPORT_ARBITRAGE"] * 16
+            + ["BATTERY_EXPORT"] * 16
             + ["IDLE"] * 32
         )
         solax_ctrl.log_detailed_schedule("detailed test")

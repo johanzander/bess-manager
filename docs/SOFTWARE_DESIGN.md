@@ -313,7 +313,7 @@ Each optimization provides detailed economic reasoning:
 The system classifies battery action intent using the battery power action as the primary discriminator, with energy flows as secondary input. Classification is performed by `classify_strategic_intent(power, energy_data)` in `decision_intelligence.py`:
 
 - **Discharging** (power < −0.1 kW):
-  - **EXPORT_ARBITRAGE**: `battery_to_grid > 0.1 kWh`
+  - **BATTERY_EXPORT**: `battery_to_grid > 0.1 kWh`
   - **LOAD_SUPPORT**: otherwise (discharge serves home load)
 - **Charging** (power > 0.1 kW):
   - **GRID_CHARGING**: `grid_to_battery > solar_to_battery` (grid is dominant charge source)
@@ -321,21 +321,27 @@ The system classifies battery action intent using the battery power action as th
 - **Near-zero power** (fallthrough for passive flows):
   - **SOLAR_STORAGE**: `battery_charged > 0.01 kWh` (passive solar charging)
   - **LOAD_SUPPORT**: `battery_discharged > 0.01 kWh` (small residual discharge)
+  - **SOLAR_EXPORT**: `grid_exported > 0.01 kWh` and `solar_to_grid > 0.01 kWh` (solar surplus exporting, battery idle)
   - **IDLE**: no significant battery activity
 
 ### TOU Schedule Generation
 
 The InverterController converts action intents into hardware-specific schedules. Each intent maps to an inverter battery mode and control parameters (shown below for Growatt MIN; other inverters use the same intent mapping with different hardware commands):
 
-| Intent | Battery Mode | Grid Charge | Charge Rate | Discharge Rate |
-|---|---|---|---|---|
-| GRID_CHARGING | battery_first | On | 100% | 0% |
-| SOLAR_STORAGE | load_first | Off | 100% | 0% |
-| LOAD_SUPPORT | load_first | Off | 0% | 100% |
-| EXPORT_ARBITRAGE | grid_first | Off | 0% | 100% |
-| IDLE | load_first | Off | 100% | 0% |
+| Intent | Battery Mode | Grid Charge | Discharge Rate |
+|---|---|---|---|
+| GRID_CHARGING | battery_first | On | 0% |
+| SOLAR_STORAGE | load_first | Off | 0% |
+| LOAD_SUPPORT | load_first | Off | action-derived |
+| BATTERY_EXPORT | grid_first | Off | action-derived |
+| SOLAR_EXPORT | load_first | Off | 0% |
+| IDLE | load_first | Off | 0% |
 
 **Why SOLAR_STORAGE and IDLE share the same inverter settings**: Both use `load_first` because solar energy serving the home directly is always more valuable than routing it through the battery (which incurs cycle cost). If prices are cheap enough to justify prioritizing battery charging over home load, the DP algorithm uses `GRID_CHARGING` instead, which enables AC grid-to-battery charging via `battery_first` mode. Using `battery_first` without `grid_charge` would cause unnecessary grid imports by routing solar to the battery first while the grid serves the home.
+
+**Why SOLAR_EXPORT uses load_first (not grid_first)**: Solar exports naturally in `load_first` when generation exceeds consumption — no special inverter mode is needed. `SOLAR_EXPORT` exists as a distinct intent purely for UI display (distinguishing "solar actively exporting" from "nothing happening"). Using `grid_first` for battery-idle periods would lock the inverter in a mode that prevents the battery from supporting house load during temporary solar deficits.
+
+**Why BATTERY_EXPORT requires grid_first**: The inverter must route battery discharge toward the grid rather than the home. In `load_first`, discharge would serve home load first; only `grid_first` guarantees battery energy reaches the grid.
 
 **Schedule generation**:
 

@@ -64,6 +64,19 @@ a minimum threshold scaled by remaining day fraction.  If savings are too
 low, the schedule is rejected in favor of all-IDLE to prevent cycling for
 marginal gains.
 
+**Shadow price (marginal value of stored energy)**: The backward induction
+builds a value-to-go for every (period, SOE-level) state — the best achievable
+result from that point onward.  The **shadow price** of a period is the slope
+of that value across SOE: *how much one extra kWh of stored energy is worth,
+in SEK, given the optimal future use of it*.  It is **not** the cost basis
+(what the energy cost to store — a sunk cost).  It is the forward-looking
+**opportunity value**, and it automatically accounts for everything the
+optimizer can do with that kWh later: avoid a future expensive grid purchase,
+export it at a future high sell price, or — crucially — nothing extra, because
+upcoming solar will refill the battery anyway (**replenishment**).  Each
+period's shadow price is stored on its decision data and is used at apply time
+for the SOLAR_EXPORT discharge gate (below).
+
 
 ## Strategic Intents
 
@@ -75,14 +88,63 @@ optimizer chose.  These are classified from the actual flow pattern:
 | **GRID_CHARGING** | grid_to_battery >= 0.1 kWh | Buying cheap grid electricity to store in battery |
 | **SOLAR_STORAGE** | solar_to_battery > 0.1 kWh, grid_to_battery < 0.1 | Storing excess solar production for later |
 | **LOAD_SUPPORT** | battery_to_home > 0.1 kWh, battery_to_grid <= 0.1 | Using battery to power home (avoid expensive grid) |
-| **EXPORT_ARBITRAGE** | battery_to_grid > 0.1 kWh | Selling stored energy to grid at high prices |
+| **BATTERY_EXPORT** | battery_to_grid > 0.1 kWh | Selling stored battery energy to grid at high prices |
+| **SOLAR_EXPORT** | power ≈ 0, solar_to_grid > 0.01 kWh | Solar surplus exporting directly to grid, battery idle |
 | **IDLE** | No significant battery flows | No profitable action — direct solar/grid consumption |
 
 **Hardware mapping**: Intents control actual inverter behavior:
 - GRID_CHARGING → battery_first mode + grid charge ON
 - LOAD_SUPPORT → load_first mode
-- EXPORT_ARBITRAGE → grid_first mode (enables grid export)
-- SOLAR_STORAGE / IDLE → load_first mode (solar serves home first)
+- BATTERY_EXPORT → grid_first mode (battery discharge to grid)
+- SOLAR_STORAGE / SOLAR_EXPORT / IDLE → load_first mode (solar serves home first)
+
+### BATTERY_EXPORT vs SOLAR_EXPORT (why the split exists)
+
+Both export to grid, but they are different situations and need different
+inverter modes:
+- **BATTERY_EXPORT**: the battery is *actively discharging to grid* for profit
+  → `grid_first` + an action-derived discharge rate.
+- **SOLAR_EXPORT**: the battery is *idle and full*; only the **solar surplus**
+  flows to grid → `load_first`.  The battery is not pushed to grid.
+
+Earlier both were one intent (`EXPORT_ARBITRAGE`) mapped to `grid_first`, which
+wrongly locked the inverter in grid-export mode for hours during sunny
+daytimes while the battery sat unable to help the house.
+
+### The SOLAR_EXPORT discharge gate (load_first + discharge rate 0 or 100)
+
+`discharge_rate` is a **hardware register** written every period, not just a
+schedule label.  At `discharge_rate=0` the battery is forbidden to discharge at
+all — so it cannot cover the house load if solar dips *within* a period.  At
+`discharge_rate=100` `load_first` lets the battery cover an intra-period deficit
+(it still won't export — that's grid_first).
+
+Whether a SOLAR_EXPORT period should allow that cover is an **economic** choice,
+decided per period from the **shadow price** (above):
+
+> Cover the dip from the battery only when the stored energy is worth *less*
+> than buying that energy from the grid right now:
+> **`buy_price × discharge_efficiency ≥ shadow_price` → rate 100, else rate 0`.**
+> (The efficiency factor applies only to the buy side — the shadow price is
+> already per-kWh-of-stored-energy.)
+
+What this works out to in practice — important for analysis:
+- During SOLAR_EXPORT the battery is full and exporting surplus, so its marginal
+  kWh is only worth the **export (sell) price** — the surplus refills it for
+  free (replenishment).  The shadow price therefore ≈ the sell price.
+- **Normal prices** (`buy > sell`): the gate is **100** — covering the dip from
+  the battery beats buying from grid, because solar refills the battery.  This
+  is the usual case.
+- **Inverted prices** (export premium or negative buy, i.e. `sell ≥ buy×eff`):
+  the gate is **0** — the energy is worth more exported than the cheap grid
+  import it would replace, so export it and buy the dip from grid.
+
+So a SOLAR_EXPORT period showing `discharge_rate=0` is **not a bug** — it means
+prices were inverted that period.  And `discharge_rate=100` on SOLAR_EXPORT does
+**not** mean the battery is being drained: `load_first` only discharges to an
+actual house deficit, and at 15-minute resolution a SOLAR_EXPORT period is net
+surplus (deficit 0), so planned vs realized economics are unchanged.  The gate
+only affects *sub-15-minute* hardware behaviour.
 
 
 ## Price Calculation

@@ -61,7 +61,8 @@ Shows battery charge level throughout the day with strategic context:
 - **GRID_CHARGING**: Buying cheap electricity to store
 - **SOLAR_STORAGE**: Storing excess solar production
 - **LOAD_SUPPORT**: Using battery to power your home
-- **EXPORT_ARBITRAGE**: Selling stored energy at high prices
+- **BATTERY_EXPORT**: Selling stored battery energy at high prices
+- **SOLAR_EXPORT**: Solar surplus going directly to grid, battery idle
 
 #### 3. Detailed Savings Analysis
 
@@ -107,12 +108,19 @@ The system status card provides key metrics and health information:
 - **When**: Evening hours with high prices and home consumption
 - **Indicator**: Battery discharging, minimal grid import
 
-#### 💰 EXPORT_ARBITRAGE
+#### 💰 BATTERY_EXPORT
 
-- **What**: Selling stored energy to grid during peak prices
+- **What**: Selling stored battery energy to grid during peak prices
 - **Why**: Maximize revenue from stored energy
 - **When**: Peak price hours when selling is more profitable
 - **Indicator**: Battery discharging, high grid export
+
+#### ☀️ SOLAR_EXPORT
+
+- **What**: Solar surplus exporting directly to grid, battery idle
+- **Why**: No battery action needed — solar production exceeds home load
+- **When**: Sunny hours when battery is full or storing is not profitable
+- **Indicator**: High solar production, grid export, battery holding
 
 #### 😴 IDLE
 

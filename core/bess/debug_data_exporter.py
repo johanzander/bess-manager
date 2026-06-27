@@ -258,7 +258,7 @@ _LOG_KEY_PATTERNS = re.compile(
     r"|Intent transition|DECISION:"
     r"|Starting optimization|Optimization complete"
     r"|Applying period|Apply schedule"
-    r"|LOAD_SUPPORT|EXPORT_ARBITRAGE|GRID_CHARGING"
+    r"|LOAD_SUPPORT|BATTERY_EXPORT|GRID_CHARGING"
     r"|TOU hardware|TOU conversion|schedule created"
     r"|Setting.*power rate|power rate.*set",
     re.IGNORECASE,

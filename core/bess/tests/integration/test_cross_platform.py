@@ -22,7 +22,7 @@ VALID_INTENTS = {
     "GRID_CHARGING",
     "SOLAR_STORAGE",
     "LOAD_SUPPORT",
-    "EXPORT_ARBITRAGE",
+    "BATTERY_EXPORT",
     "IDLE",
 }
 
@@ -129,8 +129,8 @@ class TestCrossPlatformHardwareWrites:
             assert any(r > 0 for r in mock_controller.calls["discharge_rate"])
 
     def test_export_arbitrage_commands_hardware(self, platform_system, mock_controller):
-        """EXPORT_ARBITRAGE produces a discharge command for each platform."""
-        _set_intent(platform_system, PERIOD, "EXPORT_ARBITRAGE")
+        """BATTERY_EXPORT produces a discharge command for each platform."""
+        _set_intent(platform_system, PERIOD, "BATTERY_EXPORT")
         _set_action(platform_system, PERIOD, -2.0)
 
         _apply_at_period(platform_system, PERIOD)

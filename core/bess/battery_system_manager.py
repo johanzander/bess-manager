@@ -65,6 +65,26 @@ from .weather import fetch_temperature_forecast
 logger = logging.getLogger(__name__)
 
 
+def solar_export_discharge_rate(
+    buy_price: float, shadow_price: float, eff_d: float
+) -> int:
+    """Intra-period discharge gate for a SOLAR_EXPORT period.
+
+    SOLAR_EXPORT maps to load_first; the battery only discharges to cover an
+    actual (sub-period) solar deficit. Whether it SHOULD is economic: cover from
+    battery only when the stored energy is worth less than buying from grid now.
+
+    Using 1 kWh of SoE delivers ``eff_d`` kWh to the home, avoiding
+    ``eff_d * buy_price``; ``shadow_price`` is the marginal opportunity value of
+    that kWh of SoE (dV/dSoE), already in per-kWh-of-SoE units with future
+    efficiencies baked in — so ``eff_d`` multiplies only the buy side.
+
+    Returns 100 (allow discharge) when ``buy_price * eff_d >= shadow_price``,
+    else 0 (hold the reserve, buy the dip from grid).
+    """
+    return 100 if buy_price * eff_d >= shadow_price else 0
+
+
 class BatterySystemManager:
     """
     Complete replacement for the original BatterySystemManager.
@@ -1984,7 +2004,7 @@ class BatterySystemManager:
 
             # Create strategic intents array from OptimizationResult
             # DP intents are authoritative - do NOT override with inferred intents from historical data
-            # (that causes feedback loop: export → inferred EXPORT_ARBITRAGE → grid_first mode → more export)
+            # (that causes feedback loop: export → inferred BATTERY_EXPORT → grid_first mode → more export)
             #
             # IMPORTANT: Preserve previous strategic intents for past periods (0 to optimization_period-1)
             # to avoid the "majority IDLE" bug where updating at :45 (period 3 of an hour) causes
@@ -2310,6 +2330,26 @@ class BatterySystemManager:
                 period, battery_action_kw
             )
         )
+
+        # SOLAR_EXPORT discharge gate: the optimizer plans hold (rate 0), but
+        # load_first lets the battery cover an intra-period solar dip. Allow that
+        # only when the stored energy is worth less than buying from grid now
+        # (shadow_price = DP marginal value of stored SoE). This is a sub-period
+        # hardware-robustness behaviour, invisible to the 15-min plan/sim.
+        if strategic_intent == "SOLAR_EXPORT":
+            stored = self.schedule_store.get_latest_schedule()
+            if stored is not None:
+                idx = period - stored.optimization_period
+                pd_list = stored.optimization_result.period_data
+                if 0 <= idx < len(pd_list):
+                    shadow = pd_list[idx].decision.shadow_price
+                    buy_prices, _ = self.price_manager.get_available_prices()
+                    if period < len(buy_prices):
+                        discharge_rate = solar_export_discharge_rate(
+                            buy_prices[period],
+                            shadow,
+                            self.battery_settings.efficiency_discharge,
+                        )
 
         # Store the schedule's desired discharge rate before inhibit check so that
         # apply_discharge_inhibit() can restore it when the inhibit sensor clears.
@@ -2765,7 +2805,7 @@ class BatterySystemManager:
             else:
                 # Power monitor disabled — write charge rate directly so the
                 # inverter register is not left at a stale value (e.g. 0% from a
-                # preceding LOAD_SUPPORT or EXPORT_ARBITRAGE period).
+                # preceding LOAD_SUPPORT or BATTERY_EXPORT period).
                 self.controller.set_charging_power_rate(int(charge_rate))
 
         except (AttributeError, ValueError, KeyError) as e:

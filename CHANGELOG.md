@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- **Battery locked in `grid_first` during solar-surplus idle periods** — When the optimizer planned no battery action (`power=0`) during periods with active solar export, the classifier returned `BATTERY_EXPORT` (formerly `EXPORT_ARBITRAGE`), which maps to `grid_first`. This blocked the battery from supporting house load during long daytime windows even when solar was insufficient. A new `SOLAR_EXPORT` intent is introduced for power≈0 + solar-to-grid periods; it maps to `load_first` so the battery can serve load while solar exports to the grid.
+
+### Changed
+
+- **`EXPORT_ARBITRAGE` intent renamed to `BATTERY_EXPORT`** — All references updated across backend, frontend, tests, and documentation. The semantic meaning is unchanged: battery actively discharging to the grid during peak-price windows.
+
 ## [9.6.3] - 2026-06-25
 
 ### Fixed

@@ -8,7 +8,7 @@ SPH Intent Mapping:
 - GRID_CHARGING   → charge period (mains_enabled=True)
 - SOLAR_STORAGE   → idle (SPH charges from solar by default; no explicit period needed)
 - LOAD_SUPPORT    → discharge period
-- EXPORT_ARBITRAGE → discharge period
+- BATTERY_EXPORT → discharge period
 - IDLE            → nothing (inverter default)
 """
 
@@ -45,7 +45,7 @@ class GrowattSphController(InverterController):
 
     # Intents that produce a discharge period on SPH
     DISCHARGE_INTENTS: ClassVar[frozenset[str]] = frozenset(
-        {"LOAD_SUPPORT", "EXPORT_ARBITRAGE"}
+        {"LOAD_SUPPORT", "BATTERY_EXPORT"}
     )
 
     def __init__(self, battery_settings: BatterySettings) -> None:
@@ -231,7 +231,7 @@ class GrowattSphController(InverterController):
                     "batt_mode": "grid_first",
                     "enabled": True,
                     "is_default": False,
-                    "strategic_intent": "LOAD_SUPPORT/EXPORT_ARBITRAGE",
+                    "strategic_intent": "LOAD_SUPPORT/BATTERY_EXPORT",
                 }
             )
         # Sort by start time for display, then assign 1-based segment IDs

@@ -21,11 +21,12 @@ class InverterController(ABC):
     Subclasses implement hardware-specific schedule conversion and deployment.
 
     Strategic Intent → Control Mapping:
-    - GRID_CHARGING   → grid_charge=True,  charge_rate=100, discharge_rate=0
-    - SOLAR_STORAGE   → grid_charge=False, charge_rate=100, discharge_rate=0
-    - LOAD_SUPPORT    → grid_charge=False, charge_rate=0,   discharge_rate=100
-    - EXPORT_ARBITRAGE → grid_charge=False, charge_rate=0,  discharge_rate=<action-derived>
-    - IDLE            → grid_charge=False, charge_rate=100, discharge_rate=0
+    - GRID_CHARGING  → grid_charge=True,  charge_rate=100, discharge_rate=0
+    - SOLAR_STORAGE  → grid_charge=False, charge_rate=100, discharge_rate=0
+    - LOAD_SUPPORT   → grid_charge=False, charge_rate=0,   discharge_rate=<action-derived>
+    - BATTERY_EXPORT → grid_charge=False, charge_rate=0,   discharge_rate=<action-derived>
+    - SOLAR_EXPORT   → grid_charge=False, charge_rate=100, discharge_rate=0
+    - IDLE           → grid_charge=False, charge_rate=100, discharge_rate=0
     """
 
     # Map strategic intents to inverter control settings.
@@ -38,11 +39,12 @@ class InverterController(ABC):
             "discharge_rate": 0,
         },
         "LOAD_SUPPORT": {"grid_charge": False, "charge_rate": 0, "discharge_rate": 100},
-        "EXPORT_ARBITRAGE": {
+        "BATTERY_EXPORT": {
             "grid_charge": False,
             "charge_rate": 0,
             "discharge_rate": 100,
         },
+        "SOLAR_EXPORT": {"grid_charge": False, "charge_rate": 100, "discharge_rate": 0},
         "IDLE": {"grid_charge": False, "charge_rate": 100, "discharge_rate": 0},
     }
 
@@ -51,7 +53,8 @@ class InverterController(ABC):
         "GRID_CHARGING": "battery_first",
         "SOLAR_STORAGE": "load_first",
         "LOAD_SUPPORT": "load_first",
-        "EXPORT_ARBITRAGE": "grid_first",
+        "BATTERY_EXPORT": "grid_first",
+        "SOLAR_EXPORT": "load_first",
         "IDLE": "load_first",
     }
 
@@ -60,7 +63,8 @@ class InverterController(ABC):
         "GRID_CHARGING": "Storing cheap grid energy for later use",
         "SOLAR_STORAGE": "Storing excess solar energy for evening/night",
         "LOAD_SUPPORT": "Using battery to support home consumption",
-        "EXPORT_ARBITRAGE": "Selling stored energy to grid for profit",
+        "BATTERY_EXPORT": "Selling stored energy to grid for profit",
+        "SOLAR_EXPORT": "Solar surplus exporting directly to grid",
         "IDLE": "No significant battery activity",
     }
 
@@ -120,7 +124,7 @@ class InverterController(ABC):
 
         Args:
             intent: Strategic intent string
-            battery_action_kw: Battery power in kW (used for EXPORT_ARBITRAGE and LOAD_SUPPORT scaling)
+            battery_action_kw: Battery power in kW (used for BATTERY_EXPORT and LOAD_SUPPORT scaling)
 
         Returns:
             Tuple of (grid_charge, discharge_rate_percent)
@@ -143,7 +147,7 @@ class InverterController(ABC):
             else:
                 discharge_rate = 0
             return False, discharge_rate
-        elif intent == "EXPORT_ARBITRAGE":
+        elif intent == "BATTERY_EXPORT":
             if battery_action_kw < -0.01:
                 discharge_rate = min(
                     100,
@@ -157,6 +161,8 @@ class InverterController(ABC):
             else:
                 discharge_rate = 0
             return False, discharge_rate
+        elif intent == "SOLAR_EXPORT":
+            return False, 0
         elif intent == "IDLE":
             return False, 0
         else:

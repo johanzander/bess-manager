@@ -351,7 +351,7 @@ def _aggregate_quarterly_to_hourly(
     # Priority order for tie-breaking: prioritize action over inaction
     intent_priority = {
         "GRID_CHARGING": 5,
-        "EXPORT_ARBITRAGE": 4,
+        "BATTERY_EXPORT": 4,
         "LOAD_SUPPORT": 3,
         "SOLAR_STORAGE": 2,
         "IDLE": 1,

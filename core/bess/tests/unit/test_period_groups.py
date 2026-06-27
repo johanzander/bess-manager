@@ -35,13 +35,13 @@ def _make_schedule(actions: list[float]) -> DPSchedule:
 
 class TestDischargeRateFromSchedule:
     def test_export_arbitrage_uses_action_derived_rate(self, controller):
-        """EXPORT_ARBITRAGE discharge_rate reflects actual battery action, not 100%."""
+        """BATTERY_EXPORT discharge_rate reflects actual battery action, not 100%."""
         # -0.9 kWh / 0.25 h = -3.6 kW; 3.6 / 6.0 * 100 = 60%
         intents = ["IDLE"] * 96
-        intents[20] = "EXPORT_ARBITRAGE"
-        intents[21] = "EXPORT_ARBITRAGE"
-        intents[22] = "EXPORT_ARBITRAGE"
-        intents[23] = "EXPORT_ARBITRAGE"
+        intents[20] = "BATTERY_EXPORT"
+        intents[21] = "BATTERY_EXPORT"
+        intents[22] = "BATTERY_EXPORT"
+        intents[23] = "BATTERY_EXPORT"
 
         actions = [0.0] * 96
         actions[20] = -0.9
@@ -54,25 +54,25 @@ class TestDischargeRateFromSchedule:
 
         groups = controller.get_detailed_period_groups()
 
-        export_group = next(g for g in groups if g["intent"] == "EXPORT_ARBITRAGE")
+        export_group = next(g for g in groups if g["intent"] == "BATTERY_EXPORT")
         assert export_group["discharge_rate"] == 60  # round(3.6/6.0*100)
 
     def test_no_schedule_gives_zero_rate(self, controller):
         """With no current_schedule, discharge_rate is 0 (no fallback to static 100)."""
         intents = ["IDLE"] * 96
-        intents[20] = "EXPORT_ARBITRAGE"
+        intents[20] = "BATTERY_EXPORT"
 
         controller.strategic_intents = intents
         controller.current_schedule = None
 
         groups = controller.get_detailed_period_groups()
 
-        export_group = next(g for g in groups if g["intent"] == "EXPORT_ARBITRAGE")
+        export_group = next(g for g in groups if g["intent"] == "BATTERY_EXPORT")
         assert export_group["discharge_rate"] == 0
 
     def test_actions_parameter_overrides_schedule(self, controller):
         """Explicit actions parameter takes precedence over current_schedule."""
-        intents = ["EXPORT_ARBITRAGE"] * 4  # four 15-min periods = 1 hour
+        intents = ["BATTERY_EXPORT"] * 4  # four 15-min periods = 1 hour
 
         # schedule has 0.9 kWh (would give 60%), but we pass 0.45 kWh (should give 30%)
         controller.current_schedule = _make_schedule([-0.9] * 4)
@@ -121,8 +121,8 @@ class TestDischargeRateFromSchedule:
         assert groups[0]["discharge_rate"] == 0
 
     def test_different_rates_split_into_separate_groups(self, controller):
-        """Consecutive EXPORT_ARBITRAGE periods with different rates form separate groups."""
-        intents = ["EXPORT_ARBITRAGE"] * 8
+        """Consecutive BATTERY_EXPORT periods with different rates form separate groups."""
+        intents = ["BATTERY_EXPORT"] * 8
         actions = [-0.9] * 4 + [-0.45] * 4  # 60% then 30%
 
         controller.strategic_intents = intents

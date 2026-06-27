@@ -1,17 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Battery, 
-  Zap, 
-  RefreshCw, 
-  Clock, 
-  Settings, 
+import {
+  Battery,
+  Zap,
+  RefreshCw,
+  Clock,
+  Settings,
   TrendingUp,
   Calendar,
   TrendingDown,
   CheckCircle,
   AlertTriangle,
   Home,
-  Sun
+  Sun,
+  ChevronRight
 } from 'lucide-react';
 import api from '../lib/api';
 
@@ -81,6 +82,9 @@ interface PeriodGroup {
   chargePowerRate: number;
   dischargePowerRate: number;
   gridCharge: boolean;
+  totalActionKwh?: number;
+  socEndPct?: number;
+  socDeltaKwh?: number | null;
 }
 
 interface InverterSchedule {
@@ -299,6 +303,7 @@ const InverterStatusDashboard: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
   const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const [showTomorrow, setShowTomorrow] = useState(false);
 
   // Helper function to extract values from FormattedValue objects
   const getValue = (field: any) => {
@@ -554,6 +559,14 @@ const InverterStatusDashboard: React.FC = () => {
 
   const currentPeriodGroup = getCurrentPeriodGroup();
 
+  const formatDuration = (minutes: number): string => {
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    if (hours === 0) return `${mins}min`;
+    if (mins === 0) return `${hours}h`;
+    return `${hours}h ${mins}min`;
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -710,37 +723,66 @@ const InverterStatusDashboard: React.FC = () => {
             <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Schedule Overview (15-min Resolution)</h3>
           </div>
 
-          {inverterSchedule?.periodGroups && inverterSchedule.periodGroups.length > 0 ? (
-            <div className="overflow-x-auto bg-white dark:bg-gray-800 rounded-lg shadow">
-              <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                <thead className="bg-gray-50 dark:bg-gray-700">
+          {inverterSchedule?.periodGroups && inverterSchedule.periodGroups.length > 0 ? (() => {
+            const schedulePlatform = inverterSchedule.inverterPlatform ?? 'growatt_server_min';
+            const isTouBased = schedulePlatform !== 'solax_modbus_native';
+            const totalCols = isTouBased ? 10 : 6;
+            return (
+            <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
+              <table className="min-w-full border-collapse">
+                <thead>
                   <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                      <div className="flex items-center">
-                        <Clock className="h-4 w-4 mr-1" />
+                    <th rowSpan={2} className="px-3 py-2 text-center text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700 align-bottom">
+                      <div className="flex items-center justify-center gap-1">
+                        <Clock className="h-3.5 w-3.5" />
                         Time Period
                       </div>
                     </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                    <th rowSpan={2} className="px-3 py-2 text-center text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700 align-bottom">
                       Duration
                     </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                      Battery Mode
+                    <th colSpan={4} className="px-3 py-2 text-center text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700">
+                      Optimization Plan
                     </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                      Strategic Intent
+                    {isTouBased && (
+                      <th colSpan={4} className="px-3 py-2 text-center text-xs font-semibold text-indigo-700 dark:text-indigo-300 uppercase tracking-wider border border-gray-200 dark:border-gray-700 bg-indigo-50 dark:bg-indigo-900/20">
+                        Inverter Configuration
+                      </th>
+                    )}
+                  </tr>
+                  <tr>
+                    <th className="px-3 py-2 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700">
+                      Intent
                     </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                      Power Rate
+                    <th className="px-3 py-2 text-center text-xs font-semibold text-amber-600 dark:text-amber-400 uppercase tracking-wider border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700">
+                      Solar
                     </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                      Grid Charge
+                    <th className="px-3 py-2 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700">
+                      Grid / Discharge
                     </th>
+                    <th className="px-3 py-2 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700">
+                      Target SOC
+                    </th>
+                    {isTouBased && (<>
+                      <th className="px-3 py-2 text-center text-xs font-semibold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider border border-gray-200 dark:border-gray-700 bg-indigo-50/70 dark:bg-indigo-900/10">
+                        Mode
+                      </th>
+                      <th className="px-3 py-2 text-center text-xs font-semibold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider border border-gray-200 dark:border-gray-700 bg-indigo-50/70 dark:bg-indigo-900/10">
+                        Charge %
+                      </th>
+                      <th className="px-3 py-2 text-center text-xs font-semibold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider border border-gray-200 dark:border-gray-700 bg-indigo-50/70 dark:bg-indigo-900/10">
+                        Discharge %
+                      </th>
+                      <th className="px-3 py-2 text-center text-xs font-semibold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider border border-gray-200 dark:border-gray-700 bg-indigo-50/70 dark:bg-indigo-900/10">
+                        Grid Charge
+                      </th>
+                    </>)}
                   </tr>
                 </thead>
-                <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+
+                {/* Today's rows */}
+                <tbody className="bg-white dark:bg-gray-800">
                   {inverterSchedule.periodGroups.map((group, index) => {
-                    // Check if current time falls within this period group
                     const now = new Date();
                     const currentMinutes = now.getHours() * 60 + now.getMinutes();
                     const [startH, startM] = group.startTime.split(':').map(Number);
@@ -748,141 +790,203 @@ const InverterStatusDashboard: React.FC = () => {
                     const groupStartMinutes = startH * 60 + startM;
                     const groupEndMinutes = endH * 60 + endM;
                     const isCurrentPeriod = currentMinutes >= groupStartMinutes && currentMinutes <= groupEndMinutes;
-
-                    const formatDuration = (minutes: number): string => {
-                      const hours = Math.floor(minutes / 60);
-                      const mins = minutes % 60;
-                      if (hours === 0) return `${mins}min`;
-                      if (mins === 0) return `${hours}h`;
-                      return `${hours}h ${mins}min`;
-                    };
+                    const isPast = group.socEndPct == null && !isCurrentPeriod;
+                    const cell = 'px-3 py-2.5 whitespace-nowrap text-sm border border-gray-200 dark:border-gray-700';
+                    const invCell = `${cell} bg-indigo-50/20 dark:bg-indigo-900/5`;
 
                     return (
                       <tr
                         key={index}
-                        className={isCurrentPeriod ? 'bg-blue-50 dark:bg-blue-900/20' : ''}
+                        className={
+                          isCurrentPeriod
+                            ? 'bg-blue-50 dark:bg-blue-900/20'
+                            : isPast
+                              ? 'opacity-40 bg-gray-50 dark:bg-gray-800/50'
+                              : 'hover:bg-gray-50 dark:hover:bg-gray-700/30'
+                        }
                       >
-                        <td className="px-4 py-4 whitespace-nowrap text-sm">
-                          <div className="flex items-center">
-                            <div className="font-medium text-gray-900 dark:text-white">
+                        <td className={`${cell} text-center ${isCurrentPeriod ? 'border-l-4 border-l-blue-400' : ''}`}>
+                          <div className="flex items-center justify-center gap-2">
+                            <span className="font-medium text-gray-900 dark:text-white">
                               {group.startTime} - {group.endTime}
-                            </div>
+                            </span>
                             {isCurrentPeriod && (
-                              <span className="ml-2 px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300 rounded">
+                              <span className="px-1.5 py-0.5 text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300 rounded">
                                 Now
                               </span>
                             )}
                           </div>
                         </td>
-                        <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">
-                          {formatDuration(group.durationMinutes)}
-                        </td>
-                        <td className="px-4 py-4 whitespace-nowrap text-sm">
-                          {getBatteryModeDisplay(group.mode)}
-                        </td>
-                        <td className="px-4 py-4 whitespace-nowrap text-sm">
-                          <span className={`px-2 py-1 rounded text-xs font-medium ${getIntentColor(group.dominantIntent)}`}>
+                        <td className={`${cell} text-center text-gray-600 dark:text-gray-400`}>{formatDuration(group.durationMinutes)}</td>
+                        <td className={`${cell} text-center`}>
+                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${getIntentColor(group.dominantIntent)}`}>
                             {group.dominantIntent.replace(/_/g, ' ')}
                           </span>
                         </td>
-                        <td className="px-4 py-4 whitespace-nowrap text-sm">
-                          <div className="space-y-1">
-                            {group.chargePowerRate > 0 && (
-                              <div className="text-green-600 dark:text-green-400">
-                                C: {group.chargePowerRate}%
-                              </div>
-                            )}
-                            {group.dischargePowerRate > 0 && (
-                              <div className="text-orange-600 dark:text-orange-400">
-                                D: {group.dischargePowerRate}%
-                              </div>
-                            )}
-                            {group.chargePowerRate === 0 && group.dischargePowerRate === 0 && (
-                              <div className="text-gray-500 dark:text-gray-400">-</div>
-                            )}
-                          </div>
-                        </td>
-                        <td className="px-4 py-4 whitespace-nowrap text-sm">
-                          {group.gridCharge ? (
-                            <span className="text-green-600 dark:text-green-400 font-medium">Enabled</span>
+                        {/* Solar column: SOLAR_STORAGE and passive IDLE gains */}
+                        <td className={`${cell} text-center`}>
+                          {!isPast && (group.dominantIntent === 'SOLAR_STORAGE' || group.dominantIntent === 'IDLE') &&
+                           group.socDeltaKwh != null && group.socDeltaKwh > 0.1 ? (
+                            <span className="text-amber-500 dark:text-amber-400 font-medium">
+                              +{group.socDeltaKwh.toFixed(1)} kWh
+                            </span>
                           ) : (
-                            <span className="text-gray-400 dark:text-gray-500">Disabled</span>
+                            <span className="text-gray-300 dark:text-gray-600">—</span>
                           )}
                         </td>
+                        {/* Grid / Discharge column */}
+                        <td className={`${cell} text-center`}>
+                          {!isPast && group.dominantIntent === 'GRID_CHARGING' &&
+                           group.socDeltaKwh != null && group.socDeltaKwh > 0.1 ? (
+                            <span className="text-green-600 dark:text-green-400 font-medium">
+                              +{group.socDeltaKwh.toFixed(1)} kWh
+                            </span>
+                          ) : !isPast && group.totalActionKwh !== undefined && group.totalActionKwh < -0.05 ? (
+                            <span className="text-orange-500 dark:text-orange-400 font-medium">
+                              {group.totalActionKwh.toFixed(1)} kWh
+                            </span>
+                          ) : (
+                            <span className="text-gray-300 dark:text-gray-600">—</span>
+                          )}
+                        </td>
+                        <td className={`${cell} text-center`}>
+                          {group.socEndPct != null ? (
+                            <span className="text-gray-700 dark:text-gray-300 font-medium">{Math.round(group.socEndPct)}%</span>
+                          ) : (
+                            <span className="text-gray-300 dark:text-gray-600">—</span>
+                          )}
+                        </td>
+                        {isTouBased && (<>
+                          <td className={`${invCell} text-center`}>{getBatteryModeDisplay(group.mode)}</td>
+                          <td className={`${invCell} text-center`}>
+                            {group.chargePowerRate > 0 ? (
+                              <span className="text-green-600 dark:text-green-400 font-medium">{group.chargePowerRate}%</span>
+                            ) : (
+                              <span className="text-gray-300 dark:text-gray-600">—</span>
+                            )}
+                          </td>
+                          <td className={`${invCell} text-center`}>
+                            {group.dischargePowerRate > 0 ? (
+                              <span className="text-orange-500 dark:text-orange-400 font-medium">{group.dischargePowerRate}%</span>
+                            ) : (
+                              <span className="text-gray-300 dark:text-gray-600">—</span>
+                            )}
+                          </td>
+                          <td className={`${invCell} text-center`}>
+                            {group.gridCharge ? (
+                              <span className="text-green-600 dark:text-green-400 font-medium">Yes</span>
+                            ) : (
+                              <span className="text-gray-300 dark:text-gray-600">—</span>
+                            )}
+                          </td>
+                        </>)}
                       </tr>
                     );
                   })}
                 </tbody>
+
+                {/* Tomorrow toggle row + rows — same table keeps columns aligned */}
                 {inverterSchedule.tomorrowPeriodGroups && inverterSchedule.tomorrowPeriodGroups.length > 0 && (
                   <>
-                    <thead className="bg-indigo-50 dark:bg-indigo-900/30">
-                      <tr>
-                        <th colSpan={6} className="px-4 py-3 text-left text-xs font-semibold text-indigo-700 dark:text-indigo-300 uppercase tracking-wider">
-                          Tomorrow&apos;s Planned Schedule
-                        </th>
+                    <tbody>
+                      <tr className="bg-indigo-50 dark:bg-indigo-900/20 border-t-2 border-indigo-200 dark:border-indigo-700">
+                        <td colSpan={totalCols} className="px-3 py-2.5 border border-gray-200 dark:border-gray-700">
+                          <button
+                            onClick={() => setShowTomorrow(!showTomorrow)}
+                            className="flex items-center gap-2 text-sm font-medium text-indigo-700 dark:text-indigo-300 hover:text-indigo-900 dark:hover:text-indigo-100 transition-colors"
+                          >
+                            <ChevronRight className={`h-4 w-4 transition-transform ${showTomorrow ? 'rotate-90' : ''}`} />
+                            Tomorrow&apos;s Planned Schedule ({inverterSchedule.tomorrowPeriodGroups.length} segments)
+                          </button>
+                        </td>
                       </tr>
-                    </thead>
-                    <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700 opacity-75">
-                      {inverterSchedule.tomorrowPeriodGroups.map((group, index) => {
-                        const formatDuration = (minutes: number): string => {
-                          const hours = Math.floor(minutes / 60);
-                          const mins = minutes % 60;
-                          if (hours === 0) return `${mins}min`;
-                          if (mins === 0) return `${hours}h`;
-                          return `${hours}h ${mins}min`;
-                        };
-
-                        return (
-                          <tr key={`tomorrow-${index}`}>
-                            <td className="px-4 py-4 whitespace-nowrap text-sm">
-                              <div className="font-medium text-gray-900 dark:text-white">
-                                {group.startTime} - {group.endTime}
-                              </div>
-                            </td>
-                            <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">
-                              {formatDuration(group.durationMinutes)}
-                            </td>
-                            <td className="px-4 py-4 whitespace-nowrap text-sm">
-                              {getBatteryModeDisplay(group.mode)}
-                            </td>
-                            <td className="px-4 py-4 whitespace-nowrap text-sm">
-                              <span className={`px-2 py-1 rounded text-xs font-medium ${getIntentColor(group.dominantIntent)}`}>
-                                {group.dominantIntent.replace(/_/g, ' ')}
-                              </span>
-                            </td>
-                            <td className="px-4 py-4 whitespace-nowrap text-sm">
-                              <div className="space-y-1">
-                                {group.chargePowerRate > 0 && (
-                                  <div className="text-green-600 dark:text-green-400">
-                                    C: {group.chargePowerRate}%
-                                  </div>
-                                )}
-                                {group.dischargePowerRate > 0 && (
-                                  <div className="text-orange-600 dark:text-orange-400">
-                                    D: {group.dischargePowerRate}%
-                                  </div>
-                                )}
-                                {group.chargePowerRate === 0 && group.dischargePowerRate === 0 && (
-                                  <div className="text-gray-500 dark:text-gray-400">-</div>
-                                )}
-                              </div>
-                            </td>
-                            <td className="px-4 py-4 whitespace-nowrap text-sm">
-                              {group.gridCharge ? (
-                                <span className="text-green-600 dark:text-green-400 font-medium">Enabled</span>
-                              ) : (
-                                <span className="text-gray-400 dark:text-gray-500">Disabled</span>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
                     </tbody>
+                    {showTomorrow && (
+                      <tbody className="bg-white dark:bg-gray-800 opacity-75">
+                        {inverterSchedule.tomorrowPeriodGroups.map((group, index) => {
+                          const cell = 'px-3 py-2.5 whitespace-nowrap text-sm border border-gray-200 dark:border-gray-700';
+                          const invCell = `${cell} bg-indigo-50/20 dark:bg-indigo-900/5`;
+                          return (
+                            <tr key={`tomorrow-${index}`} className="hover:bg-gray-50 dark:hover:bg-gray-700/30">
+                              <td className={`${cell} text-center`}>
+                                <span className="font-medium text-gray-900 dark:text-white">
+                                  {group.startTime} - {group.endTime}
+                                </span>
+                              </td>
+                              <td className={`${cell} text-center text-gray-600 dark:text-gray-400`}>{formatDuration(group.durationMinutes)}</td>
+                              <td className={`${cell} text-center`}>
+                                <span className={`px-2 py-0.5 rounded text-xs font-medium ${getIntentColor(group.dominantIntent)}`}>
+                                  {group.dominantIntent.replace(/_/g, ' ')}
+                                </span>
+                              </td>
+                              {/* Solar column */}
+                              <td className={`${cell} text-center`}>
+                                {(group.dominantIntent === 'SOLAR_STORAGE' || group.dominantIntent === 'IDLE') &&
+                                 group.socDeltaKwh != null && group.socDeltaKwh > 0.1 ? (
+                                  <span className="text-amber-500 dark:text-amber-400 font-medium">
+                                    +{group.socDeltaKwh.toFixed(1)} kWh
+                                  </span>
+                                ) : (
+                                  <span className="text-gray-300 dark:text-gray-600">—</span>
+                                )}
+                              </td>
+                              {/* Grid / Discharge column */}
+                              <td className={`${cell} text-center`}>
+                                {group.dominantIntent === 'GRID_CHARGING' &&
+                                 group.socDeltaKwh != null && group.socDeltaKwh > 0.1 ? (
+                                  <span className="text-green-600 dark:text-green-400 font-medium">
+                                    +{group.socDeltaKwh.toFixed(1)} kWh
+                                  </span>
+                                ) : group.totalActionKwh !== undefined && group.totalActionKwh < -0.05 ? (
+                                  <span className="text-orange-500 dark:text-orange-400 font-medium">
+                                    {group.totalActionKwh.toFixed(1)} kWh
+                                  </span>
+                                ) : (
+                                  <span className="text-gray-300 dark:text-gray-600">—</span>
+                                )}
+                              </td>
+                              <td className={`${cell} text-center`}>
+                                {group.socEndPct != null ? (
+                                  <span className="text-gray-700 dark:text-gray-300 font-medium">{Math.round(group.socEndPct)}%</span>
+                                ) : (
+                                  <span className="text-gray-300 dark:text-gray-600">—</span>
+                                )}
+                              </td>
+                              {isTouBased && (<>
+                                <td className={`${invCell} text-center`}>{getBatteryModeDisplay(group.mode)}</td>
+                                <td className={`${invCell} text-center`}>
+                                  {group.chargePowerRate > 0 ? (
+                                    <span className="text-green-600 dark:text-green-400 font-medium">{group.chargePowerRate}%</span>
+                                  ) : (
+                                    <span className="text-gray-300 dark:text-gray-600">—</span>
+                                  )}
+                                </td>
+                                <td className={`${invCell} text-center`}>
+                                  {group.dischargePowerRate > 0 ? (
+                                    <span className="text-orange-500 dark:text-orange-400 font-medium">{group.dischargePowerRate}%</span>
+                                  ) : (
+                                    <span className="text-gray-300 dark:text-gray-600">—</span>
+                                  )}
+                                </td>
+                                <td className={`${invCell} text-center`}>
+                                  {group.gridCharge ? (
+                                    <span className="text-green-600 dark:text-green-400 font-medium">Yes</span>
+                                  ) : (
+                                    <span className="text-gray-300 dark:text-gray-600">—</span>
+                                  )}
+                                </td>
+                              </>)}
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    )}
                   </>
                 )}
               </table>
             </div>
-          ) : (
+          );
+          })() : (
             <div className="text-gray-500 dark:text-gray-400 text-sm">No schedule data available</div>
           )}
         </div>

@@ -40,7 +40,7 @@
       }
     },
     "inverter": {
-      "platform": "solax"
+      "platform": "solax_modbus_native"
     },
     "growatt": {
       "inverter_type": "SOLAX",

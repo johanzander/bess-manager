@@ -500,3 +500,51 @@ class TestChargeRateHardwareWrite:
             "SOLAR_STORAGE must reset charge_rate to 100 — stale 0 from "
             f"LOAD_SUPPORT was not overwritten: {mock_controller.calls['charge_rate']}"
         )
+
+    def test_grid_charging_action_derived_charge_rate_with_schedule(
+        self, battery_system, mock_controller
+    ):
+        """GRID_CHARGING charge_rate must be proportional to the DP action when a
+        schedule is present — not always 100%.
+
+        Scenario: battery needs only 0.17 kWh this 15-min period (a small top-up).
+        That is 0.68 kW. With max_charge_power=15 kW the correct rate is
+        round(0.68 / 15 * 100) = 5%, not 100%.
+        """
+        from unittest.mock import MagicMock
+
+        from core.bess.dp_schedule import DPSchedule
+
+        assert battery_system._power_monitor is None
+
+        mgr = battery_system._inverter_controller
+        mgr.max_charge_power_kw = 15.0
+
+        # 96 quarter-hour periods; only period 8 (hour 2) is GRID_CHARGING
+        intents = ["IDLE"] * 96
+        for p in range(8, 12):  # hour 2: periods 8-11
+            intents[p] = "GRID_CHARGING"
+        mgr.strategic_intents = intents
+
+        # Attach a schedule with a small action at period 8:
+        # 0.17 kWh in 15 min → 0.68 kW → round(0.68 / 15 * 100) = 5
+        actions = [0.0] * 96
+        actions[8] = 0.17
+        mock_schedule = MagicMock(spec=DPSchedule)
+        mock_schedule.actions = actions
+        mgr.current_schedule = mock_schedule
+
+        mock_controller.calls["charge_rate"].clear()
+
+        with patch("core.bess.battery_system_manager.time_utils.now") as mock_now:
+            mock_now.return_value.hour = 2
+            mock_now.return_value.minute = 0
+            battery_system._apply_period_schedule(8)
+
+        assert mock_controller.calls[
+            "charge_rate"
+        ], "GRID_CHARGING must write charge_rate"
+        actual = mock_controller.calls["charge_rate"][-1]
+        assert (
+            actual == 5
+        ), f"GRID_CHARGING with 0.17 kWh action should write charge_rate=5%, got {actual}%"

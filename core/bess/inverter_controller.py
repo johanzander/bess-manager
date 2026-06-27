@@ -218,7 +218,13 @@ class InverterController(ABC):
             grid_charge, discharge_rate = self.compute_rates_for_period(
                 period, battery_action_kw
             )
-            charge_rate = self.INTENT_TO_CONTROL[intent]["charge_rate"]
+            if intent == "GRID_CHARGING" and battery_action_kw > 0.01:
+                charge_rate = min(
+                    100,
+                    max(0, round(battery_action_kw / self.max_charge_power_kw * 100)),
+                )
+            else:
+                charge_rate = self.INTENT_TO_CONTROL[intent]["charge_rate"]
         else:
             control = self.INTENT_TO_CONTROL[intent]
             grid_charge = control["grid_charge"]

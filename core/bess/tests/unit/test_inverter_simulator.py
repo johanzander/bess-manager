@@ -46,6 +46,37 @@ def test_derive_command_grid_charging_enables_grid_charge():
     assert cmd.grid_charge is True
 
 
+def test_derive_command_grid_charging_scales_charge_rate():
+    """GRID_CHARGING charge_rate_pct must match the DP action, not always be 100%.
+
+    With max_charge_power=15 kW and a planned action of 0.68 kW (0.17 kWh in 15 min),
+    the correct charge_rate_pct is round(0.68 / 15 * 100) = 5, not 100.
+    This mirrors the production controller's get_period_settings() behaviour.
+    """
+    bs = make_battery_settings(max_charge_power_kw=15.0)
+    # 0.17 kWh in a 15-min period → battery_action_kw = 0.17 / 0.25 = 0.68 kW
+    cmd = derive_control_command("GRID_CHARGING", battery_action_kw=0.68, settings=bs)
+    assert cmd.battery_mode == "battery_first"
+    assert cmd.grid_charge is True
+    assert (
+        cmd.charge_rate_pct == 5
+    ), f"Expected charge_rate_pct=5 for 0.68 kW action at 15 kW max, got {cmd.charge_rate_pct}"
+
+
+def test_derive_command_grid_charging_full_action_gives_100_pct():
+    """When the planned action equals max charge power, charge_rate_pct must be 100."""
+    bs = make_battery_settings(max_charge_power_kw=15.0)
+    cmd = derive_control_command("GRID_CHARGING", battery_action_kw=15.0, settings=bs)
+    assert cmd.charge_rate_pct == 100
+
+
+def test_derive_command_solar_storage_charge_rate_is_100():
+    """SOLAR_STORAGE always uses charge_rate_pct=100 — accept solar at full rate."""
+    bs = make_battery_settings()
+    cmd = derive_control_command("SOLAR_STORAGE", battery_action_kw=0.5, settings=bs)
+    assert cmd.charge_rate_pct == 100
+
+
 # ---------------------------------------------------------------------------
 # Task 2: mode_to_power
 # ---------------------------------------------------------------------------

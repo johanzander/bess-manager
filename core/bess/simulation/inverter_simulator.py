@@ -20,6 +20,7 @@ class ControlCommand:
     battery_mode: str  # "load_first" | "grid_first" | "battery_first"
     discharge_rate_pct: int  # 0..100
     grid_charge: bool
+    charge_rate_pct: int = 100  # 0..100; action-derived for GRID_CHARGING
 
 
 def derive_control_command(
@@ -29,26 +30,33 @@ def derive_control_command(
     reusing the production controller mappings so the simulator executes exactly
     what the real controller would write."""
     battery_mode = InverterController.INTENT_TO_MODE.get(strategic_intent, "load_first")
-    # Reuse the production intent->rates mapping (grid_charge, discharge_rate_pct).
-    grid_charge, discharge_rate_pct = _map_rates(
+    grid_charge, discharge_rate_pct, charge_rate_pct = _map_rates(
         strategic_intent, battery_action_kw, settings
     )
     return ControlCommand(
         battery_mode=battery_mode,
         discharge_rate_pct=discharge_rate_pct,
         grid_charge=grid_charge,
+        charge_rate_pct=charge_rate_pct,
     )
 
 
 def _map_rates(
     intent: str, action_kw: float, settings: BatterySettings
-) -> tuple[bool, int]:
+) -> tuple[bool, int, int]:
     """Mirror of InverterController._map_intent_to_rates without needing a live
-    controller instance (that method is an instance method bound to hardware)."""
+    controller instance. Returns (grid_charge, discharge_rate_pct, charge_rate_pct)."""
     if intent == "GRID_CHARGING":
-        return True, 0
+        if action_kw > 0.01:
+            charge_rate_pct = min(
+                100,
+                max(0, round(action_kw / settings.max_charge_power_kw * 100)),
+            )
+        else:
+            charge_rate_pct = 100
+        return True, 0, charge_rate_pct
     if intent in ("SOLAR_STORAGE", "IDLE", "SOLAR_EXPORT"):
-        return False, 0
+        return False, 0, 100
     if intent == "LOAD_SUPPORT":
         if action_kw < -0.01:
             rate = min(
@@ -57,7 +65,7 @@ def _map_rates(
             )
         else:
             rate = 0
-        return False, rate
+        return False, rate, 100
     if intent == "BATTERY_EXPORT":
         if action_kw < -0.01:
             rate = min(
@@ -66,7 +74,7 @@ def _map_rates(
             )
         else:
             rate = 0
-        return False, rate
+        return False, rate, 0
     raise ValueError(f"Unknown strategic intent: {intent}")
 
 
@@ -83,9 +91,8 @@ def mode_to_power(
     policy; check 1 (plan-faithfulness) validates/refines it."""
     if command.battery_mode == "battery_first":  # grid charging
         room = settings.max_soe_kwh - soe
-        max_charge_kwh = min(
-            settings.max_charge_power_kw * dt, room / settings.efficiency_charge
-        )
+        rate_kw = settings.max_charge_power_kw * command.charge_rate_pct / 100
+        max_charge_kwh = min(rate_kw * dt, room / settings.efficiency_charge)
         return max(0.0, max_charge_kwh) / dt
 
     if (

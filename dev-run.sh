@@ -3,7 +3,7 @@
 #
 # Container runtime: auto-detected (podman preferred, falls back to docker).
 # Override with DOCKER=docker ./dev-run.sh if needed.
-# When using podman, podman-compose must be installed: pip install podman-compose
+# When using podman, podman-compose is used from .venv (install with: pip install -r requirements-dev.txt).
 if [ -z "$DOCKER" ]; then
   if command -v podman >/dev/null 2>&1; then
     DOCKER="podman"
@@ -13,8 +13,14 @@ if [ -z "$DOCKER" ]; then
 fi
 COMPOSE="${COMPOSE:-${DOCKER} compose}"
 # podman-compose uses a different binary name; detect it automatically.
-if [ "$DOCKER" = "podman" ] && command -v podman-compose >/dev/null 2>&1; then
-  COMPOSE="podman-compose"
+# Prefer the project venv's copy so no global install is needed.
+if [ "$DOCKER" = "podman" ]; then
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  if [ -x "${SCRIPT_DIR}/.venv/bin/podman-compose" ]; then
+    COMPOSE="${SCRIPT_DIR}/.venv/bin/podman-compose"
+  elif command -v podman-compose >/dev/null 2>&1; then
+    COMPOSE="podman-compose"
+  fi
 fi
 
 echo "==== BESS Manager Development Environment Setup ===="

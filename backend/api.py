@@ -1438,6 +1438,7 @@ async def get_inverter_status():
             "charge_stop_soc": battery_settings.max_soc,
             "discharge_stop_soc": battery_settings.min_soc,
             "discharge_power_rate": discharge_power_rate,
+            "discharge_inhibit_active": controller.get_discharge_inhibit_active(),
             "inverter_platform": inverter_platform,
             "timestamp": datetime.now().isoformat(),
         }
@@ -1620,7 +1621,8 @@ async def get_growatt_detailed_schedule():
                 tomorrow_period_count = get_period_count(
                     time_utils.today() + timedelta(days=1)
                 )
-                tomorrow_intents = []
+                tomorrow_intents: list[str] = []
+                tomorrow_actions: list[float] = []
                 # Standalone next-day schedule: same anchor adjustment as dashboard.
                 is_next_day_only = (
                     opt_period == 0
@@ -1638,12 +1640,13 @@ async def get_growatt_detailed_schedule():
                 ):
                     data_idx = period_idx - period_data_anchor
                     if 0 <= data_idx < len(opt_result.period_data):
-                        tomorrow_intents.append(
-                            opt_result.period_data[data_idx].decision.strategic_intent
-                        )
+                        pd = opt_result.period_data[data_idx]
+                        tomorrow_intents.append(pd.decision.strategic_intent)
+                        tomorrow_actions.append(pd.decision.battery_action or 0.0)
                 if tomorrow_intents:
                     raw_tomorrow_groups = schedule_manager.get_detailed_period_groups(
-                        intents=tomorrow_intents
+                        intents=tomorrow_intents,
+                        actions=tomorrow_actions,
                     )
                     tomorrow_period_groups = []
                     for group in raw_tomorrow_groups:

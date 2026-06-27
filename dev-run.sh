@@ -3,7 +3,7 @@
 #
 # Container runtime: auto-detected (podman preferred, falls back to docker).
 # Override with DOCKER=docker ./dev-run.sh if needed.
-# When using podman, podman-compose must be installed: pip install podman-compose
+# When using podman, podman-compose is auto-installed into the venv if missing.
 if [ -z "$DOCKER" ]; then
   if command -v podman >/dev/null 2>&1; then
     DOCKER="podman"
@@ -12,8 +12,12 @@ if [ -z "$DOCKER" ]; then
   fi
 fi
 COMPOSE="${COMPOSE:-${DOCKER} compose}"
-# podman-compose uses a different binary name; detect it automatically.
-if [ "$DOCKER" = "podman" ] && command -v podman-compose >/dev/null 2>&1; then
+# podman-compose uses a different binary name; auto-install it into the venv if missing.
+if [ "$DOCKER" = "podman" ]; then
+  if ! command -v podman-compose >/dev/null 2>&1; then
+    echo "Installing podman-compose into venv..."
+    .venv/bin/pip install --quiet podman-compose
+  fi
   COMPOSE="podman-compose"
 fi
 

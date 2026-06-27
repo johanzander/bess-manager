@@ -1641,12 +1641,8 @@ async def get_growatt_detailed_schedule():
                     data_idx = period_idx - period_data_anchor
                     if 0 <= data_idx < len(opt_result.period_data):
                         pd = opt_result.period_data[data_idx]
-                        tomorrow_intents.append(
-                            pd.decision.strategic_intent
-                        )
-                        tomorrow_actions.append(
-                            pd.decision.battery_action or 0.0
-                        )
+                        tomorrow_intents.append(pd.decision.strategic_intent)
+                        tomorrow_actions.append(pd.decision.battery_action or 0.0)
                 if tomorrow_intents:
                     raw_tomorrow_groups = schedule_manager.get_detailed_period_groups(
                         intents=tomorrow_intents,

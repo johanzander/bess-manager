@@ -838,6 +838,39 @@ const InverterStatusDashboard: React.FC = () => {
                   {showTomorrow && (
                     <div className="mt-3 overflow-x-auto rounded-lg border border-indigo-200 dark:border-indigo-800 opacity-75">
                       <table className="min-w-full border-collapse">
+                        <thead>
+                          <tr>
+                            <th rowSpan={2} className="px-3 py-2 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700 align-bottom">
+                              <div className="flex items-center gap-1">
+                                <Clock className="h-3.5 w-3.5" />
+                                Time Period
+                              </div>
+                            </th>
+                            <th rowSpan={2} className="px-3 py-2 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700 align-bottom">
+                              Duration
+                            </th>
+                            <th rowSpan={2} className="px-3 py-2 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700 align-bottom">
+                              Strategic Intent
+                            </th>
+                            <th colSpan={4} className="px-3 py-2 text-center text-xs font-semibold text-indigo-700 dark:text-indigo-300 uppercase tracking-wider border border-gray-200 dark:border-gray-700 bg-indigo-50 dark:bg-indigo-900/20">
+                              Inverter Configuration
+                            </th>
+                          </tr>
+                          <tr>
+                            <th className="px-3 py-2 text-left text-xs font-semibold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider border border-gray-200 dark:border-gray-700 bg-indigo-50/70 dark:bg-indigo-900/10">
+                              Mode
+                            </th>
+                            <th className="px-3 py-2 text-center text-xs font-semibold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider border border-gray-200 dark:border-gray-700 bg-indigo-50/70 dark:bg-indigo-900/10">
+                              Charge %
+                            </th>
+                            <th className="px-3 py-2 text-center text-xs font-semibold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider border border-gray-200 dark:border-gray-700 bg-indigo-50/70 dark:bg-indigo-900/10">
+                              Discharge %
+                            </th>
+                            <th className="px-3 py-2 text-center text-xs font-semibold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider border border-gray-200 dark:border-gray-700 bg-indigo-50/70 dark:bg-indigo-900/10">
+                              Grid Charge
+                            </th>
+                          </tr>
+                        </thead>
                         <tbody className="bg-white dark:bg-gray-800">
                           {inverterSchedule.tomorrowPeriodGroups.map((group, index) => {
                             const cell = 'px-3 py-2.5 whitespace-nowrap text-sm border border-gray-200 dark:border-gray-700';

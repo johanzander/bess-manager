@@ -256,9 +256,16 @@ def test_solar_storage_preferred_over_idle_when_profitable():
                 f"SOE={pd.energy.battery_soe_start:.1f}→{pd.energy.battery_soe_end:.1f}"
             )
 
-    # Count how many high-solar periods chose SOLAR_STORAGE vs IDLE
-    solar_storage_count = sum(
-        1 for _, intent, _, _ in solar_periods_with_excess if intent == "SOLAR_STORAGE"
+    # Count how many high-solar periods chose an active charging intent vs IDLE.
+    # After the 2026-06-27 surplus gate fix, solar-hour STORE actions get grid_to_battery > 0
+    # (solar rarely saturates the 5 kW max charge rate) and are classified as GRID_CHARGING.
+    # That is correct: buy=0.08 GBP during solar hours is cheap enough to top up from grid
+    # alongside free solar. The original bug (issue #73) was being IDLE during solar, not
+    # the presence of grid top-up.
+    charging_during_solar = sum(
+        1
+        for _, intent, _, _ in solar_periods_with_excess
+        if intent in ("SOLAR_STORAGE", "GRID_CHARGING")
     )
     idle_count = sum(
         1 for _, intent, _, _ in solar_periods_with_excess if intent == "IDLE"
@@ -271,25 +278,21 @@ def test_solar_storage_preferred_over_idle_when_profitable():
 
     logger.info(
         f"High-solar periods: {len(solar_periods_with_excess)} total, "
-        f"{solar_storage_count} SOLAR_STORAGE, {idle_count} IDLE"
+        f"{charging_during_solar} charging (SOLAR_STORAGE or GRID_CHARGING), {idle_count} IDLE"
     )
     logger.info(f"GRID_CHARGING periods: {grid_charging_count}")
 
-    # The optimizer should choose SOLAR_STORAGE for at least some high-solar
-    # periods rather than leaving the battery idle and grid-charging later.
-    # With sell=0.12 and evening buy=0.20-0.35, storing free solar is clearly
-    # more valuable than exporting it.
-    assert solar_storage_count > 0, (
+    # The optimizer must actively charge during high-solar periods (SOLAR_STORAGE or
+    # GRID_CHARGING), not leave the battery idle and export cheap solar at 0.12 GBP
+    # when evening prices reach 0.20-0.35 GBP.
+    assert charging_during_solar > 0, (
         f"Optimizer chose IDLE for all {len(solar_periods_with_excess)} high-solar "
-        f"periods and scheduled {grid_charging_count} GRID_CHARGING periods. "
-        f"Free solar storage should be preferred over grid export at 0.12 GBP "
+        f"periods. Free solar storage should be preferred over grid export at 0.12 GBP "
         f"when evening prices reach 0.20-0.35 GBP."
     )
 
-    # If the optimizer correctly stores solar, it should NOT need grid charging
-    # (or need very little) since solar can fill the battery for free.
-    assert grid_charging_count == 0, (
-        f"Optimizer scheduled {grid_charging_count} GRID_CHARGING periods despite "
-        f"abundant free solar available for storage. Grid charging should be "
-        f"unnecessary with this solar forecast."
+    # No high-solar period should be wasted as IDLE when storage is profitable.
+    assert idle_count == 0, (
+        f"Optimizer left {idle_count} high-solar periods as IDLE. "
+        f"Free solar storage should be preferred over exporting at sell=0.12 GBP."
     )

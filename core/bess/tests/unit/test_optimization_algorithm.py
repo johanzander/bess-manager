@@ -431,3 +431,61 @@ def test_strategy_data_structure():
         assert hour_data.decision.strategic_intent is not None
         assert hour_data.decision.battery_action is not None
         assert hour_data.decision.cost_basis >= 0
+
+
+def test_grid_charges_during_solar_surplus_when_price_is_cheaper():
+    """Regression: optimizer must grid-charge during hours with small solar surplus
+    when grid prices are cheaper than the next available no-surplus window.
+
+    Root cause (2026-06-27): _state_transition forced grid_to_battery=0 whenever
+    solar surplus > POWER_TOLERANCE_KW. This blocked grid charging at 16:00 (1.01
+    SEK/kWh, small surplus) and forced it to 17:00 (1.76 SEK/kWh, no surplus).
+    Fix: always set grid_to_battery = remaining_rate (solar fills first, grid tops up).
+    """
+    settings = BatterySettings(
+        total_capacity=20.0,
+        min_soc=10.0,  # min_soe = 2.0 kWh
+        max_soc=100.0,  # max_soe = 20.0 kWh
+        max_charge_power_kw=10.0,
+        max_discharge_power_kw=10.0,
+        efficiency_charge=0.97,
+        efficiency_discharge=0.95,
+        cycle_cost_per_kwh=0.10,
+    )
+    # 4 periods at 15-min resolution, from the 2026-06-27 debug report:
+    # Period 0 (16:00): solar=0.9958 kWh, consumption=0.8300 kWh → surplus=0.1658 kWh
+    #                   buy=1.01 SEK — CHEAP, surplus blocks grid charging in old code
+    # Period 1 (17:00): solar=0.7076 kWh, consumption=0.9250 kWh → no surplus
+    #                   buy=1.76 SEK — EXPENSIVE, was the first grid-charge slot before fix
+    # Period 2 (18:00): expensive peak (buy=3.50) — discharge opportunity
+    # Period 3 (19:00): idle (buy=1.20)
+    solar = [0.9958, 0.7076, 0.0, 0.0]
+    consumption = [0.8300, 0.9250, 2.0, 1.0]
+    buy_price = [1.01, 1.76, 3.50, 1.20]
+    sell_price = [0.50, 0.70, 1.60, 0.60]
+
+    results = optimize_battery_schedule(
+        buy_price=buy_price,
+        sell_price=sell_price,
+        home_consumption=consumption,
+        solar_production=solar,
+        initial_soe=2.0,  # start at min SOE — empty battery
+        battery_settings=settings,
+        period_duration_hours=0.25,
+    )
+
+    p0 = results.period_data[0]
+
+    # After the fix: grid actively charges at period 0 (cheap price, small surplus).
+    # Before the fix: grid_to_battery was forced to 0 because surplus > POWER_TOLERANCE_KW.
+    assert p0.energy.grid_to_battery > 0.0, (
+        f"Period 0 (1.01 SEK/kWh): expected grid-to-battery > 0 but got "
+        f"grid_to_battery={p0.energy.grid_to_battery:.4f}. "
+        f"Intent={p0.decision.strategic_intent}. "
+        f"The surplus gate (grid_to_battery=0 when surplus>0) is still active."
+    )
+    assert p0.decision.strategic_intent == "GRID_CHARGING", (
+        f"Period 0 should be GRID_CHARGING (grid participates), "
+        f"got {p0.decision.strategic_intent}. "
+        f"grid_to_battery={p0.energy.grid_to_battery:.4f}"
+    )

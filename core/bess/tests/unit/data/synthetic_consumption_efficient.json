@@ -97,11 +97,11 @@
   },
   "expected_results": {
     "base_cost": 30.28,
-    "battery_solar_cost": -43.3337,
-    "base_to_battery_solar_savings": 73.6137,
-    "base_to_battery_solar_savings_pct": 243.1099,
-    "total_charged": 28.4,
-    "total_discharged": 25.6
+    "battery_solar_cost": -44.0916,
+    "base_to_battery_solar_savings": 74.3716,
+    "base_to_battery_solar_savings_pct": 245.6129,
+    "total_charged": 28.4211,
+    "total_discharged": 25.6000
   },
   "expected_behavior": {
     "description": "Efficient consumption with solar: store solar and export during high prices",

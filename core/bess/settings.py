@@ -129,6 +129,11 @@ class BatterySettings:
     # charging so the battery can AC-charge from surplus solar that flows
     # back through the meter (no DC solar input on the battery inverter).
     external_solar_mode: bool = False
+    # Inverter control mechanism. When "vpp", the SolaxModbusGrowattController
+    # writes direct power commands via the Growatt VPP register block
+    # (number.<*>_vpp_power) and skips TOU scheduling.  When "tou" (default),
+    # uses the legacy single-segment TOU + EMS rate path.
+    vpp_mode: bool = False
     reserved_capacity: float = field(init=False)
     min_soe_kwh: float = field(init=False)
     max_soe_kwh: float = field(init=False)
@@ -176,6 +181,7 @@ class BatterySettings:
             self.external_solar_mode = battery_config.get(
                 "external_solar_mode", False
             )
+            self.vpp_mode = battery_config.get("vpp_mode", False)
             self.__post_init__()
         return self
 

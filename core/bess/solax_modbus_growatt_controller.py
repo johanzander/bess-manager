@@ -147,9 +147,9 @@ class SolaxModbusGrowattController(GrowattMinController):
         Only writes the TOU segment when the mode actually changes, minimising
         inverter writes.
 
-        On AC-coupled setups (``external_solar_mode=True``) where the Growatt
-        VPP entities are configured, takes the VPP fast-path instead — direct
-        power command, no TOU.  This is the upstream-#118 control model.
+        When ``vpp_mode=True`` and the Growatt VPP entities are configured,
+        takes the VPP fast-path instead — direct power command, no TOU.
+        This is the upstream-#118 control model.
 
         Args:
             controller: HomeAssistantAPIController instance
@@ -159,9 +159,7 @@ class SolaxModbusGrowattController(GrowattMinController):
         Returns:
             Tuple of (success, error_message). error_message is empty on success.
         """
-        if self.battery_settings.external_solar_mode and self._vpp_available(
-            controller
-        ):
+        if self.battery_settings.vpp_mode and self._vpp_available(controller):
             return self._apply_period_vpp(controller, grid_charge, discharge_rate)
 
         errors = []
@@ -231,14 +229,12 @@ class SolaxModbusGrowattController(GrowattMinController):
         Returns:
             Tuple of (segments_updated, segments_disabled)
         """
-        # VPP fast-path: when external_solar_mode is on AND VPP entities are
+        # VPP fast-path: when vpp_mode is on AND VPP entities are
         # configured, the controller commands the inverter directly each
         # period — no TOU slot to push at startup.  Also explicitly disable
         # TOU slot 1 so a stale slot from a previous TOU-mode run can't fight
         # the VPP command.
-        if self.battery_settings.external_solar_mode and self._vpp_available(
-            controller
-        ):
+        if self.battery_settings.vpp_mode and self._vpp_available(controller):
             logger.info(
                 "Modbus: VPP control mode — skipping TOU init, disabling slot 1"
             )

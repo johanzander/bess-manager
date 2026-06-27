@@ -13,6 +13,7 @@ export interface BatteryForm {
   temperatureDeratingEnabled: boolean;
   minActionProfit: number;
   externalSolarMode: boolean;
+  vppMode: boolean;
 }
 
 interface Props {
@@ -61,6 +62,14 @@ export function BatteryFormSection({
       >
         {toggle('External solar mode (AC-coupled PV)', form.externalSolarMode,
           v => onChange({ ...form, externalSolarMode: v }))}
+      </SectionCard>
+
+      <SectionCard
+        title="Inverter control mechanism"
+        description="How BESS commands the inverter. TOU (default) uses time-of-use slots — broadly compatible but constrained by the inverter's TOU semantics. VPP (Growatt MIN/MID via SolaxModbus only) bypasses TOU and writes direct power commands — simpler and more reliable when the inverter supports it. The Growatt VPP entities must be configured for VPP mode to activate; if they are missing BESS falls back to TOU automatically. (upstream issue #118)"
+      >
+        {toggle('VPP control mode (Growatt MIN/MID + SolaxModbus)', form.vppMode,
+          v => onChange({ ...form, vppMode: v }))}
       </SectionCard>
 
       {/* Advanced settings collapsible — hidden in wizard mode since these

@@ -979,6 +979,7 @@ class APISetupCompletePayload(BaseModel):
     cycleCost: float | None = None
     minActionProfitThreshold: float | None = None
     externalSolarMode: bool | None = None
+    vppMode: bool | None = None
     # Home settings
     currency: str | None = None
     consumption: float | None = None

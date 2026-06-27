@@ -40,6 +40,7 @@ const EMPTY_BATTERY: BatteryForm = {
   efficiencyCharge: 97, efficiencyDischarge: 97,
   temperatureDeratingEnabled: false, minActionProfit: 0,
   externalSolarMode: false,
+  vppMode: false,
 };
 const EMPTY_HOME: HomeForm = {
   consumption: 3.5, consumptionStrategy: 'sensor',
@@ -169,6 +170,7 @@ const SettingsPage: React.FC = () => {
         temperatureDeratingEnabled: bat_s.temperatureDerating?.enabled ?? false,
         minActionProfit: bat_s.minActionProfitThreshold ?? 0,
         externalSolarMode: bat_s.externalSolarMode ?? false,
+        vppMode: bat_s.vppMode ?? false,
       };
       setBatteryForm(bat);
       savedBattery.current = JSON.stringify(bat);
@@ -445,6 +447,7 @@ const SettingsPage: React.FC = () => {
             weatherEntity: sensors.shared?.['weather_entity'] ?? '',
           },
           externalSolarMode: batteryForm.externalSolarMode,
+          vppMode: batteryForm.vppMode,
         },
         growatt: {
           deviceId: inverterForm.deviceId,

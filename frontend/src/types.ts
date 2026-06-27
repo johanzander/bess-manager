@@ -116,6 +116,7 @@ export interface BatterySettings {
   
   // AC-coupled PV: route SOLAR_STORAGE through grid charging
   externalSolarMode?: boolean;
+  vppMode?: boolean;
 
   // Consumption estimate
   estimatedConsumption: number; // kWh daily estimate

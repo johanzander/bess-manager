@@ -10,14 +10,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
-- **Battery locked in `grid_first` during solar-surplus idle periods** — When the optimizer planned no battery action (`power=0`) during periods with active solar export, the classifier returned `BATTERY_EXPORT` (formerly `EXPORT_ARBITRAGE`), which maps to `grid_first`. This blocked the battery from supporting house load during long daytime windows even when solar was insufficient. A new `SOLAR_EXPORT` intent is introduced for power≈0 + solar-to-grid periods; it maps to `load_first` so the battery can serve load while solar exports to the grid.
+- **Battery locked in `grid_first` during solar-surplus idle periods** — When the optimizer planned no battery action (`power=0`) during periods with active solar export, the classifier returned `BATTERY_EXPORT` (formerly `EXPORT_ARBITRAGE`), which maps to `grid_first`. This blocked the battery from supporting house load during long daytime windows even when solar was insufficient. A new `SOLAR_EXPORT` intent is introduced for power≈0 + solar-to-grid periods; it maps to `load_first` so the battery can serve load while solar exports to the grid. (#187)
 - **Grid charging blocked during solar surplus even at cheaper prices** — The optimizer had a surplus gate that prevented any grid-to-battery charging whenever solar production exceeded home consumption. This caused the optimizer to skip cheap daytime hours in favour of more expensive hours when solar was active. The gate is removed: solar fills the battery first and grid tops up remaining capacity when prices make it worthwhile. On high-solar days this can increase arbitrage savings significantly (up to +12.5 SEK on scenario baselines). (#189)
 - **Schedule Overview discharge rate always showed 100%** — `get_detailed_period_groups()` read `discharge_rate` from the static `INTENT_TO_CONTROL` table (hardcoded 100 for `EXPORT_ARBITRAGE`/`LOAD_SUPPORT`). It now computes the rate from the actual per-period battery action in the schedule, so partial-discharge slots correctly reflect the planned power rather than always showing 100%. (#186)
 - **Battery Settings card showed bare "0 %" when EV charger was inhibiting discharge** — When the EV charger suppresses discharge to 0%, the Discharge Power Rate row now dims and shows an amber "Inhibited" badge instead of a bare percentage. (#186)
 
 ### Changed
 
-- **`EXPORT_ARBITRAGE` intent renamed to `BATTERY_EXPORT`** — All references updated across backend, frontend, tests, and documentation. The semantic meaning is unchanged: battery actively discharging to the grid during peak-price windows.
+- **`EXPORT_ARBITRAGE` intent renamed to `BATTERY_EXPORT`** — All references updated across backend, frontend, tests, and documentation. The semantic meaning is unchanged: battery actively discharging to the grid during peak-price windows. (#187)
 
 ## [9.6.3] - 2026-06-25
 

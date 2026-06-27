@@ -129,3 +129,44 @@ class TestDetailedSchedule:
         for interval in intervals:
             if interval.get("enabled"):
                 assert interval["isDefault"] is False
+
+
+class TestScheduleDataChargeRate:
+    """chargePowerRate in schedule_data must reflect charge_rate from get_period_settings."""
+
+    def test_charge_power_rate_reflects_period_settings(self):
+        ctrl = _make_controller("growatt_server_min")
+        sm = ctrl.system._inverter_controller
+        sm.get_period_settings.return_value = {
+            "batt_mode": "battery_first",
+            "strategic_intent": "GRID_CHARGING",
+            "grid_charge": True,
+            "charge_rate": 25,
+            "discharge_rate": 0,
+        }
+        sys.modules["app"].bess_controller = ctrl
+        resp = _client.get("/api/growatt/detailed_schedule")
+        assert resp.status_code == 200
+        schedule = resp.json()["scheduleData"]
+        assert len(schedule) > 0
+        for entry in schedule:
+            assert (
+                entry["chargePowerRate"] == 25
+            ), f"hour {entry['hour']}: expected chargePowerRate=25, got {entry['chargePowerRate']}"
+
+    def test_charge_power_rate_defaults_to_100_when_charge_rate_absent(self):
+        ctrl = _make_controller("growatt_server_min")
+        sm = ctrl.system._inverter_controller
+        # get_period_settings returns no charge_rate key → should default to 100
+        sm.get_period_settings.return_value = {
+            "batt_mode": "load_first",
+            "strategic_intent": "IDLE",
+            "grid_charge": False,
+            "discharge_rate": 100,
+        }
+        sys.modules["app"].bess_controller = ctrl
+        resp = _client.get("/api/growatt/detailed_schedule")
+        assert resp.status_code == 200
+        schedule = resp.json()["scheduleData"]
+        for entry in schedule:
+            assert entry["chargePowerRate"] == 100

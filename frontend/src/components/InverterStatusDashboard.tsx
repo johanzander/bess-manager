@@ -82,6 +82,8 @@ interface PeriodGroup {
   chargePowerRate: number;
   dischargePowerRate: number;
   gridCharge: boolean;
+  totalActionKwh?: number;
+  socEndPct?: number;
 }
 
 interface InverterSchedule {
@@ -735,14 +737,23 @@ const InverterStatusDashboard: React.FC = () => {
                       <th rowSpan={2} className="px-3 py-2 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700 align-bottom">
                         Duration
                       </th>
-                      <th rowSpan={2} className="px-3 py-2 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700 align-bottom">
-                        Strategic Intent
+                      <th colSpan={3} className="px-3 py-2 text-center text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700">
+                        Optimization Plan
                       </th>
                       <th colSpan={4} className="px-3 py-2 text-center text-xs font-semibold text-indigo-700 dark:text-indigo-300 uppercase tracking-wider border border-gray-200 dark:border-gray-700 bg-indigo-50 dark:bg-indigo-900/20">
                         Inverter Configuration
                       </th>
                     </tr>
                     <tr>
+                      <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700">
+                        Intent
+                      </th>
+                      <th className="px-3 py-2 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700">
+                        Action
+                      </th>
+                      <th className="px-3 py-2 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700">
+                        SOC
+                      </th>
                       <th className="px-3 py-2 text-left text-xs font-semibold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider border border-gray-200 dark:border-gray-700 bg-indigo-50/70 dark:bg-indigo-900/10">
                         Mode
                       </th>
@@ -793,6 +804,22 @@ const InverterStatusDashboard: React.FC = () => {
                             <span className={`px-2 py-0.5 rounded text-xs font-medium ${getIntentColor(group.dominantIntent)}`}>
                               {group.dominantIntent.replace(/_/g, ' ')}
                             </span>
+                          </td>
+                          <td className={`${cell} text-center`}>
+                            {group.totalActionKwh !== undefined && Math.abs(group.totalActionKwh) > 0.05 ? (
+                              <span className={group.totalActionKwh > 0 ? 'text-green-600 dark:text-green-400 font-medium' : 'text-orange-500 dark:text-orange-400 font-medium'}>
+                                {group.totalActionKwh > 0 ? '+' : ''}{group.totalActionKwh.toFixed(1)} kWh
+                              </span>
+                            ) : (
+                              <span className="text-gray-300 dark:text-gray-600">—</span>
+                            )}
+                          </td>
+                          <td className={`${cell} text-center`}>
+                            {group.socEndPct !== undefined && group.socEndPct !== null ? (
+                              <span className="text-gray-700 dark:text-gray-300 font-medium">{Math.round(group.socEndPct)}%</span>
+                            ) : (
+                              <span className="text-gray-300 dark:text-gray-600">—</span>
+                            )}
                           </td>
                           <td className={invCell}>
                             {getBatteryModeDisplay(group.mode)}
@@ -849,14 +876,23 @@ const InverterStatusDashboard: React.FC = () => {
                             <th rowSpan={2} className="px-3 py-2 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700 align-bottom">
                               Duration
                             </th>
-                            <th rowSpan={2} className="px-3 py-2 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700 align-bottom">
-                              Strategic Intent
+                            <th colSpan={3} className="px-3 py-2 text-center text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700">
+                              Optimization Plan
                             </th>
                             <th colSpan={4} className="px-3 py-2 text-center text-xs font-semibold text-indigo-700 dark:text-indigo-300 uppercase tracking-wider border border-gray-200 dark:border-gray-700 bg-indigo-50 dark:bg-indigo-900/20">
                               Inverter Configuration
                             </th>
                           </tr>
                           <tr>
+                            <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700">
+                              Intent
+                            </th>
+                            <th className="px-3 py-2 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700">
+                              Action
+                            </th>
+                            <th className="px-3 py-2 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700">
+                              SOC
+                            </th>
                             <th className="px-3 py-2 text-left text-xs font-semibold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider border border-gray-200 dark:border-gray-700 bg-indigo-50/70 dark:bg-indigo-900/10">
                               Mode
                             </th>
@@ -890,6 +926,22 @@ const InverterStatusDashboard: React.FC = () => {
                                   <span className={`px-2 py-0.5 rounded text-xs font-medium ${getIntentColor(group.dominantIntent)}`}>
                                     {group.dominantIntent.replace(/_/g, ' ')}
                                   </span>
+                                </td>
+                                <td className={`${cell} text-center`}>
+                                  {group.totalActionKwh !== undefined && Math.abs(group.totalActionKwh) > 0.05 ? (
+                                    <span className={group.totalActionKwh > 0 ? 'text-green-600 dark:text-green-400 font-medium' : 'text-orange-500 dark:text-orange-400 font-medium'}>
+                                      {group.totalActionKwh > 0 ? '+' : ''}{group.totalActionKwh.toFixed(1)} kWh
+                                    </span>
+                                  ) : (
+                                    <span className="text-gray-300 dark:text-gray-600">—</span>
+                                  )}
+                                </td>
+                                <td className={`${cell} text-center`}>
+                                  {group.socEndPct !== undefined && group.socEndPct !== null ? (
+                                    <span className="text-gray-700 dark:text-gray-300 font-medium">{Math.round(group.socEndPct)}%</span>
+                                  ) : (
+                                    <span className="text-gray-300 dark:text-gray-600">—</span>
+                                  )}
                                 </td>
                                 <td className={invCell}>
                                   {getBatteryModeDisplay(group.mode)}

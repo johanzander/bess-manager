@@ -1589,7 +1589,25 @@ async def get_growatt_detailed_schedule():
         # Get period groups from schedule manager (15-minute resolution)
         period_groups = []
         try:
-            raw_groups = schedule_manager.get_detailed_period_groups()
+            stored_schedule_for_today = (
+                bess_controller.system.schedule_store.get_latest_schedule()
+            )
+            today_soc_values: list[float | None] = []
+            if stored_schedule_for_today:
+                opt_result_today = stored_schedule_for_today.optimization_result
+                opt_period_today = stored_schedule_for_today.optimization_period
+                today_period_count_local = get_period_count(time_utils.today())
+                for period_idx in range(today_period_count_local):
+                    data_idx = period_idx - opt_period_today
+                    if 0 <= data_idx < len(opt_result_today.period_data):
+                        today_soc_values.append(
+                            opt_result_today.period_data[data_idx].energy.battery_soe_end
+                        )
+                    else:
+                        today_soc_values.append(None)
+            raw_groups = schedule_manager.get_detailed_period_groups(
+                soc_values=today_soc_values if today_soc_values else None
+            )
             for group in raw_groups:
                 period_groups.append(
                     {
@@ -1603,6 +1621,8 @@ async def get_growatt_detailed_schedule():
                         "charge_power_rate": group["charge_rate"],
                         "discharge_power_rate": group["discharge_rate"],
                         "grid_charge": group["grid_charge"],
+                        "total_action_kwh": group["total_action_kwh"],
+                        "soc_end_pct": group["soc_end_pct"],
                     }
                 )
         except (ValueError, KeyError, AttributeError) as e:
@@ -1623,6 +1643,7 @@ async def get_growatt_detailed_schedule():
                 )
                 tomorrow_intents: list[str] = []
                 tomorrow_actions: list[float] = []
+                tomorrow_soc_values: list[float | None] = []
                 # Standalone next-day schedule: same anchor adjustment as dashboard.
                 is_next_day_only = (
                     opt_period == 0
@@ -1643,10 +1664,14 @@ async def get_growatt_detailed_schedule():
                         pd = opt_result.period_data[data_idx]
                         tomorrow_intents.append(pd.decision.strategic_intent)
                         tomorrow_actions.append(pd.decision.battery_action or 0.0)
+                        tomorrow_soc_values.append(pd.energy.battery_soe_end)
+                    else:
+                        tomorrow_soc_values.append(None)
                 if tomorrow_intents:
                     raw_tomorrow_groups = schedule_manager.get_detailed_period_groups(
                         intents=tomorrow_intents,
                         actions=tomorrow_actions,
+                        soc_values=tomorrow_soc_values,
                     )
                     tomorrow_period_groups = []
                     for group in raw_tomorrow_groups:
@@ -1664,6 +1689,8 @@ async def get_growatt_detailed_schedule():
                                 "charge_power_rate": group["charge_rate"],
                                 "discharge_power_rate": group["discharge_rate"],
                                 "grid_charge": group["grid_charge"],
+                                "total_action_kwh": group["total_action_kwh"],
+                                "soc_end_pct": group["soc_end_pct"],
                             }
                         )
         except (AttributeError, KeyError, ValueError) as e:

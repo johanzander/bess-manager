@@ -271,7 +271,10 @@ class InverterController(ABC):
         return self.INTENT_DESCRIPTIONS.get(intent, "Unknown intent")
 
     def get_detailed_period_groups(
-        self, intents: list[str] | None = None, actions: list[float] | None = None
+        self,
+        intents: list[str] | None = None,
+        actions: list[float] | None = None,
+        soc_values: list[float | None] | None = None,
     ) -> list[dict]:
         """Get period groups with full control parameters for display/API.
 
@@ -284,6 +287,8 @@ class InverterController(ABC):
             actions: Optional list of battery actions in kWh per period (negative=discharge).
                      If None, reads from self.current_schedule.actions. If current_schedule
                      is also None or the period is out of range, action defaults to 0.0.
+            soc_values: Optional per-period SOC end values (%). The last period's value
+                        in each group is exposed as soc_end_pct in the result.
 
         Returns:
             List of period groups with all control parameters and time strings
@@ -324,6 +329,7 @@ class InverterController(ABC):
                     "grid_charge": control["grid_charge"],
                     "charge_rate": control["charge_rate"],
                     "discharge_rate": discharge_rate,
+                    "action_kwh": action_kwh,
                 }
             )
 
@@ -340,6 +346,7 @@ class InverterController(ABC):
             ):
                 current_group["end_period"] = ps["period"]
                 current_group["count"] += 1
+                current_group["total_action_kwh"] += ps["action_kwh"]
             else:
                 if current_group is not None:
                     groups.append(current_group)
@@ -352,6 +359,7 @@ class InverterController(ABC):
                     "charge_rate": ps["charge_rate"],
                     "discharge_rate": ps["discharge_rate"],
                     "count": 1,
+                    "total_action_kwh": ps["action_kwh"],
                 }
 
         if current_group is not None:
@@ -365,6 +373,10 @@ class InverterController(ABC):
             if end_h >= 24:
                 end_h = 23
                 end_m = 59
+            end_period = group["end_period"]
+            soc_end: float | None = None
+            if soc_values is not None and end_period < len(soc_values):
+                soc_end = soc_values[end_period]
             result.append(
                 {
                     "start_time": f"{start_h:02d}:{start_m:02d}",
@@ -378,6 +390,8 @@ class InverterController(ABC):
                     "discharge_rate": group["discharge_rate"],
                     "period_count": group["count"],
                     "duration_minutes": group["count"] * 15,
+                    "total_action_kwh": group["total_action_kwh"],
+                    "soc_end_pct": soc_end,
                 }
             )
         return result

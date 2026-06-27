@@ -12,13 +12,33 @@ if [ -z "$DOCKER" ]; then
   fi
 fi
 COMPOSE="${COMPOSE:-${DOCKER} compose}"
-# podman-compose uses a different binary name; auto-install it into the venv if missing.
+
+# Locate the venv — worktrees share the main repo's venv, not a local one.
+_git_common=$(git rev-parse --git-common-dir 2>/dev/null)
+_main_root=$(cd "$(dirname "$_git_common")" && pwd)
+if [ -f ".venv/bin/pip" ]; then
+  VENV_BIN="$(pwd)/.venv/bin"
+elif [ -f "$_main_root/.venv/bin/pip" ]; then
+  VENV_BIN="$_main_root/.venv/bin"
+else
+  VENV_BIN=""
+fi
+
+# podman-compose uses a different binary; auto-install into the venv if missing.
 if [ "$DOCKER" = "podman" ]; then
-  if ! command -v podman-compose >/dev/null 2>&1; then
+  if [ -n "$VENV_BIN" ] && [ ! -f "$VENV_BIN/podman-compose" ]; then
     echo "Installing podman-compose into venv..."
-    .venv/bin/pip install --quiet podman-compose
+    "$VENV_BIN/pip" install --quiet podman-compose
   fi
-  COMPOSE="podman-compose"
+  if [ -n "$VENV_BIN" ] && [ -f "$VENV_BIN/podman-compose" ]; then
+    COMPOSE="$VENV_BIN/podman-compose"
+  elif command -v podman-compose >/dev/null 2>&1; then
+    COMPOSE="podman-compose"
+  else
+    echo "Error: podman-compose not available and no venv found to install it."
+    echo "Run: pip install podman-compose"
+    exit 1
+  fi
 fi
 
 echo "==== BESS Manager Development Environment Setup ===="
@@ -79,8 +99,8 @@ fi
 # Extract options from config.yaml to backend/dev-options.json for development
 # Note: InfluxDB credentials are passed as environment variables, not in options.json
 echo "Extracting development options from config.yaml..."
-if [ -f config.yaml ]; then
-  ./.venv/bin/python << 'EOF'
+if [ -f config.yaml ] && [ -n "$VENV_BIN" ]; then
+  "$VENV_BIN/python" << 'EOF'
 import yaml
 import json
 

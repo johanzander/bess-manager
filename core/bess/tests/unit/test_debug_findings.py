@@ -80,3 +80,18 @@ def test_build_key_findings_clean_when_nothing_notable():
     assert result["clean"] is True
     assert result["disagreements"] == []
     assert result["anomalies"] == []
+
+
+def test_build_key_findings_surfaces_the_15_45_case():
+    schedules = [
+        _sched("2026-06-28 10:31:00", 63, "BATTERY_EXPORT", -0.1),
+        _sched("2026-06-28 11:31:00", 63, "SOLAR_EXPORT", -0.0),
+    ]
+    log = (
+        "2026-06-28 10:31:00 | ERROR | core.bess.influxdb_helper:519 - "
+        "Error connecting to InfluxDB: Max retries exceeded\n"
+    )
+    result = build_key_findings(schedules, log)
+    assert result["clean"] is False
+    assert result["disagreements"][0].time == "15:45"
+    assert result["anomalies"][0].category == "network"

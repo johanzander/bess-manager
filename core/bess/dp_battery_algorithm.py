@@ -267,11 +267,16 @@ def _compute_reward(
     - Grid costs applied to energy throughput (what you draw from grid)
     - Cost basis includes BOTH grid costs AND cycle costs for profitability analysis
 
-    PROFITABILITY CHECK:
-    - For any discharge, calculate the value of the discharged energy
-    - Value = max(avoiding grid purchases, grid export revenue)
-    - Discharge only profitable if this value > cost_basis
-    - Must account for discharge efficiency losses
+    PROFITABILITY CHECK (opportunity-cost floor):
+    - A discharge is worthwhile only if its value beats the opportunity cost of
+      the stored kWh — not its sunk cost basis and not zero.
+    - Value = max(avoided grid purchase, grid export revenue), after discharge
+      efficiency.
+    - The effective floor is raised to sell_price whenever upcoming solar will
+      replenish the discharged capacity (replenishment): the kWh could be exported
+      later, so sell_price is its true replacement cost. Since
+      sell_price * efficiency_discharge < sell_price, marginal round-trip and
+      refill trades are correctly blocked.
 
     Example for stored energy costing 2.61/kWh:
     - If buy_price = 2.58, sell_price = 1.81

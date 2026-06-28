@@ -37,6 +37,86 @@ theory without checking whether the evidence actually supports it.
   a user's integration rejects the resulting values. That is a compatibility
   issue, not an off-by-one error.
 
+## FIRST: Route the question
+
+Classify before doing anything else:
+
+- **(A) Something is broken / discovery / sensors / integration** → use the
+  Analysis Process below.
+- **(B) Why did the optimizer decide X / is decision X correct / savings
+  rationale** → use the **Decision-Rationale Protocol** below. The Analysis Process
+  (sensor-health triage) does not answer "why" questions — do not default to it.
+
+## Decision-Rationale Protocol (for type-B questions)
+
+The governing economic law is in `docs/agents/bess-knowledge.md` — read it first.
+Then follow these steps in order. Each step is checkable; do not skip ahead.
+
+**STEP 0 (MANDATORY) — run the evidence extractor before reading anything else.**
+For any slot/decision question, run:
+
+```
+python scripts/extract_decision_evidence.py <bundle.md> --time HH:MM
+```
+
+(or `--period N`). It returns, for that one slot: the LATEST run's facts and
+economics (intent, battery_action, SOE, sell/buy/cost_basis/shadow_price) AND every
+EARLIER-run occurrence in the logs (compact per-period rows + inverter TOU segments
+with discharge rate) AND a **cross-run reconciliation** flag. This is your ground
+truth — do not hand-grep the 1.5 MB bundle instead.
+
+**The bundle holds multiple runs and they can disagree.** If the extractor reports
+DISAGREEMENT, or any TOU segment shows a non-zero discharge rate, then the behavior
+the user observed IS real even when the latest Period Decisions row looks benign
+(e.g. a `15:45 grid_first / 4% discharge` segment IS a battery export despite a
+latest-run `SOLAR_EXPORT`). Never conclude "it didn't happen / the battery doesn't
+move." Explain where it happened and WHY runs differ (usually near-threshold
+`shadow_price` volatility).
+
+1. **Pin the period.** Convert the clock time in the question to a period number and
+   slot; state both. Guard the off-by-one (15-min slots).
+2. **Facts before narrative.** Read that period's row in `### Period Decisions`.
+   Quote `Intent`, `BattAct` (sign + magnitude), and `SOE start→end`. State the
+   literal "what happened" from this row. Do not propose a mechanism yet. A negative
+   `BattAct` with falling `SOE` IS a battery discharge — never call it solar surplus.
+   **The latest table is not the whole story** — if it does not match the user's
+   observation, apply the HARD TRIGGER above and check the TOU segments / earlier
+   runs before settling on "what happened."
+3. **Pull the economics.** From the Full Schedule JSON for that period, quote
+   `sell_price`, `buy_price`, `cost_basis`, `shadow_price`. Add relevant totals from
+   `### Economic Summary`.
+4. **Apply the governing law.** State the counterfactual explicitly ("the
+   alternative to this action was ___"). Compute marginal value vs that
+   counterfactual using opportunity cost = `shadow_price` (floored by `sell_price`
+   under solar replenishment). Verdict: correct / incorrect / marginal-and-why.
+   Never use gross value.
+5. **Cite the code path.** Name the exact function/lines that produced the decision
+   (e.g. the discharge gate in `_compute_reward`,
+   `core/bess/dp_battery_algorithm.py:356-389`; cost_basis/shadow_price handling).
+   No claim without a code or data anchor.
+6. **Cross-run reconciliation.** If the user references multiple runs, says "it
+   changed", OR the described behavior differs from the latest run (see HARD
+   TRIGGER), diff the period's economics across the runs/TOU segments in the bundle
+   and attribute the difference to a specific cause (initial SOC / price update /
+   forecast / near-threshold `shadow_price` volatility).
+7. **Self-check gate before emitting.** Confirm: (a) every factual claim matches the
+   quoted table row; (b) you stated a counterfactual and used marginal — not gross —
+   value; (c) the mechanism has a code/data anchor; (d) you answered the literal
+   question; (e) if the user described behavior not in the latest run, you located it
+   in the TOU segments / earlier runs and reconciled it — you did NOT dismiss it as
+   "doesn't happen." Any miss → redo. Do not emit until all five hold.
+
+### Anti-patterns (do not do these)
+
+- Answering "solar surplus vs battery" from a narrative instead of reading
+  `BattAct`/`SOE` first.
+- Calling a discharge profitable because `sell_price > wear_cost`. That is gross
+  value; compute marginal value vs the counterfactual.
+- Claiming a mechanism is "missing" before grepping the optimizer for it (e.g. the
+  anti-cycling floor already exists in `_compute_reward`).
+- Concluding "it doesn't happen / battery doesn't move" from the latest run alone
+  when the user clearly observed it. Search the TOU segments and earlier runs first.
+
 ## Analysis Process
 
 ### Phase 1: Understand What the User Is Asking NOW
@@ -174,3 +254,12 @@ When reporting findings:
    conclusion (not the reporter's narrative)
 7. **Sanity check** — Does this analysis address the user's LATEST comments
    and current problem? If not, flag what you missed.
+
+### For type-B (decision-rationale) answers, use this shape:
+
+1. **Facts** — period, Intent, BattAct, SOE start→end (quoted from the table).
+2. **Economics** — sell/buy/cost_basis/shadow_price for the period.
+3. **Counterfactual & verdict** — the stated alternative, the marginal value vs it,
+   and correct / incorrect / marginal.
+4. **Code anchor** — the function/lines that produced the decision.
+5. **Cross-run note** — only if the user referenced multiple runs.

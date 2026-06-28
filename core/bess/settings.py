@@ -125,6 +125,10 @@ class BatterySettings:
     )
     efficiency_charge: float = BATTERY_EFFICIENCY_CHARGE
     efficiency_discharge: float = BATTERY_EFFICIENCY_DISCHARGE
+    # AC-coupled PV opt-in: when True, SOLAR_STORAGE periods enable grid
+    # charging so the battery can AC-charge from surplus solar that flows
+    # back through the meter (no DC solar input on the battery inverter).
+    external_solar_mode: bool = False
     reserved_capacity: float = field(init=False)
     min_soe_kwh: float = field(init=False)
     max_soe_kwh: float = field(init=False)
@@ -168,6 +172,9 @@ class BatterySettings:
             )
             self.min_action_profit_threshold = battery_config.get(
                 "min_action_profit_threshold", BATTERY_MIN_ACTION_PROFIT_THRESHOLD
+            )
+            self.external_solar_mode = battery_config.get(
+                "external_solar_mode", False
             )
             self.__post_init__()
         return self

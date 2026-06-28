@@ -73,3 +73,56 @@ def summarize_log_anomalies(log_content: str) -> list[LogAnomaly]:
             existing.first_ts = min(existing.first_ts, ts)
             existing.last_ts = max(existing.last_ts, ts)
     return sorted(agg.values(), key=lambda a: a.count, reverse=True)
+
+
+@dataclass
+class SlotDisagreement:
+    period: int
+    time: str
+    occurrences: list[tuple[str, str, float]]  # (timestamp, intent, battery_action)
+    intents: list[str]
+
+
+def _period_to_time(period: int) -> str:
+    return f"{period // 4:02d}:{(period % 4) * 15:02d}"
+
+
+def reconcile_schedules(schedules: list[dict]) -> list[SlotDisagreement]:
+    """Flag slots whose strategic_intent differs across today's runs."""
+    by_period: dict[int, list[tuple[str, str, float]]] = {}
+    for sched in schedules:
+        ts = sched.get("timestamp", "")
+        result = sched.get("optimization_result") or {}
+        for pd in result.get("period_data", []):
+            period = pd.get("period")
+            dec = pd.get("decision") or {}
+            intent = dec.get("strategic_intent")
+            action = dec.get("battery_action") or 0.0
+            if period is None or intent is None:
+                continue
+            by_period.setdefault(period, []).append((ts, intent, action))
+
+    out = []
+    for period in sorted(by_period):
+        occ = by_period[period]
+        intents = sorted({intent for _, intent, _ in occ})
+        if len(intents) > 1:
+            out.append(
+                SlotDisagreement(
+                    period=period,
+                    time=_period_to_time(period),
+                    occurrences=occ,
+                    intents=intents,
+                )
+            )
+    return out
+
+
+def build_key_findings(schedules: list[dict], log_content: str) -> dict:
+    disagreements = reconcile_schedules(schedules)
+    anomalies = summarize_log_anomalies(log_content)
+    return {
+        "disagreements": disagreements,
+        "anomalies": anomalies,
+        "clean": not disagreements and not anomalies,
+    }

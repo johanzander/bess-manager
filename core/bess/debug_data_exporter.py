@@ -56,6 +56,7 @@ from typing import Any
 
 from . import time_utils
 from .battery_system_manager import BatterySystemManager
+from .debug_findings import build_key_findings
 from .health_check import run_system_health_checks
 
 logger = logging.getLogger(__name__)
@@ -294,6 +295,7 @@ class DebugDataExport:
     todays_log_content: str
     log_file_info: dict
     ha_ws_discovery: dict = field(default_factory=dict)
+    key_findings: dict = field(default_factory=dict)
     compact: bool = True
 
 
@@ -354,7 +356,7 @@ class DebugDataAggregator:
         """
         logger.info("Starting debug data aggregation (compact=%s)", compact)
 
-        return DebugDataExport(
+        export = DebugDataExport(
             export_timestamp=datetime.now().astimezone().isoformat(),
             timezone=self._get_timezone(),
             bess_version=self._get_version(),
@@ -380,6 +382,10 @@ class DebugDataAggregator:
             ha_ws_discovery=self._serialize_ha_ws_discovery(),
             compact=compact,
         )
+        export.key_findings = build_key_findings(
+            export.schedules, export.todays_log_content
+        )
+        return export
 
     def _get_version(self) -> str:
         """Get BESS Manager version.

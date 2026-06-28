@@ -78,6 +78,71 @@ period's shadow price is stored on its decision data and is used at apply time
 for the SOLAR_EXPORT discharge gate (below).
 
 
+## The Governing Economic Law (read this first)
+
+Every battery action is judged by its **marginal net value against the next-best
+alternative for that same slot** — never by its gross value, and never against
+"do nothing = 0".
+
+The opportunity cost of a stored kWh is its **forward-looking `shadow_price`** (the
+DP's value-to-go slope), floored by `sell_price` when upcoming solar will replenish
+the battery for free. It is **not** the sunk `cost_basis`, and **not** zero.
+
+Operational forms of the one law:
+
+- **Discharge to grid** is worthwhile only if
+  `sell_price × efficiency_discharge > opportunity_cost_of_stored_kWh`.
+- **Discharge to cover home load** is worthwhile only if it beats the cheapest
+  alternative for that kWh (usually a future avoided import at a higher buy price).
+- **Charge** is worthwhile only if the stored kWh's future value exceeds what it
+  cost to store it (grid/solar cost + wear).
+
+The classic error this prevents: treating `sell_price > wear_cost` as "profitable".
+That compares gross sale value to wear and ignores the counterfactual. If the real
+alternative is "let solar keep charging one more slot and export one slot earlier",
+the value captured is only the **differential** in sell price between the two slots,
+which must still clear the wear cost. A 6 öre differential against a 40 öre wear
+cost is a loss, not a 6 öre gain.
+
+**Reconciliation with the code:** `_compute_reward`
+(`core/bess/dp_battery_algorithm.py:361-394`) implements this as an anti-cycling
+floor — for a discharge it raises the effective floor to `sell_price` whenever solar
+will replenish the discharged capacity, so `sell × efficiency_discharge < sell ≤
+floor` blocks the trade. The function's older docstring phrasing ("value >
+cost_basis") describes that floor's implementation, not the user-facing law above.
+
+### Facts vs Economics — where each lives in a debug bundle
+
+Answer "what happened" and "why" from different parts of the bundle, in that order:
+
+- **Facts (what happened):** `## Optimization Schedules → ### Period Decisions`
+  table. Columns: `Intent | Observed | BattAct | SOE start→end | BuyPrice |
+  Savings`. A negative `BattAct` with a falling `SOE` is a battery discharge — read
+  this before proposing any mechanism. Solar-only export shows `BattAct ≈ 0`.
+- **Economics (why):** the Full Schedule JSON `<details>` block — `sell_price`,
+  `buy_price`, `cost_basis`, `shadow_price` per period — plus `### Economic Summary`.
+- **Period ↔ clock time:** slots are 15 minutes. Map the question's clock time to a
+  period number and confirm it. Watch the off-by-one: the price shown for 15:45 is
+  the 15:45 slot's price, not 16:00's.
+
+### Illustrative: applying the law (method demo, not a lookup)
+
+*Illustrative only — the method generalizes to any period. Do not pattern-match the
+scenario; reproduce the reasoning steps.*
+
+A battery discharges a small amount to grid in a slot where `sell = 0.46`,
+`wear = 0.40`.
+
+- **Wrong (gross):** `0.46 > 0.40 → +6 öre, profitable.`
+- **Right (marginal):** the alternative is to let solar charge one more slot and
+  export one slot earlier, so only the sell-price *differential* (~0.06) is gained,
+  against 0.40 wear ⇒ ≈ `−0.34 SEK/kWh`, a loss. Equivalently: `shadow_price` (e.g.
+  0.876) and `cost_basis` (e.g. 0.62) both exceed `sell 0.46`, so the stored kWh is
+  worth more kept than exported ⇒ do not discharge.
+- If different optimization runs disagree on such a near-threshold slot, the cause
+  is `shadow_price` sensitivity across re-optimizations, not a missing mechanism.
+
+
 ## Strategic Intents
 
 Every 15-minute slot gets a strategic intent based on the energy flows the
@@ -156,11 +221,9 @@ The optimizer works with buy and sell prices derived from spot prices:
 
 For Octopus Energy (UK), prices are already final — no markup/VAT applied.
 
-A discharge is profitable when:
-    sell_price (or avoided buy_price) > cost_basis + cycle_cost
-
-Where cost_basis is the price at which the energy was originally stored
-(tracked via FIFO), and cycle_cost is the battery wear cost per kWh.
+For when a discharge is worthwhile, see **The Governing Economic Law** above —
+gross `sell_price` vs `cycle_cost` is *not* the test; marginal value vs the
+counterfactual is.
 
 
 ## Energy Flow Decomposition

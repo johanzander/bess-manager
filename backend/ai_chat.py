@@ -748,7 +748,7 @@ class AIAnalystService:
             if export.key_findings:
                 from core.bess.debug_report_formatter import DebugReportFormatter
 
-                sections.append(DebugReportFormatter()._format_key_findings(export))
+                sections.append(DebugReportFormatter().format_key_findings(export))
 
             # System info (tiny)
             sections.append(

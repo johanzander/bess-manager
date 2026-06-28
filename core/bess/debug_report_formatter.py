@@ -28,7 +28,7 @@ class DebugReportFormatter:
         try:
             sections = [
                 self._format_header(export),
-                self._format_key_findings(export),
+                self.format_key_findings(export),
                 self._format_system_info(export),
                 self._format_health_status(export),
                 self._format_settings(export),
@@ -62,7 +62,7 @@ class DebugReportFormatter:
 
 **BESS Version**: {export.bess_version}"""
 
-    def _format_key_findings(self, export: DebugDataExport) -> str:
+    def format_key_findings(self, export: DebugDataExport) -> str:
         kf = export.key_findings or {}
         lines = ["## ⚠️ Key Findings (auto-generated — read first)"]
         if kf.get("clean", False) or (

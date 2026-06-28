@@ -40,7 +40,7 @@ No optimizer behavior changes.
 - `core/bess/tests/unit/test_debug_findings.py` — NEW. Unit tests for the above.
 - `core/bess/debug_data_exporter.py` — add `key_findings` field to `DebugDataExport`
   and populate it in `aggregate_all_data`.
-- `core/bess/debug_report_formatter.py` — render `_format_key_findings` first;
+- `core/bess/debug_report_formatter.py` — render `format_key_findings` first;
   caption the health snapshot; move full schedule JSON to the bottom.
 - `backend/ai_chat.py` — include findings text in `_gather_context`; exclude raw log
   dump.
@@ -411,10 +411,10 @@ git commit -m "feat: attach key_findings to DebugDataExport"
 **Interfaces:**
 - Consumes: `export.key_findings` (Task 3).
 
-- [ ] **Step 1: Add `_format_key_findings`.**
+- [ ] **Step 1: Add `format_key_findings`.**
 
 ```python
-    def _format_key_findings(self, export: DebugDataExport) -> str:
+    def format_key_findings(self, export: DebugDataExport) -> str:
         kf = export.key_findings or {}
         lines = ["## ⚠️ Key Findings (auto-generated — read first)"]
         if kf.get("clean", False) or (not kf.get("disagreements") and not kf.get("anomalies")):
@@ -443,7 +443,7 @@ git commit -m "feat: attach key_findings to DebugDataExport"
 ```
 
 - [ ] **Step 2: Put it first in `format_report`.** In the section list assembled by
-  `format_report` (~line 30), insert `self._format_key_findings(export)` immediately
+  `format_report` (~line 30), insert `self.format_key_findings(export)` immediately
   after `self._format_header(export)`.
 
 - [ ] **Step 3: Caption the health snapshot as point-in-time.** In
@@ -490,7 +490,7 @@ from core.bess.debug_findings import build_key_findings
 sched=[{'timestamp':'2026-06-28 10:31:00','optimization_result':{'period_data':[{'period':63,'decision':{'strategic_intent':'BATTERY_EXPORT','battery_action':-0.1}}]}},
        {'timestamp':'2026-06-28 11:31:00','optimization_result':{'period_data':[{'period':63,'decision':{'strategic_intent':'SOLAR_EXPORT','battery_action':-0.0}}]}}]
 kf=build_key_findings(sched,'2026-06-28 10:31:00 | ERROR | core.bess.influxdb_helper:519 - Max retries exceeded')
-print('Period 63' in DebugReportFormatter()._format_key_findings(type('E',(),{'key_findings':kf})()))
+print('Period 63' in DebugReportFormatter().format_key_findings(type('E',(),{'key_findings':kf})()))
 "
 ```
 Expected: `True`.
@@ -518,7 +518,7 @@ git commit -m "feat: render Key Findings at top, demote raw logs/JSON to bottom"
   the export (it already calls the exporter). Identify where the log content is added.
 
 - [ ] **Step 2: Prepend findings, exclude raw logs.** In `_gather_context`, render the
-  key findings (reuse the formatter's `_format_key_findings`, or format inline) at the
+  key findings (reuse the formatter's `format_key_findings`, or format inline) at the
   START of the context, and ensure the raw `todays_log_content` dump is NOT included
   (the findings replace it for the chat path).
 
@@ -559,7 +559,7 @@ Expected: green.
   3. Gives the marginal `shadow_price > sell` loss verdict and cites `_compute_reward`.
 
 - [ ] **Step 3: If it still anchors,** the gap is renderer prominence/wording, not
-  data — adjust `_format_key_findings` phrasing and re-run. Do not add optimizer logic.
+  data — adjust `format_key_findings` phrasing and re-run. Do not add optimizer logic.
 
 ---
 

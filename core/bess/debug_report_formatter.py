@@ -28,6 +28,7 @@ class DebugReportFormatter:
         try:
             sections = [
                 self._format_header(export),
+                self._format_key_findings(export),
                 self._format_system_info(export),
                 self._format_health_status(export),
                 self._format_settings(export),
@@ -39,6 +40,7 @@ class DebugReportFormatter:
                 self._format_schedules(export),
                 self._format_snapshots(export),
                 self._format_logs(export),
+                self._format_raw_schedule_json(export),
             ]
             return "\n\n".join(sections)
         except Exception as e:
@@ -59,6 +61,35 @@ class DebugReportFormatter:
 **Export Date**: {export.export_timestamp}
 
 **BESS Version**: {export.bess_version}"""
+
+    def _format_key_findings(self, export: DebugDataExport) -> str:
+        kf = export.key_findings or {}
+        lines = ["## ⚠️ Key Findings (auto-generated — read first)"]
+        if kf.get("clean", False) or (
+            not kf.get("disagreements") and not kf.get("anomalies")
+        ):
+            lines.append("\nNo cross-run disagreements or log anomalies detected.")
+            return "\n".join(lines)
+
+        disagreements = kf.get("disagreements", [])
+        if disagreements:
+            lines.append("\n### Cross-run schedule disagreements")
+            for d in disagreements:
+                lines.append(
+                    f"- Period {d.period} ({d.time}): {', '.join(d.intents)} "
+                    f"across {len(d.occurrences)} runs — explain WHY runs differ; "
+                    f"do NOT conclude it didn't happen."
+                )
+
+        anomalies = kf.get("anomalies", [])
+        if anomalies:
+            lines.append("\n### Today's log anomalies (deduplicated)")
+            for a in anomalies:
+                lines.append(
+                    f"- [{a.category}] {a.source} ×{a.count} "  # noqa: RUF001
+                    f"({a.first_ts} → {a.last_ts}): {a.sample}"
+                )
+        return "\n".join(lines)
 
     def _format_system_info(self, export: DebugDataExport) -> str:
         """Format system information section.
@@ -111,7 +142,10 @@ class DebugReportFormatter:
             overall_status = "UNKNOWN"
         critical_count = error_count
 
-        summary = f"""## System Health Status
+        summary = f"""## System Health Status (point-in-time snapshot at export)
+
+*This reflects health at export time only. For problems earlier today, see Key
+Findings (top) and System Logs (bottom).*
 
 **Overall Status**: {overall_status}
 
@@ -426,16 +460,7 @@ class DebugReportFormatter:
 **Last Optimization**: {last}"""
 
         if not export.compact or not export.schedules:
-            details = f"""
-<details>
-<summary>Full Schedule Data ({total} schedules - click to expand)</summary>
-
-```json
-{self._format_json(export.schedules)}
-```
-
-</details>"""
-            return summary_text + details
+            return summary_text
 
         # Compact: render the latest schedule as a markdown table.
         # The full JSON still lives in the collapsible for deeper digs.
@@ -491,21 +516,7 @@ class DebugReportFormatter:
 
         table = "\n".join(rows)
 
-        details = f"""
-<details>
-<summary>Full Schedule JSON (for deep debugging)</summary>
-
-```json
-{self._format_json(export.schedules)}
-```
-
-</details>"""
-
-        return (
-            summary_text
-            + f"\n\n{econ_block}\n\n### Period Decisions\n\n{table}"
-            + details
-        )
+        return summary_text + f"\n\n{econ_block}\n\n### Period Decisions\n\n{table}"
 
     def _format_snapshots(self, export: DebugDataExport) -> str:
         """Format prediction snapshots section with summary.
@@ -618,6 +629,18 @@ class DebugReportFormatter:
 </details>"""
 
         return summary + details
+
+    def _format_raw_schedule_json(self, export: DebugDataExport) -> str:
+        return f"""## Raw Schedule JSON (deep debugging)
+
+<details>
+<summary>Full Schedule JSON (all runs)</summary>
+
+```json
+{self._format_json(export.schedules)}
+```
+
+</details>"""
 
     def _format_json(self, data: Any) -> str:
         """Format data as indented JSON.

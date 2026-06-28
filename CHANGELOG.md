@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+## [9.8.1] - 2026-06-28
+
+### Changed
+
+- **Debug export now leads with a "Key Findings" section** — the debug bundle opens with an auto-generated digest that surfaces cross-run schedule disagreements (a slot scheduled differently across re-optimization runs) and a deduplicated rollup of today's log anomalies (network/connectivity, data gaps, restarts, runtime errors), grouped by category and source. Raw logs and the full schedule JSON are moved to the bottom, and the health check is captioned as a point-in-time snapshot so its "OK" is not mistaken for "nothing went wrong today." The in-app AI chat uses the same digest instead of the raw log dump. This makes root-causing optimizer decisions and runtime failures much faster. (#198)
+
 ## [9.8.0] - 2026-06-27
 
 ### Added

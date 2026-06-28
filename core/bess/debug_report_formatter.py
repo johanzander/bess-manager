@@ -463,7 +463,7 @@ Findings (top) and System Logs (bottom).*
             return summary_text
 
         # Compact: render the latest schedule as a markdown table.
-        # The full JSON still lives in the collapsible for deeper digs.
+        # The full JSON is rendered at the bottom by _format_raw_schedule_json.
         schedule = export.schedules[0]
         opt_period = schedule.get("optimization_period", "?")
         opt_result = schedule.get("optimization_result", {})

@@ -92,7 +92,7 @@ move." Explain where it happened and WHY runs differ (usually near-threshold
    Never use gross value.
 5. **Cite the code path.** Name the exact function/lines that produced the decision
    (e.g. the discharge gate in `_compute_reward`,
-   `core/bess/dp_battery_algorithm.py:356-389`; cost_basis/shadow_price handling).
+   `core/bess/dp_battery_algorithm.py:361-394`; cost_basis/shadow_price handling).
    No claim without a code or data anchor.
 6. **Cross-run reconciliation.** If the user references multiple runs, says "it
    changed", OR the described behavior differs from the latest run (see HARD

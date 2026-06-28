@@ -105,7 +105,7 @@ which must still clear the wear cost. A 6 öre differential against a 40 öre we
 cost is a loss, not a 6 öre gain.
 
 **Reconciliation with the code:** `_compute_reward`
-(`core/bess/dp_battery_algorithm.py:356-389`) implements this as an anti-cycling
+(`core/bess/dp_battery_algorithm.py:361-394`) implements this as an anti-cycling
 floor — for a discharge it raises the effective floor to `sell_price` whenever solar
 will replenish the discharged capacity, so `sell × efficiency_discharge < sell ≤
 floor` blocks the trade. The function's older docstring phrasing ("value >

@@ -744,6 +744,12 @@ class AIAnalystService:
 
             sections = []
 
+            # Key findings — prepend at start so the model sees them first.
+            if export.key_findings:
+                from core.bess.debug_report_formatter import DebugReportFormatter
+
+                sections.append(DebugReportFormatter()._format_key_findings(export))
+
             # System info (tiny)
             sections.append(
                 f"## System\nVersion: {export.bess_version}, "
@@ -886,23 +892,9 @@ class AIAnalystService:
                     )
                 sections.append("\n".join(rows))
 
-            # Logs — key events only, capped
-            if (
-                export.todays_log_content
-                and "not found" not in export.todays_log_content.lower()
-            ):
-                log_lines = export.todays_log_content.split("\n")
-                # Cap at 200 lines to stay within budget.
-                if len(log_lines) > 200:
-                    log_lines = log_lines[-200:]
-                    sections.append(
-                        f"## Logs (last 200 of {len(export.todays_log_content.splitlines())} lines)\n"
-                        f"```\n{chr(10).join(log_lines)}\n```"
-                    )
-                else:
-                    sections.append(
-                        f"## Logs ({len(log_lines)} lines)\n```\n{chr(10).join(log_lines)}\n```"
-                    )
+            # Raw log dump intentionally excluded from chat context.
+            # Key findings (above) surface the relevant anomalies in a
+            # structured, token-efficient form.
 
             markdown = "\n\n".join(sections)
 
@@ -916,7 +908,7 @@ class AIAnalystService:
             summary = (
                 f"Loaded: {period_count} historical periods, "
                 f"{schedule_count} schedule(s), "
-                f"health, settings, logs "
+                f"health, settings, key findings "
                 f"({len(markdown) // 1000}KB)"
             )
 

@@ -37,6 +37,8 @@ export interface DiscoveryResult {
     exportToday?: string;
     exportTomorrow?: string;
   };
+  entsoeFound: boolean;
+  entsoeEntity: string | null;
   sensors: Record<string, string>;
   platformSensors?: Record<string, Record<string, string>>;
   missingSensors: string[];

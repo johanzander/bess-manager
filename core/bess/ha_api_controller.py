@@ -2248,6 +2248,8 @@ class HomeAssistantAPIController:
             "nordpool_custom_entity": None,
             "nordpool_config_entry_id": None,
             "octopus_found": False,
+            "entsoe_found": False,
+            "entsoe_entity": None,
             # Auto-detected hints
             "detected_inverter_platforms": [],
             "detected_phase_count": None,
@@ -2302,6 +2304,12 @@ class HomeAssistantAPIController:
             if "octopus_energy" in entity_id and "rate" in entity_id:
                 result["octopus_found"] = True
 
+        # ── ENTSO-e Transparency Platform (e.g. Belpex) ───────────────────
+        entsoe_entity = self.discover_entsoe_entity(registry, states)
+        if entsoe_entity:
+            result["entsoe_found"] = True
+            result["entsoe_entity"] = entsoe_entity
+
         # ── Parse config entries + device registry ────────────────────────
         try:
             metadata = self._parse_ha_metadata(
@@ -2348,6 +2356,10 @@ class HomeAssistantAPIController:
         elif result["octopus_found"] and not result["nordpool_found"]:
             result["currency"] = "GBP"
             result["vat_multiplier"] = 1.0
+        elif result["entsoe_found"] and not result["nordpool_found"]:
+            # ENTSO-e Transparency Platform reports all areas in EUR (const.py).
+            # VAT varies per country, so leave vat_multiplier for the user.
+            result["currency"] = "EUR"
 
         return result, states
 
@@ -2504,6 +2516,66 @@ class HomeAssistantAPIController:
                 len(result),
             )
         return result
+
+    def discover_entsoe_entity(
+        self, entity_registry: list[dict], states: list[dict]
+    ) -> str | None:
+        """Discover the ENTSO-e Transparency Platform price sensor entity_id.
+
+        The ENTSO-e integration (github.com/JaccoR/hass-entso-e, ``DOMAIN = "entsoe"``)
+        creates one sensor per metric. Only the *average* price sensor carries the
+        ``prices_today`` / ``prices_tomorrow`` attributes we need, and its
+        ``unique_id`` is constructed as ``entsoe.{name}_avg_price`` (or
+        ``entsoe.avg_price`` when no custom name is set) — see the integration's
+        ``sensor.py`` (``_attr_unique_id = f"entsoe.{name}_{description.key}"``,
+        ``key="avg_price"``).
+
+        Primary match is the immutable ``unique_id`` (robust against renaming).
+        A fallback scans live states for the ``prices_today`` attribute shape so
+        detection still works across integration versions / unique_id changes.
+
+        Args:
+            entity_registry: Entity registry list from HA WebSocket API.
+            states: Live entity states from ``/api/states``.
+
+        Returns:
+            The entity_id of the ENTSO-e average-price sensor, or None.
+        """
+        # Primary: immutable unique_id on the entsoe platform
+        for entry in entity_registry:
+            if entry.get("platform") != "entsoe":
+                continue
+            unique_id = str(entry.get("unique_id", ""))
+            if unique_id.endswith("avg_price"):
+                entity_id = entry.get("entity_id")
+                if entity_id:
+                    logger.info(
+                        "ENTSO-e discovery: matched %s via unique_id %r",
+                        entity_id,
+                        unique_id,
+                    )
+                    return entity_id
+
+        # Fallback: detect by the prices_today attribute shape
+        for state in states:
+            attributes = state.get("attributes") or {}
+            prices_today = attributes.get("prices_today")
+            if (
+                isinstance(prices_today, list)
+                and prices_today
+                and isinstance(prices_today[0], dict)
+                and "time" in prices_today[0]
+                and "price" in prices_today[0]
+            ):
+                entity_id = state.get("entity_id")
+                if entity_id:
+                    logger.info(
+                        "ENTSO-e discovery: matched %s via prices_today attribute shape",
+                        entity_id,
+                    )
+                    return entity_id
+
+        return None
 
     def discover_optional_sensors(self, states: list[dict]) -> dict[str, str]:
         """Discover optional integration sensors from entity states.

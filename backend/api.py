@@ -2990,6 +2990,8 @@ async def run_setup_discovery():
                 "nordpool_custom_entity": integrations.get("nordpool_custom_entity"),
                 "nordpool_config_entry_id": integrations["nordpool_config_entry_id"],
                 "octopus_found": integrations["octopus_found"],
+                "entsoe_found": integrations.get("entsoe_found", False),
+                "entsoe_entity": integrations.get("entsoe_entity"),
                 "missing_sensors": missing_sensors,
                 # Auto-detected hints
                 "detected_inverter_platforms": integrations[
@@ -3127,6 +3129,9 @@ async def setup_complete(payload: APISetupCompletePayload):
                     "export_today_entity": payload.octopusExportTodayEntity,
                     "export_tomorrow_entity": payload.octopusExportTomorrowEntity,
                 }
+            # Persist ENTSO-e entity when provider is entsoe
+            if payload.provider == "entsoe" and payload.entsoeEntity:
+                ep["entsoe"] = {"entity": payload.entsoeEntity}
             sections["energy_provider"] = ep
 
         # --- inverter ---

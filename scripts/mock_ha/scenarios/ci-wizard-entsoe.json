@@ -1,0 +1,605 @@
+{
+ "name": "CI Wizard: ENTSO-e / Belpex + MIN inverter",
+ "description": "Setup wizard scenario \u2014 Belgian user, ENTSO-e Transparency Platform (Belpex H) hourly prices, MIN (AC-coupled) inverter. Regression fixture for issue #126.",
+ "mock_time": "@2025-01-15 08:30:00",
+ "timezone": "Europe/Brussels",
+ "sensors": {
+  "sensor.abc1234567_state_of_charge_soc": {
+   "state": "45",
+   "attributes": {
+    "unit_of_measurement": "%",
+    "friendly_name": "State of charge (SoC)"
+   }
+  },
+  "sensor.abc1234567_battery_1_charging_w": {
+   "state": "0",
+   "attributes": {
+    "unit_of_measurement": "W"
+   }
+  },
+  "sensor.abc1234567_battery_1_discharging_w": {
+   "state": "300",
+   "attributes": {
+    "unit_of_measurement": "W"
+   }
+  },
+  "sensor.abc1234567_import_power": {
+   "state": "200",
+   "attributes": {
+    "unit_of_measurement": "W"
+   }
+  },
+  "sensor.abc1234567_export_power": {
+   "state": "0",
+   "attributes": {
+    "unit_of_measurement": "W"
+   }
+  },
+  "sensor.abc1234567_internal_wattage": {
+   "state": "0",
+   "attributes": {
+    "unit_of_measurement": "W"
+   }
+  },
+  "sensor.abc1234567_local_load_power": {
+   "state": "1200",
+   "attributes": {
+    "unit_of_measurement": "W"
+   }
+  },
+  "number.abc1234567_battery_charge_power_limit": {
+   "state": "100",
+   "attributes": {
+    "unit_of_measurement": "%",
+    "min": 0,
+    "max": 100
+   }
+  },
+  "number.abc1234567_battery_discharge_power_limit": {
+   "state": "100",
+   "attributes": {
+    "unit_of_measurement": "%",
+    "min": 0,
+    "max": 100
+   }
+  },
+  "number.abc1234567_battery_charge_soc_limit": {
+   "state": "95",
+   "attributes": {
+    "unit_of_measurement": "%",
+    "min": 0,
+    "max": 100
+   }
+  },
+  "number.abc1234567_battery_discharge_soc_limit": {
+   "state": "10",
+   "attributes": {
+    "unit_of_measurement": "%",
+    "min": 0,
+    "max": 100
+   }
+  },
+  "switch.abc1234567_charge_from_grid": {
+   "state": "off",
+   "attributes": {}
+  },
+  "sensor.abc1234567_lifetime_total_all_batteries_charged": {
+   "state": "5234.5",
+   "attributes": {
+    "unit_of_measurement": "kWh",
+    "device_class": "energy",
+    "state_class": "total_increasing"
+   }
+  },
+  "sensor.abc1234567_lifetime_total_all_batteries_discharged": {
+   "state": "4812.3",
+   "attributes": {
+    "unit_of_measurement": "kWh",
+    "device_class": "energy",
+    "state_class": "total_increasing"
+   }
+  },
+  "sensor.abc1234567_lifetime_total_solar_energy": {
+   "state": "12450.7",
+   "attributes": {
+    "unit_of_measurement": "kWh",
+    "device_class": "energy",
+    "state_class": "total_increasing"
+   }
+  },
+  "sensor.abc1234567_lifetime_total_export_to_grid": {
+   "state": "3120.4",
+   "attributes": {
+    "unit_of_measurement": "kWh",
+    "device_class": "energy",
+    "state_class": "total_increasing"
+   }
+  },
+  "sensor.abc1234567_lifetime_import_from_grid": {
+   "state": "8540.2",
+   "attributes": {
+    "unit_of_measurement": "kWh",
+    "device_class": "energy",
+    "state_class": "total_increasing"
+   }
+  },
+  "sensor.abc1234567_lifetime_total_load_consumption": {
+   "state": "15230.1",
+   "attributes": {
+    "unit_of_measurement": "kWh",
+    "device_class": "energy",
+    "state_class": "total_increasing"
+   }
+  },
+  "sensor.belpex_h_average_electricity_price": {
+   "state": "0.105",
+   "attributes": {
+    "friendly_name": "Average electricity price (Belpex H)",
+    "unit_of_measurement": "EUR/kWh",
+    "prices_today": [
+     {
+      "time": "2025-01-15T00:00:00",
+      "price": 0.085
+     },
+     {
+      "time": "2025-01-15T01:00:00",
+      "price": 0.087
+     },
+     {
+      "time": "2025-01-15T02:00:00",
+      "price": 0.089
+     },
+     {
+      "time": "2025-01-15T03:00:00",
+      "price": 0.091
+     },
+     {
+      "time": "2025-01-15T04:00:00",
+      "price": 0.093
+     },
+     {
+      "time": "2025-01-15T05:00:00",
+      "price": 0.095
+     },
+     {
+      "time": "2025-01-15T06:00:00",
+      "price": 0.097
+     },
+     {
+      "time": "2025-01-15T07:00:00",
+      "price": 0.099
+     },
+     {
+      "time": "2025-01-15T08:00:00",
+      "price": 0.101
+     },
+     {
+      "time": "2025-01-15T09:00:00",
+      "price": 0.103
+     },
+     {
+      "time": "2025-01-15T10:00:00",
+      "price": 0.105
+     },
+     {
+      "time": "2025-01-15T11:00:00",
+      "price": 0.107
+     },
+     {
+      "time": "2025-01-15T12:00:00",
+      "price": 0.109
+     },
+     {
+      "time": "2025-01-15T13:00:00",
+      "price": 0.111
+     },
+     {
+      "time": "2025-01-15T14:00:00",
+      "price": 0.113
+     },
+     {
+      "time": "2025-01-15T15:00:00",
+      "price": 0.115
+     },
+     {
+      "time": "2025-01-15T16:00:00",
+      "price": 0.117
+     },
+     {
+      "time": "2025-01-15T17:00:00",
+      "price": 0.119
+     },
+     {
+      "time": "2025-01-15T18:00:00",
+      "price": 0.121
+     },
+     {
+      "time": "2025-01-15T19:00:00",
+      "price": 0.123
+     },
+     {
+      "time": "2025-01-15T20:00:00",
+      "price": 0.125
+     },
+     {
+      "time": "2025-01-15T21:00:00",
+      "price": 0.127
+     },
+     {
+      "time": "2025-01-15T22:00:00",
+      "price": 0.129
+     },
+     {
+      "time": "2025-01-15T23:00:00",
+      "price": 0.131
+     }
+    ],
+    "prices_tomorrow": [
+     {
+      "time": "2025-01-16T00:00:00",
+      "price": 0.078
+     },
+     {
+      "time": "2025-01-16T01:00:00",
+      "price": 0.08
+     },
+     {
+      "time": "2025-01-16T02:00:00",
+      "price": 0.082
+     },
+     {
+      "time": "2025-01-16T03:00:00",
+      "price": 0.084
+     },
+     {
+      "time": "2025-01-16T04:00:00",
+      "price": 0.086
+     },
+     {
+      "time": "2025-01-16T05:00:00",
+      "price": 0.088
+     },
+     {
+      "time": "2025-01-16T06:00:00",
+      "price": 0.09
+     },
+     {
+      "time": "2025-01-16T07:00:00",
+      "price": 0.092
+     },
+     {
+      "time": "2025-01-16T08:00:00",
+      "price": 0.094
+     },
+     {
+      "time": "2025-01-16T09:00:00",
+      "price": 0.096
+     },
+     {
+      "time": "2025-01-16T10:00:00",
+      "price": 0.098
+     },
+     {
+      "time": "2025-01-16T11:00:00",
+      "price": 0.1
+     },
+     {
+      "time": "2025-01-16T12:00:00",
+      "price": 0.102
+     },
+     {
+      "time": "2025-01-16T13:00:00",
+      "price": 0.104
+     },
+     {
+      "time": "2025-01-16T14:00:00",
+      "price": 0.106
+     },
+     {
+      "time": "2025-01-16T15:00:00",
+      "price": 0.108
+     },
+     {
+      "time": "2025-01-16T16:00:00",
+      "price": 0.11
+     },
+     {
+      "time": "2025-01-16T17:00:00",
+      "price": 0.112
+     },
+     {
+      "time": "2025-01-16T18:00:00",
+      "price": 0.114
+     },
+     {
+      "time": "2025-01-16T19:00:00",
+      "price": 0.116
+     },
+     {
+      "time": "2025-01-16T20:00:00",
+      "price": 0.118
+     },
+     {
+      "time": "2025-01-16T21:00:00",
+      "price": 0.12
+     },
+     {
+      "time": "2025-01-16T22:00:00",
+      "price": 0.122
+     },
+     {
+      "time": "2025-01-16T23:00:00",
+      "price": 0.124
+     }
+    ],
+    "prices": [
+     {
+      "time": "2025-01-15T00:00:00",
+      "price": 0.085
+     },
+     {
+      "time": "2025-01-15T01:00:00",
+      "price": 0.087
+     },
+     {
+      "time": "2025-01-15T02:00:00",
+      "price": 0.089
+     },
+     {
+      "time": "2025-01-15T03:00:00",
+      "price": 0.091
+     },
+     {
+      "time": "2025-01-15T04:00:00",
+      "price": 0.093
+     },
+     {
+      "time": "2025-01-15T05:00:00",
+      "price": 0.095
+     },
+     {
+      "time": "2025-01-15T06:00:00",
+      "price": 0.097
+     },
+     {
+      "time": "2025-01-15T07:00:00",
+      "price": 0.099
+     },
+     {
+      "time": "2025-01-15T08:00:00",
+      "price": 0.101
+     },
+     {
+      "time": "2025-01-15T09:00:00",
+      "price": 0.103
+     },
+     {
+      "time": "2025-01-15T10:00:00",
+      "price": 0.105
+     },
+     {
+      "time": "2025-01-15T11:00:00",
+      "price": 0.107
+     },
+     {
+      "time": "2025-01-15T12:00:00",
+      "price": 0.109
+     },
+     {
+      "time": "2025-01-15T13:00:00",
+      "price": 0.111
+     },
+     {
+      "time": "2025-01-15T14:00:00",
+      "price": 0.113
+     },
+     {
+      "time": "2025-01-15T15:00:00",
+      "price": 0.115
+     },
+     {
+      "time": "2025-01-15T16:00:00",
+      "price": 0.117
+     },
+     {
+      "time": "2025-01-15T17:00:00",
+      "price": 0.119
+     },
+     {
+      "time": "2025-01-15T18:00:00",
+      "price": 0.121
+     },
+     {
+      "time": "2025-01-15T19:00:00",
+      "price": 0.123
+     },
+     {
+      "time": "2025-01-15T20:00:00",
+      "price": 0.125
+     },
+     {
+      "time": "2025-01-15T21:00:00",
+      "price": 0.127
+     },
+     {
+      "time": "2025-01-15T22:00:00",
+      "price": 0.129
+     },
+     {
+      "time": "2025-01-15T23:00:00",
+      "price": 0.131
+     },
+     {
+      "time": "2025-01-16T00:00:00",
+      "price": 0.078
+     },
+     {
+      "time": "2025-01-16T01:00:00",
+      "price": 0.08
+     },
+     {
+      "time": "2025-01-16T02:00:00",
+      "price": 0.082
+     },
+     {
+      "time": "2025-01-16T03:00:00",
+      "price": 0.084
+     },
+     {
+      "time": "2025-01-16T04:00:00",
+      "price": 0.086
+     },
+     {
+      "time": "2025-01-16T05:00:00",
+      "price": 0.088
+     },
+     {
+      "time": "2025-01-16T06:00:00",
+      "price": 0.09
+     },
+     {
+      "time": "2025-01-16T07:00:00",
+      "price": 0.092
+     },
+     {
+      "time": "2025-01-16T08:00:00",
+      "price": 0.094
+     },
+     {
+      "time": "2025-01-16T09:00:00",
+      "price": 0.096
+     },
+     {
+      "time": "2025-01-16T10:00:00",
+      "price": 0.098
+     },
+     {
+      "time": "2025-01-16T11:00:00",
+      "price": 0.1
+     },
+     {
+      "time": "2025-01-16T12:00:00",
+      "price": 0.102
+     },
+     {
+      "time": "2025-01-16T13:00:00",
+      "price": 0.104
+     },
+     {
+      "time": "2025-01-16T14:00:00",
+      "price": 0.106
+     },
+     {
+      "time": "2025-01-16T15:00:00",
+      "price": 0.108
+     },
+     {
+      "time": "2025-01-16T16:00:00",
+      "price": 0.11
+     },
+     {
+      "time": "2025-01-16T17:00:00",
+      "price": 0.112
+     },
+     {
+      "time": "2025-01-16T18:00:00",
+      "price": 0.114
+     },
+     {
+      "time": "2025-01-16T19:00:00",
+      "price": 0.116
+     },
+     {
+      "time": "2025-01-16T20:00:00",
+      "price": 0.118
+     },
+     {
+      "time": "2025-01-16T21:00:00",
+      "price": 0.12
+     },
+     {
+      "time": "2025-01-16T22:00:00",
+      "price": 0.122
+     },
+     {
+      "time": "2025-01-16T23:00:00",
+      "price": 0.124
+     }
+    ]
+   }
+  }
+ },
+ "config_entries": [
+  {
+   "entry_id": "mock_entsoe_config_entry",
+   "domain": "entsoe",
+   "title": "ENTSO-e Transparency Platform",
+   "state": "loaded"
+  },
+  {
+   "entry_id": "mock_growatt_config_entry",
+   "domain": "growatt_server",
+   "title": "Growatt Server",
+   "state": "loaded"
+  }
+ ],
+ "devices": [
+  {
+   "id": "mock_growatt_device_001",
+   "name": "ABC1234567",
+   "manufacturer": "Growatt",
+   "model": "MIN 6000TL-XH"
+  }
+ ],
+ "services": {
+  "growatt_server": {
+   "update_time_segment": {},
+   "read_time_segments": {}
+  }
+ },
+ "entity_registry": [
+  {
+   "entity_id": "sensor.mock_inverter_soc",
+   "platform": "growatt_server",
+   "config_entry_id": "mock_growatt_config_entry",
+   "unique_id": "MOCK_SN-tlx_statement_of_charge"
+  },
+  {
+   "entity_id": "switch.mock_inverter_ac_charge",
+   "platform": "growatt_server",
+   "config_entry_id": "mock_growatt_config_entry",
+   "unique_id": "MOCK_SN-ac_charge"
+  },
+  {
+   "entity_id": "sensor.belpex_h_current_electricity_market_price",
+   "platform": "entsoe",
+   "config_entry_id": "mock_entsoe_config_entry",
+   "unique_id": "entsoe.Belpex H_current_price"
+  },
+  {
+   "entity_id": "sensor.belpex_h_average_electricity_price",
+   "platform": "entsoe",
+   "config_entry_id": "mock_entsoe_config_entry",
+   "unique_id": "entsoe.Belpex H_avg_price"
+  }
+ ],
+ "time_segments": [],
+ "price_data": {},
+ "expected_discovery": {
+  "growatt_found": true,
+  "solax_found": false,
+  "nordpool_found": false,
+  "nordpool_area": null,
+  "nordpool_custom_area": null,
+  "nordpool_config_entry_id": null,
+  "octopus_found": false,
+  "currency": "EUR",
+  "detected_platform": "growatt_server_min",
+  "required_sensors": [
+   "grid_charge"
+  ],
+  "entsoe_found": true,
+  "entsoe_entity": "sensor.belpex_h_average_electricity_price"
+ },
+ "inverter_platform": "growatt_server_min"
+}

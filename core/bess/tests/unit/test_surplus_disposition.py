@@ -290,6 +290,60 @@ def test_grid_charging_charges_at_max_rate_not_fractional():
     )
 
 
+def test_grid_charging_action_reports_achieved_throughput_not_tied_power():
+    """Regression for #203: decision.battery_action must reflect the achieved
+    charge throughput, not the arbitrary tested `power` that won the DP's
+    tie-break among physically-identical positive STORE levels.
+
+    _state_transition's STORE physics are binary (see
+    test_grid_charging_charges_at_max_rate_not_fractional above): any positive
+    power charges at the same max rate_throughput. The real DP's power_levels
+    are iterated ascending with a strict `>` update, so the smallest positive
+    level (POWER_STEP_KW = 0.2 kW) always wins as best_action — but that tiny
+    tested value must not leak into decision.battery_action, since it drives
+    the inverter's charge_rate register via get_period_settings().
+
+    Scenario mirrors test_grid_charging_charges_at_max_rate_not_fractional:
+    no solar, power=0.2 kW (the smallest positive power_level). Expected
+    battery_action = 2.5 kWh (max-rate achieved charge), not 0.2*0.25=0.05 kWh.
+    """
+    from core.bess.dp_battery_algorithm import _build_period_data, _state_transition
+
+    bs = make_battery_settings(
+        total_capacity=20.0,
+        min_soc=0.0,
+        max_soc=100.0,
+        max_charge_power_kw=10.0,
+        efficiency_charge=1.0,
+    )
+    soe = 2.0
+    tied_power = 0.2  # smallest positive power_level — always wins the DP tie-break
+    next_soe = _state_transition(
+        soe, tied_power, bs, DT, solar_production=0.0, home_consumption=0.0
+    )
+    pd = _build_period_data(
+        power=tied_power,
+        soe=soe,
+        next_soe=next_soe,
+        period=0,
+        home_consumption=0.0,
+        battery_settings=bs,
+        dt=DT,
+        buy_price=PRICES_BUY,
+        sell_price=PRICES_SELL,
+        solar_production=0.0,
+        new_cost_basis=bs.cycle_cost_per_kwh,
+        currency="SEK",
+    )
+    expected_action = min(bs.max_charge_power_kw * DT, bs.max_soe_kwh - soe)  # 2.5 kWh
+    assert round(pd.decision.battery_action, 4) == round(expected_action, 4), (
+        f"Expected battery_action={expected_action} (achieved max-rate charge) "
+        f"but got {pd.decision.battery_action:.4f} "
+        f"(leaked tested power={tied_power}*{DT}={tied_power * DT})"
+    )
+    assert pd.decision.strategic_intent == "GRID_CHARGING"
+
+
 def test_small_solar_surplus_at_idle_classifies_as_solar_export():
     """A power-0 period with solar surplus classifies as SOLAR_EXPORT (load_first).
     grid_first is only for active battery discharge — idle periods must use

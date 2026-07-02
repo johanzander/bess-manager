@@ -447,6 +447,7 @@ def classify_strategic_intent(power: float, energy_data: EnergyData) -> str:
 
 def create_decision_data(
     power: float,
+    battery_action_kwh: float,
     energy_data: EnergyData,
     hour: int,
     cost_basis: float,
@@ -456,7 +457,6 @@ def create_decision_data(
     battery_wear_cost: float,
     buy_price: float,
     sell_price: float,
-    dt: float,
     currency: str,
 ) -> DecisionData:
     """
@@ -468,6 +468,9 @@ def create_decision_data(
 
     Args:
         power: Battery power action (+ charge, - discharge) in kW
+        battery_action_kwh: Reported planned energy action in kWh for this period.
+            Caller-derived, since only the caller knows whether `power` is the
+            physically achieved action or merely a DP test value.
         energy_data: Complete energy flow data
         hour: Current hour (0-23)
         cost_basis: Cost basis of stored energy per kWh
@@ -477,7 +480,6 @@ def create_decision_data(
         battery_wear_cost: Battery degradation cost
         buy_price: Current electricity purchase price per kWh
         sell_price: Current electricity sale price per kWh
-        dt: Period duration in hours (e.g., 0.25 for quarterly, 1.0 for hourly)
         currency: Currency code for display in economic chain explanations
 
     Returns:
@@ -531,8 +533,6 @@ def create_decision_data(
         future_target_hours = [hour]
 
     # Create DecisionData with only fields we can implement
-    # Convert power (kW) to energy (kWh) for consistency with other period data
-    battery_action_kwh = power * dt
     return DecisionData(
         strategic_intent=strategic_intent,
         battery_action=battery_action_kwh,

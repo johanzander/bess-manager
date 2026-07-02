@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- **Anti-cycling discharge gate no longer over-values stored energy during solar surplus** — When solar already covers all home load for a period, `_compute_reward`'s discharge profitability check no longer credits the discharge with `avoid_purchase_value` (there is no grid purchase to displace when solar covers the load). This closed a leak that let marginal, unprofitable ~0.1 kWh `BATTERY_EXPORT` discharges slip past the `-inf` anti-cycling floor in solar-surplus periods with a full battery. (#204)
+
 ## [9.8.1] - 2026-06-28
 
 ### Changed

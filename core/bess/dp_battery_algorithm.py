@@ -361,7 +361,16 @@ def _compute_reward(
         # Profitability check: only discharge if value exceeds cost basis
         avoid_purchase_value = current_buy_price * battery_settings.efficiency_discharge
         export_value = current_sell_price * battery_settings.efficiency_discharge
-        effective_value_per_kwh_stored = max(avoid_purchase_value, export_value)
+
+        # If solar already covers all home load this period, there is no grid
+        # purchase for the discharge to displace — its only realizable value is
+        # the export price. Including avoid_purchase_value here would credit the
+        # discharge for a purchase that was never going to happen.
+        excess_solar = max(0.0, solar_production - home_consumption)
+        if excess_solar > POWER_TOLERANCE_KW:
+            effective_value_per_kwh_stored = export_value
+        else:
+            effective_value_per_kwh_stored = max(avoid_purchase_value, export_value)
 
         # Anti-cycling: use sell_price as cost basis floor to prevent wasteful
         # charge/discharge cycling.  Stored energy has an opportunity cost —
@@ -382,7 +391,6 @@ def _compute_reward(
         if current_sell_price > current_buy_price:
             effective_cost_basis = max(effective_cost_basis, current_sell_price)
         else:
-            excess_solar = max(0.0, solar_production - home_consumption)
             capacity_after_discharge = battery_settings.max_soe_kwh - next_soe
             if (
                 excess_solar > POWER_TOLERANCE_KW

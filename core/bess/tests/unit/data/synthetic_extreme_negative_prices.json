@@ -97,17 +97,17 @@
   },
   "expected_results": {
     "base_cost": 50.31,
-    "battery_solar_cost": -31.19,
-    "base_to_battery_solar_savings": 81.5,
-    "base_to_battery_solar_savings_pct": 162.0,
-    "total_charged": 49.0,
-    "total_discharged": 44.4
+    "battery_solar_cost": -30.3945,
+    "base_to_battery_solar_savings": 80.7045,
+    "base_to_battery_solar_savings_pct": 160.4144,
+    "total_charged": 48.3657,
+    "total_discharged": 43.6000
   },
   "expected_behavior": {
     "description": "Negative prices: should aggressively grid-charge during negative-price hours and export during positive peaks",
     "intents_present": [
       "GRID_CHARGING",
-      "EXPORT_ARBITRAGE"
+      "BATTERY_EXPORT"
     ],
     "savings_positive": true,
     "constraints": {

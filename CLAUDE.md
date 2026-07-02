@@ -20,6 +20,8 @@ non-negotiable and apply to all agents.
 | [`docs/agents/patterns.md`](docs/agents/patterns.md) | Before writing new code |
 | [`docs/agents/testing.md`](docs/agents/testing.md) | Before writing or changing tests |
 | [`docs/agents/workflow.md`](docs/agents/workflow.md) | Before any commit, PR, or release |
+| [`docs/agents/skill-architecture.md`](docs/agents/skill-architecture.md) | Before working on skills, the `@claude-bot` pipeline, or adding an integration |
+| [`docs/agents/bess-knowledge.md`](docs/agents/bess-knowledge.md) | Before answering any question about BESS behavior, savings calculations, optimizer decisions, or schedule logic |
 | [`docs/agents/memory/`](docs/agents/memory/) | Project-specific memory (beta workflow, release train) |
 
 ## Project Overview
@@ -33,12 +35,11 @@ interface for managing battery schedules and monitoring energy flows.
 ### Backend (Python)
 
 ```bash
-pip install -r backend/requirements.txt
-pytest -m "not slow"           # fast tests (~3s, recommended)
-pytest -m slow                 # algorithm/integration tests (~30min)
-pytest                         # run all tests
-black . && ruff check --fix .  # format and lint
-./scripts/quality-check.sh     # full quality gate
+.venv/bin/pytest -m "not slow"           # fast tests (~3s, recommended)
+.venv/bin/pytest -m slow                 # algorithm/integration tests (~30min)
+.venv/bin/pytest                         # run all tests
+.venv/bin/black . && .venv/bin/ruff check --fix .  # format and lint
+./scripts/quality-check.sh               # full quality gate
 ```
 
 ### Frontend (React/TypeScript)
@@ -87,6 +88,7 @@ through CLAUDE.md. All stages run on `anthropics/claude-code-action@v1`.
 | 2. Analyze | `@claude-bot analyze` (manual) | `issue-analyze.yml` | ~$0.50–2 | Delegates to `bess-analyst` sub-agent, posts root-cause diagnosis. No code changes. |
 | 3. Fix | `@claude-bot fix` (manual) | `issue-fix.yml` | ~$1–4 | Implements minimal fix per Stage 2 plan, runs `quality-check.sh`, opens draft PR. |
 | 4. Review | `@claude-bot` on a PR (manual) | `pr-review.yml` | ~$0.50–2 | Reviews diff against rules and checklist. |
+| 5. Integrate | `@claude-bot integrate` (manual) | `issue-integrate.yml` | ~$2–10 | Drives a new inverter/provider request through the full experimental→stable lifecycle (`feature-lifecycle`), one stage per invocation. |
 
 **Why gated, not auto:** Stages 2 and 3 cost real money. The user explicitly
 triggers each one after reading the previous stage's output.
@@ -137,15 +139,47 @@ of `analyzed`.
 - After editing, list every file and symbol changed so the user can confirm nothing unrelated was touched
 - Never add speculative fallbacks, defensive error handling, or "robustness" improvements beyond what was asked
 
+## Cost Discipline
+
+The user pays per token. A long Opus session that re-reads a large context after
+every multi-minute wait is what runs up the bill — not the work itself.
+
+- **Default to Sonnet** (set in `.claude/settings.json`). Use Opus only for a
+  genuinely hard reasoning step, say so, and drop back. Don't run routine
+  coordination, iteration, CI-watching, or file edits on Opus.
+- **Never spawn Opus subagents**, and avoid agents for long-running watches
+  entirely; if delegation is truly needed, use a cheap model.
+- **Don't hold one big session across many long CI/test waits.** The prompt
+  cache expires after ~5 min, so each long wait forces a full uncached re-read
+  of the entire context. Prefer `/clear` between unrelated chunks, or let the
+  session sit idle rather than re-engaging every few minutes.
+- Don't re-dump large files or logs into context.
+
 ## Worktree Conventions
 
-- Create worktrees as sibling folders to the main repo (e.g., `../repo-feature/`), NOT inside `.claude/worktrees/`, so they open cleanly in VS Code
+Both layouts are first-class — either way the worktree is a normal git checkout,
+so per-agent inspect / test / run (`./deploy.sh`, `pytest`, the app) works the
+same. Choose by how you want to reach an agent's work:
+
+- **Sibling folders** (e.g. `../bess-manager-feature/`) — open cleanly in their
+  own VS Code window; this is the go-to when you actively inspect code and run
+  scripts per agent. They work with Agent View too: start the background session
+  *inside* the sibling (it's a linked git worktree, so Claude won't relocate it).
+  Caveat: a sibling only appears in **unscoped** `claude agents` (or
+  `--cwd ~/GitHub`), not in the project-scoped `claude agents --cwd <repo>` view.
+- **Native `.claude/worktrees/`** (`claude agents` / `--worktree` /
+  `EnterWorktree`) — auto-created for background sessions and visible in the
+  **project-scoped** Agent View. Still a real checkout: `code
+  <repo>/.claude/worktrees/<name>` or `cd` into it to run tests/scripts.
+
+Find any session's worktree path by peeking/attaching it in Agent View, or via
+`claude agents --json` (the `cwd` field).
 
 ## Home Assistant Integration
 
 - **Sensors**: battery SOC/power, solar production, grid import/export, pricing
 - **Device**: Growatt inverter (TOU schedule control)
-- **Add-on config**: `config.yaml` in root (version field, HA schema)
+- **Add-on config**: `bess_manager/config.yaml` (version field, HA schema)
 - **Pricing sources**: Nordpool and Octopus Energy
 
 ## Configuration Files
@@ -153,4 +187,4 @@ of `analyzed`.
 - `pyproject.toml` — Black, Ruff, mypy settings
 - `frontend/package.json` — React/TypeScript dependencies
 - `docker-compose.yml` — development environment
-- `config.yaml` — HA add-on schema and current version
+- `bess_manager/config.yaml` — HA add-on schema and current version (single source of truth)

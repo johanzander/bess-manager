@@ -364,6 +364,34 @@ class TestSetupComplete:
         assert home["phase_count"] == 3
         assert home["power_monitoring_enabled"] is True
 
+    def test_consumption_strategy_saved_without_currency_or_consumption(
+        self, complete_controller
+    ):
+        """consumptionStrategy must be persisted even when currency/consumption are omitted."""
+        payload = {
+            "consumptionStrategy": "ha_statistics",
+            "maxFuseCurrent": 25,
+            "voltage": 230,
+            "safetyMarginFactor": 1.0,
+            "phaseCount": 3,
+            "powerMonitoringEnabled": True,
+        }
+        resp = _client.post("/api/setup/complete", json=payload)
+        assert resp.status_code == 200
+        call_args = complete_controller.settings_store.save_all.call_args[0][0]
+        home = call_args["home"]
+        assert home["consumption_strategy"] == "ha_statistics"
+
+    def test_battery_fields_saved_without_total_capacity(self, complete_controller):
+        """Battery fields must be persisted even when totalCapacity is omitted."""
+        payload = {"minSoc": 15, "cycleCost": 0.6}
+        resp = _client.post("/api/setup/complete", json=payload)
+        assert resp.status_code == 200
+        call_args = complete_controller.settings_store.save_all.call_args[0][0]
+        bat = call_args["battery"]
+        assert bat["min_soc"] == 15
+        assert bat["cycle_cost_per_kwh"] == 0.6
+
     # -- Electricity price persistence --
 
     def test_electricity_price_fields_persisted(self, complete_controller):
@@ -375,6 +403,16 @@ class TestSetupComplete:
         assert elec["vat_multiplier"] == 1.25
         assert elec["additional_costs"] == 0.77
         assert elec["tax_reduction"] == 0.20
+
+    def test_price_fields_saved_without_markup_or_vat(self, complete_controller):
+        """additionalCosts/taxReduction must be persisted even without markupRate/vatMultiplier."""
+        payload = {"additionalCosts": 0.99, "taxReduction": 0.25}
+        resp = _client.post("/api/setup/complete", json=payload)
+        assert resp.status_code == 200
+        call_args = complete_controller.settings_store.save_all.call_args[0][0]
+        elec = call_args["electricity_price"]
+        assert elec["additional_costs"] == 0.99
+        assert elec["tax_reduction"] == 0.25
 
     # -- Energy provider persistence --
 
@@ -594,6 +632,21 @@ class TestSetupComplete:
         call_args = complete_controller.settings_store.save_all.call_args[0][0]
         assert "battery" not in call_args
 
+    def test_setup_complete_with_demo_mode(self, complete_controller):
+        resp = _client.post(
+            "/api/setup/complete",
+            json={
+                "sensors": {"platform": "growatt_server_min"},
+                "totalCapacity": 10.0,
+                "inverterPlatform": "growatt_server_min",
+                "demoMode": True,
+            },
+        )
+        assert resp.status_code == 200
+        stored = complete_controller.settings_store.data.get("demo_mode", {})
+        assert stored["enabled"] is True
+        complete_controller.system.set_demo_mode.assert_called_with(True)
+
 
 # ---------------------------------------------------------------------------
 # Discovery locale persistence (#113)
@@ -768,3 +821,30 @@ class TestDiscoverLocaleDefaults:
 
         assert store["home"]["currency"] == original_currency
         assert store["electricity_price"]["vat_multiplier"] == original_vat
+
+
+# ===========================================================================
+# POST /api/setup/complete — demo mode TOU reinitialization
+# ===========================================================================
+
+
+class TestSetupCompleteDemoMode:
+    """setup/complete must delegate demo mode changes to system.set_demo_mode."""
+
+    def test_disabling_demo_calls_set_demo_mode_false(self, complete_controller):
+        """demoMode=False in wizard payload must call set_demo_mode(False)."""
+        payload = _full_wizard_payload(demoMode=False)
+        _client.post("/api/setup/complete", json=payload)
+        complete_controller.system.set_demo_mode.assert_called_once_with(False)
+
+    def test_enabling_demo_calls_set_demo_mode_true(self, complete_controller):
+        """demoMode=True in wizard payload must call set_demo_mode(True)."""
+        payload = _full_wizard_payload(demoMode=True)
+        _client.post("/api/setup/complete", json=payload)
+        complete_controller.system.set_demo_mode.assert_called_once_with(True)
+
+    def test_absent_demo_mode_does_not_call_set_demo_mode(self, complete_controller):
+        """No demoMode in payload must NOT call set_demo_mode."""
+        payload = _full_wizard_payload()  # no demoMode key
+        _client.post("/api/setup/complete", json=payload)
+        complete_controller.system.set_demo_mode.assert_not_called()

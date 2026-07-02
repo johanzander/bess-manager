@@ -258,3 +258,39 @@ def test_all_scenarios(scenario_name):
         logger.info(
             f"No expected_behavior for scenario {scenario_name}, skipping behavioral validation"
         )
+
+    # ── Plan-faithfulness: R == P (#145) ──
+    # Executing the optimizer's plan through the inverter simulator must reproduce
+    # the planned economics within the DP's SoE/power-grid resolution. A larger gap
+    # is a control-fidelity finding, not just discretization.
+    from core.bess.simulation.inverter_simulator import (
+        derive_control_command,
+        simulate,
+    )
+
+    commands = [
+        derive_control_command(
+            pd.decision.strategic_intent,
+            pd.decision.battery_action / period_duration_hours,
+            battery_settings,
+        )
+        for pd in result.period_data
+    ]
+    sim = simulate(
+        commands,
+        solar_production,
+        home_consumption,
+        buy_prices,
+        sell_prices,
+        battery["initial_soe"],
+        battery_settings,
+        period_duration_hours,
+    )
+    planned_cost = result.economic_summary.battery_solar_cost
+    gap = sim.realized_cost - planned_cost
+
+    tol = max(0.5, 0.01 * abs(planned_cost))
+    assert abs(gap) <= tol, (
+        f"{scenario_name}: realized != planned — R={sim.realized_cost:.2f}, "
+        f"P={planned_cost:.2f}, gap {gap:+.3f} SEK exceeds tolerance {tol:.2f}"
+    )

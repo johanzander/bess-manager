@@ -60,14 +60,47 @@ spends money on its own. Stage 1 is auto but cheap.
 2. **Fix minor issues** — apply small fixes directly; request changes for anything substantial
 3. **Update CHANGELOG** — add entry under new version heading, credit author:
    `(thanks [@username](https://github.com/username))`
-4. **Bump version** in `config.yaml`:
+4. **Bump version** in `bess_manager/config.yaml` (single source of truth):
    - `PATCH` (x.y.**Z**): bug fixes, doc/comment changes, no behavior change
    - `MINOR` (x.**Y**.0): new features, backwards-compatible
    - `MAJOR` (**X**.0.0): breaking changes
-5. **Merge** — squash merge; wait for explicit user approval
-6. **Tag** — after user confirms hardware test: `git tag vX.Y.Z && git push origin vX.Y.Z`
+5. **Merge** — squash merge, only after **both** preconditions hold:
+   - **a) All CI checks green**, including the Algorithm (slow) job (~30–46 min)
+     when `core/bess/` changed. The **Merge gate** check (`ci-gate` job in
+     `ci.yml`) aggregates every job and is the single required status check on
+     `main` — it is green only when nothing genuinely failed.
+   - **b) Explicit user approval** for this specific merge.
+
+   Never use `gh pr merge --auto`. With branch protection it merges
+   automatically the moment the required checks pass — removing the human
+   "merge this PR now" decision (precondition **b**); and without protection
+   (as was the case for #146) it merges *immediately*, bypassing CI entirely.
+   Merge manually with `gh pr merge --squash` once green **and** approved.
+6. **Release** — create a GitHub Release (tag `vX.Y.Z`, target `main`).
+   This triggers `release-addon.yml` which builds per-arch Docker images
+   (amd64 + aarch64) and pushes them to GHCR.
+7. **Verify** — wait for the release workflow to complete, then confirm
+   images are pullable: `docker pull ghcr.io/johanzander/bess-manager-amd64:X.Y.Z`
 
 Never tag or merge without explicit user instruction.
+
+## Spec & Plan Lifecycle
+
+Superpowers produces two documents per feature: a **spec**
+(`docs/superpowers/specs/`) and a **plan** (`docs/superpowers/plans/`).
+
+- The **spec** is the durable design record — the *what and why* (problem,
+  approach, decisions, trade-offs, acceptance criteria). Keep it, and keep it
+  accurate; treat it like an ADR.
+- The **plan** is execution scaffolding — the *how*, a step-by-step build
+  checklist. Once the feature ships, the code and tests are the source of truth
+  and the plan only drifts (it keeps referencing intermediate stubs that were
+  deleted during implementation).
+
+**Policy: when a feature is implemented and merged, delete its plan; keep its
+spec.** The `finishing-a-development-branch` step should drop the plan as part of
+completion. A completed feature's record is its spec + the code/tests, not the
+build checklist.
 
 ## CHANGELOG Format
 

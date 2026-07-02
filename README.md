@@ -62,12 +62,12 @@ Something look off? The built-in AI Analyst explains every decision in plain lan
 - **InfluxDB** for historical data persistence
 - **Tibber** for power monitoring
 
-> **Want support for your inverter?** We're actively looking for testers with GivEnergy, Solis, Huawei, and other systems. [Open an issue](https://github.com/johanzander/bess-manager/issues) or join the discussion!
+> **Want support for your inverter?** We're actively looking for testers with GivEnergy, Solis, Huawei, and other systems. [Open an issue](https://github.com/johanzander/bess-manager/issues) or join the discussion! [Sponsoring](https://github.com/johanzander/bess-manager#sponsorship) helps prioritize new hardware support.
 
 ## Installation
 
-1. Go to **Settings > Add-ons > Add-on Store** and add the repository URL
-2. Install and start ChargeIQ
+1. In Home Assistant, go to **Settings → Add-ons → Add-on Store**, click the menu (⋮) → **Repositories**, and add: `https://github.com/johanzander/bess-manager`
+2. Find **BESS Battery Manager** in the store, click **Install**, then **Start**
 3. Open the web UI and follow the setup wizard
 
 Full instructions: **[Installation Guide](docs/INSTALLATION.md)**
@@ -82,6 +82,12 @@ Full instructions: **[Installation Guide](docs/INSTALLATION.md)**
 
 - **Issues & feature requests**: [GitHub Issues](https://github.com/johanzander/bess-manager/issues)
 - **Discussion**: [Home Assistant Community Forum](https://community.home-assistant.io/)
+
+## Sponsorship
+
+ChargeIQ is free and open source. If it's saving you money on your energy bill, consider sponsoring — it directly funds the AI tools used to build new features.
+
+[❤️ Sponsor on GitHub](https://github.com/sponsors/johanzander)
 
 ## License
 

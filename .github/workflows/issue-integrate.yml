@@ -1,0 +1,111 @@
+# Integration Lifecycle (gated)
+#
+# Triggered manually with `@claude-bot integrate` on a new-integration issue
+# (a new inverter platform or price provider). Drives the issue through the
+# feature-lifecycle skill, ONE stage per invocation, resuming from the PR-body
+# checklist. Re-issue `@claude-bot integrate` to advance to the next stage.
+
+name: Integration Lifecycle
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  integrate:
+    name: Integration Lifecycle
+    if: |
+      github.event.comment.user.login == github.repository_owner &&
+      github.event.issue.pull_request == null &&
+      contains(github.event.comment.body, '@claude-bot integrate')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/create-github-app-token@v2
+        id: app-token
+        with:
+          app-id: ${{ secrets.CLAUDE_REVIEWER_APP_ID }}
+          private-key: ${{ secrets.CLAUDE_REVIEWER_PRIVATE_KEY }}
+
+      # No dependency cache here on purpose: many integrate runs legitimately
+      # stop at a human gate (lifecycle Stage 2/5) without installing anything,
+      # and setup-python/-node `cache:` post-steps ERROR when the cache dir was
+      # never created — which would mark every gated-stop run as failed.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ steps.app-token.outputs.token }}
+          trigger_phrase: "@claude-bot integrate"
+          claude_args: "--max-turns 200 --permission-mode bypassPermissions"
+          prompt: |
+            You are the **Integration Lifecycle** bot for issue #${{ github.event.issue.number }} in johanzander/bess-manager.
+
+            ──────────────────────────────────────────────────────────────────
+            REQUIRED READING (read these files before acting)
+            ──────────────────────────────────────────────────────────────────
+            1. docs/agents/rules.md                       — hard constraints
+            2. docs/agents/workflow.md                    — commit/PR/release process
+            3. docs/agents/skill-architecture.md          — how the skills compose
+            4. .claude/skills/feature-lifecycle/SKILL.md  — the orchestrator you execute
+            Then read the matching IMPLEMENTATION skill (see PROCESS step 2):
+              - .claude/skills/add-inverter-platform/SKILL.md   (new inverter), or
+              - .claude/skills/add-price-provider/SKILL.md      (new price provider)
+            And the deploy skill when you reach a ship step:
+              - .claude/skills/release/SKILL.md
+
+            ──────────────────────────────────────────────────────────────────
+            PROCESS
+            ──────────────────────────────────────────────────────────────────
+            1. Get full context:
+                 gh issue view ${{ github.event.issue.number }} --json title,body,labels,comments
+               Then find any existing lifecycle PR for this issue:
+                 gh pr list --state all --search "in:body #${{ github.event.issue.number }}" --json number,title,body,isDraft,state
+
+            2. Decide feature type from the issue (a new INVERTER platform vs a
+               new PRICE PROVIDER) and read the matching implementation skill.
+
+            3. Determine the CURRENT lifecycle stage:
+               - If NO lifecycle PR exists yet → you are at Stage 1. Run the
+                 implementation skill end-to-end, mark the feature experimental,
+                 open a DRAFT PR with the feature-lifecycle checklist in the body,
+                 ship to beta via the release skill, and comment on the issue
+                 asking the user to install + report back.
+               - If a lifecycle PR exists → read its checklist. Advance ONLY to
+                 the next unchecked stage, following feature-lifecycle. If the
+                 next stage is a HUMAN GATE (Stage 2 user log, Stage 5 user
+                 confirmation) and the input isn't present yet, post a polite
+                 status/ask and STOP — do not fabricate it.
+
+            4. Update the PR-body checklist to reflect the stage you completed.
+
+            ──────────────────────────────────────────────────────────────────
+            HARD CONSTRAINTS
+            ──────────────────────────────────────────────────────────────────
+            - Follow feature-lifecycle exactly. Advance ONE stage per run.
+            - PRs are DRAFT. Never push to main. Beta vs prod remotes are owned
+              by the release skill (do not improvise remotes).
+            - NEVER claim real-world validation before the user confirms (Stage 5).
+              Keep the `experimental` marker until then.
+            - NEVER fabricate a user debug log or confirmation. Gates are human.
+            - Batch fixes — do NOT cut a beta release per fix (feature-lifecycle
+              Stage 4).
+            - Do NOT put `Closes #${{ github.event.issue.number }}` in a beta/
+              intermediate PR — only the final prod PR closes the issue.
+            - Run the local gate (pytest -m "not slow"; black/ruff; frontend build)
+              before any push.

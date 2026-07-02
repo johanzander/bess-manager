@@ -19,6 +19,92 @@ communication.
 > (AC-coupled, numbered TOU slots). GEN3 = MIX/SPA/SPH (DC-coupled, mode-specific
 > time slots). BESS detects the generation automatically from entity markers.
 
+## Inverter Integration Patterns
+
+Inverter control is **not** a single flat list of patterns — it is **two
+orthogonal axes** plus a shared vocabulary of control primitives. (This mirrors
+how cross-inverter optimizers like Predbat abstract ~20 brands: a *transport*
+capability set × a *common control vocabulary*, not a per-brand enumeration.)
+Adding a new inverter means placing it on both axes and listing which primitives
+it supports — that determines which existing controller to model on and how much
+is new.
+
+### Axis 1 — Transport (how commands reach the inverter)
+
+| Transport | HA integration(s) | Mechanism | Implemented today | Model controller(s) |
+|-----------|-------------------|-----------|-------------------|---------------------|
+| **TX-Cloud** | `growatt_server` | Vendor cloud API via HA **service calls** | ✅ | `GrowattMinController`, `GrowattSphController` |
+| **TX-Modbus** | `solax_modbus` (multi-brand: SolaX, Solis, Growatt, Sofar, AlphaESS, …) | Local Modbus **entity writes** (select/number/button) | ✅ | `SolaxModbusGrowattController`, `SolaxController` |
+| **TX-Vendor-service** | `huawei_solar` (and similar) | Local vendor integration: entity writes **+** ephemeral **service calls** (`forcible_charge`) | ❌ not yet | *(would model on `SolaxController` for the ephemeral half)* |
+| **TX-REST / TX-MQTT** | GivTCP, Solar Assistant, Sofar2mqtt | REST API / MQTT | ❌ not planned | — |
+
+`solax_modbus` is a **generic transport**, not a Growatt thing — the same channel
+serves SolaX, Solis, Growatt, Sofar, etc. via per-brand register/entity names.
+
+### Axis 2 — Scheduling model (how a plan is expressed)
+
+| Scheduling model | Description | Implemented example |
+|------------------|-------------|---------------------|
+| **SM-TOU-numbered** | Persistent **numbered** TOU slots (start/end/mode) | Growatt MIN (cloud & GEN4 single-segment) |
+| **SM-Period-lists** | Persistent **charge/discharge period lists** (≤N each), power/SOC in the write | Growatt SPH (cloud) |
+| **SM-Mode-slots** | Persistent **mode-specific** time slots | Growatt MIX/SPH GEN3 (monitoring-only today) |
+| **SM-Ephemeral** | **No persistent schedule** — push a duration-bounded command that auto-expires | SolaX VPP; Huawei `forcible_charge` would land here |
+
+### Common control primitives (the shared vocabulary)
+
+Regardless of transport/model, a controller works in these terms (each platform
+declares which it supports, mapped to BESS sensor keys): **charge window**
+(start/end) · **discharge window** · **target / charge-stop SOC** ·
+**reserve / discharge-stop SOC** · **charge rate** · **discharge rate** ·
+**grid-charge enable**.
+
+### The five existing platforms as coordinates
+
+| Platform | Transport | Scheduling model | Controller | Detection marker / service | Suffix map |
+|----------|-----------|------------------|------------|----------------------------|-----------|
+| `growatt_server_min` | TX-Cloud | SM-TOU-numbered | `GrowattMinController` | `growatt_server.update_time_segment` | `GROWATT_MIN_SUFFIX_MAP` |
+| `growatt_server_sph` | TX-Cloud | SM-Period-lists | `GrowattSphController` | `growatt_server.write_ac_charge_times` | `GROWATT_SPH_SUFFIX_MAP` |
+| `solax_modbus_growatt_min` | TX-Modbus | SM-TOU-numbered (single-segment) | `SolaxModbusGrowattController` | `_GROWATT_TOU_MARKER_SUFFIX` (`time_1_enabled`) | `SOLAX_GROWATT_MIN_SUFFIX_MAP` |
+| `solax_modbus_growatt_sph` | TX-Modbus | SM-Mode-slots (GEN3, monitoring-only) | `SolaxModbusGrowattController` | `_GROWATT_GEN3_MARKER_SUFFIX` | `SOLAX_GROWATT_SPH_SUFFIX_MAP` |
+| `solax_modbus_native` | TX-Modbus | SM-Ephemeral (VPP) | `SolaxController` | `_SOLAX_NATIVE_MARKER_SUFFIX` (`remotecontrol_power_control`) | `SOLAX_NATIVE_SUFFIX_MAP` |
+
+### Worked examples for new inverters
+
+- **Solis** (issue #130) — same **scheduling model** (persistent timed
+  charge/discharge slots + charge/discharge current) regardless of integration,
+  but Solis has several HA integrations across **both** transports. We support
+  **one of two** (chosen per the reporter's actual setup; **`solax_modbus` is the
+  default priority** because we already support that transport):
+  - **`solax_modbus`** (TX-Modbus, local; 491★ multi-brand, the community
+    standard) → **most additive**: new `SolisController` + `SOLIS_SUFFIX_MAP` + a
+    detection branch **before** the `solax_modbus_native` fallback. No new
+    transport, no ABC change.
+  - **`solis-cloud-control`** (TX-Cloud, SolisCloud Control API; easiest
+    onboarding, no wiring, but a young integration) → adds a **new TX-Cloud
+    domain** (detection branch + cloud service helpers), like Growatt cloud.
+    Treat as **experimental**.
+
+  *Not supported:* `solis-sensor` (monitoring-only) and `Pho3niX90/solis_modbus`
+  (redundant with `solax_modbus`'s local niche). **Decision: ask the reporter
+  which of the two they run, implement that one, default to `solax_modbus`.**
+- **Huawei** = **TX-Vendor-service (NEW)** × SM-Ephemeral (`forcible_charge`,
+  plus a persistent TOU working-mode). Needs a new `huawei_solar` transport
+  branch in detection + a `forcible_charge` service helper + a `HuaweiController`
+  modeled on `SolaxController`. **Additive, but the first platform to use a third
+  integration** (touches the detection dispatch).
+
+> **Both axes new?** A coordinate that needs a **new transport AND a new
+> scheduling model** is the expensive case. The safe interim for any new inverter
+> is **monitoring-only** (detection + sensors, no schedule control), as Growatt
+> GEN3 currently is.
+
+> **Note on the controller ABC:** `InverterController`'s method names are
+> TOU-centric (`get_all_tou_segments`, `get_daily_TOU_settings`,
+> `log_current_TOU_schedule`) and `_write_period_to_hardware` defaults to the
+> Growatt register interface. SM-Ephemeral inverters (SolaX today, Huawei later)
+> implement these by synthesizing "segments." It works; renaming to neutral terms
+> is an optional future cleanup, not a prerequisite.
+
 ## How BESS Controls Each Platform
 
 ### Growatt MIN (Cloud) — `growatt_min`

@@ -32,6 +32,7 @@ interface StatusCardProps {
   color: 'blue' | 'green' | 'yellow' | 'red' | 'purple';
   icon: React.ComponentType<{ className?: string }>;
   className?: string;
+  systemMode?: string;
 }
 
 const StatusCard: React.FC<StatusCardProps> = ({
@@ -42,7 +43,8 @@ const StatusCard: React.FC<StatusCardProps> = ({
   keyValue,
   keyUnit,
   metrics,
-  className = ""
+  className = "",
+  systemMode
 }) => {
   const colorClasses = {
     blue: 'bg-blue-50 border-blue-200 dark:bg-blue-900/20 dark:border-blue-800',
@@ -94,22 +96,29 @@ const StatusCard: React.FC<StatusCardProps> = ({
       {/* Metrics */}
       <div className="space-y-3">
         {metrics.map((metric, index) => (
-          <div key={index} className="flex items-center justify-between">
-            <div className="flex items-center">
-              {metric.icon && <metric.icon className="h-4 w-4 mr-2 text-gray-500 dark:text-gray-400" />}
-              <span className="text-sm text-gray-700 dark:text-gray-300">{metric.label}</span>
+          <div key={index}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center">
+                {metric.icon && <metric.icon className="h-4 w-4 mr-2 text-gray-500 dark:text-gray-400" />}
+                <span className="text-sm text-gray-700 dark:text-gray-300">{metric.label}</span>
+              </div>
+              {metric.pill && metric.color ? (
+                <span className={`text-sm font-semibold px-2 py-0.5 rounded-md ${pillColorClasses[metric.color]}`}>
+                  {metric.value}{metric.unit && <span className="opacity-70 ml-1">{metric.unit}</span>}
+                </span>
+              ) : (
+                <span className={`text-sm font-semibold ${
+                  metric.color ? metricColorClasses[metric.color] : 'text-gray-900 dark:text-gray-100'
+                }`}>
+                  {metric.value}
+                  {metric.unit && <span className="opacity-70 ml-1">{metric.unit}</span>}
+                </span>
+              )}
             </div>
-            {metric.pill && metric.color ? (
-              <span className={`text-sm font-semibold px-2 py-0.5 rounded-md ${pillColorClasses[metric.color]}`}>
-                {metric.value}{metric.unit && <span className="opacity-70 ml-1">{metric.unit}</span>}
-              </span>
-            ) : (
-              <span className={`text-sm font-semibold ${
-                metric.color ? metricColorClasses[metric.color] : 'text-gray-900 dark:text-gray-100'
-              }`}>
-                {metric.value}
-                {metric.unit && <span className="opacity-70 ml-1">{metric.unit}</span>}
-              </span>
+            {systemMode === 'demo' && metric.label === "Today's Savings" && (
+              <div className="mt-1">
+                <span className="text-xs text-gray-500">theoretical</span>
+              </div>
             )}
           </div>
         ))}
@@ -120,11 +129,14 @@ const StatusCard: React.FC<StatusCardProps> = ({
 
 interface SystemStatusCardProps {
   className?: string;
+  systemMode?: string;
 }
 
 
-const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "" }) => {
-  const { data: dashboardData, loading: dashboardLoading, error: dashboardError } = useDashboardData();
+const DASHBOARD_REFRESH_MS = 60000;
+
+const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", systemMode }) => {
+  const { data: dashboardData, loading: dashboardLoading, error: dashboardError } = useDashboardData(undefined, 'quarter-hourly', DASHBOARD_REFRESH_MS);
   const [inverterData, setInverterData] = useState<any>(null);
   const [inverterLoading, setInverterLoading] = useState(true);
   const [inverterError, setInverterError] = useState<string | null>(null);
@@ -146,6 +158,8 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "" }) =
     };
 
     fetchInverterData();
+    const interval = setInterval(fetchInverterData, DASHBOARD_REFRESH_MS);
+    return () => clearInterval(interval);
   }, []);
 
   const statusData = useMemo(() => {
@@ -223,7 +237,8 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "" }) =
       GRID_CHARGING: 'Charging from Grid',
       SOLAR_STORAGE: 'Storing Solar',
       LOAD_SUPPORT: 'Powering Home',
-      EXPORT_ARBITRAGE: 'Selling to Grid',
+      BATTERY_EXPORT: 'Selling to Grid',
+      SOLAR_EXPORT: 'Solar Exporting',
       IDLE: 'Standby',
     };
     const rawIntent = currentHourData.strategicIntent?.toUpperCase().replace(/ /g, '_') ?? 'IDLE';
@@ -451,6 +466,7 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "" }) =
           keyValue={card.keyValue}
           keyUnit={card.keyUnit}
           metrics={card.metrics}
+          systemMode={systemMode}
         />
       ))}
     </div>

@@ -254,6 +254,12 @@
       "model": "MIN 6000TL-XH",
       "config_entries": [
         "mock_growatt_config_entry"
+      ],
+      "identifiers": [
+        [
+          "growatt_server",
+          "ABC1234567"
+        ]
       ]
     },
     {
@@ -263,6 +269,12 @@
       "model": "X1-Hybrid",
       "config_entries": [
         "mock_solax_config_entry"
+      ],
+      "identifiers": [
+        [
+          "solax_modbus",
+          "SolaX Inverter"
+        ]
       ]
     }
   ],

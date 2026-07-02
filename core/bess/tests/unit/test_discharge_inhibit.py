@@ -49,7 +49,7 @@ def _set_intent(bsm: BatterySystemManager, period: int, intent: str) -> None:
 
 
 def _set_discharge_action(bsm: BatterySystemManager, period: int, kwh: float) -> None:
-    """Set a battery action for EXPORT_ARBITRAGE discharge calculation."""
+    """Set a battery action for BATTERY_EXPORT discharge calculation."""
     actions = [0.0] * 96
     actions[period] = kwh
     bsm._inverter_controller.current_schedule = SimpleNamespace(actions=actions)
@@ -62,6 +62,7 @@ class TestDischargeInhibitSuppressesDischarge:
     def test_load_support_discharges_when_inhibit_inactive(self):
         bsm, controller = _make_bsm(inhibit_active=False)
         _set_intent(bsm, PERIOD, "LOAD_SUPPORT")
+        _set_discharge_action(bsm, PERIOD, -3.75)  # -3.75 kWh / 0.25h = -15 kW → 100%
 
         bsm._apply_period_schedule(PERIOD)
 
@@ -77,7 +78,7 @@ class TestDischargeInhibitSuppressesDischarge:
 
     def test_export_arbitrage_discharges_when_inhibit_inactive(self):
         bsm, controller = _make_bsm(inhibit_active=False)
-        _set_intent(bsm, PERIOD, "EXPORT_ARBITRAGE")
+        _set_intent(bsm, PERIOD, "BATTERY_EXPORT")
         _set_discharge_action(bsm, PERIOD, -2.0)  # -2 kWh → -8 kW → ~53%
 
         bsm._apply_period_schedule(PERIOD)
@@ -86,7 +87,7 @@ class TestDischargeInhibitSuppressesDischarge:
 
     def test_export_arbitrage_discharge_suppressed_when_inhibit_active(self):
         bsm, controller = _make_bsm(inhibit_active=True)
-        _set_intent(bsm, PERIOD, "EXPORT_ARBITRAGE")
+        _set_intent(bsm, PERIOD, "BATTERY_EXPORT")
         _set_discharge_action(bsm, PERIOD, -2.0)
 
         bsm._apply_period_schedule(PERIOD)
@@ -128,6 +129,7 @@ class TestApplyDischargeInhibit:
         """Inhibit becoming active mid-period must stop discharge within 1 minute."""
         bsm, controller = _make_bsm(inhibit_active=False)
         _set_intent(bsm, PERIOD, "LOAD_SUPPORT")
+        _set_discharge_action(bsm, PERIOD, -3.75)  # -3.75 kWh / 0.25h = -15 kW → 100%
         bsm._apply_period_schedule(PERIOD)  # Sets desired=100, applied=100
         assert controller.calls["discharge_rate"][-1] == 100
 
@@ -140,6 +142,7 @@ class TestApplyDischargeInhibit:
         """Discharge must resume at the scheduled rate once inhibit clears."""
         bsm, controller = _make_bsm(inhibit_active=True)
         _set_intent(bsm, PERIOD, "LOAD_SUPPORT")
+        _set_discharge_action(bsm, PERIOD, -3.75)  # -3.75 kWh / 0.25h = -15 kW → 100%
         bsm._apply_period_schedule(PERIOD)  # Sets desired=100, applied=0 (inhibited)
 
         controller.inhibit_active = False
@@ -177,11 +180,12 @@ class TestApplyDischargeInhibit:
 
         # First period: LOAD_SUPPORT (desired=100), inhibit active → applied=0
         _set_intent(bsm, PERIOD, "LOAD_SUPPORT")
+        _set_discharge_action(bsm, PERIOD, -3.75)  # -3.75 kWh / 0.25h = -15 kW → 100%
         bsm._apply_period_schedule(PERIOD)
         assert bsm._desired_discharge_rate == 100
 
         # Period boundary fires while inhibit still active: new period has lower rate
-        _set_intent(bsm, PERIOD, "EXPORT_ARBITRAGE")
+        _set_intent(bsm, PERIOD, "BATTERY_EXPORT")
         _set_discharge_action(bsm, PERIOD, -2.0)  # → ~53%
         bsm._apply_period_schedule(PERIOD)
         desired_after_boundary = bsm._desired_discharge_rate

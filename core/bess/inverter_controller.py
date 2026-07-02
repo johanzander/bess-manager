@@ -21,11 +21,12 @@ class InverterController(ABC):
     Subclasses implement hardware-specific schedule conversion and deployment.
 
     Strategic Intent → Control Mapping:
-    - GRID_CHARGING   → grid_charge=True,  charge_rate=100, discharge_rate=0
-    - SOLAR_STORAGE   → grid_charge=False, charge_rate=100, discharge_rate=0
-    - LOAD_SUPPORT    → grid_charge=False, charge_rate=0,   discharge_rate=100
-    - EXPORT_ARBITRAGE → grid_charge=False, charge_rate=0,  discharge_rate=<action-derived>
-    - IDLE            → grid_charge=False, charge_rate=100, discharge_rate=0
+    - GRID_CHARGING  → grid_charge=True,  charge_rate=100, discharge_rate=0
+    - SOLAR_STORAGE  → grid_charge=False, charge_rate=100, discharge_rate=0
+    - LOAD_SUPPORT   → grid_charge=False, charge_rate=0,   discharge_rate=<action-derived>
+    - BATTERY_EXPORT → grid_charge=False, charge_rate=0,   discharge_rate=<action-derived>
+    - SOLAR_EXPORT   → grid_charge=False, charge_rate=100, discharge_rate=0
+    - IDLE           → grid_charge=False, charge_rate=100, discharge_rate=0
     """
 
     # Map strategic intents to inverter control settings.
@@ -38,11 +39,12 @@ class InverterController(ABC):
             "discharge_rate": 0,
         },
         "LOAD_SUPPORT": {"grid_charge": False, "charge_rate": 0, "discharge_rate": 100},
-        "EXPORT_ARBITRAGE": {
+        "BATTERY_EXPORT": {
             "grid_charge": False,
             "charge_rate": 0,
             "discharge_rate": 100,
         },
+        "SOLAR_EXPORT": {"grid_charge": False, "charge_rate": 100, "discharge_rate": 0},
         "IDLE": {"grid_charge": False, "charge_rate": 100, "discharge_rate": 0},
     }
 
@@ -51,7 +53,8 @@ class InverterController(ABC):
         "GRID_CHARGING": "battery_first",
         "SOLAR_STORAGE": "load_first",
         "LOAD_SUPPORT": "load_first",
-        "EXPORT_ARBITRAGE": "grid_first",
+        "BATTERY_EXPORT": "grid_first",
+        "SOLAR_EXPORT": "load_first",
         "IDLE": "load_first",
     }
 
@@ -60,9 +63,18 @@ class InverterController(ABC):
         "GRID_CHARGING": "Storing cheap grid energy for later use",
         "SOLAR_STORAGE": "Storing excess solar energy for evening/night",
         "LOAD_SUPPORT": "Using battery to support home consumption",
-        "EXPORT_ARBITRAGE": "Selling stored energy to grid for profit",
+        "BATTERY_EXPORT": "Selling stored energy to grid for profit",
+        "SOLAR_EXPORT": "Solar surplus exporting directly to grid",
         "IDLE": "No significant battery activity",
     }
+
+    # ── Platform capabilities ──────────────────────────────────────────────
+    # Subclasses override to declare what the hardware supports.
+
+    # Per-period charge/discharge rate register that power monitoring can
+    # read and write.  False on platforms that bake power % into atomic
+    # TOU schedule writes (SPH, SolaX native).
+    supports_charge_rate_control: ClassVar[bool] = True
 
     def __init__(self, battery_settings: BatterySettings) -> None:
         """Initialize shared inverter controller state."""
@@ -112,7 +124,7 @@ class InverterController(ABC):
 
         Args:
             intent: Strategic intent string
-            battery_action_kw: Battery power in kW (used for EXPORT_ARBITRAGE scaling)
+            battery_action_kw: Battery power in kW (used for BATTERY_EXPORT and LOAD_SUPPORT scaling)
 
         Returns:
             Tuple of (grid_charge, discharge_rate_percent)
@@ -122,19 +134,35 @@ class InverterController(ABC):
         elif intent == "SOLAR_STORAGE":
             return False, 0
         elif intent == "LOAD_SUPPORT":
-            return False, 100
-        elif intent == "EXPORT_ARBITRAGE":
             if battery_action_kw < -0.01:
                 discharge_rate = min(
                     100,
                     max(
                         0,
-                        int(abs(battery_action_kw) / self.max_discharge_power_kw * 100),
+                        round(
+                            abs(battery_action_kw) / self.max_discharge_power_kw * 100
+                        ),
                     ),
                 )
             else:
                 discharge_rate = 0
             return False, discharge_rate
+        elif intent == "BATTERY_EXPORT":
+            if battery_action_kw < -0.01:
+                discharge_rate = min(
+                    100,
+                    max(
+                        0,
+                        round(
+                            abs(battery_action_kw) / self.max_discharge_power_kw * 100
+                        ),
+                    ),
+                )
+            else:
+                discharge_rate = 0
+            return False, discharge_rate
+        elif intent == "SOLAR_EXPORT":
+            return False, 0
         elif intent == "IDLE":
             return False, 0
         else:
@@ -176,13 +204,37 @@ class InverterController(ABC):
             )
 
         intent = self.strategic_intents[period]
-        control = self.INTENT_TO_CONTROL[intent]
         mode = self.INTENT_TO_MODE[intent]
 
+        if (
+            self.current_schedule is not None
+            and self.current_schedule.actions
+            and period < len(self.current_schedule.actions)
+        ):
+            battery_action_kwh = self.current_schedule.actions[period]
+            num_periods = len(self.current_schedule.actions)
+            period_duration_hours = 24.0 / num_periods
+            battery_action_kw = battery_action_kwh / period_duration_hours
+            grid_charge, discharge_rate = self.compute_rates_for_period(
+                period, battery_action_kw
+            )
+            if intent == "GRID_CHARGING" and battery_action_kw > 0.01:
+                charge_rate = min(
+                    100,
+                    max(0, round(battery_action_kw / self.max_charge_power_kw * 100)),
+                )
+            else:
+                charge_rate = self.INTENT_TO_CONTROL[intent]["charge_rate"]
+        else:
+            control = self.INTENT_TO_CONTROL[intent]
+            grid_charge = control["grid_charge"]
+            charge_rate = control["charge_rate"]
+            discharge_rate = control["discharge_rate"]
+
         return {
-            "grid_charge": control["grid_charge"],
-            "charge_rate": control["charge_rate"],
-            "discharge_rate": control["discharge_rate"],
+            "grid_charge": grid_charge,
+            "charge_rate": charge_rate,
+            "discharge_rate": discharge_rate,
             "strategic_intent": intent,
             "batt_mode": mode,
         }
@@ -225,7 +277,10 @@ class InverterController(ABC):
         return self.INTENT_DESCRIPTIONS.get(intent, "Unknown intent")
 
     def get_detailed_period_groups(
-        self, intents: list[str] | None = None
+        self,
+        intents: list[str] | None = None,
+        actions: list[float] | None = None,
+        soc_values: list[float | None] | None = None,
     ) -> list[dict]:
         """Get period groups with full control parameters for display/API.
 
@@ -235,6 +290,11 @@ class InverterController(ABC):
         Args:
             intents: Optional list of strategic intents to group. If None,
                      uses self.strategic_intents (today's schedule).
+            actions: Optional list of battery actions in kWh per period (negative=discharge).
+                     If None, reads from self.current_schedule.actions. If current_schedule
+                     is also None or the period is out of range, action defaults to 0.0.
+            soc_values: Optional per-period SOC end values (%). The last period's value
+                        in each group is exposed as soc_end_pct in the result.
 
         Returns:
             List of period groups with all control parameters and time strings
@@ -245,6 +305,12 @@ class InverterController(ABC):
 
         num_periods = len(effective_intents)
 
+        schedule_actions: list[float] | None = None
+        if actions is not None:
+            schedule_actions = actions
+        elif self.current_schedule is not None:
+            schedule_actions = self.current_schedule.actions
+
         period_settings = []
         for period in range(num_periods):
             intent = effective_intents[period]
@@ -253,6 +319,14 @@ class InverterController(ABC):
                 intent,
                 {"grid_charge": False, "charge_rate": 100, "discharge_rate": 0},
             )
+
+            action_kwh = 0.0
+            if schedule_actions is not None and period < len(schedule_actions):
+                action_kwh = schedule_actions[period]
+            action_kw = action_kwh / 0.25
+
+            _, discharge_rate = self._map_intent_to_rates(intent, action_kw)
+
             period_settings.append(
                 {
                     "period": period,
@@ -260,7 +334,8 @@ class InverterController(ABC):
                     "mode": mode,
                     "grid_charge": control["grid_charge"],
                     "charge_rate": control["charge_rate"],
-                    "discharge_rate": control["discharge_rate"],
+                    "discharge_rate": discharge_rate,
+                    "action_kwh": action_kwh,
                 }
             )
 
@@ -277,6 +352,7 @@ class InverterController(ABC):
             ):
                 current_group["end_period"] = ps["period"]
                 current_group["count"] += 1
+                current_group["total_action_kwh"] += ps["action_kwh"]
             else:
                 if current_group is not None:
                     groups.append(current_group)
@@ -289,6 +365,7 @@ class InverterController(ABC):
                     "charge_rate": ps["charge_rate"],
                     "discharge_rate": ps["discharge_rate"],
                     "count": 1,
+                    "total_action_kwh": ps["action_kwh"],
                 }
 
         if current_group is not None:
@@ -302,6 +379,10 @@ class InverterController(ABC):
             if end_h >= 24:
                 end_h = 23
                 end_m = 59
+            end_period = group["end_period"]
+            soc_end: float | None = None
+            if soc_values is not None and end_period < len(soc_values):
+                soc_end = soc_values[end_period]
             result.append(
                 {
                     "start_time": f"{start_h:02d}:{start_m:02d}",
@@ -315,6 +396,8 @@ class InverterController(ABC):
                     "discharge_rate": group["discharge_rate"],
                     "period_count": group["count"],
                     "duration_minutes": group["count"] * 15,
+                    "total_action_kwh": group["total_action_kwh"],
+                    "soc_end_pct": soc_end,
                 }
             )
         return result
@@ -361,6 +444,15 @@ class InverterController(ABC):
     @abstractmethod
     def sync_soc_limits(self, controller) -> None:
         """Sync SOC limits from config to inverter hardware."""
+
+    def initialize_hardware(self, controller) -> None:  # noqa: B027
+        """Write initial hardware configuration required before normal operation.
+
+        Called once at startup (after demo mode blocks are cleared). Subclasses
+        override to perform whatever one-time writes their hardware requires.
+        The default is a no-op so controllers with no startup writes need not
+        override it.
+        """
 
     def _write_period_to_hardware(
         self, controller, grid_charge: bool, discharge_rate: int

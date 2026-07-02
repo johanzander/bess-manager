@@ -1,7 +1,10 @@
 """Shared test utilities for battery optimization tests.
 
 Reduces boilerplate across test files by providing:
-- run_scenario(): one-liner to run optimization from a scenario dict
+- run_scenario(): one-liner to run optimization from a scenario dict (plan, P)
+- run_scenario_realized(): also executes the plan through the inverter simulator,
+  returning the *realized* economics (R) so scenarios can verify the plan is
+  faithfully executable (R == P), not just that the plan claims a number.
 - Behavioral assertion helpers for strategic intents and physical constraints
 """
 
@@ -14,16 +17,13 @@ from core.bess.settings import (
     VAT_MULTIPLIER,
     BatterySettings,
 )
+from core.bess.simulation.inverter_simulator import derive_control_command, simulate
 
 
-def run_scenario(scenario: dict):
-    """Run optimization from a scenario dict (same format as JSON test data files).
-
-    Returns the OptimizationResult from optimize_battery_schedule.
-    """
+def _scenario_inputs(scenario: dict):
+    """Build optimizer inputs from a scenario dict. Shared by run_scenario and
+    run_scenario_realized so plan (P) and realized (R) use identical inputs."""
     base_prices = scenario["base_prices"]
-    home_consumption = scenario["home_consumption"]
-    solar_production = scenario["solar_production"]
     battery = scenario["battery"]
     price_data = scenario.get("price_data")
 
@@ -57,27 +57,57 @@ def run_scenario(scenario: dict):
         tax_reduction=tax_reduction,
         area="SE4",
     )
+    return {
+        "buy_price": price_manager.get_buy_prices(raw_prices=base_prices),
+        "sell_price": price_manager.get_sell_prices(raw_prices=base_prices),
+        "home_consumption": scenario["home_consumption"],
+        "solar_production": scenario["solar_production"],
+        "initial_soe": battery["initial_soe"],
+        "battery_settings": battery_settings,
+        "period_duration_hours": scenario.get("period_duration_hours", 1.0),
+    }
 
-    buy_prices = price_manager.get_buy_prices(raw_prices=base_prices)
-    sell_prices = price_manager.get_sell_prices(raw_prices=base_prices)
 
-    period_duration_hours = scenario.get("period_duration_hours", 1.0)
+def run_scenario(scenario: dict):
+    """Run optimization from a scenario dict. Returns the OptimizationResult (plan, P)."""
+    return optimize_battery_schedule(**_scenario_inputs(scenario))
 
-    return optimize_battery_schedule(
-        buy_price=buy_prices,
-        sell_price=sell_prices,
-        home_consumption=home_consumption,
-        solar_production=solar_production,
-        initial_soe=battery["initial_soe"],
-        battery_settings=battery_settings,
-        period_duration_hours=period_duration_hours,
+
+def run_scenario_realized(scenario: dict) -> tuple:
+    """Run the optimizer AND execute its plan through the inverter simulator.
+
+    Returns ``(result, realized_cost)`` where ``result.economic_summary.battery_solar_cost``
+    is the planned cost (P) and ``realized_cost`` is what the derived inverter
+    commands actually achieve (R). For an executable plan these are equal to the
+    cent; a gap is a control-fidelity finding.
+    """
+    inp = _scenario_inputs(scenario)
+    result = optimize_battery_schedule(**inp)
+    dt = inp["period_duration_hours"]
+    settings = inp["battery_settings"]
+    commands = [
+        derive_control_command(
+            pd.decision.strategic_intent, pd.decision.battery_action / dt, settings
+        )
+        for pd in result.period_data
+    ]
+    sim = simulate(
+        commands,
+        inp["solar_production"],
+        inp["home_consumption"],
+        inp["buy_price"],
+        inp["sell_price"],
+        inp["initial_soe"],
+        settings,
+        dt,
     )
+    return result, sim.realized_cost
 
 
 def get_intent_distribution(result) -> dict[str, int]:
     """Count how many periods have each strategic intent.
 
-    Returns e.g. {"GRID_CHARGING": 5, "IDLE": 15, "EXPORT_ARBITRAGE": 4}
+    Returns e.g. {"GRID_CHARGING": 5, "IDLE": 15, "BATTERY_EXPORT": 4}
     """
     counts: dict[str, int] = {}
     for pd in result.period_data:
@@ -89,7 +119,7 @@ def get_intent_distribution(result) -> dict[str, int]:
 def get_intents_at_hours(result, hours: list[int]) -> dict[int, str]:
     """Get strategic intent at specific hours.
 
-    Returns e.g. {2: "GRID_CHARGING", 19: "EXPORT_ARBITRAGE"}
+    Returns e.g. {2: "GRID_CHARGING", 19: "BATTERY_EXPORT"}
     """
     return {h: result.period_data[h].decision.strategic_intent for h in hours}
 
@@ -162,6 +192,25 @@ def assert_physical_constraints(result, battery: dict) -> None:
                 assert (
                     abs(action) <= battery["max_discharge_power_kw"] + power_tolerance
                 ), f"Period {pd.period}: discharge {abs(action):.2f} kW > max {battery['max_discharge_power_kw']} kW"
+
+
+def make_battery_settings(**overrides):
+    """Create a BatterySettings instance with sensible test defaults.
+
+    Accepts keyword overrides for any BatterySettings field.
+    """
+    defaults = {
+        "total_capacity": 20.0,
+        "min_soc": 11.0,
+        "max_soc": 100.0,
+        "max_charge_power_kw": 10.0,
+        "max_discharge_power_kw": 10.0,
+        "efficiency_charge": 0.97,
+        "efficiency_discharge": 0.95,
+        "cycle_cost_per_kwh": 0.40,
+    }
+    defaults.update(overrides)
+    return BatterySettings(**defaults)
 
 
 def assert_savings_positive(result) -> None:

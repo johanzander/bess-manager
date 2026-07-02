@@ -17,6 +17,21 @@
 
 set -euo pipefail
 
+# Container runtime: auto-detected (podman preferred, falls back to docker).
+# Override with DOCKER=docker ./mock-run.sh if needed.
+if [ -z "${DOCKER:-}" ]; then
+  if command -v podman >/dev/null 2>&1; then
+    DOCKER="podman"
+  else
+    DOCKER="docker"
+  fi
+fi
+if [ "$DOCKER" = "podman" ] && command -v podman-compose >/dev/null 2>&1; then
+  COMPOSE="podman-compose"
+else
+  COMPOSE="${DOCKER} compose"
+fi
+
 # Derive a unique project name from the directory so multiple worktrees
 # can run side-by-side without container name conflicts.
 export COMPOSE_PROJECT_NAME="bess-mock-$(basename "$(pwd)")"
@@ -69,22 +84,26 @@ import json, sys
 d = json.load(open('$SCENARIO_FILE'))
 cfg = d.get('bess_config')
 if not cfg:
-    print('Error: No bess_config in scenario — regenerate with from_debug_log.py', file=sys.stderr)
-    sys.exit(1)
-json.dump(cfg, open('backend/dev-options.json', 'w'), indent=2)
+    # Wizard scenario — no existing config. Write minimal defaults so the
+    # backend starts in setup-wizard mode (no sensors configured).
+    print('Note: No bess_config — starting in setup-wizard mode (fresh setup)')
+    json.dump({}, open('backend/dev-options.json', 'w'), indent=2)
+    json.dump({}, open('backend/mock-bess-settings.json', 'w'), indent=2)
+else:
+    json.dump(cfg, open('backend/dev-options.json', 'w'), indent=2)
 
-# Reset dev-bess-settings.json from the scenario bess_config so stale sensor
-# state from a previous run cannot override this scenario's sensor mapping.
-OWNED = ('home', 'battery', 'electricity_price', 'energy_provider', 'growatt', 'inverter', 'sensors')
-bess_settings = {k: cfg[k] for k in OWNED if k in cfg}
+    # Reset dev-bess-settings.json from the scenario bess_config so stale sensor
+    # state from a previous run cannot override this scenario's sensor mapping.
+    OWNED = ('home', 'battery', 'electricity_price', 'energy_provider', 'growatt', 'inverter', 'sensors')
+    bess_settings = {k: cfg[k] for k in OWNED if k in cfg}
 
-# influxdb_7d_avg requires access to the original user's InfluxDB instance,
-# which is never available in mock mode. Always override to fixed.
-if bess_settings.get('home', {}).get('consumption_strategy') == 'influxdb_7d_avg':
-    bess_settings['home']['consumption_strategy'] = 'fixed'
-    print('Note: influxdb_7d_avg requires the original user\\'s InfluxDB — overriding to fixed for mock run.')
+    # influxdb_7d_avg requires access to the original user's InfluxDB instance,
+    # which is never available in mock mode. Always override to fixed.
+    if bess_settings.get('home', {}).get('consumption_strategy') == 'influxdb_7d_avg':
+        bess_settings['home']['consumption_strategy'] = 'fixed'
+        print('Note: influxdb_7d_avg requires the original user\\'s InfluxDB — overriding to fixed for mock run.')
 
-json.dump(bess_settings, open('backend/mock-bess-settings.json', 'w'), indent=2)
+    json.dump(bess_settings, open('backend/mock-bess-settings.json', 'w'), indent=2)
 " || exit 1
 
 # Always use the mock HA server, never the real one
@@ -110,9 +129,9 @@ echo "==== BESS Mock Development Environment ===="
 echo "Scenario:      $SCENARIO"
 echo "Inverter type: $INVERTER_TYPE  (bess_config extracted from scenario)"
 
-# Verify Docker is running
-if ! docker info > /dev/null 2>&1; then
-  echo "Error: Docker is not running. Please start Docker and try again."
+# Verify container runtime is available
+if ! $DOCKER info > /dev/null 2>&1; then
+  echo "Error: $DOCKER is not running. Please start $DOCKER and try again."
   exit 1
 fi
 
@@ -142,13 +161,13 @@ echo "Building frontend..."
 }
 
 echo "Stopping any existing containers..."
-docker-compose \
+$COMPOSE \
   -f docker-compose.yml \
   -f docker-compose.mock.yml \
   down --remove-orphans
 
 echo "Building and starting mock environment..."
-docker-compose \
+$COMPOSE \
   -f docker-compose.yml \
   -f docker-compose.mock.yml \
   up --build -d
@@ -170,7 +189,7 @@ trap 'print_banner; exit 0' INT
 
 # Stream logs; print the banner once BESS is fully started (Uvicorn ready).
 # After the banner, continue streaming logs normally.
-docker-compose \
+$COMPOSE \
   -f docker-compose.yml \
   -f docker-compose.mock.yml \
   logs -f --no-log-prefix 2>&1 | while IFS= read -r line; do

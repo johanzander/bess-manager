@@ -10,39 +10,40 @@ if [ ! -d "$TARGET_PATH" ]; then
     exit 1
 fi
 
-# Auto-increment patch version if deploying same version
+# Append a local build number (X.Y.Z.N) to trigger HA update detection
+# without modifying the real semver in bess_manager/config.yaml.
+# The build number is written only to the build output config.
+BASE_VERSION=$(grep "^version:" "bess_manager/config.yaml" | cut -d'"' -f2)
 if [ -f "$TARGET_PATH/config.yaml" ]; then
-    CURRENT_VERSION=$(grep "^version:" "$TARGET_PATH/config.yaml" | cut -d'"' -f2)
-    BUILD_VERSION=$(grep "^version:" "config.dev.yaml" | cut -d'"' -f2)
-
-    if [ "$CURRENT_VERSION" = "$BUILD_VERSION" ]; then
-        echo "Same version detected ($BUILD_VERSION), auto-incrementing patch version..."
-
-        # Extract version parts
-        MAJOR=$(echo $BUILD_VERSION | cut -d. -f1)
-        MINOR=$(echo $BUILD_VERSION | cut -d. -f2)
-        PATCH=$(echo $BUILD_VERSION | cut -d. -f3)
-
-        # Increment patch version (use 10# base to avoid octal interpretation of e.g. "0b9")
-        if [[ "$PATCH" =~ ^([0-9]+b)([0-9]+)$ ]]; then
-            # Beta version like "0b9" → "0b10"
-            BETA_PREFIX="${BASH_REMATCH[1]}"
-            BETA_NUM=$((10#${BASH_REMATCH[2]} + 1))
-            NEW_PATCH="${BETA_PREFIX}${BETA_NUM}"
-        else
-            NEW_PATCH=$((10#$PATCH + 1))
-        fi
-        NEW_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
-
-        echo "Updating version: $BUILD_VERSION → $NEW_VERSION"
-        sed -i '' "s/version: \"$BUILD_VERSION\"/version: \"$NEW_VERSION\"/" config.dev.yaml
-        echo "Updated config.dev.yaml"
+    DEPLOYED_VERSION=$(grep "^version:" "$TARGET_PATH/config.yaml" | cut -d'"' -f2)
+    # Extract local build number if present (e.g. "9.5.2.3" → 3)
+    if [[ "$DEPLOYED_VERSION" =~ ^${BASE_VERSION}\.([0-9]+)$ ]]; then
+        LOCAL_BUILD=$(( ${BASH_REMATCH[1]} + 1 ))
+    elif [ "$DEPLOYED_VERSION" = "$BASE_VERSION" ]; then
+        LOCAL_BUILD=1
+    else
+        LOCAL_BUILD=0
     fi
+else
+    LOCAL_BUILD=0
+fi
+
+if [ "$LOCAL_BUILD" -gt 0 ]; then
+    DEPLOY_VERSION="${BASE_VERSION}.${LOCAL_BUILD}"
+    echo "Local deploy version: $BASE_VERSION → $DEPLOY_VERSION"
+else
+    DEPLOY_VERSION="$BASE_VERSION"
+    echo "Deploy version: $DEPLOY_VERSION"
 fi
 
 # Build first to ensure latest version
 echo "Building add-on..."
 ./package-addon.sh
+
+# Stamp the local build version into the built config (not the source file)
+if [ "$DEPLOY_VERSION" != "$BASE_VERSION" ]; then
+    sed -i '' "s/version: \"$BASE_VERSION\"/version: \"$DEPLOY_VERSION\"/" build/bess_manager/config.yaml
+fi
 
 echo "Deploying to $TARGET_PATH..."
 

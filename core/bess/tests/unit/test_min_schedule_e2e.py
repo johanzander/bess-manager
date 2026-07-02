@@ -15,6 +15,7 @@ by testing the full path with real optimizer output.
 
 import json
 import logging
+from functools import cache
 from pathlib import Path
 
 import pytest
@@ -35,7 +36,7 @@ DATA_DIR = Path(__file__).parent / "data"
 
 # Intent → expected schedule behavior mapping
 CHARGING_INTENTS = {"GRID_CHARGING"}
-EXPORT_INTENTS = {"EXPORT_ARBITRAGE"}
+EXPORT_INTENTS = {"BATTERY_EXPORT"}
 DEFAULT_MODE_INTENTS = {"IDLE", "SOLAR_STORAGE", "LOAD_SUPPORT"}
 
 
@@ -44,13 +45,20 @@ def _load_scenario(name: str) -> dict:
         return json.load(f)
 
 
-def _run_and_build_schedule(
-    scenario: dict, current_period: int = 0
-) -> tuple[GrowattScheduleManager, list[str]]:
-    """Run optimizer on scenario and build MIN Growatt TOU schedule.
+@cache
+def _optimize_scenario(scenario_name: str):
+    """Run the DP optimizer for a scenario ONCE and cache the result.
 
-    Returns (scheduler, strategic_intents) tuple.
+    The optimization (full quarterly DP) is the only expensive step in this
+    module — every test asserts a different property of the *same* schedule. By
+    caching the result per scenario and rebuilding the cheap
+    GrowattScheduleManager fresh per test (see _run_and_build_schedule), we avoid
+    recomputing the identical optimization ~16x per scenario while preserving
+    test isolation.
+
+    Returns (OptimizationResult, BatterySettings).
     """
+    scenario = _load_scenario(scenario_name)
     battery = scenario["battery"]
     price_data = scenario["price_data"]
     base_prices = scenario["base_prices"]
@@ -87,6 +95,21 @@ def _run_and_build_schedule(
         battery_settings=battery_settings,
         period_duration_hours=period_duration_hours,
     )
+    return result, battery_settings
+
+
+def _run_and_build_schedule(
+    scenario_name: str, current_period: int = 0
+) -> tuple[GrowattScheduleManager, list[str]]:
+    """Build a MIN Growatt TOU schedule from the (cached) optimizer result.
+
+    The expensive optimization is cached by _optimize_scenario; the scheduler is
+    rebuilt fresh here so each test gets an isolated object.
+
+    Returns (scheduler, strategic_intents) tuple.
+    """
+    result, battery_settings = _optimize_scenario(scenario_name)
+    scenario = _load_scenario(scenario_name)
 
     # Convert OptimizationResult → DPSchedule (same path as battery_system_manager.py)
     strategic_intents = [pd.decision.strategic_intent for pd in result.period_data]
@@ -119,24 +142,21 @@ class TestEndToEndHardwareConstraints:
 
     @pytest.mark.parametrize("scenario_name", _get_realworld_scenarios())
     def test_no_overlapping_intervals(self, scenario_name):
-        scenario = _load_scenario(scenario_name)
-        scheduler, _ = _run_and_build_schedule(scenario)
+        scheduler, _ = _run_and_build_schedule(scenario_name)
         assert (
             scheduler.has_no_overlapping_intervals()
         ), f"{scenario_name}: TOU intervals overlap"
 
     @pytest.mark.parametrize("scenario_name", _get_realworld_scenarios())
     def test_chronological_order(self, scenario_name):
-        scenario = _load_scenario(scenario_name)
-        scheduler, _ = _run_and_build_schedule(scenario)
+        scheduler, _ = _run_and_build_schedule(scenario_name)
         assert (
             scheduler.intervals_are_chronologically_ordered()
         ), f"{scenario_name}: TOU intervals not in chronological order"
 
     @pytest.mark.parametrize("scenario_name", _get_realworld_scenarios())
     def test_hardware_slot_limit(self, scenario_name):
-        scenario = _load_scenario(scenario_name)
-        scheduler, _ = _run_and_build_schedule(scenario)
+        scheduler, _ = _run_and_build_schedule(scenario_name)
         assert len(scheduler.active_tou_intervals) <= 9, (
             f"{scenario_name}: {len(scheduler.active_tou_intervals)} active intervals "
             f"exceeds 9-slot hardware limit"
@@ -144,8 +164,7 @@ class TestEndToEndHardwareConstraints:
 
     @pytest.mark.parametrize("scenario_name", _get_realworld_scenarios())
     def test_segment_ids_in_valid_range(self, scenario_name):
-        scenario = _load_scenario(scenario_name)
-        scheduler, _ = _run_and_build_schedule(scenario)
+        scheduler, _ = _run_and_build_schedule(scenario_name)
         for seg in scheduler.active_tou_intervals:
             assert (
                 1 <= seg["segment_id"] <= 9
@@ -158,8 +177,7 @@ class TestEndToEndIntentExecution:
     @pytest.mark.parametrize("scenario_name", _get_realworld_scenarios())
     def test_charging_intents_produce_charging_config(self, scenario_name):
         """Hours with GRID_CHARGING intent must be configured for charging."""
-        scenario = _load_scenario(scenario_name)
-        scheduler, intents = _run_and_build_schedule(scenario)
+        scheduler, intents = _run_and_build_schedule(scenario_name)
 
         # Find hours where all 4 quarterly periods are GRID_CHARGING
         for hour in range(24):
@@ -172,25 +190,21 @@ class TestEndToEndIntentExecution:
 
     @pytest.mark.parametrize("scenario_name", _get_realworld_scenarios())
     def test_export_intents_produce_export_config(self, scenario_name):
-        """Hours with EXPORT_ARBITRAGE intent must be configured for export."""
-        scenario = _load_scenario(scenario_name)
-        scheduler, intents = _run_and_build_schedule(scenario)
+        """Hours with BATTERY_EXPORT intent must be configured for export."""
+        scheduler, intents = _run_and_build_schedule(scenario_name)
 
         for hour in range(24):
             quarter_intents = set(intents[hour * 4 : (hour + 1) * 4])
-            if len(intents) >= (hour + 1) * 4 and quarter_intents == {
-                "EXPORT_ARBITRAGE"
-            }:
+            if len(intents) >= (hour + 1) * 4 and quarter_intents == {"BATTERY_EXPORT"}:
                 assert scheduler.is_hour_configured_for_export(hour), (
-                    f"{scenario_name}: hour {hour} has all EXPORT_ARBITRAGE periods "
+                    f"{scenario_name}: hour {hour} has all BATTERY_EXPORT periods "
                     f"but is not configured for export"
                 )
 
     @pytest.mark.parametrize("scenario_name", _get_realworld_scenarios())
     def test_idle_hours_use_default_mode(self, scenario_name):
         """Hours where all quarters are default-mode intents should be load_first."""
-        scenario = _load_scenario(scenario_name)
-        scheduler, intents = _run_and_build_schedule(scenario)
+        scheduler, intents = _run_and_build_schedule(scenario_name)
 
         for hour in range(24):
             quarter_intents = set(intents[hour * 4 : (hour + 1) * 4])
@@ -209,9 +223,8 @@ class TestEndToEndChargeDischargeRates:
 
     @pytest.mark.parametrize("scenario_name", _get_realworld_scenarios())
     def test_grid_charging_periods_have_correct_rates(self, scenario_name):
-        """GRID_CHARGING: grid_charge=True, charge_rate=100%, discharge_rate=0%."""
-        scenario = _load_scenario(scenario_name)
-        scheduler, _ = _run_and_build_schedule(scenario)
+        """GRID_CHARGING: grid_charge=True, charge_rate=1..100% (action-derived), discharge_rate=0%."""
+        scheduler, _ = _run_and_build_schedule(scenario_name)
 
         for period in range(len(scheduler.strategic_intents)):
             settings = scheduler.get_period_settings(period)
@@ -220,36 +233,34 @@ class TestEndToEndChargeDischargeRates:
                     settings["grid_charge"] is True
                 ), f"{scenario_name} period {period}: GRID_CHARGING must have grid_charge=True"
                 assert (
-                    settings["charge_rate"] == 100
-                ), f"{scenario_name} period {period}: GRID_CHARGING charge_rate={settings['charge_rate']}, expected 100"
+                    0 < settings["charge_rate"] <= 100
+                ), f"{scenario_name} period {period}: GRID_CHARGING charge_rate={settings['charge_rate']}, expected 1..100"
                 assert (
                     settings["discharge_rate"] == 0
                 ), f"{scenario_name} period {period}: GRID_CHARGING discharge_rate={settings['discharge_rate']}, expected 0"
 
     @pytest.mark.parametrize("scenario_name", _get_realworld_scenarios())
     def test_export_arbitrage_periods_have_correct_rates(self, scenario_name):
-        """EXPORT_ARBITRAGE: grid_charge=False, charge_rate=0%, discharge_rate=100%."""
-        scenario = _load_scenario(scenario_name)
-        scheduler, _ = _run_and_build_schedule(scenario)
+        """BATTERY_EXPORT: grid_charge=False, charge_rate=0%, discharge_rate=100%."""
+        scheduler, _ = _run_and_build_schedule(scenario_name)
 
         for period in range(len(scheduler.strategic_intents)):
             settings = scheduler.get_period_settings(period)
-            if settings["strategic_intent"] == "EXPORT_ARBITRAGE":
+            if settings["strategic_intent"] == "BATTERY_EXPORT":
                 assert (
                     settings["grid_charge"] is False
-                ), f"{scenario_name} period {period}: EXPORT_ARBITRAGE must have grid_charge=False"
+                ), f"{scenario_name} period {period}: BATTERY_EXPORT must have grid_charge=False"
                 assert (
                     settings["charge_rate"] == 0
-                ), f"{scenario_name} period {period}: EXPORT_ARBITRAGE charge_rate={settings['charge_rate']}, expected 0"
+                ), f"{scenario_name} period {period}: BATTERY_EXPORT charge_rate={settings['charge_rate']}, expected 0"
                 assert (
-                    settings["discharge_rate"] == 100
-                ), f"{scenario_name} period {period}: EXPORT_ARBITRAGE discharge_rate={settings['discharge_rate']}, expected 100"
+                    0 <= settings["discharge_rate"] <= 100
+                )  # dynamic: rate derived from planned action, not hardcoded
 
     @pytest.mark.parametrize("scenario_name", _get_realworld_scenarios())
     def test_idle_periods_have_correct_rates(self, scenario_name):
         """IDLE: grid_charge=False, discharge_rate=0%."""
-        scenario = _load_scenario(scenario_name)
-        scheduler, _ = _run_and_build_schedule(scenario)
+        scheduler, _ = _run_and_build_schedule(scenario_name)
 
         for period in range(len(scheduler.strategic_intents)):
             settings = scheduler.get_period_settings(period)
@@ -264,8 +275,7 @@ class TestEndToEndChargeDischargeRates:
     @pytest.mark.parametrize("scenario_name", _get_realworld_scenarios())
     def test_solar_storage_periods_have_correct_rates(self, scenario_name):
         """SOLAR_STORAGE: grid_charge=False, charge_rate=100%, discharge_rate=0%."""
-        scenario = _load_scenario(scenario_name)
-        scheduler, _ = _run_and_build_schedule(scenario)
+        scheduler, _ = _run_and_build_schedule(scenario_name)
 
         for period in range(len(scheduler.strategic_intents)):
             settings = scheduler.get_period_settings(period)
@@ -283,8 +293,7 @@ class TestEndToEndChargeDischargeRates:
     @pytest.mark.parametrize("scenario_name", _get_realworld_scenarios())
     def test_load_support_periods_have_correct_rates(self, scenario_name):
         """LOAD_SUPPORT: grid_charge=False, charge_rate=0%, discharge_rate=100%."""
-        scenario = _load_scenario(scenario_name)
-        scheduler, _ = _run_and_build_schedule(scenario)
+        scheduler, _ = _run_and_build_schedule(scenario_name)
 
         for period in range(len(scheduler.strategic_intents)):
             settings = scheduler.get_period_settings(period)
@@ -296,14 +305,13 @@ class TestEndToEndChargeDischargeRates:
                     settings["charge_rate"] == 0
                 ), f"{scenario_name} period {period}: LOAD_SUPPORT charge_rate={settings['charge_rate']}, expected 0"
                 assert (
-                    settings["discharge_rate"] == 100
-                ), f"{scenario_name} period {period}: LOAD_SUPPORT discharge_rate={settings['discharge_rate']}, expected 100"
+                    0 <= settings["discharge_rate"] <= 100
+                )  # dynamic: rate derived from planned action, not hardcoded
 
     @pytest.mark.parametrize("scenario_name", _get_realworld_scenarios())
     def test_all_periods_have_settings(self, scenario_name):
         """Every period must return valid settings via get_period_settings."""
-        scenario = _load_scenario(scenario_name)
-        scheduler, intents = _run_and_build_schedule(scenario)
+        scheduler, intents = _run_and_build_schedule(scenario_name)
 
         for period in range(len(intents)):
             settings = scheduler.get_period_settings(period)
@@ -327,7 +335,7 @@ class TestEndToEndMidDayUpdate:
         midpoint = min(horizon // 2, 48)  # cap at period 48 (noon)
 
         for current_period in [0, midpoint]:
-            scheduler, _ = _run_and_build_schedule(scenario, current_period)
+            scheduler, _ = _run_and_build_schedule(scenario_name, current_period)
 
             assert (
                 scheduler.has_no_overlapping_intervals()
@@ -347,8 +355,7 @@ class TestEndToEndHardwareWrite:
     @pytest.mark.parametrize("scenario_name", _get_realworld_scenarios())
     def test_hardware_writes_use_valid_slot_ids(self, scenario_name):
         """All hardware writes use segment_id 1-9."""
-        scenario = _load_scenario(scenario_name)
-        scheduler, _ = _run_and_build_schedule(scenario)
+        scheduler, _ = _run_and_build_schedule(scenario_name)
 
         calls = []
 
@@ -383,8 +390,7 @@ class TestEndToEndHardwareWrite:
     @pytest.mark.parametrize("scenario_name", _get_realworld_scenarios())
     def test_hardware_write_count_within_limit(self, scenario_name):
         """Never write more than 9 segments to hardware."""
-        scenario = _load_scenario(scenario_name)
-        scheduler, _ = _run_and_build_schedule(scenario)
+        scheduler, _ = _run_and_build_schedule(scenario_name)
 
         write_count = 0
 

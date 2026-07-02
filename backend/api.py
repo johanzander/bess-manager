@@ -155,6 +155,7 @@ _SECTION_MAP: dict[str, str] = {
     "inverter": "inverter",
     "sensors": "sensors",
     "aiAnalyst": "ai_analyst",
+    "demoMode": "demo_mode",
 }
 
 # Derived from the BatterySettings dataclass — fields with init=True are the
@@ -315,6 +316,10 @@ async def patch_settings(updates: dict):
                     k: v for k, v in active.items() if v
                 }
 
+            elif store_key == "demo_mode":
+                enabled = section.get("enabled", False)
+                bess_controller.system.set_demo_mode(enabled)
+
         _refresh_health(bess_controller)
         return await get_settings()
 
@@ -346,7 +351,7 @@ def _aggregate_quarterly_to_hourly(
     # Priority order for tie-breaking: prioritize action over inaction
     intent_priority = {
         "GRID_CHARGING": 5,
-        "EXPORT_ARBITRAGE": 4,
+        "BATTERY_EXPORT": 4,
         "LOAD_SUPPORT": 3,
         "SOLAR_STORAGE": 2,
         "IDLE": 1,
@@ -505,6 +510,7 @@ def _aggregate_quarterly_to_hourly(
             ),
             # Use dominant strategic intent with tie-breaking (same logic as Growatt schedule)
             strategicIntent=dominant_intent,
+            observedIntent=last_period.observedIntent,
             directSolar=sum(p.directSolar for p in quarter_periods),
         )
 
@@ -601,11 +607,28 @@ async def get_dashboard_data(
                     time_utils.today() + timedelta(days=1)
                 )
                 tomorrow_periods = []
+                # Standalone next-day schedule (prepare_next_day path): opt_period=0
+                # and period_data[0] carries tomorrow's date. In that case
+                # period_data[0..95] maps to tomorrow's periods 0..95, so the anchor
+                # is today_period_count rather than opt_period.
+                # Regular schedules (including midnight runs with extended horizon)
+                # have opt_period > 0 or period_data large enough to include tomorrow,
+                # so they continue to use opt_period as the anchor.
+                is_next_day_only = (
+                    opt_period == 0
+                    and bool(opt_result.period_data)
+                    and opt_result.period_data[0].timestamp is not None
+                    and opt_result.period_data[0].timestamp.date()
+                    == time_utils.today() + timedelta(days=1)
+                )
+                period_data_anchor = (
+                    today_period_count if is_next_day_only else opt_period
+                )
                 for period_idx in range(
                     today_period_count,
                     today_period_count + tomorrow_period_count,
                 ):
-                    data_idx = period_idx - opt_period
+                    data_idx = period_idx - period_data_anchor
                     if 0 <= data_idx < len(opt_result.period_data):
                         tomorrow_periods.append(opt_result.period_data[data_idx])
                 if tomorrow_periods:
@@ -1415,6 +1438,7 @@ async def get_inverter_status():
             "charge_stop_soc": battery_settings.max_soc,
             "discharge_stop_soc": battery_settings.min_soc,
             "discharge_power_rate": discharge_power_rate,
+            "discharge_inhibit_active": controller.get_discharge_inhibit_active(),
             "inverter_platform": inverter_platform,
             "timestamp": datetime.now().isoformat(),
         }
@@ -1437,6 +1461,7 @@ async def get_growatt_detailed_schedule():
 
     try:
         schedule_manager = bess_controller.system._inverter_controller
+        battery_settings = bess_controller.system.battery_settings
         current_hour = time_utils.now().hour
 
         # Get TOU intervals directly from schedule manager
@@ -1515,7 +1540,7 @@ async def get_growatt_detailed_schedule():
                         "dischargePowerRate": hourly_settings.get(
                             "discharge_rate", 100
                         ),
-                        "chargePowerRate": 100,
+                        "chargePowerRate": hourly_settings.get("charge_rate", 100),
                         "strategic_intent": strategic_intent,
                         "intent_description": schedule_manager._get_intent_description(
                             strategic_intent
@@ -1565,8 +1590,46 @@ async def get_growatt_detailed_schedule():
         # Get period groups from schedule manager (15-minute resolution)
         period_groups = []
         try:
-            raw_groups = schedule_manager.get_detailed_period_groups()
+            stored_schedule_for_today = (
+                bess_controller.system.schedule_store.get_latest_schedule()
+            )
+            today_soc_values: list[float | None] = []
+            today_actions: list[float] = []
+            if stored_schedule_for_today:
+                opt_result_today = stored_schedule_for_today.optimization_result
+                opt_period_today = stored_schedule_for_today.optimization_period
+                today_period_count_local = get_period_count(time_utils.today())
+                for period_idx in range(today_period_count_local):
+                    data_idx = period_idx - opt_period_today
+                    if 0 <= data_idx < len(opt_result_today.period_data):
+                        pd_today = opt_result_today.period_data[data_idx]
+                        soe = pd_today.energy.battery_soe_end
+                        today_soc_values.append(
+                            (soe / battery_settings.total_capacity * 100.0)
+                            if battery_settings.total_capacity > 0
+                            else None
+                        )
+                        today_actions.append(pd_today.decision.battery_action or 0.0)
+                    else:
+                        today_soc_values.append(None)
+                        today_actions.append(0.0)
+            raw_groups = schedule_manager.get_detailed_period_groups(
+                actions=today_actions if today_actions else None,
+                soc_values=today_soc_values if today_soc_values else None,
+            )
+            prev_soc: float | None = None
             for group in raw_groups:
+                soc_end = group["soc_end_pct"]
+                soc_delta_kwh: float | None = None
+                if (
+                    soc_end is not None
+                    and prev_soc is not None
+                    and battery_settings.total_capacity > 0
+                ):
+                    soc_delta_kwh = (
+                        (soc_end - prev_soc) / 100.0 * battery_settings.total_capacity
+                    )
+                prev_soc = soc_end
                 period_groups.append(
                     {
                         "start_time": group["start_time"],
@@ -1579,6 +1642,9 @@ async def get_growatt_detailed_schedule():
                         "charge_power_rate": group["charge_rate"],
                         "discharge_power_rate": group["discharge_rate"],
                         "grid_charge": group["grid_charge"],
+                        "total_action_kwh": group["total_action_kwh"],
+                        "soc_end_pct": soc_end,
+                        "soc_delta_kwh": soc_delta_kwh,
                     }
                 )
         except (ValueError, KeyError, AttributeError) as e:
@@ -1597,22 +1663,59 @@ async def get_growatt_detailed_schedule():
                 tomorrow_period_count = get_period_count(
                     time_utils.today() + timedelta(days=1)
                 )
-                tomorrow_intents = []
+                tomorrow_intents: list[str] = []
+                tomorrow_actions: list[float] = []
+                tomorrow_soc_values: list[float | None] = []
+                # Standalone next-day schedule: same anchor adjustment as dashboard.
+                is_next_day_only = (
+                    opt_period == 0
+                    and bool(opt_result.period_data)
+                    and opt_result.period_data[0].timestamp is not None
+                    and opt_result.period_data[0].timestamp.date()
+                    == time_utils.today() + timedelta(days=1)
+                )
+                period_data_anchor = (
+                    today_period_count if is_next_day_only else opt_period
+                )
                 for period_idx in range(
                     today_period_count,
                     today_period_count + tomorrow_period_count,
                 ):
-                    data_idx = period_idx - opt_period
+                    data_idx = period_idx - period_data_anchor
                     if 0 <= data_idx < len(opt_result.period_data):
-                        tomorrow_intents.append(
-                            opt_result.period_data[data_idx].decision.strategic_intent
+                        pd = opt_result.period_data[data_idx]
+                        tomorrow_intents.append(pd.decision.strategic_intent)
+                        tomorrow_actions.append(pd.decision.battery_action or 0.0)
+                        soe = pd.energy.battery_soe_end
+                        tomorrow_soc_values.append(
+                            (soe / battery_settings.total_capacity * 100.0)
+                            if battery_settings.total_capacity > 0
+                            else None
                         )
+                    else:
+                        tomorrow_soc_values.append(None)
                 if tomorrow_intents:
                     raw_tomorrow_groups = schedule_manager.get_detailed_period_groups(
-                        intents=tomorrow_intents
+                        intents=tomorrow_intents,
+                        actions=tomorrow_actions,
+                        soc_values=tomorrow_soc_values,
                     )
                     tomorrow_period_groups = []
+                    prev_soc_tmr: float | None = None
                     for group in raw_tomorrow_groups:
+                        soc_end = group["soc_end_pct"]
+                        soc_delta_kwh_tmr: float | None = None
+                        if (
+                            soc_end is not None
+                            and prev_soc_tmr is not None
+                            and battery_settings.total_capacity > 0
+                        ):
+                            soc_delta_kwh_tmr = (
+                                (soc_end - prev_soc_tmr)
+                                / 100.0
+                                * battery_settings.total_capacity
+                            )
+                        prev_soc_tmr = soc_end
                         tomorrow_period_groups.append(
                             {
                                 "start_time": group["start_time"],
@@ -1627,6 +1730,9 @@ async def get_growatt_detailed_schedule():
                                 "charge_power_rate": group["charge_rate"],
                                 "discharge_power_rate": group["discharge_rate"],
                                 "grid_charge": group["grid_charge"],
+                                "total_action_kwh": group["total_action_kwh"],
+                                "soc_end_pct": soc_end,
+                                "soc_delta_kwh": soc_delta_kwh_tmr,
                             }
                         )
         except (AttributeError, KeyError, ValueError) as e:
@@ -1882,14 +1988,17 @@ async def get_dashboard_health_summary():
                 logger.warning(
                     "No cached health results available, returning minimal response"
                 )
-                return {
+                summary = {
                     "has_critical_errors": False,
                     "has_warnings": False,
                     "critical_issues": [],
                     "total_critical_issues": 0,
                     "timestamp": datetime.now().isoformat(),
-                    "system_mode": "unknown",
+                    "system_mode": (
+                        "demo" if bess_controller.ha_controller.test_mode else "unknown"
+                    ),
                 }
+                return convert_keys_to_camel_case(summary)
 
             # Extract critical and warning information
             critical_issues = []
@@ -2939,61 +3048,66 @@ async def setup_complete(payload: APISetupCompletePayload):
         # All sections use read-modify-write so that keys not managed by the wizard
         # (e.g. temperature_derating in battery, config_entry_id in energy_provider)
         # are preserved when save_all replaces the section.
+        #
+        # Each section is driven by a mapping of payload-field-name → store-key.
+        # Adding a new wizard field only requires adding one entry to the mapping;
+        # the guard and the write are both derived from it automatically.
 
         # --- battery ---
-        if payload.totalCapacity is not None:
+        # maxChargeDischargePower maps to two store keys — handled separately below.
+        _BATTERY_MAP = {
+            "totalCapacity": "total_capacity",
+            "minSoc": "min_soc",
+            "maxSoc": "max_soc",
+            "cycleCost": "cycle_cost_per_kwh",
+            "minActionProfitThreshold": "min_action_profit_threshold",
+        }
+        if any(getattr(payload, f) is not None for f in _BATTERY_MAP) or (
+            payload.maxChargeDischargePower is not None
+        ):
             battery = bess_controller.settings_store.get_section("battery")
-            battery["total_capacity"] = payload.totalCapacity
-            if payload.minSoc is not None:
-                battery["min_soc"] = payload.minSoc
-            if payload.maxSoc is not None:
-                battery["max_soc"] = payload.maxSoc
+            for field, key in _BATTERY_MAP.items():
+                if getattr(payload, field) is not None:
+                    battery[key] = getattr(payload, field)
             if payload.maxChargeDischargePower is not None:
                 battery["max_charge_power_kw"] = payload.maxChargeDischargePower
                 battery["max_discharge_power_kw"] = payload.maxChargeDischargePower
-            if payload.cycleCost is not None:
-                battery["cycle_cost_per_kwh"] = payload.cycleCost
-            if payload.minActionProfitThreshold is not None:
-                battery["min_action_profit_threshold"] = (
-                    payload.minActionProfitThreshold
-                )
             sections["battery"] = battery
 
         # --- home ---
-        if payload.currency is not None or payload.consumption is not None:
+        _HOME_MAP = {
+            "consumption": "default_hourly",
+            "currency": "currency",
+            "consumptionStrategy": "consumption_strategy",
+            "maxFuseCurrent": "max_fuse_current",
+            "voltage": "voltage",
+            "safetyMarginFactor": "safety_margin",
+            "phaseCount": "phase_count",
+            "powerMonitoringEnabled": "power_monitoring_enabled",
+        }
+        if any(getattr(payload, f) is not None for f in _HOME_MAP):
             home = bess_controller.settings_store.get_section("home")
-            if payload.consumption is not None:
-                home["default_hourly"] = payload.consumption
-            if payload.currency is not None:
-                home["currency"] = payload.currency
-            if payload.consumptionStrategy is not None:
-                home["consumption_strategy"] = payload.consumptionStrategy
-            if payload.maxFuseCurrent is not None:
-                home["max_fuse_current"] = payload.maxFuseCurrent
-            if payload.voltage is not None:
-                home["voltage"] = payload.voltage
-            if payload.safetyMarginFactor is not None:
-                home["safety_margin"] = payload.safetyMarginFactor
-            if payload.phaseCount is not None:
-                home["phase_count"] = payload.phaseCount
-            if payload.powerMonitoringEnabled is not None:
-                home["power_monitoring_enabled"] = payload.powerMonitoringEnabled
+            for field, key in _HOME_MAP.items():
+                if getattr(payload, field) is not None:
+                    home[key] = getattr(payload, field)
             sections["home"] = home
 
         # --- electricity price ---
-        if payload.markupRate is not None or payload.vatMultiplier is not None:
+        # area can also come from nordpoolArea (discovery) — handled separately.
+        _PRICE_MAP = {
+            "markupRate": "markup_rate",
+            "vatMultiplier": "vat_multiplier",
+            "additionalCosts": "additional_costs",
+            "taxReduction": "tax_reduction",
+        }
+        area = payload.area or payload.nordpoolArea
+        if any(getattr(payload, f) is not None for f in _PRICE_MAP) or area:
             elec = bess_controller.settings_store.get_section("electricity_price")
-            area = payload.area or payload.nordpoolArea
             if area:
                 elec["area"] = area
-            if payload.markupRate is not None:
-                elec["markup_rate"] = payload.markupRate
-            if payload.vatMultiplier is not None:
-                elec["vat_multiplier"] = payload.vatMultiplier
-            if payload.additionalCosts is not None:
-                elec["additional_costs"] = payload.additionalCosts
-            if payload.taxReduction is not None:
-                elec["tax_reduction"] = payload.taxReduction
+            for field, key in _PRICE_MAP.items():
+                if getattr(payload, field) is not None:
+                    elec[key] = getattr(payload, field)
             sections["electricity_price"] = elec
 
         # --- energy provider ---
@@ -3036,6 +3150,10 @@ async def setup_complete(payload: APISetupCompletePayload):
                 growatt_section = bess_controller.settings_store.get_section("growatt")
                 growatt_section["device_id"] = payload.growattDeviceId
                 sections["growatt"] = growatt_section
+
+        # --- demo mode ---
+        if payload.demoMode is not None:
+            sections["demo_mode"] = {"enabled": payload.demoMode}
 
         # Persist all sections atomically
         bess_controller.settings_store.save_all(sections)
@@ -3108,6 +3226,10 @@ async def setup_complete(payload: APISetupCompletePayload):
             bess_controller.system.update_settings(
                 {"energy_provider": sections["energy_provider"]}
             )
+
+        # Apply demo mode live
+        if payload.demoMode is not None:
+            bess_controller.system.set_demo_mode(payload.demoMode)
 
         # Backfill historical data in the background (may take many seconds for 20+
         # InfluxDB queries), then build the schedule with correct historical context.

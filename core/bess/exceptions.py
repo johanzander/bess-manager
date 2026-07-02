@@ -42,3 +42,16 @@ class HAStatisticsUnavailableError(BESSException):
 
     def __init__(self, message: str | None = None):
         super().__init__(message or "HA Statistics data is not available")
+
+
+class HistoricalDataUnavailableError(BESSException):
+    """Raised when InfluxDB historical energy-flow data is unavailable.
+
+    Historical reconstruction is an optional enhancement (it backfills actuals
+    for the daily/savings view); it is never required to run the optimization,
+    which uses live SOC plus the configured forecast. Callers should treat this
+    as a recoverable, surfaced condition rather than aborting the schedule.
+    """
+
+    def __init__(self, message: str | None = None):
+        super().__init__(message or "Historical energy-flow data is not available")

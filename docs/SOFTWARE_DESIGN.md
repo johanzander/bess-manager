@@ -313,7 +313,7 @@ Each optimization provides detailed economic reasoning:
 The system classifies battery action intent using the battery power action as the primary discriminator, with energy flows as secondary input. Classification is performed by `classify_strategic_intent(power, energy_data)` in `decision_intelligence.py`:
 
 - **Discharging** (power < −0.1 kW):
-  - **EXPORT_ARBITRAGE**: `battery_to_grid > 0.1 kWh`
+  - **BATTERY_EXPORT**: `battery_to_grid > 0.1 kWh`
   - **LOAD_SUPPORT**: otherwise (discharge serves home load)
 - **Charging** (power > 0.1 kW):
   - **GRID_CHARGING**: `grid_to_battery > solar_to_battery` (grid is dominant charge source)
@@ -321,21 +321,27 @@ The system classifies battery action intent using the battery power action as th
 - **Near-zero power** (fallthrough for passive flows):
   - **SOLAR_STORAGE**: `battery_charged > 0.01 kWh` (passive solar charging)
   - **LOAD_SUPPORT**: `battery_discharged > 0.01 kWh` (small residual discharge)
+  - **SOLAR_EXPORT**: `grid_exported > 0.01 kWh` and `solar_to_grid > 0.01 kWh` (solar surplus exporting, battery idle)
   - **IDLE**: no significant battery activity
 
 ### TOU Schedule Generation
 
 The InverterController converts action intents into hardware-specific schedules. Each intent maps to an inverter battery mode and control parameters (shown below for Growatt MIN; other inverters use the same intent mapping with different hardware commands):
 
-| Intent | Battery Mode | Grid Charge | Charge Rate | Discharge Rate |
-|---|---|---|---|---|
-| GRID_CHARGING | battery_first | On | 100% | 0% |
-| SOLAR_STORAGE | load_first | Off | 100% | 0% |
-| LOAD_SUPPORT | load_first | Off | 0% | 100% |
-| EXPORT_ARBITRAGE | grid_first | Off | 0% | 100% |
-| IDLE | load_first | Off | 100% | 0% |
+| Intent | Battery Mode | Grid Charge | Discharge Rate |
+|---|---|---|---|
+| GRID_CHARGING | battery_first | On | 0% |
+| SOLAR_STORAGE | load_first | Off | 0% |
+| LOAD_SUPPORT | load_first | Off | action-derived |
+| BATTERY_EXPORT | grid_first | Off | action-derived |
+| SOLAR_EXPORT | load_first | Off | 0% |
+| IDLE | load_first | Off | 0% |
 
 **Why SOLAR_STORAGE and IDLE share the same inverter settings**: Both use `load_first` because solar energy serving the home directly is always more valuable than routing it through the battery (which incurs cycle cost). If prices are cheap enough to justify prioritizing battery charging over home load, the DP algorithm uses `GRID_CHARGING` instead, which enables AC grid-to-battery charging via `battery_first` mode. Using `battery_first` without `grid_charge` would cause unnecessary grid imports by routing solar to the battery first while the grid serves the home.
+
+**Why SOLAR_EXPORT uses load_first (not grid_first)**: Solar exports naturally in `load_first` when generation exceeds consumption — no special inverter mode is needed. `SOLAR_EXPORT` exists as a distinct intent purely for UI display (distinguishing "solar actively exporting" from "nothing happening"). Using `grid_first` for battery-idle periods would lock the inverter in a mode that prevents the battery from supporting house load during temporary solar deficits.
+
+**Why BATTERY_EXPORT requires grid_first**: The inverter must route battery discharge toward the grid rather than the home. In `load_first`, discharge would serve home load first; only `grid_first` guarantees battery energy reaches the grid.
 
 **Schedule generation**:
 
@@ -383,6 +389,56 @@ The system supports multiple inverter platforms, each with a dedicated controlle
 The active platform is stored in `inverter.platform`. Switching platform at runtime calls `BatterySystemManager.switch_inverter_platform()`, which destroys the current `InverterController` and creates the correct subclass. No restart is required.
 
 `GrowattSolaxModbusController` subclasses `GrowattMinController` — the scheduling algorithm (9 TOU slots, differential updates, corruption recovery) is identical. Only the hardware I/O differs: `growatt_server` uses a single service call per slot, while `solax_modbus` uses 4 entity writes (`select.select_option`) plus a button press per slot.
+
+### Platform Capabilities
+
+Different inverter platforms support different hardware features. The class hierarchy handles **behavioral** differences (TOU scheduling vs. period lists vs. VPP commands — genuinely different algorithms). Capabilities handle the narrower question: what does code *outside* the controller need to know about the platform?
+
+Currently only one capability exists: `charge_rate_control`. It is declared as a `ClassVar[bool]` on `InverterController` (default `True`) and overridden to `False` by subclasses whose hardware lacks per-period charge/discharge rate registers (SPH, SolaX native). BSM checks this flag to decide whether to initialize the power monitor and whether `adjust_charging_power()` should run.
+
+```python
+# inverter_controller.py (base class)
+supports_charge_rate_control: ClassVar[bool] = True
+
+# growatt_sph_controller.py
+supports_charge_rate_control: ClassVar[bool] = False
+
+# solax_controller.py
+supports_charge_rate_control: ClassVar[bool] = False
+```
+
+| Capability | Description | MIN | SPH | SolaX Native | Modbus Growatt MIN |
+|---|---|---|---|---|---|
+| `supports_charge_rate_control` | Per-period charge/discharge rate register | Yes | **No** | **No** | Yes |
+
+SPH controls charge power globally via `write_ac_charge_times(charge_power=100%)`. SolaX native uses VPP active-power commands. Neither has a per-period register that the power monitor can read/write, so fuse protection cannot function.
+
+#### Frontend Gating
+
+The frontend disables UI features based on **sensor presence**, which correlates with platform capabilities: if the platform lacks charge rate control, the corresponding sensor entity won't exist after discovery. This avoids needing a dedicated capabilities API endpoint — the sensor config already carries the signal.
+
+- Fuse protection toggle: disabled when `battery_charging_power_rate` sensor is not configured
+- InfluxDB consumption strategy: disabled when `local_load_power` sensor is not configured
+- HA Statistics strategy: disabled when `lifetime_load_consumption` sensor is not configured
+
+Sensor-based gating is the right default. A dedicated capabilities API should only be introduced when the frontend needs to gate on something that doesn't map to sensor presence.
+
+#### Evolution Path
+
+The single `ClassVar[bool]` is sufficient while capabilities are few and boolean. If the number of externally-queried capabilities grows beyond 2–3 flags, consolidate into a frozen `PlatformCapabilities` dataclass with typed fields (booleans, integers, Literals). The decision criteria: add a capability only when code **outside** the controller hierarchy needs to branch on it. Internal differences (schedule model, max slots, power control method) belong in the subclass, not the capability surface.
+
+#### Adding a New Capability
+
+1. Add `supports_foo: ClassVar[bool] = True` to `InverterController`
+2. Override to `False` on subclasses that lack the feature
+3. Gate the feature in BSM / frontend as appropriate
+
+#### Adding a New Inverter Platform
+
+1. Create an `InverterController` subclass implementing the abstract methods
+2. Override any `supports_*` flags where the platform differs from defaults
+3. Add the platform string to `VALID_PLATFORMS` and the factory in `_create_inverter_controller()`
+4. Add entity suffix map entries to `ha_api_controller.py` for sensor discovery
 
 ### Auto-Detection and Integration Discovery
 

@@ -11,6 +11,17 @@
 A test that breaks when you swap two equivalent algorithms is a bad test.
 A test that passes after the swap — because the observable outcome is the same — is a good test.
 
+### Before writing the RED test for a bug fix
+
+Identify the **correct design** before writing any test. A test written against the wrong design locks in that design and makes the correct fix harder to reach.
+
+Ask before writing:
+- Should this method be called from this caller at all, or is there a better owner?
+- Is there an existing lifecycle path (`start()`, `__init__`) that already handles this? Why is it failing there?
+- Does the test assert a specific internal call chain — and if so, is that call chain the right architecture?
+
+If you can't answer these, stop and reason through the design first. A test that says "call `_foo()` from layer X" may be specifying bad architecture, not good behavior.
+
 ## What to Test
 
 ### Business behavior
@@ -18,7 +29,7 @@ A test that passes after the swap — because the observable outcome is the same
 ```python
 # Good: test what users care about
 def test_high_price_hour_triggers_discharge():
-    strategic_intents[20] = "EXPORT_ARBITRAGE"
+    strategic_intents[20] = "BATTERY_EXPORT"
     scheduler.apply_schedule(strategic_intents)
     assert scheduler.is_hour_configured_for_export(20)
 ```
@@ -175,10 +186,27 @@ python scripts/mock_ha/scenarios/from_debug_log.py <debug-log-file.md>
 After applying the fix and running mock HA, check `http://localhost:8123/mock/service_log`
 to see what TOU segments BESS sent to the inverter. Compare with expected behavior.
 
+## Plan-Faithfulness Simulator (`R == P`)
+
+When you change the optimizer, intent classification, or inverter control
+mapping, a passing plan-only test means nothing if the plan isn't faithfully
+executable by the hardware. The plan-faithfulness simulator
+(`core/bess/simulation/`) closes that loop and is **REQUIRED** verification for
+any such change.
+
+**Full reference: [`simulator.md`](simulator.md)** — the `R == P` invariant, the
+API (`derive_control_command` / `simulate` / `verify_plan_faithfulness`), the
+`run_scenario_realized` helper, the `xfail` policy, and what it has caught.
+
 ## Test Data
 
 JSON scenario fixtures live in `core/bess/tests/unit/data/`.
 Name them descriptively: `high_solar_export.json`, `ev_charging_overnight.json`.
+
+Scenarios may carry `expected_results` (plan economics) and `expected_behavior`
+(intent presence/absence, `savings_positive`). When the optimizer legitimately
+changes behavior, regenerate these **from the optimizer** (store `expected_results`
+at ≥4 decimals to avoid 1-dp rounding-boundary flips) rather than hand-editing.
 
 ## Red Flags
 

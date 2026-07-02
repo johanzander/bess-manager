@@ -7,7 +7,7 @@
 
 **Impact**: High | **Effort**: Medium | **Dependencies**: Growatt inverter control
 
-**Description**: Discharge power seems to always be 100% leading to higher export than intended during EXPORT_ARBITRAGE operations.
+**Description**: Discharge power seems to always be 100% leading to higher export than intended during BATTERY_EXPORT operations.
 
 ### **Charging power rate setting has no effect**
 
@@ -261,6 +261,16 @@ But at noon every day we get tomorrows schedule. We could use this information t
 
 **Files**: `core/bess/battery_system_manager.py` (`_get_ha_statistics_forecast`)
 
+### **Change default consumption_strategy from `sensor` to `ha_statistics`**
+
+**Impact**: Medium | **Effort**: Low | **Dependencies**: `settings.py`, `settings_store.py`
+
+**Description**: The default `consumption_strategy` is still `sensor` (the legacy grid-import proxy that ignores solar self-consumption and requires a hand-written template sensor). `ha_statistics` is more accurate and needs no manual sensor setup, so it should be the default. Depends on `ha_statistics` working on all platforms (see above) so the default doesn't silently fall back to `fixed`.
+
+**Fix**: Change `DEFAULT` / `consumption_strategy` default to `ha_statistics` in `core/bess/settings.py:183` and the settings-store defaults; update `docs/USER_GUIDE.md` (currently labels `sensor` as "(default)").
+
+**Files**: `core/bess/settings.py`, `backend/settings_store.py`, `docs/USER_GUIDE.md`
+
 ### **Suppress retry warnings for expected Nordpool "tomorrow not available" responses**
 
 **Impact**: Low | **Effort**: Low | **Dependencies**: `official_nordpool_source.py`, `ha_api_controller.py`
@@ -335,6 +345,38 @@ Report:
 - Distinguish core sensors (battery_input_energy, battery_output_energy, grid_import, grid_export, load_energy) from optional (ev_energy_meter, solar forecasts)
 - Surface missing optional sensors as WARNING, missing core sensors as ERROR
 - This will make "Historical Data Access" reflect actual data availability, not just connectivity
+
+---
+
+## 🔵 **KNOWN ISSUES** (From Code Review — 2026-06-24)
+
+### Event Loop Blocking in demo→live Transition
+
+**Impact**: Low (only at mode switch) | **Effort**: Medium
+
+**Description**: `reinitialize_tou_schedule()` is called directly inside the `async def patch_settings` handler, which blocks the event loop while performing up to 36 synchronous HTTP calls to Home Assistant (reading all 9 TOU slots × 4 entities each). Should be offloaded to a background thread or thread pool executor.
+
+**File**: `backend/api.py` — `patch_settings` / `setup_complete`, `core/bess/ha_api_controller.py` — `read_tou_segments_from_entities`
+
+---
+
+### Startup Race: Concurrent `_initialize_tou_schedule_from_inverter` Calls
+
+**Impact**: Low | **Effort**: Low
+
+**Description**: `BatterySystemManager.start()` calls `_initialize_tou_schedule_from_inverter()` at startup, and the same underlying path is triggered again by `reinitialize_tou_schedule()` when switching demo→live. There is no threading lock protecting against concurrent calls. If both happen in rapid succession (fast live switch during startup), both threads may issue overlapping hardware writes.
+
+**File**: `core/bess/battery_system_manager.py`
+
+---
+
+### Optional Components with ERROR Status Shown as Green in PreflightCheckDialog
+
+**Impact**: Low | **Effort**: Low
+
+**Description**: `PreflightCheckDialog.tsx` maps `required=false` checks unconditionally to `status: 'ok'` (green CheckCircle). An InfluxDB component in a genuine ERROR state (misconfigured, not just NOT_CONFIGURED) would appear green, masking the problem. Consider using a neutral/warning icon (e.g. `AlertCircle`) for optional components that are ERROR, reserving green for OK status only.
+
+**File**: `frontend/src/components/PreflightCheckDialog.tsx` line 34
 
 ---
 
@@ -584,6 +626,24 @@ Both are called sequentially from `run_setup_discovery()` in `api.py`. They serv
 
 **Files**: `core/bess/ha_api_controller.py` (`_parse_ha_metadata`, `discover_sensors_from_registry`), `backend/api.py` (`run_setup_discovery`)
 
+### Remove device_id discovery fallbacks and dead `device_sn` code
+
+**Impact**: Low | **Effort**: Low | **Dependencies**: `ha_api_controller.py`, `api.py`, `sensorDefinitions.ts`
+
+**Description**: Device ID discovery has two strategies: config_entry match (primary, always works) and identifiers/SN match (fallback). The fallback depends on `_extract_growatt_device_sn()`, which fragily parses SOC entity IDs to extract the serial number. Real HA devices always have `config_entries` on the device object, so the fallback is unnecessary.
+
+Additionally, `device_sn` is extracted, returned in the API response as `deviceSn`, and declared in the frontend `DiscoveryResult` type — but nothing in the frontend or backend ever reads it. It's dead code end to end.
+
+**What to remove**:
+- `_extract_growatt_device_sn()` method
+- Identifiers-based device_id fallback (strategy 2 in `_parse_ha_metadata`)
+- `device_sn` from discovery result dict and API response
+- `deviceSn` from frontend `DiscoveryResult` type
+
+**Files**: `core/bess/ha_api_controller.py`, `backend/api.py`, `frontend/src/components/settings/SensorConfigSection.tsx`
+
+---
+
 ### Other Technical Debt
 
 - Refactor all API endpoints to use dataclass-based serialization (with robust mapping for all field variants) for consistent, type-safe, and future-proof API responses. Ensure all details and fields are preserved as in the original dict-based implementation.
@@ -609,6 +669,9 @@ To remove:
 2. Update schedule display table to show 15-min periods (or keep hourly summary for readability)
 3. Update `get_strategic_intent_summary()` to work directly with periods
 4. Remove the hourly aggregation methods listed above
+
+**Re-run optimization on energy prediction method change**:
+When the user changes the consumption strategy (e.g. from `sensor` to `fixed`), the optimization should re-run immediately with the new prediction method rather than waiting for the next scheduled cycle. The prediction cache should be cleared and a fresh optimization triggered in the same request that saves the new strategy.
 
 **Sensor Collector InfluxDB Usage**:
 Based on the code analysis: The function `_get_hour_readings` in SensorCollector is called by `collect_energy_data(hour)`. This is not called every hour automatically by the system; it is called when the system wants to collect and record data for a specific hour. The actual historical data for the dashboard is served from the HistoricalDataStore, which is an in-memory store populated by calls to `record_energy_data` (which uses the output of `collect_energy_data`).

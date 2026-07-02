@@ -1,28 +1,38 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { DetailedSavingsAnalysis } from '../components/DetailedSavingsAnalysis';
 import { SavingsOverview } from '../components/SavingsOverview';
 import { useSettings } from '../hooks/useSettings';
 import { useUserPreferences } from '../hooks/useUserPreferences';
 import { Eye, Table2 } from 'lucide-react';
+import api from '../lib/api';
 
 const SavingsPage: React.FC = () => {
   const { batterySettings } = useSettings();
   const { dataResolution, setDataResolution } = useUserPreferences();
-  const [viewMode, setViewMode] = useState<'simple' | 'detailed'>('simple');
+  const [viewMode, setViewMode] = useState<'overview' | 'scenario'>('overview');
+  const [systemMode, setSystemMode] = useState<string>('normal');
 
-  // Create merged settings with defaults for the table
+  useEffect(() => {
+    api.get('/api/settings')
+      .then(({ data }) => {
+        const dm = data.demoMode || data.demo_mode || {};
+        setSystemMode(dm.enabled ? 'demo' : 'normal');
+      })
+      .catch(() => {});
+  }, []);
+
   const mergedSettings = {
     totalCapacity: batterySettings?.totalCapacity || 10,
     reservedCapacity: batterySettings?.reservedCapacity || 2,
     estimatedConsumption: batterySettings?.estimatedConsumption || 1.5,
-    maxChargePowerKw: batterySettings?.maxChargePowerKw || 6,      
-    maxDischargePowerKw: batterySettings?.maxDischargePowerKw || 6, 
-    cycleCostPerKwh: batterySettings?.cycleCostPerKwh || 10,       
+    maxChargePowerKw: batterySettings?.maxChargePowerKw || 6,
+    maxDischargePowerKw: batterySettings?.maxDischargePowerKw || 6,
+    cycleCostPerKwh: batterySettings?.cycleCostPerKwh || 10,
     chargingPowerRate: batterySettings?.chargingPowerRate || 90,
-    minSoc: batterySettings?.minSoc || 20,                        
-    maxSoc: batterySettings?.maxSoc || 95,                        
-    efficiencyCharge: batterySettings?.efficiencyCharge || 95,    
-    efficiencyDischarge: batterySettings?.efficiencyDischarge || 95, 
+    minSoc: batterySettings?.minSoc || 20,
+    maxSoc: batterySettings?.maxSoc || 95,
+    efficiencyCharge: batterySettings?.efficiencyCharge || 95,
+    efficiencyDischarge: batterySettings?.efficiencyDischarge || 95,
     useActualPrice: true,
     markupRate: 0.05,
     vatMultiplier: 1.25,
@@ -40,31 +50,36 @@ const SavingsPage: React.FC = () => {
             <p className="text-gray-600 dark:text-gray-300">
               Compare how your battery system optimizes energy costs and increases solar utilization.
             </p>
+            {systemMode === 'demo' && (
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                All savings are theoretical estimates based on optimization plans
+              </p>
+            )}
           </div>
-          
+
           {/* View Mode Switcher */}
           <div className="flex bg-gray-100 dark:bg-gray-700 rounded-lg p-1">
             <button
-              onClick={() => setViewMode('simple')}
+              onClick={() => setViewMode('overview')}
               className={`flex items-center px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                viewMode === 'simple'
+                viewMode === 'overview'
                   ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm'
                   : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
               }`}
             >
               <Eye className="h-4 w-4 mr-2" />
-              Standard View
+              Overview
             </button>
             <button
-              onClick={() => setViewMode('detailed')}
+              onClick={() => setViewMode('scenario')}
               className={`flex items-center px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                viewMode === 'detailed'
+                viewMode === 'scenario'
                   ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm'
                   : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
               }`}
             >
               <Table2 className="h-4 w-4 mr-2" />
-              Detailed View
+              Scenario Comparison
             </button>
           </div>
         </div>
@@ -96,8 +111,7 @@ const SavingsPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Render the appropriate table based on view mode */}
-      {viewMode === 'simple' ? (
+      {viewMode === 'overview' ? (
         <SavingsOverview resolution={dataResolution} />
       ) : (
         <DetailedSavingsAnalysis settings={mergedSettings} resolution={dataResolution} />

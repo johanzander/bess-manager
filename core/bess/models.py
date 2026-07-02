@@ -51,7 +51,7 @@ def infer_intent_from_flows(power: float, energy_data: "EnergyData") -> str:
             return "SOLAR_STORAGE"  # Solar surplus covers it → load_first
     elif power < -0.1:  # DISCHARGING
         if energy_data.battery_to_grid > 0.1:  # ANY export needs capability
-            return "EXPORT_ARBITRAGE"  # Enable export capability
+            return "BATTERY_EXPORT"  # Enable export capability
         else:
             return "LOAD_SUPPORT"  # Pure home support
     else:
@@ -280,6 +280,10 @@ class DecisionData:
         None  # kWh per period - planned battery energy action (+ charge, - discharge)
     )
     cost_basis: float = 0.0  # per kWh - cost basis of stored energy
+    shadow_price: float = (
+        0.0  # SEK per kWh of SoE - marginal opportunity value of stored energy
+        # (DP value-function gradient dV/dSoE). Used to gate SOLAR_EXPORT discharge.
+    )
 
     # Enhanced intelligence fields (optional)
     pattern_name: str = ""  # Name of detected pattern

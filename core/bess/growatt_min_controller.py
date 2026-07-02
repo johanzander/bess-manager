@@ -31,7 +31,7 @@ Strategic intents (from DP algorithm) are converted to battery modes:
 - GRID_CHARGING → battery_first (AC charging enabled)
 - SOLAR_STORAGE → load_first (solar serves home first, excess to battery)
 - LOAD_SUPPORT → load_first (discharging priority)
-- EXPORT_ARBITRAGE → grid_first (export priority)
+- BATTERY_EXPORT → grid_first (export priority)
 - IDLE → load_first (normal operation)
 
 ALGORITHM:
@@ -101,7 +101,7 @@ class GrowattMinController(InverterController):
       Flow: Battery → home. Solar → home. Grid covers remainder if needed.
       Battery does not charge — energy is being spent, not accumulated.
 
-    EXPORT_ARBITRAGE (grid_first, grid_charge=False, charge=0, discharge=100):
+    BATTERY_EXPORT (grid_first, grid_charge=False, charge=0, discharge=100):
       Purpose: Export stored energy to grid during high sell-price hours.
       Flow: Battery → grid (export). Solar → grid. Grid may still serve home.
 
@@ -1089,7 +1089,7 @@ class GrowattMinController(InverterController):
         )
         lines.append("* indicates current period")
         lines.append(
-            "Intent mapping: GRID_CHARGING→battery_first, EXPORT_ARBITRAGE→grid_first, SOLAR_STORAGE/IDLE/LOAD_SUPPORT→load_first"
+            "Intent mapping: GRID_CHARGING→battery_first, BATTERY_EXPORT→grid_first, SOLAR_STORAGE/IDLE/LOAD_SUPPORT→load_first"
         )
 
         logger.info("\n".join(lines))
@@ -1352,6 +1352,9 @@ class GrowattMinController(InverterController):
                 actual_max_soc,
             )
 
+    def initialize_hardware(self, controller) -> None:
+        self.sync_soc_limits(controller)
+
     def read_and_initialize_from_hardware(self, controller, current_hour: int) -> None:
         """Read current TOU schedule from inverter and initialize this controller.
 
@@ -1380,6 +1383,22 @@ class GrowattMinController(InverterController):
 
         return [health_check]
 
+    @staticmethod
+    def _parse_time_range(
+        start_time: str, end_time: str
+    ) -> tuple[int, int, int, int] | None:
+        """Parse "HH:MM" start/end strings into (sh, sm, eh, em) ints.
+
+        Returns None if the strings are malformed.
+        """
+        try:
+            sh_s, sm_s = start_time.split(":")
+            eh_s, em_s = end_time.split(":")
+            return int(sh_s), int(sm_s), int(eh_s), int(em_s)
+        except (ValueError, AttributeError):
+            logger.warning("Malformed TOU time range: %s-%s", start_time, end_time)
+            return None
+
     # ===== BEHAVIOR TESTING METHODS =====
     # These methods test what the system DOES, not HOW it does it
 
@@ -1399,23 +1418,19 @@ class GrowattMinController(InverterController):
             if not interval.get("enabled", False):
                 continue
 
-            # Parse interval time range
-            start_time = interval["start_time"]
-            end_time = interval["end_time"]
-            start_hour = int(start_time.split(":")[0])
-            start_minute = int(start_time.split(":")[1])
-            end_hour = int(end_time.split(":")[0])
-            end_minute = int(end_time.split(":")[1])
+            parsed = self._parse_time_range(
+                interval["start_time"], interval["end_time"]
+            )
+            if parsed is None:
+                continue
+            start_hour, start_minute, end_hour, end_minute = parsed
 
-            # Convert to minutes for precise comparison
             hour_start = hour * 60
             hour_end = (hour + 1) * 60 - 1
             interval_start = start_hour * 60 + start_minute
             interval_end = end_hour * 60 + end_minute
 
-            # Check if hour overlaps with this interval
             if hour_start <= interval_end and hour_end >= interval_start:
-                # Check if this interval uses grid_first mode (export)
                 return interval.get("batt_mode") == "grid_first"
 
         return False
@@ -1436,23 +1451,19 @@ class GrowattMinController(InverterController):
             if not interval.get("enabled", False):
                 continue
 
-            # Parse interval time range
-            start_time = interval["start_time"]
-            end_time = interval["end_time"]
-            start_hour = int(start_time.split(":")[0])
-            start_minute = int(start_time.split(":")[1])
-            end_hour = int(end_time.split(":")[0])
-            end_minute = int(end_time.split(":")[1])
+            parsed = self._parse_time_range(
+                interval["start_time"], interval["end_time"]
+            )
+            if parsed is None:
+                continue
+            start_hour, start_minute, end_hour, end_minute = parsed
 
-            # Convert to minutes for precise comparison
             hour_start = hour * 60
             hour_end = (hour + 1) * 60 - 1
             interval_start = start_hour * 60 + start_minute
             interval_end = end_hour * 60 + end_minute
 
-            # Check if hour overlaps with this interval
             if hour_start <= interval_end and hour_end >= interval_start:
-                # Check if this interval uses battery_first mode (charging priority)
                 return interval.get("batt_mode") == "battery_first"
 
         return False
@@ -1467,24 +1478,21 @@ class GrowattMinController(InverterController):
             str: Battery mode ('battery_first', 'grid_first', 'load_first')
         """
         if not self.tou_intervals:
-            return "load_first"  # Default mode
+            return "load_first"
 
         for interval in self.tou_intervals:
-            # Parse interval time range
-            start_time = interval["start_time"]
-            end_time = interval["end_time"]
-            start_hour = int(start_time.split(":")[0])
-            start_minute = int(start_time.split(":")[1])
-            end_hour = int(end_time.split(":")[0])
-            end_minute = int(end_time.split(":")[1])
+            parsed = self._parse_time_range(
+                interval["start_time"], interval["end_time"]
+            )
+            if parsed is None:
+                continue
+            start_hour, start_minute, end_hour, end_minute = parsed
 
-            # Convert to minutes for precise comparison
             hour_start = hour * 60
             hour_end = (hour + 1) * 60 - 1
             interval_start = start_hour * 60 + start_minute
             interval_end = end_hour * 60 + end_minute
 
-            # Check if hour overlaps with this interval
             if hour_start <= interval_end and hour_end >= interval_start:
                 return interval.get("batt_mode", "load_first")
 

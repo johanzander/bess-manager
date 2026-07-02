@@ -287,9 +287,9 @@ jobs:
         if: always() && env.RUN_E2E == 'true'
         run: |
           echo '{}' > ./e2e/ci-wizard-settings.json
-          SCENARIO=ci-wizard-octopus-sph BESS_SETTINGS=./e2e/ci-wizard-settings.json BESS_OPTIONS=./e2e/ci-wizard-options.json docker compose -f docker-compose.ci.yml up -d
+          SCENARIO=ci-wizard-growatt-sph-cloud-octopus BESS_SETTINGS=./e2e/ci-wizard-settings.json BESS_OPTIONS=./e2e/ci-wizard-options.json docker compose -f docker-compose.ci.yml up -d
           timeout 120 bash -c 'until curl -sf http://localhost:8080/api/setup/status > /dev/null 2>&1; do sleep 2; done'
-          cd e2e && SCENARIO=ci-wizard-octopus-sph npx playwright test --project=wizard
+          cd e2e && SCENARIO=ci-wizard-growatt-sph-cloud-octopus npx playwright test --project=wizard
       - name: "E2E: Stop wizard (Octopus + SPH)"
         if: always() && env.RUN_E2E == 'true'
         run: docker compose -f docker-compose.ci.yml down
@@ -367,3 +367,34 @@ jobs:
       - name: Stop environment
         if: always()
         run: docker compose -f docker-compose.prod-test.yml down
+
+  # ── Merge gate: single required check for branch protection ──────
+  # Branch protection cannot require the conditional jobs (test-algorithm,
+  # docker-build-test) by name: when their path filter skips them, the
+  # required status never reports and the PR is blocked forever. Instead
+  # this gate always runs, depends on every job, and fails only if one
+  # genuinely failed or was cancelled (skipped is allowed). Require ONLY
+  # "Merge gate" in branch protection — it transitively enforces the rest,
+  # including the slow Algorithm job whenever core/bess/ actually changed.
+  ci-gate:
+    name: Merge gate
+    if: always()
+    needs:
+      - changes
+      - test-fast
+      - test-algorithm
+      - test-frontend
+      - e2e
+      - quality
+      - docker-build-test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if any required job failed or was cancelled
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: |
+          echo "A required CI job failed or was cancelled — blocking merge."
+          echo "Job results: ${{ join(needs.*.result, ', ') }}"
+          exit 1
+
+      - name: Gate passed
+        run: echo "All required CI jobs passed (skipped jobs allowed)."

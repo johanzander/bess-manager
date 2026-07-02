@@ -211,6 +211,74 @@ class TestGatherOptimizationDataExtended:
         _, data = result
         assert len(data["full_consumption"]) == 96
 
+    def test_prepare_next_day_uses_tomorrow_solar_forecast(self):
+        """prepare_next_day must build the schedule from TOMORROW's solar forecast.
+
+        Regression: the next-day schedule was built with today's solar forecast,
+        which under-/over-forecasts tomorrow's production and distorts the plan.
+        """
+        controller = MockHomeAssistantController()
+        controller.solar_forecast = [1.0] * 96  # today
+        controller.solar_forecast_tomorrow = [2.0] * 96  # tomorrow
+        source = MockSource([0.5] * 96)
+        system = _make_system(source, controller)
+
+        result = system._gather_optimization_data(
+            period=0, current_soc=50.0, prepare_next_day=True, period_count=96
+        )
+
+        assert result is not None
+        _, data = result
+        assert len(data["full_solar"]) == 96
+        # Solar must come from the tomorrow forecast, not today's
+        assert all(v == 2.0 for v in data["full_solar"])
+
+    def test_prepare_next_day_starts_from_real_soc(self):
+        """Next-day plan must seed initial SOE from the real current SOC.
+
+        Regression: the prepare_next_day run (cron at 23:55, when current SOC is
+        known and ~= tomorrow's starting SOC) discarded current_soc and assumed
+        min SOC, so any night the battery wasn't actually empty the next-day plan
+        started from a wrong state.
+        """
+        controller = MockHomeAssistantController()
+        source = MockSource([0.5] * 96)
+        system = _make_system(source, controller)
+
+        result = system._gather_optimization_data(
+            period=0, current_soc=50.0, prepare_next_day=True, period_count=96
+        )
+
+        assert result is not None
+        _, data = result
+        expected_soe = 50.0 / 100.0 * system.battery_settings.total_capacity
+        # Must reflect real SOC, not min_soe_kwh
+        assert expected_soe != system.battery_settings.min_soe_kwh
+        assert data["combined_soe"][0] == expected_soe
+
+    def test_prepare_next_day_solar_falls_back_to_zeros_on_error(self):
+        """If tomorrow's solar forecast is unavailable, next-day uses zeros."""
+        from core.bess.exceptions import SystemConfigurationError
+
+        controller = MockHomeAssistantController()
+        controller.solar_forecast = [1.0] * 96
+        source = MockSource([0.5] * 96)
+        system = _make_system(source, controller)
+
+        with patch.object(
+            controller,
+            "get_solar_forecast_tomorrow",
+            side_effect=SystemConfigurationError("Not configured"),
+        ):
+            result = system._gather_optimization_data(
+                period=0, current_soc=50.0, prepare_next_day=True, period_count=96
+            )
+
+        assert result is not None
+        _, data = result
+        assert len(data["full_solar"]) == 96
+        assert all(v == 0.0 for v in data["full_solar"])
+
 
 class TestCalculateTerminalValue:
     """Test _calculate_terminal_value() method."""
@@ -252,6 +320,117 @@ class TestCalculateTerminalValue:
         )
 
         assert terminal_value == 0.0
+
+
+class TestPrepareNextDayTimestamps:
+    """Timestamps in the next-day schedule must land on tomorrow's date (issue #155)."""
+
+    def test_prepare_next_day_timestamps_are_tomorrows_date(self):
+        """Optimize with prepare_next_day=True and verify every period timestamp is tomorrow."""
+        controller = MockHomeAssistantController()
+        source = DSTAwareMockSource([0.5] * 100)
+        system = _make_system(source, controller)
+
+        tomorrow = time_utils.today() + timedelta(days=1)
+
+        prices, price_entries = system._get_price_data(prepare_next_day=True)
+        assert prices is not None
+        assert price_entries is not None
+
+        result_data = system._gather_optimization_data(
+            period=0, current_soc=50.0, prepare_next_day=True, period_count=len(prices)
+        )
+        assert result_data is not None
+        optimization_period, optimization_data = result_data
+
+        result = system._run_optimization(
+            optimization_period, optimization_data, prices, price_entries, True
+        )
+        assert result is not None
+
+        for pd in result.period_data:
+            assert pd.timestamp is not None
+            assert (
+                pd.timestamp.date() == tomorrow
+            ), f"Period {pd.period} has timestamp on {pd.timestamp.date()}, expected {tomorrow}"
+
+    def test_regular_hourly_timestamps_are_todays_date(self):
+        """Optimize without prepare_next_day and verify timestamps stay on today."""
+        controller = MockHomeAssistantController()
+        source = DSTAwareMockSource([0.5] * 100)
+        system = _make_system(source, controller)
+
+        today = time_utils.today()
+
+        prices, price_entries = system._get_price_data(prepare_next_day=False)
+        assert prices is not None
+        assert price_entries is not None
+
+        # Use today-only prices so all periods are within today
+        today_count = get_period_count(today)
+        prices_today = prices[:today_count]
+        entries_today = price_entries[:today_count]
+
+        result_data = system._gather_optimization_data(
+            period=0, current_soc=50.0, prepare_next_day=False, period_count=today_count
+        )
+        assert result_data is not None
+        optimization_period, optimization_data = result_data
+
+        result = system._run_optimization(
+            optimization_period, optimization_data, prices_today, entries_today, False
+        )
+        assert result is not None
+
+        for pd in result.period_data:
+            assert pd.timestamp is not None
+            assert (
+                pd.timestamp.date() == today
+            ), f"Period {pd.period} has timestamp on {pd.timestamp.date()}, expected {today}"
+
+
+class TestUnifiedSolarPath:
+    """Verify the unified solar-sourcing path eliminates duplication (issue #157)."""
+
+    def test_prepare_next_day_and_extended_horizon_share_solar_helper(self):
+        """Both prepare_next_day and extended horizon must use the same tomorrow-solar helper.
+
+        If the tomorrow solar forecast raises, both paths must fall back to zeros
+        through the shared _fetch_tomorrow_solar_forecast helper.
+        """
+        from core.bess.exceptions import SystemConfigurationError
+
+        controller = MockHomeAssistantController()
+        controller.solar_forecast = [1.0] * 96
+        controller.solar_forecast_tomorrow = [2.0] * 96
+        source = DSTAwareMockSource([0.5] * 100)
+        system = _make_system(source, controller)
+
+        with patch.object(
+            controller,
+            "get_solar_forecast_tomorrow",
+            side_effect=SystemConfigurationError("Forecast unavailable"),
+        ):
+            # prepare_next_day path: must fall back to zeros
+            result_nd = system._gather_optimization_data(
+                period=0, current_soc=50.0, prepare_next_day=True, period_count=96
+            )
+            # extended-horizon path: tomorrow extension must also fall back to zeros
+            result_ext = system._gather_optimization_data(
+                period=0, current_soc=50.0, prepare_next_day=False, period_count=192
+            )
+
+        assert result_nd is not None
+        assert result_ext is not None
+
+        _, data_nd = result_nd
+        _, data_ext = result_ext
+
+        # next-day: all solar is zeros (tomorrow not available)
+        assert all(v == 0.0 for v in data_nd["full_solar"])
+        # extended: today's solar (1.0) is intact, tomorrow extension is zeros
+        assert all(v == 1.0 for v in data_ext["full_solar"][:96])
+        assert all(v == 0.0 for v in data_ext["full_solar"][96:])
 
 
 class TestScheduleTruncation:

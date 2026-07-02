@@ -96,18 +96,18 @@
     "tax_reduction": 0.0
   },
   "expected_results": {
-    "base_cost": 127.94548,
-    "battery_solar_cost": 47.74,
-    "base_to_battery_solar_savings": 80.21,
-    "base_to_battery_solar_savings_pct": 62.69,
-    "total_charged": 48.0,
-    "total_discharged": 43.6
+    "base_cost": 127.9455,
+    "battery_solar_cost": 48.1466,
+    "base_to_battery_solar_savings": 79.7988,
+    "base_to_battery_solar_savings_pct": 62.3694,
+    "total_charged": 46.3712,
+    "total_discharged": 41.8000
   },
   "expected_behavior": {
     "description": "High price spread with solar: grid-charge at lows, export arbitrage at peaks",
     "intents_present": [
       "GRID_CHARGING",
-      "EXPORT_ARBITRAGE"
+      "BATTERY_EXPORT"
     ],
     "savings_positive": true,
     "constraints": {

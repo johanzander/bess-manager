@@ -191,12 +191,19 @@ test.describe('Setup Wizard', () => {
     await page.getByRole('button', { name: /Next: Home/i }).click();
     await expectActiveStep(page, 4);
 
-    // Step 4 → 5: Finish
-    await page.getByRole('button', { name: /Finish Setup/i }).click();
+    // Step 4 → 5: Control Mode
+    await page.getByRole('button', { name: /Next: Control Mode/i }).click();
+    await expectActiveStep(page, 5);
 
-    // Step 5: Done — saved to real backend
-    await expect(page.getByText('Setup Complete!')).toBeVisible();
+    // Config summary should show edited battery capacity
     await expect(page.getByText('15 kWh')).toBeVisible();
+
+    // Select Live Control and complete
+    await page.getByText('Live Control').click();
+    await page.getByRole('button', { name: /Complete Setup/i }).click();
+
+    // Step 6: Done — saved to real backend
+    await expect(page.getByText('Setup Complete!')).toBeVisible();
     await expect(page.getByRole('button', { name: /Go to Dashboard/i })).toBeVisible();
   });
 
@@ -236,12 +243,53 @@ test.describe('Setup Wizard', () => {
 
     // Step 3 → 4
     await page.getByRole('button', { name: /Next: Home/i }).click();
-    // Step 4 → 5
-    await page.getByRole('button', { name: /Finish Setup/i }).click();
+    // Step 4 → 5: Control Mode
+    await page.getByRole('button', { name: /Next: Control Mode/i }).click();
+    await expectActiveStep(page, 5);
 
-    // Verify edited values in summary
-    await expect(page.getByText('Setup Complete!')).toBeVisible();
+    // Verify edited values in summary on Control Mode step
     await expect(page.getByText('20 kWh')).toBeVisible();
     await expect(page.getByText('10% – 90%')).toBeVisible();
+
+    // Select Live Control and complete
+    await page.getByText('Live Control').click();
+    await page.getByRole('button', { name: /Complete Setup/i }).click();
+
+    await expect(page.getByText('Setup Complete!')).toBeVisible();
+  });
+
+  test('home step gates features by platform capabilities', async ({ page }) => {
+    // SPH lacks local_load_power; SolaX native has it (as house_load)
+    const platformsWithoutLocalLoad = ['growatt_server_sph'];
+    const platformsWithoutChargeRate = ['growatt_server_sph', 'solax_modbus_native'];
+    const expectInfluxDisabled = platformsWithoutLocalLoad.includes(expected.inverterPlatform);
+    const expectFuseDisabled = platformsWithoutChargeRate.includes(expected.inverterPlatform);
+
+    await page.goto('/setup');
+    await expectActiveStep(page, 1);
+
+    // Navigate to Home step (step 4)
+    await page.getByRole('button', { name: /Next: Electricity Pricing/i }).click();
+    await expectActiveStep(page, 2);
+    await page.getByRole('button', { name: /Next: Battery/i }).click();
+    await expectActiveStep(page, 3);
+    await page.getByRole('button', { name: /Next: Home/i }).click();
+    await expectActiveStep(page, 4);
+
+    // InfluxDB radio should be disabled on platforms without local_load_power
+    const influxRadio = radioByLabel(page, 'InfluxDB (requires InfluxDB integration)');
+    if (expectInfluxDisabled) {
+      await expect(influxRadio).toBeDisabled();
+    } else {
+      await expect(influxRadio).toBeEnabled();
+    }
+
+    // Fuse protection toggle should be disabled on platforms without charge rate control
+    const fuseToggle = page.getByRole('switch', { name: /Enable fuse protection/i });
+    if (expectFuseDisabled) {
+      await expect(fuseToggle).toBeDisabled();
+    } else {
+      await expect(fuseToggle).toBeEnabled();
+    }
   });
 });

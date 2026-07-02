@@ -66,33 +66,6 @@ class HomeAssistantAPIController:
             description = self._get_sensor_display_name(sensor_key)
             raise ValueError(f"No entity ID configured for {description}") from e
 
-    def _get_sensor_key(self, method_name: str) -> str | None:
-        """Get the sensor key for a method - compatibility method for existing code."""
-        return self.get_method_sensor_key(method_name)
-
-    @classmethod
-    def get_method_info(cls, method_name: str) -> dict[str, object] | None:
-        """Get method information including sensor key and display name."""
-        return cls.METHOD_SENSOR_MAP.get(method_name)
-
-    @classmethod
-    def get_method_name(cls, method_name: str) -> str | None:
-        """Get the display name for a method."""
-        method_info = cls.METHOD_SENSOR_MAP.get(method_name)
-        if method_info:
-            name = method_info["name"]
-            return str(name) if name else None
-        return None
-
-    @classmethod
-    def get_method_sensor_key(cls, method_name: str) -> str | None:
-        """Get the sensor key for a method."""
-        method_info = cls.METHOD_SENSOR_MAP.get(method_name)
-        if method_info:
-            sensor_key = method_info["sensor_key"]
-            return str(sensor_key) if sensor_key else None
-        return None
-
     def __init__(
         self,
         ha_url: str,
@@ -451,7 +424,6 @@ class HomeAssistantAPIController:
         "battery_discharge_power_limit": "battery_discharging_power_rate",
         "battery_charge_soc_limit": "battery_charge_stop_soc",
         "battery_discharge_soc_limit": "battery_discharge_stop_soc",
-        "battery_discharge_soc_limit_on_grid": "battery_discharge_stop_soc",
         "soc_limit_on_grid": "battery_discharge_stop_soc",
         # ── Lifetime energy sensors ──────────────────────────────────────
         "lifetime_total_all_batteries_charged": "lifetime_battery_charged",
@@ -844,27 +816,6 @@ class HomeAssistantAPIController:
             requests.RequestException: If all retries fail
 
         """
-        # List of operations that modify state (write operations)
-        write_operations = [
-            ("post", "/api/services/growatt_server/update_tlx_inverter_time_segment"),
-            ("post", "/api/services/switch/turn_on"),
-            ("post", "/api/services/switch/turn_off"),
-            ("post", "/api/services/number/set_value"),
-        ]
-
-        # Check if this is a write operation and we're in test mode
-        is_write_operation = (method.lower(), path) in write_operations
-
-        # Test mode only blocks write operations, never read operations
-        if self.test_mode and is_write_operation:
-            logger.info(
-                "[TEST MODE] Would call %s %s with args: %s",
-                method.upper(),
-                path,
-                kwargs.get("json", {}),
-            )
-            return None
-
         url = f"{self.base_url}{path}"
         logger.debug("Making API request to %s %s", method.upper(), url)
         for attempt in range(self.max_attempts):
@@ -1108,7 +1059,8 @@ class HomeAssistantAPIController:
             SystemConfigurationError: If sensor data is unavailable
         """
         raw_value = self._get_sensor_value("48h_avg_grid_import")
-        assert raw_value is not None, "48h_avg_grid_import sensor not available"
+        if raw_value is None:
+            raise SystemConfigurationError("48h_avg_grid_import sensor not available")
         avg_hourly_consumption = raw_value / 1000
 
         # Convert hourly average to quarterly by dividing by 4
@@ -1126,7 +1078,8 @@ class HomeAssistantAPIController:
             operation="Read HA config",
             category="config",
         )
-        assert response is not None, "HA /api/config returned no data"
+        if response is None:
+            raise SystemConfigurationError("HA /api/config returned no data")
         return response
 
     def get_battery_soc(self):
@@ -2145,14 +2098,16 @@ class HomeAssistantAPIController:
                 break
 
         # Find growatt device_id from device registry.
-        # Strategy 1: match by identifiers containing the device SN
-        #   (immutable, unaffected by user renames)
-        # Strategy 2: match by config_entry belonging to growatt_server
-        #   (works even without a detected SN)
-        # Strategy 3: match by device name equal to device SN
-        #   (legacy fallback)
+        # Primary: match by config_entry belonging to growatt_server
+        # Fallback: match by identifiers containing the device SN
         growatt_device_id: str | None = None
-        if device_sn:
+        if growatt_config_entry_id:
+            for device in devices_result:
+                if growatt_config_entry_id in device.get("config_entries", []):
+                    growatt_device_id = device["id"]
+                    break
+
+        if not growatt_device_id and device_sn:
             sn_upper = device_sn.upper()
             for device in devices_result:
                 for ident in device.get("identifiers", []):
@@ -2164,20 +2119,6 @@ class HomeAssistantAPIController:
                         growatt_device_id = device["id"]
                         break
                 if growatt_device_id:
-                    break
-
-        if not growatt_device_id and growatt_config_entry_id:
-            for device in devices_result:
-                if growatt_config_entry_id in device.get("config_entries", []):
-                    growatt_device_id = device["id"]
-                    break
-
-        if not growatt_device_id and device_sn:
-            sn_upper = device_sn.upper()
-            for device in devices_result:
-                name = str(device.get("name", "")).upper()
-                if name == sn_upper:
-                    growatt_device_id = device["id"]
                     break
 
         # Determine inverter type from entity registry unique_id prefixes.
@@ -2243,7 +2184,8 @@ class HomeAssistantAPIController:
             operation="Fetch all entity states",
             category="config",
         )
-        assert states is not None, "HA /api/states returned no data"
+        if states is None:
+            raise SystemConfigurationError("HA /api/states returned no data")
         return states
 
     # Maps Nordpool area code prefix → (currency, vat_multiplier).
@@ -2258,6 +2200,13 @@ class HomeAssistantAPIController:
         "LT": ("EUR", 1.21),
         "LV": ("EUR", 1.21),
         "GB": ("GBP", 1.0),
+        # Continental Nord Pool day-ahead areas (post-expansion):
+        "NL": ("EUR", 1.21),
+        "BE": ("EUR", 1.21),
+        "DE": ("EUR", 1.19),
+        "FR": ("EUR", 1.20),
+        "AT": ("EUR", 1.20),
+        "PL": ("PLN", 1.23),
     }
 
     def _hints_from_nordpool_area(self, area: str | None) -> dict:
@@ -2418,12 +2367,16 @@ class HomeAssistantAPIController:
         """Parse Nordpool area code from an entity_id.
 
         Examples:
-        - sensor.nordpool_kwh_se4_sek_2_10_025 -> SE4  (custom integration)
-        - sensor.nordpool_kwh_no1_nok_3_10_025 -> NO1  (custom integration)
-        - sensor.nord_pool_se3_current_price    -> SE3  (official HA)
+        - sensor.nordpool_kwh_se4_sek_2_10_025   -> SE4   (custom integration)
+        - sensor.nordpool_kwh_no1_nok_3_10_025   -> NO1   (custom integration)
+        - sensor.nord_pool_se3_current_price      -> SE3   (official HA)
+        - sensor.nordpool_kwh_nl_eur_2_10_025    -> NL    (HACS continental)
+        - sensor.nordpool_kwh_de_lu_eur_2_10_025 -> DE_LU (HACS DE-LU, HA slug)
+        - nordpool_kwh_de-lu_eur_2_10_025        -> DE-LU (device registry identifier)
         """
         match = re.search(
-            r"(?:^|_)(se[1-4]|no[1-5]|dk[12]|fi|ee|lt|lv)(?:_|$)", entity_id
+            r"(?:^|_)(se[1-4]|no[1-5]|dk[12]|fi|ee|lt|lv|nl|be|de(?:[-_]lu)?|fr|at|pl)(?:_|$)",
+            entity_id,
         )
         if match:
             return match.group(1).upper()

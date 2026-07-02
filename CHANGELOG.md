@@ -10,6 +10,132 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 - **ENTSO-e / Belpex price provider** — New `entsoe` energy provider reads day-ahead spot prices from the [ENTSO-e Transparency Platform](https://github.com/JaccoR/hass-entso-e) HA integration via the average-price sensor's `prices_today` / `prices_tomorrow` attributes. Supports both hourly (PT60M) and quarterly (PT15M) data, auto-detected by the setup wizard. Prices are treated as VAT-exclusive spot prices. Experimental — not yet real-world validated. (#126)
 
+## [9.8.1] - 2026-06-28
+
+### Changed
+
+- **Debug export now leads with a "Key Findings" section** — the debug bundle opens with an auto-generated digest that surfaces cross-run schedule disagreements (a slot scheduled differently across re-optimization runs) and a deduplicated rollup of today's log anomalies (network/connectivity, data gaps, restarts, runtime errors), grouped by category and source. Raw logs and the full schedule JSON are moved to the bottom, and the health check is captioned as a point-in-time snapshot so its "OK" is not mistaken for "nothing went wrong today." The in-app AI chat uses the same digest instead of the raw log dump. This makes root-causing optimizer decisions and runtime failures much faster. (#198)
+
+## [9.8.0] - 2026-06-27
+
+### Added
+
+- **Redesigned inverter schedule table** — The schedule table in the Inverter Status Dashboard is rebuilt as a single unified table with consistent column widths across today and tomorrow. Intent is now split into separate **Solar** (amber) and **Grid/Discharge** (green/orange) power columns so it's immediately clear which source is charging or discharging. A **Target SOC** column replaces the old SOC field and shows the end-of-period state of charge as a percentage. Pre-optimization (past) rows are greyed out to indicate they are no longer accurate. Inverter Configuration columns (Mode, Charge%, Discharge%, Grid Charge) are hidden for SolaX VPP (`solax_modbus_native`), which does not use TOU-based control. (#194)
+
+## [9.7.1] - 2026-06-27
+
+### Added
+
+- **Energy Flow expandable rows in Savings Overview** — Each row in the Savings Overview table now expands to show a detail panel with per-interval solar, battery, and grid flows. Grid Import and Grid Export cells also display compact sub-flow badges (gridToHome, gridToBattery, solarToGrid, batteryToGrid) to the right of the main value. (#188)
+- **Action-derived charge rate for GRID_CHARGING periods** — The inverter now receives a proportional charge rate command instead of always 100%. For small top-up periods (e.g. filling the last 0.17 kWh at 99.4% SOC) the rate is scaled from the DP algorithm's planned action, matching what was actually optimised. All other intents (SOLAR_STORAGE, IDLE, SOLAR_EXPORT) continue to charge at 100% to accept solar at full rate. (#191)
+
+## [9.7.0] - 2026-06-27
+
+### Fixed
+
+- **Battery locked in `grid_first` during solar-surplus idle periods** — When the optimizer planned no battery action (`power=0`) during periods with active solar export, the classifier returned `BATTERY_EXPORT` (formerly `EXPORT_ARBITRAGE`), which maps to `grid_first`. This blocked the battery from supporting house load during long daytime windows even when solar was insufficient. A new `SOLAR_EXPORT` intent is introduced for power≈0 + solar-to-grid periods; it maps to `load_first` so the battery can serve load while solar exports to the grid. (#187)
+- **Grid charging blocked during solar surplus even at cheaper prices** — The optimizer had a surplus gate that prevented any grid-to-battery charging whenever solar production exceeded home consumption. This caused the optimizer to skip cheap daytime hours in favour of more expensive hours when solar was active. The gate is removed: solar fills the battery first and grid tops up remaining capacity when prices make it worthwhile. On high-solar days this can increase arbitrage savings significantly (up to +12.5 SEK on scenario baselines). (#189)
+- **Schedule Overview discharge rate always showed 100%** — `get_detailed_period_groups()` read `discharge_rate` from the static `INTENT_TO_CONTROL` table (hardcoded 100 for `EXPORT_ARBITRAGE`/`LOAD_SUPPORT`). It now computes the rate from the actual per-period battery action in the schedule, so partial-discharge slots correctly reflect the planned power rather than always showing 100%. (#186)
+- **Battery Settings card showed bare "0 %" when EV charger was inhibiting discharge** — When the EV charger suppresses discharge to 0%, the Discharge Power Rate row now dims and shows an amber "Inhibited" badge instead of a bare percentage. (#186)
+
+### Changed
+
+- **`EXPORT_ARBITRAGE` intent renamed to `BATTERY_EXPORT`** — All references updated across backend, frontend, tests, and documentation. The semantic meaning is unchanged: battery actively discharging to the grid during peak-price windows. (#187)
+
+## [9.6.3] - 2026-06-25
+
+### Fixed
+
+- **Dashboard hourly view returned 500** — `_aggregate_quarterly_to_hourly` was never updated when `observedIntent` was added to `APIDashboardHourlyData` in 9.6.2, so every call to `GET /api/dashboard?resolution=hourly` crashed with a missing required argument.
+- **Inverter platform badge always showed "SolaX Modbus"** — `InverterStatusDashboard.tsx` compared `platform` against legacy short strings (`growatt_min`, `growatt_sph`, `solax`) that never matched the actual API values (`growatt_server_min`, `growatt_server_sph`, etc.), so every user fell through to the else branch and saw "SolaX Modbus". String matching is updated to the current API values. (#60)
+- **Growatt SPH TOU intervals rendered "Segment #undefined"** — `GrowattSphController.build_schedule` built `tou_intervals` without `segment_id` or `is_default` fields. The frontend template assumed both were always present, causing `isDefault` to render as falsy and the segment label to show as undefined. Both fields are now included. (#60)
+- **AI Analyst returned 404 errors on deprecated model IDs** — The AI Analyst feature used `claude-sonnet-4-20250514` and `claude-opus-4-20250514`, the Claude 4.0 launch IDs from May 2025. Anthropic deprecated these IDs (retirement date June 15 2026), causing 404 errors for all users. Updated to `claude-sonnet-4-6` and `claude-opus-4-8`. (#180)
+- **EnergyFlowCards and SystemStatusCard stayed frozen between refreshes** — Both components called `useDashboardData()` without a refresh interval, so they fetched only on mount. The main dashboard page polls every 60 s but the cards remained stale. Both now pass a 60 s interval, staying in sync with the dashboard cadence. (#179)
+- **Energy Prediction health check validates active consumption strategy** — The health check was hardcoded to validate `get_estimated_consumption` (the `sensor` strategy sensor) regardless of which strategy was configured, producing false-positive warnings for users running `fixed`, `influxdb_7d_avg`, or `ha_statistics`. The check now only validates `get_estimated_consumption` when `sensor` is the active strategy; solar forecast validation is unchanged. (#160)
+- **Nord Pool HACS continental areas mapped to Norway** — The entity-id regex in `_parse_nordpool_area_from_entity_id` only matched original Nord Pool members (SE/NO/DK/FI/EE/LT/LV). HACS users with continental area codes (NL, BE, DE, DE-LU, FR, AT, PL) got `None` from the parser; the `raw.upper()` fallback produced a long string starting with "NO", so `_hints_from_nordpool_area` read the "NO" prefix and returned Norwegian krone instead of the correct currency. The regex is extended to cover all continental areas. (#171)
+- **Nord Pool Currency field always read-only in UI** — Both Nord Pool provider variants rendered the Currency input with `readOnly: true` unconditionally, preventing users from correcting a wrong auto-detected currency. The field is now editable when area or currency detection has not produced a value. (#171)
+- **Next-day schedule timestamps stamped with today's date** — The `prepare_next_day` path set `optimization_period=0` and then called `period_index_to_timestamp(0..95)`, which anchors index 0 to today. Period timestamps in the next-day schedule were therefore labeled `YYYY-MM-DD (today) HH:MM` instead of `YYYY-MM-DD (tomorrow) HH:MM`. `_add_timestamps_to_period_data` now accepts a `next_day` flag that offsets the period index by today's period count before timestamp conversion, so all periods resolve to tomorrow's date. (#155)
+
+### Refactored
+
+- **Unified `prepare_next_day` and extended-horizon data paths** — `_gather_optimization_data` previously had two independent branches that each fetched tomorrow's solar forecast and the consumption forecast separately. Any bug had to be fixed twice. The two branches now share a single fetch stage (`_fetch_tomorrow_solar_forecast` helper + cache-first consumption fetch) before diverging only for array-building. The 23:55 next-day publish and the rolling hourly run behave identically to before; only the duplication is removed. (#157)
+
+## [9.6.2] - 2026-06-24
+
+### Fixed
+
+- **SolaxModbus (GEN4): Load First defeated by EMS discharge register** — `apply_period()` was writing `discharge_rate=0` to the EMS register for all modes including `load_first`, overriding the inverter's own Load First logic and causing grid imports during periods that should rely on the battery. The EMS discharge register is now only written for `battery_first` and `grid_first` modes. (#166)
+- **SolaxModbus: optional preflight checks blocked "Enable Live Control"** — The `PreflightCheckDialog` treated `NOT_CONFIGURED` optional components (e.g. Solcast) as errors, preventing users from enabling live control when non-required integrations were absent. Optional checks are now correctly non-blocking. (#169)
+- **SolaxModbus: demo→live transition left inverter in bad state** — Switching from demo mode to live control skipped hardware initialization: TOU slots 2–9 from any prior 9-segment configuration were never cleaned up and SOC limits were never written, so the single-segment SolaxModbus controller could not start cleanly. Hardware initialization (disable legacy TOU slots, sync SOC limits) is now always performed on demo→live transition. (#169)
+- **Nordpool continental areas locked to SEK currency** — The discovery hint map only covered original Nord Pool members (SE/NO/DK/FI/EE/LT/LV/GB). For post-expansion areas (NL, BE, DE-LU, FR, AT, PL) no currency hint was returned, the SEK bootstrap default from `config.yaml` stayed in place, and the Settings UI locked the Currency field to SEK. Continental day-ahead areas are now mapped with their correct currency and VAT rate. (#163)
+- **SOLAR_STORAGE shown overnight when battery starts below minimum SOE** — When initial SOE was below `min_soe_kwh`, `_state_transition` clamped the next SOE up to the floor during IDLE periods. `_idle_battery_flows` was interpreting that clamp delta as passive solar charging, causing every overnight IDLE period to display as SOLAR_STORAGE even at 2 am with no solar production. Fixed by returning zero flows when `soe < min_soe_kwh`. (#161)
+
+## [9.6.1] - 2026-06-21
+
+### Fixed
+
+- **LOAD_SUPPORT discharged at full rate instead of the planned pace** — The DP optimizer models partial discharge for LOAD_SUPPORT (e.g. discharge 0.4 kW and let the grid cover the rest, reserving the battery for a later expensive peak), but the inverter control layer always wrote `discharge_rate=100%`, so the battery dumped at full power and drained early. LOAD_SUPPORT now scales the inverter discharge rate from the planned battery action, mirroring EXPORT_ARBITRAGE. (Issue #147)
+- **Consumption strategy change silently dropped in setup wizard** — `POST /api/setup/complete` only entered the home settings block when `currency` or `consumption` were non-null; changing `consumptionStrategy`, `maxFuseCurrent`, `voltage`, or other home-only fields without also touching those two fields caused the change to be silently lost. Same flaw applied to the battery block (guarded by `totalCapacity` only) and electricity-price block. All three blocks now use an `any(f is not None …)` guard covering every field in the section.
+- **Consumption strategy change takes effect immediately** — Updating `consumption_strategy` via `update_settings()` now clears the stale prediction cache so the next optimization cycle fetches predictions under the new strategy, rather than waiting until the nightly `prepare_next_day` refresh at 23:55.
+- **Next-day schedule used today's solar forecast** — The `prepare_next_day` optimization built tomorrow's battery schedule from *today's* Solcast forecast instead of tomorrow's, so the plan written to the inverter could be optimized against substantially wrong solar production (e.g. 28.5 kWh today vs 64.8 kWh forecast for the next day). It now uses `get_solar_forecast_tomorrow()`, mirroring the extended-horizon path, with the same zeros fallback when tomorrow's forecast is unavailable.
+- **Next-day schedule ignored the real battery SOC** — The `prepare_next_day` run (cron at 23:55, when current SOC is known and ≈ tomorrow's starting SOC) discarded the actual SOC and assumed minimum SOC. On any night the battery wasn't actually empty, tomorrow's plan started from a wrong state and under-used stored energy. It now seeds the next-day plan from the real current SOC, matching the regular optimization path.
+
+## [9.6.0] - 2026-06-20
+
+### Fixed
+
+- **Solar-export savings over-crediting** — On sunny days the optimizer booked revenue for exporting surplus solar that the inverter actually stores in the battery (a `load_first` "store" period stores *all* surplus), inflating reported savings by roughly 8–16%. Surplus handling is now modelled as a binary per-period choice — store all surplus (no phantom export) or export all surplus — and export is credited per disposition, so reported savings match what the hardware can actually deliver. Verified end-to-end by a new closed-loop plan-faithfulness simulator that confirms planned and realized economics agree to the öre. This also removes the morning charge/export "dithering" some users observed.
+- **Production-safety hardening** — Guard against a `ZeroDivisionError` when battery `total_capacity` is 0; replace `assert`-based validation of production data with explicit `SystemConfigurationError` (so the checks survive Python's `-O` optimization flag); and harden inverter TOU time-range parsing against malformed values.
+### Changed
+
+- **Battery surplus handling is now a binary store/export decision per period** — Schedules may differ from previous versions: instead of partial solar-to-battery splits, each period either stores all surplus solar or exports all of it. This is forecast-robust by construction — bonus solar beyond the forecast is always captured or exported, never wasted.
+
+### Improved
+
+- **Installation guide — consumption forecast (Step 3)** — Reworked into a comparison of all four consumption strategies with a clear recommendation to use `ha_statistics` (most accurate, no manual sensor setup), including the Home Assistant Energy-dashboard requirement and the ~7-day warm-up behaviour.
+
+## [9.5.0] - 2026-06-15
+
+### Added
+
+- **Demo Mode** — New users can observe how BESS Manager would optimize their battery without actually controlling the inverter. The setup wizard now offers a "Demo Mode" vs "Live Control" choice as the final step. While in demo mode, the optimizer runs normally but all inverter writes are blocked; savings are labeled as theoretical estimates. A persistent banner shows the current mode with a "Go Live" button that triggers a pre-flight health check before enabling live control. Demo mode is also available as a toggle in the new **System** tab on the Settings page.
+- **Settings page consolidation** — The Settings page now has five tabs: Integrations, Electricity Pricing, Battery, Home, and System. The old Health tab has been replaced by System, which combines demo mode toggle, AI analyst settings, and diagnostics (health checks + debug export).
+
+### Fixed
+
+- **Dockerfile and package script now auto-include new backend modules** — Previously each Python file had to be listed by name in both `Dockerfile` and `package-addon.sh`; new files (like `ai_chat.py`) were silently excluded from builds, causing `ModuleNotFoundError` at runtime. Both now use a `*.py` glob.
+- **Removed legacy `config.dev.yaml`** — `bess_manager/config.yaml` is the single source of truth for version and add-on metadata.
+
+### Improved
+
+- **Installation instructions** — Expanded Step 1 in README and Installation Guide with explicit navigation steps for first-time Home Assistant users.
+
+## [9.4.3] - 2026-06-15
+
+### Fixed
+
+- **Single changelog source of truth** — `bess_manager/CHANGELOG.md` is now a symlink to the repository-root `CHANGELOG.md` instead of a hand-maintained copy. The duplicate had drifted (it stopped at 9.4.0), so the Home Assistant add-on Changelog tab was showing outdated release notes; it now always reflects the canonical changelog.
+
+## [9.4.2] - 2026-06-15
+
+### Fixed
+
+- **Removed duplicate "Runtime Errors" alert for unavailable InfluxDB history** — When InfluxDB historical data is missing, the dedicated "Incomplete Historical Data" dashboard banner already informs the user. v9.4.1 additionally recorded the same condition in the runtime-failure tracker, so it also appeared in the "Runtime Errors" panel — alarming, since that panel is meant for unexpected, actionable failures and the condition is benign (optimization continues normally). The redundant runtime-error alert is no longer raised; the friendly banner remains the single source of truth.
+
+## [9.4.1] - 2026-06-14
+
+### Fixed
+
+- **Optimization no longer freezes when InfluxDB history is unavailable** — Historical reconstruction from InfluxDB is an optional enhancement (it backfills the actuals/savings view) and is never required to run the optimization, which uses live battery SOC plus the configured forecast. Previously a broken InfluxDB connection (e.g. after a Home Assistant update) raised a fatal error that aborted every re-optimization, silently freezing the battery on the midnight forecast for the whole day. The missing-history condition is now surfaced as a runtime failure banner and the hourly optimization continues. Note: the `influxdb_7d_avg` consumption strategy still genuinely requires InfluxDB.
+
+## [9.4.0] - 2026-06-12
+
+### Fixed
+
+- **SPH platform capability gating** — UI and backend now disable features unsupported by SPH inverters (grid charge toggle, discharge power rate, fuse protection). Prevents "No entity ID configured for Grid Charge Enabled" errors. (#60)
+- **SPH sensor definitions and device discovery** — Fixed sensor key mappings and discovery logic for SPH inverters. UI no longer incorrectly shows "solax" for SPH configurations. (#60)
+- **Dead lifetime sensors removed** — Removed non-existent lifetime sensor keys from all platform UI definitions.
+
 ## [9.3.0] - 2026-06-12
 
 ### Changed

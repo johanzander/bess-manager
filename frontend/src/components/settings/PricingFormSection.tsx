@@ -57,7 +57,9 @@ export function PricingFormSection({ form, onChange }: Props) {
               v => onChange({ ...form, nordpoolConfigEntryId: v }), 'Auto-detected…')}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {txtInput('Price Area', form.area, () => {}, 'Auto-detected…', { readOnly: true })}
-              {txtInput('Currency', form.currency, () => {}, 'Auto-detected…', { readOnly: true })}
+              {txtInput('Currency', form.currency,
+                v => onChange({ ...form, currency: v }), 'Auto-detected…',
+                { readOnly: !!(form.area && form.area.length <= 5 && form.currency) })}
             </div>
           </div>
         )}
@@ -68,7 +70,9 @@ export function PricingFormSection({ form, onChange }: Props) {
               v => onChange({ ...form, nordpoolEntity: v }), 'sensor.nordpool_…')}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {txtInput('Price Area', form.area, () => {}, 'Auto-detected…', { readOnly: true })}
-              {txtInput('Currency', form.currency, () => {}, 'Auto-detected…', { readOnly: true })}
+              {txtInput('Currency', form.currency,
+                v => onChange({ ...form, currency: v }), 'Auto-detected…',
+                { readOnly: !!(form.area && form.area.length <= 5 && form.currency) })}
             </div>
           </div>
         )}

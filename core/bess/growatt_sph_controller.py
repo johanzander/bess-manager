@@ -8,7 +8,7 @@ SPH Intent Mapping:
 - GRID_CHARGING   → charge period (mains_enabled=True)
 - SOLAR_STORAGE   → idle (SPH charges from solar by default; no explicit period needed)
 - LOAD_SUPPORT    → discharge period
-- EXPORT_ARBITRAGE → discharge period
+- BATTERY_EXPORT → discharge period
 - IDLE            → nothing (inverter default)
 """
 
@@ -34,6 +34,8 @@ class GrowattSphController(InverterController):
     BatterySystemManager can use either interchangeably via InverterController.
     """
 
+    supports_charge_rate_control: ClassVar[bool] = False
+
     MAX_CHARGE_PERIODS = 3
     MAX_DISCHARGE_PERIODS = 3
 
@@ -43,7 +45,7 @@ class GrowattSphController(InverterController):
 
     # Intents that produce a discharge period on SPH
     DISCHARGE_INTENTS: ClassVar[frozenset[str]] = frozenset(
-        {"LOAD_SUPPORT", "EXPORT_ARBITRAGE"}
+        {"LOAD_SUPPORT", "BATTERY_EXPORT"}
     )
 
     def __init__(self, battery_settings: BatterySettings) -> None:
@@ -217,6 +219,7 @@ class GrowattSphController(InverterController):
                     "end_time": p["end_time"],
                     "batt_mode": "battery_first",
                     "enabled": True,
+                    "is_default": False,
                     "strategic_intent": "GRID_CHARGING",
                 }
             )
@@ -227,11 +230,14 @@ class GrowattSphController(InverterController):
                     "end_time": p["end_time"],
                     "batt_mode": "grid_first",
                     "enabled": True,
-                    "strategic_intent": "LOAD_SUPPORT/EXPORT_ARBITRAGE",
+                    "is_default": False,
+                    "strategic_intent": "LOAD_SUPPORT/BATTERY_EXPORT",
                 }
             )
-        # Sort by start time for display
+        # Sort by start time for display, then assign 1-based segment IDs
         self.tou_intervals.sort(key=lambda x: x["start_time"])
+        for idx, interval in enumerate(self.tou_intervals):
+            interval["segment_id"] = idx + 1
 
         logger.info(
             "SPH periods built: %d charge period(s), %d discharge period(s)",
@@ -435,6 +441,9 @@ class GrowattSphController(InverterController):
                 **self._build_discharge_params(),
             )
             logger.info("Set discharge_stop_soc to %d%%", configured_min_soc)
+
+    def initialize_hardware(self, controller) -> None:
+        self.sync_soc_limits(controller)
 
     def read_and_initialize_from_hardware(self, controller, current_hour: int) -> None:
         """Read current SPH schedule from inverter and initialize this controller.

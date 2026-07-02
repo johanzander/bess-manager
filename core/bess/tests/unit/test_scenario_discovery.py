@@ -98,6 +98,8 @@ _INTEGRATION_KEYS = (
     "nordpool_custom_area",
     "nordpool_config_entry_id",
     "octopus_found",
+    "entsoe_found",
+    "entsoe_entity",
     "detected_inverter_platforms",
     "currency",
     "vat_multiplier",

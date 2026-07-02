@@ -13,8 +13,10 @@ export interface WizardExpectation {
   inverterPlatform: 'growatt_server_min' | 'growatt_server_sph' | 'solax_modbus_native' | 'solax_modbus_growatt_min' | 'solax_modbus_growatt_sph';
   nordpoolFound: boolean;
   octopusFound: boolean;
+  /** ENTSO-e Transparency Platform (e.g. Belpex). Optional — defaults to false. */
+  entsoeFound?: boolean;
   /** Which provider radio should be auto-selected after discovery */
-  autoSelectedProvider: 'nordpool_official' | 'nordpool_hacs' | 'octopus';
+  autoSelectedProvider: 'nordpool_official' | 'nordpool_hacs' | 'octopus' | 'entsoe';
 
   // Optional integrations (true = found/auto-filled)
   phaseCount: number | null; // null = no phase sensors
@@ -58,6 +60,20 @@ export const EXPECTATIONS: Record<string, WizardExpectation> = {
     nordpoolFound: false,
     octopusFound: true,
     autoSelectedProvider: 'octopus',
+    phaseCount: null,
+    solcastFound: false,
+    consumptionForecastFound: false,
+    dischargeInhibitFound: false,
+    weatherFound: false,
+  },
+  'ci-wizard-entsoe': {
+    growattFound: true,
+    solaxFound: false,
+    inverterPlatform: 'growatt_server_min',
+    nordpoolFound: false,
+    octopusFound: false,
+    entsoeFound: true,
+    autoSelectedProvider: 'entsoe',
     phaseCount: null,
     solcastFound: false,
     consumptionForecastFound: false,

@@ -11,19 +11,21 @@ PRICES_BUY = [1.0]
 PRICES_SELL = [0.8]
 
 
-def test_idle_exports_surplus_and_holds_battery():
-    """TARGET: idle (power=0) is the EXPORT disposition — surplus is exported,
-    battery holds (does NOT passively store)."""
+def test_idle_passively_charges_from_solar_surplus():
+    """idle (power=0) mirrors load_first hardware: surplus charges the battery
+    passively up to max_charge_rate/room; only overflow exports to grid."""
     bs = make_battery_settings(max_charge_power_kw=10.0)
+    # surplus = 1.5 - 0.1 = 1.4 kWh; rate_throughput = 10*0.25 = 2.5 kWh; all fits
     next_soe = _state_transition(
         5.0, 0.0, bs, DT, solar_production=1.5, home_consumption=0.1
     )
-    assert next_soe == 5.0  # battery holds; surplus exported, not stored
+    expected_stored = 1.4 * bs.efficiency_charge  # 1.4 * 0.97 = 1.358
+    assert round(next_soe - 5.0, 4) == round(expected_stored, 4)
 
     reward, _ = _compute_reward(
         power=0.0,
         soe=5.0,
-        next_soe=5.0,
+        next_soe=next_soe,
         period=0,
         home_consumption=0.1,
         battery_settings=bs,
@@ -33,20 +35,57 @@ def test_idle_exports_surplus_and_holds_battery():
         solar_production=1.5,
         cost_basis=bs.cycle_cost_per_kwh,
     )
-    # surplus 1.4 kWh exported @ 0.8 → reward = +1.4*0.8 = 1.12 (cost = -1.12)
+    # all surplus stored, grid_exported = 0; cost = battery_wear_cost only
+    battery_wear = expected_stored * bs.cycle_cost_per_kwh
+    assert round(reward, 4) == round(-battery_wear, 4)
+
+
+def test_idle_exports_when_battery_full():
+    """idle (power=0) with a full battery: no passive charging possible,
+    all surplus exports to grid — SOLAR_EXPORT semantics."""
+    bs = make_battery_settings(max_charge_power_kw=10.0)
+    full_soe = bs.max_soe_kwh  # 20.0 kWh
+    next_soe = _state_transition(
+        full_soe, 0.0, bs, DT, solar_production=1.5, home_consumption=0.1
+    )
+    assert next_soe == full_soe  # battery full, cannot charge
+
+    reward, _ = _compute_reward(
+        power=0.0,
+        soe=full_soe,
+        next_soe=full_soe,
+        period=0,
+        home_consumption=0.1,
+        battery_settings=bs,
+        dt=DT,
+        buy_price=PRICES_BUY,
+        sell_price=PRICES_SELL,
+        solar_production=1.5,
+        cost_basis=bs.cycle_cost_per_kwh,
+    )
+    # surplus 1.4 kWh exported at sell_price → reward = +1.4*0.8
     assert round(reward, 4) == round(1.4 * 0.8, 4)
 
 
-def test_charge_stores_all_surplus_not_a_fraction():
-    """TARGET: a charge action is the STORE disposition — it stores ALL surplus
-    (up to rate/room), exporting only genuine excess, regardless of the action's
-    magnitude. So a tiny charge action still stores all surplus."""
+def test_store_action_charges_at_max_rate_solar_plus_grid():
+    """TARGET: a STORE action charges at MAX rate — solar fills first, grid tops up.
+
+    Renamed from test_charge_stores_all_surplus_not_a_fraction after the 2026-06-27
+    fix that allows simultaneous solar+grid charging during surplus hours.
+
+    Scenario: solar=1.5, home=0.1 → surplus=1.4 kWh. rate_throughput=2.5 kWh.
+    Solar covers 1.4 kWh; grid covers the remaining 1.1 kWh.
+    power magnitude (0.4) is still ignored — any positive power = STORE at max rate.
+    """
     bs = make_battery_settings(max_charge_power_kw=10.0, efficiency_charge=1.0)
-    # surplus 1.4 kWh, rate_throughput = 2.5 kWh, plenty of room -> store all 1.4
     next_soe = _state_transition(
         5.0, 0.4, bs, DT, solar_production=1.5, home_consumption=0.1
     )
-    assert round(next_soe - 5.0, 4) == 1.4  # stored all surplus, not 0.4*0.25
+    # Solar covers 1.4 kWh, grid covers 1.1 kWh → total = 2.5 kWh stored (rate-limited)
+    assert round(next_soe - 5.0, 4) == 2.5, (
+        f"Expected STORE at max rate (2.5 kWh = solar 1.4 + grid 1.1) "
+        f"but got {next_soe - 5.0:.4f} kWh"
+    )
 
     reward, _ = _compute_reward(
         power=0.4,
@@ -61,9 +100,12 @@ def test_charge_stores_all_surplus_not_a_fraction():
         solar_production=1.5,
         cost_basis=bs.cycle_cost_per_kwh,
     )
-    # surplus all stored, 0 exported; only wear cost = 1.4 * cycle_cost
-    # reward = -(0 import - 0 export + 1.4*cycle_cost)
-    assert round(reward, 4) == round(-(1.4 * bs.cycle_cost_per_kwh), 4)
+    # grid_to_battery=1.1 kWh at buy_price=1.0; wear=2.5*cycle_cost; export=0
+    # total_cost = 1.1*1.0 + 2.5*cycle_cost_per_kwh
+    expected_cost = 1.1 * PRICES_BUY[0] + 2.5 * bs.cycle_cost_per_kwh
+    assert round(reward, 4) == round(
+        -expected_cost, 4
+    ), f"Expected reward={-expected_cost:.4f} but got {reward:.4f}"
 
 
 def test_build_period_data_store_disposition_flows():
@@ -87,19 +129,27 @@ def test_build_period_data_store_disposition_flows():
         new_cost_basis=bs.cycle_cost_per_kwh,
         currency="SEK",
     )
-    assert round(pd.energy.battery_charged, 4) == 1.4  # stored all surplus
-    assert round(pd.energy.grid_exported, 4) == 0.0  # nothing exported
+    # After fix: solar covers 1.4 kWh, grid covers 1.1 kWh → max rate 2.5 kWh stored
+    assert (
+        round(pd.energy.battery_charged, 4) == 2.5
+    ), f"Expected battery_charged=2.5 (solar 1.4 + grid 1.1) but got {pd.energy.battery_charged:.4f}"
+    assert (
+        round(pd.energy.grid_exported, 4) == 0.0
+    ), f"Expected grid_exported=0 but got {pd.energy.grid_exported:.4f}"
+    assert (
+        round(pd.energy.grid_imported, 4) == 1.1
+    ), f"Expected grid_imported=1.1 (grid top-up) but got {pd.energy.grid_imported:.4f}"
 
 
 # ---------------------------------------------------------------------------
-# Task 4a: EXPORT disposition classifies as EXPORT_ARBITRAGE (not IDLE)
+# Task 4a: EXPORT disposition classifies as SOLAR_EXPORT (not BATTERY_EXPORT or IDLE)
 # ---------------------------------------------------------------------------
 
 
-def test_idle_with_surplus_classifies_as_export_arbitrage():
+def test_idle_with_solar_surplus_classifies_as_solar_export():
     from core.bess.decision_intelligence import classify_strategic_intent
 
-    # power 0, surplus exported, battery holds
+    # power 0, battery full (no passive charging), surplus exported → SOLAR_EXPORT
     ed = EnergyData(
         solar_production=1.5,
         home_consumption=0.1,
@@ -110,7 +160,7 @@ def test_idle_with_surplus_classifies_as_export_arbitrage():
         battery_soe_start=5.0,
         battery_soe_end=5.0,
     )
-    assert classify_strategic_intent(0.0, ed) == "EXPORT_ARBITRAGE"
+    assert classify_strategic_intent(0.0, ed) == "SOLAR_EXPORT"
     ed2 = EnergyData(
         solar_production=0.1,
         home_consumption=0.1,
@@ -125,17 +175,17 @@ def test_idle_with_surplus_classifies_as_export_arbitrage():
 
 
 # ---------------------------------------------------------------------------
-# Task 4b: EXPORT_ARBITRAGE maps to grid_first + hold (no discharge)
+# Task 4b: BATTERY_EXPORT maps to grid_first + hold (no discharge)
 # ---------------------------------------------------------------------------
 
 
-def test_export_arbitrage_maps_to_grid_first_hold():
+def test_battery_export_maps_to_grid_first_hold():
     from core.bess.inverter_controller import InverterController
     from core.bess.simulation.inverter_simulator import derive_control_command
 
     bs = make_battery_settings()
-    assert InverterController.INTENT_TO_MODE["EXPORT_ARBITRAGE"] == "grid_first"
-    cmd = derive_control_command("EXPORT_ARBITRAGE", battery_action_kw=0.0, settings=bs)
+    assert InverterController.INTENT_TO_MODE["BATTERY_EXPORT"] == "grid_first"
+    cmd = derive_control_command("BATTERY_EXPORT", battery_action_kw=0.0, settings=bs)
     assert cmd.battery_mode == "grid_first"
     assert cmd.grid_charge is False
     assert cmd.discharge_rate_pct == 0
@@ -146,21 +196,24 @@ def test_export_arbitrage_maps_to_grid_first_hold():
 # ---------------------------------------------------------------------------
 
 
-def test_store_with_surplus_no_grid_top_up():
-    """TARGET (#145): when surplus > 0 a STORE action may NOT draw from the grid.
+def test_store_with_surplus_draws_grid_to_fill_remaining_rate():
+    """After 2026-06-27 fix: STORE action during solar surplus charges at MAX rate.
+    Solar fills first; grid covers remaining capacity up to max charge rate.
 
-    Scenario: solar=2.0, home=1.5 → surplus=0.5 kWh.
-    power=4.0 kW, dt=0.25 → power*dt=1.0 kWh > surplus.
-    The algorithm must store ONLY the 0.5 kWh solar surplus; grid_imported must be 0.
-    (Previously the code computed grid_to_battery = power*dt - surplus = 0.5 kWh,
-    which hardware cannot do in load_first/solar-storage mode.)
+    This replaced test_store_with_surplus_no_grid_top_up which encoded the old
+    SOLAR_STORAGE-only constraint (grid_to_battery=0 when surplus>0). The old
+    constraint prevented the optimizer from using cheap solar-surplus hours for
+    grid arbitrage, causing it to charge at more expensive no-surplus hours.
+
+    Scenario: solar=2.0, home=1.5 → surplus=0.5 kWh. rate_throughput=2.5 kWh.
+    Solar covers 0.5 kWh; grid draws 2.0 kWh; total charged = 2.5 kWh.
     """
     from core.bess.dp_battery_algorithm import _build_period_data, _state_transition
 
     bs = make_battery_settings(max_charge_power_kw=10.0, efficiency_charge=1.0)
     solar_production = 2.0
     home_consumption = 1.5  # surplus = 0.5 kWh
-    power = 4.0  # power*dt = 1.0 kWh > surplus
+    power = 4.0  # any positive value → STORE at max rate
 
     next_soe = _state_transition(
         5.0,
@@ -169,6 +222,12 @@ def test_store_with_surplus_no_grid_top_up():
         DT,
         solar_production=solar_production,
         home_consumption=home_consumption,
+    )
+
+    # After fix: solar 0.5 + grid 2.0 = 2.5 kWh total (rate-limited)
+    assert round(next_soe - 5.0, 4) == 2.5, (
+        f"Expected STORE at max rate (2.5 kWh) but got {next_soe - 5.0:.4f}. "
+        f"Surplus gate may still be blocking grid charging."
     )
 
     pd = _build_period_data(
@@ -186,14 +245,13 @@ def test_store_with_surplus_no_grid_top_up():
         currency="SEK",
     )
 
-    # Only solar surplus should be stored — no grid draw when surplus is present
+    # Grid draws 2.0 kWh to top up the remaining capacity after solar
     assert (
-        pd.energy.grid_imported == 0.0
-    ), f"Expected grid_imported=0 (solar-only charging) but got {pd.energy.grid_imported}"
-    # The stored amount is exactly the solar surplus
+        round(pd.energy.grid_imported, 4) == 2.0
+    ), f"Expected grid_imported=2.0 (grid top-up) but got {pd.energy.grid_imported:.4f}"
     assert (
-        round(pd.energy.battery_charged, 4) == 0.5
-    ), f"Expected battery_charged=0.5 (surplus only) but got {pd.energy.battery_charged}"
+        round(pd.energy.battery_charged, 4) == 2.5
+    ), f"Expected battery_charged=2.5 but got {pd.energy.battery_charged:.4f}"
 
 
 # ---------------------------------------------------------------------------
@@ -232,10 +290,10 @@ def test_grid_charging_charges_at_max_rate_not_fractional():
     )
 
 
-def test_small_surplus_at_idle_classifies_as_export_arbitrage():
-    """A power-0 period with even a SMALL exportable surplus must classify as
-    EXPORT_ARBITRAGE (grid_first), not IDLE — otherwise IDLE->load_first stores
-    it instead of exporting (#145 residual). Threshold must catch ~0.1 kWh."""
+def test_small_solar_surplus_at_idle_classifies_as_solar_export():
+    """A power-0 period with solar surplus classifies as SOLAR_EXPORT (load_first).
+    grid_first is only for active battery discharge — idle periods must use
+    load_first so the battery can support house load when solar is insufficient."""
     from core.bess.decision_intelligence import classify_strategic_intent
 
     ed = EnergyData(
@@ -248,4 +306,27 @@ def test_small_surplus_at_idle_classifies_as_export_arbitrage():
         battery_soe_start=5.0,
         battery_soe_end=5.0,
     )
-    assert classify_strategic_intent(0.0, ed) == "EXPORT_ARBITRAGE"
+    assert classify_strategic_intent(0.0, ed) == "SOLAR_EXPORT"
+
+
+def test_solar_export_maps_to_load_first():
+    from core.bess.inverter_controller import InverterController
+    from core.bess.simulation.inverter_simulator import derive_control_command
+
+    bs = make_battery_settings()
+    assert InverterController.INTENT_TO_MODE["SOLAR_EXPORT"] == "load_first"
+    cmd = derive_control_command("SOLAR_EXPORT", battery_action_kw=0.0, settings=bs)
+    assert cmd.battery_mode == "load_first"
+    assert cmd.grid_charge is False
+    assert cmd.discharge_rate_pct == 0
+
+
+def test_battery_export_active_discharge_still_grid_first():
+    """BATTERY_EXPORT with real discharge action → grid_first + action-derived rate."""
+    from core.bess.simulation.inverter_simulator import derive_control_command
+
+    bs = make_battery_settings()
+    cmd = derive_control_command("BATTERY_EXPORT", battery_action_kw=-5.0, settings=bs)
+    assert cmd.battery_mode == "grid_first"
+    assert cmd.discharge_rate_pct == 50
+    assert cmd.grid_charge is False

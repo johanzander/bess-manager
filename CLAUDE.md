@@ -21,6 +21,7 @@ non-negotiable and apply to all agents.
 | [`docs/agents/testing.md`](docs/agents/testing.md) | Before writing or changing tests |
 | [`docs/agents/workflow.md`](docs/agents/workflow.md) | Before any commit, PR, or release |
 | [`docs/agents/skill-architecture.md`](docs/agents/skill-architecture.md) | Before working on skills, the `@claude-bot` pipeline, or adding an integration |
+| [`docs/agents/bess-knowledge.md`](docs/agents/bess-knowledge.md) | Before answering any question about BESS behavior, savings calculations, optimizer decisions, or schedule logic |
 | [`docs/agents/memory/`](docs/agents/memory/) | Project-specific memory (beta workflow, release train) |
 
 ## Project Overview

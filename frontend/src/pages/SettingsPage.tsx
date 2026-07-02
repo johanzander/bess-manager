@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Activity, Battery, Download, Home, Settings, Sun, Zap } from 'lucide-react';
 import api from '../lib/api';
 import { downloadDebugBundle } from '../lib/reportProblem';
@@ -52,6 +52,7 @@ const EMPTY_PRICING: PricingForm = {
   nordpoolEntity: '',
   octopusImportTodayEntity: '', octopusImportTomorrowEntity: '',
   octopusExportTodayEntity: '', octopusExportTomorrowEntity: '',
+  entsoeEntity: '',
   area: '', markupRate: 0, vatMultiplier: 1.25, additionalCosts: 0,
   taxReduction: 0,
 };
@@ -63,9 +64,12 @@ const EMPTY_INVERTER: InverterForm = { inverterPlatform: 'growatt_server_min', d
 
 const SettingsPage: React.FC = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   // ── active tab ─────────────────────────────────────────────────────────
-  const [tab, setTab] = useState<Tab>('sensors');
+  const validTabs: Tab[] = ['home', 'pricing', 'battery', 'sensors', 'system'];
+  const initialTab = searchParams.get('tab') as Tab;
+  const [tab, setTab] = useState<Tab>(validTabs.includes(initialTab) ? initialTab : 'sensors');
 
   // ── form state ─────────────────────────────────────────────────────────
   const [batteryForm, setBatteryForm] = useState<BatteryForm>(EMPTY_BATTERY);
@@ -73,7 +77,7 @@ const SettingsPage: React.FC = () => {
   const [pricingForm, setPricingForm] = useState<PricingForm>(EMPTY_PRICING);
   const [inverterForm, setInverterForm] = useState<InverterForm>(EMPTY_INVERTER);
   const [sensors, setSensors] = useState<PerPlatformSensors>(emptyPerPlatformSensors());
-  const [aiForm, setAiForm] = useState<AIAnalystForm>({ apiKey: '', model: 'claude-sonnet-4-20250514', enabled: true });
+  const [aiForm, setAiForm] = useState<AIAnalystForm>({ apiKey: '', model: 'claude-sonnet-4-6', enabled: true });
   const [demoEnabled, setDemoEnabled] = useState(false);
   const [savedDemoEnabled, setSavedDemoEnabled] = useState(false);
   const [showEnableDemoConfirm, setShowEnableDemoConfirm] = useState(false);
@@ -154,6 +158,7 @@ const SettingsPage: React.FC = () => {
       const nordpool = prov_s.nordpoolOfficial ?? {};
       const nordpoolCustom = prov_s.nordpoolHacs ?? {};
       const octopus = prov_s.octopus ?? {};
+      const entsoe = prov_s.entsoe ?? {};
 
       const bat: BatteryForm = {
         totalCapacity: bat_s.totalCapacity ?? 0,
@@ -191,6 +196,7 @@ const SettingsPage: React.FC = () => {
         octopusImportTomorrowEntity: octopus.importTomorrowEntity ?? '',
         octopusExportTodayEntity: octopus.exportTodayEntity ?? '',
         octopusExportTomorrowEntity: octopus.exportTomorrowEntity ?? '',
+        entsoeEntity: entsoe.entity ?? '',
         area: elec_s.area ?? '',
         markupRate: elec_s.markupRate ?? 0,
         vatMultiplier: elec_s.vatMultiplier ?? 1.25,
@@ -218,7 +224,7 @@ const SettingsPage: React.FC = () => {
       const ai_s = s.aiAnalyst ?? {};
       const ai: AIAnalystForm = {
         apiKey: ai_s.apiKey ?? '',
-        model: ai_s.model ?? 'claude-sonnet-4-20250514',
+        model: ai_s.model ?? 'claude-sonnet-4-6',
         enabled: ai_s.enabled ?? true,
       };
       setAiForm(ai);
@@ -410,6 +416,7 @@ const SettingsPage: React.FC = () => {
             exportTodayEntity: pricingForm.octopusExportTodayEntity,
             exportTomorrowEntity: pricingForm.octopusExportTomorrowEntity,
           },
+          entsoe: { entity: pricingForm.entsoeEntity },
         },
         home: { currency: pricingForm.currency },
       });
@@ -475,6 +482,7 @@ const SettingsPage: React.FC = () => {
             exportTodayEntity: pricingForm.octopusExportTodayEntity,
             exportTomorrowEntity: pricingForm.octopusExportTomorrowEntity,
           },
+          entsoe: { entity: pricingForm.entsoeEntity },
         },
       });
       savedSensors.current = stableStringify(sensors);

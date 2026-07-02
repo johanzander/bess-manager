@@ -46,7 +46,7 @@
   "expected_behavior": {
     "description": "Short horizon high spread with solar: charge and export",
     "intents_present": [
-      "EXPORT_ARBITRAGE"
+      "BATTERY_EXPORT"
     ],
     "savings_positive": true,
     "constraints": {

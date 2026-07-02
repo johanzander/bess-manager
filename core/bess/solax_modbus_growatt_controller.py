@@ -19,7 +19,7 @@ override is needed for those.
 Mode semantics:
 - ``load_first`` — inverter default when no TOU segment is active
 - ``battery_first`` — charge from grid + solar (GRID_CHARGING intent)
-- ``grid_first`` — export to grid (EXPORT_ARBITRAGE intent)
+- ``grid_first`` — export to grid (BATTERY_EXPORT intent)
 """
 
 import logging

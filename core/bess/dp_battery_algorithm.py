@@ -47,7 +47,7 @@ The algorithm now captures the strategic reasoning behind each decision:
 - GRID_CHARGING: Storing cheap grid energy for arbitrage
 - SOLAR_STORAGE: Storing excess solar for later use
 - LOAD_SUPPORT: Discharging to meet home load
-- EXPORT_ARBITRAGE: Discharging to grid for profit
+- BATTERY_EXPORT: Discharging to grid for profit
 - IDLE: No significant activity
 
 ENERGY FLOW MODELING:
@@ -115,8 +115,9 @@ class StrategicIntent(Enum):
     GRID_CHARGING = "GRID_CHARGING"  # Storing cheap grid energy for arbitrage
     SOLAR_STORAGE = "SOLAR_STORAGE"  # Storing excess solar for later use
     LOAD_SUPPORT = "LOAD_SUPPORT"  # Discharging to meet home load
-    EXPORT_ARBITRAGE = "EXPORT_ARBITRAGE"  # Discharging to grid for profit
-    IDLE = "IDLE"  # No significant action (includes natural solar export)
+    BATTERY_EXPORT = "BATTERY_EXPORT"  # Discharging battery to grid for profit
+    SOLAR_EXPORT = "SOLAR_EXPORT"  # Solar surplus exporting to grid, battery idle
+    IDLE = "IDLE"  # No significant action
 
 
 def _discretize_state_action_space(
@@ -214,12 +215,7 @@ def _state_transition(
         remaining_rate = max(
             0.0, min(rate_throughput, room_throughput) - solar_to_battery
         )
-        if surplus > POWER_TOLERANCE_KW:
-            grid_to_battery = 0.0  # SOLAR_STORAGE: solar only, no grid top-up
-        else:
-            grid_to_battery = (
-                remaining_rate  # GRID_CHARGING / battery_first: charge at max rate
-            )
+        grid_to_battery = remaining_rate  # solar fills first, grid tops up the rest
         charge_energy = (
             solar_to_battery + grid_to_battery
         ) * battery_settings.efficiency_charge
@@ -232,8 +228,15 @@ def _state_transition(
         actual_discharge = min(discharge_energy, available_energy)
         next_soe = soe - actual_discharge
 
-    else:  # Hold / IDLE — EXPORT disposition: surplus is exported, battery holds
-        next_soe = soe
+    else:  # IDLE — passive solar charging (mirrors load_first hardware behavior)
+        surplus = max(0.0, solar_production - home_consumption)
+        room_throughput = (
+            battery_settings.max_soe_kwh - soe
+        ) / battery_settings.efficiency_charge
+        rate_throughput = battery_settings.max_charge_power_kw * dt
+        solar_to_battery = min(surplus, rate_throughput, room_throughput)
+        charge_energy = solar_to_battery * battery_settings.efficiency_charge
+        next_soe = min(battery_settings.max_soe_kwh, soe + charge_energy)
 
     # Ensure SOE stays within physical bounds
     next_soe = min(
@@ -264,11 +267,16 @@ def _compute_reward(
     - Grid costs applied to energy throughput (what you draw from grid)
     - Cost basis includes BOTH grid costs AND cycle costs for profitability analysis
 
-    PROFITABILITY CHECK:
-    - For any discharge, calculate the value of the discharged energy
-    - Value = max(avoiding grid purchases, grid export revenue)
-    - Discharge only profitable if this value > cost_basis
-    - Must account for discharge efficiency losses
+    PROFITABILITY CHECK (opportunity-cost floor):
+    - A discharge is worthwhile only if its value beats the opportunity cost of
+      the stored kWh — not its sunk cost basis and not zero.
+    - Value = max(avoided grid purchase, grid export revenue), after discharge
+      efficiency.
+    - The effective floor is raised to sell_price whenever upcoming solar will
+      replenish the discharged capacity (replenishment): the kWh could be exported
+      later, so sell_price is its true replacement cost. Since
+      sell_price * efficiency_discharge < sell_price, marginal round-trip and
+      refill trades are correctly blocked.
 
     Example for stored energy costing 2.61/kWh:
     - If buy_price = 2.58, sell_price = 1.81
@@ -317,12 +325,7 @@ def _compute_reward(
         remaining_rate = max(
             0.0, min(rate_throughput, room_throughput) - solar_to_battery
         )
-        if surplus > POWER_TOLERANCE_KW:
-            grid_to_battery = 0.0  # SOLAR_STORAGE: solar only, no grid top-up
-        else:
-            grid_to_battery = (
-                remaining_rate  # GRID_CHARGING / battery_first: charge at max rate
-            )
+        grid_to_battery = remaining_rate  # solar fills first, grid tops up the rest
 
         energy_stored = (
             solar_to_battery + grid_to_battery
@@ -390,11 +393,14 @@ def _compute_reward(
         if effective_value_per_kwh_stored <= effective_cost_basis:
             return float("-inf"), cost_basis
 
-    else:  # IDLE — EXPORT disposition: battery holds, surplus exported
-        battery_wear_cost = 0.0
-        # battery_charged/battery_discharged already 0 from _idle_battery_flows;
-        # with next_soe == soe, _idle_battery_flows returns (0.0, 0.0), so the
-        # energy_balance below exports the full surplus and credits it.
+    else:  # IDLE — passive solar charging
+        energy_stored = next_soe - soe  # kWh stored in battery after efficiency
+        battery_wear_cost = energy_stored * battery_settings.cycle_cost_per_kwh
+        if energy_stored > 0 and next_soe > battery_settings.min_soe_kwh:
+            solar_opportunity_cost = battery_charged * current_sell_price
+            new_cost_basis = (
+                soe * cost_basis + solar_opportunity_cost + battery_wear_cost
+            ) / next_soe
 
     # ============================================================================
     # REWARD CALCULATION
@@ -439,12 +445,7 @@ def _build_period_data(
         remaining_rate = max(
             0.0, min(rate_throughput, room_throughput) - solar_to_battery
         )
-        if surplus > POWER_TOLERANCE_KW:
-            grid_to_battery = 0.0  # SOLAR_STORAGE: solar only, no grid top-up
-        else:
-            grid_to_battery = (
-                remaining_rate  # GRID_CHARGING / battery_first: charge at max rate
-            )
+        grid_to_battery = remaining_rate  # solar fills first, grid tops up the rest
         battery_charged = solar_to_battery + grid_to_battery
         battery_discharged = 0.0
     elif power < -POWER_TOLERANCE_KW:  # Active discharging
@@ -472,11 +473,8 @@ def _build_period_data(
         battery_soe_end=next_soe,
     )
 
-    if power > POWER_TOLERANCE_KW:  # STORE disposition
-        energy_stored = next_soe - soe
-        battery_wear_cost = energy_stored * battery_settings.cycle_cost_per_kwh
-    else:
-        battery_wear_cost = 0.0
+    energy_stored = max(0.0, next_soe - soe)
+    battery_wear_cost = energy_stored * battery_settings.cycle_cost_per_kwh
 
     import_cost = grid_imported * current_buy_price
     export_revenue = grid_exported * current_sell_price
@@ -1083,8 +1081,9 @@ def optimize_battery_schedule(
         f"Starting direct optimization: horizon={horizon}, initial_soe={initial_soe:.1f}, initial_cost_basis={initial_cost_basis:.3f}"
     )
 
-    # Step 1: Run DP — capture policy for continuous reconstruction
-    _, policy, _, _ = _run_dynamic_programming(
+    # Step 1: Run DP — capture policy for continuous reconstruction and the
+    # value-to-go array V for the per-period shadow price (dV/dSoE).
+    V, policy, _, _ = _run_dynamic_programming(
         horizon=horizon,
         buy_price=buy_price,
         sell_price=sell_price,
@@ -1162,6 +1161,18 @@ def optimize_battery_schedule(
             new_cost_basis=new_cost_basis,
             currency=currency,
         )
+
+        # Shadow price = marginal opportunity value of stored energy (dV/dSoE),
+        # by backward difference at the chosen grid level i (the kWh we would
+        # remove by discharging). V is in reward units (SEK, higher = better),
+        # increasing in SoE, so this is positive. Exact at a full battery
+        # (i = len-1); undefined at i = 0 (nothing to discharge) -> leave 0.0.
+        # Used downstream to gate intra-period SOLAR_EXPORT discharge.
+        if i > 0:
+            period_data.decision.shadow_price = float(
+                (V[t, i] - V[t, i - 1]) / SOE_STEP_KWH
+            )
+
         hourly_results.append(period_data)
         current_soe = next_soe
         current_cost_basis = new_cost_basis

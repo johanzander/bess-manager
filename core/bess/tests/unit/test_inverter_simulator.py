@@ -14,14 +14,20 @@ from core.bess.tests.helpers import make_battery_settings
 # ---------------------------------------------------------------------------
 
 
-def test_derive_command_export_arbitrage_scales_discharge():
+def test_derive_command_battery_export_scales_discharge():
     bs = make_battery_settings(max_discharge_power_kw=10.0)
     # planned discharge of 5 kW -> grid_first, discharge ~50%
-    cmd = derive_control_command(
-        "EXPORT_ARBITRAGE", battery_action_kw=-5.0, settings=bs
-    )
+    cmd = derive_control_command("BATTERY_EXPORT", battery_action_kw=-5.0, settings=bs)
     assert cmd.battery_mode == "grid_first"
     assert cmd.discharge_rate_pct == 50
+    assert cmd.grid_charge is False
+
+
+def test_derive_command_solar_export_is_load_first_no_discharge():
+    bs = make_battery_settings()
+    cmd = derive_control_command("SOLAR_EXPORT", battery_action_kw=0.0, settings=bs)
+    assert cmd.battery_mode == "load_first"
+    assert cmd.discharge_rate_pct == 0
     assert cmd.grid_charge is False
 
 
@@ -38,6 +44,37 @@ def test_derive_command_grid_charging_enables_grid_charge():
     cmd = derive_control_command("GRID_CHARGING", battery_action_kw=4.0, settings=bs)
     assert cmd.battery_mode == "battery_first"
     assert cmd.grid_charge is True
+
+
+def test_derive_command_grid_charging_scales_charge_rate():
+    """GRID_CHARGING charge_rate_pct must match the DP action, not always be 100%.
+
+    With max_charge_power=15 kW and a planned action of 0.68 kW (0.17 kWh in 15 min),
+    the correct charge_rate_pct is round(0.68 / 15 * 100) = 5, not 100.
+    This mirrors the production controller's get_period_settings() behaviour.
+    """
+    bs = make_battery_settings(max_charge_power_kw=15.0)
+    # 0.17 kWh in a 15-min period → battery_action_kw = 0.17 / 0.25 = 0.68 kW
+    cmd = derive_control_command("GRID_CHARGING", battery_action_kw=0.68, settings=bs)
+    assert cmd.battery_mode == "battery_first"
+    assert cmd.grid_charge is True
+    assert (
+        cmd.charge_rate_pct == 5
+    ), f"Expected charge_rate_pct=5 for 0.68 kW action at 15 kW max, got {cmd.charge_rate_pct}"
+
+
+def test_derive_command_grid_charging_full_action_gives_100_pct():
+    """When the planned action equals max charge power, charge_rate_pct must be 100."""
+    bs = make_battery_settings(max_charge_power_kw=15.0)
+    cmd = derive_control_command("GRID_CHARGING", battery_action_kw=15.0, settings=bs)
+    assert cmd.charge_rate_pct == 100
+
+
+def test_derive_command_solar_storage_charge_rate_is_100():
+    """SOLAR_STORAGE always uses charge_rate_pct=100 — accept solar at full rate."""
+    bs = make_battery_settings()
+    cmd = derive_control_command("SOLAR_STORAGE", battery_action_kw=0.5, settings=bs)
+    assert cmd.charge_rate_pct == 100
 
 
 # ---------------------------------------------------------------------------
@@ -63,14 +100,17 @@ def test_load_first_no_discharge_no_surplus_returns_zero():
     assert p == 0.0
 
 
-def test_mode_to_power_load_first_stores_all_surplus():
-    """Task 4c: load_first + no discharge + surplus -> return all-surplus charge power."""
+def test_mode_to_power_load_first_surplus_returns_zero():
+    """load_first + no discharge + surplus -> return 0.0 (IDLE branch).
+
+    The old code returned surplus/dt here, which coincidentally matched IDLE when
+    grid_to_battery was gated to 0. After removing the surplus gate in dp_battery_algorithm,
+    mode_to_power must return 0.0 so _state_transition uses the IDLE branch (passive solar
+    charging, no grid draw) instead of the STORE branch (which now adds grid top-up).
+    """
     bs = make_battery_settings(max_charge_power_kw=10.0)
     cmd = ControlCommand("load_first", 0, False)
-    assert (
-        mode_to_power(cmd, solar=1.6, home=0.2, soe=5.0, settings=bs, dt=0.25)
-        == (1.6 - 0.2) / 0.25
-    )
+    assert mode_to_power(cmd, solar=1.6, home=0.2, soe=5.0, settings=bs, dt=0.25) == 0.0
 
 
 def test_mode_to_power_grid_first_no_discharge_holds_and_exports():

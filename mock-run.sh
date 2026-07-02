@@ -17,6 +17,21 @@
 
 set -euo pipefail
 
+# Container runtime: auto-detected (podman preferred, falls back to docker).
+# Override with DOCKER=docker ./mock-run.sh if needed.
+if [ -z "${DOCKER:-}" ]; then
+  if command -v podman >/dev/null 2>&1; then
+    DOCKER="podman"
+  else
+    DOCKER="docker"
+  fi
+fi
+if [ "$DOCKER" = "podman" ] && command -v podman-compose >/dev/null 2>&1; then
+  COMPOSE="podman-compose"
+else
+  COMPOSE="${DOCKER} compose"
+fi
+
 # Derive a unique project name from the directory so multiple worktrees
 # can run side-by-side without container name conflicts.
 export COMPOSE_PROJECT_NAME="bess-mock-$(basename "$(pwd)")"
@@ -114,9 +129,9 @@ echo "==== BESS Mock Development Environment ===="
 echo "Scenario:      $SCENARIO"
 echo "Inverter type: $INVERTER_TYPE  (bess_config extracted from scenario)"
 
-# Verify Docker is running
-if ! docker info > /dev/null 2>&1; then
-  echo "Error: Docker is not running. Please start Docker and try again."
+# Verify container runtime is available
+if ! $DOCKER info > /dev/null 2>&1; then
+  echo "Error: $DOCKER is not running. Please start $DOCKER and try again."
   exit 1
 fi
 
@@ -146,13 +161,13 @@ echo "Building frontend..."
 }
 
 echo "Stopping any existing containers..."
-docker-compose \
+$COMPOSE \
   -f docker-compose.yml \
   -f docker-compose.mock.yml \
   down --remove-orphans
 
 echo "Building and starting mock environment..."
-docker-compose \
+$COMPOSE \
   -f docker-compose.yml \
   -f docker-compose.mock.yml \
   up --build -d
@@ -174,7 +189,7 @@ trap 'print_banner; exit 0' INT
 
 # Stream logs; print the banner once BESS is fully started (Uvicorn ready).
 # After the banner, continue streaming logs normally.
-docker-compose \
+$COMPOSE \
   -f docker-compose.yml \
   -f docker-compose.mock.yml \
   logs -f --no-log-prefix 2>&1 | while IFS= read -r line; do

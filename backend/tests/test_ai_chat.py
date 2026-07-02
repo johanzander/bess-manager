@@ -1,8 +1,9 @@
 """Tests for AIAnalystService — the in-app AI chat backend.
 
 Covers: service init, status reporting, session lifecycle, message trimming,
-session expiry, SSE formatting, system prompt loading, and tool execution
-(read_file, search_code, list_files) including path sandboxing.
+session expiry, SSE formatting, system prompt loading, tool execution
+(read_file, search_code, list_files) including path sandboxing, and the
+_gather_context method (key findings inclusion, raw log exclusion).
 """
 
 import asyncio
@@ -85,13 +86,13 @@ class TestGetStatus:
         service = _make_service(
             {
                 "api_key": "sk-ant-test",
-                "model": "claude-opus-4-20250514",
+                "model": "claude-opus-4-8",
                 "enabled": True,
             }
         )
         status = service.get_status()
         assert status["configured"] is True
-        assert status["model"] == "claude-opus-4-20250514"
+        assert status["model"] == "claude-opus-4-8"
 
     def test_disabled(self):
         service = _make_service({"api_key": "sk-ant-test", "enabled": False})
@@ -456,3 +457,86 @@ class TestTrimMessagesWithTools:
         assert len(session.messages) == 2
         assert session.messages[0]["content"] == "question 1"
         assert session.messages[1]["content"] == "Here is the answer."
+
+
+# ---------------------------------------------------------------------------
+# _gather_context — key findings and log exclusion
+# ---------------------------------------------------------------------------
+
+
+def _make_fake_export(key_findings=None, log_content="") -> MagicMock:
+    """Return a minimal MagicMock DebugDataExport with explicit field values."""
+    export = MagicMock()
+    export.bess_version = "9.9.0-test"
+    export.system_uptime_hours = 12.0
+    export.timezone = "Europe/Brussels"
+    export.health_check_results = {"checks": []}
+    export.battery_settings = {}
+    export.price_settings = {}
+    export.home_settings = {}
+    export.price_data = None
+    export.entity_snapshot = {}
+    export.inverter_tou_segments = []
+    export.historical_periods = []
+    export.schedules = []
+    export.snapshots = []
+    export.todays_log_content = log_content
+    export.key_findings = key_findings if key_findings is not None else {}
+    return export
+
+
+class TestGatherContext:
+    """Tests for _gather_context focusing on key findings and log handling."""
+
+    def test_key_findings_heading_present_in_context(self):
+        """Key findings section appears at the start of context."""
+        service = _make_service()
+        fake_export = _make_fake_export(key_findings={"clean": True})
+
+        with patch("core.bess.debug_data_exporter.DebugDataAggregator") as mock_agg:
+            mock_agg.return_value.aggregate_all_data.return_value = fake_export
+            ctx, _summary = service._gather_context(MagicMock())
+
+        assert "Key Findings" in ctx
+
+    def test_raw_log_dump_excluded_from_context(self):
+        """Raw todays_log_content is NOT included in the chat context."""
+        service = _make_service()
+        distinctive_log_body = "RAWLOG_SENTINEL_abc123\n" * 5
+        fake_export = _make_fake_export(
+            key_findings={"clean": True},
+            log_content=distinctive_log_body,
+        )
+
+        with patch("core.bess.debug_data_exporter.DebugDataAggregator") as mock_agg:
+            mock_agg.return_value.aggregate_all_data.return_value = fake_export
+            ctx, _summary = service._gather_context(MagicMock())
+
+        assert "RAWLOG_SENTINEL_abc123" not in ctx
+
+    def test_key_findings_appears_before_system_section(self):
+        """Key findings block precedes the System section in context."""
+        service = _make_service()
+        fake_export = _make_fake_export(key_findings={"clean": True})
+
+        with patch("core.bess.debug_data_exporter.DebugDataAggregator") as mock_agg:
+            mock_agg.return_value.aggregate_all_data.return_value = fake_export
+            ctx, _summary = service._gather_context(MagicMock())
+
+        findings_pos = ctx.find("Key Findings")
+        system_pos = ctx.find("## System")
+        assert findings_pos != -1
+        assert system_pos != -1
+        assert findings_pos < system_pos
+
+    def test_summary_mentions_key_findings_not_logs(self):
+        """Summary string references key findings, not raw logs."""
+        service = _make_service()
+        fake_export = _make_fake_export(key_findings={"clean": True})
+
+        with patch("core.bess.debug_data_exporter.DebugDataAggregator") as mock_agg:
+            mock_agg.return_value.aggregate_all_data.return_value = fake_export
+            _ctx, summary = service._gather_context(MagicMock())
+
+        assert "key findings" in summary
+        assert "logs" not in summary

@@ -31,7 +31,7 @@ Strategic intents (from DP algorithm) are converted to battery modes:
 - GRID_CHARGING → battery_first (AC charging enabled)
 - SOLAR_STORAGE → load_first (solar serves home first, excess to battery)
 - LOAD_SUPPORT → load_first (discharging priority)
-- EXPORT_ARBITRAGE → grid_first (export priority)
+- BATTERY_EXPORT → grid_first (export priority)
 - IDLE → load_first (normal operation)
 
 ALGORITHM:
@@ -101,7 +101,7 @@ class GrowattMinController(InverterController):
       Flow: Battery → home. Solar → home. Grid covers remainder if needed.
       Battery does not charge — energy is being spent, not accumulated.
 
-    EXPORT_ARBITRAGE (grid_first, grid_charge=False, charge=0, discharge=100):
+    BATTERY_EXPORT (grid_first, grid_charge=False, charge=0, discharge=100):
       Purpose: Export stored energy to grid during high sell-price hours.
       Flow: Battery → grid (export). Solar → grid. Grid may still serve home.
 
@@ -1089,7 +1089,7 @@ class GrowattMinController(InverterController):
         )
         lines.append("* indicates current period")
         lines.append(
-            "Intent mapping: GRID_CHARGING→battery_first, EXPORT_ARBITRAGE→grid_first, SOLAR_STORAGE/IDLE/LOAD_SUPPORT→load_first"
+            "Intent mapping: GRID_CHARGING→battery_first, BATTERY_EXPORT→grid_first, SOLAR_STORAGE/IDLE/LOAD_SUPPORT→load_first"
         )
 
         logger.info("\n".join(lines))

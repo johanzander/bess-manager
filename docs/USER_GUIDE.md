@@ -61,7 +61,8 @@ Shows battery charge level throughout the day with strategic context:
 - **GRID_CHARGING**: Buying cheap electricity to store
 - **SOLAR_STORAGE**: Storing excess solar production
 - **LOAD_SUPPORT**: Using battery to power your home
-- **EXPORT_ARBITRAGE**: Selling stored energy at high prices
+- **BATTERY_EXPORT**: Selling stored battery energy at high prices
+- **SOLAR_EXPORT**: Solar surplus going directly to grid, battery idle
 
 #### 3. Detailed Savings Analysis
 
@@ -107,12 +108,19 @@ The system status card provides key metrics and health information:
 - **When**: Evening hours with high prices and home consumption
 - **Indicator**: Battery discharging, minimal grid import
 
-#### 💰 EXPORT_ARBITRAGE
+#### 💰 BATTERY_EXPORT
 
-- **What**: Selling stored energy to grid during peak prices
+- **What**: Selling stored battery energy to grid during peak prices
 - **Why**: Maximize revenue from stored energy
 - **When**: Peak price hours when selling is more profitable
 - **Indicator**: Battery discharging, high grid export
+
+#### ☀️ SOLAR_EXPORT
+
+- **What**: Solar surplus exporting directly to grid, battery idle
+- **Why**: No battery action needed — solar production exceeds home load
+- **When**: Sunny hours when battery is full or storing is not profitable
+- **Indicator**: High solar production, grid export, battery holding
 
 #### 😴 IDLE
 
@@ -235,7 +243,7 @@ The logs show:
 
 ### Electricity Price Settings
 
-BESS needs hourly spot prices to decide when to charge and discharge. Three price providers are supported — pick the one that matches the integration you have installed in Home Assistant.
+BESS needs hourly spot prices to decide when to charge and discharge. Four price providers are supported — pick the one that matches the integration you have installed in Home Assistant.
 
 #### Provider: Nord Pool (official HA integration)
 
@@ -262,6 +270,15 @@ For UK users on the Octopus Energy Agile tariff.
 - **Prerequisites**: The Octopus Energy HACS integration installed and configured. It creates event entities that update with upcoming half-hourly rates.
 - **How it works**: BESS reads four event entities — today's and tomorrow's import rates, and today's and tomorrow's export rates. Prices are already VAT-inclusive in GBP/kWh.
 - **Entities**: Four event entity IDs for import/export today/tomorrow. All are auto-detected by Auto-Configure.
+
+#### Provider: ENTSO-e / Belpex (Transparency Platform)
+
+For European users on a day-ahead dynamic tariff that follows the ENTSO-e Transparency Platform — including Belgian **Belpex** prices (Luminus dynamic and others). *Experimental: not yet real-world validated — see [issue #126](https://github.com/johanzander/bess-manager/issues/126).*
+
+- **Prerequisites**: The [ENTSO-e Transparency Platform](https://github.com/JaccoR/hass-entso-e) HACS integration installed and configured with your area (e.g. Belgium). It creates an "Average electricity price" sensor, e.g. `sensor.belpex_h_average_electricity_price`.
+- **How it works**: BESS reads the `prices_today` and `prices_tomorrow` attributes from that single sensor. Each is a list of `{"time", "price"}` entries. Hourly data (PT60M, 24/day) is expanded to the internal 15-minute resolution; native quarterly data (PT15M, 96/day) is used as-is.
+- **Sensor**: The entity ID of the ENTSO-e average-price sensor. Auto-detected by Auto-Configure, or enter it manually.
+- **Prices & VAT**: ENTSO-e prices are wholesale spot prices in EUR/kWh and VAT-**exclusive** by default, so BESS applies the markup/VAT/fees below — just like Nord Pool. ⚠️ If you configured a custom VAT *modifyer* inside the ENTSO-e integration, its prices already include VAT; in that case set the BESS VAT Multiplier to 1.0 to avoid double-counting.
 
 #### Price Calculation
 

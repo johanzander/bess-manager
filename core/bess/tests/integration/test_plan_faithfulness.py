@@ -52,10 +52,14 @@ def test_identical_command_sequences_have_zero_delta():
 
 
 def test_solar_storage_mode_stores_all_surplus():
-    """STORE disposition: SOLAR_STORAGE → load_first stores ALL available surplus
-    solar (up to rate/room) — the binary store-all behaviour the optimizer now
-    plans against, so plan and execution agree. (Replaces the earlier diagnostic
-    that asserted the old mode_to_power==0 behaviour; see #145.)
+    """IDLE/SOLAR_STORAGE: load_first + no discharge stores surplus via passive charging.
+
+    After the grid-charging-during-surplus fix, mode_to_power returns 0.0 for
+    load_first + no discharge (regardless of surplus). _state_transition's IDLE branch
+    then performs passive solar charging (solar fills battery, no grid draw). The old
+    code returned surplus/dt which went through the STORE branch; that used to be
+    equivalent (grid_to_battery was gated to 0), but after removing the surplus gate
+    the STORE branch would add grid top-up — incorrect for load_first hardware.
     """
     from core.bess.simulation.inverter_simulator import (
         ControlCommand,
@@ -66,12 +70,8 @@ def test_solar_storage_mode_stores_all_surplus():
     bs = make_battery_settings(max_charge_power_kw=10.0)
     cmd = ControlCommand("load_first", discharge_rate_pct=0, grid_charge=False)
 
-    # mode_to_power now returns the surplus power (store all surplus), not 0.
-    surplus = 5.0 - 0.5
-    assert (
-        mode_to_power(cmd, solar=5.0, home=0.5, soe=5.0, settings=bs, dt=1.0)
-        == surplus / 1.0
-    )
+    # mode_to_power returns 0.0; _state_transition IDLE branch does the solar charging.
+    assert mode_to_power(cmd, solar=5.0, home=0.5, soe=5.0, settings=bs, dt=1.0) == 0.0
 
     sim = simulate(
         [cmd],
@@ -86,7 +86,7 @@ def test_solar_storage_mode_stores_all_surplus():
     stored = sim.period_data[0].energy.battery_soe_end - 5.0
     assert (
         stored > 4.0
-    ), f"load_first should store ~all 4.5 kWh surplus, got {stored:.2f}"
+    ), f"load_first should store ~all 4.5 kWh surplus via IDLE passive charging, got {stored:.2f}"
 
 
 def test_forecast_robustness_more_solar_than_planned():
@@ -125,7 +125,11 @@ def test_scenarios_are_plan_faithful_realized_equals_planned():
     """Scenarios verify R (realized), not just P (plan): executing the optimizer's
     plan through the inverter simulator must reproduce the planned economics to
     within the DP's SoE-grid resolution. A larger gap is a control-fidelity
-    finding (#145)."""
+    finding (#145).
+
+    The optimizer models power=0 as passive solar charging (matching load_first
+    hardware behavior), so solar scenarios are included and must pass.
+    """
     from core.bess.tests.helpers import run_scenario_realized
 
     scenarios = {
@@ -136,10 +140,10 @@ def test_scenarios_are_plan_faithful_realized_equals_planned():
             "battery": _battery(initial_soe=3.0),
         },
         "solar_day": {
-            "base_prices": [1.2, 1.1, 0.6, 0.6, 1.5, 1.6],
-            "home_consumption": [0.2] * 6,
+            "base_prices": [0.5, 0.5, 1.0, 1.0, 0.8, 0.8],
+            "home_consumption": [0.5] * 6,
             "solar_production": [1.5, 1.8, 1.9, 1.7, 0.5, 0.0],
-            "battery": _battery(initial_soe=3.0),
+            "battery": _battery(initial_soe=5.0),
         },
     }
     # Tolerance reflects the DP's 0.1 kWh SoE-grid resolution: the plan trajectory

@@ -36,11 +36,14 @@ test.describe('Dashboard', () => {
     await page.goto('/');
     await expect(page.getByRole('heading', { name: 'Dashboard', exact: true })).toBeVisible({ timeout: 15_000 });
 
-    // Dashboard shows one of: data loaded, initializing, or no data yet
-    const hasData = await page.getByText('System Overview').isVisible().catch(() => false);
-    const isInitializing = await page.getByText('Initializing system').isVisible().catch(() => false);
-    const noData = await page.getByText('No Dashboard Data').isVisible().catch(() => false);
-    expect(hasData || isInitializing || noData).toBe(true);
+    // Wait for the dashboard to settle into one of its content states.
+    // Using .or() + toBeVisible() so Playwright retries until one appears,
+    // rather than snapshot isVisible() calls that race with data loading.
+    await expect(
+      page.getByText('System Overview')
+        .or(page.getByText('Initializing system'))
+        .or(page.getByText('No Dashboard Data'))
+    ).toBeVisible({ timeout: 10_000 });
   });
 
   test('shows energy flow section when data is available', async ({ page }) => {

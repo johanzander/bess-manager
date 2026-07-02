@@ -351,7 +351,7 @@ def _aggregate_quarterly_to_hourly(
     # Priority order for tie-breaking: prioritize action over inaction
     intent_priority = {
         "GRID_CHARGING": 5,
-        "EXPORT_ARBITRAGE": 4,
+        "BATTERY_EXPORT": 4,
         "LOAD_SUPPORT": 3,
         "SOLAR_STORAGE": 2,
         "IDLE": 1,
@@ -510,6 +510,7 @@ def _aggregate_quarterly_to_hourly(
             ),
             # Use dominant strategic intent with tie-breaking (same logic as Growatt schedule)
             strategicIntent=dominant_intent,
+            observedIntent=last_period.observedIntent,
             directSolar=sum(p.directSolar for p in quarter_periods),
         )
 
@@ -1437,6 +1438,7 @@ async def get_inverter_status():
             "charge_stop_soc": battery_settings.max_soc,
             "discharge_stop_soc": battery_settings.min_soc,
             "discharge_power_rate": discharge_power_rate,
+            "discharge_inhibit_active": controller.get_discharge_inhibit_active(),
             "inverter_platform": inverter_platform,
             "timestamp": datetime.now().isoformat(),
         }
@@ -1459,6 +1461,7 @@ async def get_growatt_detailed_schedule():
 
     try:
         schedule_manager = bess_controller.system._inverter_controller
+        battery_settings = bess_controller.system.battery_settings
         current_hour = time_utils.now().hour
 
         # Get TOU intervals directly from schedule manager
@@ -1537,7 +1540,7 @@ async def get_growatt_detailed_schedule():
                         "dischargePowerRate": hourly_settings.get(
                             "discharge_rate", 100
                         ),
-                        "chargePowerRate": 100,
+                        "chargePowerRate": hourly_settings.get("charge_rate", 100),
                         "strategic_intent": strategic_intent,
                         "intent_description": schedule_manager._get_intent_description(
                             strategic_intent
@@ -1587,8 +1590,46 @@ async def get_growatt_detailed_schedule():
         # Get period groups from schedule manager (15-minute resolution)
         period_groups = []
         try:
-            raw_groups = schedule_manager.get_detailed_period_groups()
+            stored_schedule_for_today = (
+                bess_controller.system.schedule_store.get_latest_schedule()
+            )
+            today_soc_values: list[float | None] = []
+            today_actions: list[float] = []
+            if stored_schedule_for_today:
+                opt_result_today = stored_schedule_for_today.optimization_result
+                opt_period_today = stored_schedule_for_today.optimization_period
+                today_period_count_local = get_period_count(time_utils.today())
+                for period_idx in range(today_period_count_local):
+                    data_idx = period_idx - opt_period_today
+                    if 0 <= data_idx < len(opt_result_today.period_data):
+                        pd_today = opt_result_today.period_data[data_idx]
+                        soe = pd_today.energy.battery_soe_end
+                        today_soc_values.append(
+                            (soe / battery_settings.total_capacity * 100.0)
+                            if battery_settings.total_capacity > 0
+                            else None
+                        )
+                        today_actions.append(pd_today.decision.battery_action or 0.0)
+                    else:
+                        today_soc_values.append(None)
+                        today_actions.append(0.0)
+            raw_groups = schedule_manager.get_detailed_period_groups(
+                actions=today_actions if today_actions else None,
+                soc_values=today_soc_values if today_soc_values else None,
+            )
+            prev_soc: float | None = None
             for group in raw_groups:
+                soc_end = group["soc_end_pct"]
+                soc_delta_kwh: float | None = None
+                if (
+                    soc_end is not None
+                    and prev_soc is not None
+                    and battery_settings.total_capacity > 0
+                ):
+                    soc_delta_kwh = (
+                        (soc_end - prev_soc) / 100.0 * battery_settings.total_capacity
+                    )
+                prev_soc = soc_end
                 period_groups.append(
                     {
                         "start_time": group["start_time"],
@@ -1601,6 +1642,9 @@ async def get_growatt_detailed_schedule():
                         "charge_power_rate": group["charge_rate"],
                         "discharge_power_rate": group["discharge_rate"],
                         "grid_charge": group["grid_charge"],
+                        "total_action_kwh": group["total_action_kwh"],
+                        "soc_end_pct": soc_end,
+                        "soc_delta_kwh": soc_delta_kwh,
                     }
                 )
         except (ValueError, KeyError, AttributeError) as e:
@@ -1619,7 +1663,9 @@ async def get_growatt_detailed_schedule():
                 tomorrow_period_count = get_period_count(
                     time_utils.today() + timedelta(days=1)
                 )
-                tomorrow_intents = []
+                tomorrow_intents: list[str] = []
+                tomorrow_actions: list[float] = []
+                tomorrow_soc_values: list[float | None] = []
                 # Standalone next-day schedule: same anchor adjustment as dashboard.
                 is_next_day_only = (
                     opt_period == 0
@@ -1637,15 +1683,39 @@ async def get_growatt_detailed_schedule():
                 ):
                     data_idx = period_idx - period_data_anchor
                     if 0 <= data_idx < len(opt_result.period_data):
-                        tomorrow_intents.append(
-                            opt_result.period_data[data_idx].decision.strategic_intent
+                        pd = opt_result.period_data[data_idx]
+                        tomorrow_intents.append(pd.decision.strategic_intent)
+                        tomorrow_actions.append(pd.decision.battery_action or 0.0)
+                        soe = pd.energy.battery_soe_end
+                        tomorrow_soc_values.append(
+                            (soe / battery_settings.total_capacity * 100.0)
+                            if battery_settings.total_capacity > 0
+                            else None
                         )
+                    else:
+                        tomorrow_soc_values.append(None)
                 if tomorrow_intents:
                     raw_tomorrow_groups = schedule_manager.get_detailed_period_groups(
-                        intents=tomorrow_intents
+                        intents=tomorrow_intents,
+                        actions=tomorrow_actions,
+                        soc_values=tomorrow_soc_values,
                     )
                     tomorrow_period_groups = []
+                    prev_soc_tmr: float | None = None
                     for group in raw_tomorrow_groups:
+                        soc_end = group["soc_end_pct"]
+                        soc_delta_kwh_tmr: float | None = None
+                        if (
+                            soc_end is not None
+                            and prev_soc_tmr is not None
+                            and battery_settings.total_capacity > 0
+                        ):
+                            soc_delta_kwh_tmr = (
+                                (soc_end - prev_soc_tmr)
+                                / 100.0
+                                * battery_settings.total_capacity
+                            )
+                        prev_soc_tmr = soc_end
                         tomorrow_period_groups.append(
                             {
                                 "start_time": group["start_time"],
@@ -1660,6 +1730,9 @@ async def get_growatt_detailed_schedule():
                                 "charge_power_rate": group["charge_rate"],
                                 "discharge_power_rate": group["discharge_rate"],
                                 "grid_charge": group["grid_charge"],
+                                "total_action_kwh": group["total_action_kwh"],
+                                "soc_end_pct": soc_end,
+                                "soc_delta_kwh": soc_delta_kwh_tmr,
                             }
                         )
         except (AttributeError, KeyError, ValueError) as e:
@@ -2917,6 +2990,8 @@ async def run_setup_discovery():
                 "nordpool_custom_entity": integrations.get("nordpool_custom_entity"),
                 "nordpool_config_entry_id": integrations["nordpool_config_entry_id"],
                 "octopus_found": integrations["octopus_found"],
+                "entsoe_found": integrations.get("entsoe_found", False),
+                "entsoe_entity": integrations.get("entsoe_entity"),
                 "missing_sensors": missing_sensors,
                 # Auto-detected hints
                 "detected_inverter_platforms": integrations[
@@ -3055,6 +3130,9 @@ async def setup_complete(payload: APISetupCompletePayload):
                     "export_today_entity": payload.octopusExportTodayEntity,
                     "export_tomorrow_entity": payload.octopusExportTomorrowEntity,
                 }
+            # Persist ENTSO-e entity when provider is entsoe
+            if payload.provider == "entsoe" and payload.entsoeEntity:
+                ep["entsoe"] = {"entity": payload.entsoeEntity}
             sections["energy_provider"] = ep
 
         # --- inverter ---

@@ -496,7 +496,7 @@ class TestDataFlowValidation:
             "GRID_CHARGING",
             "SOLAR_STORAGE",
             "LOAD_SUPPORT",
-            "EXPORT_ARBITRAGE",
+            "BATTERY_EXPORT",
             "IDLE",
         }
         for intent in schedule_intents:

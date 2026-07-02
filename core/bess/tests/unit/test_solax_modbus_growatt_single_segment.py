@@ -140,15 +140,15 @@ class TestApplyPeriod:
         assert len(mock_ha.calls["tou_segments"]) == initial_writes
 
     def test_grid_first_mode(self, controller, mock_ha):
-        """EXPORT_ARBITRAGE should set grid_first mode."""
-        intents = hourly_to_quarterly({10: "EXPORT_ARBITRAGE"})
+        """BATTERY_EXPORT should set grid_first mode."""
+        intents = hourly_to_quarterly({10: "BATTERY_EXPORT"})
         schedule = make_schedule(intents)
         controller.create_schedule(schedule, current_period=0)
 
         # Set initial mode
         controller._last_written_tou_mode = "load_first"
 
-        self._apply_at_period(controller, mock_ha, 40, "EXPORT_ARBITRAGE")
+        self._apply_at_period(controller, mock_ha, 40, "BATTERY_EXPORT")
         seg = mock_ha.calls["tou_segments"][-1]
         assert seg["batt_mode"] == "grid_first"
         assert seg["enabled"] is True
@@ -159,7 +159,7 @@ class TestApplyPeriod:
             {
                 0: "IDLE",
                 2: "GRID_CHARGING",
-                6: "EXPORT_ARBITRAGE",
+                6: "BATTERY_EXPORT",
                 10: "LOAD_SUPPORT",
             }
         )
@@ -176,8 +176,8 @@ class TestApplyPeriod:
         self._apply_at_period(controller, mock_ha, 8, "GRID_CHARGING")
         modes_written.append(controller._last_written_tou_mode)
 
-        # Period 24: EXPORT_ARBITRAGE -> grid_first
-        self._apply_at_period(controller, mock_ha, 24, "EXPORT_ARBITRAGE")
+        # Period 24: BATTERY_EXPORT -> grid_first
+        self._apply_at_period(controller, mock_ha, 24, "BATTERY_EXPORT")
         modes_written.append(controller._last_written_tou_mode)
 
         # Period 40: LOAD_SUPPORT -> load_first
@@ -255,7 +255,7 @@ class TestWriteScheduleToHardware:
         assert seg["enabled"] is False
 
     def test_seeds_mode_tracker(self, controller, mock_ha):
-        intents = hourly_to_quarterly({5: "EXPORT_ARBITRAGE"})
+        intents = hourly_to_quarterly({5: "BATTERY_EXPORT"})
         schedule = make_schedule(intents)
         controller.create_schedule(schedule, current_period=0)
 
@@ -389,7 +389,7 @@ class TestCompareSchedules:
 
         controller.strategic_intents = hourly_to_quarterly({2: "GRID_CHARGING"})
         other.strategic_intents = hourly_to_quarterly(
-            {2: "GRID_CHARGING", 18: "EXPORT_ARBITRAGE"}
+            {2: "GRID_CHARGING", 18: "BATTERY_EXPORT"}
         )
 
         differs, _reason = controller.compare_schedules(other)

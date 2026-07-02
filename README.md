@@ -55,13 +55,14 @@ Something look off? The built-in AI Analyst explains every decision in plain lan
 ### Electricity Markets
 - **Nordpool** — Nordic spot market (SE, NO, FI, DK, EE, LT, LV)
 - **Octopus Energy Agile** — UK market with separate import/export rates
+- **ENTSO-e / Belpex** — European day-ahead spot prices via the ENTSO-e Transparency Platform (e.g. Belgian Belpex) *(experimental)*
 
 ### Optional Integrations
 - **Solcast** or other solar forecast for production predictions
 - **InfluxDB** for historical data persistence
 - **Tibber** for power monitoring
 
-> **Want support for your inverter?** We're actively looking for testers with GivEnergy, Solis, Huawei, and other systems. [Open an issue](https://github.com/johanzander/bess-manager/issues) or join the discussion!
+> **Want support for your inverter?** We're actively looking for testers with GivEnergy, Solis, Huawei, and other systems. [Open an issue](https://github.com/johanzander/bess-manager/issues) or join the discussion! [Sponsoring](https://github.com/johanzander/bess-manager#sponsorship) helps prioritize new hardware support.
 
 ## Installation
 
@@ -81,6 +82,12 @@ Full instructions: **[Installation Guide](docs/INSTALLATION.md)**
 
 - **Issues & feature requests**: [GitHub Issues](https://github.com/johanzander/bess-manager/issues)
 - **Discussion**: [Home Assistant Community Forum](https://community.home-assistant.io/)
+
+## Sponsorship
+
+ChargeIQ is free and open source. If it's saving you money on your energy bill, consider sponsoring — it directly funds the AI tools used to build new features.
+
+[❤️ Sponsor on GitHub](https://github.com/sponsors/johanzander)
 
 ## License
 

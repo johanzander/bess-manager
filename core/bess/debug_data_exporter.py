@@ -56,6 +56,7 @@ from typing import Any
 
 from . import time_utils
 from .battery_system_manager import BatterySystemManager
+from .debug_findings import build_key_findings
 from .health_check import run_system_health_checks
 
 logger = logging.getLogger(__name__)
@@ -86,22 +87,30 @@ _CONFIG_ENTRY_DATA_ALLOWLIST: dict[str, frozenset[str]] = {
     "growatt": frozenset({"name", "plant_id", "url"}),
     "solax_modbus": frozenset({"name"}),
     "solax": frozenset({"name"}),
+    "entsoe": frozenset({"area", "currency", "energy_scale", "name"}),
 }
 
 # Domains whose config entries are captured in the WS discovery dump.
 _WS_TARGET_DOMAINS = frozenset(
-    {"nordpool", "growatt", "growatt_server", "solax_modbus", "solax"}
+    {"nordpool", "growatt", "growatt_server", "solax_modbus", "solax", "entsoe"}
 )
 
 # Domains whose entities are captured from the entity registry.
 _ENTITY_REGISTRY_DOMAINS = frozenset(
-    {"growatt_server", "solax_modbus", "solax", "nordpool", "octopus_energy"}
+    {
+        "growatt_server",
+        "solax_modbus",
+        "solax",
+        "nordpool",
+        "octopus_energy",
+        "entsoe",
+    }
 )
 
 # Keywords matched against entity_id and unique_id to capture entities
 # that belong to BESS-relevant integrations even if they register under
 # an unexpected platform name.
-_ENTITY_REGISTRY_KEYWORDS = ("growatt", "solax", "nordpool", "octopus")
+_ENTITY_REGISTRY_KEYWORDS = ("growatt", "solax", "nordpool", "octopus", "entsoe")
 
 # Entity registry fields that are useful for debugging discovery and
 # sensor mapping. unique_id is redacted (last-4) since it often contains
@@ -258,7 +267,7 @@ _LOG_KEY_PATTERNS = re.compile(
     r"|Intent transition|DECISION:"
     r"|Starting optimization|Optimization complete"
     r"|Applying period|Apply schedule"
-    r"|LOAD_SUPPORT|EXPORT_ARBITRAGE|GRID_CHARGING"
+    r"|LOAD_SUPPORT|BATTERY_EXPORT|GRID_CHARGING"
     r"|TOU hardware|TOU conversion|schedule created"
     r"|Setting.*power rate|power rate.*set",
     re.IGNORECASE,
@@ -294,6 +303,7 @@ class DebugDataExport:
     todays_log_content: str
     log_file_info: dict
     ha_ws_discovery: dict = field(default_factory=dict)
+    key_findings: dict = field(default_factory=dict)
     compact: bool = True
 
 
@@ -354,7 +364,7 @@ class DebugDataAggregator:
         """
         logger.info("Starting debug data aggregation (compact=%s)", compact)
 
-        return DebugDataExport(
+        export = DebugDataExport(
             export_timestamp=datetime.now().astimezone().isoformat(),
             timezone=self._get_timezone(),
             bess_version=self._get_version(),
@@ -380,6 +390,10 @@ class DebugDataAggregator:
             ha_ws_discovery=self._serialize_ha_ws_discovery(),
             compact=compact,
         )
+        export.key_findings = build_key_findings(
+            export.schedules, export.todays_log_content
+        )
+        return export
 
     def _get_version(self) -> str:
         """Get BESS Manager version.
@@ -710,6 +724,17 @@ class DebugDataAggregator:
                         logger.warning(
                             "Failed to fetch octopus entity %s: %s", entity_id, e
                         )
+
+        elif provider == "entsoe":
+            entsoe_cfg = config["entsoe"]
+            entity_id = entsoe_cfg.get("entity")
+            if entity_id:
+                try:
+                    state = controller.get_entity_state_raw(entity_id)
+                    if state:
+                        snapshot[entity_id] = self._strip_ha_metadata(state)
+                except Exception as e:
+                    logger.warning("Failed to fetch entsoe entity %s: %s", entity_id, e)
 
         elif provider != "nordpool_official":
             # nordpool_official uses service calls — no entity state to capture

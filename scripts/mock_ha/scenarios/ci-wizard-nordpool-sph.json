@@ -235,8 +235,17 @@
       "unique_id": "SE3-current_price"
     }
   ],
-  "ac_charge_times": [],
-  "ac_discharge_times": [],
+  "ac_charge_times": {
+    "charge_power": 100,
+    "charge_stop_soc": 95,
+    "mains_enabled": false,
+    "periods": []
+  },
+  "ac_discharge_times": {
+    "discharge_power": 100,
+    "discharge_stop_soc": 15,
+    "periods": []
+  },
   "price_data": {
     "today": [
       0.55, 0.45, 0.35, 0.3, 0.28, 0.45, 0.75, 0.95,

@@ -114,7 +114,7 @@ class TestSolarStorageIsIdle:
         assert len(manager._discharge_periods) == 0
 
 
-# ── LOAD_SUPPORT / EXPORT_ARBITRAGE → discharge period ───────────────────────
+# ── LOAD_SUPPORT / BATTERY_EXPORT → discharge period ───────────────────────
 
 
 class TestDischargeIntentsProduceDischargeperiod:
@@ -129,7 +129,7 @@ class TestDischargeIntentsProduceDischargeperiod:
     def test_export_arbitrage_produces_discharge_period(
         self, manager: GrowattSphController
     ) -> None:
-        intents = make_intents({20: "EXPORT_ARBITRAGE"})
+        intents = make_intents({20: "BATTERY_EXPORT"})
         manager.create_schedule(make_schedule_mock(intents))
 
         assert len(manager._discharge_periods) == 1
@@ -137,9 +137,9 @@ class TestDischargeIntentsProduceDischargeperiod:
     def test_consecutive_mixed_discharge_intents_merge_into_one_period(
         self, manager: GrowattSphController
     ) -> None:
-        # LOAD_SUPPORT followed immediately by EXPORT_ARBITRAGE → both are in
+        # LOAD_SUPPORT followed immediately by BATTERY_EXPORT → both are in
         # DISCHARGE_INTENTS, so they merge into a single continuous discharge period.
-        intents = make_intents({18: "LOAD_SUPPORT", 19: "EXPORT_ARBITRAGE"})
+        intents = make_intents({18: "LOAD_SUPPORT", 19: "BATTERY_EXPORT"})
         manager.create_schedule(make_schedule_mock(intents))
 
         assert len(manager._discharge_periods) == 1
@@ -149,7 +149,7 @@ class TestDischargeIntentsProduceDischargeperiod:
     def test_discharge_period_writes_discharge_call_to_controller(
         self, manager: GrowattSphController
     ) -> None:
-        intents = make_intents({20: "EXPORT_ARBITRAGE"})
+        intents = make_intents({20: "BATTERY_EXPORT"})
         manager.create_schedule(make_schedule_mock(intents))
 
         controller = MagicMock()
@@ -381,6 +381,79 @@ class TestWriteScheduleToHardware:
         assert call_kwargs.get("period_1_enabled") is True
         assert call_kwargs.get("period_2_enabled") is False
         assert call_kwargs.get("period_3_enabled") is False
+
+
+# ── tou_intervals structure ───────────────────────────────────────────────────
+
+
+class TestTouIntervalsStructure:
+    """tou_intervals entries must always carry segment_id and is_default.
+
+    These fields flow directly to the API and the frontend dashboard. Missing
+    them produces "Segment #undefined" and broken isDefault styling.
+    """
+
+    def test_charge_interval_has_segment_id(
+        self, manager: GrowattSphController
+    ) -> None:
+        intents = make_intents({2: "GRID_CHARGING", 3: "GRID_CHARGING"})
+        manager.create_schedule(make_schedule_mock(intents))
+
+        assert len(manager.tou_intervals) > 0
+        for interval in manager.tou_intervals:
+            assert "segment_id" in interval, "tou_intervals entry missing segment_id"
+            assert isinstance(interval["segment_id"], int)
+            assert interval["segment_id"] >= 1
+
+    def test_discharge_interval_has_segment_id(
+        self, manager: GrowattSphController
+    ) -> None:
+        intents = make_intents({18: "LOAD_SUPPORT", 19: "LOAD_SUPPORT"})
+        manager.create_schedule(make_schedule_mock(intents))
+
+        assert len(manager.tou_intervals) > 0
+        for interval in manager.tou_intervals:
+            assert "segment_id" in interval
+            assert isinstance(interval["segment_id"], int)
+            assert interval["segment_id"] >= 1
+
+    def test_active_intervals_have_is_default_false(
+        self, manager: GrowattSphController
+    ) -> None:
+        intents = make_intents({2: "GRID_CHARGING", 18: "LOAD_SUPPORT"})
+        manager.create_schedule(make_schedule_mock(intents))
+
+        for interval in manager.tou_intervals:
+            assert "is_default" in interval, "tou_intervals entry missing is_default"
+            assert interval["is_default"] is False
+
+    def test_segment_ids_are_sequential_from_one(
+        self, manager: GrowattSphController
+    ) -> None:
+        intents = make_intents(
+            {2: "GRID_CHARGING", 14: "GRID_CHARGING", 18: "LOAD_SUPPORT"}
+        )
+        manager.create_schedule(make_schedule_mock(intents))
+
+        ids = [i["segment_id"] for i in manager.tou_intervals]
+        assert ids == list(range(1, len(ids) + 1))
+
+    def test_idle_day_has_no_tou_intervals(self, manager: GrowattSphController) -> None:
+        intents = make_intents({})
+        manager.create_schedule(make_schedule_mock(intents))
+
+        assert manager.tou_intervals == []
+
+    def test_default_placeholder_has_segment_id_zero_and_is_default_true(
+        self, manager: GrowattSphController
+    ) -> None:
+        intents = make_intents({})
+        manager.create_schedule(make_schedule_mock(intents))
+
+        segments = manager.get_all_tou_segments()
+        assert len(segments) == 1
+        assert segments[0]["segment_id"] == 0
+        assert segments[0]["is_default"] is True
 
 
 # ── Helper ────────────────────────────────────────────────────────────────────

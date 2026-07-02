@@ -1,12 +1,53 @@
 #!/bin/bash
 # Developer startup script with continuous logs
+#
+# Container runtime: auto-detected (podman preferred, falls back to docker).
+# Override with DOCKER=docker ./dev-run.sh if needed.
+# When using podman, podman-compose is auto-installed into the venv if missing.
+if [ -z "$DOCKER" ]; then
+  if command -v podman >/dev/null 2>&1; then
+    DOCKER="podman"
+  else
+    DOCKER="docker"
+  fi
+fi
+COMPOSE="${COMPOSE:-${DOCKER} compose}"
+
+# Locate the venv — worktrees share the main repo's venv, not a local one.
+_git_common=$(git rev-parse --git-common-dir 2>/dev/null)
+_main_root=$(cd "$(dirname "$_git_common")" && pwd)
+if [ -f ".venv/bin/pip" ]; then
+  VENV_BIN="$(pwd)/.venv/bin"
+elif [ -f "$_main_root/.venv/bin/pip" ]; then
+  VENV_BIN="$_main_root/.venv/bin"
+else
+  VENV_BIN=""
+fi
+
+# podman-compose uses a different binary; auto-install into the venv if missing.
+if [ "$DOCKER" = "podman" ]; then
+  if [ -n "$VENV_BIN" ] && [ ! -f "$VENV_BIN/podman-compose" ]; then
+    echo "Installing podman-compose into venv..."
+    "$VENV_BIN/pip" install --quiet podman-compose
+  fi
+  if [ -n "$VENV_BIN" ] && [ -f "$VENV_BIN/podman-compose" ]; then
+    COMPOSE="$VENV_BIN/podman-compose"
+  elif command -v podman-compose >/dev/null 2>&1; then
+    COMPOSE="podman-compose"
+  else
+    echo "Error: podman-compose not available and no venv found to install it."
+    echo "Run: pip install podman-compose"
+    exit 1
+  fi
+fi
 
 echo "==== BESS Manager Development Environment Setup ===="
+echo "Container runtime: $DOCKER"
 
 # Derive a unique project name from the directory so multiple worktrees
 # can run side-by-side without container name conflicts.
 export COMPOSE_PROJECT_NAME="bess-$(basename "$(pwd)")"
-echo "Docker Compose project: $COMPOSE_PROJECT_NAME"
+echo "Compose project: $COMPOSE_PROJECT_NAME"
 
 # Derive stable ports from the directory name so each worktree gets a
 # predictable, unique port.  The hash maps any directory name into the
@@ -19,10 +60,10 @@ if [ -z "$BESS_DEV_PORT" ]; then
 fi
 export BESS_FRONTEND_PORT="${BESS_FRONTEND_PORT:-$(( BESS_DEV_PORT + 1000 ))}"
 
-# Verify Docker is running
-if ! docker info > /dev/null 2>&1; then
-  echo "Error: Docker is not running."
-  echo "Please start Docker and try again."
+# Verify container runtime is available
+if ! $DOCKER info > /dev/null 2>&1; then
+  echo "Error: $DOCKER is not running."
+  echo "Please start $DOCKER and try again."
   exit 1
 fi
 
@@ -58,8 +99,8 @@ fi
 # Extract options from config.yaml to backend/dev-options.json for development
 # Note: InfluxDB credentials are passed as environment variables, not in options.json
 echo "Extracting development options from config.yaml..."
-if [ -f config.yaml ]; then
-  ./.venv/bin/python << 'EOF'
+if [ -f config.yaml ] && [ -n "$VENV_BIN" ]; then
+  "$VENV_BIN/python" << 'EOF'
 import yaml
 import json
 
@@ -92,14 +133,14 @@ fi
 export TZ=${TZ:-Europe/Stockholm}
 
 echo "Stopping any existing containers for this project..."
-docker compose down --remove-orphans 2>/dev/null
+$COMPOSE down --remove-orphans 2>/dev/null
 
 # Also remove any stale container with the target name (e.g. left over
 # from a previous run or an older compose config without project naming).
 CONTAINER_NAME="${COMPOSE_PROJECT_NAME}-dev"
-if docker ps -a --format '{{.Names}}' | grep -qx "$CONTAINER_NAME"; then
+if $DOCKER ps -a --format '{{.Names}}' | grep -qx "$CONTAINER_NAME"; then
   echo "Removing stale container: $CONTAINER_NAME"
-  docker rm -f "$CONTAINER_NAME" >/dev/null
+  $DOCKER rm -f "$CONTAINER_NAME" >/dev/null
 fi
 
 # Only rebuild frontend if source files changed since last build
@@ -112,7 +153,7 @@ else
 fi
 
 echo "Building and starting development container..."
-docker compose up --build -d
+$COMPOSE up --build -d
 
 echo "Waiting for BESS to start (following logs)..."
 echo ""
@@ -127,7 +168,7 @@ print_banner() {
 trap 'print_banner; exit 0' INT
 
 # Stream logs; print the banner once BESS is fully started (Uvicorn ready).
-docker compose logs -f --no-log-prefix 2>&1 | while IFS= read -r line; do
+$COMPOSE logs -f --no-log-prefix 2>&1 | while IFS= read -r line; do
     echo "$line"
     if [[ "$line" == *"Uvicorn running on"* ]]; then
       print_banner

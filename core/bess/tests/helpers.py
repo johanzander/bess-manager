@@ -107,7 +107,7 @@ def run_scenario_realized(scenario: dict) -> tuple:
 def get_intent_distribution(result) -> dict[str, int]:
     """Count how many periods have each strategic intent.
 
-    Returns e.g. {"GRID_CHARGING": 5, "IDLE": 15, "EXPORT_ARBITRAGE": 4}
+    Returns e.g. {"GRID_CHARGING": 5, "IDLE": 15, "BATTERY_EXPORT": 4}
     """
     counts: dict[str, int] = {}
     for pd in result.period_data:
@@ -119,7 +119,7 @@ def get_intent_distribution(result) -> dict[str, int]:
 def get_intents_at_hours(result, hours: list[int]) -> dict[int, str]:
     """Get strategic intent at specific hours.
 
-    Returns e.g. {2: "GRID_CHARGING", 19: "EXPORT_ARBITRAGE"}
+    Returns e.g. {2: "GRID_CHARGING", 19: "BATTERY_EXPORT"}
     """
     return {h: result.period_data[h].decision.strategic_intent for h in hours}
 

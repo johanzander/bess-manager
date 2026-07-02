@@ -7,7 +7,7 @@
 
 **Impact**: High | **Effort**: Medium | **Dependencies**: Growatt inverter control
 
-**Description**: Discharge power seems to always be 100% leading to higher export than intended during EXPORT_ARBITRAGE operations.
+**Description**: Discharge power seems to always be 100% leading to higher export than intended during BATTERY_EXPORT operations.
 
 ### **Charging power rate setting has no effect**
 
@@ -669,6 +669,9 @@ To remove:
 2. Update schedule display table to show 15-min periods (or keep hourly summary for readability)
 3. Update `get_strategic_intent_summary()` to work directly with periods
 4. Remove the hourly aggregation methods listed above
+
+**Re-run optimization on energy prediction method change**:
+When the user changes the consumption strategy (e.g. from `sensor` to `fixed`), the optimization should re-run immediately with the new prediction method rather than waiting for the next scheduled cycle. The prediction cache should be cleared and a fresh optimization triggered in the same request that saves the new strategy.
 
 **Sensor Collector InfluxDB Usage**:
 Based on the code analysis: The function `_get_hour_readings` in SensorCollector is called by `collect_energy_data(hour)`. This is not called every hour automatically by the system; it is called when the system wants to collect and record data for a specific hour. The actual historical data for the dashboard is served from the HistoricalDataStore, which is an in-memory store populated by calls to `record_energy_data` (which uses the output of `collect_energy_data`).

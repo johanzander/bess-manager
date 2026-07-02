@@ -1319,6 +1319,92 @@
     ]
   },
   "expected_wizard": {
+    "growatt_cloud_3phase": {
+      "_comment": "Growatt SPH via cloud + Octopus Energy pricing. UK 3-phase user (xyz9876543 device). Covers phase_count=3 and power_monitoring_enabled=true path.",
+      "payload": {
+        "sensors": {
+          "battery_soc": "sensor.xyz9876543_state_of_charge",
+          "battery_charge_power": "sensor.xyz9876543_battery_charging",
+          "battery_discharge_power": "sensor.xyz9876543_battery_discharging_w",
+          "import_power": "sensor.xyz9876543_import_from_grid",
+          "export_power": "sensor.xyz9876543_export_to_grid",
+          "pv_power": "sensor.xyz9876543_all_pv_wattage",
+          "lifetime_battery_charged": "sensor.xyz9876543_lifetime_battery_charged",
+          "lifetime_battery_discharged": "sensor.xyz9876543_lifetime_battery_discharged",
+          "lifetime_solar_energy": "sensor.xyz9876543_lifetime_solar_energy",
+          "lifetime_import_from_grid": "sensor.xyz9876543_lifetime_import_from_grid",
+          "lifetime_export_to_grid": "sensor.xyz9876543_lifetime_export_to_grid",
+          "lifetime_load_consumption": "sensor.xyz9876543_lifetime_load_consumption"
+        },
+        "growattDeviceId": "dev-growatt-xyz",
+        "totalCapacity": 10.0,
+        "minSoc": 20.0,
+        "maxSoc": 95.0,
+        "maxChargeDischargePower": 5.0,
+        "cycleCost": 0.5,
+        "minActionProfitThreshold": 0.0,
+        "currency": "GBP",
+        "consumption": 4.0,
+        "consumptionStrategy": "fixed",
+        "maxFuseCurrent": 32,
+        "voltage": 230,
+        "safetyMarginFactor": 1.0,
+        "phaseCount": 3,
+        "powerMonitoringEnabled": true,
+        "markupRate": 0.0,
+        "vatMultiplier": 1.0,
+        "additionalCosts": 0.0,
+        "taxReduction": 0.0,
+        "provider": "octopus",
+        "octopusImportTodayEntity": "event.octopus_energy_electricity_current_day_rates",
+        "octopusImportTomorrowEntity": "event.octopus_energy_electricity_next_day_rates",
+        "octopusExportTodayEntity": "event.octopus_energy_electricity_export_current_day_rates",
+        "octopusExportTomorrowEntity": "event.octopus_energy_electricity_export_next_day_rates",
+        "inverterPlatform": "growatt_server_sph"
+      },
+      "expected_saved": {
+        "inverter": {
+          "platform": "growatt_server_sph"
+        },
+        "growatt": {
+          "device_id": "dev-growatt-xyz"
+        },
+        "battery": {
+          "total_capacity": 10.0,
+          "max_charge_power_kw": 5.0,
+          "max_discharge_power_kw": 5.0
+        },
+        "home": {
+          "currency": "GBP",
+          "phase_count": 3,
+          "power_monitoring_enabled": true
+        },
+        "electricity_price": {
+          "vat_multiplier": 1.0,
+          "additional_costs": 0.0,
+          "tax_reduction": 0.0
+        },
+        "energy_provider": {
+          "provider": "octopus",
+          "octopus": {
+            "import_today_entity": "event.octopus_energy_electricity_current_day_rates",
+            "import_tomorrow_entity": "event.octopus_energy_electricity_next_day_rates",
+            "export_today_entity": "event.octopus_energy_electricity_export_current_day_rates",
+            "export_tomorrow_entity": "event.octopus_energy_electricity_export_next_day_rates"
+          }
+        },
+        "sensors": {
+          "battery_soc": "sensor.xyz9876543_state_of_charge",
+          "pv_power": "sensor.xyz9876543_all_pv_wattage"
+        }
+      },
+      "expected_absent_sections": [],
+      "expected_live": {
+        "growatt_device_id": "dev-growatt-xyz",
+        "switch_inverter_platform": "growatt_server_sph"
+      },
+      "no_tou_slots": true
+    },
     "growatt_cloud": {
       "_comment": "Growatt SPH via cloud (growatt_server) + Octopus Energy pricing. UK single-phase user from issue #60.",
       "payload": {

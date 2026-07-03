@@ -2979,7 +2979,7 @@ async def run_setup_discovery():
                 sensors[phase_key] = entity_id
 
         # Discover optional integration sensors (Solcast, Weather, EV, etc.)
-        optional_sensors = ha.discover_optional_sensors(states)
+        optional_sensors = ha.discover_optional_sensors(states, registry)
         for key, entity_id in optional_sensors.items():
             if key not in sensors:
                 sensors[key] = entity_id

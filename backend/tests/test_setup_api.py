@@ -675,11 +675,11 @@ def _make_discover_controller(store_data: dict) -> MagicMock:
 class TestDiscoverLocaleDefaults:
     """POST /api/setup/discover — locale-appropriate defaults (#113)."""
 
-    def _run_discover(self, ctrl, integrations):
+    def _run_discover(self, ctrl, integrations, registry=None):
         """Helper: mock HA calls and POST /api/setup/discover."""
         ha = ctrl.ha_controller
         ha.discover_integrations.return_value = (integrations, [])
-        ha.fetch_entity_registry.return_value = []
+        ha.fetch_entity_registry.return_value = [] if registry is None else registry
         ha.discover_sensors_from_registry.return_value = ({}, None)
         ha.discover_current_sensors.return_value = {}
         ha.discover_optional_sensors.return_value = {}
@@ -821,6 +821,47 @@ class TestDiscoverLocaleDefaults:
 
         assert store["home"]["currency"] == original_currency
         assert store["electricity_price"]["vat_multiplier"] == original_vat
+
+    def test_discover_optional_sensors_receives_entity_registry(self):
+        """discover_optional_sensors must receive the entity registry (#218).
+
+        The registry is already fetched in this endpoint for Octopus
+        discovery; without passing it through, Solcast detection falls back
+        to fragile entity_id substring matching that breaks on non-English
+        HA locales.
+        """
+        store = deepcopy(_PRE_EXISTING_STORE)
+        ctrl = _make_discover_controller(store)
+        integrations = {
+            "growatt_found": False,
+            "device_sn": None,
+            "growatt_device_id": None,
+            "solax_found": False,
+            "nordpool_found": False,
+            "nordpool_area": None,
+            "nordpool_custom_area": None,
+            "nordpool_custom_entity": None,
+            "nordpool_config_entry_id": None,
+            "octopus_found": False,
+            "detected_inverter_platforms": [],
+            "detected_phase_count": None,
+            "currency": None,
+            "vat_multiplier": None,
+        }
+        registry = [
+            {
+                "entity_id": "sensor.solpanel_prognos_idag",
+                "platform": "solcast_solar",
+                "unique_id": "abc_total_kwh_forecast_today",
+            }
+        ]
+
+        resp = self._run_discover(ctrl, integrations, registry=registry)
+
+        assert resp.status_code == 200
+        ctrl.ha_controller.discover_optional_sensors.assert_called_once_with(
+            [], registry
+        )
 
 
 # ===========================================================================

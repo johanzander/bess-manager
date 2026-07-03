@@ -15,6 +15,8 @@ interface AlertBannerProps {
   criticalIssues: CriticalIssue[];
   totalCriticalIssues: number;
   onDismiss?: () => void;
+  onRecheck?: () => void;
+  isRechecking?: boolean;
   className?: string;
 }
 
@@ -23,6 +25,8 @@ const AlertBanner: React.FC<AlertBannerProps> = ({
   hasWarnings,
   criticalIssues,
   onDismiss,
+  onRecheck,
+  isRechecking = false,
   className = ''
 }) => {
   const navigate = useNavigate();
@@ -124,6 +128,15 @@ const AlertBanner: React.FC<AlertBannerProps> = ({
                 <AlertCircle className="h-3.5 w-3.5 mr-1" />
                 Report Problem
               </button>
+              {onRecheck && (
+                <button
+                  onClick={onRecheck}
+                  disabled={isRechecking}
+                  className="inline-flex items-center px-3 py-1.5 text-sm font-medium text-red-800 dark:text-red-300 bg-red-100 dark:bg-red-800/30 hover:bg-red-200 dark:hover:bg-red-800/50 rounded-md transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isRechecking ? 'Rechecking…' : 'Recheck now'}
+                </button>
+              )}
             </div>
           </div>
 
@@ -185,6 +198,15 @@ const AlertBanner: React.FC<AlertBannerProps> = ({
               <ExternalLink className="h-3.5 w-3.5 mr-1" />
               View Details
             </button>
+            {onRecheck && (
+              <button
+                onClick={onRecheck}
+                disabled={isRechecking}
+                className="inline-flex items-center px-3 py-1.5 text-sm font-medium text-amber-800 dark:text-amber-300 bg-amber-100 dark:bg-amber-800/30 hover:bg-amber-200 dark:hover:bg-amber-800/50 rounded-md transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isRechecking ? 'Rechecking…' : 'Recheck now'}
+              </button>
+            )}
           </div>
         </div>
 

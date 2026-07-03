@@ -57,6 +57,16 @@
 - All assignments and references in `decision_intelligence.py`, `sph_schedule.py`, `battery_system_manager.py`, and any API serialization
 - Frontend: any display label or type referencing `strategicIntent` / `strategic_intent`
 
+### **Minor cleanup from issue #201 (stale health-check banner) fix**
+
+**Impact**: Low | **Effort**: Low | **Dependencies**: `core/bess/influxdb_helper.py`, `backend/api.py`
+
+**Description**: A few small, non-blocking cleanups identified during code review of the #201 fix:
+
+- `get_sensor_data_batch` and `get_power_sensor_data_batch` (`core/bess/influxdb_helper.py`) each have their own copy of the `if not is_influxdb_configured(): ...` early-return guard — could be factored into a shared decorator/helper if a third call site appears.
+- `GET /api/system-health` and `POST /api/system-health/recheck` (`backend/api.py`) share the same `_require_configured_system` + health-check + `convert_keys_to_camel_case` + `HTTPException(500)` shape, differing only in whether the result is cached. Worth revisiting if a third variant is ever needed.
+- The new 5-minute health-check cron job (`backend/app.py`) also re-runs `test_influxdb_connection()` for the subset of users who *do* have InfluxDB configured (it correctly skips for everyone else). This is intentional — same cadence agreed for the dashboard banner — but worth knowing if InfluxDB load ever becomes a complaint.
+
 ### **Investigate redundant `power` gate in strategic intent detection**
 
 **Impact**: Low | **Effort**: Low | **Dependencies**: `decision_intelligence.py`, `dp_battery_algorithm.py`

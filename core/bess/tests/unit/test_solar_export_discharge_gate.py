@@ -48,17 +48,21 @@ def _solar_export_periods(result):
 
 @pytest.mark.slow
 def test_solar_export_covers_dip_when_buy_exceeds_export():
-    """Normal prices (buy > sell). During SOLAR_EXPORT the battery is full and
-    exporting surplus, so the marginal stored kWh is only worth the export floor
-    (the ongoing surplus refills it — the replenishment effect). The DP shadow
-    price therefore equals roughly the sell price, well below buy*eff_d, so the
-    gate ALLOWS discharge (100): covering an intra-period dip from the battery is
-    cheaper than buying it from grid, because solar refills the battery for free.
+    """Normal prices (buy comfortably above shadow). During SOLAR_EXPORT the
+    battery is full and exporting surplus. Discharging opens up room that the
+    ongoing surplus refills — but that refill is not free: every period spent
+    below full incurs the passive-charging cycle cost the full battery avoids.
+    So the marginal stored kWh is worth the export floor *plus* that forced
+    replenishment cost (issue #204 fixed the anti-cycling gate that used to let
+    the DP dodge this cost via unprofitable marginal discharges — see
+    docs/superpowers/specs/2026-06-27-solar-export-discharge-rate-design.md).
+    The gate still ALLOWS discharge (100) here because buy*eff_d clears even
+    this higher, more accurate shadow price.
     """
     bs = make_battery_settings(efficiency_discharge=0.95)
     eff_d = bs.efficiency_discharge
 
-    buy = [0.5] * 8 + [5.0] * 8
+    buy = [1.0] * 8 + [5.0] * 8
     sell = [0.3] * 16
     solar = [4.0] * 8 + [0.0] * 8
     consumption = [0.5] * 8 + [2.0] * 8
@@ -77,10 +81,11 @@ def test_solar_export_covers_dip_when_buy_exceeds_export():
     for t in periods:
         shadow = result.period_data[t].decision.shadow_price
         assert shadow > 0.0, f"period {t}: shadow_price not populated"
-        # replenishment floor: stored energy worth ~the export price, not the peak
+        # replenishment floor: export price plus the forced recharge's cycle cost,
+        # not sell price alone (see docstring)
         assert shadow == pytest.approx(
-            sell[t], abs=0.05
-        ), f"period {t}: shadow {shadow:.3f} should be ~sell {sell[t]:.3f}"
+            0.7093, abs=0.01
+        ), f"period {t}: shadow {shadow:.4f} should be ~0.7093 (sell + cycle cost)"
         assert shadow < buy[t] * eff_d
         assert solar_export_discharge_rate(buy[t], shadow, eff_d) == 100
 

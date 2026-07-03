@@ -1,46 +1,74 @@
 """Unified API conversion system - simple snake_case to camelCase conversion.
 
-Also defines the canonical store→API field name mappings for each settings
-section.  These dicts are the single source of truth for:
-  - which fields are required at startup (_apply_settings in app.py)
-  - how store snake_case names map to the camelCase names used by update_settings()
+Also defines the canonical settings field requirements for each section.
+These are the single source of truth for which fields are required at
+startup (_apply_settings in app.py).  Battery and Home settings reach BSM
+in snake_case unchanged — BatterySettings.update()/HomeSettings.update()
+(core/bess/settings.py) do not translate camelCase, so startup and PATCH
+both pass the same store field names straight through (issue #219, mirrors
+the Price fix in #197/#216). Price still uses the older camelCase
+translation dict (PRICE_STORE_TO_API) pending #216.
 
-Both the startup path (app.py) and tests import from here so the mapping
-can never drift between validation and usage.
+Both the startup path (app.py) and tests import from here so the
+requirements can never drift between validation and usage.
 """
 
 import re
-from dataclasses import asdict, is_dataclass
+from dataclasses import asdict, fields, is_dataclass
 from typing import Any
 
+from core.bess.settings import BatterySettings, HomeSettings
+
 # ---------------------------------------------------------------------------
-# Canonical settings field mappings  (store snake_case → update_settings camelCase)
+# Canonical settings field requirements
 # ---------------------------------------------------------------------------
 
 # Fields required at startup by build_system_settings().  Adding a key here
 # makes it required in the bootstrap defaults and in contract tests.
 # Note: charging_power_rate, efficiency_charge, efficiency_discharge are also
-# in the store but have defaults and are not required at startup.
-BATTERY_STORE_TO_API: dict[str, str] = {
-    "total_capacity": "totalCapacity",
-    "min_soc": "minSoc",
-    "max_soc": "maxSoc",
-    "cycle_cost_per_kwh": "cycleCostPerKwh",
-    "max_charge_power_kw": "maxChargePowerKw",
-    "max_discharge_power_kw": "maxDischargePowerKw",
-    "min_action_profit_threshold": "minActionProfitThreshold",
-}
+# in the store but have defaults and are not required at startup — they still
+# flow through via _BATTERY_DATACLASS_FIELDS below.
+BATTERY_REQUIRED_FIELDS: frozenset[str] = frozenset(
+    {
+        "total_capacity",
+        "min_soc",
+        "max_soc",
+        "cycle_cost_per_kwh",
+        "max_charge_power_kw",
+        "max_discharge_power_kw",
+        "min_action_profit_threshold",
+    }
+)
 
-HOME_STORE_TO_API: dict[str, str] = {
-    "default_hourly": "defaultHourly",
-    "currency": "currency",
-    "max_fuse_current": "maxFuseCurrent",
-    "voltage": "voltage",
-    "safety_margin": "safetyMargin",
-    "phase_count": "phaseCount",
-    "consumption_strategy": "consumptionStrategy",
-    "power_monitoring_enabled": "powerMonitoringEnabled",
-}
+# All BatterySettings/HomeSettings init-time attributes — used to filter the
+# battery/home store sections before passthrough. Needed because a store
+# section can carry non-dataclass keys that would raise AttributeError if
+# passed to update() directly: battery has temperature_derating (a nested
+# dict), and home can carry a stale pre-migration key (e.g. 'consumption')
+# if it and its renamed successor ('default_hourly') ever coexisted in a
+# persisted store (see settings_store.py's rename-if-absent migration guard).
+# api.py imports _BATTERY_DATACLASS_FIELDS directly (aliased as
+# _BATTERY_MODEL_ATTRS) so the PATCH path and startup path filter on the
+# exact same set — see TestBatteryModelAttrsConsistency.
+_BATTERY_DATACLASS_FIELDS: frozenset[str] = frozenset(
+    f.name for f in fields(BatterySettings) if f.init
+)
+_HOME_DATACLASS_FIELDS: frozenset[str] = frozenset(
+    f.name for f in fields(HomeSettings) if f.init
+)
+
+HOME_REQUIRED_FIELDS: frozenset[str] = frozenset(
+    {
+        "default_hourly",
+        "currency",
+        "max_fuse_current",
+        "voltage",
+        "safety_margin",
+        "phase_count",
+        "consumption_strategy",
+        "power_monitoring_enabled",
+    }
+)
 
 PRICE_STORE_TO_API: dict[str, str] = {
     "area": "area",
@@ -73,8 +101,9 @@ def build_system_settings(options: dict) -> dict:
                  ``home`` sections using store snake_case field names.
 
     Returns:
-        Dict with ``battery``, ``home``, and ``price`` sections in camelCase,
-        ready to pass to ``system.update_settings()``.
+        Dict with ``battery``, ``home``, and ``price`` sections ready to pass
+        to ``system.update_settings()``. Battery and Home are snake_case
+        (unchanged); Price is still translated to camelCase pending #216.
 
     Raises:
         ValueError: If a required section or field is missing.
@@ -88,7 +117,7 @@ def build_system_settings(options: dict) -> dict:
     electricity_price_config = options["electricity_price"]
     home_config = options["home"]
 
-    for key in BATTERY_STORE_TO_API:
+    for key in BATTERY_REQUIRED_FIELDS:
         if key not in battery_config:
             raise ValueError(f"Required battery setting '{key}' is missing from config")
     for key in PRICE_STORE_TO_API:
@@ -96,18 +125,18 @@ def build_system_settings(options: dict) -> dict:
             raise ValueError(
                 f"Required electricity_price setting '{key}' is missing from config"
             )
-    for key in HOME_STORE_TO_API:
+    for key in HOME_REQUIRED_FIELDS:
         if key not in home_config:
             raise ValueError(f"Required home setting '{key}' is missing from config")
 
     return {
+        # Filtered to known BatterySettings/HomeSettings attributes — excludes
+        # non-dataclass or stale keys sharing the same store section (see
+        # _BATTERY_DATACLASS_FIELDS/_HOME_DATACLASS_FIELDS comment above).
         "battery": {
-            camel: battery_config[snake]
-            for snake, camel in BATTERY_STORE_TO_API.items()
+            k: v for k, v in battery_config.items() if k in _BATTERY_DATACLASS_FIELDS
         },
-        "home": {
-            camel: home_config[snake] for snake, camel in HOME_STORE_TO_API.items()
-        },
+        "home": {k: v for k, v in home_config.items() if k in _HOME_DATACLASS_FIELDS},
         "price": {
             camel: electricity_price_config[snake]
             for snake, camel in PRICE_STORE_TO_API.items()

@@ -137,6 +137,38 @@ Closes #<n>
   the spec (if any); the plan is execution scaffolding that only drifts once
   the code is the source of truth. Never commit a plan doc into the PR.
 
+## After Merge
+
+A **separate, later invocation** — often a different session, sometimes days
+later once CI is green and the user has reviewed. Not part of the numbered
+flow above, which stops at draft-PR-open per the Step 10 constraints.
+
+1. Confirm the merge:
+
+   ```bash
+   gh pr view <n> --json state,mergedAt,mergeCommit
+   ```
+
+   `state == "MERGED"` is authoritative — that's the standard signal, no need
+   to separately diff branch content against `main`. Squash merges break
+   `git branch -d`'s normal ancestry check (the branch's commits never become
+   reachable from `main`), so force-delete below is expected, not a sign
+   something's wrong.
+
+2. Remove the worktree — via `ExitWorktree action=remove discard_changes=true`
+   if the session is still in it, or `git worktree remove <path>` from the
+   main repo root for a `.worktrees/`-created one.
+
+3. Force-delete the local branch and prune stale remote refs:
+
+   ```bash
+   git branch -D <branch-name>
+   git fetch origin --prune
+   ```
+
+   GitHub auto-deletes the remote branch on merge by default; `--prune` just
+   clears the now-stale local tracking ref.
+
 ## Rationalizations — Reality
 
 | Excuse | Reality |

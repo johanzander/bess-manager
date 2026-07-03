@@ -10,6 +10,7 @@ export interface PricingForm {
   octopusImportTomorrowEntity: string;
   octopusExportTodayEntity: string;
   octopusExportTomorrowEntity: string;
+  entsoeEntity: string;
   area: string;
   markupRate: number;
   vatMultiplier: number;
@@ -44,6 +45,7 @@ export function PricingFormSection({ form, onChange }: Props) {
             { value: 'nordpool_official', label: 'Nord Pool (official HA integration)' },
             { value: 'nordpool_hacs', label: 'Nord Pool (HACS custom sensor)' },
             { value: 'octopus', label: 'Octopus Energy' },
+            { value: 'entsoe', label: 'ENTSO-e / Belpex (Transparency Platform)' },
           ],
           form.provider,
           v => onChange({ ...form, provider: v }),
@@ -85,6 +87,16 @@ export function PricingFormSection({ form, onChange }: Props) {
               v => onChange({ ...form, octopusExportTodayEntity: v }))}
             {txtInput('Export tomorrow', form.octopusExportTomorrowEntity,
               v => onChange({ ...form, octopusExportTomorrowEntity: v }))}
+          </div>
+        )}
+
+        {form.provider === 'entsoe' && (
+          <div className="space-y-3">
+            {txtInput('Sensor', form.entsoeEntity,
+              v => onChange({ ...form, entsoeEntity: v }), 'sensor.…_average_electricity_price')}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {txtInput('Currency', form.currency, () => {}, 'Auto-detected…', { readOnly: true })}
+            </div>
           </div>
         )}
       </SectionCard>

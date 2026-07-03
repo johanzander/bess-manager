@@ -456,13 +456,19 @@ def _build_period_data(
         grid_to_battery = remaining_rate  # solar fills first, grid tops up the rest
         battery_charged = solar_to_battery + grid_to_battery
         battery_discharged = 0.0
+        # STORE physics are binary (any positive power charges at rate_throughput),
+        # so the DP's tie-break can report an arbitrary small `power`. Use the
+        # achieved throughput instead — see #203.
+        battery_action_kwh = battery_charged
     elif power < -POWER_TOLERANCE_KW:  # Active discharging
         battery_charged = 0.0
         battery_discharged = abs(power) * dt
+        battery_action_kwh = power * dt
     else:  # IDLE — EXPORT disposition: battery holds, surplus exported
         battery_charged, battery_discharged = _idle_battery_flows(
             soe, next_soe, battery_settings
         )
+        battery_action_kwh = power * dt
 
     energy_balance = (
         solar_production + battery_discharged - home_consumption - battery_charged
@@ -491,6 +497,7 @@ def _build_period_data(
 
     decision_data = create_decision_data(
         power=power,
+        battery_action_kwh=battery_action_kwh,
         energy_data=energy_data,
         hour=period,
         cost_basis=new_cost_basis,
@@ -500,7 +507,6 @@ def _build_period_data(
         battery_wear_cost=battery_wear_cost,
         buy_price=current_buy_price,
         sell_price=current_sell_price,
-        dt=dt,
         currency=currency,
     )
 

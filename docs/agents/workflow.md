@@ -7,6 +7,12 @@
 
 **Never commit without explicit user instruction.**
 
+**Before the first commit of new/unrelated work, check the branch.** Run
+`git branch --show-current` and confirm it matches the work — new features
+and specs get their own branch off `main`, never piggybacked onto whatever
+branch happened to be checked out (e.g. an unrelated in-progress feature
+branch). If it doesn't match, create/switch to the right branch first.
+
 Good commit message format:
 
 ```

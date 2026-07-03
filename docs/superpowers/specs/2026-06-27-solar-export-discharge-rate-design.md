@@ -128,24 +128,42 @@ invisible to the simulator. So:
 
 ## What the shadow price turns out to be during SOLAR_EXPORT
 
-A SOLAR_EXPORT period is, by definition, a **full battery actively exporting
-surplus**. So the marginal stored kWh is *replenishable for free* from the
-ongoing surplus — its opportunity value is just the **export floor (sell
-price)**, not the future peak. The DP shadow price confirms this empirically
-(`shadow ≈ sell` for every SOLAR_EXPORT period). Consequences:
+**Updated 2026-07-03 (issue #204):** the anti-cycling discharge gate in
+`_compute_reward` used to let the DP take marginal, unprofitable discharges
+during solar-surplus periods (crediting them with `avoid_purchase_value` even
+when there was no grid purchase to displace). Fixing #204 closed that leak —
+and it turns out the empirical `shadow ≈ sell` result below was partly an
+artifact of it: the buggy discharge path let the DP dodge the wear cost of the
+forced passive-solar recharge that a not-quite-full battery incurs every period
+during a surplus. With the gate fixed, that recharge cost is no longer
+avoidable, and the shadow price correctly rises to include it. The reasoning
+that follows is updated accordingly; the mechanism (backward-difference on `V`)
+is unchanged.
 
-- **Normal prices** (`buy·eff_d > sell`): gate → **100**. Covering an
-  intra-period dip from the battery beats buying from grid, because the surplus
-  refills the battery. This is the common case.
+A SOLAR_EXPORT period is, by definition, a **full battery actively exporting
+surplus**. The marginal stored kWh is replenishable from the ongoing surplus,
+but that refill is not free: every period spent below full pays the passive-
+charging cycle cost (`cycle_cost_per_kwh`) that a full battery avoids. So the
+marginal stored kWh's opportunity value is the **export floor (sell price)
+plus that forced-replenishment cycle cost**, not sell price alone. Consequences:
+
+- **Normal prices, buy comfortably above the (now higher) shadow price**: gate
+  → **100**. Covering an intra-period dip from the battery still beats buying
+  from grid.
+- **Buy price too close to sell** (shadow price, inflated by cycle cost, now
+  exceeds `buy·eff_d`): gate → **0**, even though `buy > sell`. The
+  replenishment cost eats the spread that used to make covering the dip
+  worthwhile.
 - **Inverted prices** (`sell ≥ buy·eff_d` — export premium, negative buy):
   gate → **0**. The energy is worth more exported than the cheap grid import it
   would displace; export it and buy the dip from grid.
 
-So in practice the gate is 100 except under export-premium / negative-price
-conditions. A hardcoded `discharge_rate=100` would be *wrong* in those inverted
-cases — which is why the shadow price (not a constant) is required. The
-reserve-for-peak behaviour shows up at LOAD_SUPPORT/discharge periods, where the
-gate does not apply.
+The gate is no longer "100 except under export-premium conditions" — it now
+also depends on `buy` clearing the cycle-cost-inclusive shadow price, not just
+`buy > sell`. The shadow price (not a constant, and not a bare sell-price
+proxy) is required precisely because that threshold moves with `cycle_cost_per_kwh`
+and the price levels. The reserve-for-peak behaviour shows up at
+LOAD_SUPPORT/discharge periods, where the gate does not apply.
 
 ## Tests
 

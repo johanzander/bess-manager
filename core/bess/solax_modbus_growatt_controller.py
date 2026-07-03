@@ -149,8 +149,10 @@ class SolaxModbusGrowattController(GrowattMinController):
                     errors.append(str(e))
 
         # load_first uses inverter-native discharge control; touching the EMS
-        # discharge rate register (even with 0) disables discharge entirely.
-        if mode != "load_first":
+        # discharge rate register with 0 disables discharge entirely. But
+        # LOAD_SUPPORT also maps to load_first and can carry a real non-zero
+        # rate (#200) — only withhold the write when there's nothing to write.
+        if mode != "load_first" or discharge_rate != 0:
             success, error_msg = self._write_period_to_hardware(
                 controller, grid_charge, discharge_rate
             )

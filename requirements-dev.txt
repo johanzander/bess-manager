@@ -4,3 +4,5 @@ httpx
 black
 ruff
 pyyaml
+podman-compose
+websockets

@@ -14,16 +14,19 @@
       "Bash(.venv/bin/pip install *)",
       "Bash(.venv/bin/pip show *)",
       "Bash(.venv/bin/pip list)",
-      "Bash(colima start *)",
-      "Bash(colima start)",
-      "Bash(colima stop *)",
-      "Bash(colima stop)",
+      "Bash(podman machine start *)",
+      "Bash(podman machine start)",
+      "Bash(podman machine stop *)",
+      "Bash(podman machine stop)",
+      "Bash(podman-compose *)",
       "Bash(git commit *)",
       "Bash(git push *)"
     ],
     "deny": [
-      "Bash(colima delete *)",
-      "Bash(colima delete)"
+      "Bash(podman machine rm *)",
+      "Bash(podman machine rm)",
+      "Bash(podman system reset *)",
+      "Bash(podman system reset)"
     ],
     "ask": [
       "Bash(git reset *)",

@@ -171,7 +171,7 @@ Each worktree requires its own `.venv`. Venvs contain absolute paths and cannot 
 
 ```bash
 # Create .venv (run once per worktree, or after cloning/rsyncing to a new machine)
-python3 -m venv .venv && .venv/bin/pip install -r backend/requirements.txt
+python3 -m venv .venv && .venv/bin/pip install -r backend/requirements.txt -r requirements-dev.txt
 ```
 
 ### Testing

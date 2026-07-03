@@ -122,10 +122,10 @@ class TestCrossPlatformHardwareWrites:
         elif _is_solax(platform_system):
             assert len(mock_controller.calls["vpp_calls"]) == 1
             assert mock_controller.calls["vpp_calls"][0] < 0
-        elif _is_solax_modbus(platform_system):
-            # LOAD_SUPPORT → load_first; inverter-native discharge, EMS register not written
-            assert mock_controller.calls["discharge_rate"] == []
         else:
+            # solax_modbus maps LOAD_SUPPORT to load_first same as the generic
+            # platforms below, but (#200) it must still write its real,
+            # non-zero discharge rate — only a genuinely zero rate is withheld.
             assert any(r > 0 for r in mock_controller.calls["discharge_rate"])
 
     def test_export_arbitrage_commands_hardware(self, platform_system, mock_controller):

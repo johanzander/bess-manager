@@ -221,6 +221,32 @@ class TestApplyPeriod:
         assert len(mock_ha.calls["discharge_rate"]) == 0
         assert len(mock_ha.calls["grid_charge"]) == 0
 
+    def test_load_first_writes_nonzero_load_support_discharge_rate(
+        self, controller, mock_ha
+    ):
+        """LOAD_SUPPORT's real discharge rate must reach the inverter.
+
+        Regression test for #200: LOAD_SUPPORT maps to load_first, same as
+        IDLE, but unlike IDLE it can compute a non-zero discharge rate. The
+        load_first gate must only withhold zero-rate writes (see
+        test_load_first_skips_ems_discharge_write above), not this one.
+        """
+        from datetime import datetime
+
+        intents = hourly_to_quarterly({0: "LOAD_SUPPORT"})
+        schedule = make_schedule(intents)
+        controller.create_schedule(schedule, current_period=0)
+        controller._last_written_tou_mode = "load_first"
+
+        with patch("core.bess.solax_modbus_growatt_controller.time_utils") as mock_time:
+            mock_time.now.return_value = datetime(2026, 5, 20, 0, 0, 0)
+            # -2.0 kW discharge -> non-zero discharge_rate for LOAD_SUPPORT
+            grid_charge, discharge_rate = controller.compute_rates_for_period(0, -2.0)
+            assert discharge_rate > 0  # sanity: scenario must produce a rate
+            controller.apply_period(mock_ha, grid_charge, discharge_rate)
+
+        assert mock_ha.calls["discharge_rate"] == [discharge_rate]
+
 
 class TestWriteScheduleToHardware:
     """Test write_schedule_to_hardware initialises segment 1."""

@@ -132,6 +132,10 @@ Closes #<n>
 - If `quality-check.sh` keeps failing after 3 fix attempts, or Step 8 can't
   demonstrate the fix actually works, stop, push the branch as-is, and
   report what failed — don't force a PR through.
+- If this work went through `superpowers:writing-plans` (a `docs/superpowers/plans/`
+  file exists for it), delete that plan file before the Step 9 commit. Keep
+  the spec (if any); the plan is execution scaffolding that only drifts once
+  the code is the source of truth. Never commit a plan doc into the PR.
 
 ## Rationalizations — Reality
 
@@ -142,6 +146,7 @@ Closes #<n>
 | "I'll clean up this other thing while I'm in here" | Out of scope. Minimal fix only. |
 | "code review can wait until after I've verified it works" | Reordered on purpose — catch cheap issues before spending time on manual verification, not after. |
 | "there's already a bot diagnosis, let me re-derive it anyway to be safe" | Re-verify the cited evidence; don't redo the whole investigation. |
+| "the plan doc is useful context, keep it in the PR" | Once code and tests exist, the plan only drifts — it's not the source of truth. Delete it before Step 9; keep the spec if one exists. |
 | "the user is in a hurry, just open the PR" | Time pressure from the user is not permission to skip Step 8 — it's the reason to say so explicitly and give a real ETA instead. |
 
 ## Red Flags — Stop and Go Back

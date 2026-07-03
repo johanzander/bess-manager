@@ -72,6 +72,7 @@ const SetupWizardPage: React.FC = () => {
     octopusImportTomorrowEntity: '',
     octopusExportTodayEntity: '',
     octopusExportTomorrowEntity: '',
+    entsoeEntity: '',
     markupRate: 0.08,
     vatMultiplier: 1.25,
     additionalCosts: 0.77,
@@ -98,11 +99,13 @@ const SetupWizardPage: React.FC = () => {
       const hasCustomNordpool = !!d.nordpoolCustomArea;
       const autoProvider = d.octopusFound && !d.nordpoolFound
         ? 'octopus' as const
-        : hasOfficialNordpool
-          ? 'nordpool_official' as const
-          : hasCustomNordpool
-            ? 'nordpool_hacs' as const
-            : undefined;
+        : d.entsoeFound && !d.nordpoolFound
+          ? 'entsoe' as const
+          : hasOfficialNordpool
+            ? 'nordpool_official' as const
+            : hasCustomNordpool
+              ? 'nordpool_hacs' as const
+              : undefined;
       // Use area from the matching integration — not mixed
       const autoArea = hasOfficialNordpool ? d.nordpoolArea : d.nordpoolCustomArea;
       setPricingForm(f => ({
@@ -117,6 +120,7 @@ const SetupWizardPage: React.FC = () => {
         ...(d.octopusEntities?.importTomorrow ? { octopusImportTomorrowEntity: d.octopusEntities.importTomorrow } : {}),
         ...(d.octopusEntities?.exportToday ? { octopusExportTodayEntity: d.octopusEntities.exportToday } : {}),
         ...(d.octopusEntities?.exportTomorrow ? { octopusExportTomorrowEntity: d.octopusEntities.exportTomorrow } : {}),
+        ...(d.entsoeEntity ? { entsoeEntity: d.entsoeEntity } : {}),
       }));
       // Auto-select the first detected platform; user can switch if multiple
       const detected = d.detectedInverterPlatforms ?? [];
@@ -234,6 +238,8 @@ const SetupWizardPage: React.FC = () => {
         octopusImportTomorrowEntity: ep.octopus?.importTomorrowEntity ?? f.octopusImportTomorrowEntity,
         octopusExportTodayEntity:    ep.octopus?.exportTodayEntity    ?? f.octopusExportTodayEntity,
         octopusExportTomorrowEntity: ep.octopus?.exportTomorrowEntity ?? f.octopusExportTomorrowEntity,
+        // Restore ENTSO-e entity
+        entsoeEntity:          ep.entsoe?.entity                 ?? f.entsoeEntity,
       }));
       const invNew = s.inverter ?? {};
       if (invNew.platform) {
@@ -297,6 +303,8 @@ const SetupWizardPage: React.FC = () => {
         octopusImportTomorrowEntity: pricingForm.octopusImportTomorrowEntity || undefined,
         octopusExportTodayEntity: pricingForm.octopusExportTodayEntity || undefined,
         octopusExportTomorrowEntity: pricingForm.octopusExportTomorrowEntity || undefined,
+        // ENTSO-e entity
+        entsoeEntity: pricingForm.entsoeEntity || undefined,
         // Inverter
         inverterPlatform: inverterForm.inverterPlatform,
         // Control mode

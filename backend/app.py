@@ -340,6 +340,15 @@ class BESSController:
             misfire_grace_time=30,  # Allow 30 seconds of misfire before warning
         )
 
+        # Health check refresh (every 5 minutes) — so the dashboard banner
+        # self-corrects if sensors recover after a transient failure, instead
+        # of only refreshing at startup or on the next settings save.
+        self.scheduler.add_job(
+            self.system.refresh_health_check,
+            CronTrigger(minute="*/5"),
+            misfire_grace_time=30,  # Allow 30 seconds of misfire before warning
+        )
+
         # Give BSM access to the scheduler for one-shot retry jobs
         self.system.set_scheduler(self.scheduler)
 

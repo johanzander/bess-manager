@@ -2710,6 +2710,16 @@ class BatterySystemManager:
             self._critical_sensor_failures = ["System Health Check"]
             return {"status": "ERROR", "checks": []}
 
+    def refresh_health_check(self) -> dict[str, Any]:
+        """Re-run the health check and update cached results/critical failures.
+
+        Public entry point for callers outside this class (the periodic
+        scheduler, a manual "recheck" endpoint) so the dashboard banner can
+        reflect current sensor state instead of only what was true at
+        startup or the last settings save.
+        """
+        return self._run_health_check()
+
     def has_critical_sensor_failures(self) -> bool:
         """Check if the system has critical sensor failures (degraded mode)."""
         return len(self._critical_sensor_failures) > 0

@@ -348,9 +348,9 @@ class TestPatchSettingsLiveUpdates:
         assert mock_controller.system.temperature_derating.enabled is True
 
     def test_health_refresh_called_after_patch(self, mock_controller):
-        """_run_health_check must be called to keep dashboard banner current."""
+        """refresh_health_check must be called to keep dashboard banner current."""
         _client.patch("/api/settings", json={"home": {"defaultHourly": 5.0}})
-        mock_controller.system._run_health_check.assert_called()
+        mock_controller.system.refresh_health_check.assert_called()
 
 
 # ===========================================================================

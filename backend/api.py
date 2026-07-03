@@ -8,6 +8,9 @@ import threading
 from datetime import datetime, timedelta
 
 from api_conversion import (
+    BATTERY_MODEL_ATTRS as _BATTERY_MODEL_ATTRS,
+)
+from api_conversion import (
     convert_keys_to_camel_case,
     convert_keys_to_snake_case,
 )
@@ -29,7 +32,6 @@ from settings_store import VALID_PLATFORMS
 
 from core.bess import time_utils
 from core.bess.health_check import run_system_health_checks
-from core.bess.settings import BatterySettings as _BatterySettings
 from core.bess.time_utils import get_period_count
 
 router = APIRouter()
@@ -157,14 +159,6 @@ _SECTION_MAP: dict[str, str] = {
     "aiAnalyst": "ai_analyst",
     "demoMode": "demo_mode",
 }
-
-# Derived from the BatterySettings dataclass — fields with init=True are the
-# writable attributes; init=False fields (min_soe_kwh, max_soe_kwh,
-# reserved_capacity) are computed and must not be sent to update_settings().
-# temperature_derating is a nested dict handled separately below.
-_BATTERY_MODEL_ATTRS: frozenset[str] = frozenset(
-    f.name for f in dataclasses.fields(_BatterySettings) if f.init
-)
 
 
 @router.get("/api/settings")
@@ -3183,28 +3177,32 @@ async def setup_complete(payload: APISetupCompletePayload):
 
         live_updates: dict = {}
         if "battery" in sections:
+            # BatterySettings.update() takes snake_case (store field names)
+            # directly — no camelCase translation (issue #197).
             live_updates["battery"] = _nn(
                 {
-                    "totalCapacity": payload.totalCapacity,
-                    "minSoc": payload.minSoc,
-                    "maxSoc": payload.maxSoc,
-                    "maxChargePowerKw": payload.maxChargeDischargePower,
-                    "maxDischargePowerKw": payload.maxChargeDischargePower,
-                    "cycleCostPerKwh": payload.cycleCost,
-                    "minActionProfitThreshold": payload.minActionProfitThreshold,
+                    "total_capacity": payload.totalCapacity,
+                    "min_soc": payload.minSoc,
+                    "max_soc": payload.maxSoc,
+                    "max_charge_power_kw": payload.maxChargeDischargePower,
+                    "max_discharge_power_kw": payload.maxChargeDischargePower,
+                    "cycle_cost_per_kwh": payload.cycleCost,
+                    "min_action_profit_threshold": payload.minActionProfitThreshold,
                 }
             )
         if "home" in sections:
+            # HomeSettings.update() takes snake_case (store field names)
+            # directly — no camelCase translation (issue #197).
             live_updates["home"] = _nn(
                 {
-                    "defaultHourly": payload.consumption,
+                    "default_hourly": payload.consumption,
                     "currency": payload.currency,
-                    "consumptionStrategy": payload.consumptionStrategy,
-                    "maxFuseCurrent": payload.maxFuseCurrent,
+                    "consumption_strategy": payload.consumptionStrategy,
+                    "max_fuse_current": payload.maxFuseCurrent,
                     "voltage": payload.voltage,
-                    "safetyMargin": payload.safetyMarginFactor,
-                    "phaseCount": payload.phaseCount,
-                    "powerMonitoringEnabled": payload.powerMonitoringEnabled,
+                    "safety_margin": payload.safetyMarginFactor,
+                    "phase_count": payload.phaseCount,
+                    "power_monitoring_enabled": payload.powerMonitoringEnabled,
                 }
             )
         if "electricity_price" in sections:

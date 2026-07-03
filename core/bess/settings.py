@@ -14,20 +14,8 @@ All user-facing settings should be configured and overridden via config.yaml:
 For production configuration, all user-facing values must be properly configured in config.yaml.
 """
 
-import re
 from dataclasses import dataclass, field
 from typing import Any
-
-
-def _camel_to_snake(name: str) -> str:
-    """Convert camelCase to snake_case.
-
-    This matches the implementation in backend/api_conversion.py but is kept
-    separate to maintain architectural separation between core and backend layers.
-    """
-    s1 = re.sub("(.)([A-Z][a-z]+)", r"\1_\2", name)
-    return re.sub("([a-z0-9])([A-Z])", r"\1_\2", s1).lower()
-
 
 # Price settings defaults
 DEFAULT_AREA = ""
@@ -100,10 +88,10 @@ class PriceSettings:
     def update(self, **kwargs: Any) -> None:
         """Update settings from a snake_case dict — the store's native format.
 
-        Unlike BatterySettings/HomeSettings, this does not translate
-        camelCase: both the startup and PATCH paths pass snake_case store
-        field names directly. CamelCase API payloads are converted to
-        snake_case in the API layer before reaching here (issue #197).
+        Does not translate camelCase: both the startup and PATCH paths pass
+        snake_case store field names directly. CamelCase API payloads are
+        converted to snake_case in the API layer before reaching here
+        (issue #197).
         """
         for key, value in kwargs.items():
             if not hasattr(self, key):
@@ -141,15 +129,17 @@ class BatterySettings:
         self.reserved_capacity = self.min_soe_kwh
 
     def update(self, **kwargs: Any) -> None:
-        """Update settings from dict."""
+        """Update settings from a snake_case dict — the store's native format.
+
+        Does not translate camelCase: both the startup and PATCH paths pass
+        snake_case store field names directly. CamelCase API payloads are
+        converted to snake_case in the API layer before reaching here
+        (issue #197).
+        """
         for key, value in kwargs.items():
-            # Convert camelCase to snake_case for compatibility with API layer
-            snake_key = _camel_to_snake(key)
-            if not hasattr(self, snake_key):
-                raise AttributeError(
-                    f"BatterySettings has no attribute '{snake_key}' (from key '{key}')"
-                )
-            setattr(self, snake_key, value)
+            if not hasattr(self, key):
+                raise AttributeError(f"BatterySettings has no attribute '{key}'")
+            setattr(self, key, value)
 
         self.__post_init__()
 
@@ -196,15 +186,17 @@ class HomeSettings:
         ), f"phase_count must be 1 or 3, got {self.phase_count}"
 
     def update(self, **kwargs: Any) -> None:
-        """Update settings from dict."""
+        """Update settings from a snake_case dict — the store's native format.
+
+        Does not translate camelCase: both the startup and PATCH paths pass
+        snake_case store field names directly. CamelCase API payloads are
+        converted to snake_case in the API layer before reaching here
+        (issue #197).
+        """
         for key, value in kwargs.items():
-            # Convert camelCase to snake_case for compatibility with API layer
-            snake_key = _camel_to_snake(key)
-            if not hasattr(self, snake_key):
-                raise AttributeError(
-                    f"HomeSettings has no attribute '{snake_key}' (from key '{key}')"
-                )
-            setattr(self, snake_key, value)
+            if not hasattr(self, key):
+                raise AttributeError(f"HomeSettings has no attribute '{key}'")
+            setattr(self, key, value)
         self.__post_init__()
 
     def from_ha_config(self, config: dict) -> "HomeSettings":

@@ -124,38 +124,25 @@ def test_battery_settings_action_threshold():
     assert settings.min_action_profit_threshold == 2.0
 
 
-def test_battery_settings_camelcase_update():
-    """Test that update method handles camelCase keys from API layer."""
+def test_battery_settings_camelcase_no_longer_accepted():
+    """BatterySettings.update() no longer translates camelCase — snake_case
+    is the canonical, single format for both the startup and PATCH paths
+    (issue #197). CamelCase translation for API payloads belongs in the
+    API layer, not here."""
     settings = BatterySettings()
 
-    # Update with camelCase keys (as sent from frontend/API)
-    settings.update(
-        totalCapacity=25.0,
-        maxChargePowerKw=8.0,
-        cycleCostPerKwh=0.55,
-        minActionProfitThreshold=1.2,
-    )
-
-    # Verify that values were correctly mapped to snake_case attributes
-    assert settings.total_capacity == 25.0
-    assert settings.max_charge_power_kw == 8.0
-    assert settings.cycle_cost_per_kwh == 0.55
-    assert settings.min_action_profit_threshold == 1.2
-
-    # Verify computed fields are updated
-    assert settings.reserved_capacity == 2.5  # 10% of 25
+    with pytest.raises(AttributeError):
+        settings.update(totalCapacity=25.0)
 
 
 def test_battery_settings_invalid_key_raises_error():
     """Test that update method raises AttributeError for invalid keys."""
     settings = BatterySettings()
 
-    # Attempt to update with an invalid key should raise AttributeError
     with pytest.raises(AttributeError) as exc_info:
-        settings.update(invalidKey=123)
+        settings.update(invalid_key=123)
 
     assert "BatterySettings has no attribute 'invalid_key'" in str(exc_info.value)
-    assert "from key 'invalidKey'" in str(exc_info.value)
 
 
 def test_price_settings_update_snake_case():
@@ -185,13 +172,13 @@ def test_battery_settings_independent_charge_discharge_power():
     settings = BatterySettings()
 
     # Test both orderings - should give same result regardless of key order
-    settings.update(maxChargePowerKw=10.0, maxDischargePowerKw=8.0)
+    settings.update(max_charge_power_kw=10.0, max_discharge_power_kw=8.0)
     assert settings.max_charge_power_kw == 10.0
     assert settings.max_discharge_power_kw == 8.0
 
     # Test reverse order - should NOT have dict ordering bugs
     settings2 = BatterySettings()
-    settings2.update(maxDischargePowerKw=8.0, maxChargePowerKw=10.0)
+    settings2.update(max_discharge_power_kw=8.0, max_charge_power_kw=10.0)
     assert settings2.max_charge_power_kw == 10.0
     assert settings2.max_discharge_power_kw == 8.0
 
@@ -315,11 +302,11 @@ def test_home_settings_phase_count_invalid():
 
 
 def test_home_settings_update_phase_count():
-    """Test update() with phaseCount (camelCase conversion)."""
+    """Test update() with phase_count (snake_case, the store's native format)."""
     settings = HomeSettings()
     assert settings.phase_count == 3
 
-    settings.update(phaseCount=1)
+    settings.update(phase_count=1)
     assert settings.phase_count == 1
 
 
@@ -328,7 +315,26 @@ def test_home_settings_update_phase_count_invalid():
     settings = HomeSettings()
 
     with pytest.raises(AssertionError, match="phase_count must be 1 or 3"):
-        settings.update(phaseCount=2)
+        settings.update(phase_count=2)
+
+
+def test_home_settings_camelcase_no_longer_accepted():
+    """HomeSettings.update() no longer translates camelCase — snake_case
+    is the canonical, single format for both the startup and PATCH paths
+    (issue #197)."""
+    settings = HomeSettings()
+
+    with pytest.raises(AttributeError):
+        settings.update(phaseCount=1)
+
+
+def test_home_settings_invalid_key_raises_error():
+    settings = HomeSettings()
+
+    with pytest.raises(AttributeError) as exc_info:
+        settings.update(invalid_key=123)
+
+    assert "HomeSettings has no attribute 'invalid_key'" in str(exc_info.value)
 
 
 def test_home_settings_from_ha_config_phase_count():

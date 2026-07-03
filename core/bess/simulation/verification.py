@@ -1,5 +1,7 @@
 """Verification harnesses: plan-faithfulness (R == P) and A/B economic gate."""
 
+import statistics
+
 from core.bess.dp_battery_algorithm import optimize_battery_schedule
 from core.bess.settings import BatterySettings
 from core.bess.simulation.inverter_simulator import (
@@ -92,7 +94,18 @@ def realized_under_solar_error(
     no phantom export booked, so realized should never be worse than the
     forecast plan would have been on the actual day. This is the simulator-verified
     answer to "is the schedule robust to solar forecast error?".
+
+    Both figures are credited for usable energy left in the battery at horizon end
+    (mirroring BatterySystemManager._calculate_terminal_value's median-buy-price
+    valuation), otherwise a run that legitimately stores more bonus solar than the
+    forecast run — real value carried past the horizon, not waste — looks like a
+    loss purely from the horizon cutoff.
     """
+    terminal_value_per_kwh = max(
+        0.0,
+        statistics.median(buy_price) * settings.efficiency_discharge
+        - settings.cycle_cost_per_kwh,
+    )
     result = optimize_battery_schedule(
         buy_price=buy_price,
         sell_price=sell_price,
@@ -101,6 +114,7 @@ def realized_under_solar_error(
         initial_soe=initial_soe,
         battery_settings=settings,
         period_duration_hours=dt,
+        terminal_value_per_kwh=terminal_value_per_kwh,
     )
     commands = [
         derive_control_command(
@@ -111,4 +125,16 @@ def realized_under_solar_error(
     sim = simulate(
         commands, actual_solar, home, buy_price, sell_price, initial_soe, settings, dt
     )
-    return result.economic_summary.battery_solar_cost, sim.realized_cost
+
+    planned_usable = max(
+        0.0, result.period_data[-1].energy.battery_soe_end - settings.min_soe_kwh
+    )
+    realized_usable = max(
+        0.0, sim.period_data[-1].energy.battery_soe_end - settings.min_soe_kwh
+    )
+    planned_cost = (
+        result.economic_summary.battery_solar_cost
+        - terminal_value_per_kwh * planned_usable
+    )
+    realized_cost = sim.realized_cost - terminal_value_per_kwh * realized_usable
+    return planned_cost, realized_cost

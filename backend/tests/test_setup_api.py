@@ -531,21 +531,23 @@ class TestSetupComplete:
     # -- Live system updates --
 
     def test_live_battery_update_sent(self, complete_controller):
+        """Battery is sent snake_case, matching Price's #216 fix (issue #219)."""
         _client.post("/api/setup/complete", json=_full_wizard_payload())
         calls = complete_controller.system.update_settings.call_args_list
         battery_calls = [c for c in calls if "battery" in c[0][0]]
         assert len(battery_calls) >= 1
         sent = battery_calls[0][0][0]["battery"]
-        assert sent["totalCapacity"] == 30.0
-        assert sent["maxChargePowerKw"] == 15.0
+        assert sent["total_capacity"] == 30.0
+        assert sent["max_charge_power_kw"] == 15.0
 
     def test_live_home_update_sent(self, complete_controller):
+        """Home is sent snake_case, matching Price's #216 fix (issue #219)."""
         _client.post("/api/setup/complete", json=_full_wizard_payload())
         calls = complete_controller.system.update_settings.call_args_list
         home_calls = [c for c in calls if "home" in c[0][0]]
         assert len(home_calls) >= 1
         sent = home_calls[0][0][0]["home"]
-        assert sent["defaultHourly"] == 3.5
+        assert sent["default_hourly"] == 3.5
         assert sent["currency"] == "SEK"
 
     def test_live_price_update_sent(self, complete_controller):

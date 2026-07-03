@@ -15,7 +15,7 @@ For production configuration, all user-facing values must be properly configured
 """
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from typing import Any
 
 
@@ -139,15 +139,18 @@ class BatterySettings:
         self.reserved_capacity = self.min_soe_kwh
 
     def update(self, **kwargs: Any) -> None:
-        """Update settings from dict."""
+        """Update settings from a snake_case dict — the store's native format.
+
+        Unlike the old camelCase-translating contract, both the startup and
+        PATCH paths pass snake_case store field names directly. CamelCase
+        API payloads are converted to snake_case in the API layer before
+        reaching here (issue #219, mirrors PriceSettings' #197 fix).
+        """
+        valid_fields = {f.name for f in fields(self)}
         for key, value in kwargs.items():
-            # Convert camelCase to snake_case for compatibility with API layer
-            snake_key = _camel_to_snake(key)
-            if not hasattr(self, snake_key):
-                raise AttributeError(
-                    f"BatterySettings has no attribute '{snake_key}' (from key '{key}')"
-                )
-            setattr(self, snake_key, value)
+            if key not in valid_fields:
+                raise AttributeError(f"BatterySettings has no attribute '{key}'")
+            setattr(self, key, value)
 
         self.__post_init__()
 
@@ -194,15 +197,18 @@ class HomeSettings:
         ), f"phase_count must be 1 or 3, got {self.phase_count}"
 
     def update(self, **kwargs: Any) -> None:
-        """Update settings from dict."""
+        """Update settings from a snake_case dict — the store's native format.
+
+        Unlike the old camelCase-translating contract, both the startup and
+        PATCH paths pass snake_case store field names directly. CamelCase
+        API payloads are converted to snake_case in the API layer before
+        reaching here (issue #219, mirrors PriceSettings' #197 fix).
+        """
+        valid_fields = {f.name for f in fields(self)}
         for key, value in kwargs.items():
-            # Convert camelCase to snake_case for compatibility with API layer
-            snake_key = _camel_to_snake(key)
-            if not hasattr(self, snake_key):
-                raise AttributeError(
-                    f"HomeSettings has no attribute '{snake_key}' (from key '{key}')"
-                )
-            setattr(self, snake_key, value)
+            if key not in valid_fields:
+                raise AttributeError(f"HomeSettings has no attribute '{key}'")
+            setattr(self, key, value)
         self.__post_init__()
 
     def from_ha_config(self, config: dict) -> "HomeSettings":

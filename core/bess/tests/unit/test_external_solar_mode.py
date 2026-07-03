@@ -44,7 +44,8 @@ class TestExternalSolarModeOverride:
         [
             ("GRID_CHARGING", True),
             ("LOAD_SUPPORT", False),
-            ("EXPORT_ARBITRAGE", False),
+            ("BATTERY_EXPORT", False),
+            ("SOLAR_EXPORT", False),
             ("IDLE", False),
         ],
     )
@@ -106,7 +107,8 @@ class TestExternalSolarModeBattModeOverride:
         [
             ("GRID_CHARGING", "battery_first"),
             ("LOAD_SUPPORT", "load_first"),
-            ("EXPORT_ARBITRAGE", "grid_first"),
+            ("BATTERY_EXPORT", "grid_first"),
+            ("SOLAR_EXPORT", "load_first"),
             ("IDLE", "load_first"),
         ],
     )

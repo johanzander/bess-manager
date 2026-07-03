@@ -3,6 +3,12 @@ name: Release Add-on
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build (e.g. v9.6.2-jvdd.4)"
+        required: true
+        type: string
 
 env:
   REGISTRY: ghcr.io
@@ -30,6 +36,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref_name }}
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -46,7 +54,9 @@ jobs:
 
       - name: Extract version from tag
         id: version
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push
         uses: docker/build-push-action@v6
@@ -62,7 +72,7 @@ jobs:
             BUILD_DATE=${{ github.event.release.published_at }}
             BUILD_REF=${{ github.sha }}
           tags: |
-            ${{ env.REGISTRY }}/johanzander/bess-manager-${{ matrix.arch }}:${{ steps.version.outputs.version }}
-            ${{ env.REGISTRY }}/johanzander/bess-manager-${{ matrix.arch }}:latest
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/bess-manager-${{ matrix.arch }}:${{ steps.version.outputs.version }}
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/bess-manager-${{ matrix.arch }}:latest
           cache-from: type=gha,scope=${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=${{ matrix.arch }}

@@ -6,6 +6,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+## [9.8.1-jvdd.1] - 2026-07-03
+
+Rebased the jvdd fork from upstream v9.6.3 onto **v9.8.1** (picking up
+v9.7.1, v9.8.0 and v9.8.1 — including the `EXPORT_ARBITRAGE` →
+`BATTERY_EXPORT`/`SOLAR_EXPORT` intent split and the redesigned inverter
+schedule table). All fork patches below apply cleanly on the new base; the
+VPP mapping is intent-name-agnostic (keys on `grid_charge`/`discharge_rate`)
+so the upstream intent rename does not affect it, and `external_solar_mode`
+still keys on the unchanged `SOLAR_STORAGE` intent. This release folds the
+previous `9.6.4-jvdd.1` … `9.6.4-jvdd.7` fork builds into a single entry on
+the 9.8.1 base.
+
+### Added (jvdd fork)
+
+- **`external_solar_mode`** battery setting for AC-coupled PV setups (upstream PR #167, still open). When enabled, `SOLAR_STORAGE` periods use `grid_charge=True` **and** TOU mode `battery_first` so the inverter actively pulls from the AC side during the planned solar window.
+- **`vpp_mode`** — independent toggle for direct Growatt VPP power commands (upstream issue #118). When enabled and the Growatt VPP entities are configured, BESS bypasses TOU scheduling and writes signed percentage power via `number.<*>_vpp_power`, toggling `select.<*>_vpp_status` per period. Orthogonal to `external_solar_mode`.
+
+### Fixed (jvdd fork)
+
+- **SolaxModbus + Growatt MID: TOU begin/end writes silently dropped** — mirror each `select.*_inverter_time_N_begin/end` write to the parallel `time.*_time_N_begin/end` entity, which accepts writes on the Growatt MID (upstream issue #181).
+- **Growatt VPP unit + activation semantics** (live-verified on Growatt MID 15KTL3-XH) — `vpp_power` is a percentage (−100..100, step 5), `vpp_time` is minutes (0..1440, step 5); `set_growatt_vpp` writes `vpp_status=Enabled` as the last step and always pre-arms with a `Disabled→Enabled` edge, since writing `Enabled` while already `Enabled` is silently ignored.
+- **`external_solar_mode` / `vpp_mode` reverted on restart** — both fork-only keys added to `BATTERY_STORE_TO_API` so they survive the `build_system_settings()` startup filter.
+
+### Fork infrastructure
+
+- Release workflow publishes to `ghcr.io/${{ github.repository_owner }}/bess-manager-{arch}` and supports `workflow_dispatch` with an explicit tag input.
+
 ## [9.8.1] - 2026-06-28
 
 ### Changed

@@ -96,6 +96,7 @@ export default function DashboardPage({
   
   const [healthSummary, setHealthSummary] = useState<HealthSummary | null>(null);
   const [dismissedBanner, setDismissedBanner] = useState(false);
+  const [isRecheckingHealth, setIsRecheckingHealth] = useState(false);
   const [demoMode, setDemoMode] = useState(false);
 
   // Runtime failures state
@@ -201,6 +202,22 @@ export default function DashboardPage({
     }
   }, [isInitialLoad, onLoadingChange, dataResolution]); // Add dependencies
 
+  // Manually re-run health checks (e.g. after fixing a sensor in Home Assistant)
+  // instead of waiting for the next periodic refresh.
+  const handleRecheckHealth = useCallback(async () => {
+    setIsRecheckingHealth(true);
+    try {
+      await api.post('/api/system-health/recheck');
+      await fetchData();
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
+      setError(`Recheck failed: ${errorMessage}`);
+      console.error('Health recheck failed:', err);
+    } finally {
+      setIsRecheckingHealth(false);
+    }
+  }, [fetchData]);
+
   useEffect(() => {
     fetchData();
     // Poll every 3s while initializing for live progress, 60s normally
@@ -240,6 +257,8 @@ export default function DashboardPage({
           criticalIssues={healthSummary.criticalIssues}
           totalCriticalIssues={healthSummary.totalCriticalIssues}
           onDismiss={handleDismissBanner}
+          onRecheck={handleRecheckHealth}
+          isRechecking={isRecheckingHealth}
         />
       )}
 

@@ -138,7 +138,7 @@ def _refresh_health(bess_controller) -> None:
     Failures are non-fatal — the banner will self-correct on the next poll.
     """
     try:
-        bess_controller.system._run_health_check()
+        bess_controller.system.refresh_health_check()
     except Exception as exc:
         logger.warning("Could not refresh health state after settings update: %s", exc)
 
@@ -1926,6 +1926,27 @@ async def get_system_health():
         return convert_keys_to_camel_case(error_result)
 
 
+@router.post("/api/system-health/recheck")
+async def recheck_system_health():
+    """Manually re-run health checks and refresh the cached dashboard banner state.
+
+    Unlike GET /api/system-health (which runs a fresh check but doesn't touch
+    the cache), this updates ``_cached_health_results``/``_critical_sensor_failures``
+    so the dashboard banner immediately reflects the result — for a "Recheck now"
+    button after the user fixes a sensor in Home Assistant.
+    """
+    from app import bess_controller
+
+    _require_configured_system(bess_controller)
+
+    try:
+        health_results = bess_controller.system.refresh_health_check()
+        return convert_keys_to_camel_case(health_results)
+    except Exception as e:
+        logger.error(f"Error refreshing system health: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
 @router.get("/api/dashboard-health-summary")
 async def get_dashboard_health_summary():
     """Get lightweight health summary for dashboard alert banner - only critical issues."""
@@ -3261,7 +3282,7 @@ async def setup_complete(payload: APISetupCompletePayload):
         # Re-run health check so the dashboard banner reflects the new configuration
         # instead of the stale failures recorded at startup (before sensors were set).
         try:
-            bess_controller.system._run_health_check()
+            bess_controller.system.refresh_health_check()
         except Exception as health_err:
             logger.warning("Could not re-run health check after setup: %s", health_err)
 

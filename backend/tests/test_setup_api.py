@@ -607,7 +607,7 @@ class TestSetupComplete:
 
     def test_health_check_rerun(self, complete_controller):
         _client.post("/api/setup/complete", json=_full_wizard_payload())
-        complete_controller.system._run_health_check.assert_called()
+        complete_controller.system.refresh_health_check.assert_called()
 
     def test_discovered_config_applied(self, complete_controller):
         _client.post("/api/setup/complete", json=_full_wizard_payload())

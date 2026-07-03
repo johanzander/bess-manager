@@ -251,6 +251,49 @@ class TestCriticalSensorFailures:
         assert system.get_critical_sensor_failures() == ["x"]
 
 
+class TestRefreshHealthCheck:
+    """Public wrapper so callers outside BatterySystemManager (the scheduler,
+    a manual-recheck endpoint) can re-run health checks without reaching into
+    the private ``_run_health_check`` method.
+    """
+
+    def test_updates_cached_results_from_a_fresh_run(self, system):
+        system._critical_sensor_failures = ["Battery SOC"]
+        healthy_result = {
+            "status": "OK",
+            "checks": [{"name": "Battery SOC", "status": "OK", "required": True}],
+        }
+        with patch(
+            "core.bess.battery_system_manager.run_system_health_checks",
+            return_value=healthy_result,
+        ):
+            system.refresh_health_check()
+
+        assert system.get_cached_health_results() == healthy_result
+        assert not system.has_critical_sensor_failures()
+
+    def test_recovers_failures_that_are_still_present(self, system):
+        failing_result = {
+            "status": "ERROR",
+            "checks": [
+                {
+                    "name": "Battery SOC",
+                    "status": "ERROR",
+                    "required": True,
+                    "checks": [],
+                }
+            ],
+        }
+        with patch(
+            "core.bess.battery_system_manager.run_system_health_checks",
+            return_value=failing_result,
+        ):
+            system.refresh_health_check()
+
+        assert system.has_critical_sensor_failures()
+        assert system.get_critical_sensor_failures() == ["Battery SOC"]
+
+
 class TestGetCurrentDailyView:
     def test_invalid_period_raises(self, system):
         with pytest.raises(SystemConfigurationError):

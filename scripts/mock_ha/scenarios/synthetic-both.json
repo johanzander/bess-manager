@@ -667,13 +667,19 @@
     },
     {
       "entity_id": "sensor.solcast_pv_forecast_forecast_today",
+      "unique_id": "total_kwh_forecast_today",
       "platform": "solcast_solar",
-      "unique_id": "sensor_solcast_pv_forecast_forecast_today"
+      "original_name": "Forecast Today",
+      "disabled_by": null,
+      "hidden_by": null
     },
     {
       "entity_id": "sensor.solcast_pv_forecast_forecast_tomorrow",
+      "unique_id": "total_kwh_forecast_tomorrow",
       "platform": "solcast_solar",
-      "unique_id": "sensor_solcast_pv_forecast_forecast_tomorrow"
+      "original_name": "Forecast Tomorrow",
+      "disabled_by": null,
+      "hidden_by": null
     },
     {
       "entity_id": "sensor.current_l1",

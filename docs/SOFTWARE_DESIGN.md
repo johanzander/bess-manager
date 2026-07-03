@@ -527,7 +527,7 @@ After discovery, the system derives additional configuration hints:
 
 Beyond core inverter and price sensors, discovery also detects:
 
-- **Solcast solar forecast**: Entities matching `solcast_solar` platform with `forecast_today` / `forecast_tomorrow` in the entity ID
+- **Solcast solar forecast**: Entity registry entries on the `solcast_solar` platform, matched by `unique_id` suffix (robust against non-English HA locale renaming of the entity ID)
 - **Weather**: Entities in the `weather.*` domain, preferring `weather.home` when multiple exist
 - **Phase currents**: `current_l1`, `current_l2`, `current_l3`
 - **EV charging inhibit**: Binary sensors ending with `_charging` or `_is_charging`

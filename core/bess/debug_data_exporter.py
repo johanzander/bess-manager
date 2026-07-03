@@ -104,13 +104,21 @@ _ENTITY_REGISTRY_DOMAINS = frozenset(
         "nordpool",
         "octopus_energy",
         "entsoe",
+        "solcast_solar",
     }
 )
 
 # Keywords matched against entity_id and unique_id to capture entities
 # that belong to BESS-relevant integrations even if they register under
 # an unexpected platform name.
-_ENTITY_REGISTRY_KEYWORDS = ("growatt", "solax", "nordpool", "octopus", "entsoe")
+_ENTITY_REGISTRY_KEYWORDS = (
+    "growatt",
+    "solax",
+    "nordpool",
+    "octopus",
+    "entsoe",
+    "solcast",
+)
 
 # Entity registry fields that are useful for debugging discovery and
 # sensor mapping. unique_id is redacted (last-4) since it often contains

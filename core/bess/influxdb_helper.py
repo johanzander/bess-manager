@@ -27,7 +27,12 @@ def is_influxdb_configured() -> bool:
     except (KeyError, FileNotFoundError, json.JSONDecodeError):
         return False
 
-    if not config["url"] or not config["username"] or not config["password"]:
+    if (
+        not config["url"]
+        or not config["username"]
+        or not config["password"]
+        or not config["bucket"]
+    ):
         return False
 
     if (
@@ -394,16 +399,16 @@ def get_sensor_data_batch(sensors_list, target_date) -> dict:
         _LOGGER.warning("No sensors configured — skipping InfluxDB query")
         return {"status": "error", "message": "No sensors configured"}
 
+    if not is_influxdb_configured():
+        _LOGGER.debug("InfluxDB is not configured — skipping query")
+        return {"status": "error", "message": "InfluxDB not configured"}
+
     # Get configuration
     influxdb_config = get_influxdb_config()
     url = influxdb_config["url"]
     bucket = influxdb_config["bucket"]
     username = influxdb_config["username"]
     password = influxdb_config["password"]
-
-    if not url or not username or not password or not bucket:
-        _LOGGER.error("InfluxDB configuration is incomplete")
-        return {"status": "error", "message": "Incomplete InfluxDB configuration"}
 
     headers = {
         "Content-type": "application/vnd.flux",
@@ -723,15 +728,15 @@ def get_power_sensor_data_batch(power_sensors: list[str], target_date) -> dict:
         tzinfo=local_tz
     )
 
+    if not is_influxdb_configured():
+        _LOGGER.debug("InfluxDB is not configured — skipping query")
+        return {"status": "error", "message": "InfluxDB not configured"}
+
     influxdb_config = get_influxdb_config()
     url = influxdb_config["url"]
     bucket = influxdb_config["bucket"]
     username = influxdb_config["username"]
     password = influxdb_config["password"]
-
-    if not url or not username or not password or not bucket:
-        _LOGGER.error("InfluxDB configuration is incomplete")
-        return {"status": "error", "message": "Incomplete InfluxDB configuration"}
 
     headers = {
         "Content-type": "application/vnd.flux",

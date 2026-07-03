@@ -227,6 +227,31 @@ class TestSystemHealth:
 
 
 # ===========================================================================
+# POST /api/system-health/recheck
+# ===========================================================================
+
+
+class TestSystemHealthRecheck:
+    def test_returns_200_and_calls_refresh_health_check(self):
+        ctrl = _make_started_controller()
+        ctrl.system.refresh_health_check.return_value = {
+            "checks": [],
+            "system_mode": "normal",
+        }
+        sys.modules["app"].bess_controller = ctrl
+
+        resp = _client.post("/api/system-health/recheck")
+
+        assert resp.status_code == 200
+        ctrl.system.refresh_health_check.assert_called_once()
+
+    def test_unconfigured_returns_503(self):
+        sys.modules["app"].bess_controller = _unconfigured_controller()
+        resp = _client.post("/api/system-health/recheck")
+        assert resp.status_code == 503
+
+
+# ===========================================================================
 # GET /api/dashboard-health-summary
 # ===========================================================================
 

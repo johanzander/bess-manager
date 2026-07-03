@@ -114,6 +114,9 @@ export interface BatterySettings {
   efficiencyCharge: number;     // % charging efficiency
   efficiencyDischarge: number;  // % discharge efficiency
   
+  // AC-coupled PV: route SOLAR_STORAGE through grid charging
+  externalSolarMode?: boolean;
+
   // Consumption estimate
   estimatedConsumption: number; // kWh daily estimate
   consumptionStrategy: string;  // "sensor", "fixed", or "influxdb_7d_avg"

@@ -45,6 +45,7 @@ const SetupWizardPage: React.FC = () => {
     efficiencyDischarge: 97,
     temperatureDeratingEnabled: false,
     minActionProfit: 8.0,
+    externalSolarMode: false,
   });
 
   const [inverterForm, setInverterForm] = useState<InverterForm>({
@@ -209,6 +210,7 @@ const SetupWizardPage: React.FC = () => {
         efficiencyCharge:         bat.efficiencyCharge         ?? f.efficiencyCharge,
         efficiencyDischarge:      bat.efficiencyDischarge      ?? f.efficiencyDischarge,
         temperatureDeratingEnabled: bat.temperatureDeratingEnabled ?? f.temperatureDeratingEnabled,
+        externalSolarMode:        bat.externalSolarMode        ?? f.externalSolarMode,
       }));
       setHomeForm(f => ({
         ...f,
@@ -280,6 +282,7 @@ const SetupWizardPage: React.FC = () => {
         maxChargeDischargePower: batteryForm.maxChargeDischargePowerKw,
         cycleCost: batteryForm.cycleCostPerKwh,
         minActionProfitThreshold: batteryForm.minActionProfit,
+        externalSolarMode: batteryForm.externalSolarMode,
         // Home
         currency: pricingForm.currency,
         consumption: homeForm.consumption,

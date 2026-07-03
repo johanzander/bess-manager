@@ -1,0 +1,128 @@
+"""Tests for the AC-coupled `external_solar_mode` battery setting.
+
+When enabled, the SOLAR_STORAGE strategic intent must translate to
+`grid_charge=True` so the battery can AC-charge from surplus solar that
+returns via the meter (the battery inverter has no DC solar input).
+All other intents must keep their default mapping.
+"""
+
+import pytest
+
+from core.bess.settings import BatterySettings
+from core.bess.solax_controller import SolaxController
+
+
+def _settings(*, external_solar_mode: bool) -> BatterySettings:
+    return BatterySettings(
+        total_capacity=10.0,
+        max_charge_power_kw=5.0,
+        max_discharge_power_kw=5.0,
+        min_soc=15.0,
+        max_soc=95.0,
+        external_solar_mode=external_solar_mode,
+    )
+
+
+class TestExternalSolarModeOverride:
+    def test_default_is_disabled(self) -> None:
+        assert BatterySettings(total_capacity=10.0).external_solar_mode is False
+
+    def test_solar_storage_grid_charge_false_when_disabled(self) -> None:
+        ctrl = SolaxController(battery_settings=_settings(external_solar_mode=False))
+        grid_charge, discharge_rate = ctrl._map_intent_to_rates("SOLAR_STORAGE", 0.0)
+        assert grid_charge is False
+        assert discharge_rate == 0
+
+    def test_solar_storage_grid_charge_true_when_enabled(self) -> None:
+        ctrl = SolaxController(battery_settings=_settings(external_solar_mode=True))
+        grid_charge, discharge_rate = ctrl._map_intent_to_rates("SOLAR_STORAGE", 0.0)
+        assert grid_charge is True
+        assert discharge_rate == 0
+
+    @pytest.mark.parametrize(
+        "intent,expected_grid_charge",
+        [
+            ("GRID_CHARGING", True),
+            ("LOAD_SUPPORT", False),
+            ("EXPORT_ARBITRAGE", False),
+            ("IDLE", False),
+        ],
+    )
+    def test_other_intents_unaffected_when_enabled(
+        self, intent: str, expected_grid_charge: bool
+    ) -> None:
+        ctrl = SolaxController(battery_settings=_settings(external_solar_mode=True))
+        grid_charge, _ = ctrl._map_intent_to_rates(intent, 0.0)
+        assert grid_charge is expected_grid_charge
+
+    def test_detailed_period_groups_apply_override(self) -> None:
+        ctrl = SolaxController(battery_settings=_settings(external_solar_mode=True))
+        ctrl.strategic_intents = ["SOLAR_STORAGE"] * 96
+        groups = ctrl.get_detailed_period_groups()
+        assert groups, "expected at least one period group"
+        for group in groups:
+            assert group["grid_charge"] is True
+            assert group["intent"] == "SOLAR_STORAGE"
+
+    def test_detailed_period_groups_no_override_when_disabled(self) -> None:
+        ctrl = SolaxController(battery_settings=_settings(external_solar_mode=False))
+        ctrl.strategic_intents = ["SOLAR_STORAGE"] * 96
+        groups = ctrl.get_detailed_period_groups()
+        for group in groups:
+            assert group["grid_charge"] is False
+
+    def test_get_period_settings_applies_override_without_schedule(self) -> None:
+        ctrl = SolaxController(battery_settings=_settings(external_solar_mode=True))
+        ctrl.strategic_intents = ["SOLAR_STORAGE"] * 96
+        ctrl.current_schedule = None
+        settings = ctrl.get_period_settings(period=10)
+        assert settings["grid_charge"] is True
+        assert settings["strategic_intent"] == "SOLAR_STORAGE"
+
+
+class TestExternalSolarModeBattModeOverride:
+    """external_solar_mode should also flip SOLAR_STORAGE's mode to battery_first.
+
+    On AC-coupled setups, Load First mode does not initiate battery charging
+    even with grid_charge enabled — the EMS waits for a trigger that never
+    comes.  Battery First mode makes the inverter actively charge from the
+    AC side.
+    """
+
+    def test_solar_storage_mode_is_load_first_when_disabled(self) -> None:
+        ctrl = SolaxController(battery_settings=_settings(external_solar_mode=False))
+        ctrl.strategic_intents = ["SOLAR_STORAGE"] * 96
+        settings = ctrl.get_period_settings(period=10)
+        assert settings["batt_mode"] == "load_first"
+
+    def test_solar_storage_mode_is_battery_first_when_enabled(self) -> None:
+        ctrl = SolaxController(battery_settings=_settings(external_solar_mode=True))
+        ctrl.strategic_intents = ["SOLAR_STORAGE"] * 96
+        settings = ctrl.get_period_settings(period=10)
+        assert settings["batt_mode"] == "battery_first"
+
+    @pytest.mark.parametrize(
+        "intent,expected_mode",
+        [
+            ("GRID_CHARGING", "battery_first"),
+            ("LOAD_SUPPORT", "load_first"),
+            ("EXPORT_ARBITRAGE", "grid_first"),
+            ("IDLE", "load_first"),
+        ],
+    )
+    def test_other_intents_unaffected_when_enabled(
+        self, intent: str, expected_mode: str
+    ) -> None:
+        ctrl = SolaxController(battery_settings=_settings(external_solar_mode=True))
+        ctrl.strategic_intents = [intent] * 96
+        settings = ctrl.get_period_settings(period=10)
+        assert settings["batt_mode"] == expected_mode
+
+    def test_detailed_period_groups_apply_mode_override(self) -> None:
+        ctrl = SolaxController(battery_settings=_settings(external_solar_mode=True))
+        ctrl.strategic_intents = ["SOLAR_STORAGE"] * 96
+        groups = ctrl.get_detailed_period_groups()
+        assert groups, "expected at least one period group"
+        for group in groups:
+            assert group["mode"] == "battery_first"
+            assert group["grid_charge"] is True

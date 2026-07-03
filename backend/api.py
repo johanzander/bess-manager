@@ -3208,13 +3208,15 @@ async def setup_complete(payload: APISetupCompletePayload):
                 }
             )
         if "electricity_price" in sections:
+            # PriceSettings.update() takes snake_case (store field names)
+            # directly — no camelCase translation (issue #197).
             live_updates["price"] = _nn(
                 {
                     "area": sections["electricity_price"].get("area"),
-                    "markupRate": payload.markupRate,
-                    "vatMultiplier": payload.vatMultiplier,
-                    "additionalCosts": payload.additionalCosts,
-                    "taxReduction": payload.taxReduction,
+                    "markup_rate": payload.markupRate,
+                    "vat_multiplier": payload.vatMultiplier,
+                    "additional_costs": payload.additionalCosts,
+                    "tax_reduction": payload.taxReduction,
                 }
             )
         if live_updates:

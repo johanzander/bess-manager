@@ -5,6 +5,7 @@ import pytest
 from core.bess.settings import (
     BatterySettings,
     HomeSettings,
+    PriceSettings,
     TemperatureDeratingSettings,
     apply_temperature_derating,
     interpolate_derating,
@@ -155,6 +156,28 @@ def test_battery_settings_invalid_key_raises_error():
 
     assert "BatterySettings has no attribute 'invalid_key'" in str(exc_info.value)
     assert "from key 'invalidKey'" in str(exc_info.value)
+
+
+def test_price_settings_update_snake_case():
+    """PriceSettings.update() accepts the store's native snake_case keys."""
+    settings = PriceSettings()
+
+    settings.update(area="SE3", markup_rate=0.42, vat_multiplier=1.1)
+
+    assert settings.area == "SE3"
+    assert settings.markup_rate == 0.42
+    assert settings.vat_multiplier == 1.1
+
+
+def test_price_settings_camelcase_no_longer_accepted():
+    """PriceSettings.update() no longer translates camelCase — snake_case
+    is the canonical, single format for both the startup and PATCH paths
+    (issue #197). CamelCase translation for API payloads belongs in the
+    API layer, not here."""
+    settings = PriceSettings()
+
+    with pytest.raises(AttributeError):
+        settings.update(markupRate=0.5)
 
 
 def test_battery_settings_independent_charge_discharge_power():

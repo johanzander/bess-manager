@@ -14,12 +14,16 @@ caught:
 
 How to use when adding or renaming a settings field
 -----------------------------------------------------
-  1. Update the relevant mapping in ``api_conversion.py``
-     (BATTERY_STORE_TO_API / HOME_STORE_TO_API / PRICE_STORE_TO_API).
+  1. Battery/Home: update the relevant mapping in ``api_conversion.py``
+     (BATTERY_STORE_TO_API / HOME_STORE_TO_API). Price: update
+     ``PRICE_REQUIRED_FIELDS`` — price settings reach BSM in snake_case
+     unchanged, there is no camelCase translation for price (issue #197).
   2. Update ``_bootstrap_defaults`` in ``settings_store.py`` so it writes
      the new key name.
   3. If the BatterySettings dataclass changed, ``_BATTERY_MODEL_ATTRS`` in
      ``api.py`` updates automatically — the test here will verify that.
+     Same for PriceSettings via ``PRICE_REQUIRED_FIELDS``
+     (TestPriceModelAttrsConsistency below).
   4. Run this file.  All tests should pass before committing.
 """
 
@@ -32,7 +36,7 @@ import settings_store as _sm
 from api_conversion import (
     BATTERY_STORE_TO_API,
     HOME_STORE_TO_API,
-    PRICE_STORE_TO_API,
+    PRICE_REQUIRED_FIELDS,
 )
 from settings_store import SettingsStore
 
@@ -113,7 +117,7 @@ class TestBootstrapFieldConsistency:
     def test_price_keys(self, tmp_path, monkeypatch):
         store = _fresh_store(tmp_path, monkeypatch)
         price = store.data["electricity_price"]
-        for key in PRICE_STORE_TO_API:
+        for key in PRICE_REQUIRED_FIELDS:
             assert key in price, (
                 f"Bootstrap defaults missing required electricity_price key '{key}'. "
                 f"Add it to _bootstrap_defaults() in settings_store.py."
@@ -181,12 +185,16 @@ class TestApplySettings:
         assert result["home"]["safetyMargin"] == 1.0
         assert result["home"]["currency"] == "SEK"
 
-    def test_valid_options_produce_camelcase_price(self):
+    def test_valid_options_produce_price_unchanged_snake_case(self):
+        """Price settings reach BSM in snake_case unchanged — no camelCase
+        translation, unlike battery/home (issue #197)."""
         from api_conversion import build_system_settings
 
         result = build_system_settings(_valid_options())
         assert result["price"]["area"] == "SE4"
-        assert result["price"]["vatMultiplier"] == 1.25
+        assert result["price"]["vat_multiplier"] == 1.25
+        assert result["price"]["markup_rate"] == 0.08
+        assert "vatMultiplier" not in result["price"]
 
     def test_old_battery_field_raises(self):
         from api_conversion import build_system_settings
@@ -257,6 +265,106 @@ class TestBatteryModelAttrsConsistency:
             f"Extra in api.py:     {_BATTERY_MODEL_ATTRS - expected}\n"
             f"Missing from api.py: {expected - _BATTERY_MODEL_ATTRS}"
         )
+
+
+# ---------------------------------------------------------------------------
+# 3b. api_conversion.PRICE_REQUIRED_FIELDS must match PriceSettings' store-
+# backed fields.
+#
+# min_profit and use_actual_price are excluded: they are internal algorithm
+# parameters (see core/bess/settings.py module docstring), never read from
+# the settings store or written by the wizard. If this fails after adding a
+# field to PriceSettings, add it to PRICE_REQUIRED_FIELDS in
+# api_conversion.py (store-backed) or to the exclusion set below
+# (internal-only).
+# ---------------------------------------------------------------------------
+
+
+class TestPriceModelAttrsConsistency:
+    def test_required_fields_match_store_backed_dataclass_fields(self):
+        from core.bess.settings import PriceSettings
+
+        internal_only = {"min_profit", "use_actual_price"}
+        expected = frozenset(
+            f.name
+            for f in dataclasses.fields(PriceSettings)
+            if f.init and f.name not in internal_only
+        )
+        assert PRICE_REQUIRED_FIELDS == expected, (
+            f"PRICE_REQUIRED_FIELDS in api_conversion.py doesn't match PriceSettings.\n"
+            f"Extra:   {PRICE_REQUIRED_FIELDS - expected}\n"
+            f"Missing: {expected - PRICE_REQUIRED_FIELDS}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 3c. Startup and PATCH paths must reach BSM identically (issue #197).
+#
+# Startup goes through build_system_settings(); PATCH /api/settings passes
+# the raw store dict straight to update_settings(). Both must land on the
+# same PriceSettings values on a real BatterySystemManager.
+# ---------------------------------------------------------------------------
+
+
+def _bsm():
+    from core.bess.battery_system_manager import BatterySystemManager
+    from core.bess.ha_api_controller import HomeAssistantAPIController
+    from core.bess.price_manager import MockSource
+
+    return BatterySystemManager(
+        controller=MagicMock(spec=HomeAssistantAPIController),
+        price_source=MockSource([1.0] * 96),
+    )
+
+
+class TestPriceSettingsRoundTrip:
+    def test_startup_path_applies_price_settings_to_bsm(self, tmp_path, monkeypatch):
+        from api_conversion import build_system_settings
+
+        store = _fresh_store(tmp_path, monkeypatch)
+        price = dict(store.data["electricity_price"])
+        price["markup_rate"] = 0.42
+        price["area"] = "SE3"
+        store.data["electricity_price"] = price
+
+        options = {
+            "battery": store.data["battery"],
+            "home": store.data["home"],
+            "electricity_price": store.data["electricity_price"],
+        }
+        settings = build_system_settings(options)
+
+        system = _bsm()
+        system.update_settings(settings)
+
+        assert system.price_settings.markup_rate == 0.42
+        assert system.price_settings.area == "SE3"
+
+    def test_startup_and_patch_paths_produce_identical_bsm_state(
+        self, tmp_path, monkeypatch
+    ):
+        from api_conversion import build_system_settings
+
+        store = _fresh_store(tmp_path, monkeypatch)
+        price = dict(store.data["electricity_price"])
+        price["markup_rate"] = 0.33
+        price["tax_reduction"] = 0.15
+        store.data["electricity_price"] = price
+
+        options = {
+            "battery": store.data["battery"],
+            "home": store.data["home"],
+            "electricity_price": store.data["electricity_price"],
+        }
+
+        startup_system = _bsm()
+        startup_system.update_settings(build_system_settings(options))
+
+        # PATCH /api/settings passes the raw store dict directly (api.py).
+        patch_system = _bsm()
+        patch_system.update_settings({"price": store.data["electricity_price"]})
+
+        assert startup_system.price_settings == patch_system.price_settings
 
 
 # ---------------------------------------------------------------------------

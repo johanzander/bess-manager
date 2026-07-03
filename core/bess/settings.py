@@ -98,15 +98,17 @@ class PriceSettings:
     use_actual_price: bool = USE_ACTUAL_PRICE
 
     def update(self, **kwargs: Any) -> None:
-        """Update settings from dict."""
+        """Update settings from a snake_case dict — the store's native format.
+
+        Unlike BatterySettings/HomeSettings, this does not translate
+        camelCase: both the startup and PATCH paths pass snake_case store
+        field names directly. CamelCase API payloads are converted to
+        snake_case in the API layer before reaching here (issue #197).
+        """
         for key, value in kwargs.items():
-            # Convert camelCase to snake_case for compatibility with API layer
-            snake_key = _camel_to_snake(key)
-            if not hasattr(self, snake_key):
-                raise AttributeError(
-                    f"PriceSettings has no attribute '{snake_key}' (from key '{key}')"
-                )
-            setattr(self, snake_key, value)
+            if not hasattr(self, key):
+                raise AttributeError(f"PriceSettings has no attribute '{key}'")
+            setattr(self, key, value)
 
 
 @dataclass

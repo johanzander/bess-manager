@@ -1,12 +1,14 @@
 """Unified API conversion system - simple snake_case to camelCase conversion.
 
-Also defines the canonical store→API field name mappings for each settings
-section.  These dicts are the single source of truth for:
-  - which fields are required at startup (_apply_settings in app.py)
-  - how store snake_case names map to the camelCase names used by update_settings()
+Also defines the canonical settings field requirements for each section.
+These are the single source of truth for which fields are required at
+startup (_apply_settings in app.py).  Battery and Home additionally map
+store snake_case names to the camelCase names used by update_settings();
+Price does not — PriceSettings.update() takes the store's snake_case
+field names directly (issue #197).
 
-Both the startup path (app.py) and tests import from here so the mapping
-can never drift between validation and usage.
+Both the startup path (app.py) and tests import from here so the
+requirements can never drift between validation and usage.
 """
 
 import re
@@ -42,13 +44,14 @@ HOME_STORE_TO_API: dict[str, str] = {
     "power_monitoring_enabled": "powerMonitoringEnabled",
 }
 
-PRICE_STORE_TO_API: dict[str, str] = {
-    "area": "area",
-    "markup_rate": "markupRate",
-    "vat_multiplier": "vatMultiplier",
-    "additional_costs": "additionalCosts",
-    "tax_reduction": "taxReduction",
-}
+# Price settings reach BSM in snake_case unchanged — PriceSettings.update()
+# (core/bess/settings.py) does not translate camelCase, so startup and PATCH
+# both pass the same store field names straight through. This set only
+# validates presence at startup; kept in sync with the PriceSettings
+# dataclass by TestPriceModelAttrsConsistency (issue #197).
+PRICE_REQUIRED_FIELDS: frozenset[str] = frozenset(
+    {"area", "markup_rate", "vat_multiplier", "additional_costs", "tax_reduction"}
+)
 
 # Legacy inverter_type values ("MIN"/"SPH") → canonical inverter.platform.
 # Used only by settings_store migration for old configs.
@@ -91,7 +94,7 @@ def build_system_settings(options: dict) -> dict:
     for key in BATTERY_STORE_TO_API:
         if key not in battery_config:
             raise ValueError(f"Required battery setting '{key}' is missing from config")
-    for key in PRICE_STORE_TO_API:
+    for key in PRICE_REQUIRED_FIELDS:
         if key not in electricity_price_config:
             raise ValueError(
                 f"Required electricity_price setting '{key}' is missing from config"
@@ -108,10 +111,8 @@ def build_system_settings(options: dict) -> dict:
         "home": {
             camel: home_config[snake] for snake, camel in HOME_STORE_TO_API.items()
         },
-        "price": {
-            camel: electricity_price_config[snake]
-            for snake, camel in PRICE_STORE_TO_API.items()
-        },
+        # Price is passed through unchanged (snake_case) — no translation.
+        "price": dict(electricity_price_config),
     }
 
 

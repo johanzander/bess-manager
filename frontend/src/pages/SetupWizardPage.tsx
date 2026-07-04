@@ -19,6 +19,14 @@ import type { DiscoveryResult, InverterForm } from '../components/settings/Senso
 
 const STEPS = ['Scan', 'Review Sensors', 'Electricity Pricing', 'Battery', 'Home', 'Control Mode', 'Done'];
 
+// Battery cycle cost approximates wear cost per kWh cycled, so the SEK
+// default (0.40) is wrong for other currencies. Mirrors
+// core.bess.settings.CYCLE_COST_BY_CURRENCY.
+const CYCLE_COST_BY_CURRENCY: Record<string, number> = { SEK: 0.40, EUR: 0.035, GBP: 0.031 };
+// Placeholder values (bootstrap SEK default, initial form default) treated as
+// "not yet user-configured" so a detected currency can safely replace them.
+const UNSET_CYCLE_COST_DEFAULTS = new Set([0.40, 0.50]);
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -130,6 +138,14 @@ const SetupWizardPage: React.FC = () => {
         ...(d.octopusEntities?.exportTomorrow ? { octopusExportTomorrowEntity: d.octopusEntities.exportTomorrow } : {}),
         ...(d.entsoeEntity ? { entsoeEntity: d.entsoeEntity } : {}),
       }));
+      if (d.currency && CYCLE_COST_BY_CURRENCY[d.currency] !== undefined) {
+        const cycleCost = CYCLE_COST_BY_CURRENCY[d.currency];
+        setBatteryForm(f => (
+          UNSET_CYCLE_COST_DEFAULTS.has(f.cycleCostPerKwh)
+            ? { ...f, cycleCostPerKwh: cycleCost }
+            : f
+        ));
+      }
       // Auto-select the first detected platform; user can switch if multiple
       const detected = d.detectedInverterPlatforms ?? [];
       const detectedPlatform = detected[0] ?? null;

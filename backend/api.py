@@ -2933,12 +2933,20 @@ async def run_setup_discovery():
         detected_currency = integrations.get("currency")
         detected_vat = integrations.get("vat_multiplier")
         if detected_currency or detected_vat is not None:
+            from core.bess.settings import CYCLE_COST_BY_CURRENCY
+
             home = bess_controller.settings_store.get_section("home")
             elec = bess_controller.settings_store.get_section("electricity_price")
+            battery = bess_controller.settings_store.get_section("battery")
             changed = False
+            battery_changed = False
             if detected_currency and home.get("currency") != detected_currency:
                 home["currency"] = detected_currency
                 changed = True
+                cycle_cost = CYCLE_COST_BY_CURRENCY.get(detected_currency)
+                if cycle_cost is not None:
+                    battery["cycle_cost_per_kwh"] = cycle_cost
+                    battery_changed = True
             if detected_vat is not None and elec.get("vat_multiplier") != detected_vat:
                 elec["vat_multiplier"] = detected_vat
                 changed = True
@@ -2956,13 +2964,16 @@ async def run_setup_discovery():
                 if ep.get("provider") != "octopus":
                     ep["provider"] = "octopus"
                     bess_controller.settings_store.save_section("energy_provider", ep)
+            if battery_changed:
+                bess_controller.settings_store.save_section("battery", battery)
             if changed:
                 bess_controller.settings_store.save_section("home", home)
                 bess_controller.settings_store.save_section("electricity_price", elec)
                 logger.info(
-                    "Persisted locale defaults: currency=%s, vat=%s",
+                    "Persisted locale defaults: currency=%s, vat=%s, cycle_cost=%s",
                     detected_currency,
                     detected_vat,
+                    battery.get("cycle_cost_per_kwh") if battery_changed else None,
                 )
 
         sensors: dict[str, str] = {}

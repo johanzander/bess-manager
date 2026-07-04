@@ -1,5 +1,6 @@
 # CI-friendly docker-compose for E2E tests.
-# No volume mounts, no live reload — builds everything into the image.
+# Bind-mounts live source over the built image so edits are picked up on
+# container restart without a rebuild.
 #
 # Usage:
 #   SCENARIO=ci-normal-day docker compose -f docker-compose.ci.yml up -d
@@ -26,6 +27,13 @@ services:
       - ./frontend/dist:/app/frontend:ro
       - ${BESS_OPTIONS:-./e2e/ci-options.json}:/data/options.json:ro
       - ${BESS_SETTINGS:-./e2e/ci-bess-settings.json}:/data/bess_settings.json
+    # Dockerfile.dev's WORKDIR is /app, which the image also uses as the
+    # build-time COPY destination for backend/*.py — without this override,
+    # sys.path[0] resolves to that stale baked copy instead of the live
+    # bind-mounted /app/backend, so backend-root edits (app.py, api.py, ...)
+    # would silently not take effect on restart. Matches docker-compose.yml's
+    # dev setup, which cds into /app/backend before invoking uvicorn.
+    working_dir: /app/backend
     command: ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8080"]
     depends_on:
       mock-ha:

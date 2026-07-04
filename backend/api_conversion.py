@@ -5,8 +5,9 @@ the single source of truth for which fields are required at startup
 (_apply_settings in app.py). Battery/Home/Price all reach update_settings()
 in snake_case (the store's native format) unchanged — none of the
 BatterySettings/HomeSettings/PriceSettings.update() methods translate
-camelCase (issue #197). CamelCase API payloads are converted to snake_case
-in the API layer, not in core/bess/settings.py.
+camelCase (issue #197, extended to Battery/Home in #219). CamelCase API
+payloads are converted to snake_case in the API layer, not in
+core/bess/settings.py.
 
 Both the startup path (app.py) and tests import from here so the
 requirements can never drift between validation and usage.
@@ -17,7 +18,7 @@ import re
 from dataclasses import asdict, is_dataclass
 from typing import Any
 
-from core.bess.settings import BatterySettings
+from core.bess.settings import BatterySettings, HomeSettings
 
 # ---------------------------------------------------------------------------
 # Canonical settings field requirements
@@ -26,8 +27,9 @@ from core.bess.settings import BatterySettings
 # Fields required at startup by build_system_settings(). Adding a key here
 # makes it required in the bootstrap defaults and in contract tests.
 # Note: charging_power_rate, efficiency_charge, efficiency_discharge are also
-# in the store (see BATTERY_MODEL_ATTRS) but have class defaults and are not
-# required at startup — a store missing them still boots, using the default.
+# in the store (see BATTERY_MODEL_ATTRS below) but have class defaults and
+# are not required at startup — a store missing them still boots, using
+# the default.
 BATTERY_REQUIRED_FIELDS: frozenset[str] = frozenset(
     {
         "total_capacity",
@@ -40,20 +42,27 @@ BATTERY_REQUIRED_FIELDS: frozenset[str] = frozenset(
     }
 )
 
-# All BatterySettings fields the store may hold — used to filter the store's
-# battery section before passing it to update_settings(), so a non-model key
-# living alongside it in the store (temperature_derating, applied via a
-# separate mechanism at BSM construction) is never passed to
-# BatterySettings.update(). Derived from the dataclass so a newly added
-# field is included automatically — this is what BATTERY_REQUIRED_FIELDS
-# (a hand-picked subset) previously failed to do for charging_power_rate/
-# efficiency_charge/efficiency_discharge: they were silently dropped at
-# startup while still working via PATCH, reverting to class defaults on
-# every restart (the #197 bug class, live on main for these three fields).
-# Kept in sync by TestBatteryModelAttrsConsistency; also used by the PATCH
-# handler in api.py.
+# All BatterySettings/HomeSettings fields the store may hold — used to
+# filter the store's battery/home sections before passing them to
+# update_settings(), so a non-model key living alongside them in the store
+# is never passed to update() directly: battery has temperature_derating (a
+# nested dict, applied via a separate mechanism at BSM construction), and
+# home can carry a stale pre-migration key (e.g. 'consumption') if it and
+# its renamed successor ('default_hourly') ever coexisted in a persisted
+# store (see settings_store.py's rename-if-absent migration guard). Derived
+# from each dataclass so a newly added field is included automatically —
+# this is what BATTERY_REQUIRED_FIELDS (a hand-picked subset) previously
+# failed to do for charging_power_rate/efficiency_charge/efficiency_discharge:
+# they were silently dropped at startup while still working via PATCH,
+# reverting to class defaults on every restart (the #197 bug class, live on
+# main for these three fields). Kept in sync by
+# TestBatteryModelAttrsConsistency/TestHomeModelAttrsConsistency;
+# BATTERY_MODEL_ATTRS is also imported directly by the PATCH handler in api.py.
 BATTERY_MODEL_ATTRS: frozenset[str] = frozenset(
     f.name for f in dataclasses.fields(BatterySettings) if f.init
+)
+HOME_MODEL_ATTRS: frozenset[str] = frozenset(
+    f.name for f in dataclasses.fields(HomeSettings) if f.init
 )
 
 HOME_REQUIRED_FIELDS: frozenset[str] = frozenset(
@@ -130,16 +139,17 @@ def build_system_settings(options: dict) -> dict:
             raise ValueError(f"Required home setting '{key}' is missing from config")
 
     return {
-        # Filtered to known BatterySettings fields — the store's battery
-        # section also carries temperature_derating, which is not a
-        # BatterySettings field (applied separately at BSM construction).
+        # Filtered to known BatterySettings/HomeSettings fields — their store
+        # sections can carry non-model keys (battery's temperature_derating;
+        # a stale pre-migration key for home — see BATTERY_MODEL_ATTRS/
+        # HOME_MODEL_ATTRS comment above) that would raise AttributeError if
+        # passed to update() directly.
         "battery": {
             k: v for k, v in battery_config.items() if k in BATTERY_MODEL_ATTRS
         },
-        # Home/Price are passed through unchanged (snake_case) — no
-        # translation, no filtering (their store sections carry no
-        # non-model keys).
-        "home": dict(home_config),
+        "home": {k: v for k, v in home_config.items() if k in HOME_MODEL_ATTRS},
+        # Price is passed through unchanged — no non-model keys share its
+        # store section.
         "price": dict(electricity_price_config),
     }
 

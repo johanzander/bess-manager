@@ -14,7 +14,7 @@ All user-facing settings should be configured and overridden via config.yaml:
 For production configuration, all user-facing values must be properly configured in config.yaml.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from typing import Any
 
 # Price settings defaults
@@ -93,8 +93,9 @@ class PriceSettings:
         converted to snake_case in the API layer before reaching here
         (issue #197).
         """
+        valid_fields = {f.name for f in fields(self)}
         for key, value in kwargs.items():
-            if not hasattr(self, key):
+            if key not in valid_fields:
                 raise AttributeError(f"PriceSettings has no attribute '{key}'")
             setattr(self, key, value)
 
@@ -134,10 +135,11 @@ class BatterySettings:
         Does not translate camelCase: both the startup and PATCH paths pass
         snake_case store field names directly. CamelCase API payloads are
         converted to snake_case in the API layer before reaching here
-        (issue #197).
+        (issue #197, mirrored to Battery/Home in #219).
         """
+        valid_fields = {f.name for f in fields(self)}
         for key, value in kwargs.items():
-            if not hasattr(self, key):
+            if key not in valid_fields:
                 raise AttributeError(f"BatterySettings has no attribute '{key}'")
             setattr(self, key, value)
 
@@ -191,10 +193,11 @@ class HomeSettings:
         Does not translate camelCase: both the startup and PATCH paths pass
         snake_case store field names directly. CamelCase API payloads are
         converted to snake_case in the API layer before reaching here
-        (issue #197).
+        (issue #197, mirrored to Battery/Home in #219).
         """
+        valid_fields = {f.name for f in fields(self)}
         for key, value in kwargs.items():
-            if not hasattr(self, key):
+            if key not in valid_fields:
                 raise AttributeError(f"HomeSettings has no attribute '{key}'")
             setattr(self, key, value)
         self.__post_init__()

@@ -2973,7 +2973,7 @@ async def run_setup_discovery():
                 sensors[phase_key] = entity_id
 
         # Discover optional integration sensors (Solcast, Weather, EV, etc.)
-        optional_sensors = ha.discover_optional_sensors(states)
+        optional_sensors = ha.discover_optional_sensors(states, registry)
         for key, entity_id in optional_sensors.items():
             if key not in sensors:
                 sensors[key] = entity_id
@@ -3199,7 +3199,7 @@ async def setup_complete(payload: APISetupCompletePayload):
         live_updates: dict = {}
         if "battery" in sections:
             # BatterySettings.update() takes snake_case (store field names)
-            # directly — no camelCase translation (issue #197).
+            # directly — no camelCase translation (issue #197, #219).
             live_updates["battery"] = _nn(
                 {
                     "total_capacity": payload.totalCapacity,
@@ -3213,7 +3213,7 @@ async def setup_complete(payload: APISetupCompletePayload):
             )
         if "home" in sections:
             # HomeSettings.update() takes snake_case (store field names)
-            # directly — no camelCase translation (issue #197).
+            # directly — no camelCase translation (issue #197, #219).
             live_updates["home"] = _nn(
                 {
                     "default_hourly": payload.consumption,

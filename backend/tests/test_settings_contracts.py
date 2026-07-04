@@ -15,16 +15,18 @@ caught:
 How to use when adding or renaming a settings field
 -----------------------------------------------------
 None of Battery/Home/Price translate camelCase in core/bess/settings.py —
-all three reach update_settings() in snake_case unchanged (issue #197).
+all three reach update_settings() in snake_case unchanged (issue #197,
+extended to Battery/Home in #219).
 
   1. If the field should be required at startup: add it to
      BATTERY_REQUIRED_FIELDS / HOME_REQUIRED_FIELDS / PRICE_REQUIRED_FIELDS
      in api_conversion.py. If optional (has a class default and the store
-     may omit it): no registry change needed for Battery — BATTERY_MODEL_ATTRS
-     is derived live from the BatterySettings dataclass, so a new optional
-     field is picked up automatically. Home/Price currently have no
-     optional-but-store-backed fields; if one is added, give it the same
-     two-set treatment as Battery (see BATTERY_MODEL_ATTRS's comment).
+     may omit it): no registry change needed for Battery/Home —
+     BATTERY_MODEL_ATTRS/HOME_MODEL_ATTRS are derived live from their
+     dataclasses, so a new optional field is picked up automatically. Price
+     currently has no optional-but-store-backed fields; if one is added,
+     give it the same two-set treatment as Battery/Home (see
+     BATTERY_MODEL_ATTRS's comment).
   2. Update ``_bootstrap_defaults`` in ``settings_store.py`` so it writes
      the new key name (required fields only — optional fields fall back to
      the dataclass default if absent).
@@ -43,6 +45,7 @@ import settings_store as _sm
 from api_conversion import (
     BATTERY_MODEL_ATTRS,
     BATTERY_REQUIRED_FIELDS,
+    HOME_MODEL_ATTRS,
     HOME_REQUIRED_FIELDS,
     PRICE_REQUIRED_FIELDS,
 )
@@ -72,6 +75,11 @@ def _valid_options() -> dict:
             "max_charge_power_kw": 15.0,
             "max_discharge_power_kw": 15.0,
             "min_action_profit_threshold": 0.0,
+            # Present in every real store (added by migration) but not
+            # required at startup — see BATTERY_REQUIRED_FIELDS.
+            "charging_power_rate": 40,
+            "efficiency_charge": 0.97,
+            "efficiency_discharge": 0.95,
         },
         "home": {
             "default_hourly": 3.5,
@@ -177,7 +185,7 @@ class TestApplySettings:
 
     def test_valid_options_produce_battery_unchanged_snake_case(self):
         """Battery settings reach BSM in snake_case unchanged — no camelCase
-        translation (issue #197)."""
+        translation (issue #197, #219)."""
         from api_conversion import build_system_settings
 
         result = build_system_settings(_valid_options())
@@ -225,7 +233,7 @@ class TestApplySettings:
 
     def test_valid_options_produce_home_unchanged_snake_case(self):
         """Home settings reach BSM in snake_case unchanged — no camelCase
-        translation (issue #197)."""
+        translation (issue #197, #219)."""
         from api_conversion import build_system_settings
 
         result = build_system_settings(_valid_options())
@@ -233,6 +241,18 @@ class TestApplySettings:
         assert result["home"]["safety_margin"] == 1.0
         assert result["home"]["currency"] == "SEK"
         assert "defaultHourly" not in result["home"]
+
+    def test_valid_options_home_drops_non_model_keys(self):
+        """A stray key in the home store section (e.g. a stale pre-migration
+        field left behind if both the old and new key ever coexist — see
+        settings_store.py's rename-if-absent migration guards) must not
+        reach HomeSettings.update(), or startup raises AttributeError."""
+        from api_conversion import build_system_settings
+
+        options = _valid_options()
+        options["home"]["consumption"] = 3.5  # stale pre-migration key
+        result = build_system_settings(options)
+        assert "consumption" not in result["home"]
 
     def test_valid_options_produce_price_unchanged_snake_case(self):
         """Price settings reach BSM in snake_case unchanged — no camelCase
@@ -320,25 +340,48 @@ class TestBatteryModelAttrsConsistency:
             f"Missing: {expected - BATTERY_MODEL_ATTRS}"
         )
 
-    def test_required_fields_is_subset_of_model_attrs(self):
-        assert BATTERY_REQUIRED_FIELDS <= BATTERY_MODEL_ATTRS, (
-            "BATTERY_REQUIRED_FIELDS names a field not in BatterySettings: "
-            f"{BATTERY_REQUIRED_FIELDS - BATTERY_MODEL_ATTRS}"
+    def test_required_fields_match_model_attrs_minus_optional(self):
+        """BATTERY_REQUIRED_FIELDS must be exactly BATTERY_MODEL_ATTRS minus
+        the fields that have class defaults — a plain subset check would miss
+        a field that drifted out of both sets."""
+        has_default = {
+            "charging_power_rate",
+            "efficiency_charge",
+            "efficiency_discharge",
+        }
+        expected = BATTERY_MODEL_ATTRS - has_default
+        assert BATTERY_REQUIRED_FIELDS == expected, (
+            f"BATTERY_REQUIRED_FIELDS in api_conversion.py doesn't match BatterySettings.\n"
+            f"Extra:   {BATTERY_REQUIRED_FIELDS - expected}\n"
+            f"Missing: {expected - BATTERY_REQUIRED_FIELDS}"
         )
 
 
 # ---------------------------------------------------------------------------
-# 3a. api_conversion.HOME_REQUIRED_FIELDS must match HomeSettings' store-
-# backed fields.
+# 3a. api_conversion.HOME_MODEL_ATTRS must match the HomeSettings dataclass,
+# and HOME_REQUIRED_FIELDS must match HomeSettings' store-backed fields.
 #
-# min_valid is excluded: it's an internal algorithm parameter, never read
-# from the settings store or written by the wizard (unlike Battery, Home has
-# no optional-but-store-backed field today, so one set does double duty as
-# both the required-fields check and the passthrough filter).
+# min_valid is excluded from HOME_REQUIRED_FIELDS: it's an internal algorithm
+# parameter, never read from the settings store or written by the wizard —
+# it's the one field HOME_MODEL_ATTRS has that HOME_REQUIRED_FIELDS doesn't.
 # ---------------------------------------------------------------------------
 
 
 class TestHomeModelAttrsConsistency:
+    def test_model_attrs_match_dataclass_init_fields(self):
+        """Regression guard: HOME_MODEL_ATTRS is derived live from the
+        dataclass so it can't currently drift, but this catches the
+        derivation ever being hand-rolled again (mirrors Battery's
+        equivalent test above)."""
+        from core.bess.settings import HomeSettings
+
+        expected = frozenset(f.name for f in dataclasses.fields(HomeSettings) if f.init)
+        assert HOME_MODEL_ATTRS == expected, (
+            f"HOME_MODEL_ATTRS in api_conversion.py doesn't match HomeSettings.\n"
+            f"Extra:   {HOME_MODEL_ATTRS - expected}\n"
+            f"Missing: {expected - HOME_MODEL_ATTRS}"
+        )
+
     def test_required_fields_match_store_backed_dataclass_fields(self):
         from core.bess.settings import HomeSettings
 
@@ -496,6 +539,22 @@ class TestHomeSettingsRoundTrip:
 
         assert system.home_settings.default_hourly == 5.5
         assert system.home_settings.phase_count == 1
+
+    def test_startup_path_drops_stale_key_without_crashing(self, tmp_path, monkeypatch):
+        """A stale pre-migration key (e.g. 'consumption' coexisting with its
+        renamed successor 'default_hourly' — see settings_store.py's
+        rename-if-absent migration guard) lives in the store's home section
+        but is not a HomeSettings field — the startup path must filter it
+        out rather than crash with AttributeError on HomeSettings.update()."""
+        from api_conversion import build_system_settings
+
+        store = _fresh_store(tmp_path, monkeypatch)
+        home = dict(store.data["home"])
+        home["consumption"] = 3.5
+        store.data["home"] = home
+
+        system = _bsm()
+        system.update_settings(build_system_settings(_full_options(store)))  # no raise
 
     def test_startup_and_patch_paths_produce_identical_bsm_state(
         self, tmp_path, monkeypatch

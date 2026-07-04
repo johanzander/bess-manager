@@ -127,8 +127,8 @@ def test_battery_settings_action_threshold():
 def test_battery_settings_camelcase_no_longer_accepted():
     """BatterySettings.update() no longer translates camelCase — snake_case
     is the canonical, single format for both the startup and PATCH paths
-    (issue #197). CamelCase translation for API payloads belongs in the
-    API layer, not here."""
+    (issue #197, extended to Battery/Home in #219). CamelCase translation
+    for API payloads belongs in the API layer, not here."""
     settings = BatterySettings()
 
     with pytest.raises(AttributeError):
@@ -165,6 +165,18 @@ def test_price_settings_camelcase_no_longer_accepted():
 
     with pytest.raises(AttributeError):
         settings.update(markupRate=0.5)
+
+
+def test_battery_settings_update_rejects_method_names():
+    """update() validates against dataclass fields, not hasattr() — a key
+    matching a method/property name (e.g. 'update' itself) must raise, not
+    silently overwrite the method via setattr."""
+    settings = BatterySettings()
+
+    with pytest.raises(AttributeError):
+        settings.update(update=123)
+
+    assert callable(settings.update)
 
 
 def test_battery_settings_independent_charge_discharge_power():
@@ -321,7 +333,7 @@ def test_home_settings_update_phase_count_invalid():
 def test_home_settings_camelcase_no_longer_accepted():
     """HomeSettings.update() no longer translates camelCase — snake_case
     is the canonical, single format for both the startup and PATCH paths
-    (issue #197)."""
+    (issue #197, extended to Battery/Home in #219)."""
     settings = HomeSettings()
 
     with pytest.raises(AttributeError):
@@ -335,6 +347,18 @@ def test_home_settings_invalid_key_raises_error():
         settings.update(invalid_key=123)
 
     assert "HomeSettings has no attribute 'invalid_key'" in str(exc_info.value)
+
+
+def test_home_settings_update_rejects_method_names():
+    """update() validates against dataclass fields, not hasattr() — a key
+    matching a method/property name (e.g. 'update' itself) must raise, not
+    silently overwrite the method via setattr."""
+    settings = HomeSettings()
+
+    with pytest.raises(AttributeError):
+        settings.update(update=123)
+
+    assert callable(settings.update)
 
 
 def test_home_settings_from_ha_config_phase_count():

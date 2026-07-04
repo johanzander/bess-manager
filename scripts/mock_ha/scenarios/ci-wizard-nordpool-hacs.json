@@ -255,6 +255,22 @@
       "platform": "growatt_server",
       "config_entry_id": "mock_growatt_config_entry",
       "unique_id": "MOCK_SN-ac_charge"
+    },
+    {
+      "entity_id": "sensor.solcast_pv_forecast_forecast_today",
+      "unique_id": "total_kwh_forecast_today",
+      "platform": "solcast_solar",
+      "original_name": "Forecast Today",
+      "disabled_by": null,
+      "hidden_by": null
+    },
+    {
+      "entity_id": "sensor.solcast_pv_forecast_forecast_tomorrow",
+      "unique_id": "total_kwh_forecast_tomorrow",
+      "platform": "solcast_solar",
+      "original_name": "Forecast Tomorrow",
+      "disabled_by": null,
+      "hidden_by": null
     }
   ],
   "time_segments": [],

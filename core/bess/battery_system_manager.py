@@ -2103,6 +2103,9 @@ class BatterySystemManager:
                 today_base_cost = sum(
                     pd.economic.grid_only_cost for pd in today_result_periods
                 )
+                today_solar_only_cost = sum(
+                    pd.economic.solar_only_cost for pd in today_result_periods
+                )
                 today_optimized_cost = sum(
                     pd.economic.hourly_cost for pd in today_result_periods
                 )
@@ -2113,14 +2116,15 @@ class BatterySystemManager:
                     pd.energy.battery_discharged for pd in today_result_periods
                 )
                 today_savings = today_base_cost - today_optimized_cost
+                today_solar_savings = today_solar_only_cost - today_optimized_cost
 
                 result.economic_summary = EconomicSummary(
                     grid_only_cost=today_base_cost,
-                    solar_only_cost=today_base_cost,
+                    solar_only_cost=today_solar_only_cost,
                     battery_solar_cost=today_optimized_cost,
-                    grid_to_solar_savings=0.0,
+                    grid_to_solar_savings=today_base_cost - today_solar_only_cost,
                     grid_to_battery_solar_savings=today_savings,
-                    solar_to_battery_solar_savings=today_savings,
+                    solar_to_battery_solar_savings=today_solar_savings,
                     grid_to_battery_solar_savings_pct=(
                         (today_savings / today_base_cost) * 100
                         if today_base_cost > 0

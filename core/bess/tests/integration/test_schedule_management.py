@@ -315,6 +315,35 @@ class TestScheduleEconomics:
             abs(total_savings - summary_savings) < 0.01
         ), "Savings calculations should be consistent"
 
+    def test_today_scoped_summary_reflects_real_solar_cost(
+        self, mock_controller, quarterly_battery_system
+    ):
+        """Regression for #231's baseline bug, present a second time: the
+        'today only' EconomicSummary recompute in _create_updated_schedule
+        (prepare_next_day=False path) must not re-hardcode solar_only_cost to
+        grid_only_cost. That recompute runs on every normal (non-next-day-prep)
+        schedule update, so this bug affects the solar/battery savings split
+        shown to users every day, not just on the specific days the
+        profitability gate mishandles.
+        """
+        mock_controller.solar_forecast = [2.0] * 96
+
+        success = quarterly_battery_system.update_battery_schedule(
+            32, prepare_next_day=False
+        )
+        assert success, "Should create schedule"
+
+        latest_schedule = quarterly_battery_system.schedule_store.get_latest_schedule()
+        economic_summary = latest_schedule.optimization_result.economic_summary
+
+        assert economic_summary.solar_only_cost < economic_summary.grid_only_cost, (
+            f"With solar present, solar_only_cost "
+            f"({economic_summary.solar_only_cost:.2f}) should be less than "
+            f"grid_only_cost ({economic_summary.grid_only_cost:.2f}) — got them "
+            "equal/unrelated, meaning the today-scoped summary recompute is "
+            "still hardcoding solar_only_cost to grid_only_cost."
+        )
+
 
 class TestScheduleValidation:
     """Test schedule validation and error handling."""

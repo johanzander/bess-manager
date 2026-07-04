@@ -61,28 +61,18 @@ def get_all_scenario_files():
     return sorted(scenario_files)
 
 
-@pytest.mark.parametrize("scenario_name", get_all_scenario_files())
-def test_all_scenarios(scenario_name):
-    """Test all scenario files with the battery optimization algorithm."""
+def build_scenario_inputs(scenario_name):
+    """Load a scenario file and derive battery settings + buy/sell prices.
+
+    Shared by every test that runs a scenario through the optimizer, so the
+    battery/price derivation logic (and its price_data fallback rules) lives
+    in exactly one place.
+    """
     scenario = load_test_scenario(scenario_name)
     base_prices = scenario["base_prices"]
-    home_consumption = scenario["home_consumption"]
-    solar_production = scenario["solar_production"]
     battery = scenario["battery"]
     price_data = scenario.get("price_data")
 
-    # Determine the actual horizon from the scenario data
-    horizon = len(base_prices)
-
-    # Validate that all arrays have the same length
-    assert (
-        len(home_consumption) == horizon
-    ), f"home_consumption length {len(home_consumption)} != base_prices length {horizon}"
-    assert (
-        len(solar_production) == horizon
-    ), f"solar_production length {len(solar_production)} != base_prices length {horizon}"
-
-    # Create battery settings directly from the test scenario values
     battery_settings = BatterySettings(
         total_capacity=battery["max_soe_kwh"],
         min_soc=(battery["min_soe_kwh"] / battery["max_soe_kwh"]) * 100.0,
@@ -105,7 +95,6 @@ def test_all_scenarios(scenario_name):
         additional_costs = ADDITIONAL_COSTS
         tax_reduction = TAX_REDUCTION
 
-    # Create PriceManager
     price_manager = PriceManager(
         MockSource(base_prices),
         markup_rate=markup_rate,
@@ -114,13 +103,33 @@ def test_all_scenarios(scenario_name):
         tax_reduction=tax_reduction,
         area="SE4",
     )
-
-    # Get buy and sell prices
     buy_prices = price_manager.get_buy_prices(raw_prices=base_prices)
     sell_prices = price_manager.get_sell_prices(raw_prices=base_prices)
-
-    # Use period_duration_hours from scenario if specified (quarterly=0.25), default hourly
     period_duration_hours = scenario.get("period_duration_hours", 1.0)
+
+    return scenario, battery_settings, buy_prices, sell_prices, period_duration_hours
+
+
+@pytest.mark.parametrize("scenario_name", get_all_scenario_files())
+def test_all_scenarios(scenario_name):
+    """Test all scenario files with the battery optimization algorithm."""
+    scenario, battery_settings, buy_prices, sell_prices, period_duration_hours = (
+        build_scenario_inputs(scenario_name)
+    )
+    home_consumption = scenario["home_consumption"]
+    solar_production = scenario["solar_production"]
+    battery = scenario["battery"]
+
+    # Determine the actual horizon from the scenario data
+    horizon = len(scenario["base_prices"])
+
+    # Validate that all arrays have the same length
+    assert (
+        len(home_consumption) == horizon
+    ), f"home_consumption length {len(home_consumption)} != base_prices length {horizon}"
+    assert (
+        len(solar_production) == horizon
+    ), f"solar_production length {len(solar_production)} != base_prices length {horizon}"
 
     # Run optimization
     result = optimize_battery_schedule(
@@ -293,4 +302,68 @@ def test_all_scenarios(scenario_name):
     assert abs(gap) <= tol, (
         f"{scenario_name}: realized != planned — R={sim.realized_cost:.2f}, "
         f"P={planned_cost:.2f}, gap {gap:+.3f} SEK exceeds tolerance {tol:.2f}"
+    )
+
+
+@pytest.mark.parametrize(
+    "scenario_name",
+    [
+        "realworld_2026_04_11_004719",
+        "realworld_2026_04_19_084608",
+        "realworld_2026_04_24_090423",
+    ],
+)
+def test_gate_never_substitutes_a_worse_fallback(scenario_name):
+    """Regression for #231 follow-up: when the profitability gate trips, the
+    all-IDLE fallback it substitutes must never cost more than the DP
+    schedule it's rejecting. `_create_idle_schedule` still pays wear cost on
+    passively-absorbed solar but never discharges to recoup any of it, so on
+    these three real scenarios the "safe" fallback was in fact strictly more
+    expensive than the schedule it replaced.
+
+    Compares the actual (gated) result against the DP's real schedule,
+    obtained by re-running with the gate effectively disabled — not against
+    a freshly recomputed fallback, which would trivially match the gated
+    result and prove nothing.
+    """
+    import dataclasses
+
+    scenario, battery_settings, buy_prices, sell_prices, period_duration_hours = (
+        build_scenario_inputs(scenario_name)
+    )
+    home_consumption = scenario["home_consumption"]
+    solar_production = scenario["solar_production"]
+    battery = scenario["battery"]
+
+    result = optimize_battery_schedule(
+        buy_price=buy_prices,
+        sell_price=sell_prices,
+        home_consumption=home_consumption,
+        solar_production=solar_production,
+        initial_soe=battery["initial_soe"],
+        battery_settings=battery_settings,
+        period_duration_hours=period_duration_hours,
+    )
+
+    # Re-run with the gate effectively disabled to recover the DP's real,
+    # rejected schedule and its true cost.
+    unfettered_settings = dataclasses.replace(
+        battery_settings, min_action_profit_threshold=-1e9
+    )
+    unfettered_result = optimize_battery_schedule(
+        buy_price=buy_prices,
+        sell_price=sell_prices,
+        home_consumption=home_consumption,
+        solar_production=solar_production,
+        initial_soe=battery["initial_soe"],
+        battery_settings=unfettered_settings,
+        period_duration_hours=period_duration_hours,
+    )
+    dp_real_cost = unfettered_result.economic_summary.battery_solar_cost
+
+    assert result.economic_summary.battery_solar_cost <= dp_real_cost + 1e-6, (
+        f"{scenario_name}: returned schedule costs "
+        f"{result.economic_summary.battery_solar_cost:.2f} but the DP's own "
+        f"(rejected) schedule only cost {dp_real_cost:.2f} — the gate "
+        f"substituted a schedule worse than the one it rejected."
     )

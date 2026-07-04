@@ -97,6 +97,9 @@ def _valid_options() -> dict:
             "vat_multiplier": 1.25,
             "additional_costs": 0.77,
             "tax_reduction": 0.2,
+            "spot_multiplier": 1.0175,
+            "export_spot_multiplier": 1.018,
+            "use_actual_price": False,
         },
     }
 

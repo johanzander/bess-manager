@@ -46,6 +46,7 @@ export interface DiscoveryResult {
   detectedPhaseCount: number | null;
   currency: string | null;
   vatMultiplier: number | null;
+  pricingDefaults?: Record<string, number>;
 }
 
 // ---------------------------------------------------------------------------

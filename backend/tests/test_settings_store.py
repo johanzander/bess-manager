@@ -494,6 +494,43 @@ class TestSchemaMigration:
                 field in battery
             ), f"Expected default for '{field}' to be added by migration"
 
+    def test_electricity_price_missing_multiplier_fields_get_defaults(
+        self, tmp_path, monkeypatch
+    ):
+        """Configs written before spot_multiplier existed must get safe defaults.
+
+        Without this, build_system_settings() raises ValueError at startup
+        for any pre-existing config (PRICE_STORE_TO_API requires the key).
+        """
+        store = self._store_with_data(
+            tmp_path,
+            monkeypatch,
+            {"electricity_price": {"area": "SE4", "markup_rate": 0.08}},
+        )
+        price = store.get_section("electricity_price")
+        assert price["spot_multiplier"] == 1.0
+        assert price["export_spot_multiplier"] == 1.0
+        assert price["use_actual_price"] is False
+
+    def test_electricity_price_existing_multiplier_fields_preserved(
+        self, tmp_path, monkeypatch
+    ):
+        """Migration must not clobber a user's already-configured multiplier."""
+        store = self._store_with_data(
+            tmp_path,
+            monkeypatch,
+            {
+                "electricity_price": {
+                    "area": "EUR",
+                    "spot_multiplier": 1.0175,
+                    "export_spot_multiplier": 1.018,
+                }
+            },
+        )
+        price = store.get_section("electricity_price")
+        assert price["spot_multiplier"] == 1.0175
+        assert price["export_spot_multiplier"] == 1.018
+
     def test_migration_persists_to_disk(self, tmp_path, monkeypatch):
         """Migrated field names must be written back to disk immediately."""
         path = _settings_path(tmp_path)

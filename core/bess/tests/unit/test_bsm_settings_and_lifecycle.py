@@ -57,6 +57,20 @@ class TestUpdateSettings:
             system.update_settings({"price": {"vat_multiplier": 1.25}})
             mock_clear.assert_called_once()
 
+    def test_spot_multiplier_synced_to_price_manager(self, system):
+        system.update_settings(
+            {
+                "price": {
+                    "spot_multiplier": 1.0175,
+                    "export_spot_multiplier": 1.018,
+                }
+            }
+        )
+        assert system.price_settings.spot_multiplier == 1.0175
+        assert system.price_settings.export_spot_multiplier == 1.018
+        assert system._price_manager.spot_multiplier == 1.0175
+        assert system._price_manager.export_spot_multiplier == 1.018
+
     def test_invalid_settings_raises_system_configuration_error(self, system):
         with pytest.raises(SystemConfigurationError):
             system.update_settings({"battery": {"capacity": "not_a_number"}})

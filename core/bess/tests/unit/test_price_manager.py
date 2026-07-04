@@ -36,6 +36,43 @@ def test_direct_price_initialization():
     assert pm.get_sell_prices() == pm.sell_prices
 
 
+def test_spot_multiplier_applied_to_buy_price():
+    """Multiplicative spot adjustment must apply before markup/VAT (Luminus-style contracts)."""
+    mock_source = MockSource([1.0])
+    pm = PriceManager(
+        price_source=mock_source,
+        markup_rate=0.198,
+        vat_multiplier=1.06,
+        additional_costs=0.0,
+        tax_reduction=-0.012685,
+        area="EUR",
+        spot_multiplier=1.0175,
+        export_spot_multiplier=1.018,
+    )
+
+    expected_buy_price = (1.0 * 1.0175 + 0.198) * 1.06
+    assert pm.buy_prices[0] == expected_buy_price
+
+    expected_sell_price = 1.0 * 1.018 + (-0.012685)
+    assert pm.sell_prices[0] == expected_sell_price
+
+
+def test_spot_multiplier_defaults_to_no_adjustment():
+    """Omitting spot_multiplier/export_spot_multiplier must reproduce the additive-only formula."""
+    mock_source = MockSource([1.0])
+    pm = PriceManager(
+        price_source=mock_source,
+        markup_rate=0.1,
+        vat_multiplier=1.25,
+        additional_costs=0.5,
+        tax_reduction=0.2,
+        area="SE4",
+    )
+
+    assert pm.buy_prices[0] == (1.0 + 0.1) * 1.25 + 0.5
+    assert pm.sell_prices[0] == 1.0 + 0.2
+
+
 def test_controller_price_fetching():
     """Test price fetching from controller."""
     mock_controller = MagicMock()

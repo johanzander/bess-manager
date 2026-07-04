@@ -2863,6 +2863,39 @@ async def get_setup_status():
     )
 
 
+_PROVIDER_PRICING_DEFAULTS: dict[str, dict] = {
+    "nordpool_official": {
+        "spotMultiplier": 1.0,
+        "exportSpotMultiplier": 1.0,
+    },
+    "nordpool_hacs": {
+        "spotMultiplier": 1.0,
+        "exportSpotMultiplier": 1.0,
+    },
+    "entsoe": {
+        "spotMultiplier": 1.0175,
+        "exportSpotMultiplier": 1.018,
+    },
+    "octopus": {
+        "spotMultiplier": 1.0,
+        "exportSpotMultiplier": 1.0,
+    },
+}
+
+
+def _pricing_defaults_for_discovery(integrations: dict) -> dict:
+    """Return suggested spot-multiplier defaults matching the auto-detected provider."""
+    if integrations.get("octopus_found") and not integrations.get("nordpool_found"):
+        return _PROVIDER_PRICING_DEFAULTS["octopus"]
+    if integrations.get("entsoe_found") and not integrations.get("nordpool_found"):
+        return _PROVIDER_PRICING_DEFAULTS["entsoe"]
+    if integrations.get("nordpool_config_entry_id"):
+        return _PROVIDER_PRICING_DEFAULTS["nordpool_official"]
+    if integrations.get("nordpool_custom_area"):
+        return _PROVIDER_PRICING_DEFAULTS["nordpool_hacs"]
+    return _PROVIDER_PRICING_DEFAULTS["nordpool_official"]
+
+
 @router.post("/api/setup/discover")
 async def run_setup_discovery():
     """Run auto-discovery of inverter and pricing integrations.
@@ -3029,6 +3062,9 @@ async def run_setup_discovery():
         # Attach sensor dicts without key conversion
         result["sensors"] = sensors
         result["platformSensors"] = platform_sensors
+        # Suggested spot-multiplier defaults for the auto-detected provider —
+        # already camelCase, attach after conversion to avoid double-conversion.
+        result["pricingDefaults"] = _pricing_defaults_for_discovery(integrations)
         # Attach Octopus entities for pricing form auto-fill
         if octopus_entities:
             result["octopusEntities"] = octopus_entities
@@ -3123,6 +3159,8 @@ async def setup_complete(payload: APISetupCompletePayload):
             "vatMultiplier": "vat_multiplier",
             "additionalCosts": "additional_costs",
             "taxReduction": "tax_reduction",
+            "spotMultiplier": "spot_multiplier",
+            "exportSpotMultiplier": "export_spot_multiplier",
         }
         area = payload.area or payload.nordpoolArea
         if any(getattr(payload, f) is not None for f in _PRICE_MAP) or area:
@@ -3245,6 +3283,8 @@ async def setup_complete(payload: APISetupCompletePayload):
                     "vat_multiplier": payload.vatMultiplier,
                     "additional_costs": payload.additionalCosts,
                     "tax_reduction": payload.taxReduction,
+                    "spot_multiplier": payload.spotMultiplier,
+                    "export_spot_multiplier": payload.exportSpotMultiplier,
                 }
             )
         if live_updates:

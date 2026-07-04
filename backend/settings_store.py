@@ -360,12 +360,15 @@ class SettingsStore:
             BATTERY_STORAGE_SIZE_KWH,
             DEFAULT_AREA,
             DEFAULT_CURRENCY,
+            EXPORT_SPOT_MULTIPLIER,
             HOME_HOURLY_CONSUMPTION_KWH,
             HOUSE_MAX_FUSE_CURRENT_A,
             HOUSE_VOLTAGE_V,
             MARKUP_RATE,
             SAFETY_MARGIN_FACTOR,
+            SPOT_MULTIPLIER,
             TAX_REDUCTION,
+            USE_ACTUAL_PRICE,
             VAT_MULTIPLIER,
         )
 
@@ -395,6 +398,9 @@ class SettingsStore:
                 "additional_costs": ADDITIONAL_COSTS,
                 "tax_reduction": TAX_REDUCTION,
                 "area": DEFAULT_AREA,
+                "spot_multiplier": SPOT_MULTIPLIER,
+                "export_spot_multiplier": EXPORT_SPOT_MULTIPLIER,
+                "use_actual_price": USE_ACTUAL_PRICE,
             },
             "energy_provider": {
                 "provider": "nordpool_official",
@@ -430,6 +436,9 @@ class SettingsStore:
             BATTERY_EFFICIENCY_CHARGE,
             BATTERY_EFFICIENCY_DISCHARGE,
             BATTERY_MIN_ACTION_PROFIT_THRESHOLD,
+            EXPORT_SPOT_MULTIPLIER,
+            SPOT_MULTIPLIER,
+            USE_ACTUAL_PRICE,
         )
 
         changed = False
@@ -497,6 +506,29 @@ class SettingsStore:
 
             if changed:
                 self.data["home"] = home
+
+        # --- electricity_price: spot_multiplier / export_spot_multiplier / use_actual_price ---
+        # Added after these fields were introduced on PriceSettings; without a
+        # default, build_system_settings() would raise ValueError at startup
+        # for any config written before this migration existed.
+        price = self.data.get("electricity_price")
+        if isinstance(price, dict):
+            for key, default in (
+                ("spot_multiplier", SPOT_MULTIPLIER),
+                ("export_spot_multiplier", EXPORT_SPOT_MULTIPLIER),
+                ("use_actual_price", USE_ACTUAL_PRICE),
+            ):
+                if key not in price:
+                    price[key] = default
+                    logger.info(
+                        "Schema migration: added electricity_price.%s = %s",
+                        key,
+                        default,
+                    )
+                    changed = True
+
+            if changed:
+                self.data["electricity_price"] = price
 
         ep = self.data.get("energy_provider")
         if isinstance(ep, dict):

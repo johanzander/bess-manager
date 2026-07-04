@@ -21,7 +21,7 @@ Only users who enable "Show beta and dev channel releases" in the add-on UI will
 7. Verify images are pullable
 8. Ensure GHCR packages are public (first release of a new package name requires manual visibility toggle)
 
-Branch protection is enabled on `beta/main` requiring these CI checks to pass.
+Branch protection is enabled on `beta/main` requiring these CI checks to pass (as of 2026-07-04, the required-approving-review rule was removed — main has zero branch protection and beta was stricter for no reason; merge is now gated on CI status checks only, so `gh pr merge --squash` works without `--admin`).
 
 **Why:** Direct pushes skip CI validation. A prior release (v9.0.0b11) was pushed without CI. PRs ensure all tests run before code reaches users. Pre-built Docker images (since v9.3.0) replaced source-based builds for faster installs and no build failures on user hardware.
 

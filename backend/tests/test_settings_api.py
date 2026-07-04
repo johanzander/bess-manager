@@ -313,6 +313,25 @@ class TestPatchSettingsLiveUpdates:
         assert len(home_calls) >= 1
         assert "default_hourly" in home_calls[0][0][0]["home"]
 
+    def test_home_update_excludes_stale_pre_migration_key(self, mock_controller):
+        """A stale 'consumption' key coexisting with its renamed successor
+        'default_hourly' (e.g. from an interrupted migration — the rename in
+        settings_store.py only fires when default_hourly is absent) must not
+        be forwarded to update_settings — HomeSettings has no 'consumption'
+        field and would raise AttributeError, unlike the startup path which
+        already filters via HOME_MODEL_ATTRS (issue #219/#197)."""
+        mock_controller.settings_store.data["home"]["consumption"] = 3.5
+
+        resp = _client.patch("/api/settings", json={"home": {"defaultHourly": 5.0}})
+
+        assert resp.status_code == 200
+        calls = mock_controller.system.update_settings.call_args_list
+        home_calls = [c for c in calls if "home" in c[0][0]]
+        assert home_calls, "update_settings not called for home"
+        sent = home_calls[0][0][0]["home"]
+        assert "consumption" not in sent
+        assert sent["default_hourly"] == 5.0
+
     def test_electricity_price_update_calls_system_update(self, mock_controller):
         _client.patch("/api/settings", json={"electricityPrice": {"area": "SE3"}})
         calls = mock_controller.system.update_settings.call_args_list

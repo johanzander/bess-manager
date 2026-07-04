@@ -11,6 +11,9 @@ from api_conversion import (
     BATTERY_MODEL_ATTRS as _BATTERY_MODEL_ATTRS,
 )
 from api_conversion import (
+    HOME_MODEL_ATTRS as _HOME_MODEL_ATTRS,
+)
+from api_conversion import (
     convert_keys_to_camel_case,
     convert_keys_to_snake_case,
 )
@@ -263,7 +266,13 @@ async def patch_settings(updates: dict):
                         obj.weather_entity = td["weather_entity"]
 
             elif store_key == "home":
-                bess_controller.system.update_settings({"home": section})
+                # Filtered to known HomeSettings fields — a stale pre-migration
+                # key (e.g. 'consumption') can coexist with its renamed
+                # successor if a migration was ever interrupted (see
+                # HOME_MODEL_ATTRS's comment in api_conversion.py); passing it
+                # straight through would raise AttributeError.
+                in_mem = {k: v for k, v in section.items() if k in _HOME_MODEL_ATTRS}
+                bess_controller.system.update_settings({"home": in_mem})
 
             elif store_key == "electricity_price":
                 # PriceSettings attribute names match the store field names directly

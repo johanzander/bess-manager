@@ -5,6 +5,9 @@ Tests that fixed profit threshold correctly prevents low-profit actions
 while preserving high-profit opportunities.
 """
 
+import json
+import os
+
 import pytest  # type: ignore
 
 from core.bess.dp_battery_algorithm import optimize_battery_schedule
@@ -219,3 +222,102 @@ class TestActionThreshold:
         assert (
             discharging_actions > 0
         ), f"Should discharge to save on expensive grid purchases, got {discharging_actions} discharging actions"
+
+    def test_gate_not_falsely_tripped_by_high_solar_negative_price_day(self):
+        """Regression for #231: gate must compare against the solar-only
+        baseline, not a solar-blind one, or high-solar days with negative
+        injection prices get spuriously rejected into an all-IDLE fallback
+        that can never discharge through the evening price peak.
+        """
+        battery_settings = BatterySettings(
+            total_capacity=10.0,
+            min_soc=10,
+            max_soc=100,
+            max_charge_power_kw=10.0,
+            max_discharge_power_kw=10.0,
+            cycle_cost_per_kwh=0.20,
+            min_action_profit_threshold=0.0,  # stock default
+            efficiency_charge=0.97,
+            efficiency_discharge=0.95,
+        )
+
+        # Midday: large solar surplus (well beyond consumption) sold at a
+        # negative injection price if not stored. Evening: a price peak the
+        # battery should discharge into.
+        buy_prices = [0.20] * 10 + [0.10] * 4 + [0.35] * 4 + [0.20] * 6
+        sell_prices = [0.10] * 10 + [-0.15] * 4 + [0.15] * 4 + [0.10] * 6
+        consumption = [0.3] * 10 + [0.0] * 4 + [1.0] * 4 + [0.3] * 6
+        solar = [0.0] * 10 + [3.0] * 4 + [0.0] * 4 + [0.0] * 6
+
+        result = optimize_battery_schedule(
+            buy_price=buy_prices,
+            sell_price=sell_prices,
+            home_consumption=consumption,
+            solar_production=solar,
+            initial_soe=1.0,
+            battery_settings=battery_settings,
+            period_duration_hours=1.0,
+        )
+
+        discharging_actions = sum(
+            1
+            for hour in result.period_data
+            if hour.decision.battery_action is not None
+            and hour.decision.battery_action < -0.1
+        )
+
+        assert discharging_actions > 0, (
+            "Battery has genuine value against the correct solar-only baseline "
+            "(the day's real DP schedule beats it) but the gate rejected the "
+            "schedule anyway and fell back to an all-IDLE plan that can never "
+            "discharge into the evening price peak."
+        )
+
+    def test_solar_only_cost_correct_for_reported_issue_231_day(self):
+        """Regression using the literal real-world data from issue #231
+        (bess-debug-2026-07-04-062923.md, 9.9.0b5, period 25/06:15 run) — not
+        an approximation. For this exact day the DP's real schedule and the
+        all-IDLE fallback happen to converge in cost (the evening buy/sell
+        spread genuinely doesn't clear the 0.40 EUR/kWh wear cost, verified
+        separately), so this does not assert a change in discharge behavior.
+        What it does assert is the literal defect in #231: `solar_only_cost`
+        must reflect this day's real ~36 kWh of solar, not be silently equal
+        to `grid_only_cost` (the solar-blind hardcode).
+        """
+        fixture_path = os.path.join(
+            os.path.dirname(__file__), "fixtures", "issue_231_real_debug_export.json"
+        )
+        with open(fixture_path) as f:
+            data = json.load(f)
+
+        battery_settings = BatterySettings(
+            total_capacity=data["battery_settings"]["total_capacity"],
+            min_soc=data["battery_settings"]["min_soc"],
+            max_soc=data["battery_settings"]["max_soc"],
+            max_charge_power_kw=data["battery_settings"]["max_charge_power_kw"],
+            max_discharge_power_kw=data["battery_settings"]["max_discharge_power_kw"],
+            cycle_cost_per_kwh=data["battery_settings"]["cycle_cost_per_kwh"],
+            min_action_profit_threshold=data["battery_settings"][
+                "min_action_profit_threshold"
+            ],
+            efficiency_charge=data["battery_settings"]["efficiency_charge"],
+            efficiency_discharge=data["battery_settings"]["efficiency_discharge"],
+        )
+
+        result = optimize_battery_schedule(
+            buy_price=data["buy_price"],
+            sell_price=data["sell_price"],
+            home_consumption=data["home_consumption"],
+            solar_production=data["solar_production"],
+            initial_soe=data["initial_soe"],
+            battery_settings=battery_settings,
+            period_duration_hours=data["period_duration_hours"],
+        )
+
+        es = result.economic_summary
+        assert es.solar_only_cost < es.grid_only_cost - 1.0, (
+            f"solar_only_cost ({es.solar_only_cost:.2f}) should reflect this "
+            f"day's real solar production and be meaningfully below "
+            f"grid_only_cost ({es.grid_only_cost:.2f}), not silently equal to "
+            "it (the #231 solar-blind baseline bug)."
+        )

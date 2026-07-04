@@ -990,6 +990,7 @@ def _create_idle_schedule(
 
     # Calculate economic summary for idle schedule
     total_base_cost = sum(home_consumption[i] * buy_price[i] for i in range(horizon))
+    solar_only_cost = sum(h.economic.solar_only_cost for h in period_data_list)
     total_optimized_cost = sum(h.economic.hourly_cost for h in period_data_list)
 
     total_charged = sum(h.energy.battery_charged for h in period_data_list)
@@ -997,11 +998,11 @@ def _create_idle_schedule(
 
     economic_summary = EconomicSummary(
         grid_only_cost=total_base_cost,
-        solar_only_cost=total_base_cost,
+        solar_only_cost=solar_only_cost,
         battery_solar_cost=total_optimized_cost,
-        grid_to_solar_savings=0.0,
+        grid_to_solar_savings=total_base_cost - solar_only_cost,
         grid_to_battery_solar_savings=total_base_cost - total_optimized_cost,
-        solar_to_battery_solar_savings=0.0,
+        solar_to_battery_solar_savings=solar_only_cost - total_optimized_cost,
         grid_to_battery_solar_savings_pct=(
             (total_base_cost - total_optimized_cost) / total_base_cost * 100
             if total_base_cost > 0
@@ -1196,20 +1197,27 @@ def optimize_battery_schedule(
         home_consumption[i] * buy_price[i] for i in range(len(buy_price))
     )
 
+    # Cost with solar but no battery — the correct baseline for judging whether
+    # the battery adds value beyond what solar alone already provides. Reuses
+    # each period's already-computed EconomicData.solar_only_cost rather than
+    # re-deriving the formula (see EconomicData.from_energy_data).
+    solar_only_cost = sum(h.economic.solar_only_cost for h in hourly_results)
+
     total_optimized_cost = sum(h.economic.hourly_cost for h in hourly_results)
     total_charged = sum(h.energy.battery_charged for h in hourly_results)
     total_discharged = sum(h.energy.battery_discharged for h in hourly_results)
 
     # Calculate savings directly - renamed variables for clarity
     grid_to_battery_solar_savings = total_base_cost - total_optimized_cost
+    solar_to_battery_solar_savings = solar_only_cost - total_optimized_cost
 
     economic_summary = EconomicSummary(
         grid_only_cost=total_base_cost,
-        solar_only_cost=total_base_cost,  # Simplified - no solar in this scenario
+        solar_only_cost=solar_only_cost,
         battery_solar_cost=total_optimized_cost,
-        grid_to_solar_savings=0.0,  # No solar
+        grid_to_solar_savings=total_base_cost - solar_only_cost,
         grid_to_battery_solar_savings=grid_to_battery_solar_savings,
-        solar_to_battery_solar_savings=grid_to_battery_solar_savings,
+        solar_to_battery_solar_savings=solar_to_battery_solar_savings,
         grid_to_battery_solar_savings_pct=(
             (grid_to_battery_solar_savings / total_base_cost) * 100
             if total_base_cost > 0
@@ -1237,15 +1245,8 @@ def optimize_battery_schedule(
     effective_threshold = (
         battery_settings.min_action_profit_threshold * horizon_fraction
     )
-    if grid_to_battery_solar_savings < effective_threshold:
-        logger.warning(
-            f"Optimization savings ({grid_to_battery_solar_savings:.2f} {currency}) below "
-            f"effective threshold ({effective_threshold:.2f} {currency}) "
-            f"(configured: {battery_settings.min_action_profit_threshold:.2f}, "
-            f"horizon: {horizon}/{total_periods} periods, scale: {horizon_fraction:.2f}). "
-            f"Using all-IDLE schedule instead."
-        )
-        return _create_idle_schedule(
+    if solar_to_battery_solar_savings < effective_threshold:
+        idle_schedule = _create_idle_schedule(
             horizon=horizon,
             buy_price=buy_price,
             sell_price=sell_price,
@@ -1254,6 +1255,26 @@ def optimize_battery_schedule(
             initial_soe=initial_soe,
             battery_settings=battery_settings,
             dt=dt,
+        )
+        # The all-IDLE fallback still pays wear cost on solar passively absorbed
+        # into any available room, but never discharges to recoup any of it —
+        # it is not guaranteed to be cheaper than the schedule it would replace.
+        # Only substitute it if it actually is.
+        if idle_schedule.economic_summary.battery_solar_cost < total_optimized_cost:
+            logger.warning(
+                f"Optimization savings vs solar-only baseline ({solar_to_battery_solar_savings:.2f} "
+                f"{currency}) below effective threshold ({effective_threshold:.2f} {currency}) "
+                f"(configured: {battery_settings.min_action_profit_threshold:.2f}, "
+                f"horizon: {horizon}/{total_periods} periods, scale: {horizon_fraction:.2f}). "
+                f"Using all-IDLE schedule instead."
+            )
+            return idle_schedule
+        logger.warning(
+            f"Optimization savings vs solar-only baseline ({solar_to_battery_solar_savings:.2f} "
+            f"{currency}) below effective threshold ({effective_threshold:.2f} {currency}), but "
+            f"the all-IDLE fallback ({idle_schedule.economic_summary.battery_solar_cost:.2f} "
+            f"{currency}) is not cheaper than the optimized schedule ({total_optimized_cost:.2f} "
+            f"{currency}). Keeping the optimized schedule."
         )
 
     return OptimizationResult(

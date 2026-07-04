@@ -59,10 +59,15 @@ over time, the system tracks the cost of stored energy using FIFO (first-in,
 first-out) accounting.  When the battery discharges, the oldest (cheapest)
 energy is used first.  This determines the true profit of a discharge action.
 
-**Profit threshold**: After optimization, total savings are compared against
-a minimum threshold scaled by remaining day fraction.  If savings are too
-low, the schedule is rejected in favor of all-IDLE to prevent cycling for
-marginal gains.
+**Profit threshold**: After optimization, the battery's own contribution
+(`solar_only_cost - battery_solar_cost` — how much better the schedule is
+than solar alone, not than a zero-solar grid-only baseline) is compared
+against a minimum threshold scaled by remaining day fraction. If that's too
+low, an all-IDLE fallback is computed as a candidate replacement — but it is
+only used if it's actually cheaper than the rejected schedule. The fallback
+still passively absorbs any solar surplus into available battery room and
+pays wear cost on it, but never discharges to recoup that cost, so it isn't
+automatically better than what it would replace.
 
 **Shadow price (marginal value of stored energy)**: The backward induction
 builds a value-to-go for every (period, SOE-level) state — the best achievable

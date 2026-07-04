@@ -10,8 +10,8 @@
    - `npx vitest run` (frontend tests)
    - `cd frontend && npx tsc --noEmit` (TypeScript type check — catches errors that vitest and vite build miss)
    - If any fix during this session revealed another bug, fix it now. Do not cut a release per fix — batch fixes locally until all tests pass.
-3. **Bump version** in `config.yaml` to the next version determined in step 1.
-4. **Update CHANGELOG.md** — add entry at the top following Keep a Changelog format (Fixed/Added/Changed sections). This is NOT optional.
+4. **Bump version** in `config.yaml` to the next version determined in step 1.
+4. **Update CHANGELOG.md** — add entry at the top following Keep a Changelog format (Fixed/Added/Changed sections). This is NOT optional. When an item links to a PR, keep it to one line (bold title + a short clause) — the PR description already has the full explanation, don't duplicate it in the changelog.
 5. **Run `black --check .` and `ruff check .`** — fix any formatting issues before committing.
 6. **Commit** all changes to the current branch.
 7. **Push branch to beta remote**: `git push beta <branch>:<branch>`
@@ -33,7 +33,17 @@
     git tag v<version> beta/main
     git push beta v<version>
     ```
-12. **Verify**: `git ls-remote --tags beta | grep v<version>`
+12. **Create a published GitHub Release** — pushing the tag alone does NOT trigger the image build; `release-addon.yml` only fires on `release: published`:
+    ```
+    gh release create v<version> --repo johanzander/bess-manager-beta \
+      --title "v<version>" --prerelease --notes "<changelog>"
+    ```
+13. **Verify the build and images**:
+    ```
+    gh run list --repo johanzander/bess-manager-beta --workflow release-addon.yml -L 1
+    podman pull ghcr.io/johanzander/bess-manager-beta-amd64:<version>
+    ```
+    A successful anonymous pull confirms both that the build succeeded and that the GHCR package is public (first release of a new package name needs a manual visibility toggle otherwise).
 
 ### Required CI checks on `beta/main`
 - Fast tests
@@ -46,7 +56,7 @@
 1. **Check version**: `gh release list -L 5` (origin repo)
 2. **Run full test suite** — including `pytest -m slow`
 3. **Bump version** in `config.yaml`
-4. **Update CHANGELOG.md** — this is NOT optional.
+4. **Update CHANGELOG.md** — this is NOT optional. Same rule as beta: one line per PR-linked item, no restating the PR body.
 5. **Run `black --check .` and `ruff check .`** — fix any formatting issues.
 6. **Create PR** against `origin/main`, wait for CI
 7. **Merge**, tag, push tag to origin

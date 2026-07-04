@@ -5,6 +5,7 @@ import pytest
 from core.bess.settings import (
     BatterySettings,
     HomeSettings,
+    PriceSettings,
     TemperatureDeratingSettings,
     apply_temperature_derating,
     interpolate_derating,
@@ -126,7 +127,7 @@ def test_battery_settings_action_threshold():
 def test_battery_settings_camelcase_no_longer_accepted():
     """BatterySettings.update() no longer translates camelCase — snake_case
     is the canonical, single format for both the startup and PATCH paths
-    (issue #219, mirrors #197's PriceSettings fix). CamelCase translation
+    (issue #197, extended to Battery/Home in #219). CamelCase translation
     for API payloads belongs in the API layer, not here."""
     settings = BatterySettings()
 
@@ -142,6 +143,28 @@ def test_battery_settings_invalid_key_raises_error():
         settings.update(invalid_key=123)
 
     assert "BatterySettings has no attribute 'invalid_key'" in str(exc_info.value)
+
+
+def test_price_settings_update_snake_case():
+    """PriceSettings.update() accepts the store's native snake_case keys."""
+    settings = PriceSettings()
+
+    settings.update(area="SE3", markup_rate=0.42, vat_multiplier=1.1)
+
+    assert settings.area == "SE3"
+    assert settings.markup_rate == 0.42
+    assert settings.vat_multiplier == 1.1
+
+
+def test_price_settings_camelcase_no_longer_accepted():
+    """PriceSettings.update() no longer translates camelCase — snake_case
+    is the canonical, single format for both the startup and PATCH paths
+    (issue #197). CamelCase translation for API payloads belongs in the
+    API layer, not here."""
+    settings = PriceSettings()
+
+    with pytest.raises(AttributeError):
+        settings.update(markupRate=0.5)
 
 
 def test_battery_settings_update_rejects_method_names():
@@ -310,11 +333,20 @@ def test_home_settings_update_phase_count_invalid():
 def test_home_settings_camelcase_no_longer_accepted():
     """HomeSettings.update() no longer translates camelCase — snake_case
     is the canonical, single format for both the startup and PATCH paths
-    (issue #219, mirrors #197's PriceSettings fix)."""
+    (issue #197, extended to Battery/Home in #219)."""
     settings = HomeSettings()
 
     with pytest.raises(AttributeError):
         settings.update(phaseCount=1)
+
+
+def test_home_settings_invalid_key_raises_error():
+    settings = HomeSettings()
+
+    with pytest.raises(AttributeError) as exc_info:
+        settings.update(invalid_key=123)
+
+    assert "HomeSettings has no attribute 'invalid_key'" in str(exc_info.value)
 
 
 def test_home_settings_update_rejects_method_names():

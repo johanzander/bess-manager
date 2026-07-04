@@ -14,17 +14,26 @@ caught:
 
 How to use when adding or renaming a settings field
 -----------------------------------------------------
-  1. Battery/Home: update ``BATTERY_REQUIRED_FIELDS`` / ``HOME_REQUIRED_FIELDS``
-     in ``api_conversion.py``. Price: update ``PRICE_STORE_TO_API`` (still a
-     camelCase translation dict pending #216).
+None of Battery/Home/Price translate camelCase in core/bess/settings.py —
+all three reach update_settings() in snake_case unchanged (issue #197,
+extended to Battery/Home in #219).
+
+  1. If the field should be required at startup: add it to
+     BATTERY_REQUIRED_FIELDS / HOME_REQUIRED_FIELDS / PRICE_REQUIRED_FIELDS
+     in api_conversion.py. If optional (has a class default and the store
+     may omit it): no registry change needed for Battery/Home —
+     BATTERY_MODEL_ATTRS/HOME_MODEL_ATTRS are derived live from their
+     dataclasses, so a new optional field is picked up automatically. Price
+     currently has no optional-but-store-backed fields; if one is added,
+     give it the same two-set treatment as Battery/Home (see
+     BATTERY_MODEL_ATTRS's comment).
   2. Update ``_bootstrap_defaults`` in ``settings_store.py`` so it writes
-     the new key name.
-  3. If the BatterySettings dataclass changed, ``_BATTERY_MODEL_ATTRS`` in
-     ``api.py`` updates automatically — the test here will verify that.
-     Same for BatterySettings/HomeSettings via ``BATTERY_REQUIRED_FIELDS`` /
-     ``HOME_REQUIRED_FIELDS`` (TestBatteryRequiredFieldsConsistency /
-     TestHomeRequiredFieldsConsistency below).
-  4. Run this file.  All tests should pass before committing.
+     the new key name (required fields only — optional fields fall back to
+     the dataclass default if absent).
+  3. Run this file.  All tests should pass before committing — in
+     particular TestBatteryModelAttrsConsistency / TestHomeModelAttrsConsistency
+     / TestPriceModelAttrsConsistency, which catch a required-fields set
+     drifting from the dataclass.
 """
 
 import dataclasses
@@ -34,9 +43,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 import settings_store as _sm
 from api_conversion import (
+    BATTERY_MODEL_ATTRS,
     BATTERY_REQUIRED_FIELDS,
+    HOME_MODEL_ATTRS,
     HOME_REQUIRED_FIELDS,
-    PRICE_STORE_TO_API,
+    PRICE_REQUIRED_FIELDS,
 )
 from settings_store import SettingsStore
 
@@ -122,7 +133,7 @@ class TestBootstrapFieldConsistency:
     def test_price_keys(self, tmp_path, monkeypatch):
         store = _fresh_store(tmp_path, monkeypatch)
         price = store.data["electricity_price"]
-        for key in PRICE_STORE_TO_API:
+        for key in PRICE_REQUIRED_FIELDS:
             assert key in price, (
                 f"Bootstrap defaults missing required electricity_price key '{key}'. "
                 f"Add it to _bootstrap_defaults() in settings_store.py."
@@ -174,7 +185,7 @@ class TestApplySettings:
 
     def test_valid_options_produce_battery_unchanged_snake_case(self):
         """Battery settings reach BSM in snake_case unchanged — no camelCase
-        translation, matching the Price fix in #216 (issue #219)."""
+        translation (issue #197, #219)."""
         from api_conversion import build_system_settings
 
         result = build_system_settings(_valid_options())
@@ -185,33 +196,44 @@ class TestApplySettings:
         assert result["battery"]["min_action_profit_threshold"] == 0.0
         assert "totalCapacity" not in result["battery"]
 
-    def test_valid_options_battery_passes_through_optional_fields(self):
-        """charging_power_rate/efficiency_charge/efficiency_discharge are in
-        every real store (added by migration) but aren't startup-required —
-        they must still flow through to BSM instead of being silently
-        dropped, matching what the PATCH path already applies."""
-        from api_conversion import build_system_settings
-
-        result = build_system_settings(_valid_options())
-        assert result["battery"]["charging_power_rate"] == 40
-        assert result["battery"]["efficiency_charge"] == 0.97
-        assert result["battery"]["efficiency_discharge"] == 0.95
-
-    def test_valid_options_battery_excludes_non_dataclass_keys(self):
-        """temperature_derating lives in the same store section as battery
-        settings but is not a BatterySettings attribute — it must be
-        filtered out, or BatterySettings.update() raises AttributeError at
-        startup for any user who has ever enabled it via PATCH."""
+    def test_valid_options_battery_passes_through_optional_fields_when_present(self):
+        """charging_power_rate/efficiency_charge/efficiency_discharge are
+        optional (not in BATTERY_REQUIRED_FIELDS) but must still be applied
+        at startup when the store has them — this is the #197 bug: they were
+        previously dropped unconditionally, reverting to class defaults on
+        every restart even though PATCH applied them correctly in-session."""
         from api_conversion import build_system_settings
 
         options = _valid_options()
-        options["battery"]["temperature_derating"] = {"enabled": True}
+        options["battery"]["charging_power_rate"] = 55.0
+        options["battery"]["efficiency_charge"] = 0.91
+        options["battery"]["efficiency_discharge"] = 0.88
+
         result = build_system_settings(options)
+
+        assert result["battery"]["charging_power_rate"] == 55.0
+        assert result["battery"]["efficiency_charge"] == 0.91
+        assert result["battery"]["efficiency_discharge"] == 0.88
+
+    def test_valid_options_battery_drops_non_model_keys(self):
+        """temperature_derating lives in the store's battery section but is
+        not a BatterySettings field (applied separately at BSM construction)
+        — it must be filtered out, not passed to BatterySettings.update()."""
+        from api_conversion import build_system_settings
+
+        options = _valid_options()
+        options["battery"]["temperature_derating"] = {
+            "enabled": True,
+            "weather_entity": "weather.home",
+        }
+
+        result = build_system_settings(options)
+
         assert "temperature_derating" not in result["battery"]
 
     def test_valid_options_produce_home_unchanged_snake_case(self):
         """Home settings reach BSM in snake_case unchanged — no camelCase
-        translation, matching the Price fix in #216 (issue #219)."""
+        translation (issue #197, #219)."""
         from api_conversion import build_system_settings
 
         result = build_system_settings(_valid_options())
@@ -220,7 +242,7 @@ class TestApplySettings:
         assert result["home"]["currency"] == "SEK"
         assert "defaultHourly" not in result["home"]
 
-    def test_valid_options_home_excludes_non_dataclass_keys(self):
+    def test_valid_options_home_drops_non_model_keys(self):
         """A stray key in the home store section (e.g. a stale pre-migration
         field left behind if both the old and new key ever coexist — see
         settings_store.py's rename-if-absent migration guards) must not
@@ -232,12 +254,16 @@ class TestApplySettings:
         result = build_system_settings(options)
         assert "consumption" not in result["home"]
 
-    def test_valid_options_produce_camelcase_price(self):
+    def test_valid_options_produce_price_unchanged_snake_case(self):
+        """Price settings reach BSM in snake_case unchanged — no camelCase
+        translation, unlike battery/home (issue #197)."""
         from api_conversion import build_system_settings
 
         result = build_system_settings(_valid_options())
         assert result["price"]["area"] == "SE4"
-        assert result["price"]["vatMultiplier"] == 1.25
+        assert result["price"]["vat_multiplier"] == 1.25
+        assert result["price"]["markup_rate"] == 0.08
+        assert "vatMultiplier" not in result["price"]
 
     def test_old_battery_field_raises(self):
         from api_conversion import build_system_settings
@@ -287,55 +313,43 @@ class TestApplySettings:
 
 
 # ---------------------------------------------------------------------------
-# 3. api.py _BATTERY_MODEL_ATTRS must match BatterySettings dataclass
+# 3. api_conversion.BATTERY_MODEL_ATTRS must match the BatterySettings
+# dataclass, and BATTERY_REQUIRED_FIELDS must be a subset of it.
 #
-# If this fails: a field was added/removed from BatterySettings but the
-# derived frozenset in api.py doesn't match — check the dataclass definition.
+# If test_attrs_match_dataclass_init_fields fails: a field was added/removed
+# from BatterySettings — since BATTERY_MODEL_ATTRS is derived live from the
+# dataclass, this test failing means api.py's PATCH filtering (which imports
+# the same frozenset) is already correct; it's here as a regression guard in
+# case the derivation is ever hand-rolled again.
+#
+# If test_required_fields_is_subset_of_model_attrs fails: BATTERY_REQUIRED_FIELDS
+# names a field BatterySettings doesn't have — fix the typo/stale name.
 # ---------------------------------------------------------------------------
 
 
 class TestBatteryModelAttrsConsistency:
     def test_attrs_match_dataclass_init_fields(self):
-        from api import _BATTERY_MODEL_ATTRS  # type: ignore[import]
-
         from core.bess.settings import BatterySettings
 
         expected = frozenset(
             f.name for f in dataclasses.fields(BatterySettings) if f.init
         )
-        assert _BATTERY_MODEL_ATTRS == expected, (
-            f"_BATTERY_MODEL_ATTRS in api.py doesn't match BatterySettings dataclass.\n"
-            f"Extra in api.py:     {_BATTERY_MODEL_ATTRS - expected}\n"
-            f"Missing from api.py: {expected - _BATTERY_MODEL_ATTRS}"
+        assert BATTERY_MODEL_ATTRS == expected, (
+            f"BATTERY_MODEL_ATTRS in api_conversion.py doesn't match BatterySettings.\n"
+            f"Extra:   {BATTERY_MODEL_ATTRS - expected}\n"
+            f"Missing: {expected - BATTERY_MODEL_ATTRS}"
         )
 
-
-# ---------------------------------------------------------------------------
-# 3b. api_conversion.BATTERY_REQUIRED_FIELDS / HOME_REQUIRED_FIELDS must
-# match the store-backed fields of BatterySettings / HomeSettings.
-#
-# charging_power_rate, efficiency_charge, efficiency_discharge (Battery) and
-# min_valid (Home) are excluded: they have dataclass defaults and are not
-# required at startup (see api_conversion.py comment). If this fails after
-# adding a field, add it to the relevant *_REQUIRED_FIELDS set (store-backed)
-# or to the exclusion set below (has-a-default / internal-only).
-# ---------------------------------------------------------------------------
-
-
-class TestBatteryRequiredFieldsConsistency:
-    def test_required_fields_match_store_backed_dataclass_fields(self):
-        from core.bess.settings import BatterySettings
-
+    def test_required_fields_match_model_attrs_minus_optional(self):
+        """BATTERY_REQUIRED_FIELDS must be exactly BATTERY_MODEL_ATTRS minus
+        the fields that have class defaults — a plain subset check would miss
+        a field that drifted out of both sets."""
         has_default = {
             "charging_power_rate",
             "efficiency_charge",
             "efficiency_discharge",
         }
-        expected = frozenset(
-            f.name
-            for f in dataclasses.fields(BatterySettings)
-            if f.init and f.name not in has_default
-        )
+        expected = BATTERY_MODEL_ATTRS - has_default
         assert BATTERY_REQUIRED_FIELDS == expected, (
             f"BATTERY_REQUIRED_FIELDS in api_conversion.py doesn't match BatterySettings.\n"
             f"Extra:   {BATTERY_REQUIRED_FIELDS - expected}\n"
@@ -343,7 +357,31 @@ class TestBatteryRequiredFieldsConsistency:
         )
 
 
-class TestHomeRequiredFieldsConsistency:
+# ---------------------------------------------------------------------------
+# 3a. api_conversion.HOME_MODEL_ATTRS must match the HomeSettings dataclass,
+# and HOME_REQUIRED_FIELDS must match HomeSettings' store-backed fields.
+#
+# min_valid is excluded from HOME_REQUIRED_FIELDS: it's an internal algorithm
+# parameter, never read from the settings store or written by the wizard —
+# it's the one field HOME_MODEL_ATTRS has that HOME_REQUIRED_FIELDS doesn't.
+# ---------------------------------------------------------------------------
+
+
+class TestHomeModelAttrsConsistency:
+    def test_model_attrs_match_dataclass_init_fields(self):
+        """Regression guard: HOME_MODEL_ATTRS is derived live from the
+        dataclass so it can't currently drift, but this catches the
+        derivation ever being hand-rolled again (mirrors Battery's
+        equivalent test above)."""
+        from core.bess.settings import HomeSettings
+
+        expected = frozenset(f.name for f in dataclasses.fields(HomeSettings) if f.init)
+        assert HOME_MODEL_ATTRS == expected, (
+            f"HOME_MODEL_ATTRS in api_conversion.py doesn't match HomeSettings.\n"
+            f"Extra:   {HOME_MODEL_ATTRS - expected}\n"
+            f"Missing: {expected - HOME_MODEL_ATTRS}"
+        )
+
     def test_required_fields_match_store_backed_dataclass_fields(self):
         from core.bess.settings import HomeSettings
 
@@ -361,13 +399,41 @@ class TestHomeRequiredFieldsConsistency:
 
 
 # ---------------------------------------------------------------------------
-# 3c. Startup and PATCH paths must reach BSM identically for Battery/Home
-# (issue #219, mirrors #197's TestPriceSettingsRoundTrip).
+# 3b. api_conversion.PRICE_REQUIRED_FIELDS must match PriceSettings' store-
+# backed fields.
+#
+# min_profit and use_actual_price are excluded: they are internal algorithm
+# parameters (see core/bess/settings.py module docstring), never read from
+# the settings store or written by the wizard. If this fails after adding a
+# field to PriceSettings, add it to PRICE_REQUIRED_FIELDS in
+# api_conversion.py (store-backed) or to the exclusion set below
+# (internal-only).
+# ---------------------------------------------------------------------------
+
+
+class TestPriceModelAttrsConsistency:
+    def test_required_fields_match_store_backed_dataclass_fields(self):
+        from core.bess.settings import PriceSettings
+
+        internal_only = {"min_profit", "use_actual_price"}
+        expected = frozenset(
+            f.name
+            for f in dataclasses.fields(PriceSettings)
+            if f.init and f.name not in internal_only
+        )
+        assert PRICE_REQUIRED_FIELDS == expected, (
+            f"PRICE_REQUIRED_FIELDS in api_conversion.py doesn't match PriceSettings.\n"
+            f"Extra:   {PRICE_REQUIRED_FIELDS - expected}\n"
+            f"Missing: {expected - PRICE_REQUIRED_FIELDS}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 3c. Startup and PATCH paths must reach BSM identically (issue #197).
 #
 # Startup goes through build_system_settings(); PATCH /api/settings passes
-# the raw store dict straight to update_settings() (battery is filtered by
-# _BATTERY_MODEL_ATTRS first; home is passed through unfiltered). Both must
-# land on the same values on a real BatterySystemManager.
+# the (possibly filtered) store dict straight to update_settings(). Both
+# must land on the same *Settings values on a real BatterySystemManager.
 # ---------------------------------------------------------------------------
 
 
@@ -382,39 +448,114 @@ def _bsm():
     )
 
 
+def _full_options(store) -> dict:
+    return {
+        "battery": store.data["battery"],
+        "home": store.data["home"],
+        "electricity_price": store.data["electricity_price"],
+    }
+
+
 class TestBatterySettingsRoundTrip:
-    def test_startup_and_patch_paths_produce_identical_bsm_state(
+    def test_startup_path_applies_optional_battery_fields_to_bsm(
         self, tmp_path, monkeypatch
     ):
+        """Regression test for the #197 bug: charging_power_rate,
+        efficiency_charge and efficiency_discharge are optional (not in
+        BATTERY_REQUIRED_FIELDS) but were previously dropped unconditionally
+        by build_system_settings() regardless of what the store held —
+        applied live via PATCH, then silently reverted to class defaults on
+        every restart. They must now survive the startup path."""
         from api_conversion import build_system_settings
 
         store = _fresh_store(tmp_path, monkeypatch)
         battery = dict(store.data["battery"])
-        battery["cycle_cost_per_kwh"] = 0.6
-        battery["min_action_profit_threshold"] = 1.5
+        battery["charging_power_rate"] = 55.0
+        battery["efficiency_charge"] = 0.91
+        battery["efficiency_discharge"] = 0.88
         store.data["battery"] = battery
 
-        options = {
-            "battery": store.data["battery"],
-            "home": store.data["home"],
-            "electricity_price": store.data["electricity_price"],
-        }
+        system = _bsm()
+        system.update_settings(build_system_settings(_full_options(store)))
+
+        assert system.battery_settings.charging_power_rate == 55.0
+        assert system.battery_settings.efficiency_charge == 0.91
+        assert system.battery_settings.efficiency_discharge == 0.88
+
+    def test_startup_path_drops_temperature_derating_without_crashing(
+        self, tmp_path, monkeypatch
+    ):
+        """temperature_derating lives in the store's battery section but is
+        applied separately at BSM construction, not via update_settings() —
+        the startup path must filter it out rather than crash with
+        AttributeError on BatterySettings.update()."""
+        from api_conversion import build_system_settings
+
+        store = _fresh_store(tmp_path, monkeypatch)
+        battery = dict(store.data["battery"])
+        battery["temperature_derating"] = {"enabled": True, "weather_entity": ""}
+        store.data["battery"] = battery
+
+        system = _bsm()
+        system.update_settings(build_system_settings(_full_options(store)))  # no raise
+
+    def test_startup_and_patch_paths_produce_identical_bsm_state(
+        self, tmp_path, monkeypatch
+    ):
+        from api_conversion import BATTERY_MODEL_ATTRS, build_system_settings
+
+        store = _fresh_store(tmp_path, monkeypatch)
+        battery = dict(store.data["battery"])
+        battery["total_capacity"] = 42.0
+        battery["efficiency_charge"] = 0.91
+        store.data["battery"] = battery
 
         startup_system = _bsm()
-        startup_system.update_settings(build_system_settings(options))
+        startup_system.update_settings(build_system_settings(_full_options(store)))
 
-        # PATCH /api/settings filters by _BATTERY_MODEL_ATTRS (api.py) before
-        # calling update_settings — replicate that filtering here.
-        from api import _BATTERY_MODEL_ATTRS  # type: ignore[import]
-
+        # PATCH /api/settings filters to BATTERY_MODEL_ATTRS, then passes
+        # the raw store dict directly (api.py).
         patch_system = _bsm()
-        in_mem = {k: v for k, v in battery.items() if k in _BATTERY_MODEL_ATTRS}
+        in_mem = {
+            k: v for k, v in store.data["battery"].items() if k in BATTERY_MODEL_ATTRS
+        }
         patch_system.update_settings({"battery": in_mem})
 
         assert startup_system.battery_settings == patch_system.battery_settings
 
 
 class TestHomeSettingsRoundTrip:
+    def test_startup_path_applies_home_settings_to_bsm(self, tmp_path, monkeypatch):
+        from api_conversion import build_system_settings
+
+        store = _fresh_store(tmp_path, monkeypatch)
+        home = dict(store.data["home"])
+        home["default_hourly"] = 5.5
+        home["phase_count"] = 1
+        store.data["home"] = home
+
+        system = _bsm()
+        system.update_settings(build_system_settings(_full_options(store)))
+
+        assert system.home_settings.default_hourly == 5.5
+        assert system.home_settings.phase_count == 1
+
+    def test_startup_path_drops_stale_key_without_crashing(self, tmp_path, monkeypatch):
+        """A stale pre-migration key (e.g. 'consumption' coexisting with its
+        renamed successor 'default_hourly' — see settings_store.py's
+        rename-if-absent migration guard) lives in the store's home section
+        but is not a HomeSettings field — the startup path must filter it
+        out rather than crash with AttributeError on HomeSettings.update()."""
+        from api_conversion import build_system_settings
+
+        store = _fresh_store(tmp_path, monkeypatch)
+        home = dict(store.data["home"])
+        home["consumption"] = 3.5
+        store.data["home"] = home
+
+        system = _bsm()
+        system.update_settings(build_system_settings(_full_options(store)))  # no raise
+
     def test_startup_and_patch_paths_produce_identical_bsm_state(
         self, tmp_path, monkeypatch
     ):
@@ -422,9 +563,52 @@ class TestHomeSettingsRoundTrip:
 
         store = _fresh_store(tmp_path, monkeypatch)
         home = dict(store.data["home"])
-        home["default_hourly"] = 5.2
-        home["phase_count"] = 1
+        home["default_hourly"] = 6.25
         store.data["home"] = home
+
+        startup_system = _bsm()
+        startup_system.update_settings(build_system_settings(_full_options(store)))
+
+        # PATCH /api/settings passes the raw store dict directly (api.py).
+        patch_system = _bsm()
+        patch_system.update_settings({"home": store.data["home"]})
+
+        assert startup_system.home_settings == patch_system.home_settings
+
+
+class TestPriceSettingsRoundTrip:
+    def test_startup_path_applies_price_settings_to_bsm(self, tmp_path, monkeypatch):
+        from api_conversion import build_system_settings
+
+        store = _fresh_store(tmp_path, monkeypatch)
+        price = dict(store.data["electricity_price"])
+        price["markup_rate"] = 0.42
+        price["area"] = "SE3"
+        store.data["electricity_price"] = price
+
+        options = {
+            "battery": store.data["battery"],
+            "home": store.data["home"],
+            "electricity_price": store.data["electricity_price"],
+        }
+        settings = build_system_settings(options)
+
+        system = _bsm()
+        system.update_settings(settings)
+
+        assert system.price_settings.markup_rate == 0.42
+        assert system.price_settings.area == "SE3"
+
+    def test_startup_and_patch_paths_produce_identical_bsm_state(
+        self, tmp_path, monkeypatch
+    ):
+        from api_conversion import build_system_settings
+
+        store = _fresh_store(tmp_path, monkeypatch)
+        price = dict(store.data["electricity_price"])
+        price["markup_rate"] = 0.33
+        price["tax_reduction"] = 0.15
+        store.data["electricity_price"] = price
 
         options = {
             "battery": store.data["battery"],
@@ -437,9 +621,9 @@ class TestHomeSettingsRoundTrip:
 
         # PATCH /api/settings passes the raw store dict directly (api.py).
         patch_system = _bsm()
-        patch_system.update_settings({"home": store.data["home"]})
+        patch_system.update_settings({"price": store.data["electricity_price"]})
 
-        assert startup_system.home_settings == patch_system.home_settings
+        assert startup_system.price_settings == patch_system.price_settings
 
 
 # ---------------------------------------------------------------------------

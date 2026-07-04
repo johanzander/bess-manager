@@ -8,7 +8,10 @@ import threading
 from datetime import datetime, timedelta
 
 from api_conversion import (
-    _BATTERY_DATACLASS_FIELDS as _BATTERY_MODEL_ATTRS,
+    BATTERY_MODEL_ATTRS as _BATTERY_MODEL_ATTRS,
+)
+from api_conversion import (
+    HOME_MODEL_ATTRS as _HOME_MODEL_ATTRS,
 )
 from api_conversion import (
     convert_keys_to_camel_case,
@@ -160,14 +163,6 @@ _SECTION_MAP: dict[str, str] = {
     "demoMode": "demo_mode",
 }
 
-# _BATTERY_MODEL_ATTRS (imported above as _BATTERY_DATACLASS_FIELDS) is derived
-# from the BatterySettings dataclass — fields with init=True are the writable
-# attributes; init=False fields (min_soe_kwh, max_soe_kwh, reserved_capacity)
-# are computed and must not be sent to update_settings(). temperature_derating
-# is a nested dict handled separately below. Defined once in api_conversion.py
-# so build_system_settings() (startup) and this PATCH handler filter on the
-# exact same set — see TestBatteryModelAttrsConsistency.
-
 
 @router.get("/api/settings")
 async def get_settings():
@@ -271,7 +266,13 @@ async def patch_settings(updates: dict):
                         obj.weather_entity = td["weather_entity"]
 
             elif store_key == "home":
-                bess_controller.system.update_settings({"home": section})
+                # Filtered to known HomeSettings fields — a stale pre-migration
+                # key (e.g. 'consumption') can coexist with its renamed
+                # successor if a migration was ever interrupted (see
+                # HOME_MODEL_ATTRS's comment in api_conversion.py); passing it
+                # straight through would raise AttributeError.
+                in_mem = {k: v for k, v in section.items() if k in _HOME_MODEL_ATTRS}
+                bess_controller.system.update_settings({"home": in_mem})
 
             elif store_key == "electricity_price":
                 # PriceSettings attribute names match the store field names directly
@@ -3207,7 +3208,7 @@ async def setup_complete(payload: APISetupCompletePayload):
         live_updates: dict = {}
         if "battery" in sections:
             # BatterySettings.update() takes snake_case (store field names)
-            # directly — no camelCase translation (issue #219).
+            # directly — no camelCase translation (issue #197, #219).
             live_updates["battery"] = _nn(
                 {
                     "total_capacity": payload.totalCapacity,
@@ -3221,7 +3222,7 @@ async def setup_complete(payload: APISetupCompletePayload):
             )
         if "home" in sections:
             # HomeSettings.update() takes snake_case (store field names)
-            # directly — no camelCase translation (issue #219).
+            # directly — no camelCase translation (issue #197, #219).
             live_updates["home"] = _nn(
                 {
                     "default_hourly": payload.consumption,
@@ -3235,13 +3236,15 @@ async def setup_complete(payload: APISetupCompletePayload):
                 }
             )
         if "electricity_price" in sections:
+            # PriceSettings.update() takes snake_case (store field names)
+            # directly — no camelCase translation (issue #197).
             live_updates["price"] = _nn(
                 {
                     "area": sections["electricity_price"].get("area"),
-                    "markupRate": payload.markupRate,
-                    "vatMultiplier": payload.vatMultiplier,
-                    "additionalCosts": payload.additionalCosts,
-                    "taxReduction": payload.taxReduction,
+                    "markup_rate": payload.markupRate,
+                    "vat_multiplier": payload.vatMultiplier,
+                    "additional_costs": payload.additionalCosts,
+                    "tax_reduction": payload.taxReduction,
                 }
             )
         if live_updates:

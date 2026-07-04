@@ -1,20 +1,21 @@
 """Unified API conversion system - simple snake_case to camelCase conversion.
 
-Also defines the canonical settings field requirements for each section.
-These are the single source of truth for which fields are required at
-startup (_apply_settings in app.py).  Battery and Home settings reach BSM
-in snake_case unchanged — BatterySettings.update()/HomeSettings.update()
-(core/bess/settings.py) do not translate camelCase, so startup and PATCH
-both pass the same store field names straight through (issue #219, mirrors
-the Price fix in #197/#216). Price still uses the older camelCase
-translation dict (PRICE_STORE_TO_API) pending #216.
+Also defines the canonical settings field requirements for each section —
+the single source of truth for which fields are required at startup
+(_apply_settings in app.py). Battery/Home/Price all reach update_settings()
+in snake_case (the store's native format) unchanged — none of the
+BatterySettings/HomeSettings/PriceSettings.update() methods translate
+camelCase (issue #197, extended to Battery/Home in #219). CamelCase API
+payloads are converted to snake_case in the API layer, not in
+core/bess/settings.py.
 
 Both the startup path (app.py) and tests import from here so the
 requirements can never drift between validation and usage.
 """
 
+import dataclasses
 import re
-from dataclasses import asdict, fields, is_dataclass
+from dataclasses import asdict, is_dataclass
 from typing import Any
 
 from core.bess.settings import BatterySettings, HomeSettings
@@ -23,11 +24,12 @@ from core.bess.settings import BatterySettings, HomeSettings
 # Canonical settings field requirements
 # ---------------------------------------------------------------------------
 
-# Fields required at startup by build_system_settings().  Adding a key here
+# Fields required at startup by build_system_settings(). Adding a key here
 # makes it required in the bootstrap defaults and in contract tests.
 # Note: charging_power_rate, efficiency_charge, efficiency_discharge are also
-# in the store but have defaults and are not required at startup — they still
-# flow through via _BATTERY_DATACLASS_FIELDS below.
+# in the store (see BATTERY_MODEL_ATTRS below) but have class defaults and
+# are not required at startup — a store missing them still boots, using
+# the default.
 BATTERY_REQUIRED_FIELDS: frozenset[str] = frozenset(
     {
         "total_capacity",
@@ -40,21 +42,27 @@ BATTERY_REQUIRED_FIELDS: frozenset[str] = frozenset(
     }
 )
 
-# All BatterySettings/HomeSettings init-time attributes — used to filter the
-# battery/home store sections before passthrough. Needed because a store
-# section can carry non-dataclass keys that would raise AttributeError if
-# passed to update() directly: battery has temperature_derating (a nested
-# dict), and home can carry a stale pre-migration key (e.g. 'consumption')
-# if it and its renamed successor ('default_hourly') ever coexisted in a
-# persisted store (see settings_store.py's rename-if-absent migration guard).
-# api.py imports _BATTERY_DATACLASS_FIELDS directly (aliased as
-# _BATTERY_MODEL_ATTRS) so the PATCH path and startup path filter on the
-# exact same set — see TestBatteryModelAttrsConsistency.
-_BATTERY_DATACLASS_FIELDS: frozenset[str] = frozenset(
-    f.name for f in fields(BatterySettings) if f.init
+# All BatterySettings/HomeSettings fields the store may hold — used to
+# filter the store's battery/home sections before passing them to
+# update_settings(), so a non-model key living alongside them in the store
+# is never passed to update() directly: battery has temperature_derating (a
+# nested dict, applied via a separate mechanism at BSM construction), and
+# home can carry a stale pre-migration key (e.g. 'consumption') if it and
+# its renamed successor ('default_hourly') ever coexisted in a persisted
+# store (see settings_store.py's rename-if-absent migration guard). Derived
+# from each dataclass so a newly added field is included automatically —
+# this is what BATTERY_REQUIRED_FIELDS (a hand-picked subset) previously
+# failed to do for charging_power_rate/efficiency_charge/efficiency_discharge:
+# they were silently dropped at startup while still working via PATCH,
+# reverting to class defaults on every restart (the #197 bug class, live on
+# main for these three fields). Kept in sync by
+# TestBatteryModelAttrsConsistency/TestHomeModelAttrsConsistency;
+# BATTERY_MODEL_ATTRS is also imported directly by the PATCH handler in api.py.
+BATTERY_MODEL_ATTRS: frozenset[str] = frozenset(
+    f.name for f in dataclasses.fields(BatterySettings) if f.init
 )
-_HOME_DATACLASS_FIELDS: frozenset[str] = frozenset(
-    f.name for f in fields(HomeSettings) if f.init
+HOME_MODEL_ATTRS: frozenset[str] = frozenset(
+    f.name for f in dataclasses.fields(HomeSettings) if f.init
 )
 
 HOME_REQUIRED_FIELDS: frozenset[str] = frozenset(
@@ -70,13 +78,14 @@ HOME_REQUIRED_FIELDS: frozenset[str] = frozenset(
     }
 )
 
-PRICE_STORE_TO_API: dict[str, str] = {
-    "area": "area",
-    "markup_rate": "markupRate",
-    "vat_multiplier": "vatMultiplier",
-    "additional_costs": "additionalCosts",
-    "tax_reduction": "taxReduction",
-}
+# Price settings reach BSM in snake_case unchanged — PriceSettings.update()
+# (core/bess/settings.py) does not translate camelCase, so startup and PATCH
+# both pass the same store field names straight through. This set only
+# validates presence at startup; kept in sync with the PriceSettings
+# dataclass by TestPriceModelAttrsConsistency (issue #197).
+PRICE_REQUIRED_FIELDS: frozenset[str] = frozenset(
+    {"area", "markup_rate", "vat_multiplier", "additional_costs", "tax_reduction"}
+)
 
 # Legacy inverter_type values ("MIN"/"SPH") → canonical inverter.platform.
 # Used only by settings_store migration for old configs.
@@ -90,20 +99,20 @@ UI_TYPE_TO_PLATFORM = LEGACY_INVERTER_PLATFORM_MAP
 
 
 def build_system_settings(options: dict) -> dict:
-    """Validate settings options and return the camelCase dict for update_settings().
+    """Validate settings options and return the snake_case dict for update_settings().
 
-    This is the pure transformation layer between the settings store (snake_case)
-    and the in-memory system (camelCase).  It is intentionally a standalone
-    function so it can be unit-tested without instantiating BESSController.
+    This is the pure transformation layer between the settings store and the
+    in-memory system — both snake_case (issue #197).  It is intentionally a
+    standalone function so it can be unit-tested without instantiating
+    BESSController.
 
     Args:
         options: Dict with at minimum ``battery``, ``electricity_price``, and
                  ``home`` sections using store snake_case field names.
 
     Returns:
-        Dict with ``battery``, ``home``, and ``price`` sections ready to pass
-        to ``system.update_settings()``. Battery and Home are snake_case
-        (unchanged); Price is still translated to camelCase pending #216.
+        Dict with ``battery``, ``home``, and ``price`` sections, snake_case,
+        ready to pass to ``system.update_settings()``.
 
     Raises:
         ValueError: If a required section or field is missing.
@@ -120,7 +129,7 @@ def build_system_settings(options: dict) -> dict:
     for key in BATTERY_REQUIRED_FIELDS:
         if key not in battery_config:
             raise ValueError(f"Required battery setting '{key}' is missing from config")
-    for key in PRICE_STORE_TO_API:
+    for key in PRICE_REQUIRED_FIELDS:
         if key not in electricity_price_config:
             raise ValueError(
                 f"Required electricity_price setting '{key}' is missing from config"
@@ -130,17 +139,18 @@ def build_system_settings(options: dict) -> dict:
             raise ValueError(f"Required home setting '{key}' is missing from config")
 
     return {
-        # Filtered to known BatterySettings/HomeSettings attributes — excludes
-        # non-dataclass or stale keys sharing the same store section (see
-        # _BATTERY_DATACLASS_FIELDS/_HOME_DATACLASS_FIELDS comment above).
+        # Filtered to known BatterySettings/HomeSettings fields — their store
+        # sections can carry non-model keys (battery's temperature_derating;
+        # a stale pre-migration key for home — see BATTERY_MODEL_ATTRS/
+        # HOME_MODEL_ATTRS comment above) that would raise AttributeError if
+        # passed to update() directly.
         "battery": {
-            k: v for k, v in battery_config.items() if k in _BATTERY_DATACLASS_FIELDS
+            k: v for k, v in battery_config.items() if k in BATTERY_MODEL_ATTRS
         },
-        "home": {k: v for k, v in home_config.items() if k in _HOME_DATACLASS_FIELDS},
-        "price": {
-            camel: electricity_price_config[snake]
-            for snake, camel in PRICE_STORE_TO_API.items()
-        },
+        "home": {k: v for k, v in home_config.items() if k in HOME_MODEL_ATTRS},
+        # Price is passed through unchanged — no non-model keys share its
+        # store section.
+        "price": dict(electricity_price_config),
     }
 
 

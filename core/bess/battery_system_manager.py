@@ -156,6 +156,8 @@ class BatterySystemManager:
             additional_costs=self.price_settings.additional_costs,
             tax_reduction=self.price_settings.tax_reduction,
             area=self.price_settings.area,
+            spot_multiplier=self.price_settings.spot_multiplier,
+            export_spot_multiplier=self.price_settings.export_spot_multiplier,
         )
 
         # Initialize monitors (created in start() if controller available)
@@ -2905,6 +2907,12 @@ class BatterySystemManager:
                 )
                 self._price_manager.tax_reduction = self.price_settings.tax_reduction
                 self._price_manager.area = self.price_settings.area
+                self._price_manager.spot_multiplier = (
+                    self.price_settings.spot_multiplier
+                )
+                self._price_manager.export_spot_multiplier = (
+                    self.price_settings.export_spot_multiplier
+                )
                 self._price_manager.clear_cache()
 
             if "energy_provider" in settings:

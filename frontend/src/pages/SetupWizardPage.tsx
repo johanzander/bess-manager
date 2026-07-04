@@ -77,6 +77,8 @@ const SetupWizardPage: React.FC = () => {
     vatMultiplier: 1.25,
     additionalCosts: 0.77,
     taxReduction: 0.2,
+    spotMultiplier: 1.0,
+    exportSpotMultiplier: 1.0,
   });
 
   const handleScan = useCallback(async () => {
@@ -110,6 +112,12 @@ const SetupWizardPage: React.FC = () => {
       const autoArea = hasOfficialNordpool ? d.nordpoolArea : d.nordpoolCustomArea;
       setPricingForm(f => ({
         ...f,
+        // Only seed spot-multiplier defaults when the provider is newly
+        // auto-detected (changing) — never on a re-scan of an already
+        // configured provider, or this would clobber a saved custom
+        // contract-specific value (e.g. a real Luminus vs. non-Luminus
+        // ENTSO-e multiplier) every time the wizard mounts or rescans.
+        ...(autoProvider && autoProvider !== f.provider ? (d.pricingDefaults ?? {}) : {}),
         ...(autoProvider ? { provider: autoProvider } : {}),
         ...(d.currency ? { currency: d.currency } : {}),
         ...(autoArea ? { area: autoArea } : {}),
@@ -230,6 +238,8 @@ const SetupWizardPage: React.FC = () => {
         vatMultiplier:         elec.vatMultiplier                   ?? f.vatMultiplier,
         additionalCosts:       elec.additionalCosts                 ?? f.additionalCosts,
         taxReduction:          elec.taxReduction                    ?? f.taxReduction,
+        spotMultiplier:        elec.spotMultiplier                  ?? f.spotMultiplier,
+        exportSpotMultiplier:  elec.exportSpotMultiplier            ?? f.exportSpotMultiplier,
         // Restore saved config entry IDs so manual entries survive a wizard re-run
         nordpoolConfigEntryId: ep.nordpoolOfficial?.configEntryId ?? f.nordpoolConfigEntryId,
         nordpoolEntity:        ep.nordpoolHacs?.entity           ?? f.nordpoolEntity,
@@ -296,6 +306,8 @@ const SetupWizardPage: React.FC = () => {
         vatMultiplier: pricingForm.vatMultiplier,
         additionalCosts: pricingForm.additionalCosts,
         taxReduction: pricingForm.taxReduction,
+        spotMultiplier: pricingForm.spotMultiplier,
+        exportSpotMultiplier: pricingForm.exportSpotMultiplier,
         // Nordpool HACS entity
         nordpoolEntity: pricingForm.nordpoolEntity || undefined,
         // Octopus Energy entity IDs

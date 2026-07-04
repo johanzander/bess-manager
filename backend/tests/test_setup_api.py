@@ -404,6 +404,20 @@ class TestSetupComplete:
         assert elec["additional_costs"] == 0.77
         assert elec["tax_reduction"] == 0.20
 
+    def test_spot_multiplier_fields_persisted(self, complete_controller):
+        """spotMultiplier/exportSpotMultiplier must reach electricity_price, not be dropped."""
+        payload = _full_wizard_payload(
+            provider="entsoe",
+            spotMultiplier=1.0175,
+            exportSpotMultiplier=1.018,
+        )
+        resp = _client.post("/api/setup/complete", json=payload)
+        assert resp.status_code == 200
+        call_args = complete_controller.settings_store.save_all.call_args[0][0]
+        elec = call_args["electricity_price"]
+        assert elec["spot_multiplier"] == 1.0175
+        assert elec["export_spot_multiplier"] == 1.018
+
     def test_price_fields_saved_without_markup_or_vat(self, complete_controller):
         """additionalCosts/taxReduction must be persisted even without markupRate/vatMultiplier."""
         payload = {"additionalCosts": 0.99, "taxReduction": 0.25}
@@ -558,6 +572,23 @@ class TestSetupComplete:
         assert len(price_calls) >= 1
         sent = price_calls[0][0][0]["price"]
         assert sent["vat_multiplier"] == 1.25
+
+    def test_live_spot_multiplier_update_sent(self, complete_controller):
+        """spotMultiplier/exportSpotMultiplier must reach the live system update,
+        not just the persisted store — otherwise the optimizer keeps using the
+        default 1.0 until the addon restarts."""
+        payload = _full_wizard_payload(
+            provider="entsoe",
+            spotMultiplier=1.0175,
+            exportSpotMultiplier=1.018,
+        )
+        _client.post("/api/setup/complete", json=payload)
+        calls = complete_controller.system.update_settings.call_args_list
+        price_calls = [c for c in calls if "price" in c[0][0]]
+        assert len(price_calls) >= 1
+        sent = price_calls[0][0][0]["price"]
+        assert sent["spot_multiplier"] == 1.0175
+        assert sent["export_spot_multiplier"] == 1.018
 
     def test_live_energy_provider_update_sent(self, complete_controller):
         _client.post("/api/setup/complete", json=_full_wizard_payload())
@@ -865,6 +896,81 @@ class TestDiscoverLocaleDefaults:
         ctrl.ha_controller.discover_optional_sensors.assert_called_once_with(
             [], registry
         )
+
+
+class TestDiscoverPricingDefaults:
+    """POST /api/setup/discover must suggest provider-aware pricing defaults.
+
+    Without this, the setup wizard has no way to pre-fill spotMultiplier for
+    an auto-detected ENTSO-e provider — the user would have to know the
+    Luminus-style 1.0175 factor and enter it manually.
+    """
+
+    def _run_discover(self, ctrl, integrations):
+        ha = ctrl.ha_controller
+        ha.discover_integrations.return_value = (integrations, [])
+        ha.fetch_entity_registry.return_value = []
+        ha.discover_sensors_from_registry.return_value = ({}, None)
+        ha.discover_current_sensors.return_value = {}
+        ha.discover_optional_sensors.return_value = {}
+        ha.discover_octopus_entities.return_value = {}
+        ha.ENTITY_SUFFIX_MAP = {}
+        ha.SOLAX_GROWATT_MIN_SUFFIX_MAP = {}
+        ha.SOLAX_GROWATT_SPH_SUFFIX_MAP = {}
+        ha.SOLAX_NATIVE_SUFFIX_MAP = {}
+        sys.modules["app"].bess_controller = ctrl
+        return _client.post("/api/setup/discover")
+
+    def _integrations(self, **overrides) -> dict:
+        base = {
+            "growatt_found": False,
+            "device_sn": None,
+            "growatt_device_id": None,
+            "solax_found": False,
+            "nordpool_found": False,
+            "nordpool_area": None,
+            "nordpool_custom_area": None,
+            "nordpool_custom_entity": None,
+            "nordpool_config_entry_id": None,
+            "octopus_found": False,
+            "entsoe_found": False,
+            "detected_inverter_platforms": [],
+            "detected_phase_count": None,
+            "currency": None,
+            "vat_multiplier": None,
+        }
+        base.update(overrides)
+        return base
+
+    def test_entsoe_only_suggests_spot_multiplier_defaults(self):
+        store = deepcopy(_PRE_EXISTING_STORE)
+        ctrl = _make_discover_controller(store)
+        integrations = self._integrations(entsoe_found=True)
+        resp = self._run_discover(ctrl, integrations)
+        assert resp.status_code == 200
+        defaults = resp.json()["pricingDefaults"]
+        assert defaults["spotMultiplier"] == 1.0175
+        assert defaults["exportSpotMultiplier"] == 1.018
+
+    def test_octopus_only_suggests_no_adjustment(self):
+        store = deepcopy(_PRE_EXISTING_STORE)
+        ctrl = _make_discover_controller(store)
+        integrations = self._integrations(octopus_found=True)
+        resp = self._run_discover(ctrl, integrations)
+        assert resp.status_code == 200
+        defaults = resp.json()["pricingDefaults"]
+        assert defaults["spotMultiplier"] == 1.0
+        assert defaults["exportSpotMultiplier"] == 1.0
+
+    def test_nordpool_official_suggests_no_adjustment(self):
+        store = deepcopy(_PRE_EXISTING_STORE)
+        ctrl = _make_discover_controller(store)
+        integrations = self._integrations(nordpool_config_entry_id="entry-123")
+        resp = self._run_discover(ctrl, integrations)
+        assert resp.status_code == 200
+        defaults = resp.json()["pricingDefaults"]
+        assert defaults["spotMultiplier"] == 1.0
+        assert defaults["exportSpotMultiplier"] == 1.0
 
 
 # ===========================================================================

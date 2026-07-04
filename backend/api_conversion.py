@@ -82,9 +82,21 @@ HOME_REQUIRED_FIELDS: frozenset[str] = frozenset(
 # (core/bess/settings.py) does not translate camelCase, so startup and PATCH
 # both pass the same store field names straight through. This set only
 # validates presence at startup; kept in sync with the PriceSettings
-# dataclass by TestPriceModelAttrsConsistency (issue #197).
+# dataclass by TestPriceModelAttrsConsistency (issue #197). spot_multiplier/
+# export_spot_multiplier are wizard-configurable and store-backed like the
+# other required fields (issue #221); use_actual_price is excluded — it is
+# an internal-only field, never read from the store or written by the
+# wizard, matching min_profit's exclusion.
 PRICE_REQUIRED_FIELDS: frozenset[str] = frozenset(
-    {"area", "markup_rate", "vat_multiplier", "additional_costs", "tax_reduction"}
+    {
+        "area",
+        "markup_rate",
+        "vat_multiplier",
+        "additional_costs",
+        "tax_reduction",
+        "spot_multiplier",
+        "export_spot_multiplier",
+    }
 )
 
 # Legacy inverter_type values ("MIN"/"SPH") → canonical inverter.platform.

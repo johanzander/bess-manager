@@ -53,7 +53,7 @@ const EMPTY_PRICING: PricingForm = {
   octopusExportTodayEntity: '', octopusExportTomorrowEntity: '',
   entsoeEntity: '',
   area: '', markupRate: 0, vatMultiplier: 1.25, additionalCosts: 0,
-  taxReduction: 0,
+  taxReduction: 0, spotMultiplier: 1.0, exportSpotMultiplier: 1.0,
 };
 const EMPTY_INVERTER: InverterForm = { inverterPlatform: 'growatt_server_min', deviceId: '' };
 
@@ -200,6 +200,8 @@ const SettingsPage: React.FC = () => {
         vatMultiplier: elec_s.vatMultiplier ?? 1.25,
         additionalCosts: elec_s.additionalCosts ?? 0,
         taxReduction: elec_s.taxReduction ?? 0,
+        spotMultiplier: elec_s.spotMultiplier ?? 1.0,
+        exportSpotMultiplier: elec_s.exportSpotMultiplier ?? 1.0,
       };
       setPricingForm(p);
       savedPricing.current = JSON.stringify(p);
@@ -402,6 +404,8 @@ const SettingsPage: React.FC = () => {
           vatMultiplier: pricingForm.vatMultiplier,
           additionalCosts: pricingForm.additionalCosts,
           taxReduction: pricingForm.taxReduction,
+          spotMultiplier: pricingForm.spotMultiplier,
+          exportSpotMultiplier: pricingForm.exportSpotMultiplier,
           useActualPrice: false,
         },
         energyProvider: {

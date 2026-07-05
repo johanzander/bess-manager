@@ -58,6 +58,7 @@ from .settings import (
 )
 from .solax_controller import SolaxController
 from .solax_modbus_growatt_controller import SolaxModbusGrowattController
+from .solis_modbus_controller import SolisModbusController
 from .time_utils import (
     format_period,
     get_period_count,
@@ -218,6 +219,7 @@ class BatterySystemManager:
         "solax_modbus_growatt_min",
         "solax_modbus_growatt_sph",
         "solax_modbus_native",
+        "solis_modbus",
     }
 
     _INVERTER_TYPE_TO_PLATFORM: ClassVar[dict[str, str]] = {
@@ -226,6 +228,7 @@ class BatterySystemManager:
         "solax_modbus_growatt_sph": "solax_modbus_growatt_sph",
         "growatt_server_sph": "growatt_server_sph",
         "solax_modbus_native": "solax_modbus_native",
+        "solis_modbus": "solis_modbus",
         # Legacy values stored in growatt.inverter_type
         "MIN": "growatt_server_min",
         "SPH": "growatt_server_sph",
@@ -278,6 +281,8 @@ class BatterySystemManager:
             return GrowattSphController(battery_settings=self.battery_settings)
         if self.inverter_platform == "solax_modbus_native":
             return SolaxController(battery_settings=self.battery_settings)
+        if self.inverter_platform == "solis_modbus":
+            return SolisModbusController(battery_settings=self.battery_settings)
         if self.inverter_platform in (
             "solax_modbus_growatt_min",
             "solax_modbus_growatt_sph",

@@ -650,6 +650,128 @@ class HomeAssistantAPIController:
         "charger_use_mode": "solax_charger_use_mode",
     }
 
+    # ── Solis hybrid inverters via the Pho3niX90/solis_modbus integration ──
+    #
+    # (github.com/Pho3niX90/solis_modbus, verified against release v4.1.6).
+    # DOMAIN = "solis_modbus" (const.py:1). Credits SA7BNT's research and
+    # implementation in bess-manager-beta PR #51, re-verified here against
+    # the actual integration source per the add-inverter-platform skill.
+    #
+    # unique_id_generator(controller, third_value) (helpers.py:40-49) builds
+    # unique_id = f"solis_modbus_{serial_or_identification_or_host}_{third_value}".
+    #
+    # Control entities pass a clean string as third_value and are safely
+    # matched by suffix (this map, via the normal _map_registry_entities
+    # endswith() matching — same mechanism every other platform uses):
+    #   - time.py:52 (TOU start/end pickers):
+    #     unique_id_generator(controller, entity_definition.get("unique", ...))
+    #     where entity["unique"] = f"time_entity_{register}" (time_sensors.py:63).
+    #   - solis_binary_sensor.py:36 (TOU per-slot enable switches):
+    #     unique_id_generator_binary(controller, register, bit_position, None)
+    #     -> f"{register}_{bit_position}" (switch_sensors.py:207-216).
+    #
+    # IMPORTANT — verified integration bug, not an assumption: for entities
+    # built via SolisSensorGroup.__init__ (sensors/solis_base_sensor.py:254),
+    # `unique_id=unique_id_generator(controller, entity)` passes the *entire
+    # entity definition dict* as third_value instead of `entity["unique"]`.
+    # This means most read-only sensors AND all "editable" number entities
+    # (per-slot TOU current/cutoff-SOC, global charge/discharge stop SOC)
+    # get a unique_id containing the Python repr of their whole definition
+    # dict, e.g. ``solis_modbus_SN123_{'name': 'Battery SOC', ..., 'unique':
+    # 'solis_modbus_inverter_battery_soc', ...}`` — not a clean suffix.
+    # Present in v4.1.6 (stable) and unchanged on HEAD as of 2026-07-05;
+    # reported upstream as Pho3niX90/solis_modbus#<TBD>.
+    # These CANNOT be matched with endswith() and are handled separately by
+    # `_match_solis_dict_embedded_entities` (substring match on the verified
+    # ``'unique': '<key>'`` fragment), never by changing the shared
+    # `_map_registry_entities` matching logic used by every other platform.
+    #
+    # `hybrid_sensors_derived` entities (__init__.py:280) go through the
+    # *correct* call path (`entity.get("unique", "reserve")`) and therefore
+    # DO have clean, endswith()-matchable unique_ids — those are in this map.
+    SOLIS_SUFFIX_MAP: ClassVar[dict[str, str]] = {
+        # ── Real-time power (hybrid_sensors_derived — clean unique_id) ────
+        "solis_modbus_inverter_battery_charge_power": "battery_charge_power",
+        "solis_modbus_inverter_battery_discharge_power": "battery_discharge_power",
+        # Solis exposes only a single signed net grid power sensor (no
+        # separate import/export power entities, hybrid_sensors_derived
+        # "Grid Power Net" register 33263/33264, positive=import,
+        # negative=export). A suffix map key can only resolve to one BESS
+        # sensor key, so auto-discovery wires it to import_power only;
+        # export_power is left unconfigured (see docs/INVERTER_PLATFORMS.md
+        # Solis section) rather than guessing a second mapping for the same
+        # entity.
+        "solis_modbus_inverter_grid_power_net": "import_power",
+        # PV Power 1 only (hybrid_sensors_derived, register 33049/33050).
+        # Solis hybrids have up to 4 MPPT strings (dc_power_1..4); summing
+        # them into a single pv_power reading is not implemented in this
+        # first pass — installations with a single MPPT string get accurate
+        # readings, multi-string installations will under-report.
+        "solis_modbus_inverter_dc_power_1": "pv_power",
+        # ── Grid Time of Use v2 charge/discharge period times (6 slots) ───
+        # unique key = f"time_entity_{register}" (time_sensors.py:34-63).
+        "time_entity_43711": "solis_charge_start_1",
+        "time_entity_43713": "solis_charge_end_1",
+        "time_entity_43753": "solis_discharge_start_1",
+        "time_entity_43755": "solis_discharge_end_1",
+        "time_entity_43718": "solis_charge_start_2",
+        "time_entity_43720": "solis_charge_end_2",
+        "time_entity_43760": "solis_discharge_start_2",
+        "time_entity_43762": "solis_discharge_end_2",
+        "time_entity_43725": "solis_charge_start_3",
+        "time_entity_43727": "solis_charge_end_3",
+        "time_entity_43767": "solis_discharge_start_3",
+        "time_entity_43769": "solis_discharge_end_3",
+        "time_entity_43732": "solis_charge_start_4",
+        "time_entity_43734": "solis_charge_end_4",
+        "time_entity_43774": "solis_discharge_start_4",
+        "time_entity_43776": "solis_discharge_end_4",
+        "time_entity_43739": "solis_charge_start_5",
+        "time_entity_43741": "solis_charge_end_5",
+        "time_entity_43781": "solis_discharge_start_5",
+        "time_entity_43783": "solis_discharge_end_5",
+        "time_entity_43746": "solis_charge_start_6",
+        "time_entity_43748": "solis_charge_end_6",
+        "time_entity_43788": "solis_discharge_start_6",
+        "time_entity_43790": "solis_discharge_end_6",
+        # ── Grid Time of Use v2 per-slot enable switches (register 43707) ─
+        # unique key = f"switch_{register}_{bit_position}" (switch_sensors.py
+        # :207-216); actual unique_id uses unique_id_generator_binary, whose
+        # suffix is f"{register}_{bit_position}" (solis_binary_sensor.py:36).
+        # Bits 0-5 = charge periods 1-6, bits 6-11 = discharge periods 1-6
+        # (switch_sensors.py:176-191).
+        "43707_0": "solis_charge_enable_1",
+        "43707_1": "solis_charge_enable_2",
+        "43707_2": "solis_charge_enable_3",
+        "43707_3": "solis_charge_enable_4",
+        "43707_4": "solis_charge_enable_5",
+        "43707_5": "solis_charge_enable_6",
+        "43707_6": "solis_discharge_enable_1",
+        "43707_7": "solis_discharge_enable_2",
+        "43707_8": "solis_discharge_enable_3",
+        "43707_9": "solis_discharge_enable_4",
+        "43707_10": "solis_discharge_enable_5",
+        "43707_11": "solis_discharge_enable_6",
+    }
+
+    # ── Solis monitoring sensors affected by the dict-embedded unique_id bug
+    # (see SOLIS_SUFFIX_MAP docstring above). Matched by a Solis-only
+    # substring check on the verified ``'unique': '<key>'`` fragment — this
+    # is scoped narrowly to Solis and never touches the shared, endswith()-
+    # based `_map_registry_entities` used by every other platform.
+    # Keys are the verified "unique" field from hybrid_sensors.py (the
+    # *non-derived* sensor list, whose SolisSensorGroup construction path
+    # has the bug); values are BESS sensor keys.
+    SOLIS_DICT_EMBEDDED_SUFFIX_MAP: ClassVar[dict[str, str]] = {
+        "solis_modbus_inverter_battery_soc": "battery_soc",  # hybrid_sensors.py:656
+        "solis_modbus_inverter_household_load_power": "local_load_power",  # :725
+        "solis_modbus_inverter_total_battery_charge_energy": "lifetime_battery_charged",  # :811
+        "solis_modbus_inverter_total_battery_discharge_energy": "lifetime_battery_discharged",  # :841
+        "solis_modbus_inverter_pv_total_generation": "lifetime_solar_energy",  # :155
+        "solis_modbus_inverter_total_energy_imported_from_grid": "lifetime_import_from_grid",  # :871
+        "solis_modbus_inverter_total_energy_fed_into_grid": "lifetime_export_to_grid",  # :901
+    }
+
     SOLCAST_SUFFIX_MAP: ClassVar[dict[str, str]] = {
         "total_kwh_forecast_today": "solar_forecast_today",
         "total_kwh_forecast_tomorrow": "solar_forecast_tomorrow",
@@ -1408,6 +1530,124 @@ class HomeAssistantAPIController:
 
         return segments
 
+    # ── Solis solis_modbus entity-based TOU period control ─────────────────
+    # Solis (TX-Modbus) writes each period directly to HA entities, unlike
+    # SPH's atomic growatt_server service calls. Charge/discharge period
+    # start/end are `time` entities; per-slot enable is a `switch` entity
+    # (see SOLIS_SUFFIX_MAP for the verified unique_id -> BESS sensor key
+    # derivation). Sensor keys: solis_{charge,discharge}_{start,end}_N and
+    # solis_{charge,discharge}_enable_N for N in 1..6.
+
+    def write_solis_period(
+        self,
+        direction: str,
+        slot: int,
+        start_time: str,
+        end_time: str,
+        enabled: bool,
+    ) -> None:
+        """Write one Solis Grid TOU v2 charge or discharge period (slot 1-6).
+
+        Args:
+            direction: "charge" or "discharge"
+            slot: TOU slot number (1-6)
+            start_time: Start time "HH:MM"
+            end_time: End time "HH:MM"
+            enabled: Whether the period's enable switch should be on
+        """
+        if direction not in ("charge", "discharge"):
+            raise ValueError(
+                f"direction must be 'charge' or 'discharge', got {direction!r}"
+            )
+
+        start_key = f"solis_{direction}_start_{slot}"
+        end_key = f"solis_{direction}_end_{slot}"
+        enable_key = f"solis_{direction}_enable_{slot}"
+
+        start_entity = self._get_entity_for_service(start_key)
+        end_entity = self._get_entity_for_service(end_key)
+        enable_entity = self._get_entity_for_service(enable_key)
+
+        self._service_call_with_retry(
+            "time",
+            "set_value",
+            operation=f"Solis {direction} slot {slot} start={start_time}",
+            entity_id=start_entity,
+            time=f"{start_time}:00",
+        )
+        self._service_call_with_retry(
+            "time",
+            "set_value",
+            operation=f"Solis {direction} slot {slot} end={end_time}",
+            entity_id=end_entity,
+            time=f"{end_time}:00",
+        )
+        self._service_call_with_retry(
+            "switch",
+            "turn_on" if enabled else "turn_off",
+            operation=f"Solis {direction} slot {slot} enabled={enabled}",
+            entity_id=enable_entity,
+        )
+
+    def read_solis_periods(self, direction: str) -> list[dict]:
+        """Read all 6 Solis Grid TOU v2 periods for one direction from HA entity states.
+
+        Args:
+            direction: "charge" or "discharge"
+
+        Returns:
+            List of dicts with slot, start_time, end_time, enabled — only for
+            slots whose entities are configured.
+        """
+        if direction not in ("charge", "discharge"):
+            raise ValueError(
+                f"direction must be 'charge' or 'discharge', got {direction!r}"
+            )
+
+        periods: list[dict] = []
+        for slot in range(1, 7):
+            try:
+                start_entity = self._get_entity_for_service(
+                    f"solis_{direction}_start_{slot}"
+                )
+                end_entity = self._get_entity_for_service(
+                    f"solis_{direction}_end_{slot}"
+                )
+                enable_entity = self._get_entity_for_service(
+                    f"solis_{direction}_enable_{slot}"
+                )
+            except ValueError:
+                logger.debug(
+                    "Solis %s slot %d entities not configured, skipping",
+                    direction,
+                    slot,
+                )
+                continue
+
+            try:
+                start_state = self._api_request("get", f"/api/states/{start_entity}")
+                end_state = self._api_request("get", f"/api/states/{end_entity}")
+                enable_state = self._api_request("get", f"/api/states/{enable_entity}")
+
+                start_time = str(start_state.get("state", "00:00:00"))[:5]
+                end_time = str(end_state.get("state", "00:00:00"))[:5]
+                enabled = enable_state.get("state") == "on"
+
+                periods.append(
+                    {
+                        "slot": slot,
+                        "start_time": start_time,
+                        "end_time": end_time,
+                        "enabled": enabled,
+                    }
+                )
+            except Exception as e:
+                logger.warning(
+                    "Failed to read Solis %s slot %d: %s", direction, slot, e
+                )
+
+        return periods
+
     def write_ac_charge_times(
         self,
         charge_power: int,
@@ -2160,6 +2400,15 @@ class HomeAssistantAPIController:
             elif self._has_growatt_gen3_entities(entity_registry_result):
                 detected_platforms.append("solax_modbus_growatt_sph")
 
+        solis_config_entry = any(
+            entry.get("domain") == "solis_modbus" and entry.get("state") == "loaded"
+            for entry in config_entries_result
+        )
+        if solis_config_entry and self._has_solis_tou_v2_entities(
+            entity_registry_result
+        ):
+            detected_platforms.append("solis_modbus")
+
         logger.info(
             "WS discovery: nordpool_config_entry_id=%s, nordpool_area=%s, "
             "growatt_device_id=%s, octopus_found=%s, "
@@ -2251,6 +2500,7 @@ class HomeAssistantAPIController:
             "device_sn": None,
             "growatt_device_id": None,
             "solax_found": False,
+            "solis_found": False,
             "nordpool_found": False,
             "nordpool_area": None,
             "nordpool_custom_area": None,
@@ -2288,6 +2538,7 @@ class HomeAssistantAPIController:
         inverter_detected = self.detect_inverter_integrations(registry)
         result["growatt_found"] = inverter_detected.get("growatt", False)
         result["solax_found"] = inverter_detected.get("solax", False)
+        result["solis_found"] = inverter_detected.get("solis", False)
 
         # ── States: Growatt device SN, Nordpool area ─────────────────────
         states = self._fetch_all_states()
@@ -2353,6 +2604,9 @@ class HomeAssistantAPIController:
                 detected.append("solax_modbus_growatt_sph")
             elif self._has_solax_native_entities(registry):
                 detected.append("solax_modbus_native")
+        if result["solis_found"] and "solis_modbus" not in detected:
+            if self._has_solis_tou_v2_entities(registry):
+                detected.append("solis_modbus")
         result["detected_inverter_platforms"] = detected
 
         # Currency & VAT from Nordpool area or Octopus defaults
@@ -2647,6 +2901,7 @@ class HomeAssistantAPIController:
     _INVERTER_PLATFORMS: ClassVar[dict[str, list[str]]] = {
         "growatt": ["growatt_server"],
         "solax": ["solax_modbus", "solax"],
+        "solis": ["solis_modbus"],
     }
     _PRICE_PLATFORMS: ClassVar[dict[str, list[str]]] = {
         "nordpool": ["nordpool"],
@@ -2694,6 +2949,64 @@ class HomeAssistantAPIController:
     )
 
     _SOLAX_PLATFORMS: ClassVar[set[str]] = {"solax_modbus", "solax"}
+
+    # Solis: "solis_modbus" is a dedicated integration domain (unlike
+    # solax_modbus, which multiplexes several inverter brands), so platform
+    # match alone already identifies it uniquely. The marker below confirms
+    # the installed inverter actually exposes the Grid Time of Use v2
+    # schedule (InverterFeature.V2 gates it in time_sensors.py:31) rather
+    # than an older Solis hybrid without local TOU control.
+    _SOLIS_PLATFORMS: ClassVar[set[str]] = {"solis_modbus"}
+    _SOLIS_TOU_MARKER_SUFFIX: ClassVar[str] = (
+        "time_entity_43711"  # Grid TOU v2 Charge Start (Slot 1)
+    )
+
+    def _has_solis_tou_v2_entities(self, entities: list[dict]) -> bool:
+        """Check for Solis Grid Time of Use v2 schedule entities."""
+        count = 0
+        for entity in entities:
+            if entity.get("platform") not in self._SOLIS_PLATFORMS:
+                continue
+            count += 1
+            unique_id = str(entity.get("unique_id", ""))
+            if unique_id.endswith(f"_{self._SOLIS_TOU_MARKER_SUFFIX}"):
+                logger.info("Solis TOU v2 marker found: unique_id=%s", unique_id)
+                return True
+        logger.info(
+            "No Solis TOU v2 marker found among %d solis_modbus entities", count
+        )
+        return False
+
+    def _match_solis_dict_embedded_entities(
+        self, entities: list[dict]
+    ) -> dict[str, str]:
+        """Map Solis monitoring entities affected by the dict-embedded unique_id bug.
+
+        Scoped to the ``solis_modbus`` platform only — never touches
+        ``_map_registry_entities``'s endswith()/exact matching used by every
+        other platform. See ``SOLIS_DICT_EMBEDDED_SUFFIX_MAP`` for the source
+        citation for this integration bug.
+
+        Matches by checking whether the verified ``'unique': '<key>'``
+        fragment (the exact substring Python's dict repr produces for that
+        key) is present anywhere in the entity's unique_id.
+        """
+        result: dict[str, str] = {}
+        for key, bess_key in self.SOLIS_DICT_EMBEDDED_SUFFIX_MAP.items():
+            if bess_key in result:
+                continue
+            fragment = f"'unique': '{key}'"
+            for entity in entities:
+                if entity.get("platform") not in self._SOLIS_PLATFORMS:
+                    continue
+                unique_id = str(entity.get("unique_id", ""))
+                if fragment in unique_id:
+                    entity_id = entity.get("entity_id", "")
+                    if "." in entity_id:
+                        result[bess_key] = entity_id
+                        break
+        logger.info("Mapped %d Solis dict-embedded monitoring entities", len(result))
+        return result
 
     def _has_solax_entity_suffix(
         self, entities: list[dict], suffix: str, label: str
@@ -2839,6 +3152,37 @@ class HomeAssistantAPIController:
                 platform_sensors["solax_modbus_native"] = solax_sensors
                 if not detected_platform:
                     detected_platform = "solax_modbus_native"
+
+        if inverter_detected.get("solis"):
+            solis_platforms = ["solis_modbus"]
+            solis_sensors = self._map_registry_entities(
+                entities, solis_platforms, self.SOLIS_SUFFIX_MAP
+            )
+            # Dict-embedded-unique_id monitoring entities need a separate,
+            # Solis-scoped matcher (see SOLIS_DICT_EMBEDDED_SUFFIX_MAP) —
+            # merge them in without touching _map_registry_entities.
+            solis_sensors.update(
+                {
+                    k: v
+                    for k, v in self._match_solis_dict_embedded_entities(
+                        entities
+                    ).items()
+                    if k not in solis_sensors
+                }
+            )
+            if self._has_solis_tou_v2_entities(entities):
+                platform_sensors["solis_modbus"] = solis_sensors
+                if not detected_platform:
+                    detected_platform = "solis_modbus"
+            else:
+                logger.warning(
+                    "solis_modbus detected but no Grid Time of Use v2 "
+                    "entities found — schedule control unavailable on this "
+                    "inverter/firmware; monitoring sensors still mapped"
+                )
+                platform_sensors["solis_modbus"] = solis_sensors
+                if not detected_platform:
+                    detected_platform = "solis_modbus"
 
         return platform_sensors, detected_platform
 

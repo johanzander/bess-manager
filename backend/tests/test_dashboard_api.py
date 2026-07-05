@@ -104,6 +104,8 @@ def _make_started_controller() -> MagicMock:
     ctrl.system.get_runtime_failures.return_value = []
     ctrl.system.dismiss_runtime_failure.return_value = None
     ctrl.system.dismiss_all_runtime_failures.return_value = 0
+    ctrl.system.get_health_recoveries.return_value = []
+    ctrl.system.acknowledge_health_recoveries.return_value = 0
     ctrl.system.has_critical_sensor_failures.return_value = False
     ctrl.system.get_cached_health_results.return_value = {
         "checks": [],
@@ -272,6 +274,37 @@ class TestDashboardHealthSummary:
         resp = _client.get("/api/dashboard-health-summary")
         assert resp.status_code == 503
 
+    def test_critical_issue_names_the_failing_sensor(self):
+        ctrl = _make_started_controller()
+        ctrl.system.has_critical_sensor_failures.return_value = True
+        ctrl.system.get_critical_sensor_failures.return_value = ["Battery Control"]
+        ctrl.system.get_cached_health_results.return_value = {
+            "checks": [
+                {
+                    "name": "Battery Control",
+                    "status": "ERROR",
+                    "required": True,
+                    "checks": [
+                        {
+                            "name": "Battery Charging Power Rate",
+                            "entity_id": "number.growatt_battery_charging_power_rate",
+                            "status": "WARNING",
+                            "error": "Entity state is 'unavailable'",
+                        }
+                    ],
+                }
+            ],
+            "system_mode": "degraded",
+        }
+        sys.modules["app"].bess_controller = ctrl
+
+        resp = _client.get("/api/dashboard-health-summary")
+
+        issue = resp.json()["criticalIssues"][0]
+        assert issue["detail"] == (
+            "Battery Charging Power Rate (number.growatt_battery_charging_power_rate)"
+        )
+
 
 # ===========================================================================
 # GET /api/historical-data-status
@@ -432,4 +465,32 @@ class TestRuntimeFailures:
     def test_dismiss_all_unconfigured_returns_503(self):
         sys.modules["app"].bess_controller = _unconfigured_controller()
         resp = _client.post("/api/runtime-failures/dismiss-all")
+        assert resp.status_code == 503
+
+
+# ===========================================================================
+# GET /api/health-recoveries
+# POST /api/health-recoveries/acknowledge
+# ===========================================================================
+
+
+class TestHealthRecoveries:
+    def test_get_returns_200(self):
+        sys.modules["app"].bess_controller = _make_started_controller()
+        resp = _client.get("/api/health-recoveries")
+        assert resp.status_code == 200
+
+    def test_get_unconfigured_returns_503(self):
+        sys.modules["app"].bess_controller = _unconfigured_controller()
+        resp = _client.get("/api/health-recoveries")
+        assert resp.status_code == 503
+
+    def test_acknowledge_returns_200(self):
+        sys.modules["app"].bess_controller = _make_started_controller()
+        resp = _client.post("/api/health-recoveries/acknowledge")
+        assert resp.status_code == 200
+
+    def test_acknowledge_unconfigured_returns_503(self):
+        sys.modules["app"].bess_controller = _unconfigured_controller()
+        resp = _client.post("/api/health-recoveries/acknowledge")
         assert resp.status_code == 503

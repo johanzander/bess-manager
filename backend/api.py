@@ -34,7 +34,7 @@ from loguru import logger
 from settings_store import VALID_PLATFORMS
 
 from core.bess import time_utils
-from core.bess.health_check import run_system_health_checks
+from core.bess.health_check import describe_failing_checks, run_system_health_checks
 from core.bess.time_utils import get_period_count
 
 router = APIRouter()
@@ -1985,12 +1985,19 @@ async def get_dashboard_health_summary():
         if bess_controller.system.has_critical_sensor_failures():
             # System is in degraded mode due to critical sensor failures
             critical_failures = bess_controller.system.get_critical_sensor_failures()
+            cached_results = bess_controller.system.get_cached_health_results() or {}
+            components_by_name = {
+                component.get("name"): component
+                for component in cached_results.get("checks", [])
+            }
             critical_issues = []
             for failure in critical_failures:
+                component = components_by_name.get(failure, {})
                 critical_issues.append(
                     {
                         "component": failure,
                         "description": "Critical sensor configuration issue detected",
+                        "detail": describe_failing_checks(component),
                         "status": "ERROR",
                     }
                 )
@@ -2039,6 +2046,7 @@ async def get_dashboard_health_summary():
                         {
                             "component": component.get("name", "Unknown"),
                             "description": component.get("description", ""),
+                            "detail": describe_failing_checks(component),
                             "status": status,
                         }
                     )
@@ -2048,6 +2056,7 @@ async def get_dashboard_health_summary():
                         {
                             "component": component.get("name", "Unknown"),
                             "description": component.get("description", ""),
+                            "detail": describe_failing_checks(component),
                             "status": status,
                         }
                     )
@@ -2744,6 +2753,48 @@ async def dismiss_all_runtime_failures():
         return {"success": True, "message": f"Dismissed {count} runtime failures"}
     except Exception as e:
         logger.error(f"Error dismissing all runtime failures: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.get("/api/health-recoveries")
+async def get_health_recoveries():
+    """Get pending health-check recoveries (components that self-resolved).
+
+    A component that goes ERROR/WARNING -> OK between health checks is
+    recorded here, so an intermittent sensor issue is not silently lost if
+    nobody was watching the live status banner when it recovered.
+
+    Returns:
+        list[dict]: Pending recoveries, newest first
+    """
+    from app import bess_controller
+
+    _require_configured_system(bess_controller)
+
+    try:
+        recoveries = bess_controller.system.get_health_recoveries()
+        return convert_keys_to_camel_case([dataclasses.asdict(r) for r in recoveries])
+    except Exception as e:
+        logger.error(f"Error getting health recoveries: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.post("/api/health-recoveries/acknowledge")
+async def acknowledge_health_recoveries():
+    """Acknowledge (clear) all pending health-check recoveries.
+
+    Returns:
+        dict: Success confirmation with count of recoveries acknowledged
+    """
+    from app import bess_controller
+
+    _require_configured_system(bess_controller)
+
+    try:
+        count = bess_controller.system.acknowledge_health_recoveries()
+        return {"success": True, "message": f"Acknowledged {count} health recoveries"}
+    except Exception as e:
+        logger.error(f"Error acknowledging health recoveries: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 

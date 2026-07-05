@@ -692,4 +692,15 @@ When the user changes the consumption strategy (e.g. from `sensor` to `fixed`), 
 **Sensor Collector InfluxDB Usage**:
 Based on the code analysis: The function `_get_hour_readings` in SensorCollector is called by `collect_energy_data(hour)`. This is not called every hour automatically by the system; it is called when the system wants to collect and record data for a specific hour. The actual historical data for the dashboard is served from the HistoricalDataStore, which is an in-memory store populated by calls to `record_energy_data` (which uses the output of `collect_energy_data`).
 
+## From #215 health-recovery-banner code review (non-blocking, low severity)
+
+**Concurrent health-check race could double-record a recovery**:
+`BatterySystemManager._run_health_check` reads `_cached_health_results` as `previous_results`, then later overwrites it and calls `_update_health_recoveries(previous_results, health_results)` — none of this is lock-protected. If the 5-minute cron job and a manual "Recheck now" click ever overlap almost exactly, both could read the same stale `previous_results` and each record a recovery for the same real transition, leaving a duplicate entry in the banner until acknowledged. Narrow timing window, not observed in practice; would need the tracker's own lock extended around the read-modify-write in `_run_health_check` to close it.
+
+**Component disappearing from health checks leaves a stale pending recovery**:
+`_update_health_recoveries` (core/bess/battery_system_manager.py) only visits components present in the *new* checks list. If a component goes ERROR then becomes unconfigured/absent (e.g. an optional check dropped by a settings change) before recovering, `clear_for_component` never runs for it and any stale pending recovery for that name lingers until acknowledged or evicted by the 50-entry cap. Edge case, low impact.
+
+**`/api/health-recoveries` uses camelCase (`convert_keys_to_camel_case`) while sibling `/api/runtime-failures` returns raw snake_case `__dict__`**:
+Both are valid given each has its own matching frontend hook, but it's an inconsistent precedent for the next tracker-style endpoint someone adds. Worth standardizing next time either is touched.
+
 The `_get_hour_readings` (and thus the InfluxDB query) is called at startup (to reconstruct history) and whenever a new hour is completed and needs to be recorded. It is not called every hour by a scheduler, but it is called for each hour that needs to be reconstructed or recorded.

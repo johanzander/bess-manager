@@ -11,6 +11,7 @@ import { RuntimeFailureAlerts } from '../components/RuntimeFailureAlerts';
 import api from '../lib/api';
 import { useUserPreferences } from '../hooks/useUserPreferences';
 import { useRuntimeFailures } from '../hooks/useRuntimeFailures';
+import { useHealthRecoveries } from '../hooks/useHealthRecoveries';
 
 interface DashboardProps {
   onLoadingChange: (loading: boolean) => void;
@@ -88,6 +89,7 @@ export default function DashboardPage({
     criticalIssues: Array<{
       component: string;
       description: string;
+      detail?: string;
       status: string;
     }>;
     totalCriticalIssues: number;
@@ -95,12 +97,15 @@ export default function DashboardPage({
   }
   
   const [healthSummary, setHealthSummary] = useState<HealthSummary | null>(null);
-  const [dismissedBanner, setDismissedBanner] = useState(false);
   const [isRecheckingHealth, setIsRecheckingHealth] = useState(false);
   const [demoMode, setDemoMode] = useState(false);
 
   // Runtime failures state
   const { failures, dismissFailure, dismissAllFailures } = useRuntimeFailures();
+
+  // Health-check recoveries: components that self-resolved since the last
+  // check, surfaced independent of whether anyone saw the live banner (#215).
+  const { recoveries, acknowledgeRecoveries } = useHealthRecoveries();
 
   // Historical data status state
   interface HistoricalDataStatus {
@@ -115,11 +120,6 @@ export default function DashboardPage({
 
   const [historicalDataStatus, setHistoricalDataStatus] = useState<HistoricalDataStatus | null>(null);
   const [dismissedHistoricalWarning, setDismissedHistoricalWarning] = useState(false);
-
-  // Handle banner dismissal
-  const handleDismissBanner = useCallback(() => {
-    setDismissedBanner(true);
-  }, []);
 
   // Handle historical warning dismissal
   const handleDismissHistoricalWarning = useCallback(() => {
@@ -170,10 +170,6 @@ export default function DashboardPage({
       // Process health summary data
       if (healthResponse?.data) {
         setHealthSummary(healthResponse.data);
-        // Reset dismissed banner if there are new critical issues or warnings
-        if (healthResponse.data.hasCriticalErrors || healthResponse.data.hasWarnings) {
-          setDismissedBanner(false);
-        }
       }
 
       // Process historical data status
@@ -249,16 +245,18 @@ export default function DashboardPage({
         </div>
       )}
 
-      {/* Critical Sensor Alert Banner */}
-      {healthSummary && (healthSummary.hasCriticalErrors || healthSummary.hasWarnings) && !dismissedBanner && (
+      {/* Critical Sensor Alert Banner (also covers a pending self-resolved recovery) */}
+      {healthSummary && (healthSummary.hasCriticalErrors || healthSummary.hasWarnings || recoveries.length > 0) && (
         <AlertBanner
           hasCriticalErrors={healthSummary.hasCriticalErrors}
           hasWarnings={healthSummary.hasWarnings}
           criticalIssues={healthSummary.criticalIssues}
           totalCriticalIssues={healthSummary.totalCriticalIssues}
-          onDismiss={handleDismissBanner}
+          recoveries={recoveries}
+          onAcknowledgeRecoveries={acknowledgeRecoveries}
           onRecheck={handleRecheckHealth}
           isRechecking={isRecheckingHealth}
+          timestamp={healthSummary.timestamp}
         />
       )}
 

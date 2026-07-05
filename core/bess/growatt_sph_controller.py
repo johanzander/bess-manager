@@ -77,128 +77,16 @@ class GrowattSphController(InverterController):
         return self.tou_intervals
 
     # ── Period utility ────────────────────────────────────────────────────────
-
-    # ── SPH period grouping ───────────────────────────────────────────────────
-
-    def _group_sph_periods(self) -> tuple[list[dict], list[dict]]:
-        """Group consecutive strategic intent periods into charge and discharge blocks.
-
-        Returns:
-            Tuple of (charge_blocks, discharge_blocks) where each block is a dict with
-            keys 'start_period', 'end_period', and 'intents'.
-        """
-        if not self.strategic_intents:
-            return [], []
-
-        charge_blocks: list[dict] = []
-        discharge_blocks: list[dict] = []
-
-        for _category, target_list, intent_set in [
-            ("charge", charge_blocks, self.CHARGE_INTENTS),
-            ("discharge", discharge_blocks, self.DISCHARGE_INTENTS),
-        ]:
-            current_block: dict | None = None
-
-            for period, intent in enumerate(self.strategic_intents):
-                if intent in intent_set:
-                    if current_block is None:
-                        current_block = {
-                            "start_period": period,
-                            "end_period": period,
-                            "intents": [intent],
-                        }
-                    else:
-                        current_block["end_period"] = period
-                        current_block["intents"].append(intent)
-                else:
-                    if current_block is not None:
-                        target_list.append(current_block)
-                        current_block = None
-
-            if current_block is not None:
-                target_list.append(current_block)
-
-        return charge_blocks, discharge_blocks
-
-    def _enforce_period_limit(self, blocks: list[dict], max_periods: int) -> list[dict]:
-        """Enforce maximum period count by dropping shortest blocks.
-
-        Args:
-            blocks: List of period blocks
-            max_periods: Maximum allowed blocks
-
-        Returns:
-            Trimmed list of at most max_periods blocks
-        """
-        if len(blocks) <= max_periods:
-            return blocks
-
-        logger.warning(
-            "SPH PERIOD LIMIT EXCEEDED: %d blocks, maximum is %d — dropping shortest",
-            len(blocks),
-            max_periods,
-        )
-
-        def block_duration(b: dict) -> int:
-            return b["end_period"] - b["start_period"] + 1
-
-        # Keep the longest blocks, sorted by original order
-        sorted_by_duration = sorted(blocks, key=block_duration, reverse=True)
-        kept = sorted_by_duration[:max_periods]
-        dropped = sorted_by_duration[max_periods:]
-
-        for b in dropped:
-            sh, sm = self._period_to_time(b["start_period"])
-            eh, em = self._period_to_time(b["end_period"])
-            logger.warning(
-                "  DROPPED: %02d:%02d-%02d:%02d (%d periods) intents=%s",
-                sh,
-                sm,
-                eh,
-                em + 14,
-                block_duration(b),
-                b["intents"],
-            )
-
-        # Return kept blocks in chronological order
-        return sorted(kept, key=lambda b: b["start_period"])
-
-    def _blocks_to_period_dicts(self, blocks: list[dict]) -> list[dict]:
-        """Convert period blocks to time-string dicts for hardware and display.
-
-        Args:
-            blocks: List of period blocks from _group_sph_periods
-
-        Returns:
-            List of dicts with 'start_time', 'end_time', 'enabled' keys
-        """
-        result = []
-        for block in blocks:
-            sh, sm = self._period_to_time(block["start_period"])
-            eh, em = self._period_to_time(block["end_period"])
-
-            # Cap end time to 23:59
-            if sh >= 24:
-                continue  # Skip DST fall-back periods beyond 23:59
-            if eh >= 24:
-                eh, em = 23, 59
-            else:
-                em += 14  # Last minute of the 15-min period
-
-            result.append(
-                {
-                    "start_time": f"{sh:02d}:{sm:02d}",
-                    "end_time": f"{eh:02d}:{em:02d}",
-                    "enabled": True,
-                }
-            )
-        return result
+    # NOTE: _group_period_blocks / _enforce_period_limit / _blocks_to_period_dicts
+    # live on InverterController (the base class) — they are pure functions of
+    # strategic_intents/CHARGE_INTENTS/DISCHARGE_INTENTS shared by any
+    # SM-Period-lists controller (SPH here, Solis via SolisModbusController).
 
     # ── Schedule building ─────────────────────────────────────────────────────
 
     def _build_sph_periods(self) -> None:
         """Build charge and discharge period lists from strategic intents."""
-        charge_blocks, discharge_blocks = self._group_sph_periods()
+        charge_blocks, discharge_blocks = self._group_period_blocks()
 
         charge_blocks = self._enforce_period_limit(
             charge_blocks, self.MAX_CHARGE_PERIODS

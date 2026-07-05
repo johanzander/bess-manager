@@ -2990,8 +2990,13 @@ class HomeAssistantAPIController:
         Matches by checking whether the verified ``'unique': '<key>'``
         fragment (the exact substring Python's dict repr produces for that
         key) is present anywhere in the entity's unique_id.
+
+        Enabled entities are preferred over disabled ones, mirroring
+        ``_map_registry_entities``'s deferral behavior — a disabled match is
+        only used if no enabled entity matches the same key.
         """
         result: dict[str, str] = {}
+        disabled_matches: dict[str, str] = {}
         for key, bess_key in self.SOLIS_DICT_EMBEDDED_SUFFIX_MAP.items():
             if bess_key in result:
                 continue
@@ -2999,12 +3004,30 @@ class HomeAssistantAPIController:
             for entity in entities:
                 if entity.get("platform") not in self._SOLIS_PLATFORMS:
                     continue
+                entity_id = entity.get("entity_id", "")
+                if "." not in entity_id:
+                    continue
                 unique_id = str(entity.get("unique_id", ""))
-                if fragment in unique_id:
-                    entity_id = entity.get("entity_id", "")
-                    if "." in entity_id:
-                        result[bess_key] = entity_id
-                        break
+                if fragment not in unique_id:
+                    continue
+                if entity.get("disabled_by"):
+                    # Defer — an enabled entity may appear later
+                    if bess_key not in disabled_matches:
+                        disabled_matches[bess_key] = entity_id
+                    continue
+                result[bess_key] = entity_id
+                break
+
+        for bess_key, entity_id in disabled_matches.items():
+            if bess_key not in result:
+                result[bess_key] = entity_id
+                logger.warning(
+                    "Solis dict-embedded sensor %s only matched a disabled "
+                    "entity %s",
+                    bess_key,
+                    entity_id,
+                )
+
         logger.info("Mapped %d Solis dict-embedded monitoring entities", len(result))
         return result
 
@@ -3170,19 +3193,23 @@ class HomeAssistantAPIController:
                     if k not in solis_sensors
                 }
             )
+            # Monitoring sensors are always mapped, but only auto-select
+            # solis_modbus as the detected platform when the Grid TOU v2
+            # marker is present — without it, schedule writes fail on every
+            # attempt (write_solis_period raises), so a monitoring-only
+            # Solis install must not be silently promoted to "detected"
+            # like a fully-controllable one.
+            platform_sensors["solis_modbus"] = solis_sensors
             if self._has_solis_tou_v2_entities(entities):
-                platform_sensors["solis_modbus"] = solis_sensors
                 if not detected_platform:
                     detected_platform = "solis_modbus"
             else:
                 logger.warning(
                     "solis_modbus detected but no Grid Time of Use v2 "
                     "entities found — schedule control unavailable on this "
-                    "inverter/firmware; monitoring sensors still mapped"
+                    "inverter/firmware; monitoring sensors mapped but "
+                    "solis_modbus is not auto-selected as detected_platform"
                 )
-                platform_sensors["solis_modbus"] = solis_sensors
-                if not detected_platform:
-                    detected_platform = "solis_modbus"
 
         return platform_sensors, detected_platform
 

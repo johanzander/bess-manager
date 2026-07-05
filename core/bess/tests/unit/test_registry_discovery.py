@@ -1085,6 +1085,68 @@ class TestDiscoverSensorsFromRegistry:
         detected = self.ctrl.detect_inverter_integrations(_solis_registry())
         assert detected["solis"] is True
 
+    def test_solis_without_tou_v2_entities_maps_sensors_but_not_detected(self):
+        """Monitoring-only Solis (no Grid TOU v2 marker) must not be auto-selected.
+
+        Without time_entity_43711 (or any TOU v2 entity), schedule writes
+        would fail on every attempt — solis_modbus must still be populated
+        in platform_sensors (so a user can select it manually) but must not
+        silently become detected_platform like a fully-controllable Solis.
+        """
+        sn = _SOLIS_SERIAL
+        monitoring_only = [
+            _entity(
+                "sensor.solis_battery_charge_power",
+                "solis_modbus",
+                f"solis_modbus_{sn}_solis_modbus_inverter_battery_charge_power",
+            ),
+            _entity(
+                "sensor.solis_battery_soc",
+                "solis_modbus",
+                _solis_dict_embedded_unique_id("solis_modbus_inverter_battery_soc"),
+            ),
+        ]
+
+        sensors, platform = self.ctrl.discover_sensors_from_registry(monitoring_only)
+
+        assert "solis_modbus" in sensors
+        assert sensors["solis_modbus"]["battery_soc"] == "sensor.solis_battery_soc"
+        assert platform is None
+
+    def test_solis_dict_embedded_matcher_prefers_enabled_over_disabled(self):
+        """A disabled dict-embedded entity must not shadow an enabled one."""
+        disabled_entity = _entity(
+            "sensor.solis_battery_soc_old",
+            "solis_modbus",
+            _solis_dict_embedded_unique_id("solis_modbus_inverter_battery_soc"),
+        )
+        disabled_entity["disabled_by"] = "user"
+        enabled_entity = _entity(
+            "sensor.solis_battery_soc",
+            "solis_modbus",
+            _solis_dict_embedded_unique_id("solis_modbus_inverter_battery_soc"),
+        )
+
+        mapped = self.ctrl._match_solis_dict_embedded_entities(
+            [disabled_entity, enabled_entity]
+        )
+
+        assert mapped["battery_soc"] == "sensor.solis_battery_soc"
+
+    def test_solis_dict_embedded_matcher_falls_back_to_disabled_if_only_match(self):
+        """A disabled-only match is still returned (with a warning), per the
+        same deferral behavior as _map_registry_entities."""
+        disabled_entity = _entity(
+            "sensor.solis_battery_soc_old",
+            "solis_modbus",
+            _solis_dict_embedded_unique_id("solis_modbus_inverter_battery_soc"),
+        )
+        disabled_entity["disabled_by"] = "user"
+
+        mapped = self.ctrl._match_solis_dict_embedded_entities([disabled_entity])
+
+        assert mapped["battery_soc"] == "sensor.solis_battery_soc_old"
+
     def test_gen3_marker_not_detected_for_gen4(self):
         """GEN4 entities (TOU slots) do not trigger GEN3 detection."""
         entities = _solax_growatt_tou_registry()

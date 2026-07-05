@@ -11,6 +11,25 @@ from .influxdb_helper import (
 logger = logging.getLogger(__name__)
 
 
+def describe_failing_checks(component: dict) -> str:
+    """Summarize the sub-check(s) that made a health-check component unhealthy.
+
+    Returns e.g. "Battery Charging Power Rate
+    (number.growatt_battery_charging_power_rate)", joining multiple failing
+    sub-checks with "; ". Empty string if none are identifiable.
+    """
+    failing = [
+        check
+        for check in component.get("checks", [])
+        if check.get("status") not in ("OK", None)
+    ]
+    parts = []
+    for check in failing:
+        entity_id = check.get("entity_id")
+        parts.append(f"{check['name']} ({entity_id})" if entity_id else check["name"])
+    return "; ".join(parts)
+
+
 def format_sensor_value_with_unit(value, method_name: str, controller) -> str:
     """Format sensor value with appropriate unit based on METHOD_SENSOR_MAP.
 

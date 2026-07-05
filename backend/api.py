@@ -34,7 +34,7 @@ from loguru import logger
 from settings_store import VALID_PLATFORMS
 
 from core.bess import time_utils
-from core.bess.health_check import run_system_health_checks
+from core.bess.health_check import describe_failing_checks, run_system_health_checks
 from core.bess.time_utils import get_period_count
 
 router = APIRouter()
@@ -1985,12 +1985,19 @@ async def get_dashboard_health_summary():
         if bess_controller.system.has_critical_sensor_failures():
             # System is in degraded mode due to critical sensor failures
             critical_failures = bess_controller.system.get_critical_sensor_failures()
+            cached_results = bess_controller.system.get_cached_health_results() or {}
+            components_by_name = {
+                component.get("name"): component
+                for component in cached_results.get("checks", [])
+            }
             critical_issues = []
             for failure in critical_failures:
+                component = components_by_name.get(failure, {})
                 critical_issues.append(
                     {
                         "component": failure,
                         "description": "Critical sensor configuration issue detected",
+                        "detail": describe_failing_checks(component),
                         "status": "ERROR",
                     }
                 )
@@ -2039,6 +2046,7 @@ async def get_dashboard_health_summary():
                         {
                             "component": component.get("name", "Unknown"),
                             "description": component.get("description", ""),
+                            "detail": describe_failing_checks(component),
                             "status": status,
                         }
                     )
@@ -2048,6 +2056,7 @@ async def get_dashboard_health_summary():
                         {
                             "component": component.get("name", "Unknown"),
                             "description": component.get("description", ""),
+                            "detail": describe_failing_checks(component),
                             "status": status,
                         }
                     )

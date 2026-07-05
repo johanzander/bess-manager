@@ -27,12 +27,17 @@ class HealthRecovery:
         timestamp: When the recovery was detected
         component: Health-check component name (e.g. "Battery SOC")
         previous_status: Status the component was in before recovering
+        detail: The specific failing sensor(s)/entity that caused the
+            previous status, e.g. "Battery Charging Power Rate
+            (number.growatt_battery_charging_power_rate)". Empty if none
+            could be identified.
     """
 
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     timestamp: datetime = field(default_factory=datetime.now)
     component: str = ""
     previous_status: str = ""
+    detail: str = ""
 
 
 class HealthRecoveryTracker:
@@ -47,9 +52,13 @@ class HealthRecoveryTracker:
         self._recoveries: list[HealthRecovery] = []
         self._lock = Lock()
 
-    def record_recovery(self, component: str, previous_status: str) -> HealthRecovery:
+    def record_recovery(
+        self, component: str, previous_status: str, detail: str = ""
+    ) -> HealthRecovery:
         """Record that a component recovered from an error/warning state."""
-        recovery = HealthRecovery(component=component, previous_status=previous_status)
+        recovery = HealthRecovery(
+            component=component, previous_status=previous_status, detail=detail
+        )
         with self._lock:
             self._recoveries.append(recovery)
             if len(self._recoveries) > self.MAX_RECOVERIES:

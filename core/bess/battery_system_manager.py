@@ -28,7 +28,7 @@ from .exceptions import (
 from .growatt_min_controller import GrowattMinController
 from .growatt_sph_controller import GrowattSphController
 from .ha_api_controller import HomeAssistantAPIController
-from .health_check import run_system_health_checks
+from .health_check import describe_failing_checks, run_system_health_checks
 from .health_recovery_tracker import HealthRecovery, HealthRecoveryTracker
 from .historical_data_store import HistoricalDataStore
 from .influxdb_helper import get_power_sensor_data_batch, is_influxdb_configured
@@ -2733,19 +2733,24 @@ class BatterySystemManager:
         if not previous_results:
             return
 
-        previous_status_by_component = {
-            component["name"]: component["status"]
+        previous_components_by_name = {
+            component["name"]: component
             for component in previous_results.get("checks", [])
         }
 
         for component in new_results.get("checks", []):
             name = component["name"]
             new_status = component["status"]
-            previous_status = previous_status_by_component.get(name)
+            previous_component = previous_components_by_name.get(name)
+            previous_status = (
+                previous_component["status"] if previous_component else None
+            )
 
             if previous_status in ("ERROR", "WARNING") and new_status == "OK":
                 self._health_recovery_tracker.record_recovery(
-                    component=name, previous_status=previous_status
+                    component=name,
+                    previous_status=previous_status,
+                    detail=describe_failing_checks(previous_component),
                 )
             elif new_status in ("ERROR", "WARNING"):
                 self._health_recovery_tracker.clear_for_component(name)

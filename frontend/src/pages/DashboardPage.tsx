@@ -89,6 +89,7 @@ export default function DashboardPage({
     criticalIssues: Array<{
       component: string;
       description: string;
+      detail?: string;
       status: string;
     }>;
     totalCriticalIssues: number;
@@ -255,6 +256,7 @@ export default function DashboardPage({
           onAcknowledgeRecoveries={acknowledgeRecoveries}
           onRecheck={handleRecheckHealth}
           isRechecking={isRecheckingHealth}
+          timestamp={healthSummary.timestamp}
         />
       )}
 

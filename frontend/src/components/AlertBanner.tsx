@@ -6,12 +6,14 @@ import { useReportProblem } from './ReportProblemContext';
 interface CriticalIssue {
   component: string;
   description: string;
+  detail?: string;
   status: string;
 }
 
 interface HealthRecovery {
   component: string;
   previousStatus: string;
+  detail?: string;
   timestamp: string;
 }
 
@@ -24,8 +26,12 @@ interface AlertBannerProps {
   onAcknowledgeRecoveries?: () => void;
   onRecheck?: () => void;
   isRechecking?: boolean;
+  timestamp?: string;
   className?: string;
 }
+
+const formatTime = (isoTimestamp: string): string =>
+  new Date(isoTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
 
 const VISIBLE_ISSUE_LIMIT = 3;
 
@@ -48,7 +54,10 @@ const IssueList: React.FC<IssueListProps> = ({ issues, dotClassName, textClassNa
           <li key={index} className={`text-sm ${textClassName} flex items-center`}>
             <span className={`w-1.5 h-1.5 ${dotClassName} rounded-full mr-2 flex-shrink-0`}></span>
             <span className="font-medium">{issue.component}:</span>
-            <span className="ml-1 truncate">{issue.description}</span>
+            <span className="ml-1 truncate">
+              {issue.description}
+              {issue.detail && <span> ({issue.detail})</span>}
+            </span>
           </li>
         ))}
       </ul>
@@ -72,6 +81,7 @@ const AlertBanner: React.FC<AlertBannerProps> = ({
   onAcknowledgeRecoveries,
   onRecheck,
   isRechecking = false,
+  timestamp,
   className = ''
 }) => {
   const navigate = useNavigate();
@@ -112,11 +122,11 @@ const AlertBanner: React.FC<AlertBannerProps> = ({
             </h3>
 
             <div className="text-sm text-red-700 dark:text-red-300 mb-3">
-              {criticalIssues.length === 1 ? (
-                <p>1 critical component is not functioning properly and may affect system operation.</p>
-              ) : (
-                <p>{criticalIssues.length} critical components are not functioning properly and may affect system operation.</p>
-              )}
+              <p>
+                BESS Manager cannot reliably operate or optimize your battery while this is
+                unresolved. Check Home Assistant for sensor or integration errors.
+                {timestamp && <span className="italic"> As of {formatTime(timestamp)}.</span>}
+              </p>
             </div>
 
             {errors.length > 0 && (
@@ -190,6 +200,7 @@ const AlertBanner: React.FC<AlertBannerProps> = ({
               ) : (
                 <p>{warnings.length} configured sensors are not responding. Data from these sensors will be missing.</p>
               )}
+              {timestamp && <p className="italic">As of {formatTime(timestamp)}.</p>}
             </div>
 
             <div className="mb-3">
@@ -236,10 +247,18 @@ const AlertBanner: React.FC<AlertBannerProps> = ({
             Recovered From an Earlier Issue
           </h3>
 
+          <p className="text-sm text-amber-700 dark:text-amber-300 mb-2">
+            BESS Manager could not reliably operate or optimize your battery during the
+            period below — it&apos;s operating normally again now.
+          </p>
+
           <ul className="space-y-1">
             {recoveries.map((recovery, index) => (
               <li key={index} className="text-sm text-amber-700 dark:text-amber-300">
                 <span className="font-medium">{recovery.component}</span> recovered from {recovery.previousStatus.toLowerCase()}
+                {recovery.detail && <span> ({recovery.detail})</span>}
+                {' at '}
+                {formatTime(recovery.timestamp)}
               </li>
             ))}
           </ul>

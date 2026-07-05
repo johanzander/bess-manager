@@ -6,6 +6,7 @@ interface HealthRecovery {
   timestamp: string;
   component: string;
   previousStatus: string;
+  detail: string;
 }
 
 export const useHealthRecoveries = () => {

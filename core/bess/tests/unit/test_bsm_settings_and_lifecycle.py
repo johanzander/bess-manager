@@ -352,6 +352,51 @@ class TestHealthRecoveryTracking:
         assert recoveries[0].component == "Battery SOC"
         assert recoveries[0].previous_status == "ERROR"
 
+    def test_recovery_detail_names_the_failing_sensor(self, system):
+        self._run(
+            system,
+            {
+                "status": "ERROR",
+                "checks": [
+                    {
+                        "name": "Battery Control",
+                        "status": "ERROR",
+                        "required": True,
+                        "checks": [
+                            {
+                                "name": "Battery Charging Power Rate",
+                                "entity_id": "number.growatt_battery_charging_power_rate",
+                                "status": "WARNING",
+                                "error": "Entity state is 'unavailable'",
+                            },
+                            {
+                                "name": "Grid Charge Enabled",
+                                "entity_id": "switch.growatt_grid_charge",
+                                "status": "OK",
+                                "error": None,
+                            },
+                        ],
+                    }
+                ],
+            },
+        )
+        self._run(
+            system,
+            {
+                "status": "OK",
+                "checks": [
+                    {"name": "Battery Control", "status": "OK", "required": True}
+                ],
+            },
+        )
+
+        recoveries = system.get_health_recoveries()
+        assert len(recoveries) == 1
+        assert (
+            recoveries[0].detail
+            == "Battery Charging Power Rate (number.growatt_battery_charging_power_rate)"
+        )
+
     def test_no_recovery_recorded_when_first_check_is_ok(self, system):
         self._run(
             system,

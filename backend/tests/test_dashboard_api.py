@@ -274,6 +274,37 @@ class TestDashboardHealthSummary:
         resp = _client.get("/api/dashboard-health-summary")
         assert resp.status_code == 503
 
+    def test_critical_issue_names_the_failing_sensor(self):
+        ctrl = _make_started_controller()
+        ctrl.system.has_critical_sensor_failures.return_value = True
+        ctrl.system.get_critical_sensor_failures.return_value = ["Battery Control"]
+        ctrl.system.get_cached_health_results.return_value = {
+            "checks": [
+                {
+                    "name": "Battery Control",
+                    "status": "ERROR",
+                    "required": True,
+                    "checks": [
+                        {
+                            "name": "Battery Charging Power Rate",
+                            "entity_id": "number.growatt_battery_charging_power_rate",
+                            "status": "WARNING",
+                            "error": "Entity state is 'unavailable'",
+                        }
+                    ],
+                }
+            ],
+            "system_mode": "degraded",
+        }
+        sys.modules["app"].bess_controller = ctrl
+
+        resp = _client.get("/api/dashboard-health-summary")
+
+        issue = resp.json()["criticalIssues"][0]
+        assert issue["detail"] == (
+            "Battery Charging Power Rate (number.growatt_battery_charging_power_rate)"
+        )
+
 
 # ===========================================================================
 # GET /api/historical-data-status

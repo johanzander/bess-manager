@@ -44,6 +44,50 @@ describe('AlertBanner recheck action', () => {
   })
 })
 
+describe('AlertBanner active issue specifics', () => {
+  it('shows the specific failing sensor/entity for an active critical issue', () => {
+    renderBanner({
+      hasCriticalErrors: true,
+      hasWarnings: false,
+      criticalIssues: [{
+        component: 'Battery Control',
+        description: 'Critical sensor configuration issue detected',
+        detail: 'Battery Charging Power Rate (number.growatt_battery_charging_power_rate)',
+        status: 'ERROR',
+      }],
+    })
+
+    expect(screen.getByText(/number\.growatt_battery_charging_power_rate/i)).toBeInTheDocument()
+  })
+
+  it('shows when the issue was last checked', () => {
+    renderBanner({ hasCriticalErrors: true, hasWarnings: false, timestamp: '2026-07-05T14:32:00' })
+
+    expect(screen.getByText(/as of 14:32/i)).toBeInTheDocument()
+  })
+})
+
+describe('AlertBanner explains the consequence', () => {
+  it('tells the user battery control/optimization is affected while a critical error is active', () => {
+    renderBanner({ hasCriticalErrors: true, hasWarnings: false })
+
+    expect(screen.getByText(/cannot reliably operate or optimize your battery/i)).toBeInTheDocument()
+    expect(screen.getByText(/check home assistant/i)).toBeInTheDocument()
+  })
+
+  it('tells the user battery control/optimization may have been affected during a recovered period', () => {
+    renderBanner({
+      hasCriticalErrors: false,
+      hasWarnings: false,
+      criticalIssues: [],
+      recoveries: [{ component: 'Battery Control', previousStatus: 'ERROR', detail: '', timestamp: '2026-07-05T14:32:00' }],
+    })
+
+    expect(screen.getByText(/could not reliably operate or optimize your battery/i)).toBeInTheDocument()
+    expect(screen.getByText(/operating normally again now/i)).toBeInTheDocument()
+  })
+})
+
 describe('AlertBanner active issues are not dismissible', () => {
   it('renders no dismiss button while a critical error is active', () => {
     renderBanner({ hasCriticalErrors: true, hasWarnings: false })
@@ -77,6 +121,41 @@ describe('AlertBanner recovered state', () => {
     renderBanner({ hasCriticalErrors: false, hasWarnings: false, criticalIssues: [], recoveries })
 
     expect(screen.getByText(/battery soc/i)).toBeInTheDocument()
+  })
+
+  it('shows which sensor caused the recovery and when it happened', () => {
+    renderBanner({
+      hasCriticalErrors: false,
+      hasWarnings: false,
+      criticalIssues: [],
+      recoveries: [
+        {
+          component: 'Battery Control',
+          previousStatus: 'ERROR',
+          detail: 'Battery Charging Power Rate (number.growatt_battery_charging_power_rate)',
+          timestamp: '2026-07-05T14:32:00',
+        },
+      ],
+    })
+
+    expect(screen.getByText(/battery charging power rate/i)).toBeInTheDocument()
+    expect(screen.getByText(/number\.growatt_battery_charging_power_rate/i)).toBeInTheDocument()
+    expect(screen.getByText(/14:32/)).toBeInTheDocument()
+  })
+
+  it('lists every recovery when multiple components recovered', () => {
+    renderBanner({
+      hasCriticalErrors: false,
+      hasWarnings: false,
+      criticalIssues: [],
+      recoveries: [
+        { component: 'Battery Control', previousStatus: 'ERROR', detail: '', timestamp: '2026-07-05T14:32:00' },
+        { component: 'Solar Forecast', previousStatus: 'WARNING', detail: '', timestamp: '2026-07-05T14:35:00' },
+      ],
+    })
+
+    expect(screen.getByText(/battery control/i)).toBeInTheDocument()
+    expect(screen.getByText(/solar forecast/i)).toBeInTheDocument()
   })
 
   it('calls onAcknowledgeRecoveries when the recovered banner is dismissed', () => {

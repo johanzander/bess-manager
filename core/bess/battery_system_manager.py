@@ -29,6 +29,7 @@ from .growatt_min_controller import GrowattMinController
 from .growatt_sph_controller import GrowattSphController
 from .ha_api_controller import HomeAssistantAPIController
 from .health_check import run_system_health_checks
+from .health_recovery_tracker import HealthRecovery, HealthRecoveryTracker
 from .historical_data_store import HistoricalDataStore
 from .influxdb_helper import get_power_sensor_data_batch, is_influxdb_configured
 from .inverter_controller import InverterController
@@ -185,6 +186,7 @@ class BatterySystemManager:
         self._scheduler = None
 
         self._runtime_failure_tracker = RuntimeFailureTracker()
+        self._health_recovery_tracker = HealthRecoveryTracker()
 
         # Inject failure tracker into controller if available
         if self._controller:
@@ -2646,11 +2648,15 @@ class BatterySystemManager:
     def _run_health_check(self) -> dict[str, Any]:
         """Run system health check."""
         try:
+            previous_results = getattr(self, "_cached_health_results", None)
+
             logger.info("Running system health check...")
             health_results = run_system_health_checks(self)
 
             # Cache results for dashboard (avoid re-running on every page load)
             self._cached_health_results = health_results
+
+            self._update_health_recoveries(previous_results, health_results)
 
             logger.info("System Health Check Results:")
             logger.info("=" * 40)
@@ -2715,6 +2721,42 @@ class BatterySystemManager:
             # Don't crash the system, allow degraded mode operation
             self._critical_sensor_failures = ["System Health Check"]
             return {"status": "ERROR", "checks": []}
+
+    def _update_health_recoveries(
+        self, previous_results: dict[str, Any] | None, new_results: dict[str, Any]
+    ) -> None:
+        """Detect per-component ERROR/WARNING -> OK transitions and record them.
+
+        A component still in ERROR/WARNING clears any stale pending recovery
+        for itself, since the live banner already covers it.
+        """
+        if not previous_results:
+            return
+
+        previous_status_by_component = {
+            component["name"]: component["status"]
+            for component in previous_results.get("checks", [])
+        }
+
+        for component in new_results.get("checks", []):
+            name = component["name"]
+            new_status = component["status"]
+            previous_status = previous_status_by_component.get(name)
+
+            if previous_status in ("ERROR", "WARNING") and new_status == "OK":
+                self._health_recovery_tracker.record_recovery(
+                    component=name, previous_status=previous_status
+                )
+            elif new_status in ("ERROR", "WARNING"):
+                self._health_recovery_tracker.clear_for_component(name)
+
+    def get_health_recoveries(self) -> list[HealthRecovery]:
+        """Get all pending (unacknowledged) health-check recoveries."""
+        return self._health_recovery_tracker.get_recoveries()
+
+    def acknowledge_health_recoveries(self) -> int:
+        """Acknowledge (clear) all pending health-check recoveries."""
+        return self._health_recovery_tracker.acknowledge_all()
 
     def refresh_health_check(self) -> dict[str, Any]:
         """Re-run the health check and update cached results/critical failures.

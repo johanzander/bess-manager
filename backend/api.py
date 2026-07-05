@@ -2747,6 +2747,48 @@ async def dismiss_all_runtime_failures():
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+@router.get("/api/health-recoveries")
+async def get_health_recoveries():
+    """Get pending health-check recoveries (components that self-resolved).
+
+    A component that goes ERROR/WARNING -> OK between health checks is
+    recorded here, so an intermittent sensor issue is not silently lost if
+    nobody was watching the live status banner when it recovered.
+
+    Returns:
+        list[dict]: Pending recoveries, newest first
+    """
+    from app import bess_controller
+
+    _require_configured_system(bess_controller)
+
+    try:
+        recoveries = bess_controller.system.get_health_recoveries()
+        return convert_keys_to_camel_case([dataclasses.asdict(r) for r in recoveries])
+    except Exception as e:
+        logger.error(f"Error getting health recoveries: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.post("/api/health-recoveries/acknowledge")
+async def acknowledge_health_recoveries():
+    """Acknowledge (clear) all pending health-check recoveries.
+
+    Returns:
+        dict: Success confirmation with count of recoveries acknowledged
+    """
+    from app import bess_controller
+
+    _require_configured_system(bess_controller)
+
+    try:
+        count = bess_controller.system.acknowledge_health_recoveries()
+        return {"success": True, "message": f"Acknowledged {count} health recoveries"}
+    except Exception as e:
+        logger.error(f"Error acknowledging health recoveries: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
 # ---------------------------------------------------------------------------
 # AI Analyst chat endpoints
 # ---------------------------------------------------------------------------

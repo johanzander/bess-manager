@@ -1,31 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, ReferenceArea, ComposedChart, Area } from 'recharts';
-import { HourlyData, FormattedValue } from '../types';
+import { HourlyData } from '../types';
 import { periodToTimeString, periodToTimeRange } from '../utils/timeUtils';
 import { DataResolution } from '../hooks/useUserPreferences';
-import { toggle } from './settings/FormHelpers';
 
 interface BatteryLevelChartProps {
   hourlyData: HourlyData[];
   tomorrowData?: HourlyData[] | null;
   settings: any; // Adjust type as needed
   resolution: DataResolution;
-  showSellPrice: boolean;
-  onShowSellPriceChange: (show: boolean) => void;
 }
 
-// Exported for unit testing without needing to render the full recharts tree.
-export function getSellPriceTooltipText(
-  data: { sellPriceFormatted?: FormattedValue },
-  showSellPrice: boolean
-): string | null {
-  if (!showSellPrice || !data.sellPriceFormatted) {
-    return null;
-  }
-  return data.sellPriceFormatted.text;
-}
-
-export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData, tomorrowData, resolution, showSellPrice, onShowSellPriceChange }) => {
+export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData, tomorrowData, resolution }) => {
   // Reactive dark mode detection — observes class changes on <html> to match Tailwind's 'class' strategy
   const [isDarkMode, setIsDarkMode] = useState(
     document.documentElement.classList.contains('dark')
@@ -111,13 +97,12 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
       // Include FormattedValue objects for tooltip
       batterySocEndFormatted: hour.batterySocEnd,
       batteryActionFormatted: hour.batteryAction,
-      buyPriceFormatted: hour.buyPrice,
-      sellPriceFormatted: hour.sellPrice
+      buyPriceFormatted: hour.buyPrice
     };
   });
 
   // Zero anchor at x=0: gives stepBefore a left edge so bars render from 0→1 for period 0
-  chartData.unshift({ hour: 0, periodNum: -1, hourLabel: '', batterySocPercent: chartData[0]?.batterySocPercent ?? 0, action: 0, charging: 0, discharging: 0, price: chartData[0]?.price ?? 0, dataSource: 'actual', isActual: true, isPredicted: false, isTomorrow: false, batterySocEndFormatted: chartData[0]?.batterySocEndFormatted, batteryActionFormatted: chartData[0]?.batteryActionFormatted, buyPriceFormatted: chartData[0]?.buyPriceFormatted, sellPriceFormatted: chartData[0]?.sellPriceFormatted });
+  chartData.unshift({ hour: 0, periodNum: -1, hourLabel: '', batterySocPercent: chartData[0]?.batterySocPercent ?? 0, action: 0, charging: 0, discharging: 0, price: chartData[0]?.price ?? 0, dataSource: 'actual', isActual: true, isPredicted: false, isTomorrow: false, batterySocEndFormatted: chartData[0]?.batterySocEndFormatted, batteryActionFormatted: chartData[0]?.batteryActionFormatted, buyPriceFormatted: chartData[0]?.buyPriceFormatted });
 
   // Append tomorrow's data with hour offset 24+
   const hasTomorrowData = tomorrowData && tomorrowData.length > 0;
@@ -160,8 +145,7 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
         isTomorrow: true,
         batterySocEndFormatted: hour.batterySocEnd,
         batteryActionFormatted: hour.batteryAction,
-        buyPriceFormatted: hour.buyPrice,
-        sellPriceFormatted: hour.sellPrice
+        buyPriceFormatted: hour.buyPrice
       });
     }
   }
@@ -182,11 +166,6 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
 
   return (
     <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
-      <div className="flex justify-end mb-2">
-        <div className="w-48">
-          {toggle('Show sell price', showSellPrice, onShowSellPriceChange)}
-        </div>
-      </div>
       <div className="h-80">
         <ResponsiveContainer width="100%" height="100%">
           <ComposedChart data={chartData} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
@@ -244,13 +223,11 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
                 if (data.periodNum === -1) return null;
                 const timeRange = periodToTimeRange(data.periodNum, resolution);
                 const label = data.isTomorrow ? `Tomorrow ${timeRange}` : timeRange;
-                const sellPriceText = getSellPriceTooltipText(data, showSellPrice);
                 return (
                   <div style={{ backgroundColor: colors.tooltip, border: `1px solid ${colors.tooltipBorder}`, borderRadius: '8px', padding: '10px', color: colors.text }}>
                     <p style={{ fontWeight: 'bold', marginBottom: 4 }}>{label}</p>
                     <p style={{ color: '#16a34a' }}>Battery SOC : {data.batterySocEndFormatted?.text ?? `${data.batterySocPercent} %`}</p>
-                    <p style={{ color: '#9CA3AF' }}>Buy Price : {data.buyPriceFormatted?.text ?? `${data.price}`}</p>
-                    {sellPriceText !== null && <p style={{ color: '#9CA3AF' }}>Sell Price : {sellPriceText}</p>}
+                    <p style={{ color: '#9CA3AF' }}>Electricity Price : {data.buyPriceFormatted?.text ?? `${data.price}`}</p>
                     {data.action > 0 && <p style={{ color: '#16a34a' }}>Battery Charging : {(data.batteryActionFormatted?.text ?? `${data.action}`).replace(/^-0(\b|\.)/, '0$1')}</p>}
                     {data.action < 0 && <p style={{ color: '#dc2626' }}>Battery Discharging : {(data.batteryActionFormatted?.text ?? `${data.action}`).replace(/^-0(\b|\.)/, '0$1')}</p>}
                   </div>

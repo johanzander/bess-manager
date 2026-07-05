@@ -1,25 +1,25 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
-import { BatteryLevelChart, getSellPriceTooltipText } from '../BatteryLevelChart'
+import { EnergyFlowChart, getSellPriceTooltipText } from '../EnergyFlowChart'
 import type { HourlyData } from '../../types'
 
-const hourlyData: HourlyData[] = [
+const dailyViewData: HourlyData[] = [
   {
     period: 0,
     dataSource: 'actual',
-    batteryAction: { value: 0, display: '0', unit: 'kWh', text: '0 kWh' },
-    batterySocEnd: { value: 50, display: '50', unit: '%', text: '50 %' },
+    solarProduction: { value: 0, display: '0', unit: 'kWh', text: '0 kWh' },
+    homeConsumption: { value: 1, display: '1', unit: 'kWh', text: '1 kWh' },
     buyPrice: { value: 0.21, display: '0.21', unit: 'EUR', text: '0.21 EUR' },
     sellPrice: { value: -0.03, display: '-0.03', unit: 'EUR', text: '-0.03 EUR' },
   },
 ]
 
-describe('BatteryLevelChart sell price toggle', () => {
+describe('EnergyFlowChart sell price toggle', () => {
   it('renders the sell price switch reflecting showSellPrice', () => {
     render(
-      <BatteryLevelChart
-        hourlyData={hourlyData}
-        settings={{}}
+      <EnergyFlowChart
+        dailyViewData={dailyViewData}
+        currentHour={0}
         resolution="hourly"
         showSellPrice={false}
         onShowSellPriceChange={vi.fn()}
@@ -32,9 +32,9 @@ describe('BatteryLevelChart sell price toggle', () => {
   it('calls onShowSellPriceChange when clicked', () => {
     const onShowSellPriceChange = vi.fn()
     render(
-      <BatteryLevelChart
-        hourlyData={hourlyData}
-        settings={{}}
+      <EnergyFlowChart
+        dailyViewData={dailyViewData}
+        currentHour={0}
         resolution="hourly"
         showSellPrice={false}
         onShowSellPriceChange={onShowSellPriceChange}

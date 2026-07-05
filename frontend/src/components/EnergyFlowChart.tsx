@@ -1,11 +1,22 @@
 import React, { useState, useEffect } from 'react';
 import { ComposedChart, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, ReferenceArea } from 'recharts';
-import { HourlyData } from '../types';
+import { HourlyData, FormattedValue } from '../types';
 import { periodToTimeRange } from '../utils/timeUtils';
 import { DataResolution } from '../hooks/useUserPreferences';
+import { toggle } from './settings/FormHelpers';
 
+// Exported for unit testing without needing to render the full recharts tree.
+export function getSellPriceTooltipText(
+  data: { sellPriceFormatted?: FormattedValue },
+  showSellPrice: boolean
+): string | null {
+  if (!showSellPrice || !data.sellPriceFormatted) {
+    return null;
+  }
+  return data.sellPriceFormatted.text;
+}
 
-const CustomTooltip = ({ active, payload, label, resolution }: any) => {
+const CustomTooltip = ({ active, payload, label, resolution, showSellPrice }: any) => {
   if (active && payload && payload.length) {
     const data = payload[0].payload;
 
@@ -38,7 +49,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
     // Filter out entries with zero values and price (since we handle price separately)
     // Also separate into sources and consumption
     const energyEntries = payload.filter((entry: any) =>
-      entry.dataKey !== 'price' && Math.abs(entry.value) > 0
+      entry.dataKey !== 'price' && entry.dataKey !== 'sell' && Math.abs(entry.value) > 0
     );
     const sources = energyEntries.filter((entry: any) => entry.value > 0);
     const consumption = energyEntries.filter((entry: any) => entry.value < 0);
@@ -77,7 +88,12 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
           )}
           {data.buyPriceFormatted && (
             <p className="text-gray-600 dark:text-gray-400 mt-2">
-              Price: {data.buyPriceFormatted.text}
+              Buy Price: {data.buyPriceFormatted.text}
+            </p>
+          )}
+          {getSellPriceTooltipText(data, showSellPrice) !== null && (
+            <p className="text-gray-600 dark:text-gray-400">
+              Sell Price: {getSellPriceTooltipText(data, showSellPrice)}
             </p>
           )}
         </div>
@@ -90,7 +106,9 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
   tomorrowData?: HourlyData[] | null;
   currentHour: number;
   resolution: DataResolution;
-}> = ({ dailyViewData, tomorrowData, resolution }) => {
+  showSellPrice: boolean;
+  onShowSellPriceChange: (show: boolean) => void;
+}> = ({ dailyViewData, tomorrowData, resolution, showSellPrice, onShowSellPriceChange }) => {
   
   // Helper function to get currency unit from price data
   const getCurrencyUnit = () => {
@@ -164,6 +182,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
       isActual,
       isTomorrow: false,
       price: getValue(dailyViewHour?.buyPrice) || null, // Treat zero/missing price as null for visual gaps
+      sell: getValue(dailyViewHour?.sellPrice) || null, // Treat zero/missing price as null for visual gaps
       // Include FormattedValue objects for tooltip
       solarProductionFormatted: dailyViewHour?.solarProduction,
       homeConsumptionFormatted: dailyViewHour?.homeConsumption,
@@ -172,6 +191,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
       gridImportedFormatted: dailyViewHour?.gridImported,
       gridExportedFormatted: dailyViewHour?.gridExported,
       buyPriceFormatted: dailyViewHour?.buyPrice,
+      sellPriceFormatted: dailyViewHour?.sellPrice,
     };
   });
 
@@ -207,6 +227,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
         isActual: false,
         isTomorrow: true,
         price: getValue(hourData?.buyPrice) || null, // Treat zero/missing price as null for visual gaps
+        sell: getValue(hourData?.sellPrice) || null, // Treat zero/missing price as null for visual gaps
         // Include FormattedValue objects for tooltip
         solarProductionFormatted: hourData?.solarProduction,
         homeConsumptionFormatted: hourData?.homeConsumption,
@@ -215,6 +236,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
         gridImportedFormatted: hourData?.gridImported,
         gridExportedFormatted: hourData?.gridExported,
         buyPriceFormatted: hourData?.buyPrice,
+        sellPriceFormatted: hourData?.sellPrice,
       } as any);
     }
   }
@@ -239,6 +261,11 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
 
   return (
     <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
+      <div className="flex justify-end mb-2">
+        <div className="w-48">
+          {toggle('Show sell price', showSellPrice, onShowSellPriceChange)}
+        </div>
+      </div>
       <div style={{ width: '100%', height: '400px' }}>
         <ResponsiveContainer>
           <ComposedChart
@@ -340,7 +367,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
                 style: { textAnchor: 'middle', dominantBaseline: 'central', fill: colors.text }
               }}
             />
-            <Tooltip content={<CustomTooltip resolution={resolution} />} />
+            <Tooltip content={<CustomTooltip resolution={resolution} showSellPrice={showSellPrice} />} />
             
             {/* Reference line at zero to separate sources from consumption */}
             <ReferenceLine y={0} stroke={colors.text} strokeWidth={2} />
@@ -457,9 +484,22 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
               stroke="#9CA3AF"
               strokeWidth={1.5}
               dot={false}
-              name="Electricity Price"
+              name="Buy Price"
               connectNulls={false}
             />
+            {showSellPrice && (
+              <Line
+                type="monotone"
+                dataKey="sell"
+                yAxisId="price"
+                stroke="#f59e0b"
+                strokeWidth={1.5}
+                strokeDasharray="4 3"
+                dot={false}
+                name="Sell Price"
+                connectNulls={false}
+              />
+            )}
           </ComposedChart>
         </ResponsiveContainer>
       </div>
@@ -484,8 +524,14 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
         </div>
         <div className="flex items-center">
           <div className="w-4 h-1" style={{ backgroundColor: '#9CA3AF', borderStyle: 'dashed', borderWidth: '1px 0' }}></div>
-          <span className="text-gray-700 dark:text-gray-300 ml-2">Electricity Price</span>
+          <span className="text-gray-700 dark:text-gray-300 ml-2">Buy Price</span>
         </div>
+        {showSellPrice && (
+          <div className="flex items-center">
+            <div className="w-4 h-1" style={{ backgroundColor: '#f59e0b', borderStyle: 'dashed', borderWidth: '1px 0' }}></div>
+            <span className="text-gray-700 dark:text-gray-300 ml-2">Sell Price</span>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -411,6 +411,8 @@ export default function DashboardPage({
                 tomorrowData={dashboardData.tomorrowData as any}
                 currentHour={currentHour}
                 resolution={dataResolution}
+                showSellPrice={showSellPrice}
+                onShowSellPriceChange={setShowSellPrice}
               />
             </div>
 
@@ -422,8 +424,6 @@ export default function DashboardPage({
                 tomorrowData={dashboardData.tomorrowData as any}
                 settings={settings}
                 resolution={dataResolution}
-                showSellPrice={showSellPrice}
-                onShowSellPriceChange={setShowSellPrice}
               />
             </div>
           </div>

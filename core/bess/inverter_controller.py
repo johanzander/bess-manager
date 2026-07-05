@@ -85,6 +85,12 @@ class InverterController(ABC):
     CHARGE_INTENTS: ClassVar[frozenset[str]] = frozenset()
     DISCHARGE_INTENTS: ClassVar[frozenset[str]] = frozenset()
 
+    # Maximum number of charge/discharge period-list slots. Subclasses using
+    # the SM-Period-lists model (Growatt SPH: 3+3, Solis: 6+6) override these;
+    # left at 0 on the base since not every controller uses period lists.
+    MAX_CHARGE_PERIODS: ClassVar[int] = 0
+    MAX_DISCHARGE_PERIODS: ClassVar[int] = 0
+
     def __init__(self, battery_settings: BatterySettings) -> None:
         """Initialize shared inverter controller state."""
         if battery_settings is None:
@@ -228,6 +234,125 @@ class InverterController(ABC):
                 }
             )
         return result
+
+    def _build_period_list_schedule(self) -> tuple[list[dict], list[dict]]:
+        """Group strategic intents into charge/discharge period lists and build
+        ``self.tou_intervals`` for display — the shared "new schedule" build for
+        any SM-Period-lists controller (Growatt SPH, Solis).
+
+        Returns:
+            Tuple of (charge_periods, discharge_periods) — subclasses store
+            these on ``self._charge_periods`` / ``self._discharge_periods``.
+        """
+        charge_blocks, discharge_blocks = self._group_period_blocks()
+        charge_blocks = self._enforce_period_limit(
+            charge_blocks, self.MAX_CHARGE_PERIODS
+        )
+        discharge_blocks = self._enforce_period_limit(
+            discharge_blocks, self.MAX_DISCHARGE_PERIODS
+        )
+
+        charge_periods = self._blocks_to_period_dicts(charge_blocks)
+        discharge_periods = self._blocks_to_period_dicts(discharge_blocks)
+
+        self.tou_intervals = self._periods_to_tou_intervals(
+            charge_periods, discharge_periods, assign_segment_ids=True
+        )
+        return charge_periods, discharge_periods
+
+    @staticmethod
+    def _periods_to_tou_intervals(
+        charge_periods: list[dict],
+        discharge_periods: list[dict],
+        charge_intent: str = "GRID_CHARGING",
+        discharge_intent: str = "LOAD_SUPPORT/BATTERY_EXPORT",
+        is_default: bool = False,
+        assign_segment_ids: bool = False,
+    ) -> list[dict]:
+        """Build a unified, time-sorted tou_intervals list for display.
+
+        Shared by any SM-Period-lists controller for both the "new schedule"
+        build (assign_segment_ids=True, default intent labels) and the
+        "read existing schedule from hardware" path (assign_segment_ids=False,
+        charge_intent=discharge_intent="existing_schedule" — matching the
+        prior per-controller behavior this was extracted from).
+        """
+        intervals = []
+        for p in charge_periods:
+            intervals.append(
+                {
+                    "start_time": p["start_time"],
+                    "end_time": p["end_time"],
+                    "batt_mode": "battery_first",
+                    "enabled": p.get("enabled", True),
+                    "is_default": is_default,
+                    "strategic_intent": charge_intent,
+                }
+            )
+        for p in discharge_periods:
+            intervals.append(
+                {
+                    "start_time": p["start_time"],
+                    "end_time": p["end_time"],
+                    "batt_mode": "grid_first",
+                    "enabled": p.get("enabled", True),
+                    "is_default": is_default,
+                    "strategic_intent": discharge_intent,
+                }
+            )
+        intervals.sort(key=lambda x: x["start_time"])
+        if assign_segment_ids:
+            for idx, interval in enumerate(intervals):
+                interval["segment_id"] = idx + 1
+        return intervals
+
+    def _compare_period_list_schedules(
+        self, other_schedule: "InverterController", label: str
+    ) -> tuple[bool, str]:
+        """Shared ``compare_schedules`` body for SM-Period-lists controllers.
+
+        Args:
+            other_schedule: Another controller of the same concrete type
+                (must have ``_charge_periods``/``_discharge_periods``).
+            label: Platform label used in log/reason strings (e.g. "SPH", "Solis").
+        """
+        current_charge = self._charge_periods
+        new_charge = other_schedule._charge_periods
+        current_discharge = self._discharge_periods
+        new_discharge = other_schedule._discharge_periods
+
+        def _periods_equal(a: list[dict], b: list[dict]) -> bool:
+            if len(a) != len(b):
+                return False
+            for pa, pb in zip(a, b, strict=False):
+                if (
+                    pa.get("start_time") != pb.get("start_time")
+                    or pa.get("end_time") != pb.get("end_time")
+                    or pa.get("enabled") != pb.get("enabled")
+                ):
+                    return False
+            return True
+
+        if not _periods_equal(current_charge, new_charge):
+            logger.info(
+                "DECISION: %s charge periods differ — current=%s new=%s",
+                label,
+                current_charge,
+                new_charge,
+            )
+            return True, f"{label} charge periods differ"
+
+        if not _periods_equal(current_discharge, new_discharge):
+            logger.info(
+                "DECISION: %s discharge periods differ — current=%s new=%s",
+                label,
+                current_discharge,
+                new_discharge,
+            )
+            return True, f"{label} discharge periods differ"
+
+        logger.info("DECISION: %s schedules match", label)
+        return False, ""
 
     # ── Intent → hardware rates ───────────────────────────────────────────────
 

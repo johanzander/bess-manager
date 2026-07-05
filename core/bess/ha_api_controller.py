@@ -2963,19 +2963,12 @@ class HomeAssistantAPIController:
 
     def _has_solis_tou_v2_entities(self, entities: list[dict]) -> bool:
         """Check for Solis Grid Time of Use v2 schedule entities."""
-        count = 0
-        for entity in entities:
-            if entity.get("platform") not in self._SOLIS_PLATFORMS:
-                continue
-            count += 1
-            unique_id = str(entity.get("unique_id", ""))
-            if unique_id.endswith(f"_{self._SOLIS_TOU_MARKER_SUFFIX}"):
-                logger.info("Solis TOU v2 marker found: unique_id=%s", unique_id)
-                return True
-        logger.info(
-            "No Solis TOU v2 marker found among %d solis_modbus entities", count
+        return self._has_solax_entity_suffix(
+            entities,
+            self._SOLIS_TOU_MARKER_SUFFIX,
+            "Solis TOU v2",
+            platforms=self._SOLIS_PLATFORMS,
         )
-        return False
 
     def _match_solis_dict_embedded_entities(
         self, entities: list[dict]
@@ -2987,9 +2980,11 @@ class HomeAssistantAPIController:
         other platform. See ``SOLIS_DICT_EMBEDDED_SUFFIX_MAP`` for the source
         citation for this integration bug.
 
-        Matches by checking whether the verified ``'unique': '<key>'``
-        fragment (the exact substring Python's dict repr produces for that
-        key) is present anywhere in the entity's unique_id.
+        Matches via a regex anchored to the ``unique`` dict key specifically
+        (``'unique':\\s*'<key>'``) rather than a bare substring check — this
+        tolerates whitespace variation in the dict repr while still requiring
+        both quote boundaries around the key, so it can't false-positive on
+        the key appearing as a fragment of some other field's value.
 
         Enabled entities are preferred over disabled ones, mirroring
         ``_map_registry_entities``'s deferral behavior — a disabled match is
@@ -3000,7 +2995,7 @@ class HomeAssistantAPIController:
         for key, bess_key in self.SOLIS_DICT_EMBEDDED_SUFFIX_MAP.items():
             if bess_key in result:
                 continue
-            fragment = f"'unique': '{key}'"
+            pattern = re.compile(r"'unique':\s*'" + re.escape(key) + r"'")
             for entity in entities:
                 if entity.get("platform") not in self._SOLIS_PLATFORMS:
                     continue
@@ -3008,7 +3003,7 @@ class HomeAssistantAPIController:
                 if "." not in entity_id:
                     continue
                 unique_id = str(entity.get("unique_id", ""))
-                if fragment not in unique_id:
+                if not pattern.search(unique_id):
                     continue
                 if entity.get("disabled_by"):
                     # Defer — an enabled entity may appear later
@@ -3032,19 +3027,27 @@ class HomeAssistantAPIController:
         return result
 
     def _has_solax_entity_suffix(
-        self, entities: list[dict], suffix: str, label: str
+        self,
+        entities: list[dict],
+        suffix: str,
+        label: str,
+        platforms: set[str] | None = None,
     ) -> bool:
-        """Check whether any solax_modbus entity has a unique_id ending with the suffix."""
+        """Check whether any entity of the given platform(s) has a unique_id
+        ending with the suffix. Defaults to ``_SOLAX_PLATFORMS`` for the
+        existing solax_modbus marker checks; pass ``platforms`` to reuse this
+        for another platform's own marker (e.g. Solis)."""
+        platform_set = platforms if platforms is not None else self._SOLAX_PLATFORMS
         count = 0
         for entity in entities:
-            if entity.get("platform") not in self._SOLAX_PLATFORMS:
+            if entity.get("platform") not in platform_set:
                 continue
             count += 1
             unique_id = str(entity.get("unique_id", ""))
             if unique_id.endswith(f"_{suffix}"):
                 logger.info("%s marker found: unique_id=%s", label, unique_id)
                 return True
-        logger.info("No %s marker found among %d solax_modbus entities", label, count)
+        logger.info("No %s marker found among %d matching entities", label, count)
         return False
 
     def _has_growatt_tou_entities(self, entities: list[dict]) -> bool:

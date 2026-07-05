@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- **Solis inverter platform** (`solis_modbus`) — Solis hybrid inverters can now be configured via the community [Pho3niX90/solis_modbus](https://github.com/Pho3niX90/solis_modbus) integration (local Modbus, Grid Time of Use v2 schedule — 6 charge + 6 discharge periods). `solax_modbus` (already supported for other brands) was the initial target since no new transport would be needed, but real-world testing on the reporter's hardware confirmed Solis is not reachable through it — this integration is the confirmed-working path instead. Based on SA7BNT's research and initial implementation in bess-manager-beta PR #51, re-verified against the actual integration source and re-implemented to share scheduling logic with Growatt SPH through proper inheritance instead of cross-class private-method calls. **Experimental** — not yet validated end-to-end against a real Solis installation beyond the reporter's Modbus entity check. (#130)
+
 - **Daily savings history with week/month/year aggregates** — A new `DailyViewStore` persists a per-day savings snapshot at day rollover. `GET /api/savings/aggregate` and a new Savings page section expose week/month/year rollups built from that history, plus disk-usage and clear-history controls. ([#260](https://github.com/johanzander/bess-manager/pull/260))
 
 ### Changed

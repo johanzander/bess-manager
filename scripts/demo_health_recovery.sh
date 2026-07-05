@@ -9,12 +9,15 @@
 # banner, then fixes it to trigger the dismissible "recovered" banner — both
 # visible directly in the browser, not just via the API.
 #
-# Usage: ./scripts/demo_health_recovery.sh [up|break|fix|down]
-#   (no args) — runs the full up -> break -> fix sequence, leaves the stack running
-#   up        — bring up the stack only
-#   break     — mark the sensor unavailable and recheck (expect an active ERROR banner)
-#   fix       — restore the sensor and recheck (expect the dismissible recovered banner)
-#   down      — tear down the stack
+# Usage: ./scripts/demo_health_recovery.sh [up|break|fix|break-multi|fix-multi|down]
+#   (no args)   — runs the full up -> break -> fix sequence, leaves the stack running
+#   up          — bring up the stack only
+#   break       — mark one sensor unavailable and recheck (a single active ERROR banner)
+#   fix         — restore it and recheck (the dismissible recovered banner, one entry)
+#   break-multi — break 3 sensors across 2 different components (Battery Control +
+#                 Energy Monitoring) at once, to see multiple issues in one banner
+#   fix-multi   — restore all 3 and recheck (recovered banner with 2 entries)
+#   down        — tear down the stack
 
 set -e
 
@@ -131,26 +134,59 @@ cmd_up() {
     echo "✅ Up. Open http://localhost:$BESS_PORT in a browser, then run:"
     echo "     ./scripts/demo_health_recovery.sh break"
     echo "     ./scripts/demo_health_recovery.sh fix"
+    echo "   or ./scripts/demo_health_recovery.sh break-multi / fix-multi for multiple issues at once"
+}
+
+update_sensor() {
+    curl -s -X POST "http://localhost:$MOCK_HA_PORT/mock/update_sensor/$1" \
+        -H "Content-Type: application/json" -d "$2" >/dev/null
+}
+
+recheck() {
+    curl -s -X POST "http://localhost:$BESS_PORT/api/system-health/recheck" >/dev/null
 }
 
 cmd_break() {
     echo "🔸 Marking $SENSOR unavailable..."
-    curl -s -X POST "http://localhost:$MOCK_HA_PORT/mock/update_sensor/$SENSOR" \
-        -H "Content-Type: application/json" \
-        -d "{\"state\": \"unavailable\", \"attributes\": $SENSOR_ATTRS}" >/dev/null
-    curl -s -X POST "http://localhost:$BESS_PORT/api/system-health/recheck" >/dev/null
+    update_sensor "$SENSOR" "{\"state\": \"unavailable\", \"attributes\": $SENSOR_ATTRS}"
+    recheck
     echo "✅ Rechecked. Refresh the dashboard — expect a red, non-dismissible"
     echo "   'Critical System Issues Detected' banner for Battery Control."
 }
 
 cmd_fix() {
     echo "🔸 Restoring $SENSOR..."
-    curl -s -X POST "http://localhost:$MOCK_HA_PORT/mock/update_sensor/$SENSOR" \
-        -H "Content-Type: application/json" \
-        -d "{\"state\": \"100\", \"attributes\": $SENSOR_ATTRS}" >/dev/null
-    curl -s -X POST "http://localhost:$BESS_PORT/api/system-health/recheck" >/dev/null
+    update_sensor "$SENSOR" "{\"state\": \"100\", \"attributes\": $SENSOR_ATTRS}"
+    recheck
     echo "✅ Rechecked. Refresh the dashboard — expect the red banner gone, replaced"
     echo "   by an amber, dismissible 'Recovered From an Earlier Issue' banner."
+}
+
+# Breaks 2 sensors in Battery Control (charging rate + grid charge switch) and
+# 1 sensor in Energy Monitoring (lifetime solar energy) — 2 different
+# top-level components failing at once, one of them with 2 failing sub-checks.
+cmd_break_multi() {
+    echo "🔸 Marking 3 sensors across Battery Control and Energy Monitoring unavailable..."
+    update_sensor "number.growatt_battery_charging_power_rate" \
+        '{"state": "unavailable", "attributes": {"unit_of_measurement": "%", "min": 0, "max": 100}}'
+    update_sensor "switch.growatt_grid_charge" '{"state": "unavailable", "attributes": {}}'
+    update_sensor "sensor.growatt_lifetime_solar_energy" \
+        '{"state": "unavailable", "attributes": {"unit_of_measurement": "kWh"}}'
+    recheck
+    echo "✅ Rechecked. Refresh the dashboard — expect the red banner listing 2 critical"
+    echo "   components: 'Battery Control' (2 failing sensors) and 'Energy Monitoring'."
+}
+
+cmd_fix_multi() {
+    echo "🔸 Restoring all 3 sensors..."
+    update_sensor "number.growatt_battery_charging_power_rate" \
+        '{"state": "100", "attributes": {"unit_of_measurement": "%", "min": 0, "max": 100}}'
+    update_sensor "switch.growatt_grid_charge" '{"state": "off", "attributes": {}}'
+    update_sensor "sensor.growatt_lifetime_solar_energy" \
+        '{"state": "2000", "attributes": {"unit_of_measurement": "kWh"}}'
+    recheck
+    echo "✅ Rechecked. Refresh the dashboard — expect the red banner gone, replaced"
+    echo "   by the recovered banner listing BOTH components with their own detail/time."
 }
 
 cmd_down() {
@@ -162,6 +198,8 @@ case "${1:-}" in
     up) cmd_up ;;
     break) cmd_break ;;
     fix) cmd_fix ;;
+    break-multi) cmd_break_multi ;;
+    fix-multi) cmd_fix_multi ;;
     down) cmd_down ;;
     "")
         cmd_up
@@ -173,7 +211,7 @@ case "${1:-}" in
         echo "🔸 Stack still running. Tear down with: ./scripts/demo_health_recovery.sh down"
         ;;
     *)
-        echo "Usage: $0 [up|break|fix|down]"
+        echo "Usage: $0 [up|break|fix|break-multi|fix-multi|down]"
         exit 1
         ;;
 esac

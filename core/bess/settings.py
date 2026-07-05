@@ -74,6 +74,15 @@ SAFETY_MARGIN_FACTOR = 1.0  # Safety margin for power calculations (100%)
 # Currency defaults
 DEFAULT_CURRENCY = "SEK"  # Default currency for price display (override in config.yaml)
 
+# BATTERY_CHARGE_CYCLE_COST is denominated in SEK. It approximates battery
+# wear cost per kWh cycled, so it must be re-based per currency rather than
+# reused as-is for non-Swedish installs.
+CYCLE_COST_BY_CURRENCY: dict[str, float] = {
+    "SEK": BATTERY_CHARGE_CYCLE_COST,
+    "EUR": 0.035,
+    "GBP": 0.031,
+}
+
 
 @dataclass
 class PriceSettings:

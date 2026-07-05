@@ -25,6 +25,7 @@ export interface DiscoveryResult {
   solaxFound: boolean;
   solaxHasGrowattTou: boolean;
   solaxHasGrowattGen3: boolean;
+  solisFound: boolean;
   nordpoolFound: boolean;
   nordpoolArea: string | null;
   nordpoolCustomArea: string | null;
@@ -76,6 +77,7 @@ function isIntegrationFound(
   if (id === 'solax_modbus_growatt_min') return discovery.solaxHasGrowattTou;
   if (id === 'solax_modbus_growatt_sph') return discovery.solaxHasGrowattGen3;
   if (id === 'solax_modbus_native') return discovery.solaxFound;
+  if (id === 'solis_modbus') return discovery.solisFound;
   if (id === 'nordpool') return discovery.nordpoolFound;
   if (id === 'phase_current') {
     return !!(shared['current_l1'] || shared['current_l2'] || shared['current_l3']);
@@ -146,7 +148,7 @@ function healthDot(
 // ---------------------------------------------------------------------------
 
 // IDs of inverter integrations — only one should be visible at a time.
-const INVERTER_IDS = new Set(['growatt_server_min', 'growatt_server_sph', 'solax_modbus_growatt_min', 'solax_modbus_growatt_sph', 'solax_modbus_native']);
+const INVERTER_IDS = new Set(['growatt_server_min', 'growatt_server_sph', 'solax_modbus_growatt_min', 'solax_modbus_growatt_sph', 'solax_modbus_native', 'solis_modbus']);
 
 interface Props {
   sensors: PerPlatformSensors;
@@ -196,6 +198,9 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
   const solaxDetected = wizardMode
     ? Boolean(discovery.solaxFound && !discovery.solaxHasGrowattTou && !discovery.solaxHasGrowattGen3)
     : Boolean((sensors.solax_modbus_native ?? {})['solax_power_control_mode'] || (sensors.solax_modbus_native ?? {})['solax_active_power']);
+  const solisDetected = wizardMode
+    ? discovery.solisFound
+    : Boolean((sensors.solis_modbus ?? {})['solis_charge_start_1']);
 
   /** Update a sensor value in the correct sub-dict (platform or shared). */
   const handleSensorChange = (integrationId: string, sensorKey: string, value: string) => {
@@ -219,10 +224,15 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
   const isModbusActive = inverterForm.inverterPlatform === 'solax_modbus_growatt_min'
     || inverterForm.inverterPlatform === 'solax_modbus_growatt_sph'
     || inverterForm.inverterPlatform === 'solax_modbus_native';
+  const isSolisActive = inverterForm.inverterPlatform === 'solis_modbus';
 
-  const handleIntegrationChange = (integration: 'cloud' | 'modbus') => {
+  const handleIntegrationChange = (integration: 'cloud' | 'modbus' | 'solis') => {
     if (integration === 'cloud') {
       const newType = 'growatt_server_min';
+      onInverterChange({ ...inverterForm, inverterPlatform: newType });
+      onChange({ ...sensors, platform: newType });
+    } else if (integration === 'solis') {
+      const newType = 'solis_modbus';
       onInverterChange({ ...inverterForm, inverterPlatform: newType });
       onChange({ ...sensors, platform: newType });
     } else {
@@ -260,14 +270,14 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
           Inverter Platform
         </p>
 
-        {/* Level 1: Integration tabs — Growatt Cloud vs SolaX Modbus */}
+        {/* Level 1: Integration tabs — Growatt Cloud vs SolaX Modbus vs Solis Modbus */}
         {(() => {
           const cloudDetected = growattDetected;
           const modbusDetected = growattModbusDetected || growattModbusGen3Detected || solaxDetected;
-          const activeTab = isCloudActive ? 'cloud' : 'modbus';
+          const activeTab = isCloudActive ? 'cloud' : isSolisActive ? 'solis' : 'modbus';
 
           return (
-            <Tabs value={activeTab} onValueChange={(v) => handleIntegrationChange(v as 'cloud' | 'modbus')}>
+            <Tabs value={activeTab} onValueChange={(v) => handleIntegrationChange(v as 'cloud' | 'modbus' | 'solis')}>
               <TabsList className="bg-gray-100 dark:bg-gray-700/60">
                 <TabsTrigger
                   value="cloud"
@@ -291,6 +301,18 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
                       <span className={`h-2 w-2 rounded-full flex-shrink-0 ${modbusDetected ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-500'}`} />
                     )}
                     SolaX Modbus
+                  </span>
+                </TabsTrigger>
+                <TabsTrigger
+                  value="solis"
+                  disabled={wizardMode && !solisDetected}
+                  className="data-[state=active]:bg-white dark:data-[state=active]:bg-gray-600 dark:text-gray-300 dark:data-[state=active]:text-white"
+                >
+                  <span className="flex items-center gap-1.5">
+                    {wizardMode && (
+                      <span className={`h-2 w-2 rounded-full flex-shrink-0 ${solisDetected ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-500'}`} />
+                    )}
+                    Solis Modbus
                   </span>
                 </TabsTrigger>
               </TabsList>
@@ -372,6 +394,14 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
                     );
                   })}
                 </div>
+              </TabsContent>
+
+              <TabsContent value="solis">
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Solis hybrid inverter via the Pho3niX90/solis_modbus integration
+                  (Grid Time of Use v2, local Modbus). Experimental — not yet
+                  validated against a real Solis installation.
+                </p>
               </TabsContent>
             </Tabs>
           );

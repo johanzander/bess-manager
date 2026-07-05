@@ -6,17 +6,17 @@ import { DataResolution } from '../hooks/useUserPreferences';
 import { toggle } from './settings/FormHelpers';
 
 // Exported for unit testing without needing to render the full recharts tree.
+// Always shown in the tooltip regardless of the "Show sell price" line toggle.
 export function getSellPriceTooltipText(
-  data: { sellPriceFormatted?: FormattedValue },
-  showSellPrice: boolean
+  data: { sellPriceFormatted?: FormattedValue }
 ): string | null {
-  if (!showSellPrice || !data.sellPriceFormatted) {
+  if (!data.sellPriceFormatted) {
     return null;
   }
   return data.sellPriceFormatted.text;
 }
 
-const CustomTooltip = ({ active, payload, label, resolution, showSellPrice }: any) => {
+const CustomTooltip = ({ active, payload, label, resolution }: any) => {
   if (active && payload && payload.length) {
     const data = payload[0].payload;
 
@@ -91,9 +91,9 @@ const CustomTooltip = ({ active, payload, label, resolution, showSellPrice }: an
               Buy Price: {data.buyPriceFormatted.text}
             </p>
           )}
-          {getSellPriceTooltipText(data, showSellPrice) !== null && (
+          {getSellPriceTooltipText(data) !== null && (
             <p className="text-gray-600 dark:text-gray-400">
-              Sell Price: {getSellPriceTooltipText(data, showSellPrice)}
+              Sell Price: {getSellPriceTooltipText(data)}
             </p>
           )}
         </div>
@@ -367,7 +367,7 @@ const CustomTooltip = ({ active, payload, label, resolution, showSellPrice }: an
                 style: { textAnchor: 'middle', dominantBaseline: 'central', fill: colors.text }
               }}
             />
-            <Tooltip content={<CustomTooltip resolution={resolution} showSellPrice={showSellPrice} />} />
+            <Tooltip content={<CustomTooltip resolution={resolution} />} />
             
             {/* Reference line at zero to separate sources from consumption */}
             <ReferenceLine y={0} stroke={colors.text} strokeWidth={2} />

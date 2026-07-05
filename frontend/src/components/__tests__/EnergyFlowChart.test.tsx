@@ -50,15 +50,11 @@ describe('EnergyFlowChart sell price toggle', () => {
 describe('getSellPriceTooltipText', () => {
   const sellPriceFormatted = { value: -0.03, display: '-0.03', unit: 'EUR', text: '-0.03 EUR' }
 
-  it('returns null when showSellPrice is false', () => {
-    expect(getSellPriceTooltipText({ sellPriceFormatted }, false)).toBeNull()
-  })
-
   it('returns null when there is no sell price data', () => {
-    expect(getSellPriceTooltipText({}, true)).toBeNull()
+    expect(getSellPriceTooltipText({})).toBeNull()
   })
 
-  it('returns the formatted sell price text when enabled and present', () => {
-    expect(getSellPriceTooltipText({ sellPriceFormatted }, true)).toBe('-0.03 EUR')
+  it('returns the formatted sell price text whenever it is present, regardless of the line toggle', () => {
+    expect(getSellPriceTooltipText({ sellPriceFormatted })).toBe('-0.03 EUR')
   })
 })

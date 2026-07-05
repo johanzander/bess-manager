@@ -9,7 +9,7 @@
 # banner, then fixes it to trigger the dismissible "recovered" banner — both
 # visible directly in the browser, not just via the API.
 #
-# Usage: ./scripts/demo_health_recovery.sh [up|break|fix|break-multi|fix-multi|down]
+# Usage: ./scripts/demo_health_recovery.sh [up|break|fix|break-multi|fix-multi|fix-partial|down]
 #   (no args)   — runs the full up -> break -> fix sequence, leaves the stack running
 #   up          — bring up the stack only
 #   break       — mark one sensor unavailable and recheck (a single active ERROR banner)
@@ -17,6 +17,10 @@
 #   break-multi — break 3 sensors across 2 different components (Battery Control +
 #                 Energy Monitoring) at once, to see multiple issues in one banner
 #   fix-multi   — restore all 3 and recheck (recovered banner with 2 entries)
+#   fix-partial — after break-multi, restore ONLY Energy Monitoring's sensor and
+#                 recheck: its recovery is recorded, but the banner stays red for
+#                 Battery Control (still broken) — the recovered notice only shows
+#                 once every active issue clears (run fix-multi afterwards to see it)
 #   down        — tear down the stack
 
 set -e
@@ -189,6 +193,21 @@ cmd_fix_multi() {
     echo "   by the recovered banner listing BOTH components with their own detail/time."
 }
 
+# Restores only the Energy Monitoring sensor from break-multi, leaving Battery
+# Control still broken — demonstrates that a recovery is recorded even while
+# a different component is still actively failing, but stays hidden behind
+# the still-active red banner until that clears too (run fix-multi next).
+cmd_fix_partial() {
+    echo "🔸 Restoring only the Energy Monitoring sensor (Battery Control stays broken)..."
+    update_sensor "sensor.growatt_lifetime_solar_energy" \
+        '{"state": "2000", "attributes": {"unit_of_measurement": "kWh"}}'
+    recheck
+    echo "✅ Rechecked. Refresh the dashboard — still the red banner, now for Battery"
+    echo "   Control only. The Energy Monitoring recovery is recorded (check"
+    echo "   /api/health-recoveries) but stays hidden until Battery Control also"
+    echo "   clears. Run 'fix-multi' next to see both appear together."
+}
+
 cmd_down() {
     compose down
     rm -rf "$SCRATCH_DIR" "$GENERATED_SCENARIO"
@@ -200,6 +219,7 @@ case "${1:-}" in
     fix) cmd_fix ;;
     break-multi) cmd_break_multi ;;
     fix-multi) cmd_fix_multi ;;
+    fix-partial) cmd_fix_partial ;;
     down) cmd_down ;;
     "")
         cmd_up
@@ -211,7 +231,7 @@ case "${1:-}" in
         echo "🔸 Stack still running. Tear down with: ./scripts/demo_health_recovery.sh down"
         ;;
     *)
-        echo "Usage: $0 [up|break|fix|break-multi|fix-multi|down]"
+        echo "Usage: $0 [up|break|fix|break-multi|fix-multi|fix-partial|down]"
         exit 1
         ;;
 esac

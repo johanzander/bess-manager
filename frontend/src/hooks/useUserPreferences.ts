@@ -4,12 +4,14 @@ export type DataResolution = 'hourly' | 'quarter-hourly';
 
 interface UserPreferences {
   dataResolution: DataResolution;
+  showSellPrice: boolean;
 }
 
 const PREFERENCES_KEY = 'bess_user_preferences';
 
 const defaultPreferences: UserPreferences = {
-  dataResolution: 'quarter-hourly'
+  dataResolution: 'quarter-hourly',
+  showSellPrice: false
 };
 
 export function useUserPreferences() {
@@ -38,10 +40,16 @@ export function useUserPreferences() {
     setPreferences({ dataResolution: resolution });
   };
 
+  const setShowSellPrice = (showSellPrice: boolean) => {
+    setPreferences({ showSellPrice });
+  };
+
   return {
     preferences,
     setPreferences,
     dataResolution: preferences.dataResolution,
-    setDataResolution
+    setDataResolution,
+    showSellPrice: preferences.showSellPrice,
+    setShowSellPrice
   };
 }

@@ -19,3 +19,14 @@ if (typeof localStorage === 'undefined') {
     configurable: true,
   })
 }
+
+// jsdom has no layout engine, so recharts' ResponsiveContainer (which relies
+// on ResizeObserver to measure its parent) needs a stub to mount at all.
+if (typeof ResizeObserver === 'undefined') {
+  class ResizeObserverStub {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+  globalThis.ResizeObserver = ResizeObserverStub as unknown as typeof ResizeObserver
+}

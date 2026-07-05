@@ -79,7 +79,7 @@ export default function DashboardPage({
   const [isInitialLoad, setIsInitialLoad] = useState(true);
 
   // User preferences (resolution, etc.)
-  const { dataResolution, setDataResolution } = useUserPreferences();
+  const { dataResolution, setDataResolution, showSellPrice, setShowSellPrice } = useUserPreferences();
 
   // Health summary state for alert banner
   interface HealthSummary {
@@ -411,6 +411,8 @@ export default function DashboardPage({
                 tomorrowData={dashboardData.tomorrowData as any}
                 currentHour={currentHour}
                 resolution={dataResolution}
+                showSellPrice={showSellPrice}
+                onShowSellPriceChange={setShowSellPrice}
               />
             </div>
 

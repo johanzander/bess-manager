@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 import { useUserPreferences } from '../useUserPreferences'
 
@@ -42,6 +42,7 @@ describe('useUserPreferences', () => {
     expect(result.current.dataResolution).toBe('hourly')
     expect(JSON.parse(localStorage.getItem('bess_user_preferences')!)).toEqual({
       dataResolution: 'hourly',
+      showSellPrice: false,
     })
   })
 
@@ -52,6 +53,26 @@ describe('useUserPreferences', () => {
       result.current.setPreferences({ dataResolution: 'hourly' })
     })
 
-    expect(result.current.preferences).toEqual({ dataResolution: 'hourly' })
+    expect(result.current.preferences).toEqual({ dataResolution: 'hourly', showSellPrice: false })
+  })
+
+  it('defaults showSellPrice to false', () => {
+    const { result } = renderHook(() => useUserPreferences())
+
+    expect(result.current.showSellPrice).toBe(false)
+  })
+
+  it('setShowSellPrice updates state and localStorage', () => {
+    const { result } = renderHook(() => useUserPreferences())
+
+    act(() => {
+      result.current.setShowSellPrice(true)
+    })
+
+    expect(result.current.showSellPrice).toBe(true)
+    expect(JSON.parse(localStorage.getItem('bess_user_preferences')!)).toEqual({
+      dataResolution: 'quarter-hourly',
+      showSellPrice: true,
+    })
   })
 })

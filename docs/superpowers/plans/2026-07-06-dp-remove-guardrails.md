@@ -609,59 +609,18 @@ def test_run_dynamic_programming_returns_one_value():
     )
     import numpy as np
     assert isinstance(result, np.ndarray), f"expected a bare V array, got {type(result)}"
-
-
-def test_interpolated_replay_never_worse_than_snap_to_grid_on_regression_fixture():
-    """The historical_2025_01_05_no_spread_no_solar fixture is the one
-    pinned scenario where the DP's own (gate-free) schedule cost slightly
-    more than an all-IDLE schedule, traced to SoE-grid-snapping drift in the
-    old Step 2 replay. The interpolated-V recompute must not make this
-    worse (empirically it reduces the gap from 0.27 to 0.16 SEK; the
-    all-IDLE safety net from Task 3 covers the rest)."""
-    from core.bess.dp_battery_algorithm import (
-        _create_idle_schedule,
-        optimize_battery_schedule,
-    )
-    from core.bess.tests.unit.test_scenarios import build_scenario_inputs
-
-    scenario, battery_settings, buy_prices, sell_prices, dt = build_scenario_inputs(
-        "historical_2025_01_05_no_spread_no_solar"
-    )
-    home_consumption = scenario["home_consumption"]
-    solar_production = scenario["solar_production"]
-    battery = scenario["battery"]
-    horizon = len(buy_prices)
-
-    result = optimize_battery_schedule(
-        buy_price=buy_prices,
-        sell_price=sell_prices,
-        home_consumption=home_consumption,
-        solar_production=solar_production,
-        initial_soe=battery["initial_soe"],
-        battery_settings=battery_settings,
-        period_duration_hours=dt,
-    )
-    idle_result = _create_idle_schedule(
-        horizon=horizon,
-        buy_price=buy_prices,
-        sell_price=sell_prices,
-        home_consumption=home_consumption,
-        solar_production=solar_production,
-        initial_soe=battery["initial_soe"],
-        battery_settings=battery_settings,
-        dt=dt,
-    )
-    # The Task 3 safety net guarantees this regardless; asserting it here
-    # locks in the specific fixture the design doc investigated.
-    assert result.economic_summary.battery_solar_cost <= (
-        idle_result.economic_summary.battery_solar_cost + 1e-6
-    )
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+The general property this task's fix improves — the DP schedule never
+costs more than an all-IDLE schedule, across every pinned fixture including
+`historical_2025_01_05_no_spread_no_solar` (the one fixture where this gap
+was investigated) — is covered by Task 5's parametrized test, not
+duplicated here.
 
-Run: `.venv/bin/pytest core/bess/tests/unit/test_dp_no_guardrails.py -v`
-Expected: `test_run_dynamic_programming_returns_one_value` FAILS (`_run_dynamic_programming` still returns a 2-tuple). `test_interpolated_replay_never_worse_than_snap_to_grid_on_regression_fixture` PASSES already (Task 3's safety net already guarantees it) — this is expected; it becomes a permanent regression guard.
+- [ ] **Step 2: Run the test to verify it fails**
+
+Run: `.venv/bin/pytest core/bess/tests/unit/test_dp_no_guardrails.py::test_run_dynamic_programming_returns_one_value -v`
+Expected: FAILS (`_run_dynamic_programming` still returns a 2-tuple).
 
 - [ ] **Step 3: Add the two helper functions**
 

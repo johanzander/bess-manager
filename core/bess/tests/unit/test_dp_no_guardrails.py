@@ -4,8 +4,9 @@ flow-accounting fix, per docs/superpowers/specs/2026-07-06-dp-bellman-guardrail-
 
 import pytest
 
-from core.bess.dp_battery_algorithm import _compute_reward
+from core.bess.dp_battery_algorithm import _compute_reward, _create_idle_schedule, optimize_battery_schedule
 from core.bess.tests.helpers import make_battery_settings
+from core.bess.tests.unit.test_scenarios import build_scenario_inputs, get_all_scenario_files
 
 
 def test_discharge_no_longer_blocked_by_cost_basis_floor():
@@ -142,4 +143,50 @@ def test_optimizer_ignores_min_action_profit_threshold():
     assert result.economic_summary.grid_to_battery_solar_savings > 0.0, (
         "optimizer fell back to all-IDLE despite a genuine arbitrage "
         "opportunity -- min_action_profit_threshold should have no effect"
+    )
+
+
+pytestmark = pytest.mark.slow
+
+
+@pytest.mark.parametrize("scenario_name", get_all_scenario_files())
+def test_dp_output_never_worse_than_all_idle_schedule(scenario_name):
+    """The numerical safety net in optimize_battery_schedule always returns
+    whichever of (DP schedule, all-IDLE schedule) is cheaper -- so the
+    optimizer's returned cost must never exceed the all-IDLE baseline,
+    across every pinned fixture. This is the property the whole redesign
+    rests on (docs/superpowers/specs/2026-07-06-dp-bellman-guardrail-removal-design.md)."""
+    scenario, battery_settings, buy_prices, sell_prices, dt = build_scenario_inputs(
+        scenario_name
+    )
+    home_consumption = scenario["home_consumption"]
+    solar_production = scenario["solar_production"]
+    battery = scenario["battery"]
+    horizon = len(buy_prices)
+
+    result = optimize_battery_schedule(
+        buy_price=buy_prices,
+        sell_price=sell_prices,
+        home_consumption=home_consumption,
+        solar_production=solar_production,
+        initial_soe=battery["initial_soe"],
+        battery_settings=battery_settings,
+        period_duration_hours=dt,
+    )
+    idle_result = _create_idle_schedule(
+        horizon=horizon,
+        buy_price=buy_prices,
+        sell_price=sell_prices,
+        home_consumption=home_consumption,
+        solar_production=solar_production,
+        initial_soe=battery["initial_soe"],
+        battery_settings=battery_settings,
+        dt=dt,
+    )
+    assert result.economic_summary.battery_solar_cost <= (
+        idle_result.economic_summary.battery_solar_cost + 1e-6
+    ), (
+        f"{scenario_name}: DP schedule cost "
+        f"{result.economic_summary.battery_solar_cost:.4f} exceeds all-IDLE "
+        f"cost {idle_result.economic_summary.battery_solar_cost:.4f}"
     )

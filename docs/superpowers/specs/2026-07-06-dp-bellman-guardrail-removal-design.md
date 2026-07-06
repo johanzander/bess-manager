@@ -90,11 +90,24 @@ discharges in the regressed schedule are all smaller than that period's
 apply to. Applying the #240 fix to this fixture produces byte-identical
 actions and cost.
 
-**Conclusion**: the only guardrail actually justified is a trivial numerical
-safety net — compare the DP's own output cost against all-IDLE, take whichever
-is cheaper — justified purely by SoE-grid discretization noise, not by
-distrust of the value function's economics. This is a different, much
-narrower justification than the current whole-day threshold gate.
+**Tried to close the gap fully**: replaced the Step-2 replay's "snap SoE to
+nearest grid index, trust that cell's stored policy" with a one-step
+recompute at the true continuous SoE, using the already-known `V[t+1, :]`
+(linearly interpolated) as the continuation value — same reward+max(V) logic
+as the backward pass, just applied at the true state instead of a snapped
+one. This reduced the regression (0.27 → 0.16 SEK, ~40%) but did not
+eliminate it, and introduced no regressions elsewhere across the other 25
+fixtures. A full elimination would need finer SoE/power discretization or a
+continuous-action reformulation — out of scope here.
+
+**Conclusion**: include the interpolated-V replay recompute (small, clearly
+justified, no new risk) *and* keep a trivial numerical safety net — compare
+the DP's own output cost against all-IDLE, take whichever is cheaper. The
+safety net now guards a smaller residual (~0.16 SEK, ~0.06% of daily cost)
+than the original whole-day threshold gate did, but it isn't provably zero
+without it, so it stays. This is a different, much narrower justification
+than the current whole-day threshold gate: pure numerical insurance against
+discretization noise, not an economic trust mechanism.
 
 ## Design
 
@@ -105,10 +118,13 @@ narrower justification than the current whole-day threshold gate.
   the `-inf` veto. Discharge reward becomes a direct cash-flow computation
   with no veto — `IDLE` competing in the same `max` is the only arbiter.
 - The whole-day `min_action_profit_threshold` rejection gate in
-  `optimize_battery_schedule`, `THRESHOLD_HORIZON_FLOOR`, and the
-  `battery.min_action_profit_threshold` config option (add-on config schema +
-  `BatterySettings`). **User-facing config removal** — flagged for the
-  changelog and add-on config migration.
+  `optimize_battery_schedule` and `THRESHOLD_HORIZON_FLOOR`. The algorithm
+  stops reading/using `min_action_profit_threshold` entirely as part of this
+  PR. The `BatterySettings` field and the add-on's `config.yaml` schema entry
+  are **left in place but unused** for now — removing them is a separate,
+  user-facing config-schema change (existing installs have this value set)
+  with its own migration path, tracked as a **separate follow-up issue**, not
+  bundled here.
 - The dead `C` cost-basis-threading grid in `_run_dynamic_programming` (moot
   once nothing reads it as a floor input).
 
@@ -117,6 +133,11 @@ narrower justification than the current whole-day threshold gate.
 - A trivial post-hoc comparison in `optimize_battery_schedule`: compute the
   DP's schedule cost and the all-IDLE schedule cost, return whichever is
   cheaper. O(1) comparison, not a configurable threshold.
+- Step 2's continuous-path reconstruction changes from "snap SoE to nearest
+  grid index, use that cell's stored policy" to a one-step recompute at the
+  true continuous SoE using interpolated `V[t+1, :]` as the continuation
+  value. Reduces (but does not eliminate — verified empirically) the
+  discretization residual the safety net above guards against.
 - The #240 fix in the discharge branch's flow accounting: if the naively
   computed `grid_exported` for a discharge is `<= 0.1 kWh` (reusing the same
   threshold `decision_intelligence.classify_strategic_intent` already uses to
@@ -159,9 +180,24 @@ narrower justification than the current whole-day threshold gate.
     redesign's safety net rests on).
   - A #240-specific test: a discharge that overshoots `home_consumption` by
     less than 0.1 kWh must show zero `grid_exported` credit for the excess.
-- `bess_manager/config.yaml` — remove `min_action_profit_threshold` from the
-  add-on's HA config schema; add a config migration note for existing
-  installs with that option set.
+- `core/bess/tests/integration/test_plan_faithfulness.py` (the `R == P`
+  invariant: executing the optimizer's plan through the inverter simulator
+  must reproduce the planned economics, per `docs/agents/simulator.md`) —
+  these hand-crafted scenarios were deliberately designed to avoid the
+  SoE-grid boundary ambiguity ("no fractional solar-storage", per the file's
+  own docstrings), so they're expected to keep passing unchanged. But the
+  #240 fix changes what the *planned* economics assume for small-overshoot
+  discharge — verify during implementation whether `core/bess/simulation/`
+  already models load-first self-throttling physically (the debug-bundle
+  evidence in #240 suggests real hardware does); if so, this fix should
+  *improve* `R == P` alignment for such periods, not break it. Add a new
+  plan-faithfulness scenario that deliberately hits the small-overshoot
+  boundary to lock this in — it's exactly the case existing scenarios were
+  designed to avoid, so nothing currently covers it.
+- `bess_manager/config.yaml` and `BatterySettings.min_action_profit_threshold`
+  — left in place, unused, per the scope note above; removal is a separate
+  follow-up issue with its own config-migration path (existing installs may
+  have this value set).
 
 ## Rollout
 
@@ -171,10 +207,8 @@ first, then released to the beta channel before stable (existing convention
 for changes that are easy to self-validate against fixtures but hard to
 validate against real hardware/pricing behavior ahead of time).
 
-## Open questions
+## Follow-up issues (not in this PR)
 
-- Should the `min_action_profit_threshold` config removal include a
-  backward-compatible no-op (accept and ignore the field) or hard-fail on
-  presence in `config.yaml`? Leaning no-op for one release, then remove, to
-  avoid breaking existing add-on installs on upgrade — to be confirmed during
-  implementation planning.
+- Remove `min_action_profit_threshold` from `bess_manager/config.yaml`'s HA
+  add-on schema and `BatterySettings`, once this PR has shipped and the field
+  is confirmed unused. Needs its own migration note for existing installs.

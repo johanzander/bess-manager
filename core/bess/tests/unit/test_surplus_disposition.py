@@ -392,11 +392,13 @@ def test_battery_export_active_discharge_still_grid_first():
 # ---------------------------------------------------------------------------
 
 
-def test_discharge_blocked_when_solar_covers_load_and_action_matches_bug_report():
-    """Reproduces issue #204 period 63 exactly: solar covers all home load,
-    battery full, buy_price > sell_price. avoid_purchase_value wrongly lets a
-    marginal 0.1 kWh discharge through the -inf anti-cycling gate because
-    there is no grid purchase to actually avoid this period."""
+def test_discharge_no_longer_blocked_by_cost_basis_floor_issue_204():
+    """UPDATED for guardrail removal: Issue #204 used to test that a discharge
+    was blocked by the anti-cycling profitability floor when solar covers all
+    home load and buy_price > sell_price. With the profitability floor removed,
+    the discharge is no longer blocked but is still evaluated by the DP's
+    value function (IDLE can still be chosen if it's better). Discharge with
+    finite reward is now the expected behavior."""
     bs = make_battery_settings()
     buy_price = [1.0568]
     sell_price = [0.46126]
@@ -421,18 +423,18 @@ def test_discharge_blocked_when_solar_covers_load_and_action_matches_bug_report(
         solar_production=0.893,
         cost_basis=cost_basis,
     )
-    assert reward == float("-inf"), (
-        f"Expected discharge blocked (no grid purchase to displace, "
-        f"export_value=0.438 < cost_basis=0.622) but got reward={reward}"
+    assert reward != float("-inf"), (
+        f"Discharge should no longer be blocked by profitability floor "
+        f"(that guardrail was removed). Got reward={reward}"
     )
 
 
-def test_discharge_blocked_at_smaller_action_size_below_capacity_threshold():
-    """Same solar-covers-load scenario as above but with a smaller discharge
-    action (0.05 kWh) whose capacity_after_discharge falls below SOE_STEP_KWH.
-    The fix must gate on excess_solar alone, not on capacity_after_discharge —
-    otherwise this smaller action slips through even after fixing the
-    reported 0.1 kWh case."""
+def test_small_discharge_still_evaluated_without_profitability_floor():
+    """UPDATED for guardrail removal: same solar-covers-load scenario as above
+    but with a smaller discharge action (0.05 kWh) whose capacity_after_discharge
+    falls below SOE_STEP_KWH. With the profitability floor removed, even small
+    actions with limited capacity are no longer blocked — they're evaluated by
+    the DP and IDLE can be chosen if it's better."""
     bs = make_battery_settings()
     buy_price = [1.0568]
     sell_price = [0.46126]
@@ -461,9 +463,9 @@ def test_discharge_blocked_at_smaller_action_size_below_capacity_threshold():
         solar_production=0.893,
         cost_basis=cost_basis,
     )
-    assert reward == float(
+    assert reward != float(
         "-inf"
-    ), f"Expected discharge blocked even at smaller action size but got reward={reward}"
+    ), f"Discharge should no longer be blocked by profitability floor. Got reward={reward}"
 
 
 def test_discharge_not_blocked_when_solar_does_not_cover_load():

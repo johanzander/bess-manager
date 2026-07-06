@@ -106,6 +106,11 @@ logger = logging.getLogger(__name__)
 SOE_STEP_KWH = 0.1
 POWER_STEP_KW = 0.2
 POWER_TOLERANCE_KW = 0.001  # Threshold to distinguish IDLE from charge/discharge
+# Matches decision_intelligence._POWER_THRESHOLD_KW's own use as the
+# BATTERY_EXPORT vs LOAD_SUPPORT classification boundary (kept as a separate
+# constant here, not imported, to avoid coupling to that module's private
+# threshold -- if one changes, check the other).
+BATTERY_EXPORT_THRESHOLD_KWH = 0.1
 
 
 class StrategicIntent(Enum):
@@ -267,26 +272,18 @@ def _compute_reward(
     - Grid costs applied to energy throughput (what you draw from grid)
     - Cost basis includes BOTH grid costs AND cycle costs for profitability analysis
 
-    PROFITABILITY CHECK (opportunity-cost floor):
-    - A discharge is worthwhile only if its value beats the opportunity cost of
-      the stored kWh — not its sunk cost basis and not zero.
-    - Value = max(avoided grid purchase, grid export revenue), after discharge
-      efficiency.
-    - The effective floor is raised to sell_price whenever upcoming solar will
-      replenish the discharged capacity (replenishment): the kWh could be exported
-      later, so sell_price is its true replacement cost. Since
-      sell_price * efficiency_discharge < sell_price, marginal round-trip and
-      refill trades are correctly blocked.
-
-    Example for stored energy costing 2.61/kWh:
-    - If buy_price = 2.58, sell_price = 1.81
-    - Avoid purchase value: 2.58 x 0.95 = 2.45/kWh stored
-    - Export value: 1.81 x 0.95 = 1.72/kWh stored
-    - Best value: max(2.45, 1.72) = 2.45/kWh stored
-    - 2.45 < 2.61 → UNPROFITABLE (correctly blocked)
+    DISCHARGE ACCOUNTING:
+    - No profitability veto: every physically valid discharge gets a finite
+      reward. IDLE, competing in the same max() during backward induction,
+      already makes the hold-vs-discharge call correctly via the
+      forward-looking value function -- a separate floor on top of that is
+      redundant at best (see docs/superpowers/specs/2026-07-06-dp-bellman-guardrail-removal-design.md).
+    - Self-throttling (#240): a discharge overshooting home_consumption by
+      less than BATTERY_EXPORT_THRESHOLD_KWH is not credited as export
+      revenue -- load-first hardware never actually delivers it to the grid.
 
     Returns:
-        (reward, new_cost_basis) or (float("-inf"), cost_basis) if discharge is unprofitable.
+        (reward, new_cost_basis).
     """
     current_buy_price = buy_price[period]
     current_sell_price = sell_price[period]
@@ -358,48 +355,15 @@ def _compute_reward(
     elif power < -POWER_TOLERANCE_KW:  # Discharging
         battery_wear_cost = 0.0
 
-        # Profitability check: only discharge if value exceeds cost basis
-        avoid_purchase_value = current_buy_price * battery_settings.efficiency_discharge
-        export_value = current_sell_price * battery_settings.efficiency_discharge
-
-        # If solar already covers all home load this period, there is no grid
-        # purchase for the discharge to displace — its only realizable value is
-        # the export price. Including avoid_purchase_value here would credit the
-        # discharge for a purchase that was never going to happen.
-        excess_solar = max(0.0, solar_production - home_consumption)
-        if excess_solar > POWER_TOLERANCE_KW:
-            effective_value_per_kwh_stored = export_value
-        else:
-            effective_value_per_kwh_stored = max(avoid_purchase_value, export_value)
-
-        # Anti-cycling: use sell_price as cost basis floor to prevent wasteful
-        # charge/discharge cycling.  Stored energy has an opportunity cost —
-        # it could be exported at sell_price.  Any discharge is only worthwhile
-        # if its value exceeds this opportunity cost.
-        #
-        # Two cases where cycling occurs:
-        #
-        # 1. Grid arbitrage (sell > buy): discharge to export at sell, re-buy
-        #    at buy.  Always unprofitable because sell * eff_d < sell — the
-        #    round-trip efficiency loss eats the spread.
-        #
-        # 2. Solar displacement: excess solar will refill discharged capacity.
-        #    The displaced solar could have been exported at sell_price, so
-        #    sell_price is the true replacement cost.  Check capacity AFTER
-        #    the proposed discharge (a full battery that discharges opens room).
-        effective_cost_basis = cost_basis
-        if current_sell_price > current_buy_price:
-            effective_cost_basis = max(effective_cost_basis, current_sell_price)
-        else:
-            capacity_after_discharge = battery_settings.max_soe_kwh - next_soe
-            if (
-                excess_solar > POWER_TOLERANCE_KW
-                and capacity_after_discharge > SOE_STEP_KWH
-            ):
-                effective_cost_basis = max(effective_cost_basis, current_sell_price)
-
-        if effective_value_per_kwh_stored <= effective_cost_basis:
-            return float("-inf"), cost_basis
+        # Self-throttling fix (#240): load-first hardware never actually
+        # exports a small discharge overshoot beyond home_consumption -- it
+        # delivers only what the home needs. Below BATTERY_EXPORT_THRESHOLD_KWH
+        # (the same boundary decision_intelligence.classify_strategic_intent
+        # uses to call something BATTERY_EXPORT vs LOAD_SUPPORT), treat the
+        # overshoot as self-throttled: no export credit. At or above it, it's
+        # a genuine deliberate export.
+        if grid_exported <= BATTERY_EXPORT_THRESHOLD_KWH:
+            grid_exported = 0.0
 
     else:  # IDLE — passive solar charging
         energy_stored = next_soe - soe  # kWh stored in battery after efficiency

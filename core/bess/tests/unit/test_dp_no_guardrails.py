@@ -92,11 +92,9 @@ def test_large_discharge_overshoot_still_credited_as_export():
     assert reward == pytest.approx(0.8, abs=1e-9)
 
 
-def test_run_dynamic_programming_returns_two_values():
-    """_run_dynamic_programming's C grid (dead since #234: a loop-order bug
-    meant it was never read back) and stored_period_data (already discarded
-    by the sole caller before this change) are removed. Only V and policy
-    remain."""
+def test_run_dynamic_programming_returns_one_value():
+    """policy is no longer used by any caller once Step 2 recomputes actions
+    directly from V -- _run_dynamic_programming returns V only."""
     from core.bess.dp_battery_algorithm import _run_dynamic_programming
 
     settings = make_battery_settings()
@@ -110,7 +108,11 @@ def test_run_dynamic_programming_returns_two_values():
         solar_production=[0.0, 0.0, 0.0],
         initial_soe=5.0,
     )
-    assert len(result) == 2, f"expected (V, policy), got {len(result)} values"
+    import numpy as np
+
+    assert isinstance(
+        result, np.ndarray
+    ), f"expected a bare V array, got {type(result)}"
 
 
 def test_optimizer_ignores_min_action_profit_threshold():

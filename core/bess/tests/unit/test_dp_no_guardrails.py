@@ -90,3 +90,24 @@ def test_large_discharge_overshoot_still_credited_as_export():
     )
     # 1.0 kWh exported at sell_price=0.8, no import, no wear on discharge.
     assert reward == pytest.approx(0.8, abs=1e-9)
+
+
+def test_run_dynamic_programming_returns_two_values():
+    """_run_dynamic_programming's C grid (dead since #234: a loop-order bug
+    meant it was never read back) and stored_period_data (already discarded
+    by the sole caller before this change) are removed. Only V and policy
+    remain."""
+    from core.bess.dp_battery_algorithm import _run_dynamic_programming
+
+    settings = make_battery_settings()
+    result = _run_dynamic_programming(
+        horizon=3,
+        buy_price=[1.0, 1.0, 1.0],
+        sell_price=[0.8, 0.8, 0.8],
+        home_consumption=[0.5, 0.5, 0.5],
+        battery_settings=settings,
+        dt=1.0,
+        solar_production=[0.0, 0.0, 0.0],
+        initial_soe=5.0,
+    )
+    assert len(result) == 2, f"expected (V, policy), got {len(result)} values"

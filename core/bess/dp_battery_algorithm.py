@@ -633,13 +633,10 @@ def _run_dynamic_programming(
     terminal_value_per_kwh: float = 0.0,
     currency: str = "SEK",
     max_charge_power_per_period: list[float] | None = None,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict]:
+) -> tuple[np.ndarray, np.ndarray]:
     """
-    Enhanced DP that stores the PeriodData objects calculated during optimization.
-    This eliminates the need for reward recalculation in simulation.
+    Run backward induction DP to compute optimal battery control policy.
     """
-
-    logger.debug("Starting DP optimization with PeriodData storage")
 
     # Set defaults if not provided
     if solar_production is None:
@@ -647,10 +644,9 @@ def _run_dynamic_programming(
     if initial_soe is None:
         initial_soe = battery_settings.min_soe_kwh
 
-    # Discretize state and action spaces (same as before)
+    # Discretize state and action spaces
     soe_levels, power_levels = _discretize_state_action_space(battery_settings)
 
-    # Initialize DP arrays (same as before)
     V = np.zeros((horizon + 1, len(soe_levels)))
 
     # Terminal value: assign value to usable energy remaining at end of horizon
@@ -660,18 +656,12 @@ def _run_dynamic_programming(
             V[horizon, i] = max(0.0, usable_energy) * terminal_value_per_kwh
 
     policy = np.zeros((horizon, len(soe_levels)))
-    C = np.full((horizon + 1, len(soe_levels)), initial_cost_basis)
 
-    # Store PeriodData objects calculated during DP
-    stored_period_data = {}  # Key: (t, i), Value: PeriodData
-
-    # Backward induction (same structure as before)
+    # Backward induction
     for t in reversed(range(horizon)):
         for i, soe in enumerate(soe_levels):
             best_value = float("-inf")
             best_action = 0
-            best_new_cost_basis = C[t, i]
-            best_next_soe = soe  # tracked for _build_period_data after inner loop
 
             # Per-period charge power limit (from temperature derating or None)
             period_max_charge = (
@@ -719,7 +709,7 @@ def _run_dynamic_programming(
                     continue
 
                 # Compute reward scalars only — no dataclass allocation in hot path
-                reward, new_cost_basis = _compute_reward(
+                reward, _ = _compute_reward(
                     power=power,
                     soe=soe,
                     next_soe=next_soe,
@@ -730,12 +720,8 @@ def _run_dynamic_programming(
                     solar_production=solar_production[t],
                     buy_price=buy_price,
                     sell_price=sell_price,
-                    cost_basis=C[t, i],
+                    cost_basis=initial_cost_basis,
                 )
-
-                # Skip if unprofitable
-                if reward == float("-inf"):
-                    continue
 
                 # Find next state index
                 next_i = round((next_soe - battery_settings.min_soe_kwh) / SOE_STEP_KWH)
@@ -748,109 +734,12 @@ def _run_dynamic_programming(
                 if value > best_value:
                     best_value = value
                     best_action = power
-                    best_new_cost_basis = new_cost_basis
-                    best_next_soe = next_soe
 
-            # Store results
+            # IDLE is always a feasible, finite-reward action (no physical
+            # constraint check applies to it, and _compute_reward never
+            # returns -inf), so best_value can never remain -inf here.
             V[t, i] = best_value
             policy[t, i] = best_action
-
-            # Build PeriodData once for the winning action (not in the hot path)
-            if best_value > float("-inf"):
-                stored_period_data[(t, i)] = _build_period_data(
-                    power=best_action,
-                    soe=soe,
-                    next_soe=best_next_soe,
-                    period=t,
-                    home_consumption=home_consumption[t],
-                    battery_settings=battery_settings,
-                    dt=dt,
-                    solar_production=solar_production[t],
-                    buy_price=buy_price,
-                    sell_price=sell_price,
-                    new_cost_basis=best_new_cost_basis,
-                    currency=currency,
-                )
-            else:
-                # No valid action found - create a default IDLE PeriodData
-                # This can happen at boundary states (e.g., max SOE with unprofitable discharge)
-                logger.warning(
-                    f"No valid action found for period {t}, state {i} (SOE={soe:.1f}). "
-                    f"Creating default IDLE state."
-                )
-                # Calculate IDLE scenario with passive solar charging
-                idle_next_soe = _state_transition(
-                    soe,
-                    0.0,
-                    battery_settings,
-                    dt,
-                    solar_production=solar_production[t],
-                    home_consumption=home_consumption[t],
-                )
-                idle_passive_stored = idle_next_soe - soe
-                idle_battery_charged, _ = _idle_battery_flows(
-                    soe, idle_next_soe, battery_settings
-                )
-                idle_energy_balance = (
-                    solar_production[t] - home_consumption[t] - idle_battery_charged
-                )
-                idle_grid_imported = max(0, -idle_energy_balance)
-                idle_grid_exported = max(0, idle_energy_balance)
-                idle_wear_cost = (
-                    idle_passive_stored * battery_settings.cycle_cost_per_kwh
-                )
-                idle_energy = EnergyData(
-                    solar_production=solar_production[t],
-                    home_consumption=home_consumption[t],
-                    battery_charged=idle_battery_charged,
-                    battery_discharged=0.0,
-                    grid_imported=idle_grid_imported,
-                    grid_exported=idle_grid_exported,
-                    battery_soe_start=soe,
-                    battery_soe_end=idle_next_soe,
-                )
-                idle_economic = EconomicData.from_energy_data(
-                    energy_data=idle_energy,
-                    buy_price=buy_price[t],
-                    sell_price=sell_price[t],
-                    battery_cycle_cost=idle_wear_cost,
-                )
-                idle_decision = DecisionData(
-                    strategic_intent=classify_strategic_intent(0.0, idle_energy),
-                    battery_action=0.0,
-                    cost_basis=C[t, i],
-                )
-                idle_period_data = PeriodData(
-                    period=t,
-                    energy=idle_energy,
-                    timestamp=None,
-                    data_source="predicted",
-                    economic=idle_economic,
-                    decision=idle_decision,
-                )
-                stored_period_data[(t, i)] = idle_period_data
-                # Also update V[t, i] to the actual IDLE cost (not -inf),
-                # including future value to preserve backward propagation.
-                idle_next_i = round(
-                    (idle_next_soe - battery_settings.min_soe_kwh) / SOE_STEP_KWH
-                )
-                idle_next_i = min(max(0, idle_next_i), len(soe_levels) - 1)
-                V[t, i] = (
-                    -(
-                        idle_grid_imported * buy_price[t]
-                        - idle_grid_exported * sell_price[t]
-                        + idle_wear_cost
-                    )
-                    + V[t + 1, idle_next_i]
-                )
-
-            # Update cost basis for next time step
-            if best_action != 0 and t + 1 < horizon:
-                next_i = round(
-                    (best_next_soe - battery_settings.min_soe_kwh) / SOE_STEP_KWH
-                )
-                next_i = min(max(0, next_i), len(soe_levels) - 1)
-                C[t + 1, next_i] = best_new_cost_basis
 
     # Final safety check
     if max_charge_power_per_period is not None:
@@ -868,7 +757,7 @@ def _run_dynamic_programming(
             battery_settings.max_charge_power_kw,
         )
 
-    return V, policy, C, stored_period_data
+    return V, policy
 
 
 def _create_idle_schedule(
@@ -1062,7 +951,7 @@ def optimize_battery_schedule(
 
     # Step 1: Run DP — capture policy for continuous reconstruction and the
     # value-to-go array V for the per-period shadow price (dV/dSoE).
-    V, policy, _, _ = _run_dynamic_programming(
+    V, policy = _run_dynamic_programming(
         horizon=horizon,
         buy_price=buy_price,
         sell_price=sell_price,

@@ -1087,48 +1087,28 @@ def optimize_battery_schedule(
     )
 
     # ============================================================================
-    # PROFITABILITY GATE: Reject optimization if savings below effective threshold
+    # NUMERICAL SAFETY NET: guard against SoE-grid discretization residual
     # ============================================================================
-    # Scale the threshold proportionally to the remaining horizon so that mid-day
-    # and late-day runs are not held to a full-day savings bar.
-    # A floor of 15% prevents the threshold from collapsing to near-zero at end of day.
-    THRESHOLD_HORIZON_FLOOR = 0.15
-    total_periods = round(24.0 / dt)
-    horizon_fraction = max(THRESHOLD_HORIZON_FLOOR, horizon / total_periods)
-    effective_threshold = (
-        battery_settings.min_action_profit_threshold * horizon_fraction
+    # Bellman's principle of optimality guarantees the DP's own schedule is
+    # never worse than doing nothing: IDLE is always a feasible action every
+    # period, so backward induction already picks it whenever it's the best
+    # available option. The only way the realized schedule can still cost
+    # slightly more than an all-IDLE schedule is SoE-grid discretization
+    # residual (see docs/superpowers/specs/2026-07-06-dp-bellman-guardrail-removal-design.md)
+    # -- a numerical artifact, not an economic one. This is a trivial O(1)
+    # comparison, not a configurable threshold.
+    idle_schedule = _create_idle_schedule(
+        horizon=horizon,
+        buy_price=buy_price,
+        sell_price=sell_price,
+        home_consumption=home_consumption,
+        solar_production=solar_production,
+        initial_soe=initial_soe,
+        battery_settings=battery_settings,
+        dt=dt,
     )
-    if solar_to_battery_solar_savings < effective_threshold:
-        idle_schedule = _create_idle_schedule(
-            horizon=horizon,
-            buy_price=buy_price,
-            sell_price=sell_price,
-            home_consumption=home_consumption,
-            solar_production=solar_production,
-            initial_soe=initial_soe,
-            battery_settings=battery_settings,
-            dt=dt,
-        )
-        # The all-IDLE fallback still pays wear cost on solar passively absorbed
-        # into any available room, but never discharges to recoup any of it —
-        # it is not guaranteed to be cheaper than the schedule it would replace.
-        # Only substitute it if it actually is.
-        if idle_schedule.economic_summary.battery_solar_cost < total_optimized_cost:
-            logger.warning(
-                f"Optimization savings vs solar-only baseline ({solar_to_battery_solar_savings:.2f} "
-                f"{currency}) below effective threshold ({effective_threshold:.2f} {currency}) "
-                f"(configured: {battery_settings.min_action_profit_threshold:.2f}, "
-                f"horizon: {horizon}/{total_periods} periods, scale: {horizon_fraction:.2f}). "
-                f"Using all-IDLE schedule instead."
-            )
-            return idle_schedule
-        logger.warning(
-            f"Optimization savings vs solar-only baseline ({solar_to_battery_solar_savings:.2f} "
-            f"{currency}) below effective threshold ({effective_threshold:.2f} {currency}), but "
-            f"the all-IDLE fallback ({idle_schedule.economic_summary.battery_solar_cost:.2f} "
-            f"{currency}) is not cheaper than the optimized schedule ({total_optimized_cost:.2f} "
-            f"{currency}). Keeping the optimized schedule."
-        )
+    if idle_schedule.economic_summary.battery_solar_cost < total_optimized_cost:
+        return idle_schedule
 
     return OptimizationResult(
         period_data=hourly_results,

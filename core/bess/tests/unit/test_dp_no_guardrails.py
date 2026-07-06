@@ -4,9 +4,16 @@ flow-accounting fix, per docs/superpowers/specs/2026-07-06-dp-bellman-guardrail-
 
 import pytest
 
-from core.bess.dp_battery_algorithm import _compute_reward, _create_idle_schedule, optimize_battery_schedule
+from core.bess.dp_battery_algorithm import (
+    _compute_reward,
+    _create_idle_schedule,
+    optimize_battery_schedule,
+)
 from core.bess.tests.helpers import make_battery_settings
-from core.bess.tests.unit.test_scenarios import build_scenario_inputs, get_all_scenario_files
+from core.bess.tests.unit.test_scenarios import (
+    build_scenario_inputs,
+    get_all_scenario_files,
+)
 
 
 def test_discharge_no_longer_blocked_by_cost_basis_floor():
@@ -173,21 +180,20 @@ def test_small_export_only_discharge_classified_as_battery_export():
         battery_soe_end=7.63,
     )
     intent = classify_strategic_intent(power=-0.2, energy_data=energy_data)
-    assert intent == "BATTERY_EXPORT", (
-        f"expected BATTERY_EXPORT for a 100%-export discharge, got {intent}"
-    )
+    assert (
+        intent == "BATTERY_EXPORT"
+    ), f"expected BATTERY_EXPORT for a 100%-export discharge, got {intent}"
 
 
-pytestmark = pytest.mark.slow
-
-
+@pytest.mark.slow
 @pytest.mark.parametrize("scenario_name", get_all_scenario_files())
 def test_dp_output_never_worse_than_all_idle_schedule(scenario_name):
     """The numerical safety net in optimize_battery_schedule always returns
     whichever of (DP schedule, all-IDLE schedule) is cheaper -- so the
     optimizer's returned cost must never exceed the all-IDLE baseline,
     across every pinned fixture. This is the property the whole redesign
-    rests on (docs/superpowers/specs/2026-07-06-dp-bellman-guardrail-removal-design.md)."""
+    rests on (docs/superpowers/specs/2026-07-06-dp-bellman-guardrail-removal-design.md).
+    """
     scenario, battery_settings, buy_prices, sell_prices, dt = build_scenario_inputs(
         scenario_name
     )

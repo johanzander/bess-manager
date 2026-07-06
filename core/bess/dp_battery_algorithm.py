@@ -16,31 +16,9 @@ total cost over the remaining time horizon.
 KEY FEATURES:
 - 24-hour optimization horizon with perfect foresight
 - Cost basis tracking for stored energy (FIFO accounting)
-- Profitability checks to prevent unprofitable discharging
-- Minimum profit threshold system to prevent excessive cycling for low-profit actions
 - Multi-objective optimization: cost minimization + battery longevity
 - Simultaneous energy flow optimization across multiple sources/destinations
 - Strategic intent capture at decision time for transparency and hardware control
-
-MINIMUM PROFIT THRESHOLD SYSTEM:
-The minimum profit threshold prevents unprofitable battery operations through a post-optimization profitability gate.
-After optimization completes, the total savings are compared against an effective threshold derived from the configured
-value scaled proportionally to the remaining horizon fraction:
-
-    effective_threshold = min_action_profit_threshold * max(THRESHOLD_HORIZON_FLOOR, horizon / total_periods)
-
-- If total_savings >= effective_threshold: Execute the optimized schedule
-- If total_savings < effective_threshold: Reject optimization and use all-IDLE schedule (do nothing)
-
-The scaling ensures the bar is proportional to how much of the day remains. A run at midnight faces the full threshold;
-a run at 20:00 with only 4 hours left faces roughly 1/6 of it. Without scaling, late-day runs are held to an
-unreachable standard and legitimate evening discharge opportunities get blocked.
-
-THRESHOLD_HORIZON_FLOOR (0.15) prevents the effective threshold from collapsing to near-zero at end of day, which
-would allow the battery to cycle for trivially small gains in the final hour or two.
-
-Configurable via battery.min_action_profit_threshold in config.yaml (in your currency).
-Example: a threshold of 8.0 at 16:00 (8/24 remaining) becomes an effective threshold of 8.0 * 0.33 = 2.67
 
 STRATEGIC INTENT CAPTURE:
 The algorithm now captures the strategic reasoning behind each decision:

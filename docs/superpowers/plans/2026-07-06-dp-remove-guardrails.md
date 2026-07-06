@@ -1156,6 +1156,237 @@ EOF
 
 ---
 
+### Task 8b: Fix `classify_strategic_intent`'s inconsistent BATTERY_EXPORT threshold
+
+**Discovered mid-Task-8, not in the original spec.** Running the R == P
+plan-faithfulness check (in `test_scenarios.py::test_all_scenarios`) after
+updating the 15 legitimate fixtures in Task 8 revealed a real
+control-fidelity bug on 8 of 9 quarter-hourly (`period_duration_hours=0.25`)
+fixtures, with gaps of 1.6-18.7 SEK between planned and realized cost —
+`realized` always worse than `planned`.
+
+**Root cause, traced on `realworld_2026_04_27_211212` period 42:** the DP
+plans a genuinely tiny discharge (0.05 kWh) during a period with abundant
+solar surplus (solar=3.5, home=0.2) — this discharge is 100% export
+(`battery_to_home=0.0`, `battery_to_grid=0.05`), a real, marginally
+profitable micro-arbitrage, not a discretization artifact (the #240 fix from
+Task 1 only zeroes out overshoot *up to* 0.1 kWh **beyond consumption**; this
+period's total exported energy is 3.35 kWh, far above that — #240's fix
+correctly does not suppress it).
+
+But `decision_intelligence.classify_strategic_intent`
+(`core/bess/decision_intelligence.py:414-445`) classifies a discharge as
+`BATTERY_EXPORT` only if `battery_to_grid > 0.1` — otherwise `LOAD_SUPPORT`,
+regardless of whether any home deficit was actually covered. Since
+`0.05 <= 0.1`, this 100%-export discharge is mislabeled `LOAD_SUPPORT`. Every
+other flow check in the same function uses `0.01` as its "meaningfully
+nonzero" threshold (`grid_to_battery > 0.01`, `battery_charged > 0.01`,
+`battery_discharged > 0.01`, `grid_exported > 0.01`) — only this one check
+uses the ten-times-coarser `0.1`, with no evident reason.
+
+`LOAD_SUPPORT` maps to `load_first` mode. In
+`core/bess/simulation/inverter_simulator.py`'s `mode_to_power`, `load_first`
+computes `deficit = max(0.0, home - solar) = max(0.0, 0.2 - 3.5) = 0.0` (correctly
+— there is no real deficit) and returns exactly `0.0`. But
+`_state_transition` (`core/bess/dp_battery_algorithm.py`) treats `power == 0`
+as "IDLE — passive solar charging," which absorbs the *entire* solar surplus
+that period (~3.3 kWh) into the battery — a completely different, much larger
+action than either the plan or "do nothing." That single period's SoE
+diverges by kWh, not by 0.05 kWh, and every subsequent period's decision
+depends on the SoE actually reached, so the error compounds for the rest of
+the horizon instead of washing out.
+
+`grid_first` (`BATTERY_EXPORT`'s mode) has no equivalent discontinuity: it
+always delivers `rate_kw * dt` proportional to `discharge_rate_pct`, and
+since it's a strict superset of `load_first`'s capability (the resulting
+energy balance naturally splits between covering any real deficit and
+exporting the rest), reclassifying this case as `BATTERY_EXPORT` makes the
+plan physically realizable with no discontinuity.
+
+**This fix does not change the DP's own cost calculation.**
+`classify_strategic_intent` is a post-hoc labeling/execution-mapping
+function; backward induction never reads it. So this task changes zero
+`expected_results` values — only the reported intent label for borderline
+periods and which hardware mode gets commanded at execution time (which is
+exactly what closes the R == P gap).
+
+**Files:**
+- Modify: `core/bess/decision_intelligence.py:432` (the `BATTERY_EXPORT`
+  threshold inside `classify_strategic_intent`)
+- Modify: `core/bess/models.py:53` (the same threshold bug in
+  `infer_intent_from_flows` — this function's own docstring says it's
+  "OBSERVATIONAL purposes only (dashboard display)... not authoritative,"
+  so it doesn't cause the R == P failures this task is primarily about, but
+  it has the identical inconsistency: every other check in that function
+  uses `0.01` (`grid_to_battery > 0.01`), and its own comment on the `0.1`
+  line literally says "ANY export needs capability" — contradicting the
+  threshold it's attached to. Fix for consistency while touching this
+  pattern.
+- Test: add to `core/bess/tests/unit/test_dp_no_guardrails.py`, or a new
+  small test file if you judge the existing one doesn't fit topically — your
+  call, but justify it in the report if you deviate from
+  `test_dp_no_guardrails.py`
+
+**Interfaces:**
+- Consumes: nothing new.
+- Produces: `classify_strategic_intent`'s public signature is unchanged;
+  only the `BATTERY_EXPORT` vs `LOAD_SUPPORT` boundary for discharges moves
+  from `0.1` to `0.01`.
+
+- [ ] **Step 1: Write the failing test**
+
+```python
+def test_small_export_only_discharge_classified_as_battery_export():
+    """A discharge with zero home-deficit coverage and a small (but
+    meaningfully nonzero) export must be classified BATTERY_EXPORT, not
+    LOAD_SUPPORT -- LOAD_SUPPORT maps to load_first, which physically cannot
+    export at all (core/bess/simulation/inverter_simulator.py's mode_to_power
+    caps load_first delivery at max(0, home-solar), i.e. zero when solar
+    already covers home). Mislabeling this as LOAD_SUPPORT makes the plan
+    unrealizable: real/simulated hardware delivers zero instead of the
+    planned export, and that zero triggers passive solar charging instead
+    (_state_transition's IDLE branch), a much larger, unplanned action.
+    Regression for the R == P failures traced on
+    realworld_2026_04_27_211212 period 42 during Task 8's fixture
+    regeneration."""
+    from core.bess.decision_intelligence import classify_strategic_intent
+    from core.bess.models import EnergyData
+
+    energy_data = EnergyData(
+        solar_production=3.5,
+        home_consumption=0.2,
+        battery_charged=0.0,
+        battery_discharged=0.05,
+        grid_imported=0.0,
+        grid_exported=3.35,
+        battery_soe_start=7.68,
+        battery_soe_end=7.63,
+    )
+    intent = classify_strategic_intent(power=-0.2, energy_data=energy_data)
+    assert intent == "BATTERY_EXPORT", (
+        f"expected BATTERY_EXPORT for a 100%-export discharge, got {intent}"
+    )
+```
+
+Note: `EnergyData`'s `battery_to_grid`/`battery_to_home` are derived
+properties computed from the constructor fields above (energy conservation
+decomposition) — check `core/bess/models.py` for their exact derivation if
+the test doesn't produce `battery_to_grid=0.05`/`battery_to_home=0.0` as
+expected, and adjust the constructor fields (not the assertion) to match a
+genuine 100%-export scenario.
+
+- [ ] **Step 2: Run the test to verify it fails**
+
+Run: `.venv/bin/pytest core/bess/tests/unit/test_dp_no_guardrails.py::test_small_export_only_discharge_classified_as_battery_export -v`
+Expected: FAIL (`AssertionError: expected BATTERY_EXPORT ..., got LOAD_SUPPORT`)
+
+- [ ] **Step 3: Fix the threshold in `decision_intelligence.py`**
+
+In `core/bess/decision_intelligence.py`, change:
+
+```python
+    if power < -_POWER_THRESHOLD_KW:  # Discharging
+        if energy_data.battery_to_grid > 0.1:
+            return "BATTERY_EXPORT"
+        return "LOAD_SUPPORT"
+```
+
+to:
+
+```python
+    if power < -_POWER_THRESHOLD_KW:  # Discharging
+        # Any meaningfully nonzero export (same 0.01 kWh noise floor used by
+        # every other flow check in this function) must be BATTERY_EXPORT:
+        # LOAD_SUPPORT maps to load_first, which can only ever cover a real
+        # deficit and physically cannot export -- see
+        # docs/superpowers/specs/2026-07-06-dp-bellman-guardrail-removal-design.md
+        # for the R == P failure this threshold mismatch caused.
+        if energy_data.battery_to_grid > 0.01:
+            return "BATTERY_EXPORT"
+        return "LOAD_SUPPORT"
+```
+
+- [ ] **Step 3b: Fix the identical threshold bug in `models.py`**
+
+In `core/bess/models.py`'s `infer_intent_from_flows`, change:
+
+```python
+    elif power < -0.1:  # DISCHARGING
+        if energy_data.battery_to_grid > 0.1:  # ANY export needs capability
+            return "BATTERY_EXPORT"  # Enable export capability
+        else:
+            return "LOAD_SUPPORT"  # Pure home support
+```
+
+to:
+
+```python
+    elif power < -0.1:  # DISCHARGING
+        if energy_data.battery_to_grid > 0.01:  # ANY export needs capability
+            return "BATTERY_EXPORT"  # Enable export capability
+        else:
+            return "LOAD_SUPPORT"  # Pure home support
+```
+
+This function is observational/dashboard-display only (per its own
+docstring) and isn't in the R == P execution path, but it has the identical
+inconsistency against its own sibling check (`grid_to_battery > 0.01`) and
+its own comment ("ANY export needs capability") already states the intent
+the `0.01` threshold now matches.
+
+- [ ] **Step 4: Run the test to verify it passes**
+
+Run: `.venv/bin/pytest core/bess/tests/unit/test_dp_no_guardrails.py::test_small_export_only_discharge_classified_as_battery_export -v`
+Expected: PASS
+
+- [ ] **Step 5: Run the fast suite**
+
+Run: `.venv/bin/pytest -m "not slow"`
+Expected: PASS. If any existing test asserts a specific intent label for a
+borderline discharge (`battery_to_grid` between 0.01 and 0.1) that now
+flips from `LOAD_SUPPORT` to `BATTERY_EXPORT`, investigate whether that
+test's fixture genuinely has zero home-deficit coverage for that period
+(in which case update the expected label, it was asserting the old bug) or
+a real deficit (in which case something in this fix's reasoning is wrong —
+escalate, don't force the test to pass).
+
+- [ ] **Step 6: Re-run the specific R == P failures this fix targets**
+
+Run: `.venv/bin/pytest core/bess/tests/unit/test_scenarios.py -k "realworld_2026_04_11_004719 or realworld_2026_04_19_084608 or realworld_2026_04_22_202249 or realworld_2026_04_24_090423 or realworld_2026_04_27_184643 or realworld_2026_04_27_211212 or realworld_2026_04_29_195900 or realworld_2026_04_29_220919" -m slow -v`
+
+Expected: the R == P plan-faithfulness assertion (not necessarily the
+`expected_results` assertion — that's Task 8's job, unaffected by this fix)
+now passes for all 8. If any still fail R == P, report DONE_WITH_CONCERNS
+with specifics rather than treating this step as optional.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add core/bess/decision_intelligence.py core/bess/models.py core/bess/tests/unit/test_dp_no_guardrails.py
+git commit -m "$(cat <<'EOF'
+fix: classify_strategic_intent uses consistent 0.01 kWh export threshold
+
+The BATTERY_EXPORT check used a 0.1 kWh threshold, ten times coarser than
+every other flow check in this function (0.01). A discharge with zero home-
+deficit coverage and a small (0.01-0.1 kWh) export was misclassified
+LOAD_SUPPORT, which maps to load_first -- a mode that can only cover a real
+deficit and physically cannot export. When the deficit-based delivery
+computed exactly zero, _state_transition's IDLE branch absorbed the entire
+solar surplus instead, a much larger unplanned action whose error compounded
+for the rest of the horizon. Traced via Task 8's R == P failures on 8 of 9
+quarter-hourly fixtures (gaps up to 18.7 SEK).
+
+Also fixes the identical inconsistency in models.py's infer_intent_from_flows
+(observational/dashboard-display only, not in the R == P execution path, but
+the same threshold mismatch against its own sibling checks).
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
+
 ### Task 9: Verify `test_cost_basis_calculation.py`, `test_solar_export_discharge_gate.py`, and `test_optimization_algorithm.py` still pass
 
 **Files:**

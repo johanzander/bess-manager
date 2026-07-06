@@ -84,11 +84,12 @@ logger = logging.getLogger(__name__)
 SOE_STEP_KWH = 0.1
 POWER_STEP_KW = 0.2
 POWER_TOLERANCE_KW = 0.001  # Threshold to distinguish IDLE from charge/discharge
-# Matches decision_intelligence._POWER_THRESHOLD_KW's own use as the
-# BATTERY_EXPORT vs LOAD_SUPPORT classification boundary (kept as a separate
-# constant here, not imported, to avoid coupling to that module's private
-# threshold -- if one changes, check the other).
-BATTERY_EXPORT_THRESHOLD_KWH = 0.1
+# Matches decision_intelligence.classify_strategic_intent's own
+# battery_to_grid threshold for BATTERY_EXPORT classification -- keep these
+# in sync: the DP's own reward search must value a discharge's export
+# credit consistently with whether that discharge will actually be
+# classified (and executed via grid_first) as a real export.
+BATTERY_EXPORT_THRESHOLD_KWH = 0.01
 
 
 class StrategicIntent(Enum):
@@ -336,10 +337,10 @@ def _compute_reward(
         # Self-throttling fix (#240): load-first hardware never actually
         # exports a small discharge overshoot beyond home_consumption -- it
         # delivers only what the home needs. Below BATTERY_EXPORT_THRESHOLD_KWH
-        # (the same boundary decision_intelligence.classify_strategic_intent
-        # uses to call something BATTERY_EXPORT vs LOAD_SUPPORT), treat the
-        # overshoot as self-throttled: no export credit. At or above it, it's
-        # a genuine deliberate export.
+        # (the same battery_to_grid boundary decision_intelligence.
+        # classify_strategic_intent uses to call something BATTERY_EXPORT vs
+        # LOAD_SUPPORT), treat the overshoot as self-throttled: no export
+        # credit. At or above it, it's a genuine deliberate export.
         if grid_exported <= BATTERY_EXPORT_THRESHOLD_KWH:
             grid_exported = 0.0
 

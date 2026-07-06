@@ -47,12 +47,13 @@ def test_discharge_no_longer_blocked_by_cost_basis_floor():
 def test_small_discharge_overshoot_not_credited_as_export():
     """#240: load-first hardware self-throttles -- a discharge that
     overshoots home_consumption by less than the BATTERY_EXPORT
-    classification threshold (0.1 kWh) never actually reaches the grid, so
-    it must not be credited as export revenue."""
+    classification threshold (0.01 kWh, reconciled with
+    classify_strategic_intent's own boundary) never actually reaches the
+    grid, so it must not be credited as export revenue."""
     settings = make_battery_settings()
     dt = 1.0
     home_consumption = 1.0
-    power = -1.05  # discharges 1.05 kWh -- 0.05 kWh over consumption
+    power = -1.005  # discharges 1.005 kWh -- 0.005 kWh over consumption
     next_soe = 5.0 - (abs(power) * dt / settings.efficiency_discharge)
     reward, _ = _compute_reward(
         power=power,
@@ -67,7 +68,7 @@ def test_small_discharge_overshoot_not_credited_as_export():
         solar_production=0.0,
         cost_basis=0.1,
     )
-    # No import (fully covered) and no export credit for the 0.05 kWh
+    # No import (fully covered) and no export credit for the 0.005 kWh
     # overshoot: net cost should be exactly zero, not a phantom profit.
     assert reward == pytest.approx(
         0.0, abs=1e-9
@@ -75,7 +76,7 @@ def test_small_discharge_overshoot_not_credited_as_export():
 
 
 def test_large_discharge_overshoot_still_credited_as_export():
-    """A discharge that overshoots home_consumption by 0.1 kWh or more is a
+    """A discharge that overshoots home_consumption by 0.01 kWh or more is a
     genuine deliberate export (BATTERY_EXPORT), not self-throttled
     load-following -- it must still be credited as export revenue."""
     settings = make_battery_settings()
@@ -228,3 +229,45 @@ def test_dp_output_never_worse_than_all_idle_schedule(scenario_name):
         f"{result.economic_summary.battery_solar_cost:.4f} exceeds all-IDLE "
         f"cost {idle_result.economic_summary.battery_solar_cost:.4f}"
     )
+
+
+def test_battery_export_threshold_matches_classification_boundary():
+    """_compute_reward's export-credit threshold must match
+    classify_strategic_intent's classification threshold (both 0.01 kWh) --
+    a discharge that gets classified BATTERY_EXPORT (and therefore actually
+    executes as a real export via grid_first) must also be credited as a
+    real export in the reward the DP's own search used to choose it.
+    Regression for the mismatch found during the final whole-branch review:
+    the two thresholds disagreed (0.1 vs 0.01) after Task 8b changed only
+    the classification side."""
+    from core.bess.dp_battery_algorithm import (
+        BATTERY_EXPORT_THRESHOLD_KWH,
+        _compute_reward,
+    )
+    from core.bess.tests.helpers import make_battery_settings
+
+    assert BATTERY_EXPORT_THRESHOLD_KWH == 0.01
+
+    settings = make_battery_settings()
+    dt = 1.0
+    home_consumption = 1.0
+    power = -1.05  # 0.05 kWh overshoot -- in the (0.01, 0.1] gap band
+    next_soe = 5.0 - (abs(power) * dt / settings.efficiency_discharge)
+    reward, _ = _compute_reward(
+        power=power,
+        soe=5.0,
+        next_soe=next_soe,
+        period=0,
+        home_consumption=home_consumption,
+        battery_settings=settings,
+        dt=dt,
+        buy_price=[1.0],
+        sell_price=[1.0],
+        solar_production=0.0,
+        cost_basis=0.1,
+    )
+    # 0.05 kWh exported at sell_price=1.0, no import, no wear on discharge --
+    # this must now be credited as a real export, not zeroed.
+    assert reward == pytest.approx(
+        0.05, abs=1e-9
+    ), f"expected 0.05 kWh export credited at sell_price, got reward={reward}"

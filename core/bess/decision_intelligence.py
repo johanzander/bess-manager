@@ -429,7 +429,13 @@ def classify_strategic_intent(power: float, energy_data: EnergyData) -> str:
         One of: GRID_CHARGING, SOLAR_STORAGE, LOAD_SUPPORT, BATTERY_EXPORT, SOLAR_EXPORT, IDLE.
     """
     if power < -_POWER_THRESHOLD_KW:  # Discharging
-        if energy_data.battery_to_grid > 0.1:
+        # Any meaningfully nonzero export (same 0.01 kWh noise floor used by
+        # every other flow check in this function) must be BATTERY_EXPORT:
+        # LOAD_SUPPORT maps to load_first, which can only ever cover a real
+        # deficit and physically cannot export -- see
+        # docs/superpowers/specs/2026-07-06-dp-bellman-guardrail-removal-design.md
+        # for the R == P failure this threshold mismatch caused.
+        if energy_data.battery_to_grid > 0.01:
             return "BATTERY_EXPORT"
         return "LOAD_SUPPORT"
     elif power > _POWER_THRESHOLD_KW:  # Charging

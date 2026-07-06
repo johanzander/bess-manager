@@ -146,6 +146,38 @@ def test_optimizer_ignores_min_action_profit_threshold():
     )
 
 
+def test_small_export_only_discharge_classified_as_battery_export():
+    """A discharge with zero home-deficit coverage and a small (but
+    meaningfully nonzero) export must be classified BATTERY_EXPORT, not
+    LOAD_SUPPORT -- LOAD_SUPPORT maps to load_first, which physically cannot
+    export at all (core/bess/simulation/inverter_simulator.py's mode_to_power
+    caps load_first delivery at max(0, home-solar), i.e. zero when solar
+    already covers home). Mislabeling this as LOAD_SUPPORT makes the plan
+    unrealizable: real/simulated hardware delivers zero instead of the
+    planned export, and that zero triggers passive solar charging instead
+    (_state_transition's IDLE branch), a much larger, unplanned action.
+    Regression for the R == P failures traced on
+    realworld_2026_04_27_211212 period 42 during Task 8's fixture
+    regeneration."""
+    from core.bess.decision_intelligence import classify_strategic_intent
+    from core.bess.models import EnergyData
+
+    energy_data = EnergyData(
+        solar_production=3.5,
+        home_consumption=0.2,
+        battery_charged=0.0,
+        battery_discharged=0.05,
+        grid_imported=0.0,
+        grid_exported=3.35,
+        battery_soe_start=7.68,
+        battery_soe_end=7.63,
+    )
+    intent = classify_strategic_intent(power=-0.2, energy_data=energy_data)
+    assert intent == "BATTERY_EXPORT", (
+        f"expected BATTERY_EXPORT for a 100%-export discharge, got {intent}"
+    )
+
+
 pytestmark = pytest.mark.slow
 
 

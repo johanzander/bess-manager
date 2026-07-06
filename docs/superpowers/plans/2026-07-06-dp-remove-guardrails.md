@@ -1445,6 +1445,178 @@ If nothing needed changes, skip this commit.
 
 ---
 
+### Task 9b: Recalibrate `test_solar_export_discharge_gate.py`'s two stale scenarios
+
+**Discovered during Task 9, not in the original spec.** Both `@pytest.mark.slow`
+tests in this file fail — not due to Task 8b's threshold fix (traced and ruled
+out: `classify_strategic_intent`'s `SOLAR_EXPORT` branch and
+`solar_export_discharge_rate` are untouched by that fix), but due to Task 1's
+removal of the discharge profitability floor. That floor used to block certain
+discharges outright; with it gone, the DP now correctly finds more profitable
+schedules in both tests' price scenarios, and each test's hardcoded
+expectations no longer match reality. Both were `@pytest.mark.slow` and were
+never run by any earlier task's `-m "not slow"` checks — latent since Task 1
+landed.
+
+**This is not a bug in the redesign.** Verified directly (see design doc
+addendum): for `test_solar_export_holds_when_export_more_valuable`'s exact
+inputs, the DP's active-discharge schedule for periods 0-7 costs -44.90 SEK vs.
+a forced-hold alternative's -28.0 SEK — a genuine 16.9 SEK improvement. The old
+"hold" behavior this test hardcoded as correct was leaving money on the table.
+
+**Scenario 1: `test_solar_export_covers_dip_when_buy_exceeds_export`**
+
+Traced the actual per-period `shadow_price` for this test's existing inputs
+(`buy=[1.0]*8+[5.0]*8, sell=[0.3]*16, solar=[4.0]*8+[0.0]*8, consumption=[0.5]*8+[2.0]*8`):
+
+```
+t=0: shadow=0.45   (finite-horizon transient)
+t=1..7: shadow=0.30 (== sell_price exactly -- steady state)
+```
+
+The hardcoded `0.7093` constant (from an earlier design era, `#204`) never
+matches either value. Adding lead-in periods before the test's window shows
+the transient decays over 2-3 periods (`0.7093 -> 0.45 -> 0.30`) the further
+you are from the horizon's terminal transition (into the expensive evening
+window at the original t=8) — a normal finite-horizon DP boundary effect, not
+an economic constant to hardcode. The steady-state value (`0.30 == sell_price`)
+matches `docs/agents/bess-knowledge.md`'s already-documented law: "shadow price
+therefore ≈ the sell price" during genuine `SOLAR_EXPORT` (battery full,
+solar refills it for free). `t=0`'s transient value is real but is a boundary
+artifact of this specific 16-period horizon, not a value to assert as a fixed
+constant either.
+
+**Scenario 2: `test_solar_export_holds_when_export_more_valuable`**
+
+The existing inputs (`buy=[0.2]*16, sell=[1.0]*16` — a sustained 5x export
+premium with no future cost of recharging) make immediate full-day arbitrage
+strictly better than holding, so no `SOLAR_EXPORT` period exists at all with
+these inputs anymore. Found and verified a replacement scenario that restores
+a genuine hold state: `buy=[0.2]*8+[8.0]*8, sell=[1.0]*8+[0.5]*8,
+solar=[4.0]*8+[0.0]*8, consumption=[0.5]*8+[2.0]*8` (export premium during
+solar hours, but buying is much more expensive right after — so preserving
+stored energy for that expensive window beats liquidating it now). Verified:
+periods `t=0..6` are genuine `SOLAR_EXPORT`, each with `shadow_price=1.0000`
+exactly (`== sell_price`), and `buy[t]*eff_d=0.19 < shadow` — the hold
+condition holds cleanly. (`t=7` flips to `BATTERY_EXPORT`, a boundary
+artifact like scenario 1's `t=0` — irrelevant here since
+`_solar_export_periods` already filters to only classified `SOLAR_EXPORT`
+periods, so the test's existing loop structure naturally excludes it.)
+
+**Files:**
+- Modify: `core/bess/tests/unit/test_solar_export_discharge_gate.py`
+
+**Interfaces:** none — test-only change, no production code touched.
+
+- [ ] **Step 1: Fix scenario 1's assertion**
+
+Replace the single hardcoded assertion:
+
+```python
+        assert shadow == pytest.approx(
+            0.7093, abs=0.01
+        ), f"period {t}: shadow {shadow:.4f} should be ~0.7093 (sell + cycle cost)"
+```
+
+with a check against the documented steady-state law (shadow ≈ sell_price),
+skipping the one verified finite-horizon transient period rather than
+asserting a magic constant for it:
+
+```python
+        if t == periods[0]:
+            # First SOLAR_EXPORT period is a finite-horizon transient (verified:
+            # 0.45 here vs. steady-state 0.30 for the rest) -- a normal DP
+            # boundary effect near the horizon's terminal transition, not a
+            # fixed economic constant. Only check the gate property still holds.
+            assert shadow > 0.0
+        else:
+            # Steady state: shadow price converges to sell_price, per
+            # docs/agents/bess-knowledge.md's documented law for SOLAR_EXPORT
+            # (battery full, solar refills it for free -- marginal kWh is
+            # worth only the export price).
+            assert shadow == pytest.approx(
+                sell[t], abs=0.01
+            ), f"period {t}: shadow {shadow:.4f} should equal sell_price {sell[t]}"
+```
+
+Update the test's docstring to remove the "replenishment floor: export price
+plus the forced recharge's cycle cost" framing (that was the pre-redesign
+model) and state the current one: shadow price converges to `sell_price` in
+steady state, per the documented economic law.
+
+- [ ] **Step 2: Replace scenario 2's inputs**
+
+Replace:
+
+```python
+    buy = [0.2] * 16
+    sell = [1.0] * 16  # export premium > import value
+    solar = [4.0] * 8 + [0.0] * 8
+    consumption = [0.5] * 8 + [2.0] * 8
+```
+
+with:
+
+```python
+    buy = [0.2] * 8 + [8.0] * 8  # export premium during solar hours, then a
+    # much more expensive window right after -- preserving stored energy for
+    # that window beats liquidating it now (verified: this is what makes the
+    # DP genuinely hold rather than actively discharge -- with a sustained
+    # premium and no future cost of recharging, full-day arbitrage dominates
+    # instead, per this scenario's original inputs).
+    sell = [1.0] * 8 + [0.5] * 8
+    solar = [4.0] * 8 + [0.0] * 8
+    consumption = [0.5] * 8 + [2.0] * 8
+```
+
+Update the docstring to describe this scenario accurately (a temporary export
+premium during solar hours, followed by an expensive buy window that makes
+holding the better choice — not just "inverted prices" in the abstract).
+
+- [ ] **Step 3: Run both tests**
+
+Run: `.venv/bin/pytest core/bess/tests/unit/test_solar_export_discharge_gate.py -v -m slow`
+Expected: all 2 slow tests PASS (plus the existing fast boundary test, run
+separately or together with `-m ""` if you want to see all 3).
+
+- [ ] **Step 4: Run the fast and full slow suites to check for regressions**
+
+Run: `.venv/bin/pytest core/bess -m "not slow" -q`
+Expected: PASS, no regressions (scope to `core/bess` — the repo root has an
+unrelated pre-existing collection error in `backend/tests/test_ai_chat.py`
+from a missing `anthropic` package).
+
+Run: `.venv/bin/pytest core/bess/tests/unit/test_scenarios.py -m slow -v`
+Expected: same result as Task 8 left it (25/26 passing, the one pre-existing
+`realworld_2026_04_29_195900` intents_present failure unrelated to this task).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add core/bess/tests/unit/test_solar_export_discharge_gate.py
+git commit -m "$(cat <<'EOF'
+test: recalibrate solar-export-gate scenarios for the guardrail redesign
+
+Both scenarios were tuned to the pre-redesign reward model (the removed
+discharge-profitability floor). Scenario 1's hardcoded shadow_price constant
+(0.7093) was stale -- the DP now correctly converges to shadow == sell_price
+in steady state, per the already-documented economic law in
+docs/agents/bess-knowledge.md; the one verified finite-horizon transient
+period is no longer asserted against a fixed number. Scenario 2's inputs (a
+sustained 5x export premium with no future recharge cost) made full-day
+arbitrage strictly better than holding, so no SOLAR_EXPORT period existed at
+all anymore -- verified the DP's new schedule beats the old hardcoded "hold"
+expectation by 16.9 SEK. Replaced with inputs that restore a genuine hold
+state (export premium now, but an expensive window right after that makes
+preserving stored energy the better choice).
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
+
 ### Task 10: Full regression suite and quality gate
 
 **Files:** none (verification only)

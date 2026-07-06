@@ -1,5 +1,7 @@
 # core/bess/tests/integration/test_plan_faithfulness.py
 
+import pytest
+
 from core.bess.simulation.verification import verify_plan_faithfulness
 from core.bess.tests.helpers import make_battery_settings
 
@@ -172,3 +174,36 @@ def _battery(initial_soe):
         "cycle_cost_per_kwh": 0.40,
         "initial_soe": initial_soe,
     }
+
+
+def test_load_support_self_throttles_discretization_overshoot():
+    """#240 regression: load-first hardware never exports a discharge that
+    overshoots home_consumption -- it self-throttles to the actual deficit,
+    regardless of what a coarser discretized plan might have assumed. This
+    locks in the physical behavior the #240 reward-model fix
+    (core/bess/dp_battery_algorithm.py's _compute_reward) now assumes:
+    before that fix, the plan credited export revenue for energy that was
+    never actually exported, breaking R == P for these periods -- a case
+    the existing hand-crafted plan-faithfulness scenarios were deliberately
+    designed to avoid (see their own docstrings), so nothing else covers it.
+    """
+    from core.bess.simulation.inverter_simulator import ControlCommand, simulate
+
+    bs = make_battery_settings()
+    home = 1.15
+    solar = 0.0
+    cmd = ControlCommand("load_first", discharge_rate_pct=100, grid_charge=False)
+    sim = simulate(
+        [cmd],
+        solar_production=[solar],
+        home_consumption=[home],
+        buy_price=[1.0],
+        sell_price=[1.0],
+        initial_soe=5.0,
+        settings=bs,
+        dt=1.0,
+    )
+    assert sim.period_data[0].energy.grid_exported == pytest.approx(0.0, abs=1e-9), (
+        "load_first should never export -- it self-throttles to the actual "
+        "home deficit, matching the #240-fixed reward model's assumption"
+    )

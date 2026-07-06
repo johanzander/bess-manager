@@ -379,7 +379,7 @@
       "BATTERY_EXPORT",
       "GRID_CHARGING",
       "IDLE",
-      "SOLAR_EXPORT"
+      "SOLAR_STORAGE"
     ],
     "savings_positive": true,
     "constraints": {

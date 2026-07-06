@@ -1655,6 +1655,299 @@ If `quality-check.sh` made no changes, skip this commit.
 
 ---
 
+### Task 11: Fix `realworld_2026_04_29_195900`'s stale `intents_present` (correcting a false "pre-existing" claim)
+
+**Discovered by the final whole-branch review, not in the original spec.**
+Tasks 8 and 9 both claimed this fixture's `expected_behavior.intents_present`
+failure (`SOLAR_EXPORT` expected, not produced) was pre-existing and
+unrelated to this branch, "confirmed via git-stash bisection." That method
+was unsound: `git stash` only reaches uncommitted changes, so it can never
+look behind this branch's already-committed history — it cannot prove
+anything about behavior at the branch's actual base.
+
+**Independently re-verified against the true merge-base
+(`66e9b8b2d37b9e09b358c37d8d945f5f9ebe7a7e`):** the fixture's `test_all_scenarios`
+case **passes** there (`SOLAR_EXPORT` occurs 27 times) and **fails** at
+current HEAD (`SOLAR_EXPORT` occurs 0 times; the intent distribution shifted
+to `{BATTERY_EXPORT: 33, IDLE: 57, GRID_CHARGING: 16, SOLAR_STORAGE: 7}`).
+This branch genuinely changed this fixture's schedule.
+
+**This is not a bug.** Verified directly:
+- Economics improved substantially: `battery_solar_cost` moved from 16.3842
+  to 5.0938 (an $11.29 SEK improvement), already reflected in this fixture's
+  `expected_results` block from Task 8 (which correctly updated the numeric
+  values but not the separate `intents_present` list).
+- `R == P` holds exactly for the corrected schedule (planned=5.0938,
+  realized=5.0938, gap≈0.0000, well within tolerance).
+
+So the fixture's `intents_present` list is simply stale — it still expects
+an intent (`SOLAR_EXPORT`) that a legitimately-improved schedule no longer
+produces (the battery now stores some solar via `SOLAR_STORAGE` rather than
+holding at max and exporting it directly, and discharges more actively
+elsewhere).
+
+**Files:**
+- Modify: `core/bess/tests/unit/data/realworld_2026_04_29_195900.json`
+  (`expected_behavior.intents_present` only — do not touch `expected_results`,
+  already correct from Task 8)
+
+- [ ] **Step 1: Verify the current intent distribution yourself**
+
+Run:
+```bash
+.venv/bin/python3 -c "
+from core.bess.tests.unit.test_scenarios import build_scenario_inputs
+from core.bess.dp_battery_algorithm import optimize_battery_schedule
+from core.bess.tests.helpers import get_intent_distribution
+
+scenario, battery_settings, buy_prices, sell_prices, dt = build_scenario_inputs('realworld_2026_04_29_195900')
+result = optimize_battery_schedule(
+    buy_price=buy_prices, sell_price=sell_prices, home_consumption=scenario['home_consumption'],
+    solar_production=scenario['solar_production'], initial_soe=scenario['battery']['initial_soe'],
+    battery_settings=battery_settings, period_duration_hours=dt,
+)
+print(get_intent_distribution(result))
+"
+```
+Expected: `{'BATTERY_EXPORT': 33, 'IDLE': 57, 'GRID_CHARGING': 16, 'SOLAR_STORAGE': 7}`
+(no `SOLAR_EXPORT`, no `LOAD_SUPPORT`). If this doesn't match, STOP and report
+BLOCKED — do not proceed with an edit based on a distribution you haven't
+personally reproduced.
+
+- [ ] **Step 2: Re-verify R == P for this fixture**
+
+Run:
+```bash
+.venv/bin/python3 -c "
+from core.bess.tests.unit.test_scenarios import build_scenario_inputs
+from core.bess.dp_battery_algorithm import optimize_battery_schedule
+from core.bess.simulation.inverter_simulator import derive_control_command, simulate
+
+scenario, battery_settings, buy_prices, sell_prices, dt = build_scenario_inputs('realworld_2026_04_29_195900')
+home_consumption = scenario['home_consumption']
+solar_production = scenario['solar_production']
+battery = scenario['battery']
+result = optimize_battery_schedule(
+    buy_price=buy_prices, sell_price=sell_prices, home_consumption=home_consumption,
+    solar_production=solar_production, initial_soe=battery['initial_soe'],
+    battery_settings=battery_settings, period_duration_hours=dt,
+)
+commands = [derive_control_command(pd.decision.strategic_intent, pd.decision.battery_action/dt, battery_settings) for pd in result.period_data]
+sim = simulate(commands, solar_production, home_consumption, buy_prices, sell_prices, battery['initial_soe'], battery_settings, dt)
+planned = result.economic_summary.battery_solar_cost
+gap = sim.realized_cost - planned
+tol = max(0.5, 0.01*abs(planned))
+print(f'planned={planned:.4f} realized={sim.realized_cost:.4f} gap={gap:+.4f} tol={tol:.4f} R==P: {abs(gap)<=tol}')
+"
+```
+Expected: `R==P: True` with a small gap. If `R==P: False`, STOP — this would
+mean the schedule change is NOT the clean improvement it's believed to be,
+and the fixture should not be updated; report BLOCKED instead.
+
+- [ ] **Step 3: Update the fixture's `intents_present`**
+
+In `core/bess/tests/unit/data/realworld_2026_04_29_195900.json`, change
+`expected_behavior.intents_present` from including `SOLAR_EXPORT` to
+including `SOLAR_STORAGE` instead (remove `SOLAR_EXPORT`, add
+`SOLAR_STORAGE`; leave `BATTERY_EXPORT`, `GRID_CHARGING`, `IDLE` as they are
+since all three are still confirmed present). Do not touch
+`expected_results` — already correct.
+
+- [ ] **Step 4: Run the full scenario suite**
+
+Run: `.venv/bin/pytest core/bess/tests/unit/test_scenarios.py -m slow -v`
+Expected: all 26 fixtures PASS now (this was the last remaining failure).
+
+- [ ] **Step 5: Run the fast suite**
+
+Run: `.venv/bin/pytest core/bess -m "not slow" -q`
+Expected: PASS, no regressions.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add core/bess/tests/unit/data/realworld_2026_04_29_195900.json
+git commit -m "$(cat <<'EOF'
+test: fix realworld_2026_04_29_195900's stale intents_present expectation
+
+Previously believed pre-existing (Tasks 8/9's git-stash bisection was
+methodologically unsound -- stash cannot reach behind this branch's own
+committed history). Independently re-verified against the true merge-base:
+this branch genuinely changed the schedule (SOLAR_EXPORT -> SOLAR_STORAGE +
+more active discharge), improving battery_solar_cost by 11.29 SEK (already
+reflected in this fixture's expected_results from Task 8) with R == P
+holding exactly. Only the separate intents_present list was stale.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
+
+### Task 12: Reconcile `_compute_reward`'s export threshold with `classify_strategic_intent`'s
+
+**Discovered by the final whole-branch review, not in the original spec.**
+`_compute_reward`'s `BATTERY_EXPORT_THRESHOLD_KWH = 0.1` (zeroes export
+credit for a discharge overshoot at or below this amount, treating it as
+self-throttled per the #240 fix) no longer matches
+`classify_strategic_intent`'s export-classification threshold, which Task 8b
+correctly changed to `0.01` for a different but related reason (any
+meaningfully nonzero export must be `BATTERY_EXPORT`, since `LOAD_SUPPORT`
+physically cannot execute one). The two now disagree by 10x.
+
+**Verified this gap is real but currently benign.** Found 80 periods across
+8 fixtures where `battery_to_grid` falls in `(0.01, 0.1]` kWh — all already
+correctly classified `BATTERY_EXPORT` (confirming Task 8b's fix works). But
+`_compute_reward`'s reward calculation (used during the DP's own backward-
+induction search) still zeroes the export credit for these same discharges,
+since `0.05 <= BATTERY_EXPORT_THRESHOLD_KWH (0.1)`. That's inconsistent: the
+DP's search undervalues an action that will actually be executed as a real,
+revenue-generating export (per `classify_strategic_intent` + `grid_first`
+mode). Checked R == P directly on the 3 most-affected fixtures
+(`realworld_2026_04_11_004719`, `realworld_2026_04_19_084608`,
+`realworld_2026_04_29_220919`) and it holds comfortably (gaps of
+0.02-0.14 SEK against 0.5+ SEK tolerances) even without this fix — so this
+is not currently causing a plan-vs-realized divergence, but the DP's own
+valuation of these ~80 periods is inaccurate, which could affect which
+action it picks in a close call.
+
+**Files:**
+- Modify: `core/bess/dp_battery_algorithm.py` (the `BATTERY_EXPORT_THRESHOLD_KWH`
+  constant's value and its comment, plus the misattributed comment on the
+  discharge branch that claims it matches `decision_intelligence._POWER_THRESHOLD_KW`
+  — it should instead reference the actual, now-`0.01`, threshold in
+  `classify_strategic_intent`)
+
+**Interfaces:** none — the constant's name and usage sites are unchanged,
+only its value (`0.1` → `0.01`) and its documentation.
+
+- [ ] **Step 1: Write a test confirming the new threshold value**
+
+Add to `core/bess/tests/unit/test_dp_no_guardrails.py`:
+
+```python
+def test_battery_export_threshold_matches_classification_boundary():
+    """_compute_reward's export-credit threshold must match
+    classify_strategic_intent's classification threshold (both 0.01 kWh) --
+    a discharge that gets classified BATTERY_EXPORT (and therefore actually
+    executes as a real export via grid_first) must also be credited as a
+    real export in the reward the DP's own search used to choose it.
+    Regression for the mismatch found during the final whole-branch review:
+    the two thresholds disagreed (0.1 vs 0.01) after Task 8b changed only
+    the classification side."""
+    from core.bess.dp_battery_algorithm import _compute_reward, BATTERY_EXPORT_THRESHOLD_KWH
+    from core.bess.tests.helpers import make_battery_settings
+
+    assert BATTERY_EXPORT_THRESHOLD_KWH == 0.01
+
+    settings = make_battery_settings()
+    dt = 1.0
+    home_consumption = 1.0
+    power = -1.05  # 0.05 kWh overshoot -- in the (0.01, 0.1] gap band
+    next_soe = 5.0 - (abs(power) * dt / settings.efficiency_discharge)
+    reward, _ = _compute_reward(
+        power=power, soe=5.0, next_soe=next_soe, period=0,
+        home_consumption=home_consumption, battery_settings=settings, dt=dt,
+        buy_price=[1.0], sell_price=[1.0], solar_production=0.0, cost_basis=0.1,
+    )
+    # 0.05 kWh exported at sell_price=1.0, no import, no wear on discharge --
+    # this must now be credited as a real export, not zeroed.
+    assert reward == pytest.approx(0.05, abs=1e-9), (
+        f"expected 0.05 kWh export credited at sell_price, got reward={reward}"
+    )
+```
+
+- [ ] **Step 2: Run the test to verify it fails**
+
+Run: `.venv/bin/pytest core/bess/tests/unit/test_dp_no_guardrails.py::test_battery_export_threshold_matches_classification_boundary -v`
+Expected: FAIL (`BATTERY_EXPORT_THRESHOLD_KWH == 0.01` fails; current value is `0.1`).
+
+- [ ] **Step 3: Change the threshold and fix the comment**
+
+In `core/bess/dp_battery_algorithm.py`, change:
+
+```python
+BATTERY_EXPORT_THRESHOLD_KWH = 0.1
+```
+
+to:
+
+```python
+BATTERY_EXPORT_THRESHOLD_KWH = 0.01
+```
+
+And update its constant-definition comment (previously misattributing this
+to `decision_intelligence._POWER_THRESHOLD_KW`) to:
+
+```python
+# Matches decision_intelligence.classify_strategic_intent's own
+# battery_to_grid threshold for BATTERY_EXPORT classification -- keep these
+# in sync: the DP's own reward search must value a discharge's export
+# credit consistently with whether that discharge will actually be
+# classified (and executed via grid_first) as a real export.
+BATTERY_EXPORT_THRESHOLD_KWH = 0.01
+```
+
+Also update the inline comment at the discharge branch's use of this
+constant (previously also referencing `_POWER_THRESHOLD_KW`) to point at
+`classify_strategic_intent`'s actual `0.01` threshold instead.
+
+- [ ] **Step 4: Run the test to verify it passes**
+
+Run: `.venv/bin/pytest core/bess/tests/unit/test_dp_no_guardrails.py::test_battery_export_threshold_matches_classification_boundary -v`
+Expected: PASS.
+
+- [ ] **Step 5: Re-run the full scenario suite and hand-verify every economic delta**
+
+Run: `.venv/bin/pytest core/bess/tests/unit/test_scenarios.py -m slow -v`
+
+This changes the DP's own reward search, so — same discipline as Task 8 —
+recompute every one of the 26 fixtures' `expected_results` and compare
+against the current pinned values before updating anything. Per this task's
+own investigation, the expected effect is small (the 3 sampled fixtures
+already showed comfortable R == P margins even before this fix), but do not
+assume: if any fixture's `battery_solar_cost` moves, verify the new value is
+equal-or-better before updating its `expected_results`, exactly as Task 8's
+sanity rule required. If any fixture shows worse economics, STOP and report
+DONE_WITH_CONCERNS rather than updating it — that would be a new,
+unexplained regression, not something to fold in silently.
+
+- [ ] **Step 6: Run the fast suite**
+
+Run: `.venv/bin/pytest core/bess -m "not slow" -q`
+Expected: PASS, no regressions.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add core/bess/dp_battery_algorithm.py core/bess/tests/unit/test_dp_no_guardrails.py
+git commit -m "$(cat <<'EOF'
+fix: reconcile BATTERY_EXPORT_THRESHOLD_KWH with classification threshold
+
+_compute_reward's export-credit threshold (0.1) no longer matched
+classify_strategic_intent's classification threshold (0.01, fixed in Task
+8b) -- found by the final whole-branch review. 80 periods across 8 fixtures
+sat in the (0.01, 0.1] gap: already correctly classified BATTERY_EXPORT
+(executed as real exports via grid_first), but the DP's own reward search
+still zeroed their export credit, undervaluing actions it will actually
+realize. R == P held even before this fix (verified on the 3 most-affected
+fixtures), so this corrects the DP's internal valuation rather than a
+plan-vs-realized divergence.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+EOF
+)"
+```
+
+Before running this command, replace the commit body above the
+`Co-Authored-By` line with a factual account of Step 5's actual outcome:
+state explicitly which fixtures' `expected_results` changed (with their
+before/after values) if any did, or state explicitly that no fixture needed
+an update if none did. Do not run the template text as written.
+
+---
+
 ## Follow-up (not in this plan)
 
 - File a separate issue: remove `min_action_profit_threshold` from

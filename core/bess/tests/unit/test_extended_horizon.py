@@ -288,9 +288,9 @@ class TestCalculateTerminalValue:
         source = MockSource([1.0] * 96)
         system = _make_system(source)
 
-        # 192 buy prices remaining but only ~96 today periods remaining from period 0
+        # 192 buy/sell prices remaining but only ~96 today periods remaining from period 0
         terminal_value = system._calculate_terminal_value(
-            buy_prices=[1.0] * 192, optimization_period=0
+            buy_prices=[1.0] * 192, sell_prices=[1.0] * 192, optimization_period=0
         )
 
         assert terminal_value == 0.0
@@ -302,10 +302,10 @@ class TestCalculateTerminalValue:
 
         # Only 50 remaining prices (clearly today-only)
         terminal_value = system._calculate_terminal_value(
-            buy_prices=[1.0] * 50, optimization_period=46
+            buy_prices=[1.0] * 50, sell_prices=[1.0] * 50, optimization_period=46
         )
 
-        # Should be avg_buy * efficiency_discharge - cycle_cost > 0
+        # Should be median_sell * efficiency_discharge - cycle_cost > 0
         assert terminal_value > 0.0
 
     def test_floored_at_zero(self):
@@ -316,10 +316,38 @@ class TestCalculateTerminalValue:
         system.battery_settings.cycle_cost_per_kwh = 5.0
 
         terminal_value = system._calculate_terminal_value(
-            buy_prices=[0.01] * 10, optimization_period=86
+            buy_prices=[0.01] * 10, sell_prices=[0.01] * 10, optimization_period=86
         )
 
         assert terminal_value == 0.0
+
+    def test_based_on_sell_price_not_buy_price(self):
+        """Terminal value must reflect real, achievable export value (sell price),
+        not an optimistic buy-price-based guess -- see #244.
+
+        On contracts with a large buy/sell spread (e.g. Belgian dynamic
+        tariffs), using buy price systematically overvalues holding charge
+        to the end of the horizon over exporting it at the real, known,
+        better price available right now.
+        """
+        source = MockSource([1.0] * 96)
+        system = _make_system(source)
+        system.battery_settings.cycle_cost_per_kwh = 0.04
+
+        high_buy = [0.35] * 20
+        low_sell = [0.12] * 20
+
+        terminal_value = system._calculate_terminal_value(
+            buy_prices=high_buy, sell_prices=low_sell, optimization_period=76
+        )
+
+        eff_d = system.battery_settings.efficiency_discharge
+        cycle_cost = system.battery_settings.cycle_cost_per_kwh
+        buy_based_estimate = 0.35 * eff_d - cycle_cost
+        sell_based_estimate = 0.12 * eff_d - cycle_cost
+
+        assert terminal_value == pytest.approx(sell_based_estimate)
+        assert terminal_value < buy_based_estimate
 
 
 class TestPrepareNextDayTimestamps:

@@ -96,14 +96,14 @@ def realized_under_solar_error(
     answer to "is the schedule robust to solar forecast error?".
 
     Both figures are credited for usable energy left in the battery at horizon end
-    (mirroring BatterySystemManager._calculate_terminal_value's median-buy-price
+    (mirroring BatterySystemManager._calculate_terminal_value's median-sell-price
     valuation), otherwise a run that legitimately stores more bonus solar than the
     forecast run — real value carried past the horizon, not waste — looks like a
     loss purely from the horizon cutoff.
     """
     terminal_value_per_kwh = max(
         0.0,
-        statistics.median(buy_price) * settings.efficiency_discharge
+        statistics.median(sell_price) * settings.efficiency_discharge
         - settings.cycle_cost_per_kwh,
     )
     result = optimize_battery_schedule(

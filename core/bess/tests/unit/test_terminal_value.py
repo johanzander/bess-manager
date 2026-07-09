@@ -1,5 +1,7 @@
 """Tests for terminal value parameter in DP optimization."""
 
+import statistics
+
 import pytest
 
 from core.bess.dp_battery_algorithm import optimize_battery_schedule
@@ -113,6 +115,155 @@ class TestTerminalValueHoldsEnergy:
         assert discharge_with_tv <= discharge_no_tv, (
             f"Terminal value should reduce low-price discharge: "
             f"without={discharge_no_tv:.2f}, with={discharge_with_tv:.2f}"
+        )
+
+
+class TestTerminalValueCapRegression:
+    """Scenario-level regression tests for the arbitrage-consistency cap (#246).
+
+    Both scenarios apply the same terminal-value formula the production code
+    uses in `BatterySystemManager._calculate_terminal_value`:
+    ``min(buy-median-based, sell-max-based)``. Reusing real numbers from
+    #126/#244 (Belgian) and the ordinary/Nordic-shaped counter-scenario
+    bess-analyst used to reject #245's straight sell-swap fix.
+    """
+
+    def test_belgian_shaped_market_exports_at_evening_peak(self):
+        """Wide buy/sell spread: an uncapped buy-median terminal value exceeds
+        the real evening export price and makes the DP hold charge instead of
+        exporting (#126/#244's actual bug). The cap must collapse the
+        terminal value below that real peak so the DP exports."""
+        settings = BatterySettings(
+            total_capacity=15.0,
+            min_soc=10,
+            max_soc=100,
+            max_charge_power_kw=5.0,
+            max_discharge_power_kw=5.0,
+            cycle_cost_per_kwh=0.04,
+        )
+
+        # Mirrors #244's evidence: horizon=38 (14:30 to midnight), buy prices
+        # ~0.21-0.38 (median ~0.30), real achievable export peak ~0.13-0.16
+        # around 20:00-22:00, otherwise low sell prices.
+        buy = [0.21] * 10 + [0.30] * 18 + [0.38] * 10
+        sell = [0.10] * 22 + [0.16] * 8 + [0.12] * 8
+        consumption = [0.3] * 38
+        solar = [0.0] * 38
+
+        buy_based = max(
+            0.0,
+            statistics.median(buy) * settings.efficiency_discharge
+            - settings.cycle_cost_per_kwh,
+        )
+        sell_cap = max(
+            0.0,
+            max(sell) * settings.efficiency_discharge - settings.cycle_cost_per_kwh,
+        )
+        assert sell_cap < buy_based, "scenario must exercise the binding cap"
+        capped_terminal_value = min(buy_based, sell_cap)
+
+        result_uncapped = optimize_battery_schedule(
+            buy_price=buy,
+            sell_price=sell,
+            home_consumption=consumption,
+            battery_settings=settings,
+            solar_production=solar,
+            initial_soe=14.0,
+            terminal_value_per_kwh=buy_based,  # old, buggy (#244) behavior
+        )
+        result_capped = optimize_battery_schedule(
+            buy_price=buy,
+            sell_price=sell,
+            home_consumption=consumption,
+            battery_settings=settings,
+            solar_production=solar,
+            initial_soe=14.0,
+            terminal_value_per_kwh=capped_terminal_value,  # fixed (#246) behavior
+        )
+
+        peak_price = max(sell)
+        peak_period_indices = {i for i, p in enumerate(sell) if p == peak_price}
+
+        def total_export(result):
+            return sum(
+                abs(pd.decision.battery_action)
+                for i, pd in enumerate(result.period_data)
+                if i in peak_period_indices
+                and pd.decision.battery_action is not None
+                and pd.decision.battery_action < -consumption[i]
+            )
+
+        export_uncapped = total_export(result_uncapped)
+        export_capped = total_export(result_capped)
+
+        assert export_uncapped == pytest.approx(0.0, abs=1e-6), (
+            "sanity check: uncapped buy-median value should reproduce the "
+            "reported bug (holds through the peak instead of exporting)"
+        )
+        assert export_capped > 0.0, (
+            "capped terminal value should let the DP export during the real "
+            "evening peak instead of holding for a fictitious bonus"
+        )
+
+    def test_nordic_shaped_market_retains_reserve(self):
+        """Ordinary/Nordic-shaped market with a genuine narrow evening peak:
+        the best in-horizon sell price is already above the buy-median
+        estimate, so the cap must not bind and the battery should still
+        retain a substantial reserve at horizon end (the exact regression
+        #245's straight sell-swap fix introduced, left untested there)."""
+        settings = BatterySettings(
+            total_capacity=15.0,
+            min_soc=10,
+            max_soc=100,
+            max_charge_power_kw=5.0,
+            max_discharge_power_kw=5.0,
+            cycle_cost_per_kwh=0.04,
+        )
+
+        # 0.6 baseline, narrow 1-hour peak at 1.4, sell = 0.85x buy throughout.
+        # No home consumption: isolates the pure hold-vs-export arbitrage
+        # decision the terminal value governs, since discharging to serve
+        # real consumption is rational whenever its value beats the buy
+        # price regardless of terminal value, which would confound the
+        # reserve check below.
+        buy = [0.6] * 30 + [1.4] * 4 + [0.6] * 6
+        sell = [round(p * 0.85, 4) for p in buy]
+        consumption = [0.0] * 40
+        solar = [0.0] * 40
+
+        buy_based = max(
+            0.0,
+            statistics.median(buy) * settings.efficiency_discharge
+            - settings.cycle_cost_per_kwh,
+        )
+        sell_cap = max(
+            0.0,
+            max(sell) * settings.efficiency_discharge - settings.cycle_cost_per_kwh,
+        )
+        assert buy_based < sell_cap, "scenario must exercise the non-binding cap"
+        capped_terminal_value = min(buy_based, sell_cap)
+        assert capped_terminal_value == pytest.approx(buy_based), (
+            "cap should not alter the terminal value on an ordinary/Nordic-"
+            "shaped market"
+        )
+
+        result = optimize_battery_schedule(
+            buy_price=buy,
+            sell_price=sell,
+            home_consumption=consumption,
+            battery_settings=settings,
+            solar_production=solar,
+            initial_soe=14.9,
+            terminal_value_per_kwh=capped_terminal_value,
+        )
+
+        final_soe = result.period_data[-1].energy.battery_soe_end
+        usable_capacity = settings.total_capacity - settings.min_soe_kwh
+        final_reserve_fraction = (final_soe - settings.min_soe_kwh) / usable_capacity
+
+        assert final_reserve_fraction > 0.5, (
+            f"DP should retain a substantial reserve at horizon end on an "
+            f"ordinary market, got {final_reserve_fraction:.1%} of usable capacity"
         )
 
 

@@ -5,6 +5,7 @@ import FormattedValueComponent from './FormattedValue';
 import { useDashboardData } from '../hooks/useDashboardData';
 import { DataResolution } from '../hooks/useUserPreferences';
 import { periodToTimeString, periodToEndTime } from '../utils/timeUtils';
+import { getIntent } from '../utils/intent';
 
 interface SavingsOverviewProps {
   resolution: DataResolution;
@@ -50,14 +51,6 @@ export const SavingsOverview: React.FC<SavingsOverviewProps> = ({ resolution }) 
     }
     // No fallback - if unit is missing, it indicates a backend configuration issue
     return '???';
-  };
-
-  // For actual periods, observedIntent reflects what really happened (derived
-  // from sensor flows); strategicIntent can default to "IDLE" when no DP plan
-  // covered the period. Same precedence as BatteryModeTimeline.tsx.
-  const isBatteryExport = (hour: any) => {
-    const intent = (hour.dataSource === 'actual' && hour.observedIntent) ? hour.observedIntent : hour.strategicIntent;
-    return intent === 'BATTERY_EXPORT';
   };
 
   if (loading) {
@@ -343,7 +336,7 @@ export const SavingsOverview: React.FC<SavingsOverviewProps> = ({ resolution }) 
                           {hour.batteryToHome?.display}
                         </span>
                       )}
-                      {isBatteryExport(hour) && (
+                      {getIntent(hour) === 'BATTERY_EXPORT' && (
                         <span className="text-xs font-medium bg-slate-100 dark:bg-slate-900/30 text-slate-700 dark:text-slate-300 px-1 py-0 rounded flex items-center gap-0.5">
                           <Zap className="h-2.5 w-2.5" />
                           {hour.batteryToGrid?.display}
@@ -402,7 +395,7 @@ export const SavingsOverview: React.FC<SavingsOverviewProps> = ({ resolution }) 
                           {hour.solarToGrid?.display}
                         </span>
                       )}
-                      {isBatteryExport(hour) && (
+                      {getIntent(hour) === 'BATTERY_EXPORT' && (
                         <span className="text-xs font-medium bg-slate-100 dark:bg-slate-900/30 text-slate-700 dark:text-slate-300 px-1 py-0 rounded flex items-center gap-0.5">
                           <Battery className="h-2.5 w-2.5" />
                           {hour.batteryToGrid?.display}
@@ -742,7 +735,7 @@ export const SavingsOverview: React.FC<SavingsOverviewProps> = ({ resolution }) 
                                   {hour.batteryToHome?.display}
                                 </span>
                               )}
-                              {isBatteryExport(hour) && (
+                              {getIntent(hour) === 'BATTERY_EXPORT' && (
                                 <span className="text-xs font-medium bg-slate-100 dark:bg-slate-900/30 text-slate-700 dark:text-slate-300 px-1 py-0 rounded flex items-center gap-0.5">
                                   <Zap className="h-2.5 w-2.5" />
                                   {hour.batteryToGrid?.display}
@@ -801,7 +794,7 @@ export const SavingsOverview: React.FC<SavingsOverviewProps> = ({ resolution }) 
                                   {hour.solarToGrid?.display}
                                 </span>
                               )}
-                              {isBatteryExport(hour) && (
+                              {getIntent(hour) === 'BATTERY_EXPORT' && (
                                 <span className="text-xs font-medium bg-slate-100 dark:bg-slate-900/30 text-slate-700 dark:text-slate-300 px-1 py-0 rounded flex items-center gap-0.5">
                                   <Battery className="h-2.5 w-2.5" />
                                   {hour.batteryToGrid?.display}

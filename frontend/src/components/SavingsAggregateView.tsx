@@ -7,7 +7,7 @@ const PERIODS: SavingsAggregatePeriod[] = ['week', 'month', 'year'];
 
 export const SavingsAggregateView: React.FC = () => {
   const [period, setPeriod] = useState<SavingsAggregatePeriod>('week');
-  const [viewMode, setViewMode] = useState<'chart' | 'table'>('table');
+  const [viewMode, setViewMode] = useState<'chart' | 'table'>('chart');
   const { data, loading, error } = useSavingsAggregate(period);
   const [isDarkMode, setIsDarkMode] = useState(
     document.documentElement.classList.contains('dark')

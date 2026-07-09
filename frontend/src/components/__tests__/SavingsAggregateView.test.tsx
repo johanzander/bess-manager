@@ -33,10 +33,30 @@ describe('SavingsAggregateView', () => {
 
     render(<SavingsAggregateView />);
 
+    // Default view is the chart, which Recharts doesn't meaningfully render
+    // under jsdom (ResponsiveContainer measures 0x0 with no layout engine).
+    // Switch to the table view, which renders plain DOM the bucket data.
+    fireEvent.click(screen.getByRole('button', { name: /table/i }));
+
     await waitFor(() => {
       expect(screen.getByText('2026-W28')).toBeInTheDocument();
     });
     expect(screen.getByText('3.00 EUR')).toBeInTheDocument();
+  });
+
+  it('defaults to the chart view without crashing', async () => {
+    vi.spyOn(scheduleApi, 'fetchSavingsAggregate').mockResolvedValue({
+      buckets: [bucket('2026-W28', 1)],
+      count: 1,
+    });
+
+    render(<SavingsAggregateView />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /^chart$/i })).toBeInTheDocument();
+    });
+    expect(screen.getByText('Savings History')).toBeInTheDocument();
+    expect(screen.queryByText(/could not load savings history/i)).not.toBeInTheDocument();
   });
 
   it('refetches with the new period when the toggle is changed', async () => {

@@ -29,14 +29,29 @@ This skill orchestrates other skills — it does not re-implement them:
 1. Run the **implementation skill** end-to-end (`add-price-provider`): verified
    discovery from integration source, source class + wiring + frontend, unit +
    discovery tests, a **source-derived** scenario fixture, and the wizard E2E.
-2. Mark the feature **experimental** everywhere the user sees it:
+2. Mark the feature **experimental** everywhere the user sees it — this label
+   *is* the stability flag for this codebase; there is no separate config
+   toggle, reuse this exact convention:
    - UI: provider/platform option label or help text (e.g. "(experimental)").
    - Docs: `README.md` tag + `docs/USER_GUIDE.md` note.
-3. Open a **draft PR** against `main`, `Closes #<issue>`. Put the lifecycle
-   checklist in the body (see template below).
-4. Ship to beta: run `release beta`. Comment on the issue that an experimental
+   - Maturity record: add (or extend) an entry in
+     `docs/agents/memory/project_platform_maturity.md` under "Experimental /
+     not yet real-world validated", naming the new platform/provider key —
+     following the existing pattern for `solax_modbus_growatt_sph` (GEN3) and
+     `solax_modbus_native` (SolaX VPP).
+3. Open a **draft PR against `origin/main`**, `Closes #<issue>`. Put the
+   lifecycle checklist in the body (see template below). `origin/main` is the
+   PR target for **every** stage of this lifecycle, including this initial
+   experimental merge — there is no beta-first branch. Beta is a
+   downstream mirror of `main` (see `release` skill) and is never a place
+   code is authored.
+4. Merge to `origin/main` with the experimental markers from step 2 in place.
+   Then run `release beta` to mirror the current `main` (now including this
+   feature) into a beta build. Comment on the issue that an experimental
    build is available and **ask the user to install it and report back**.
-- **Exit:** beta build published, issue comment posted requesting a trial.
+- **Exit:** feature merged to `origin/main` behind the experimental markers,
+  mirrored into a published beta build, issue comment posted requesting a
+  trial.
 
 ## Stage 2 — User provides logs (GATE)
 
@@ -49,7 +64,8 @@ config: inverter platform, sensors, and the new provider entity).
 2. When the log arrives, **verify it against the real data**:
    - Confirm the new integration's entity + attributes are present and parse.
    - If discovery/parse fails, this is a real bug — loop back to Stage 1
-     (fix, re-ship beta) before proceeding. Do not skip.
+     (fix on `main`, re-run `release beta` to re-mirror) before proceeding.
+     Do not skip.
 - **Exit:** a real debug log is in hand and the feature demonstrably works on it.
 
 ## Stage 3 — Lock the user's real config into the regression suite
@@ -82,13 +98,15 @@ provider together never silently break.
 This stage is usually a **loop of rapid minor fixes** (the feature can't be
 self-validated, so issues surface only against real configs). **Batch them** —
 do NOT cut a beta release + CHANGELOG entry per fix; that spams users and the
-changelog. Accumulate fixes as commits on the PR and cut a *consolidated* beta
-drop only at a meaningful checkpoint, with one combined CHANGELOG entry.
+changelog. Accumulate fixes as commits on the PR to `origin/main` and cut a
+*consolidated* beta mirror only at a meaningful checkpoint, with one combined
+CHANGELOG entry.
 
 1. Local gate on each iteration: `pytest -m "not slow"`, `black`/`ruff`,
    `tsc`/`vitest`/build, and the new scenario's wizard E2E.
-2. At a checkpoint (not per fix): `release beta` with the accumulated fixes +
-   regression fixture, one consolidated CHANGELOG entry.
+2. At a checkpoint (not per fix): merge the accumulated fixes + regression
+   fixture to `origin/main`, then run `release beta` to mirror that
+   checkpoint into beta, one consolidated CHANGELOG entry.
 3. **Poll CI** until green:
    ```
    gh pr checks <pr> --repo <repo> --watch
@@ -107,14 +125,21 @@ drop only at a meaningful checkpoint, with one combined CHANGELOG entry.
 
 ## Stage 6 — Graduate (remove experimental)
 
-1. Strip the `experimental` markers added in Stage 1 (UI label/help, README tag,
-   USER_GUIDE note).
-2. Update the maturity record (the project maturity memory / docs) to list the
-   feature as real-world tested, crediting the confirming user's scenario.
-3. Run the production `release` skill (`release` / `release prod`): version bump,
+Graduation only removes the stability flag from Stage 1 — it is a follow-up
+PR to `origin/main`, never a branch change (the feature already lives on
+`main`; beta was only ever a mirror of it).
+
+1. Open a **follow-up PR to `origin/main`** that changes only the experimental
+   markers added in Stage 1's step 2: strip the UI label/help text, the
+   `README.md` tag, the `docs/USER_GUIDE.md` note, and move the platform/
+   provider key in `docs/agents/memory/project_platform_maturity.md` from
+   "Experimental / not yet real-world validated" to the real-world-tested
+   list, crediting the confirming user's scenario. No implementation changes
+   belong in this PR.
+2. Run the production `release` skill (`release` / `release prod`): version bump,
    CHANGELOG "Added — now stable", PR to `origin/main`, CI green, tag, GitHub
    Release.
-4. Mark the PR ready (un-draft), ensure it closes the issue, and post a final
+3. Mark the PR ready (un-draft), ensure it closes the issue, and post a final
    thank-you comment to the user.
 - **Exit:** feature stable in a production release; issue closed.
 
@@ -139,5 +164,5 @@ drop only at a meaningful checkpoint, with one combined CHANGELOG entry.
 | Debug log → scenario | `scripts/mock_ha/scenarios/from_debug_log.py` |
 | Backend regression harness | `core/bess/tests/unit/test_scenario_discovery.py` |
 | Frontend wizard E2E | `e2e/tests/setup-wizard.spec.ts`, `e2e/run-e2e.sh`, `.github/workflows/ci.yml` |
-| Maturity record | project maturity memory (`docs/agents/memory/`) + `README.md` |
+| Maturity record (the stability flag) | `docs/agents/memory/project_platform_maturity.md` + `README.md` tag + UI "(experimental)" label |
 | Agent comms | `gh pr comment`, `gh issue comment`, `gh pr checks --watch` |

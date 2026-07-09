@@ -23,6 +23,7 @@ from api_dataclasses import (
     APIDashboardHourlyData,
     APIDashboardResponse,
     APIPredictionSnapshot,
+    APISavingsBucket,
     APISetupCompletePayload,
     APISnapshotComparison,
     APIStrategyForecast,
@@ -35,6 +36,7 @@ from settings_store import VALID_PLATFORMS
 
 from core.bess import time_utils
 from core.bess.health_check import describe_failing_checks, run_system_health_checks
+from core.bess.savings_aggregator import DEFAULT_COUNTS, build_buckets
 from core.bess.time_utils import get_period_count
 
 router = APIRouter()
@@ -2216,6 +2218,68 @@ async def get_prediction_timeline():
 
     except Exception as e:
         logger.error(f"Error building prediction timeline: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.get("/api/savings/aggregate")
+async def get_savings_aggregate(
+    period: str = Query(..., pattern="^(week|month|year)$"),
+    count: int | None = Query(None, ge=1, le=520),
+):
+    """Get week/month/year savings aggregates from the persisted daily history."""
+    from app import bess_controller
+
+    _require_configured_system(bess_controller)
+
+    try:
+        resolved_count = count or DEFAULT_COUNTS[period]
+        buckets = build_buckets(
+            period, resolved_count, bess_controller.system.daily_view_store
+        )
+        currency = bess_controller.system.home_settings.currency
+
+        api_buckets = [APISavingsBucket.from_internal(b, currency) for b in buckets]
+
+        response = {
+            "buckets": [b.__dict__ for b in api_buckets],
+            "count": len(api_buckets),
+        }
+
+        return convert_keys_to_camel_case(response)
+
+    except Exception as e:
+        logger.error(f"Error building savings aggregate: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.get("/api/savings/history/disk-usage")
+async def get_savings_history_disk_usage():
+    """Get disk usage of the persisted daily savings history."""
+    from app import bess_controller
+
+    _require_configured_system(bess_controller)
+
+    try:
+        usage = bess_controller.system.daily_view_store.get_disk_usage()
+        return convert_keys_to_camel_case(usage)
+    except Exception as e:
+        logger.error(f"Error getting savings history disk usage: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.delete("/api/savings/history")
+async def delete_savings_history():
+    """Clear all persisted daily savings history."""
+    from app import bess_controller
+
+    _require_configured_system(bess_controller)
+
+    try:
+        bess_controller.system.daily_view_store.clear_all()
+        usage = bess_controller.system.daily_view_store.get_disk_usage()
+        return convert_keys_to_camel_case(usage)
+    except Exception as e:
+        logger.error(f"Error clearing savings history: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 

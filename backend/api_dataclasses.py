@@ -78,6 +78,54 @@ def create_formatted_value(
 
 
 @dataclass
+class APISavingsBucket:
+    """API representation of a savings_aggregator.SavingsBucket."""
+
+    label: str
+    startDate: str
+    endDate: str
+    dayCount: int
+    importKwh: FormattedValue
+    importEur: FormattedValue
+    exportKwh: FormattedValue
+    exportEur: FormattedValue
+    gridCost: FormattedValue
+    batteryCycleCost: FormattedValue
+    savingsVsGridOnly: FormattedValue
+    solarKwh: FormattedValue
+    batteryChargedKwh: FormattedValue
+    batteryDischargedKwh: FormattedValue
+
+    @classmethod
+    def from_internal(cls, bucket, currency: str) -> APISavingsBucket:
+        t = bucket.totals
+        return cls(
+            label=bucket.label,
+            startDate=bucket.start_date,
+            endDate=bucket.end_date,
+            dayCount=bucket.day_count,
+            importKwh=create_formatted_value(t.import_kwh, "energy_kwh_only", currency),
+            importEur=create_formatted_value(t.import_eur, "currency", currency),
+            exportKwh=create_formatted_value(t.export_kwh, "energy_kwh_only", currency),
+            exportEur=create_formatted_value(t.export_eur, "currency", currency),
+            gridCost=create_formatted_value(t.grid_cost, "currency", currency),
+            batteryCycleCost=create_formatted_value(
+                t.battery_cycle_cost, "currency", currency
+            ),
+            savingsVsGridOnly=create_formatted_value(
+                t.savings_vs_grid_only, "currency", currency
+            ),
+            solarKwh=create_formatted_value(t.solar_kwh, "energy_kwh_only", currency),
+            batteryChargedKwh=create_formatted_value(
+                t.battery_charged_kwh, "energy_kwh_only", currency
+            ),
+            batteryDischargedKwh=create_formatted_value(
+                t.battery_discharged_kwh, "energy_kwh_only", currency
+            ),
+        )
+
+
+@dataclass
 class APIPredictionSnapshot:
     """API representation of PredictionSnapshot."""
 

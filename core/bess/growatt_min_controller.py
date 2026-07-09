@@ -1321,15 +1321,13 @@ class GrowattMinController(InverterController):
         return writes, disables
 
     def sync_soc_limits(self, controller) -> None:
-        """Sync SOC limits from config to inverter hardware via entity writes."""
+        """Sync SOC limits from config to inverter hardware via entity writes.
+
+        Reads current charge/discharge stop SOC from the inverter and writes
+        back only if they differ from the configured max_soc / min_soc.
+        """
         configured_min_soc = self.battery_settings.min_soc
         configured_max_soc = self.battery_settings.max_soc
-
-        controller.set_discharge_stop_soc(configured_min_soc)
-        logger.info("Set discharge_stop_soc to %d%%", configured_min_soc)
-
-        controller.set_charge_stop_soc(configured_max_soc)
-        logger.info("Set charge_stop_soc to %d%%", configured_max_soc)
 
         actual_min_soc = controller.get_discharge_stop_soc()
         actual_max_soc = controller.get_charge_stop_soc()
@@ -1343,14 +1341,24 @@ class GrowattMinController(InverterController):
                 actual_min_soc,
                 actual_max_soc,
             )
-        else:
-            logger.warning(
-                "SOC limit mismatch detected! Configured: min=%d%%, max=%d%% | Actual: min=%s%%, max=%s%%",
-                configured_min_soc,
-                configured_max_soc,
-                actual_min_soc,
-                actual_max_soc,
-            )
+            return
+
+        logger.info(
+            "SOC limit mismatch — configured: min=%d%%, max=%d%% | "
+            "actual: min=%s%%, max=%s%% — syncing",
+            configured_min_soc,
+            configured_max_soc,
+            actual_min_soc,
+            actual_max_soc,
+        )
+
+        if actual_min_soc != configured_min_soc:
+            controller.set_discharge_stop_soc(configured_min_soc)
+            logger.info("Set discharge_stop_soc to %d%%", configured_min_soc)
+
+        if actual_max_soc != configured_max_soc:
+            controller.set_charge_stop_soc(configured_max_soc)
+            logger.info("Set charge_stop_soc to %d%%", configured_max_soc)
 
     def initialize_hardware(self, controller) -> None:
         self.sync_soc_limits(controller)

@@ -30,15 +30,22 @@ This skill orchestrates other skills — it does not re-implement them:
    discovery from integration source, source class + wiring + frontend, unit +
    discovery tests, a **source-derived** scenario fixture, and the wizard E2E.
 2. Mark the feature **experimental** everywhere the user sees it — this label
-   *is* the stability flag for this codebase; there is no separate config
-   toggle, reuse this exact convention:
-   - UI: provider/platform option label or help text (e.g. "(experimental)").
-   - Docs: `README.md` tag + `docs/USER_GUIDE.md` note.
-   - Maturity record: add (or extend) an entry in
-     `docs/agents/memory/project_platform_maturity.md` under "Experimental /
-     not yet real-world validated", naming the new platform/provider key —
-     following the existing pattern for `solax_modbus_growatt_sph` (GEN3) and
-     `solax_modbus_native` (SolaX VPP).
+   *is* the stability flag for this codebase. Only the README/USER_GUIDE tag
+   has real precedent today (used for the ENTSO-e/Belpex price provider);
+   the other two are new conventions this feature would establish:
+   - Docs (real, precedented): `README.md` tag `*(experimental)*` +
+     `docs/USER_GUIDE.md` note in the style of the ENTSO-e/Belpex entry
+     ("*Experimental: not yet real-world validated*").
+   - UI (aspirational — not implemented anywhere in `frontend/src` today):
+     if feasible, add a provider/platform option label or help text such as
+     "(experimental)"; otherwise skip it and rely on the docs tag alone.
+   - Maturity record (new — does not exist on `main` yet): create
+     `docs/agents/memory/project_platform_maturity.md` with an "Experimental /
+     not yet real-world validated" section naming the new platform/provider
+     key. This is the **first** feature to use this file; there is no
+     existing GEN3/SolaX entry to extend — those platforms are candidates for
+     future entries, not current precedent. Once created, later features
+     extend this same file instead of re-creating it.
 3. Open a **draft PR against `origin/main`**, `Closes #<issue>`. Put the
    lifecycle checklist in the body (see template below). `origin/main` is the
    PR target for **every** stage of this lifecycle, including this initial
@@ -164,5 +171,5 @@ PR to `origin/main`, never a branch change (the feature already lives on
 | Debug log → scenario | `scripts/mock_ha/scenarios/from_debug_log.py` |
 | Backend regression harness | `core/bess/tests/unit/test_scenario_discovery.py` |
 | Frontend wizard E2E | `e2e/tests/setup-wizard.spec.ts`, `e2e/run-e2e.sh`, `.github/workflows/ci.yml` |
-| Maturity record (the stability flag) | `docs/agents/memory/project_platform_maturity.md` + `README.md` tag + UI "(experimental)" label |
+| Maturity record (the stability flag) | `README.md` `*(experimental)*` tag + `docs/USER_GUIDE.md` note (real, precedented today via ENTSO-e/Belpex) + `docs/agents/memory/project_platform_maturity.md` (new file, first created by this feature) + optional UI "(experimental)" label (aspirational, no current precedent in `frontend/src`) |
 | Agent comms | `gh pr comment`, `gh issue comment`, `gh pr checks --watch` |

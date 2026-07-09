@@ -75,20 +75,32 @@ the bug (from the diagnosis's evidence — the specific period/scenario/input)
 and watch it fail, then write the minimal fix. No refactors outside the bug
 — match `docs/agents/patterns.md`.
 
-### 6. Quality gate
+### 6. Quality gate + code review (background)
 
-```bash
-./scripts/quality-check.sh
-```
+Every PR must pass both the fast and slow suites, plus code review. This is
+the long-wait step (slow suite is ~30min) — per `CLAUDE.md`'s Cost
+Discipline, do NOT hold the session open watching it run. Dispatch a
+background `Agent` (no `isolation` — it must operate in the Step 4 worktree,
+not spawn a new one; `run_in_background: true`, the default) with a
+self-contained prompt covering:
 
-Zero errors. If it fails, fix and re-run — do not proceed with failures.
+1. `./scripts/quality-check.sh` (fast suite) — if it fails, fix and re-run,
+   do not proceed with failures.
+2. `.venv/bin/pytest -m slow` (slow suite) — same failure handling.
+3. Invoke the `code-review` skill on the diff.
+4. Report back: pass/fail on both suites, and any CONFIRMED code-review
+   findings verbatim (everything else goes to `TODO.md`).
 
-### 7. Code review
+Do not poll — you'll be notified on completion. This is a hard session
+boundary: don't keep re-touching the diagnosis/TDD context while it runs.
 
-Invoke `code-review` (the project's `/code-review` skill). CONFIRMED
-findings block progress — fix them before continuing. Everything else goes
-to `TODO.md`. This runs BEFORE local verification (Step 8) on purpose: catch
-cheap-to-fix issues before spending time on manual observation.
+### 7. Confirm gate 2 (manual — mandatory)
+
+Present the background agent's report to the user: suite results and any
+CONFIRMED findings. Fix CONFIRMED findings in the same worktree before
+continuing. Wait for explicit go-ahead before Step 8 — same reasoning as
+Step 3, cheap insurance against shipping a finding-blocked or slow-suite-
+broken change.
 
 ### 8. Local run & observe (never skip this)
 
@@ -180,16 +192,19 @@ flow above, which stops at draft-PR-open per the Step 10 constraints.
 | "there's already a bot diagnosis, let me re-derive it anyway to be safe" | Re-verify the cited evidence; don't redo the whole investigation. |
 | "the plan doc is useful context, keep it in the PR" | Once code and tests exist, the plan only drifts — it's not the source of truth. Delete it before Step 9; keep the spec if one exists. |
 | "the user is in a hurry, just open the PR" | Time pressure from the user is not permission to skip Step 8 — it's the reason to say so explicitly and give a real ETA instead. |
+| "I'll just watch the background agent run" | Defeats the point — the whole reason it's backgrounded is so the session isn't held open through the slow suite. Let the notification bring you back. |
 
 ## Red Flags — Stop and Go Back
 
 - About to commit or open the PR without having actually run/observed the
   fix — only ran automated tests.
-- About to skip the Step 3 confirm gate because of time pressure.
+- About to skip the Step 3 or Step 7 confirm gate because of time pressure.
 - About to open the PR before `/code-review` CONFIRMED findings are
   resolved.
 - About to re-run the full `bess-analyst` diagnosis when a verified bot
   comment already exists.
+- About to run the slow suite inline in the main session instead of
+  dispatching the Step 6 background agent.
 
 ## Quick Reference
 
@@ -200,7 +215,7 @@ flow above, which stops at draft-PR-open per the Step 10 constraints.
 | 3. Confirm gate | — | No |
 | 4. Worktree | `using-git-worktrees` | No |
 | 5. TDD | `test-driven-development` | No |
-| 6. Quality gate | `quality-check.sh` | No |
-| 7. Code review | `code-review` | No |
+| 6. Quality gate + code review | `quality-check.sh` + slow suite + `code-review` (background agent) | No |
+| 7. Confirm gate 2 | — | No |
 | 8. Local run & observe | `verify` | **Never** |
 | 9. Commit + PR | `finishing-a-development-branch` | No |

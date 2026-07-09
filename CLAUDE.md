@@ -154,6 +154,10 @@ every multi-minute wait is what runs up the bill — not the work itself.
   of the entire context. Prefer `/clear` between unrelated chunks, or let the
   session sit idle rather than re-engaging every few minutes.
 - Don't re-dump large files or logs into context.
+- **Treat `implement-issue` Step 8 (`verify`, podman-compose/mock-HA E2E) as
+  a session boundary.** Kick it off, then either let the session sit idle
+  until it completes or `/clear` and resume fresh once it's done — don't
+  stay engaged re-touching the diagnosis/TDD context through the wait.
 
 ## Worktree Conventions
 

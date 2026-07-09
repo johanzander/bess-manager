@@ -9,6 +9,7 @@ import logging
 from typing import Any
 
 from .debug_data_exporter import DebugDataExport
+from .time_utils import format_period
 
 logger = logging.getLogger(__name__)
 
@@ -399,7 +400,8 @@ Findings (top) and System Logs (bottom).*
         for p in export.historical_periods:
             if p is None:
                 continue
-            ts = str(p.get("timestamp", ""))[:16]
+            period = p.get("period", "")
+            time_str = format_period(period) if isinstance(period, int) else ""
             src = p.get("data_source", "")[:6]
             dec = p.get("decision", {})
             intent = dec.get("strategic_intent", "")[:16]
@@ -412,7 +414,7 @@ Findings (top) and System Logs (bottom).*
             econ = p.get("economic", {})
             savings = econ.get("hourly_savings", 0)
             rows.append(
-                f"| {p.get('period', ''):>3} | {ts[11:16]:5} | {src:<6} |"
+                f"| {period:>3} | {time_str:5} | {src:<6} |"
                 f" {intent:<16} | {observed:<16} |"
                 f" {soe_s:>4.1f}→{soe_e:<4.1f} | {solar:>5.2f} | {imp:>6.2f} | {savings:>7.4f} |"
             )
@@ -505,10 +507,10 @@ Findings (top) and System Logs (bottom).*
             econ = p.get("economic", {})
             buy = econ.get("buy_price", 0)
             savings = econ.get("hourly_savings", 0)
-            ts = str(p.get("timestamp", ""))
-            time_str = ts[11:16] if len(ts) >= 16 else ""
+            period = p.get("period", "")
+            time_str = format_period(period) if isinstance(period, int) else ""
             rows.append(
-                f"| {p.get('period', ''):>3} | {time_str:5} |"
+                f"| {period:>3} | {time_str:5} |"
                 f" {intent:<16} | {observed:<16} |"
                 f" {batt_act:>+7.3f} | {soe_s:>4.1f}→{soe_e:<4.1f} |"
                 f" {buy:>8.4f} | {savings:>7.4f} |"

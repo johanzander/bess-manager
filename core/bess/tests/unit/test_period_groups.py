@@ -132,3 +132,54 @@ class TestDischargeRateFromSchedule:
         assert len(groups) == 2
         assert groups[0]["discharge_rate"] == 60
         assert groups[1]["discharge_rate"] == 30
+
+
+class TestChargeRateFromSchedule:
+    def test_grid_charging_uses_action_derived_rate(self, controller):
+        """GRID_CHARGING charge_rate reflects actual battery action, not static 100%."""
+        # 0.05 kWh / 0.25 h = 0.2 kW; round(0.2 / 6.0 * 100) = 3
+        intents = ["IDLE"] * 96
+        intents[20] = "GRID_CHARGING"
+        intents[21] = "GRID_CHARGING"
+        intents[22] = "GRID_CHARGING"
+        intents[23] = "GRID_CHARGING"
+
+        actions = [0.0] * 96
+        actions[20] = 0.05
+        actions[21] = 0.05
+        actions[22] = 0.05
+        actions[23] = 0.05
+
+        controller.strategic_intents = intents
+        controller.current_schedule = _make_schedule(actions)
+
+        groups = controller.get_detailed_period_groups()
+
+        charge_group = next(g for g in groups if g["intent"] == "GRID_CHARGING")
+        assert charge_group["charge_rate"] == 3  # round(0.2/6.0*100)
+
+    def test_grid_charging_no_schedule_falls_back_to_static_rate(self, controller):
+        """With no current_schedule, charge_rate falls back to static 100."""
+        intents = ["IDLE"] * 96
+        intents[20] = "GRID_CHARGING"
+
+        controller.strategic_intents = intents
+        controller.current_schedule = None
+
+        groups = controller.get_detailed_period_groups()
+
+        charge_group = next(g for g in groups if g["intent"] == "GRID_CHARGING")
+        assert charge_group["charge_rate"] == 100
+
+    def test_solar_storage_charge_rate_stays_static(self, controller):
+        """Non-GRID_CHARGING intents keep the static charge_rate regardless of action."""
+        intents = ["IDLE"] * 4
+        intents[0] = "SOLAR_STORAGE"
+        actions = [0.9, 0.0, 0.0, 0.0]
+
+        controller.strategic_intents = intents
+        controller.current_schedule = _make_schedule(actions)
+
+        groups = controller.get_detailed_period_groups()
+        storage_group = next(g for g in groups if g["intent"] == "SOLAR_STORAGE")
+        assert storage_group["charge_rate"] == 100

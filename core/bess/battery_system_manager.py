@@ -1702,19 +1702,33 @@ class BatterySystemManager:
         return optimization_period, optimization_data
 
     def _calculate_terminal_value(
-        self, buy_prices: list[float], optimization_period: int
+        self,
+        buy_prices: list[float],
+        sell_prices: list[float],
+        optimization_period: int,
     ) -> float:
         """Calculate terminal value per kWh for the DP optimization.
 
         When the horizon already extends past today (i.e. tomorrow's prices are
         included), return 0.0 since the DP has explicit future data. Otherwise,
-        estimate value from the median buy price adjusted for efficiency
-        and cycle cost.
+        estimate value from the median buy price adjusted for efficiency and
+        cycle cost ("avoid tomorrow's purchase"), capped at the best achievable
+        in-horizon export value ("arbitrage-consistency cap").
 
-        Using the median avoids inflating the terminal value with peak prices.
+        The cap is required because cycle cost is only ever charged on
+        charging, never on discharge (see `_compute_reward`): an uncapped
+        buy-median terminal value can exceed the best real, known export price
+        already visible inside today's horizon, which makes the DP hold charge
+        to chase a fictitious future bonus instead of exporting now (#126,
+        #244). The cap is self-calibrating from data the DP already has, so it
+        collapses on wide-spread contracts (e.g. Belgian ENTSO-e/Belpex)
+        without needing a market-specific threshold, and stays inert on
+        ordinary/Nordic-shaped markets where the best in-horizon peak is
+        already above the buy-median estimate (#246, supersedes #245).
 
         Args:
             buy_prices: Full buy price array (from optimization_period onwards)
+            sell_prices: Full sell price array (from optimization_period onwards)
             optimization_period: Current optimization starting period
 
         Returns:
@@ -1738,16 +1752,27 @@ class BatterySystemManager:
             return 0.0
 
         median_price = statistics.median(buy_prices)
-        terminal_value = (
+        max_sell_price = max(sell_prices)
+        buy_based = max(
+            0.0,
             median_price * self.battery_settings.efficiency_discharge
-            - self.battery_settings.cycle_cost_per_kwh
+            - self.battery_settings.cycle_cost_per_kwh,
         )
-        terminal_value = max(0.0, terminal_value)
+        sell_cap = max(
+            0.0,
+            max_sell_price * self.battery_settings.efficiency_discharge
+            - self.battery_settings.cycle_cost_per_kwh,
+        )
+        terminal_value = min(buy_based, sell_cap)
 
         logger.info(
-            "Terminal value: %.3f/kWh (median_price=%.3f, efficiency=%.2f, cycle_cost=%.3f)",
+            "Terminal value: %.3f/kWh (buy_based=%.3f, sell_cap=%.3f, "
+            "median_buy=%.3f, max_sell=%.3f, efficiency=%.2f, cycle_cost=%.3f)",
             terminal_value,
+            buy_based,
+            sell_cap,
             median_price,
+            max_sell_price,
             self.battery_settings.efficiency_discharge,
             self.battery_settings.cycle_cost_per_kwh,
         )
@@ -1869,7 +1894,7 @@ class BatterySystemManager:
 
             # Calculate terminal value for end-of-horizon energy valuation
             terminal_value = self._calculate_terminal_value(
-                buy_prices, optimization_period
+                buy_prices, sell_prices, optimization_period
             )
 
             # Get temperature-based charge power limits if derating is enabled.

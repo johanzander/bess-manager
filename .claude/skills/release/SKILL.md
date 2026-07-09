@@ -66,3 +66,16 @@
 7. **Create a PR** against `origin/main` (a version-bump-only PR, branched from `origin/main`), wait for CI.
 8. **Get explicit user approval, then merge, tag, and push the tag** to `origin`.
 9. **Create a GitHub Release**: `gh release create v<version> --title "v<version>" --notes "<changelog>"`.
+
+## Hotfix Release (`release hotfix`)
+
+Use when a bug is found in the **currently-published stable version** and `origin/main` has since moved on with unrelated, unreleased work you don't want to ship alongside the fix. If `origin/main` is still close to the last stable tag (no risky or unvalidated work merged since), skip this — just fix on `main` and run a normal Production Release instead.
+
+1. **Fix on `main` first**, via a normal PR. `main` remains the only place any fix is ever authored — this procedure only moves it backward to where users already are, never authors it directly on a release branch.
+2. **Branch from the stable tag**: `git fetch origin --tags && git checkout -b release-X.Y vX.Y.Z` (the currently-published stable tag, not `main`).
+3. **Cherry-pick the fix commit(s)** from `main` onto `release-X.Y`: `git cherry-pick <sha>`.
+4. **Bump the patch version** in `config.yaml` (`X.Y.Z` → `X.Y.(Z+1)`) and add a changelog entry directly on `release-X.Y` (this content also needs to make it back into `origin/main`'s next `Unreleased` section by hand, since `release-X.Y` isn't merged back into `main` — the fix code already is, only the changelog line and version bump are release-branch-only).
+5. **Run the fast test suite** on `release-X.Y`: `pytest -m "not slow"`.
+6. **Push, tag, and release** from `origin`: `git push origin release-X.Y`, then tag `vX.Y.(Z+1)` on `release-X.Y` and `gh release create` as in a normal production release — get explicit user approval before each push/tag/release.
+7. **Delete `release-X.Y`** once the patch is published: `git push origin --delete release-X.Y`. It is not long-lived.
+8. **Sync beta**: run the normal `release beta` flow afterward so beta picks up both the original fix (already on `main`) and stays ahead — no special handling needed since `main` already has the fix from step 1.

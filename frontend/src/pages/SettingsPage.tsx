@@ -15,6 +15,7 @@ import { SensorConfigSection } from '../components/settings/SensorConfigSection'
 import type { InverterForm } from '../components/settings/SensorConfigSection';
 import { AIAnalystSettings } from '../components/settings/AIAnalystSettings';
 import type { AIAnalystForm } from '../components/settings/AIAnalystSettings';
+import { SavingsHistorySection } from '../components/settings/SavingsHistorySection';
 import { emptyPerPlatformSensors, getActiveSensorsFlat } from '../lib/sensorDefinitions';
 import type { PerPlatformSensors } from '../lib/sensorDefinitions';
 
@@ -756,6 +757,7 @@ const SettingsPage: React.FC = () => {
                     <span>Export Debug Data</span>
                   </button>
                 </div>
+                <SavingsHistorySection />
                 <SystemHealthComponent />
               </div>
             </div>

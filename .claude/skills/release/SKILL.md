@@ -57,11 +57,12 @@
 
 ## Production Release (`release` or `release prod`)
 
-1. **Check version**: `gh release list -L 5` (origin repo)
-2. **Run full test suite** — including `pytest -m slow`
-3. **Bump version** in `config.yaml`
-4. **Update CHANGELOG.md** — this is NOT optional. Same rule as beta: one line per PR-linked item, no restating the PR body.
-5. **Run `black --check .` and `ruff check .`** — fix any formatting issues.
-6. **Create PR** against `origin/main`, wait for CI
-7. **Merge**, tag, push tag to origin
-8. **Create GitHub Release**: `gh release create v<version> --title "v<version>" --notes "<changelog>"`
+1. **Check the current stable version**: `gh release list -L 5` (origin repo) and `git show origin/main:bess_manager/config.yaml | grep '^version:'` — they should match; if not, stop and investigate before releasing.
+2. **Confirm the commit being promoted has already shipped as a beta** — `git log --oneline` on `origin/main` should show the exact commit was previously synced to `beta/main` and released there (check `gh release list -L 10 -R johanzander/bess-manager-beta` for a matching `bN` version pointing at content you recognize). Promoting a commit that was never validated on beta defeats the point of having a beta channel — if this is a small, fully self-validated change (see project memory on beta-vs-prod channel choice), that's fine, just confirm it deliberately rather than by default.
+3. **Run the full test suite locally**, including `pytest -m slow`.
+4. **Bump `config.yaml`** — drop the `bN` suffix (e.g. `9.9.0b12` → `9.9.0`).
+5. **Rename the changelog heading** — `## [Unreleased]` becomes `## [<version>] - <date>` in `CHANGELOG.md` on `origin/main`. This is the only changelog edit a production release makes; do not also hand-add entries, they should already be there from each PR's merge.
+6. **Run `black --check .` and `ruff check .`** — fix any formatting issues.
+7. **Create a PR** against `origin/main` (a version-bump-only PR, branched from `origin/main`), wait for CI.
+8. **Get explicit user approval, then merge, tag, and push the tag** to `origin`.
+9. **Create a GitHub Release**: `gh release create v<version> --title "v<version>" --notes "<changelog>"`.

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { DetailedSavingsAnalysis } from '../components/DetailedSavingsAnalysis';
 import { SavingsOverview } from '../components/SavingsOverview';
+import { SavingsAggregateView } from '../components/SavingsAggregateView';
 import { useSettings } from '../hooks/useSettings';
 import { useUserPreferences } from '../hooks/useUserPreferences';
 import { Eye, Table2 } from 'lucide-react';
@@ -116,6 +117,8 @@ const SavingsPage: React.FC = () => {
       ) : (
         <DetailedSavingsAnalysis settings={mergedSettings} resolution={dataResolution} />
       )}
+
+      <SavingsAggregateView />
     </div>
   );
 };

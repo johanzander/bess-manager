@@ -13,6 +13,7 @@ from typing import Any, ClassVar
 
 from . import time_utils
 from .daily_view_builder import DailyView, DailyViewBuilder
+from .daily_view_store import DailyViewStore
 from .dp_battery_algorithm import (
     OptimizationResult,
     optimize_battery_schedule,
@@ -125,6 +126,7 @@ class BatterySystemManager:
         self.historical_store = HistoricalDataStore(self.battery_settings)
         self.schedule_store = ScheduleStore()
         self.prediction_snapshot_store = PredictionSnapshotStore()
+        self.daily_view_store = DailyViewStore()
 
         # Initialize specialized components
         self.sensor_collector = SensorCollector(controller, self.battery_settings)
@@ -1285,6 +1287,7 @@ class BatterySystemManager:
             logger.info(
                 "Preparing for next day - clearing historical store and refreshing predictions"
             )
+            self.daily_view_store.save_day(self.get_current_daily_view())
             # Clear historical store to prevent yesterday's data from appearing as today's future data
             self.historical_store.clear()
             self.prediction_snapshot_store.clear()

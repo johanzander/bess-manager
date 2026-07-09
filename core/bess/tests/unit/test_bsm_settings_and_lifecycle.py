@@ -209,9 +209,40 @@ class TestHandleSpecialCases:
     def test_prepare_next_day_clears_stores_and_refetches(self, system):
         system._consumption_predictions = [1.0] * 96
         system._solar_predictions = [0.0] * 96
-        with patch.object(system, "_fetch_predictions") as mock_fetch:
+        with (
+            patch.object(system, "get_current_daily_view"),
+            patch.object(system.daily_view_store, "save_day"),
+            patch.object(system, "_fetch_predictions") as mock_fetch,
+        ):
             system._handle_special_cases(period=0, prepare_next_day=True)
             mock_fetch.assert_called_once()
+
+    def test_prepare_next_day_saves_daily_view_before_clearing(self, system, tmp_path):
+        from datetime import date as date_cls
+        from unittest.mock import patch
+
+        from core.bess.daily_view_builder import DailyView
+        from core.bess.daily_view_store import DailyViewStore
+
+        # Use a temp persist dir instead of the production default (/data/daily_views),
+        # which isn't writable in local/sandboxed test environments.
+        system.daily_view_store = DailyViewStore(persist_dir=tmp_path)
+
+        fake_view = DailyView(
+            date=date_cls(2026, 7, 9),
+            periods=[],
+            total_savings=1.5,
+            actual_count=0,
+            predicted_count=0,
+        )
+
+        with patch.object(system, "get_current_daily_view", return_value=fake_view):
+            with patch.object(system, "_fetch_predictions"):
+                system._handle_special_cases(period=0, prepare_next_day=True)
+
+        saved = system.daily_view_store.load_day(date_cls(2026, 7, 9))
+        assert saved is not None
+        assert saved.total_savings == 1.5
 
 
 class TestRuntimeFailureTracking:

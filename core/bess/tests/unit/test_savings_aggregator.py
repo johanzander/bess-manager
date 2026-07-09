@@ -1,6 +1,6 @@
 """Unit tests for savings_aggregator bucketing."""
 
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 
@@ -101,6 +101,26 @@ class TestWeekBuckets:
         assert buckets[0].day_count == 0
         assert buckets[0].totals.import_kwh == 0.0
 
+    def test_multi_bucket_sequence_crosses_iso_year_boundary(self, tmp_path):
+        store = DailyViewStore(persist_dir=tmp_path)
+        # Jan 2, 2026 is a Friday in ISO week 2026-W01 (Mon 2025-12-29 - Sun 2026-01-04).
+        # Stepping back 7 days from the week's Monday (Dec 29) lands on Dec 22, which is in 2025-W52.
+        # This gives us a sequence where the ISO year label changes: 2025-W52 → 2026-W01.
+        buckets = build_buckets("week", count=2, store=store, today=date(2026, 1, 2))
+
+        assert len(buckets) == 2
+        assert [b.label for b in buckets] == ["2025-W52", "2026-W01"]
+        # 2025-W52: Mon 2025-12-22 to Sun 2025-12-28
+        assert buckets[0].start_date == "2025-12-22"
+        assert buckets[0].end_date == "2025-12-28"
+        # 2026-W01: Mon 2025-12-29 to Sun 2026-01-04 (contains Jan 4, so labeled as 2026)
+        assert buckets[1].start_date == "2025-12-29"
+        assert buckets[1].end_date == "2026-01-04"
+        # Verify contiguity: next week's start is exactly one day after previous week's end
+        assert date.fromisoformat(buckets[1].start_date) == date.fromisoformat(
+            buckets[0].end_date
+        ) + timedelta(days=1)
+
 
 class TestMonthBuckets:
     def test_bucket_spans_the_whole_calendar_month(self, tmp_path):
@@ -123,6 +143,22 @@ class TestMonthBuckets:
 
         assert buckets[0].end_date == "2028-02-29"
 
+    def test_multi_bucket_sequence_crosses_december_to_january_boundary(self, tmp_path):
+        store = DailyViewStore(persist_dir=tmp_path)
+
+        buckets = build_buckets("month", count=2, store=store, today=date(2026, 1, 15))
+
+        assert len(buckets) == 2
+        assert [b.label for b in buckets] == ["2025-12", "2026-01"]
+        # December bucket: full month
+        assert buckets[0].start_date == "2025-12-01"
+        assert buckets[0].end_date == "2025-12-31"
+        # January bucket: full month
+        assert buckets[1].start_date == "2026-01-01"
+        assert buckets[1].end_date == "2026-01-31"
+        # Verify contiguity: January starts the day after December ends
+        assert buckets[1].start_date == "2026-01-01"
+
 
 class TestYearBuckets:
     def test_bucket_spans_the_whole_calendar_year(self, tmp_path):
@@ -137,6 +173,20 @@ class TestYearBuckets:
         assert buckets[0].start_date == "2026-01-01"
         assert buckets[0].end_date == "2026-12-31"
         assert buckets[0].day_count == 1
+
+    def test_multi_bucket_sequence_crosses_year_boundary(self, tmp_path):
+        store = DailyViewStore(persist_dir=tmp_path)
+
+        buckets = build_buckets("year", count=2, store=store, today=date(2026, 1, 5))
+
+        assert len(buckets) == 2
+        assert [b.label for b in buckets] == ["2025", "2026"]
+        # 2025 bucket: full year
+        assert buckets[0].start_date == "2025-01-01"
+        assert buckets[0].end_date == "2025-12-31"
+        # 2026 bucket: full year
+        assert buckets[1].start_date == "2026-01-01"
+        assert buckets[1].end_date == "2026-12-31"
 
 
 class TestInvalidPeriod:

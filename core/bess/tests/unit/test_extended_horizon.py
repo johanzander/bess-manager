@@ -290,7 +290,7 @@ class TestCalculateTerminalValue:
 
         # 192 buy prices remaining but only ~96 today periods remaining from period 0
         terminal_value = system._calculate_terminal_value(
-            buy_prices=[1.0] * 192, optimization_period=0
+            buy_prices=[1.0] * 192, sell_prices=[0.8] * 192, optimization_period=0
         )
 
         assert terminal_value == 0.0
@@ -300,12 +300,13 @@ class TestCalculateTerminalValue:
         source = MockSource([1.0] * 96)
         system = _make_system(source)
 
-        # Only 50 remaining prices (clearly today-only)
+        # Only 50 remaining prices (clearly today-only), sell prices high enough
+        # that the arbitrage cap doesn't bind.
         terminal_value = system._calculate_terminal_value(
-            buy_prices=[1.0] * 50, optimization_period=46
+            buy_prices=[1.0] * 50, sell_prices=[1.0] * 50, optimization_period=46
         )
 
-        # Should be avg_buy * efficiency_discharge - cycle_cost > 0
+        # Should be median_buy * efficiency_discharge - cycle_cost > 0
         assert terminal_value > 0.0
 
     def test_floored_at_zero(self):
@@ -316,10 +317,52 @@ class TestCalculateTerminalValue:
         system.battery_settings.cycle_cost_per_kwh = 5.0
 
         terminal_value = system._calculate_terminal_value(
-            buy_prices=[0.01] * 10, optimization_period=86
+            buy_prices=[0.01] * 10, sell_prices=[0.01] * 10, optimization_period=86
         )
 
         assert terminal_value == 0.0
+
+    def test_capped_by_sell_price_on_wide_spread(self):
+        """Belgian-shaped case (#126/#244): wide buy/sell spread must cap the
+        buy-median terminal value at the best achievable in-horizon export,
+        so the DP doesn't hold charge to chase a fictitious bonus."""
+        source = MockSource([0.3] * 96)
+        system = _make_system(source)
+        system.battery_settings.cycle_cost_per_kwh = 0.05
+
+        buy_prices = [0.21, 0.24, 0.30, 0.35, 0.38]  # median = 0.30
+        sell_prices = [0.10, 0.12, 0.13, 0.15, 0.16]  # max = 0.16
+
+        terminal_value = system._calculate_terminal_value(
+            buy_prices=buy_prices, sell_prices=sell_prices, optimization_period=91
+        )
+
+        eff = system.battery_settings.efficiency_discharge
+        buy_based = 0.30 * eff - 0.05
+        sell_cap = 0.16 * eff - 0.05
+        assert sell_cap < buy_based, "test fixture must exercise the binding cap"
+        assert terminal_value == pytest.approx(sell_cap)
+
+    def test_uses_buy_based_when_cap_does_not_bind(self):
+        """Ordinary/Nordic-shaped case: a narrow evening peak sits well above
+        the buy-median estimate, so the cap must not bind and today's
+        reserve-holding behavior is preserved (the gap #245 left untested)."""
+        source = MockSource([0.6] * 96)
+        system = _make_system(source)
+        system.battery_settings.cycle_cost_per_kwh = 0.05
+
+        buy_prices = [0.6, 0.6, 0.6, 1.4, 1.4]  # median = 0.6
+        sell_prices = [p * 0.85 for p in buy_prices]  # max = 1.19
+
+        terminal_value = system._calculate_terminal_value(
+            buy_prices=buy_prices, sell_prices=sell_prices, optimization_period=91
+        )
+
+        eff = system.battery_settings.efficiency_discharge
+        buy_based = 0.6 * eff - 0.05
+        sell_cap = max(sell_prices) * eff - 0.05
+        assert buy_based < sell_cap, "test fixture must exercise the non-binding cap"
+        assert terminal_value == pytest.approx(buy_based)
 
 
 class TestPrepareNextDayTimestamps:

@@ -64,7 +64,7 @@ spends money on its own. Stage 1 is auto but cheap.
 
 1. **Review** — check diff for correctness, architecture fit, `rules.md` compliance
 2. **Fix minor issues** — apply small fixes directly; request changes for anything substantial
-3. **Update CHANGELOG** — add entry under new version heading, credit author:
+3. **Update CHANGELOG** — add entry under the `## [Unreleased]` heading (create it if a previous production release consumed it and it's currently missing), credit author:
    `(thanks [@username](https://github.com/username))`
 4. **Bump version** in `bess_manager/config.yaml` (single source of truth):
    - `PATCH` (x.y.**Z**): bug fixes, doc/comment changes, no behavior change

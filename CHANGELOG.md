@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- **DP optimizer now uses pure backward induction instead of ad hoc profitability floors** — Removed the `cost_basis` discharge-profitability floor, the anti-cycling special case, and the whole-day `min_action_profit_threshold` rejection gate. `IDLE` is always a feasible action, so the value function's own `max` already makes the hold-vs-discharge call correctly per Bellman's principle of optimality; a separate veto on top was redundant at best. Replaced with a trivial idle-vs-DP-cost numerical safety net that only guards against SoE-grid discretization residual. Changes nearly every scenario's expected schedule — equal-or-better economics on all 26 pinned fixtures. `min_action_profit_threshold` remains in settings/schema but is now unused (backward-compatible for existing installs). ([#242](https://github.com/johanzander/bess-manager/pull/242))
+
+### Fixed
+
+- **Small export overshoot beyond `home_consumption` was miscredited as export revenue** — Load-first hardware self-throttles and never actually delivers that excess, so it's no longer counted as savings. ([#240](https://github.com/johanzander/bess-manager/pull/240), [#242](https://github.com/johanzander/bess-manager/pull/242))
+- **`BATTERY_EXPORT` classification threshold was 10x coarser than related flow checks** — `classify_strategic_intent`/`infer_intent_from_flows` used a `0.1` kWh threshold instead of `0.01`, misclassifying small export-only discharges as `LOAD_SUPPORT` (a mode that physically cannot export), causing planned-vs-realized cost gaps up to 18.7 SEK on quarter-hourly fixtures. Reconciled to `0.01` everywhere, including the reward function's matching export-credit threshold. ([#242](https://github.com/johanzander/bess-manager/pull/242))
+- **`GRID_CHARGING` charge rate display was stuck at a static 100% in logs and the schedule API** — `get_detailed_period_groups()` (used by the debug log's schedule table and by the API/frontend) read a static `charge_rate=100` for GRID_CHARGING periods instead of the action-derived rate `get_period_settings()` already computed since [#191](https://github.com/johanzander/bess-manager/pull/191), so small top-up charges (e.g. ~1% of max power) were misreported as full-rate 100% in the ASCII debug table. Both call sites now share one `_compute_charge_rate()` helper.
+- **Redundant "Intent transition" log spam on every hourly re-optimization** — `create_schedule()` in both the Growatt MIN and Solax Modbus Growatt controllers re-logged every already-elapsed intent transition for the whole day on each hourly re-plan, dominating debug bundles (~88% of INFO-level log lines). Transition logging now starts from the current period instead of period 0. Also removed a per-run log dump of the static `INTENT_TO_MODE` class constant.
+
 ### Added
 
 - **ENTSO-e / Belpex price provider** — New `entsoe` energy provider reads day-ahead spot prices from the [ENTSO-e Transparency Platform](https://github.com/JaccoR/hass-entso-e) HA integration via the average-price sensor's `prices_today` / `prices_tomorrow` attributes. Supports both hourly (PT60M) and quarterly (PT15M) data, auto-detected by the setup wizard. Prices are treated as VAT-exclusive spot prices. Experimental — not yet real-world validated. ([#208](https://github.com/johanzander/bess-manager/pull/208))

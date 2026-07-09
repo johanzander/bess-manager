@@ -1,0 +1,4222 @@
+{
+  "name": "CI Wizard: Frank issue #126 \u2014 ENTSO-e Belpex + SolaX Modbus Growatt MIN",
+  "description": "Real-world regression from issue #126: Belgian user (Frank-Leysen) with ENTSO-e/Belpex price source and Growatt MOD 5000TL3-XH (GEN4) via SolaX Modbus. Validates ENTSO-e discovery, EUR currency detection, and Growatt GEN4 platform detection.",
+  "mock_time": "@2026-06-21 12:35:00",
+  "timezone": "Europe/Brussels",
+  "sensors": {
+    "sensor.pv_growatt_battery_soc": {
+      "entity_id": "sensor.pv_growatt_battery_soc",
+      "state": "44",
+      "attributes": {
+        "state_class": "measurement",
+        "ed_mapping_present": false,
+        "unit_of_measurement": "%",
+        "device_class": "battery",
+        "friendly_name": "Growatt PV Battery SOC"
+      }
+    },
+    "number.pv_growatt_ems_charging_rate": {
+      "entity_id": "number.pv_growatt_ems_charging_rate",
+      "state": "100",
+      "attributes": {
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "mode": "auto",
+        "unit_of_measurement": "%",
+        "icon": "mdi:battery-arrow-up",
+        "friendly_name": "Growatt PV MOD 5000TL3-XH EMS Charging Rate"
+      }
+    },
+    "number.pv_growatt_ems_discharging_rate": {
+      "entity_id": "number.pv_growatt_ems_discharging_rate",
+      "state": "0",
+      "attributes": {
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "mode": "auto",
+        "unit_of_measurement": "%",
+        "icon": "mdi:battery-arrow-down",
+        "friendly_name": "Growatt PV MOD 5000TL3-XH EMS Discharging Rate"
+      }
+    },
+    "number.pv_growatt_ems_charging_stop_soc": {
+      "entity_id": "number.pv_growatt_ems_charging_stop_soc",
+      "state": "100",
+      "attributes": {
+        "min": 11,
+        "max": 100,
+        "step": 1,
+        "mode": "auto",
+        "unit_of_measurement": "%",
+        "icon": "mdi:battery",
+        "friendly_name": "Growatt PV MOD 5000TL3-XH EMS Charging Stop SOC"
+      }
+    },
+    "number.pv_growatt_ems_discharging_stop_soc_off_grid": {
+      "entity_id": "number.pv_growatt_ems_discharging_stop_soc_off_grid",
+      "state": "10",
+      "attributes": {
+        "min": 10,
+        "max": 100,
+        "step": 1,
+        "mode": "auto",
+        "unit_of_measurement": "%",
+        "icon": "mdi:battery-10",
+        "friendly_name": "Growatt PV MOD 5000TL3-XH EMS Discharging Stop SOC (off grid)"
+      }
+    },
+    "select.pv_growatt_allow_grid_charge": {
+      "entity_id": "select.pv_growatt_allow_grid_charge",
+      "state": "Disabled",
+      "attributes": {
+        "options": [
+          "Disabled",
+          "Enabled"
+        ],
+        "icon": "mdi:battery-charging",
+        "friendly_name": "Growatt PV MOD 5000TL3-XH Allow Grid Charge"
+      }
+    },
+    "sensor.pv_growatt_pv_power_total": {
+      "entity_id": "sensor.pv_growatt_pv_power_total",
+      "state": "3100.5",
+      "attributes": {
+        "state_class": "measurement",
+        "ed_mapping_present": false,
+        "unit_of_measurement": "W",
+        "device_class": "power",
+        "icon": "mdi:solar-power-variant",
+        "friendly_name": "Growatt PV PV Power Total"
+      }
+    },
+    "sensor.pv_growatt_total_forward_power": {
+      "entity_id": "sensor.pv_growatt_total_forward_power",
+      "state": "0.0",
+      "attributes": {
+        "state_class": "measurement",
+        "ed_mapping_present": false,
+        "unit_of_measurement": "W",
+        "device_class": "power",
+        "friendly_name": "Growatt PV Total Import Power"
+      }
+    },
+    "sensor.pv_growatt_total_reverse_power": {
+      "entity_id": "sensor.pv_growatt_total_reverse_power",
+      "state": "0.0",
+      "attributes": {
+        "state_class": "measurement",
+        "ed_mapping_present": false,
+        "unit_of_measurement": "W",
+        "device_class": "power",
+        "friendly_name": "Growatt PV Total Export Power"
+      }
+    },
+    "sensor.pv_growatt_total_load_power": {
+      "entity_id": "sensor.pv_growatt_total_load_power",
+      "state": "662.5",
+      "attributes": {
+        "state_class": "measurement",
+        "ed_mapping_present": false,
+        "unit_of_measurement": "W",
+        "device_class": "power",
+        "friendly_name": "Growatt PV Total Load Power"
+      }
+    },
+    "sensor.pv_growatt_battery_charge_power": {
+      "entity_id": "sensor.pv_growatt_battery_charge_power",
+      "state": "2453.0",
+      "attributes": {
+        "state_class": "measurement",
+        "ed_mapping_present": false,
+        "unit_of_measurement": "W",
+        "device_class": "power",
+        "friendly_name": "Growatt PV Battery Charge Power"
+      }
+    },
+    "sensor.pv_growatt_battery_discharge_power": {
+      "entity_id": "sensor.pv_growatt_battery_discharge_power",
+      "state": "0.0",
+      "attributes": {
+        "state_class": "measurement",
+        "ed_mapping_present": false,
+        "unit_of_measurement": "W",
+        "device_class": "power",
+        "friendly_name": "Growatt PV Battery Discharge Power"
+      }
+    },
+    "sensor.pv_growatt_grid_current_l1": {
+      "entity_id": "sensor.pv_growatt_grid_current_l1",
+      "state": "0.4",
+      "attributes": {
+        "ed_mapping_present": false,
+        "unit_of_measurement": "A",
+        "device_class": "current",
+        "friendly_name": "Growatt PV Grid Current L1"
+      }
+    },
+    "sensor.pv_growatt_grid_current_l2": {
+      "entity_id": "sensor.pv_growatt_grid_current_l2",
+      "state": "0.4",
+      "attributes": {
+        "ed_mapping_present": false,
+        "unit_of_measurement": "A",
+        "device_class": "current",
+        "friendly_name": "Growatt PV Grid Current L2"
+      }
+    },
+    "sensor.pv_growatt_grid_current_l3": {
+      "entity_id": "sensor.pv_growatt_grid_current_l3",
+      "state": "0.4",
+      "attributes": {
+        "ed_mapping_present": false,
+        "unit_of_measurement": "A",
+        "device_class": "current",
+        "friendly_name": "Growatt PV Grid Current L3"
+      }
+    },
+    "sensor.solcast_pv_forecast_voorspelling_vandaag": {
+      "entity_id": "sensor.solcast_pv_forecast_voorspelling_vandaag",
+      "state": "12.5",
+      "attributes": {
+        "unit_of_measurement": "kWh",
+        "device_class": "energy",
+        "friendly_name": "Solcast PV Forecast Voorspelling vandaag",
+        "detailedHourly": [
+          {
+            "period_start": "2025-06-15T00:00:00+02:00",
+            "pv_estimate": 0.0
+          },
+          {
+            "period_start": "2025-06-15T06:00:00+02:00",
+            "pv_estimate": 0.5
+          },
+          {
+            "period_start": "2025-06-15T07:00:00+02:00",
+            "pv_estimate": 1.2
+          },
+          {
+            "period_start": "2025-06-15T08:00:00+02:00",
+            "pv_estimate": 2.1
+          },
+          {
+            "period_start": "2025-06-15T09:00:00+02:00",
+            "pv_estimate": 2.8
+          },
+          {
+            "period_start": "2025-06-15T10:00:00+02:00",
+            "pv_estimate": 3.2
+          },
+          {
+            "period_start": "2025-06-15T11:00:00+02:00",
+            "pv_estimate": 3.5
+          },
+          {
+            "period_start": "2025-06-15T12:00:00+02:00",
+            "pv_estimate": 3.4
+          },
+          {
+            "period_start": "2025-06-15T13:00:00+02:00",
+            "pv_estimate": 3.1
+          },
+          {
+            "period_start": "2025-06-15T14:00:00+02:00",
+            "pv_estimate": 2.6
+          },
+          {
+            "period_start": "2025-06-15T15:00:00+02:00",
+            "pv_estimate": 2.0
+          },
+          {
+            "period_start": "2025-06-15T16:00:00+02:00",
+            "pv_estimate": 1.3
+          },
+          {
+            "period_start": "2025-06-15T17:00:00+02:00",
+            "pv_estimate": 0.6
+          },
+          {
+            "period_start": "2025-06-15T18:00:00+02:00",
+            "pv_estimate": 0.2
+          }
+        ]
+      }
+    },
+    "sensor.solcast_pv_forecast_voorspelling_morgen": {
+      "entity_id": "sensor.solcast_pv_forecast_voorspelling_morgen",
+      "state": "11.8",
+      "attributes": {
+        "unit_of_measurement": "kWh",
+        "device_class": "energy",
+        "friendly_name": "Solcast PV Forecast Voorspelling morgen",
+        "detailedHourly": [
+          {
+            "period_start": "2025-06-16T00:00:00+02:00",
+            "pv_estimate": 0.0
+          },
+          {
+            "period_start": "2025-06-16T06:00:00+02:00",
+            "pv_estimate": 0.4
+          },
+          {
+            "period_start": "2025-06-16T07:00:00+02:00",
+            "pv_estimate": 1.0
+          },
+          {
+            "period_start": "2025-06-16T08:00:00+02:00",
+            "pv_estimate": 1.9
+          },
+          {
+            "period_start": "2025-06-16T09:00:00+02:00",
+            "pv_estimate": 2.5
+          },
+          {
+            "period_start": "2025-06-16T10:00:00+02:00",
+            "pv_estimate": 3.0
+          },
+          {
+            "period_start": "2025-06-16T11:00:00+02:00",
+            "pv_estimate": 3.3
+          },
+          {
+            "period_start": "2025-06-16T12:00:00+02:00",
+            "pv_estimate": 3.2
+          },
+          {
+            "period_start": "2025-06-16T13:00:00+02:00",
+            "pv_estimate": 2.9
+          },
+          {
+            "period_start": "2025-06-16T14:00:00+02:00",
+            "pv_estimate": 2.4
+          },
+          {
+            "period_start": "2025-06-16T15:00:00+02:00",
+            "pv_estimate": 1.8
+          },
+          {
+            "period_start": "2025-06-16T16:00:00+02:00",
+            "pv_estimate": 1.1
+          },
+          {
+            "period_start": "2025-06-16T17:00:00+02:00",
+            "pv_estimate": 0.5
+          },
+          {
+            "period_start": "2025-06-16T18:00:00+02:00",
+            "pv_estimate": 0.1
+          }
+        ]
+      }
+    },
+    "sensor.pv_growatt_total_battery_input_energy": {
+      "entity_id": "sensor.pv_growatt_total_battery_input_energy",
+      "state": "4394.1",
+      "attributes": {
+        "state_class": "total_increasing",
+        "ed_mapping_present": false,
+        "unit_of_measurement": "kWh",
+        "device_class": "energy",
+        "icon": "mdi:battery-arrow-up",
+        "friendly_name": "Growatt PV Total Battery Input Energy"
+      }
+    },
+    "sensor.pv_growatt_total_battery_output_energy": {
+      "entity_id": "sensor.pv_growatt_total_battery_output_energy",
+      "state": "4447.7",
+      "attributes": {
+        "state_class": "total_increasing",
+        "ed_mapping_present": false,
+        "unit_of_measurement": "kWh",
+        "device_class": "energy",
+        "icon": "mdi:battery-arrow-down",
+        "friendly_name": "Growatt PV Total Battery Output Energy"
+      }
+    },
+    "sensor.pv_growatt_total_solar_energy": {
+      "entity_id": "sensor.pv_growatt_total_solar_energy",
+      "state": "6400.0",
+      "attributes": {
+        "state_class": "total_increasing",
+        "ed_mapping_present": false,
+        "unit_of_measurement": "kWh",
+        "device_class": "energy",
+        "icon": "mdi:solar-power",
+        "friendly_name": "Growatt PV Total Solar Energy"
+      }
+    },
+    "sensor.pv_growatt_total_grid_import": {
+      "entity_id": "sensor.pv_growatt_total_grid_import",
+      "state": "4650.0",
+      "attributes": {
+        "state_class": "total_increasing",
+        "ed_mapping_present": false,
+        "unit_of_measurement": "kWh",
+        "device_class": "energy",
+        "icon": "mdi:home-import-outline",
+        "friendly_name": "Growatt PV Total Grid Import"
+      }
+    },
+    "sensor.pv_growatt_total_grid_export": {
+      "entity_id": "sensor.pv_growatt_total_grid_export",
+      "state": "830.4",
+      "attributes": {
+        "state_class": "total_increasing",
+        "ed_mapping_present": false,
+        "unit_of_measurement": "kWh",
+        "device_class": "energy",
+        "icon": "mdi:home-export-outline",
+        "friendly_name": "Growatt PV Total Grid Export"
+      }
+    },
+    "sensor.pv_growatt_total_load_energy": {
+      "entity_id": "sensor.pv_growatt_total_load_energy",
+      "state": "10273.3",
+      "attributes": {
+        "state_class": "total_increasing",
+        "ed_mapping_present": false,
+        "unit_of_measurement": "kWh",
+        "device_class": "energy",
+        "friendly_name": "Growatt PV Total Load Energy"
+      }
+    },
+    "sensor.pv_growatt_total_power_generation": {
+      "entity_id": "sensor.pv_growatt_total_power_generation",
+      "state": "6807.6",
+      "attributes": {
+        "state_class": "total_increasing",
+        "ed_mapping_present": false,
+        "unit_of_measurement": "kWh",
+        "device_class": "energy",
+        "icon": "mdi:solar-power",
+        "friendly_name": "Growatt PV Total Power Generation"
+      }
+    },
+    "binary_sensor.predbat_charging": {
+      "entity_id": "binary_sensor.predbat_charging",
+      "state": "off",
+      "attributes": {
+        "friendly_name": "Predbat is charging",
+        "icon": "mdi:battery-arrow-up"
+      }
+    },
+    "sensor.belpex_h_average_electricity_price": {
+      "entity_id": "sensor.belpex_h_average_electricity_price",
+      "state": "0.08765",
+      "attributes": {
+        "state_class": "measurement",
+        "prices_today": [
+          {
+            "time": "2026-06-21 00:00:00+02:00",
+            "price": 0.141
+          },
+          {
+            "time": "2026-06-21 01:00:00+02:00",
+            "price": 0.12671
+          },
+          {
+            "time": "2026-06-21 02:00:00+02:00",
+            "price": 0.124
+          },
+          {
+            "time": "2026-06-21 03:00:00+02:00",
+            "price": 0.11955
+          },
+          {
+            "time": "2026-06-21 04:00:00+02:00",
+            "price": 0.11713
+          },
+          {
+            "time": "2026-06-21 05:00:00+02:00",
+            "price": 0.1126
+          },
+          {
+            "time": "2026-06-21 06:00:00+02:00",
+            "price": 0.12281
+          },
+          {
+            "time": "2026-06-21 07:00:00+02:00",
+            "price": 0.12505
+          },
+          {
+            "time": "2026-06-21 08:00:00+02:00",
+            "price": 0.12262
+          },
+          {
+            "time": "2026-06-21 09:00:00+02:00",
+            "price": 0.07359
+          },
+          {
+            "time": "2026-06-21 10:00:00+02:00",
+            "price": 0.00136
+          },
+          {
+            "time": "2026-06-21 11:00:00+02:00",
+            "price": -0.0
+          },
+          {
+            "time": "2026-06-21 12:00:00+02:00",
+            "price": -1e-05
+          },
+          {
+            "time": "2026-06-21 13:00:00+02:00",
+            "price": -1e-05
+          },
+          {
+            "time": "2026-06-21 14:00:00+02:00",
+            "price": -1e-05
+          },
+          {
+            "time": "2026-06-21 15:00:00+02:00",
+            "price": 1e-05
+          },
+          {
+            "time": "2026-06-21 16:00:00+02:00",
+            "price": 0.01216
+          },
+          {
+            "time": "2026-06-21 17:00:00+02:00",
+            "price": 0.07116
+          },
+          {
+            "time": "2026-06-21 18:00:00+02:00",
+            "price": 0.11279
+          },
+          {
+            "time": "2026-06-21 19:00:00+02:00",
+            "price": 0.13092
+          },
+          {
+            "time": "2026-06-21 20:00:00+02:00",
+            "price": 0.14638
+          },
+          {
+            "time": "2026-06-21 21:00:00+02:00",
+            "price": 0.15082
+          },
+          {
+            "time": "2026-06-21 22:00:00+02:00",
+            "price": 0.14519
+          },
+          {
+            "time": "2026-06-21 23:00:00+02:00",
+            "price": 0.13263
+          }
+        ],
+        "prices_tomorrow": [],
+        "prices": [
+          {
+            "time": "2026-06-20 00:00:00+02:00",
+            "price": 0.12938
+          },
+          {
+            "time": "2026-06-20 01:00:00+02:00",
+            "price": 0.12108
+          },
+          {
+            "time": "2026-06-20 02:00:00+02:00",
+            "price": 0.1186
+          },
+          {
+            "time": "2026-06-20 03:00:00+02:00",
+            "price": 0.11581
+          },
+          {
+            "time": "2026-06-20 04:00:00+02:00",
+            "price": 0.11411
+          },
+          {
+            "time": "2026-06-20 05:00:00+02:00",
+            "price": 0.11253
+          },
+          {
+            "time": "2026-06-20 06:00:00+02:00",
+            "price": 0.10972
+          },
+          {
+            "time": "2026-06-20 07:00:00+02:00",
+            "price": 0.10548
+          },
+          {
+            "time": "2026-06-20 08:00:00+02:00",
+            "price": 0.11184
+          },
+          {
+            "time": "2026-06-20 09:00:00+02:00",
+            "price": 0.06307
+          },
+          {
+            "time": "2026-06-20 10:00:00+02:00",
+            "price": 0.00412
+          },
+          {
+            "time": "2026-06-20 11:00:00+02:00",
+            "price": -0.0
+          },
+          {
+            "time": "2026-06-20 12:00:00+02:00",
+            "price": -1e-05
+          },
+          {
+            "time": "2026-06-20 13:00:00+02:00",
+            "price": -2e-05
+          },
+          {
+            "time": "2026-06-20 14:00:00+02:00",
+            "price": -1e-05
+          },
+          {
+            "time": "2026-06-20 15:00:00+02:00",
+            "price": 0.00025
+          },
+          {
+            "time": "2026-06-20 16:00:00+02:00",
+            "price": 0.01761
+          },
+          {
+            "time": "2026-06-20 17:00:00+02:00",
+            "price": 0.08089
+          },
+          {
+            "time": "2026-06-20 18:00:00+02:00",
+            "price": 0.11847
+          },
+          {
+            "time": "2026-06-20 19:00:00+02:00",
+            "price": 0.14077
+          },
+          {
+            "time": "2026-06-20 20:00:00+02:00",
+            "price": 0.16969
+          },
+          {
+            "time": "2026-06-20 21:00:00+02:00",
+            "price": 0.17684
+          },
+          {
+            "time": "2026-06-20 22:00:00+02:00",
+            "price": 0.16479
+          },
+          {
+            "time": "2026-06-20 23:00:00+02:00",
+            "price": 0.14392
+          },
+          {
+            "time": "2026-06-21 00:00:00+02:00",
+            "price": 0.141
+          },
+          {
+            "time": "2026-06-21 01:00:00+02:00",
+            "price": 0.12671
+          },
+          {
+            "time": "2026-06-21 02:00:00+02:00",
+            "price": 0.124
+          },
+          {
+            "time": "2026-06-21 03:00:00+02:00",
+            "price": 0.11955
+          },
+          {
+            "time": "2026-06-21 04:00:00+02:00",
+            "price": 0.11713
+          },
+          {
+            "time": "2026-06-21 05:00:00+02:00",
+            "price": 0.1126
+          },
+          {
+            "time": "2026-06-21 06:00:00+02:00",
+            "price": 0.12281
+          },
+          {
+            "time": "2026-06-21 07:00:00+02:00",
+            "price": 0.12505
+          },
+          {
+            "time": "2026-06-21 08:00:00+02:00",
+            "price": 0.12262
+          },
+          {
+            "time": "2026-06-21 09:00:00+02:00",
+            "price": 0.07359
+          },
+          {
+            "time": "2026-06-21 10:00:00+02:00",
+            "price": 0.00136
+          },
+          {
+            "time": "2026-06-21 11:00:00+02:00",
+            "price": -0.0
+          },
+          {
+            "time": "2026-06-21 12:00:00+02:00",
+            "price": -1e-05
+          },
+          {
+            "time": "2026-06-21 13:00:00+02:00",
+            "price": -1e-05
+          },
+          {
+            "time": "2026-06-21 14:00:00+02:00",
+            "price": -1e-05
+          },
+          {
+            "time": "2026-06-21 15:00:00+02:00",
+            "price": 1e-05
+          },
+          {
+            "time": "2026-06-21 16:00:00+02:00",
+            "price": 0.01216
+          },
+          {
+            "time": "2026-06-21 17:00:00+02:00",
+            "price": 0.07116
+          },
+          {
+            "time": "2026-06-21 18:00:00+02:00",
+            "price": 0.11279
+          },
+          {
+            "time": "2026-06-21 19:00:00+02:00",
+            "price": 0.13092
+          },
+          {
+            "time": "2026-06-21 20:00:00+02:00",
+            "price": 0.14638
+          },
+          {
+            "time": "2026-06-21 21:00:00+02:00",
+            "price": 0.15082
+          },
+          {
+            "time": "2026-06-21 22:00:00+02:00",
+            "price": 0.14519
+          },
+          {
+            "time": "2026-06-21 23:00:00+02:00",
+            "price": 0.13263
+          }
+        ],
+        "unit_of_measurement": "\u20ac/kWh",
+        "attribution": "Data provided by ENTSO-e Transparency Platform",
+        "icon": "mdi:currency-eur",
+        "friendly_name": "Belpex H Tarief Average electricity price (Belpex H)"
+      }
+    }
+  },
+  "config_entries": [
+    {
+      "entry_id": "01KBWWRCMXYHRE321BZNE0121H",
+      "domain": "solax_modbus",
+      "title": "***",
+      "state": "loaded",
+      "version": null,
+      "options": {},
+      "data": {}
+    },
+    {
+      "entry_id": "01KBYNH51DCWW7MXRNKRD8CRG2",
+      "domain": "entsoe",
+      "title": "***",
+      "state": "loaded",
+      "version": null,
+      "options": {},
+      "data": {}
+    }
+  ],
+  "entity_registry": [
+    {
+      "entity_id": "button.pv_growatt_active_power_not_limited",
+      "unique_id": "PV_active_power_not_limited",
+      "unique_id_suffix": "PV_active_power_not_limited",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Active Power Not Limited"
+    },
+    {
+      "entity_id": "button.pv_growatt_reactive_power_not_limited",
+      "unique_id": "PV_reactive_power_not_limited",
+      "unique_id_suffix": "PV_reactive_power_not_limited",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Reactive Power Not Limited"
+    },
+    {
+      "entity_id": "button.pv_growatt_sync_rtc",
+      "unique_id": "PV_sync_rtc",
+      "unique_id_suffix": "PV_sync_rtc",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Sync RTC"
+    },
+    {
+      "entity_id": "button.pv_growatt_time_1_update",
+      "unique_id": "PV_time_1_update",
+      "unique_id_suffix": "PV_time_1_update",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 1 Update"
+    },
+    {
+      "entity_id": "button.pv_growatt_time_2_update",
+      "unique_id": "PV_time_2_update",
+      "unique_id_suffix": "PV_time_2_update",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 2 Update"
+    },
+    {
+      "entity_id": "button.pv_growatt_time_3_update",
+      "unique_id": "PV_time_3_update",
+      "unique_id_suffix": "PV_time_3_update",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 3 Update"
+    },
+    {
+      "entity_id": "button.pv_growatt_time_4_update",
+      "unique_id": "PV_time_4_update",
+      "unique_id_suffix": "PV_time_4_update",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 4 Update"
+    },
+    {
+      "entity_id": "button.pv_growatt_time_5_update",
+      "unique_id": "PV_time_5_update",
+      "unique_id_suffix": "PV_time_5_update",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 5 Update"
+    },
+    {
+      "entity_id": "button.pv_growatt_time_6_update",
+      "unique_id": "PV_time_6_update",
+      "unique_id_suffix": "PV_time_6_update",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 6 Update"
+    },
+    {
+      "entity_id": "button.pv_growatt_time_7_update",
+      "unique_id": "PV_time_7_update",
+      "unique_id_suffix": "PV_time_7_update",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 7 Update"
+    },
+    {
+      "entity_id": "button.pv_growatt_time_8_update",
+      "unique_id": "PV_time_8_update",
+      "unique_id_suffix": "PV_time_8_update",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 8 Update"
+    },
+    {
+      "entity_id": "button.pv_growatt_time_9_update",
+      "unique_id": "PV_time_9_update",
+      "unique_id_suffix": "PV_time_9_update",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 9 Update"
+    },
+    {
+      "entity_id": "button.pv_growatt_time_1_clear",
+      "unique_id": "PV_time_1_clear",
+      "unique_id_suffix": "PV_time_1_clear",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 1 Clear"
+    },
+    {
+      "entity_id": "button.pv_growatt_time_2_clear",
+      "unique_id": "PV_time_2_clear",
+      "unique_id_suffix": "PV_time_2_clear",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 2 Clear"
+    },
+    {
+      "entity_id": "button.pv_growatt_time_3_clear",
+      "unique_id": "PV_time_3_clear",
+      "unique_id_suffix": "PV_time_3_clear",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 3 Clear"
+    },
+    {
+      "entity_id": "button.pv_growatt_time_4_clear",
+      "unique_id": "PV_time_4_clear",
+      "unique_id_suffix": "PV_time_4_clear",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 4 Clear"
+    },
+    {
+      "entity_id": "button.pv_growatt_time_5_clear",
+      "unique_id": "PV_time_5_clear",
+      "unique_id_suffix": "PV_time_5_clear",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 5 Clear"
+    },
+    {
+      "entity_id": "button.pv_growatt_time_6_clear",
+      "unique_id": "PV_time_6_clear",
+      "unique_id_suffix": "PV_time_6_clear",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 6 Clear"
+    },
+    {
+      "entity_id": "button.pv_growatt_time_7_clear",
+      "unique_id": "PV_time_7_clear",
+      "unique_id_suffix": "PV_time_7_clear",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 7 Clear"
+    },
+    {
+      "entity_id": "button.pv_growatt_time_8_clear",
+      "unique_id": "PV_time_8_clear",
+      "unique_id_suffix": "PV_time_8_clear",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 8 Clear"
+    },
+    {
+      "entity_id": "button.pv_growatt_time_9_clear",
+      "unique_id": "PV_time_9_clear",
+      "unique_id_suffix": "PV_time_9_clear",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 9 Clear"
+    },
+    {
+      "entity_id": "number.pv_growatt_active_power_limit",
+      "unique_id": "PV_active_power_limit",
+      "unique_id_suffix": "PV_active_power_limit",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Active Power Limit"
+    },
+    {
+      "entity_id": "number.pv_growatt_reactive_power_limit",
+      "unique_id": "PV_reactive_power_limit",
+      "unique_id_suffix": "PV_reactive_power_limit",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Reactive Power Limit"
+    },
+    {
+      "entity_id": "number.pv_growatt_grid_export_limit",
+      "unique_id": "PV_grid_export_limit",
+      "unique_id_suffix": "PV_grid_export_limit",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Grid Export Limit"
+    },
+    {
+      "entity_id": "number.pv_growatt_ems_discharging_rate",
+      "unique_id": "PV_ems_discharging_rate",
+      "unique_id_suffix": "PV_ems_discharging_rate",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH EMS Discharging Rate",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "number.pv_growatt_ems_discharging_stop_soc_off_grid",
+      "unique_id": "PV_ems_discharging_stop_soc",
+      "unique_id_suffix": "PV_ems_discharging_stop_soc",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH EMS Discharging Stop SOC (off grid)",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "number.pv_growatt_ems_charging_rate",
+      "unique_id": "PV_ems_charging_rate",
+      "unique_id_suffix": "PV_ems_charging_rate",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH EMS Charging Rate",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "number.pv_growatt_ems_charging_stop_soc",
+      "unique_id": "PV_ems_charging_stop_soc",
+      "unique_id_suffix": "PV_ems_charging_stop_soc",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH EMS Charging Stop SOC",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "number.pv_growatt_ems_discharging_stop_soc_on_grid",
+      "unique_id": "PV_ems_discharging_stop_soc_on_grid",
+      "unique_id_suffix": "PV_ems_discharging_stop_soc_on_grid",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH EMS Discharging Stop SOC (on grid)",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "number.pv_growatt_peak_import_limit",
+      "unique_id": "PV_peak_import_limit",
+      "unique_id_suffix": "PV_peak_import_limit",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Peak Import Limit",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "number.pv_growatt_peak_export_limit",
+      "unique_id": "PV_peak_export_limit",
+      "unique_id_suffix": "PV_peak_export_limit",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Peak Export Limit",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "number.pv_growatt_reserved_soc_for_peak_shaving",
+      "unique_id": "PV_reserved_soc_peak_shaving",
+      "unique_id_suffix": "PV_reserved_soc_peak_shaving",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Reserved SoC for Peak Shaving",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "number.pv_growatt_max_charge_power_from_grid",
+      "unique_id": "PV_max_charge_power_from_grid",
+      "unique_id_suffix": "PV_max_charge_power_from_grid",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Max charge power from grid",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "number.pv_growatt_charge_stop_soc_from_grid",
+      "unique_id": "PV_charge_stop_soc_from_grid",
+      "unique_id_suffix": "PV_charge_stop_soc_from_grid",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Charge Stop SOC from Grid",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "select.pv_growatt_inverter_switch",
+      "unique_id": "PV_inverter_switch",
+      "unique_id_suffix": "PV_inverter_switch",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Inverter Switch"
+    },
+    {
+      "entity_id": "select.pv_growatt_select_baud_rate",
+      "unique_id": "PV_select_baud_rate",
+      "unique_id_suffix": "PV_select_baud_rate",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Select baud rate",
+      "disabled_by": "integration",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "select.pv_growatt_limit_grid_export",
+      "unique_id": "PV_limit_grid_export",
+      "unique_id_suffix": "PV_limit_grid_export",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Limit Grid Export"
+    },
+    {
+      "entity_id": "select.pv_growatt_peak_shaving_active",
+      "unique_id": "PV_peak_shaving_enable",
+      "unique_id_suffix": "PV_peak_shaving_enable",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Peak Shaving Active"
+    },
+    {
+      "entity_id": "select.pv_growatt_reserved_soc_for_peak_shaving_active",
+      "unique_id": "PV_reserved_soc_peak_shaving_enable",
+      "unique_id_suffix": "PV_reserved_soc_peak_shaving_enable",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Reserved SoC for Peak Shaving Active"
+    },
+    {
+      "entity_id": "select.pv_growatt_allow_grid_charge",
+      "unique_id": "PV_charger_switch",
+      "unique_id_suffix": "PV_charger_switch",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Allow Grid Charge"
+    },
+    {
+      "entity_id": "select.pv_growatt_time_1_mode",
+      "unique_id": "PV_time_1_mode",
+      "unique_id_suffix": "PV_time_1_mode",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 1 Mode",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "select.pv_growatt_time_1_active",
+      "unique_id": "PV_time_1_enabled",
+      "unique_id_suffix": "PV_time_1_enabled",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 1 Active",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "select.pv_growatt_time_2_mode",
+      "unique_id": "PV_time_2_mode",
+      "unique_id_suffix": "PV_time_2_mode",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 2 Mode",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "select.pv_growatt_time_2_active",
+      "unique_id": "PV_time_2_enabled",
+      "unique_id_suffix": "PV_time_2_enabled",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 2 Active",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "select.pv_growatt_time_3_begin",
+      "unique_id": "PV_time_3_begin",
+      "unique_id_suffix": "PV_time_3_begin",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 3 Begin",
+      "disabled_by": "integration",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "select.pv_growatt_time_3_end",
+      "unique_id": "PV_time_3_end",
+      "unique_id_suffix": "PV_time_3_end",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 3 End",
+      "disabled_by": "integration",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "select.pv_growatt_time_3_mode",
+      "unique_id": "PV_time_3_mode",
+      "unique_id_suffix": "PV_time_3_mode",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 3 Mode",
+      "disabled_by": "integration",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "select.pv_growatt_time_3_active",
+      "unique_id": "PV_time_3_enabled",
+      "unique_id_suffix": "PV_time_3_enabled",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 3 Active",
+      "disabled_by": "integration",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "select.pv_growatt_time_4_begin",
+      "unique_id": "PV_time_4_begin",
+      "unique_id_suffix": "PV_time_4_begin",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 4 Begin",
+      "disabled_by": "integration",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "select.pv_growatt_time_4_end",
+      "unique_id": "PV_time_4_end",
+      "unique_id_suffix": "PV_time_4_end",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 4 End",
+      "disabled_by": "integration",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "select.pv_growatt_time_4_mode",
+      "unique_id": "PV_time_4_mode",
+      "unique_id_suffix": "PV_time_4_mode",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 4 Mode",
+      "disabled_by": "integration",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "select.pv_growatt_time_4_active",
+      "unique_id": "PV_time_4_enabled",
+      "unique_id_suffix": "PV_time_4_enabled",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 4 Active",
+      "disabled_by": "integration",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "select.pv_growatt_time_5_begin",
+      "unique_id": "PV_time_5_begin",
+      "unique_id_suffix": "PV_time_5_begin",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 5 Begin",
+      "disabled_by": "integration",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "select.pv_growatt_time_5_end",
+      "unique_id": "PV_time_5_end",
+      "unique_id_suffix": "PV_time_5_end",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 5 End",
+      "disabled_by": "integration",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "select.pv_growatt_time_5_mode",
+      "unique_id": "PV_time_5_mode",
+      "unique_id_suffix": "PV_time_5_mode",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 5 Mode",
+      "disabled_by": "integration",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "select.pv_growatt_time_5_active",
+      "unique_id": "PV_time_5_enabled",
+      "unique_id_suffix": "PV_time_5_enabled",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 5 Active",
+      "disabled_by": "integration",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "select.pv_growatt_time_6_begin",
+      "unique_id": "PV_time_6_begin",
+      "unique_id_suffix": "PV_time_6_begin",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 6 Begin",
+      "disabled_by": "integration",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "select.pv_growatt_time_6_end",
+      "unique_id": "PV_time_6_end",
+      "unique_id_suffix": "PV_time_6_end",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 6 End",
+      "disabled_by": "integration",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "select.pv_growatt_time_6_mode",
+      "unique_id": "PV_time_6_mode",
+      "unique_id_suffix": "PV_time_6_mode",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 6 Mode",
+      "disabled_by": "integration",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "select.pv_growatt_time_6_active",
+      "unique_id": "PV_time_6_enabled",
+      "unique_id_suffix": "PV_time_6_enabled",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 6 Active",
+      "disabled_by": "integration",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "select.pv_growatt_time_7_begin",
+      "unique_id": "PV_time_7_begin",
+      "unique_id_suffix": "PV_time_7_begin",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 7 Begin",
+      "disabled_by": "integration",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "select.pv_growatt_time_7_end",
+      "unique_id": "PV_time_7_end",
+      "unique_id_suffix": "PV_time_7_end",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 7 End",
+      "disabled_by": "integration",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "select.pv_growatt_time_7_mode",
+      "unique_id": "PV_time_7_mode",
+      "unique_id_suffix": "PV_time_7_mode",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 7 Mode",
+      "disabled_by": "integration",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "select.pv_growatt_time_7_active",
+      "unique_id": "PV_time_7_enabled",
+      "unique_id_suffix": "PV_time_7_enabled",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 7 Active",
+      "disabled_by": "integration",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "select.pv_growatt_time_8_begin",
+      "unique_id": "PV_time_8_begin",
+      "unique_id_suffix": "PV_time_8_begin",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 8 Begin",
+      "disabled_by": "integration",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "select.pv_growatt_time_8_end",
+      "unique_id": "PV_time_8_end",
+      "unique_id_suffix": "PV_time_8_end",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 8 End",
+      "disabled_by": "integration",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "select.pv_growatt_time_8_mode",
+      "unique_id": "PV_time_8_mode",
+      "unique_id_suffix": "PV_time_8_mode",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 8 Mode",
+      "disabled_by": "integration",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "select.pv_growatt_time_8_active",
+      "unique_id": "PV_time_8_enabled",
+      "unique_id_suffix": "PV_time_8_enabled",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 8 Active",
+      "disabled_by": "integration",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "select.pv_growatt_time_9_begin",
+      "unique_id": "PV_time_9_begin",
+      "unique_id_suffix": "PV_time_9_begin",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 9 Begin",
+      "disabled_by": "integration",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "select.pv_growatt_time_9_end",
+      "unique_id": "PV_time_9_end",
+      "unique_id_suffix": "PV_time_9_end",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 9 End",
+      "disabled_by": "integration",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "select.pv_growatt_time_9_mode",
+      "unique_id": "PV_time_9_mode",
+      "unique_id_suffix": "PV_time_9_mode",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 9 Mode",
+      "disabled_by": "integration",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "select.pv_growatt_time_9_active",
+      "unique_id": "PV_time_9_enabled",
+      "unique_id_suffix": "PV_time_9_enabled",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 9 Active",
+      "disabled_by": "integration",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_firmware_version",
+      "unique_id": "PV_firmware_version",
+      "unique_id_suffix": "PV_firmware_version",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Firmware Version",
+      "disabled_by": "integration",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_firmware_control_version",
+      "unique_id": "PV_firmware_control_version",
+      "unique_id_suffix": "PV_firmware_control_version",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Firmware Control Version",
+      "disabled_by": "integration",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_language",
+      "unique_id": "PV_language",
+      "unique_id_suffix": "PV_language",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Language",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_rtc",
+      "unique_id": "PV_rtc",
+      "unique_id_suffix": "PV_rtc",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV RTC",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_pv_isolation_resistance",
+      "unique_id": "PV_pv_isolation_resistance",
+      "unique_id_suffix": "PV_pv_isolation_resistance",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV PV Isolation Resistance",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_type",
+      "unique_id": "PV_bms_type",
+      "unique_id_suffix": "PV_bms_type",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS Type",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_serial_number",
+      "unique_id": "PV_serialnumber",
+      "unique_id_suffix": "PV_serialnumber",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Serial Number",
+      "disabled_by": "integration",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_battery_type",
+      "unique_id": "PV_battery_type",
+      "unique_id_suffix": "PV_battery_type",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Battery Type",
+      "disabled_by": "integration",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_pv_power_total",
+      "unique_id": "PV_pv_power_total",
+      "unique_id_suffix": "PV_pv_power_total",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV PV Power Total"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_output_power",
+      "unique_id": "PV_output_power",
+      "unique_id_suffix": "PV_output_power",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Output Power"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_total_work_time_hours",
+      "unique_id": "PV_total_work_time_hours",
+      "unique_id_suffix": "PV_total_work_time_hours",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Total Work Time Hours",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_priority",
+      "unique_id": "PV_priority",
+      "unique_id_suffix": "PV_priority",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Priority"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_battery_combined_power",
+      "unique_id": "PV_battery_combined_power",
+      "unique_id_suffix": "PV_battery_combined_power",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Battery Combined Power"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_inverter_state",
+      "unique_id": "PV_inverter_state",
+      "unique_id_suffix": "PV_inverter_state",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Inverter Run State",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_run_mode",
+      "unique_id": "PV_run_mode",
+      "unique_id_suffix": "PV_run_mode",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Machine Status",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_total_pv_power",
+      "unique_id": "PV_total_pv_power",
+      "unique_id_suffix": "PV_total_pv_power",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Total PV Power",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_pv_voltage_1",
+      "unique_id": "PV_pv_voltage_1",
+      "unique_id_suffix": "PV_pv_voltage_1",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV PV Voltage 1"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_pv_current_1",
+      "unique_id": "PV_pv_current_1",
+      "unique_id_suffix": "PV_pv_current_1",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV PV Current 1"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_pv_power_1",
+      "unique_id": "PV_pv_power_1",
+      "unique_id_suffix": "PV_pv_power_1",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV PV Power 1"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_pv_voltage_2",
+      "unique_id": "PV_pv_voltage_2",
+      "unique_id_suffix": "PV_pv_voltage_2",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV PV Voltage 2"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_pv_current_2",
+      "unique_id": "PV_pv_current_2",
+      "unique_id_suffix": "PV_pv_current_2",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV PV Current 2"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_pv_power_2",
+      "unique_id": "PV_pv_power_2",
+      "unique_id_suffix": "PV_pv_power_2",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV PV Power 2"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_grid_power_total",
+      "unique_id": "PV_total_grid_power_va",
+      "unique_id_suffix": "PV_total_grid_power_va",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Grid Power Total"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_total_grid_power",
+      "unique_id": "PV_total_grid_power",
+      "unique_id_suffix": "PV_total_grid_power",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Total Grid Power",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_grid_frequency",
+      "unique_id": "PV_grid_frequency",
+      "unique_id_suffix": "PV_grid_frequency",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Grid Frequency"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_grid_voltage_l1",
+      "unique_id": "PV_grid_voltage_l1",
+      "unique_id_suffix": "PV_grid_voltage_l1",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Grid Voltage L1"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_grid_current_l1",
+      "unique_id": "PV_grid_current_l1",
+      "unique_id_suffix": "PV_grid_current_l1",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Grid Current L1"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_grid_power_l1",
+      "unique_id": "PV_grid_power_l1",
+      "unique_id_suffix": "PV_grid_power_l1",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Grid Power L1"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_grid_voltage_l2",
+      "unique_id": "PV_grid_voltage_l2",
+      "unique_id_suffix": "PV_grid_voltage_l2",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Grid Voltage L2"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_grid_current_l2",
+      "unique_id": "PV_grid_current_l2",
+      "unique_id_suffix": "PV_grid_current_l2",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Grid Current L2"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_grid_power_l2",
+      "unique_id": "PV_grid_power_l2",
+      "unique_id_suffix": "PV_grid_power_l2",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Grid Power L2"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_grid_voltage_l3",
+      "unique_id": "PV_grid_voltage_l3",
+      "unique_id_suffix": "PV_grid_voltage_l3",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Grid Voltage L3"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_grid_current_l3",
+      "unique_id": "PV_grid_current_l3",
+      "unique_id_suffix": "PV_grid_current_l3",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Grid Current L3"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_grid_power_l3",
+      "unique_id": "PV_grid_power_l3",
+      "unique_id_suffix": "PV_grid_power_l3",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Grid Power L3"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_total_forward_power",
+      "unique_id": "PV_total_forward_power",
+      "unique_id_suffix": "PV_total_forward_power",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Total Import Power"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_total_reverse_power",
+      "unique_id": "PV_total_reverse_power",
+      "unique_id_suffix": "PV_total_reverse_power",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Total Export Power"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_total_load_power",
+      "unique_id": "PV_total_load_power",
+      "unique_id_suffix": "PV_total_load_power",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Total Load Power"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_today_s_power_generation",
+      "unique_id": "PV_today_s_power_generation",
+      "unique_id_suffix": "PV_today_s_power_generation",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Today's Power Generation"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_total_power_generation",
+      "unique_id": "PV_total_power_generation",
+      "unique_id_suffix": "PV_total_power_generation",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Total Power Generation"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_total_solar_energy",
+      "unique_id": "PV_total_solar_energy",
+      "unique_id_suffix": "PV_total_solar_energy",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Total Solar Energy"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_today_s_pv1_solar_energy",
+      "unique_id": "PV_today_s_pv1_solar_energy",
+      "unique_id_suffix": "PV_today_s_pv1_solar_energy",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Today's PV1 Solar Energy",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_total_pv1_solar_energy",
+      "unique_id": "PV_total_pv1_solar_energy",
+      "unique_id_suffix": "PV_total_pv1_solar_energy",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Total PV1 Solar Energy",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_today_s_pv2_solar_energy",
+      "unique_id": "PV_today_s_pv2_solar_energy",
+      "unique_id_suffix": "PV_today_s_pv2_solar_energy",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Today's PV2 Solar Energy",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_total_pv2_solar_energy",
+      "unique_id": "PV_total_pv2_solar_energy",
+      "unique_id_suffix": "PV_total_pv2_solar_energy",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Total PV2 Solar Energy",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_today_s_grid_import",
+      "unique_id": "PV_today_s_grid_import",
+      "unique_id_suffix": "PV_today_s_grid_import",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Today's Grid Import"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_total_grid_import",
+      "unique_id": "PV_total_grid_import",
+      "unique_id_suffix": "PV_total_grid_import",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Total Grid Import"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_today_s_grid_export",
+      "unique_id": "PV_today_s_grid_export",
+      "unique_id_suffix": "PV_today_s_grid_export",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Today's Grid Export"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_total_grid_export",
+      "unique_id": "PV_total_grid_export",
+      "unique_id_suffix": "PV_total_grid_export",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Total Grid Export"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_today_s_load_energy",
+      "unique_id": "PV_today_s_yield",
+      "unique_id_suffix": "PV_today_s_yield",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Today's Load Energy"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_total_load_energy",
+      "unique_id": "PV_total_yield",
+      "unique_id_suffix": "PV_total_yield",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Total Load Energy"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_today_s_solar_energy",
+      "unique_id": "PV_today_s_solar_energy",
+      "unique_id_suffix": "PV_today_s_solar_energy",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Today's Solar Energy"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_inverter_temperature",
+      "unique_id": "PV_inverter_temperature",
+      "unique_id_suffix": "PV_inverter_temperature",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Inverter Temperature",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_ipm_inverter_temperature",
+      "unique_id": "PV_ipm_inverter_temperature",
+      "unique_id_suffix": "PV_ipm_inverter_temperature",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV IPM Inverter Temperature",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_boost_temperature",
+      "unique_id": "PV_boost_temperature",
+      "unique_id_suffix": "PV_boost_temperature",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Boost Temperature",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_communication_board_temperature",
+      "unique_id": "PV_communication_board_temperature",
+      "unique_id_suffix": "PV_communication_board_temperature",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Communication Board Temperature",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_today_s_battery_output_energy",
+      "unique_id": "PV_today_s_battery_output_energy",
+      "unique_id_suffix": "PV_today_s_battery_output_energy",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Today's Battery Output Energy"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_total_battery_output_energy",
+      "unique_id": "PV_total_battery_output_energy",
+      "unique_id_suffix": "PV_total_battery_output_energy",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Total Battery Output Energy"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_today_s_battery_input_energy",
+      "unique_id": "PV_today_s_battery_input_energy",
+      "unique_id_suffix": "PV_today_s_battery_input_energy",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Today's Battery Input Energy"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_total_battery_input_energy",
+      "unique_id": "PV_total_battery_input_energy",
+      "unique_id_suffix": "PV_total_battery_input_energy",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Total Battery Input Energy"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_work_mode_priority",
+      "unique_id": "PV_work_mode_priority",
+      "unique_id_suffix": "PV_work_mode_priority",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Work Mode - Priority"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_battery_voltage",
+      "unique_id": "PV_battery_voltage",
+      "unique_id_suffix": "PV_battery_voltage",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Battery Voltage"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_battery_current",
+      "unique_id": "PV_battery_current",
+      "unique_id_suffix": "PV_battery_current",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Battery Current"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_battery_soc",
+      "unique_id": "PV_battery_soc",
+      "unique_id_suffix": "PV_battery_soc",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Battery SOC"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_battery_discharge_power",
+      "unique_id": "PV_battery_discharge_power",
+      "unique_id_suffix": "PV_battery_discharge_power",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Battery Discharge Power"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_battery_charge_power",
+      "unique_id": "PV_battery_charge_power",
+      "unique_id_suffix": "PV_battery_charge_power",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Battery Charge Power"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_time_1_begin_read",
+      "unique_id": "PV_time_1_begin_read",
+      "unique_id_suffix": "PV_time_1_begin_read",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Time 1 Begin (read)",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_time_1_mode_read",
+      "unique_id": "PV_time_1_mode_read",
+      "unique_id_suffix": "PV_time_1_mode_read",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Time 1 Mode (read)",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_time_1_active_read",
+      "unique_id": "PV_time_1_enabled_read",
+      "unique_id_suffix": "PV_time_1_enabled_read",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Time 1 Active (read)",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_time_1_end_read",
+      "unique_id": "PV_time_1_end_read",
+      "unique_id_suffix": "PV_time_1_end_read",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Time 1 End (read)",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_time_2_begin_read",
+      "unique_id": "PV_time_2_begin_read",
+      "unique_id_suffix": "PV_time_2_begin_read",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Time 2 Begin (read)",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_time_2_mode_read",
+      "unique_id": "PV_time_2_mode_read",
+      "unique_id_suffix": "PV_time_2_mode_read",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Time 2 Mode (read)",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_time_2_active_read",
+      "unique_id": "PV_time_2_enabled_read",
+      "unique_id_suffix": "PV_time_2_enabled_read",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Time 2 Active (read)",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_time_2_end_read",
+      "unique_id": "PV_time_2_end_read",
+      "unique_id_suffix": "PV_time_2_end_read",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Time 2 End (read)",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_time_3_begin_read",
+      "unique_id": "PV_time_3_begin_read",
+      "unique_id_suffix": "PV_time_3_begin_read",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Time 3 Begin (read)",
+      "disabled_by": "integration",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_time_3_mode_read",
+      "unique_id": "PV_time_3_mode_read",
+      "unique_id_suffix": "PV_time_3_mode_read",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Time 3 Mode (read)",
+      "disabled_by": "integration",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_time_3_active_read",
+      "unique_id": "PV_time_3_enabled_read",
+      "unique_id_suffix": "PV_time_3_enabled_read",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Time 3 Active (read)",
+      "disabled_by": "integration",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_time_3_end_read",
+      "unique_id": "PV_time_3_end_read",
+      "unique_id_suffix": "PV_time_3_end_read",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Time 3 End (read)",
+      "disabled_by": "integration",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_time_4_begin_read",
+      "unique_id": "PV_time_4_begin_read",
+      "unique_id_suffix": "PV_time_4_begin_read",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Time 4 Begin (read)",
+      "disabled_by": "integration",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_time_4_mode_read",
+      "unique_id": "PV_time_4_mode_read",
+      "unique_id_suffix": "PV_time_4_mode_read",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Time 4 Mode (read)",
+      "disabled_by": "integration",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_time_4_active_read",
+      "unique_id": "PV_time_4_enabled_read",
+      "unique_id_suffix": "PV_time_4_enabled_read",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Time 4 Active (read)",
+      "disabled_by": "integration",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_time_4_end_read",
+      "unique_id": "PV_time_4_end_read",
+      "unique_id_suffix": "PV_time_4_end_read",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Time 4 End (read)",
+      "disabled_by": "integration",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_time_5_begin_read",
+      "unique_id": "PV_time_5_begin_read",
+      "unique_id_suffix": "PV_time_5_begin_read",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Time 5 Begin (read)",
+      "disabled_by": "integration",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_time_5_mode_read",
+      "unique_id": "PV_time_5_mode_read",
+      "unique_id_suffix": "PV_time_5_mode_read",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Time 5 Mode (read)",
+      "disabled_by": "integration",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_time_5_active_read",
+      "unique_id": "PV_time_5_enabled_read",
+      "unique_id_suffix": "PV_time_5_enabled_read",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Time 5 Active (read)",
+      "disabled_by": "integration",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_time_5_end_read",
+      "unique_id": "PV_time_5_end_read",
+      "unique_id_suffix": "PV_time_5_end_read",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Time 5 End (read)",
+      "disabled_by": "integration",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_time_6_begin_read",
+      "unique_id": "PV_time_6_begin_read",
+      "unique_id_suffix": "PV_time_6_begin_read",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Time 6 Begin (read)",
+      "disabled_by": "integration",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_time_6_mode_read",
+      "unique_id": "PV_time_6_mode_read",
+      "unique_id_suffix": "PV_time_6_mode_read",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Time 6 Mode (read)",
+      "disabled_by": "integration",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_time_6_active_read",
+      "unique_id": "PV_time_6_enabled_read",
+      "unique_id_suffix": "PV_time_6_enabled_read",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Time 6 Active (read)",
+      "disabled_by": "integration",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_time_6_end_read",
+      "unique_id": "PV_time_6_end_read",
+      "unique_id_suffix": "PV_time_6_end_read",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Time 6 End (read)",
+      "disabled_by": "integration",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_time_7_begin_read",
+      "unique_id": "PV_time_7_begin_read",
+      "unique_id_suffix": "PV_time_7_begin_read",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Time 7 Begin (read)",
+      "disabled_by": "integration",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_time_7_mode_read",
+      "unique_id": "PV_time_7_mode_read",
+      "unique_id_suffix": "PV_time_7_mode_read",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Time 7 Mode (read)",
+      "disabled_by": "integration",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_time_7_active_read",
+      "unique_id": "PV_time_7_enabled_read",
+      "unique_id_suffix": "PV_time_7_enabled_read",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Time 7 Active (read)",
+      "disabled_by": "integration",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_time_7_end_read",
+      "unique_id": "PV_time_7_end_read",
+      "unique_id_suffix": "PV_time_7_end_read",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Time 7 End (read)",
+      "disabled_by": "integration",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_time_8_begin_read",
+      "unique_id": "PV_time_8_begin_read",
+      "unique_id_suffix": "PV_time_8_begin_read",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Time 8 Begin (read)",
+      "disabled_by": "integration",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_time_8_mode_read",
+      "unique_id": "PV_time_8_mode_read",
+      "unique_id_suffix": "PV_time_8_mode_read",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Time 8 Mode (read)",
+      "disabled_by": "integration",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_time_8_active_read",
+      "unique_id": "PV_time_8_enabled_read",
+      "unique_id_suffix": "PV_time_8_enabled_read",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Time 8 Active (read)",
+      "disabled_by": "integration",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_time_8_end_read",
+      "unique_id": "PV_time_8_end_read",
+      "unique_id_suffix": "PV_time_8_end_read",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Time 8 End (read)",
+      "disabled_by": "integration",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_time_9_begin_read",
+      "unique_id": "PV_time_9_begin_read",
+      "unique_id_suffix": "PV_time_9_begin_read",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Time 9 Begin (read)",
+      "disabled_by": "integration",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_time_9_mode_read",
+      "unique_id": "PV_time_9_mode_read",
+      "unique_id_suffix": "PV_time_9_mode_read",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Time 9 Mode (read)",
+      "disabled_by": "integration",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_time_9_active_read",
+      "unique_id": "PV_time_9_enabled_read",
+      "unique_id_suffix": "PV_time_9_enabled_read",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Time 9 Active (read)",
+      "disabled_by": "integration",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_time_9_end_read",
+      "unique_id": "PV_time_9_end_read",
+      "unique_id_suffix": "PV_time_9_end_read",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Time 9 End (read)",
+      "disabled_by": "integration",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_inverter_warning_text",
+      "unique_id": "PV_inverter_warning_text",
+      "unique_id_suffix": "PV_inverter_warning_text",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Inverter Warning Text"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_inverter_fault_text",
+      "unique_id": "PV_inverter_fault_text",
+      "unique_id_suffix": "PV_inverter_fault_text",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Inverter Fault Text"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_inverter_total_module_count",
+      "unique_id": "PV_inverter_total_module_count",
+      "unique_id_suffix": "PV_inverter_total_module_count",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Inverter Total Module Count"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_s_connected",
+      "unique_id": "PV_bmss_connceted",
+      "unique_id_suffix": "PV_bmss_connceted",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS's Connected"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_serial_number",
+      "unique_id": "PV_bms_1_serialnumber",
+      "unique_id_suffix": "PV_bms_1_serialnumber",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Serial Number",
+      "disabled_by": "integration",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_charge_power",
+      "unique_id": "PV_bms_1_charge_power",
+      "unique_id_suffix": "PV_bms_1_charge_power",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Charge Power",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_discharge_power",
+      "unique_id": "PV_bms_1_discharge_power",
+      "unique_id_suffix": "PV_bms_1_discharge_power",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Discharge Power",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_temp_a",
+      "unique_id": "PV_bms_1_temp_a",
+      "unique_id_suffix": "PV_bms_1_temp_a",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Temp A"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_temp_b",
+      "unique_id": "PV_bms_1_temp_b",
+      "unique_id_suffix": "PV_bms_1_temp_b",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Temp B"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_count",
+      "unique_id": "PV_bms_1_module_count",
+      "unique_id_suffix": "PV_bms_1_module_count",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module Count"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_status",
+      "unique_id": "PV_bms_1_status",
+      "unique_id_suffix": "PV_bms_1_status",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Status"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_awake_modules",
+      "unique_id": "PV_bms_1_awake_modules",
+      "unique_id_suffix": "PV_bms_1_awake_modules",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Awake Modules"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_monitoring_version",
+      "unique_id": "PV_bms_1_monitoring_version",
+      "unique_id_suffix": "PV_bms_1_monitoring_version",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Monitoring Version",
+      "disabled_by": "integration",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_total_output_energy",
+      "unique_id": "PV_bms_1_toe",
+      "unique_id_suffix": "PV_bms_1_toe",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Total Output Energy",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_soc",
+      "unique_id": "PV_bms_1_soc",
+      "unique_id_suffix": "PV_bms_1_soc",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 SoC",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_soh",
+      "unique_id": "PV_bms_1_soh",
+      "unique_id_suffix": "PV_bms_1_soh",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 SoH",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_1_status",
+      "unique_id": "PV_bms_1_module_1_status",
+      "unique_id_suffix": "PV_bms_1_module_1_status",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 1 Status"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_1_soc",
+      "unique_id": "PV_bms_1_module_1_soc",
+      "unique_id_suffix": "PV_bms_1_module_1_soc",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 1 SoC",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_1_soh",
+      "unique_id": "PV_bms_1_module_1_soh",
+      "unique_id_suffix": "PV_bms_1_module_1_soh",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 1 SoH",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_1_volt",
+      "unique_id": "PV_bms_1_module_1_volt",
+      "unique_id_suffix": "PV_bms_1_module_1_volt",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 1 Volt",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_1_combined_current",
+      "unique_id": "PV_bms_1_module_1_combined_current",
+      "unique_id_suffix": "PV_bms_1_module_1_combined_current",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 1 Combined Current",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_1_combined_power",
+      "unique_id": "PV_bms_1_module_1_combined_power",
+      "unique_id_suffix": "PV_bms_1_module_1_combined_power",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 1 Combined Power"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_1_total_output_energy",
+      "unique_id": "PV_bms_1_module_1_toe",
+      "unique_id_suffix": "PV_bms_1_module_1_toe",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 1 Total Output Energy",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_1_max_cell_temp",
+      "unique_id": "PV_bms_1_module_1_max_cell_temp",
+      "unique_id_suffix": "PV_bms_1_module_1_max_cell_temp",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 1 Max Cell Temp",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_1_min_cell_temp",
+      "unique_id": "PV_bms_1_module_1_min_cell_temp",
+      "unique_id_suffix": "PV_bms_1_module_1_min_cell_temp",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 1 Min Cell Temp",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_1_warning_text",
+      "unique_id": "PV_bms_1_module_1_warning_text",
+      "unique_id_suffix": "PV_bms_1_module_1_warning_text",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 1 Warning Text"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_1_charge_cycles",
+      "unique_id": "PV_bms_1_module_1_charge_cycles",
+      "unique_id_suffix": "PV_bms_1_module_1_charge_cycles",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 1 Charge Cycles",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_1_serial_number",
+      "unique_id": "PV_bms_1_module_1_serialnumber",
+      "unique_id_suffix": "PV_bms_1_module_1_serialnumber",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 1 Serial Number",
+      "disabled_by": "integration",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_2_status",
+      "unique_id": "PV_bms_1_module_2_status",
+      "unique_id_suffix": "PV_bms_1_module_2_status",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 2 Status"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_2_soc",
+      "unique_id": "PV_bms_1_module_2_soc",
+      "unique_id_suffix": "PV_bms_1_module_2_soc",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 2 SoC",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_2_soh",
+      "unique_id": "PV_bms_1_module_2_soh",
+      "unique_id_suffix": "PV_bms_1_module_2_soh",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 2 SoH",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_2_volt",
+      "unique_id": "PV_bms_1_module_2_volt",
+      "unique_id_suffix": "PV_bms_1_module_2_volt",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 2 Volt",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_2_combined_current",
+      "unique_id": "PV_bms_1_module_2_combined_current",
+      "unique_id_suffix": "PV_bms_1_module_2_combined_current",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 2 Combined Current",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_2_combined_power",
+      "unique_id": "PV_bms_1_module_2_combined_power",
+      "unique_id_suffix": "PV_bms_1_module_2_combined_power",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 2 Combined Power",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_2_total_output_energy",
+      "unique_id": "PV_bms_1_module_2_toe",
+      "unique_id_suffix": "PV_bms_1_module_2_toe",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 2 Total Output Energy",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_2_max_cell_temp",
+      "unique_id": "PV_bms_1_module_2_max_cell_temp",
+      "unique_id_suffix": "PV_bms_1_module_2_max_cell_temp",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 2 Max Cell Temp",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_2_min_cell_temp",
+      "unique_id": "PV_bms_1_module_2_min_cell_temp",
+      "unique_id_suffix": "PV_bms_1_module_2_min_cell_temp",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 2 Min Cell Temp",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_2_warning_text",
+      "unique_id": "PV_bms_1_module_2_warning_text",
+      "unique_id_suffix": "PV_bms_1_module_2_warning_text",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 2 Warning Text"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_2_charge_cycles",
+      "unique_id": "PV_bms_1_module_2_charge_cycles",
+      "unique_id_suffix": "PV_bms_1_module_2_charge_cycles",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 2 Charge Cycles",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_2_serial_number",
+      "unique_id": "PV_bms_1_module_2_serialnumber",
+      "unique_id_suffix": "PV_bms_1_module_2_serialnumber",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 2 Serial Number",
+      "disabled_by": "integration",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_3_status",
+      "unique_id": "PV_bms_1_module_3_status",
+      "unique_id_suffix": "PV_bms_1_module_3_status",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 3 Status"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_3_soc",
+      "unique_id": "PV_bms_1_module_3_soc",
+      "unique_id_suffix": "PV_bms_1_module_3_soc",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 3 SoC",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_3_soh",
+      "unique_id": "PV_bms_1_module_3_soh",
+      "unique_id_suffix": "PV_bms_1_module_3_soh",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 3 SoH",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_3_volt",
+      "unique_id": "PV_bms_1_module_3_volt",
+      "unique_id_suffix": "PV_bms_1_module_3_volt",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 3 Volt",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_3_combined_current",
+      "unique_id": "PV_bms_1_module_3_combined_current",
+      "unique_id_suffix": "PV_bms_1_module_3_combined_current",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 3 Combined Current",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_3_combined_power",
+      "unique_id": "PV_bms_1_module_3_combined_power",
+      "unique_id_suffix": "PV_bms_1_module_3_combined_power",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 3 Combined Power",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_3_total_output_energy",
+      "unique_id": "PV_bms_1_module_3_toe",
+      "unique_id_suffix": "PV_bms_1_module_3_toe",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 3 Total Output Energy",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_3_max_cell_temp",
+      "unique_id": "PV_bms_1_module_3_max_cell_temp",
+      "unique_id_suffix": "PV_bms_1_module_3_max_cell_temp",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 3 Max Cell Temp",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_3_min_cell_temp",
+      "unique_id": "PV_bms_1_module_3_min_cell_temp",
+      "unique_id_suffix": "PV_bms_1_module_3_min_cell_temp",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 3 Min Cell Temp",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_3_warning_text",
+      "unique_id": "PV_bms_1_module_3_warning_text",
+      "unique_id_suffix": "PV_bms_1_module_3_warning_text",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 3 Warning Text"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_3_charge_cycles",
+      "unique_id": "PV_bms_1_module_3_charge_cycles",
+      "unique_id_suffix": "PV_bms_1_module_3_charge_cycles",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 3 Charge Cycles",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_3_serial_number",
+      "unique_id": "PV_bms_1_module_3_serialnumber",
+      "unique_id_suffix": "PV_bms_1_module_3_serialnumber",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 3 Serial Number",
+      "disabled_by": "integration",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_4_status",
+      "unique_id": "PV_bms_1_module_4_status",
+      "unique_id_suffix": "PV_bms_1_module_4_status",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 4 Status",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_4_soc",
+      "unique_id": "PV_bms_1_module_4_soc",
+      "unique_id_suffix": "PV_bms_1_module_4_soc",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 4 SoC",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_4_soh",
+      "unique_id": "PV_bms_1_module_4_soh",
+      "unique_id_suffix": "PV_bms_1_module_4_soh",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 4 SoH",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_4_volt",
+      "unique_id": "PV_bms_1_module_4_volt",
+      "unique_id_suffix": "PV_bms_1_module_4_volt",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 4 Volt",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_4_combined_current",
+      "unique_id": "PV_bms_1_module_4_combined_current",
+      "unique_id_suffix": "PV_bms_1_module_4_combined_current",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 4 Combined Current",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_4_combined_power",
+      "unique_id": "PV_bms_1_module_4_combined_power",
+      "unique_id_suffix": "PV_bms_1_module_4_combined_power",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 4 Combined Power",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_4_total_output_energy",
+      "unique_id": "PV_bms_1_module_4_toe",
+      "unique_id_suffix": "PV_bms_1_module_4_toe",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 4 Total Output Energy",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_4_max_cell_temp",
+      "unique_id": "PV_bms_1_module_4_max_cell_temp",
+      "unique_id_suffix": "PV_bms_1_module_4_max_cell_temp",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 4 Max Cell Temp",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_4_min_cell_temp",
+      "unique_id": "PV_bms_1_module_4_min_cell_temp",
+      "unique_id_suffix": "PV_bms_1_module_4_min_cell_temp",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 4 Min Cell Temp",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_4_warning_text",
+      "unique_id": "PV_bms_1_module_4_warning_text",
+      "unique_id_suffix": "PV_bms_1_module_4_warning_text",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 4 Warning Text",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_4_charge_cycles",
+      "unique_id": "PV_bms_1_module_4_charge_cycles",
+      "unique_id_suffix": "PV_bms_1_module_4_charge_cycles",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 4 Charge Cycles",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_4_serial_number",
+      "unique_id": "PV_bms_1_module_4_serialnumber",
+      "unique_id_suffix": "PV_bms_1_module_4_serialnumber",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 4 Serial Number",
+      "disabled_by": "integration",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_5_status",
+      "unique_id": "PV_bms_1_module_5_status",
+      "unique_id_suffix": "PV_bms_1_module_5_status",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 5 Status",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_5_soc",
+      "unique_id": "PV_bms_1_module_5_soc",
+      "unique_id_suffix": "PV_bms_1_module_5_soc",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 5 SoC",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_5_soh",
+      "unique_id": "PV_bms_1_module_5_soh",
+      "unique_id_suffix": "PV_bms_1_module_5_soh",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 5 SoH",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_5_volt",
+      "unique_id": "PV_bms_1_module_5_volt",
+      "unique_id_suffix": "PV_bms_1_module_5_volt",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 5 Volt",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_5_combined_current",
+      "unique_id": "PV_bms_1_module_5_combined_current",
+      "unique_id_suffix": "PV_bms_1_module_5_combined_current",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 5 Combined Current",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_5_combined_power",
+      "unique_id": "PV_bms_1_module_5_combined_power",
+      "unique_id_suffix": "PV_bms_1_module_5_combined_power",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 5 Combined Power",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_5_total_output_energy",
+      "unique_id": "PV_bms_1_module_5_toe",
+      "unique_id_suffix": "PV_bms_1_module_5_toe",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 5 Total Output Energy",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_5_max_cell_temp",
+      "unique_id": "PV_bms_1_module_5_max_cell_temp",
+      "unique_id_suffix": "PV_bms_1_module_5_max_cell_temp",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 5 Max Cell Temp",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_5_min_cell_temp",
+      "unique_id": "PV_bms_1_module_5_min_cell_temp",
+      "unique_id_suffix": "PV_bms_1_module_5_min_cell_temp",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 5 Min Cell Temp",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_5_warning_text",
+      "unique_id": "PV_bms_1_module_5_warning_text",
+      "unique_id_suffix": "PV_bms_1_module_5_warning_text",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 5 Warning Text",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_5_charge_cycles",
+      "unique_id": "PV_bms_1_module_5_charge_cycles",
+      "unique_id_suffix": "PV_bms_1_module_5_charge_cycles",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 5 Charge Cycles",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_5_serial_number",
+      "unique_id": "PV_bms_1_module_5_serialnumber",
+      "unique_id_suffix": "PV_bms_1_module_5_serialnumber",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 5 Serial Number",
+      "disabled_by": "integration",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_6_status",
+      "unique_id": "PV_bms_1_module_6_status",
+      "unique_id_suffix": "PV_bms_1_module_6_status",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 6 Status",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_6_soc",
+      "unique_id": "PV_bms_1_module_6_soc",
+      "unique_id_suffix": "PV_bms_1_module_6_soc",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 6 SoC",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_6_soh",
+      "unique_id": "PV_bms_1_module_6_soh",
+      "unique_id_suffix": "PV_bms_1_module_6_soh",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 6 SoH",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_6_volt",
+      "unique_id": "PV_bms_1_module_6_volt",
+      "unique_id_suffix": "PV_bms_1_module_6_volt",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 6 Volt",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_6_combined_current",
+      "unique_id": "PV_bms_1_module_6_combined_current",
+      "unique_id_suffix": "PV_bms_1_module_6_combined_current",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 6 Combined Current",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_6_combined_power",
+      "unique_id": "PV_bms_1_module_6_combined_power",
+      "unique_id_suffix": "PV_bms_1_module_6_combined_power",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 6 Combined Power",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_6_total_output_energy",
+      "unique_id": "PV_bms_1_module_6_toe",
+      "unique_id_suffix": "PV_bms_1_module_6_toe",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 6 Total Output Energy",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_6_max_cell_temp",
+      "unique_id": "PV_bms_1_module_6_max_cell_temp",
+      "unique_id_suffix": "PV_bms_1_module_6_max_cell_temp",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 6 Max Cell Temp",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_6_min_cell_temp",
+      "unique_id": "PV_bms_1_module_6_min_cell_temp",
+      "unique_id_suffix": "PV_bms_1_module_6_min_cell_temp",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 6 Min Cell Temp",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_6_warning_text",
+      "unique_id": "PV_bms_1_module_6_warning_text",
+      "unique_id_suffix": "PV_bms_1_module_6_warning_text",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 6 Warning Text",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_6_charge_cycles",
+      "unique_id": "PV_bms_1_module_6_charge_cycles",
+      "unique_id_suffix": "PV_bms_1_module_6_charge_cycles",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 6 Charge Cycles",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_1_module_6_serial_number",
+      "unique_id": "PV_bms_1_module_6_serialnumber",
+      "unique_id_suffix": "PV_bms_1_module_6_serialnumber",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 1 Module 6 Serial Number",
+      "disabled_by": "integration",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_charge_power",
+      "unique_id": "PV_bms_2_charge_power",
+      "unique_id_suffix": "PV_bms_2_charge_power",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Charge Power",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_discharge_power",
+      "unique_id": "PV_bms_2_discharge_power",
+      "unique_id_suffix": "PV_bms_2_discharge_power",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Discharge Power",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_temp_a",
+      "unique_id": "PV_bms_2_temp_a",
+      "unique_id_suffix": "PV_bms_2_temp_a",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Temp A",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_temp_b",
+      "unique_id": "PV_bms_2_temp_b",
+      "unique_id_suffix": "PV_bms_2_temp_b",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Temp B",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_count",
+      "unique_id": "PV_bms_2_module_count",
+      "unique_id_suffix": "PV_bms_2_module_count",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module Count",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_status",
+      "unique_id": "PV_bms_2_status",
+      "unique_id_suffix": "PV_bms_2_status",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Status",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_awake_modules",
+      "unique_id": "PV_bms_2_awake_modules",
+      "unique_id_suffix": "PV_bms_2_awake_modules",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Awake Modules"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_serial_number",
+      "unique_id": "PV_bms_2_serialnumber",
+      "unique_id_suffix": "PV_bms_2_serialnumber",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Serial Number",
+      "disabled_by": "integration",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_monitoring_version",
+      "unique_id": "PV_bms_2_monitoring_version",
+      "unique_id_suffix": "PV_bms_2_monitoring_version",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Monitoring Version",
+      "disabled_by": "integration",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_total_output_energy",
+      "unique_id": "PV_bms_2_toe",
+      "unique_id_suffix": "PV_bms_2_toe",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Total Output Energy",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_soc",
+      "unique_id": "PV_bms_2_soc",
+      "unique_id_suffix": "PV_bms_2_soc",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 SoC",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_soh",
+      "unique_id": "PV_bms_2_soh",
+      "unique_id_suffix": "PV_bms_2_soh",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 SoH",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_1_status",
+      "unique_id": "PV_bms_2_module_1_status",
+      "unique_id_suffix": "PV_bms_2_module_1_status",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 1 Status",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_1_soc",
+      "unique_id": "PV_bms_2_module_1_soc",
+      "unique_id_suffix": "PV_bms_2_module_1_soc",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 1 SoC",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_1_soh",
+      "unique_id": "PV_bms_2_module_1_soh",
+      "unique_id_suffix": "PV_bms_2_module_1_soh",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 1 SoH",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_1_volt",
+      "unique_id": "PV_bms_2_module_1_volt",
+      "unique_id_suffix": "PV_bms_2_module_1_volt",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 1 Volt",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_1_combined_current",
+      "unique_id": "PV_bms_2_module_1_combined_current",
+      "unique_id_suffix": "PV_bms_2_module_1_combined_current",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 1 Combined Current",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_1_combined_power",
+      "unique_id": "PV_bms_2_module_1_combined_power",
+      "unique_id_suffix": "PV_bms_2_module_1_combined_power",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 1 Combined Power",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_1_total_output_energy",
+      "unique_id": "PV_bms_2_module_1_toe",
+      "unique_id_suffix": "PV_bms_2_module_1_toe",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 1 Total Output Energy",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_1_max_cell_temp",
+      "unique_id": "PV_bms_2_module_1_max_cell_temp",
+      "unique_id_suffix": "PV_bms_2_module_1_max_cell_temp",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 1 Max Cell Temp",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_1_min_cell_temp",
+      "unique_id": "PV_bms_2_module_1_min_cell_temp",
+      "unique_id_suffix": "PV_bms_2_module_1_min_cell_temp",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 1 Min Cell Temp",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_1_warning_text",
+      "unique_id": "PV_bms_2_module_1_warning_text",
+      "unique_id_suffix": "PV_bms_2_module_1_warning_text",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 1 Warning Text",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_1_charge_cycles",
+      "unique_id": "PV_bms_2_module_1_charge_cycles",
+      "unique_id_suffix": "PV_bms_2_module_1_charge_cycles",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 1 Charge Cycles",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_1_serial_number",
+      "unique_id": "PV_bms_2_module_1_serialnumber",
+      "unique_id_suffix": "PV_bms_2_module_1_serialnumber",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 1 Serial Number",
+      "disabled_by": "integration",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_2_status",
+      "unique_id": "PV_bms_2_module_2_status",
+      "unique_id_suffix": "PV_bms_2_module_2_status",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 2 Status",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_2_soc",
+      "unique_id": "PV_bms_2_module_2_soc",
+      "unique_id_suffix": "PV_bms_2_module_2_soc",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 2 SoC",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_2_soh",
+      "unique_id": "PV_bms_2_module_2_soh",
+      "unique_id_suffix": "PV_bms_2_module_2_soh",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 2 SoH",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_2_volt",
+      "unique_id": "PV_bms_2_module_2_volt",
+      "unique_id_suffix": "PV_bms_2_module_2_volt",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 2 Volt",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_2_combined_current",
+      "unique_id": "PV_bms_2_module_2_combined_current",
+      "unique_id_suffix": "PV_bms_2_module_2_combined_current",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 2 Combined Current",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_2_combined_power",
+      "unique_id": "PV_bms_2_module_2_combined_power",
+      "unique_id_suffix": "PV_bms_2_module_2_combined_power",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 2 Combined Power",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_2_total_output_energy",
+      "unique_id": "PV_bms_2_module_2_toe",
+      "unique_id_suffix": "PV_bms_2_module_2_toe",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 2 Total Output Energy",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_2_warning_text",
+      "unique_id": "PV_bms_2_module_2_warning_text",
+      "unique_id_suffix": "PV_bms_2_module_2_warning_text",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 2 Warning Text",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_2_charge_cycles",
+      "unique_id": "PV_bms_2_module_2_charge_cycles",
+      "unique_id_suffix": "PV_bms_2_module_2_charge_cycles",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 2 Charge Cycles",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_2_serial_number",
+      "unique_id": "PV_bms_2_module_2_serialnumber",
+      "unique_id_suffix": "PV_bms_2_module_2_serialnumber",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 2 Serial Number",
+      "disabled_by": "integration",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_3_status",
+      "unique_id": "PV_bms_2_module_3_status",
+      "unique_id_suffix": "PV_bms_2_module_3_status",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 3 Status",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_3_soc",
+      "unique_id": "PV_bms_2_module_3_soc",
+      "unique_id_suffix": "PV_bms_2_module_3_soc",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 3 SoC",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_3_soh",
+      "unique_id": "PV_bms_2_module_3_soh",
+      "unique_id_suffix": "PV_bms_2_module_3_soh",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 3 SoH",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_3_volt",
+      "unique_id": "PV_bms_2_module_3_volt",
+      "unique_id_suffix": "PV_bms_2_module_3_volt",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 3 Volt",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_3_combined_current",
+      "unique_id": "PV_bms_2_module_3_combined_current",
+      "unique_id_suffix": "PV_bms_2_module_3_combined_current",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 3 Combined Current",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_3_combined_power",
+      "unique_id": "PV_bms_2_module_3_combined_power",
+      "unique_id_suffix": "PV_bms_2_module_3_combined_power",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 3 Combined Power",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_3_total_output_energy",
+      "unique_id": "PV_bms_2_module_3_toe",
+      "unique_id_suffix": "PV_bms_2_module_3_toe",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 3 Total Output Energy",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_3_warning_text",
+      "unique_id": "PV_bms_2_module_3_warning_text",
+      "unique_id_suffix": "PV_bms_2_module_3_warning_text",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 3 Warning Text",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_3_charge_cycles",
+      "unique_id": "PV_bms_2_module_3_charge_cycles",
+      "unique_id_suffix": "PV_bms_2_module_3_charge_cycles",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 3 Charge Cycles",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_3_serial_number",
+      "unique_id": "PV_bms_2_module_3_serialnumber",
+      "unique_id_suffix": "PV_bms_2_module_3_serialnumber",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 3 Serial Number",
+      "disabled_by": "integration",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_4_status",
+      "unique_id": "PV_bms_2_module_4_status",
+      "unique_id_suffix": "PV_bms_2_module_4_status",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 4 Status",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_4_soc",
+      "unique_id": "PV_bms_2_module_4_soc",
+      "unique_id_suffix": "PV_bms_2_module_4_soc",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 4 SoC",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_4_soh",
+      "unique_id": "PV_bms_2_module_4_soh",
+      "unique_id_suffix": "PV_bms_2_module_4_soh",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 4 SoH",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_4_volt",
+      "unique_id": "PV_bms_2_module_4_volt",
+      "unique_id_suffix": "PV_bms_2_module_4_volt",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 4 Volt",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_4_combined_current",
+      "unique_id": "PV_bms_2_module_4_combined_current",
+      "unique_id_suffix": "PV_bms_2_module_4_combined_current",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 4 Combined Current",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_4_combined_power",
+      "unique_id": "PV_bms_2_module_4_combined_power",
+      "unique_id_suffix": "PV_bms_2_module_4_combined_power",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 4 Combined Power",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_4_total_output_energy",
+      "unique_id": "PV_bms_2_module_4_toe",
+      "unique_id_suffix": "PV_bms_2_module_4_toe",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 4 Total Output Energy",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_4_warning_text",
+      "unique_id": "PV_bms_2_module_4_warning_text",
+      "unique_id_suffix": "PV_bms_2_module_4_warning_text",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 4 Warning Text",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_4_charge_cycles",
+      "unique_id": "PV_bms_2_module_4_charge_cycles",
+      "unique_id_suffix": "PV_bms_2_module_4_charge_cycles",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 4 Charge Cycles",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_4_serial_number",
+      "unique_id": "PV_bms_2_module_4_serialnumber",
+      "unique_id_suffix": "PV_bms_2_module_4_serialnumber",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 4 Serial Number",
+      "disabled_by": "integration",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_5_status",
+      "unique_id": "PV_bms_2_module_5_status",
+      "unique_id_suffix": "PV_bms_2_module_5_status",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 5 Status",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_5_soc",
+      "unique_id": "PV_bms_2_module_5_soc",
+      "unique_id_suffix": "PV_bms_2_module_5_soc",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 5 SoC",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_5_soh",
+      "unique_id": "PV_bms_2_module_5_soh",
+      "unique_id_suffix": "PV_bms_2_module_5_soh",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 5 SoH",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_5_volt",
+      "unique_id": "PV_bms_2_module_5_volt",
+      "unique_id_suffix": "PV_bms_2_module_5_volt",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 5 Volt",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_5_combined_current",
+      "unique_id": "PV_bms_2_module_5_combined_current",
+      "unique_id_suffix": "PV_bms_2_module_5_combined_current",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 5 Combined Current",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_5_combined_power",
+      "unique_id": "PV_bms_2_module_5_combined_power",
+      "unique_id_suffix": "PV_bms_2_module_5_combined_power",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 5 Combined Power",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_5_total_output_energy",
+      "unique_id": "PV_bms_2_module_5_toe",
+      "unique_id_suffix": "PV_bms_2_module_5_toe",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 5 Total Output Energy",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_5_warning_text",
+      "unique_id": "PV_bms_2_module_5_warning_text",
+      "unique_id_suffix": "PV_bms_2_module_5_warning_text",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 5 Warning Text",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_5_charge_cycles",
+      "unique_id": "PV_bms_2_module_5_charge_cycles",
+      "unique_id_suffix": "PV_bms_2_module_5_charge_cycles",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 5 Charge Cycles",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_5_serial_number",
+      "unique_id": "PV_bms_2_module_5_serialnumber",
+      "unique_id_suffix": "PV_bms_2_module_5_serialnumber",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 5 Serial Number",
+      "disabled_by": "integration",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_6_status",
+      "unique_id": "PV_bms_2_module_6_status",
+      "unique_id_suffix": "PV_bms_2_module_6_status",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 6 Status",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_6_soc",
+      "unique_id": "PV_bms_2_module_6_soc",
+      "unique_id_suffix": "PV_bms_2_module_6_soc",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 6 SoC",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_6_soh",
+      "unique_id": "PV_bms_2_module_6_soh",
+      "unique_id_suffix": "PV_bms_2_module_6_soh",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 6 SoH",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_6_volt",
+      "unique_id": "PV_bms_2_module_6_volt",
+      "unique_id_suffix": "PV_bms_2_module_6_volt",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 6 Volt",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_6_combined_current",
+      "unique_id": "PV_bms_2_module_6_combined_current",
+      "unique_id_suffix": "PV_bms_2_module_6_combined_current",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 6 Combined Current",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_6_combined_power",
+      "unique_id": "PV_bms_2_module_6_combined_power",
+      "unique_id_suffix": "PV_bms_2_module_6_combined_power",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 6 Combined Power",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_6_total_output_energy",
+      "unique_id": "PV_bms_2_module_6_toe",
+      "unique_id_suffix": "PV_bms_2_module_6_toe",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 6 Total Output Energy",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_6_warning_text",
+      "unique_id": "PV_bms_2_module_6_warning_text",
+      "unique_id_suffix": "PV_bms_2_module_6_warning_text",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 6 Warning Text",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_6_charge_cycles",
+      "unique_id": "PV_bms_2_module_6_charge_cycles",
+      "unique_id_suffix": "PV_bms_2_module_6_charge_cycles",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 6 Charge Cycles",
+      "disabled_by": "integration"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_bms_2_module_6_serial_number",
+      "unique_id": "PV_bms_2_module_6_serialnumber",
+      "unique_id_suffix": "PV_bms_2_module_6_serialnumber",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV BMS 2 Module 6 Serial Number",
+      "disabled_by": "integration",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_growatt_vpp_status",
+      "unique_id": "PV_vpp_status",
+      "unique_id_suffix": "PV_vpp_status",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Growatt VPP Status",
+      "disabled_by": "integration",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.belpex_h_current_electricity_market_price",
+      "unique_id": "entsoe.Belpex H_current_price",
+      "unique_id_suffix": "entsoe.Belpex H_current_price",
+      "platform": "entsoe",
+      "device_id": "27c044edd4885c0d172df6be073b9c0a",
+      "original_name": "Current electricity market price (Belpex H)"
+    },
+    {
+      "entity_id": "sensor.belpex_h_next_hour_electricity_market_price",
+      "unique_id": "entsoe.Belpex H_next_hour_price",
+      "unique_id_suffix": "entsoe.Belpex H_next_hour_price",
+      "platform": "entsoe",
+      "device_id": "27c044edd4885c0d172df6be073b9c0a",
+      "original_name": "Next hour electricity market price (Belpex H)"
+    },
+    {
+      "entity_id": "sensor.belpex_h_lowest_energy_price",
+      "unique_id": "entsoe.Belpex H_min_price",
+      "unique_id_suffix": "entsoe.Belpex H_min_price",
+      "platform": "entsoe",
+      "device_id": "27c044edd4885c0d172df6be073b9c0a",
+      "original_name": "Lowest energy price (Belpex H)"
+    },
+    {
+      "entity_id": "sensor.belpex_h_highest_energy_price",
+      "unique_id": "entsoe.Belpex H_max_price",
+      "unique_id_suffix": "entsoe.Belpex H_max_price",
+      "platform": "entsoe",
+      "device_id": "27c044edd4885c0d172df6be073b9c0a",
+      "original_name": "Highest energy price (Belpex H)"
+    },
+    {
+      "entity_id": "sensor.belpex_h_average_electricity_price",
+      "unique_id": "entsoe.Belpex H_avg_price",
+      "unique_id_suffix": "entsoe.Belpex H_avg_price",
+      "platform": "entsoe",
+      "device_id": "27c044edd4885c0d172df6be073b9c0a",
+      "original_name": "Average electricity price (Belpex H)"
+    },
+    {
+      "entity_id": "sensor.belpex_h_current_percentage_of_highest_electricity_price",
+      "unique_id": "entsoe.Belpex H_percentage_of_max",
+      "unique_id_suffix": "entsoe.Belpex H_percentage_of_max",
+      "platform": "entsoe",
+      "device_id": "27c044edd4885c0d172df6be073b9c0a",
+      "original_name": "Current percentage of highest electricity price (Belpex H)"
+    },
+    {
+      "entity_id": "sensor.belpex_h_current_percentage_in_electricity_price_range",
+      "unique_id": "entsoe.Belpex H_percentage_of_range",
+      "unique_id_suffix": "entsoe.Belpex H_percentage_of_range",
+      "platform": "entsoe",
+      "device_id": "27c044edd4885c0d172df6be073b9c0a",
+      "original_name": "Current percentage in electricity price range (Belpex H)"
+    },
+    {
+      "entity_id": "sensor.belpex_h_time_of_highest_price",
+      "unique_id": "entsoe.Belpex H_highest_price_time_today",
+      "unique_id_suffix": "entsoe.Belpex H_highest_price_time_today",
+      "platform": "entsoe",
+      "device_id": "27c044edd4885c0d172df6be073b9c0a",
+      "original_name": "Time of highest price (Belpex H)"
+    },
+    {
+      "entity_id": "sensor.belpex_h_time_of_lowest_price",
+      "unique_id": "entsoe.Belpex H_lowest_price_time_today",
+      "unique_id_suffix": "entsoe.Belpex H_lowest_price_time_today",
+      "platform": "entsoe",
+      "device_id": "27c044edd4885c0d172df6be073b9c0a",
+      "original_name": "Time of lowest price (Belpex H)"
+    },
+    {
+      "entity_id": "number.pv_mod_5000tl3_xh_vpp_time",
+      "unique_id": "PV_vpp_time",
+      "unique_id_suffix": "PV_vpp_time",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH VPP Time",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "number.pv_mod_5000tl3_xh_vpp_power",
+      "unique_id": "PV_vpp_power",
+      "unique_id_suffix": "PV_vpp_power",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH VPP Power",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "select.pv_mod_5000tl3_xh_vpp_status",
+      "unique_id": "PV_vpp_status",
+      "unique_id_suffix": "PV_vpp_status",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH VPP Status",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "select.pv_mod_5000tl3_xh_vpp_remote_control",
+      "unique_id": "PV_vpp_remote_control",
+      "unique_id_suffix": "PV_vpp_remote_control",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH VPP Remote Control",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "switch.enable_pv_variant_detail_sensors",
+      "unique_id": "PV Energy Dashboard_energy_dashboard_pv_variants_enabled",
+      "unique_id_suffix": "PV Energy Dashboard_energy_dashboard_pv_variants_enabled",
+      "platform": "solax_modbus",
+      "device_id": "99eabcef2e4ac39de4f94c44e942ee45",
+      "original_name": "Enable PV Variant Detail Sensors",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "switch.enable_home_consumption_sensor",
+      "unique_id": "PV Energy Dashboard_energy_dashboard_home_consumption_enabled",
+      "unique_id_suffix": "PV Energy Dashboard_energy_dashboard_home_consumption_enabled",
+      "platform": "solax_modbus",
+      "device_id": "99eabcef2e4ac39de4f94c44e942ee45",
+      "original_name": "Enable Home Consumption Sensor",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "switch.enable_grid_to_battery_sensors",
+      "unique_id": "PV Energy Dashboard_energy_dashboard_grid_to_battery_enabled",
+      "unique_id_suffix": "PV Energy Dashboard_energy_dashboard_grid_to_battery_enabled",
+      "platform": "solax_modbus",
+      "device_id": "99eabcef2e4ac39de4f94c44e942ee45",
+      "original_name": "Enable Grid to Battery Sensors",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "select.growatt_pv_mod_5000tl3_xh_vpp_allow_ac_charging",
+      "unique_id": "PV_vpp_allow_ac_charging",
+      "unique_id_suffix": "PV_vpp_allow_ac_charging",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH VPP Allow AC charging",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "sensor.growatt_pv_grid_status",
+      "unique_id": "PV_grid_status",
+      "unique_id_suffix": "PV_grid_status",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Grid Status",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.growatt_pv_backup_status",
+      "unique_id": "PV_backup_status",
+      "unique_id_suffix": "PV_backup_status",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV Backup Status",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.growatt_communication_health",
+      "unique_id": "PV_communication_health",
+      "unique_id_suffix": "PV_communication_health",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "Communication Health",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.growatt_communication_success_rate",
+      "unique_id": "PV_communication_success_rate",
+      "unique_id_suffix": "PV_communication_success_rate",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "Communication Success Rate",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.growatt_communication_quarantined_registers",
+      "unique_id": "PV_communication_quarantined_registers",
+      "unique_id_suffix": "PV_communication_quarantined_registers",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "Communication Quarantined Registers",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_energy_dashboard_mode",
+      "unique_id": "PV Energy Dashboard_energy_dashboard_mode",
+      "unique_id_suffix": "PV Energy Dashboard_energy_dashboard_mode",
+      "platform": "solax_modbus",
+      "device_id": "99eabcef2e4ac39de4f94c44e942ee45",
+      "original_name": "Mode",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_energy_dashboard_inverter_count",
+      "unique_id": "PV Energy Dashboard_energy_dashboard_inverter_count",
+      "unique_id_suffix": "PV Energy Dashboard_energy_dashboard_inverter_count",
+      "platform": "solax_modbus",
+      "device_id": "99eabcef2e4ac39de4f94c44e942ee45",
+      "original_name": "Inverter Count",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_energy_dashboard_last_total_inverter_count",
+      "unique_id": "PV Energy Dashboard_energy_dashboard_last_total_inverter_count",
+      "unique_id_suffix": "PV Energy Dashboard_energy_dashboard_last_total_inverter_count",
+      "platform": "solax_modbus",
+      "device_id": "99eabcef2e4ac39de4f94c44e942ee45",
+      "original_name": "Last Total Inverter Count",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_energy_dashboard_parallel_setting",
+      "unique_id": "PV Energy Dashboard_energy_dashboard_parallel_setting",
+      "unique_id_suffix": "PV Energy Dashboard_energy_dashboard_parallel_setting",
+      "platform": "solax_modbus",
+      "device_id": "99eabcef2e4ac39de4f94c44e942ee45",
+      "original_name": "Parallel Setting",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "sensor.pv_energy_dashboard_mapping_summary",
+      "unique_id": "PV Energy Dashboard_energy_dashboard_mapping_summary",
+      "unique_id_suffix": "PV Energy Dashboard_energy_dashboard_mapping_summary",
+      "platform": "solax_modbus",
+      "device_id": "99eabcef2e4ac39de4f94c44e942ee45",
+      "original_name": "Mapping Summary",
+      "entity_category": "diagnostic"
+    },
+    {
+      "entity_id": "time.buiten_growatt_pv_mod_5000tl3_xh_time_3_begin",
+      "unique_id": "PV_time_3_begin",
+      "unique_id_suffix": "PV_time_3_begin",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 3 Begin",
+      "disabled_by": "integration",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "time.buiten_growatt_pv_mod_5000tl3_xh_time_3_end",
+      "unique_id": "PV_time_3_end",
+      "unique_id_suffix": "PV_time_3_end",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 3 End",
+      "disabled_by": "integration",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "time.buiten_growatt_pv_mod_5000tl3_xh_time_4_begin",
+      "unique_id": "PV_time_4_begin",
+      "unique_id_suffix": "PV_time_4_begin",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 4 Begin",
+      "disabled_by": "integration",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "time.buiten_growatt_pv_mod_5000tl3_xh_time_4_end",
+      "unique_id": "PV_time_4_end",
+      "unique_id_suffix": "PV_time_4_end",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 4 End",
+      "disabled_by": "integration",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "time.buiten_growatt_pv_mod_5000tl3_xh_time_5_begin",
+      "unique_id": "PV_time_5_begin",
+      "unique_id_suffix": "PV_time_5_begin",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 5 Begin",
+      "disabled_by": "integration",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "time.buiten_growatt_pv_mod_5000tl3_xh_time_5_end",
+      "unique_id": "PV_time_5_end",
+      "unique_id_suffix": "PV_time_5_end",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 5 End",
+      "disabled_by": "integration",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "time.buiten_growatt_pv_mod_5000tl3_xh_time_6_begin",
+      "unique_id": "PV_time_6_begin",
+      "unique_id_suffix": "PV_time_6_begin",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 6 Begin",
+      "disabled_by": "integration",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "time.buiten_growatt_pv_mod_5000tl3_xh_time_6_end",
+      "unique_id": "PV_time_6_end",
+      "unique_id_suffix": "PV_time_6_end",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 6 End",
+      "disabled_by": "integration",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "time.buiten_growatt_pv_mod_5000tl3_xh_time_7_begin",
+      "unique_id": "PV_time_7_begin",
+      "unique_id_suffix": "PV_time_7_begin",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 7 Begin",
+      "disabled_by": "integration",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "time.buiten_growatt_pv_mod_5000tl3_xh_time_7_end",
+      "unique_id": "PV_time_7_end",
+      "unique_id_suffix": "PV_time_7_end",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 7 End",
+      "disabled_by": "integration",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "time.buiten_growatt_pv_mod_5000tl3_xh_time_8_begin",
+      "unique_id": "PV_time_8_begin",
+      "unique_id_suffix": "PV_time_8_begin",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 8 Begin",
+      "disabled_by": "integration",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "time.buiten_growatt_pv_mod_5000tl3_xh_time_8_end",
+      "unique_id": "PV_time_8_end",
+      "unique_id_suffix": "PV_time_8_end",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 8 End",
+      "disabled_by": "integration",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "time.buiten_growatt_pv_mod_5000tl3_xh_time_9_begin",
+      "unique_id": "PV_time_9_begin",
+      "unique_id_suffix": "PV_time_9_begin",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 9 Begin",
+      "disabled_by": "integration",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "time.buiten_growatt_pv_mod_5000tl3_xh_time_9_end",
+      "unique_id": "PV_time_9_end",
+      "unique_id_suffix": "PV_time_9_end",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 9 End",
+      "disabled_by": "integration",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "time.pv_growatt_time_1_begin",
+      "unique_id": "PV_time_1_begin",
+      "unique_id_suffix": "PV_time_1_begin",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 1 Begin",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "time.pv_growatt_time_1_end",
+      "unique_id": "PV_time_1_end",
+      "unique_id_suffix": "PV_time_1_end",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 1 End",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "time.pv_growatt_time_2_begin",
+      "unique_id": "PV_time_2_begin",
+      "unique_id_suffix": "PV_time_2_begin",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 2 Begin",
+      "disabled_by": "integration",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "time.pv_growatt_time_2_end",
+      "unique_id": "PV_time_2_end",
+      "unique_id_suffix": "PV_time_2_end",
+      "platform": "solax_modbus",
+      "device_id": "a0b3f565137b65df4a5d2ab0894f08a7",
+      "original_name": "PV MOD 5000TL3-XH Time 2 End",
+      "disabled_by": "integration",
+      "entity_category": "config"
+    },
+    {
+      "entity_id": "sensor.solcast_pv_forecast_voorspelling_vandaag",
+      "unique_id": "total_kwh_forecast_today",
+      "platform": "solcast_solar",
+      "original_name": "Forecast Today",
+      "disabled_by": null,
+      "hidden_by": null
+    },
+    {
+      "entity_id": "sensor.solcast_pv_forecast_voorspelling_morgen",
+      "unique_id": "total_kwh_forecast_tomorrow",
+      "platform": "solcast_solar",
+      "original_name": "Forecast Tomorrow",
+      "disabled_by": null,
+      "hidden_by": null
+    }
+  ],
+  "price_data": {
+    "today": [
+      0.141,
+      0.12671,
+      0.124,
+      0.11955,
+      0.11713,
+      0.1126,
+      0.12281,
+      0.12505,
+      0.12262,
+      0.07359,
+      0.00136,
+      -0.0,
+      -1e-05,
+      -1e-05,
+      -1e-05,
+      1e-05,
+      0.01216,
+      0.07116,
+      0.11279,
+      0.13092,
+      0.14638,
+      0.15082,
+      0.14519,
+      0.13263
+    ],
+    "tomorrow": []
+  },
+  "expected_discovery": {
+    "growatt_found": false,
+    "solax_found": true,
+    "nordpool_found": false,
+    "nordpool_area": null,
+    "nordpool_custom_area": null,
+    "nordpool_config_entry_id": null,
+    "octopus_found": false,
+    "currency": "EUR",
+    "detected_platform": "solax_modbus_growatt_min",
+    "entsoe_found": true,
+    "entsoe_entity": "sensor.belpex_h_average_electricity_price",
+    "required_sensors": [
+      "grid_charge",
+      "battery_soc",
+      "battery_charge_power",
+      "battery_discharge_power",
+      "pv_power"
+    ],
+    "solcast_found": true
+  },
+  "inverter_platform": "solax_modbus_growatt_min"
+}

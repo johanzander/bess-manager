@@ -424,8 +424,11 @@ class GrowattMinController(InverterController):
             f"Using {len(self.strategic_intents)} strategic intents from DP algorithm (quarterly resolution)"
         )
 
-        # Log intent transitions
-        for period in range(1, len(self.strategic_intents)):
+        # Log intent transitions from current_period onward — periods before
+        # current_period are already elapsed and re-log identically on every
+        # hourly re-optimization otherwise (downstream TOU-segment building
+        # only processes from current_period onward too, see below).
+        for period in range(max(1, current_period), len(self.strategic_intents)):
             if self.strategic_intents[period] != self.strategic_intents[period - 1]:
                 logger.info(
                     "Intent transition at period %d: %s → %s",
@@ -464,9 +467,6 @@ class GrowattMinController(InverterController):
             "Converting %d strategic intents to TOU intervals using 15-minute resolution",
             len(self.strategic_intents),
         )
-
-        # Log the intent-to-mode mapping being used
-        logger.info("Intent to mode mapping: %s", self.INTENT_TO_MODE)
 
         # Check for corrupted existing intervals before clearing
         if self.tou_intervals:

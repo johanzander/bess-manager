@@ -19,7 +19,7 @@ The exact visual shape of the aggregate view (bar chart vs. table vs. both with 
 - Archiving historical electricity prices separately — prices are already captured per-period inside each day's snapshot.
 - A payback/investment prediction calculator.
 - Any change to `/api/dashboard`'s live behavior or response shape.
-- Any change to `HistoricalDataStore`/`PredictionSnapshotStore`'s existing daily-clear behavior. (Noted for later: the user wants these three stores eventually consolidated/simplified — this design keeps the new store's schema close to `DailyView`/`PeriodData` rather than inventing a divergent shape, so that future consolidation isn't made harder than necessary. No action beyond that is taken now.)
+- Any change to `HistoricalDataStore`/`PredictionSnapshotStore`'s existing daily-clear behavior. Future consolidation of these three stores is tracked in `TODO.md` under Technical Debt — this design keeps the new store's schema close to `DailyView`/`PeriodData` so that consolidation isn't made harder than necessary, but no action beyond that is taken now.
 
 ## Architecture
 

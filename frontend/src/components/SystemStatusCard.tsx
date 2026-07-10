@@ -249,10 +249,10 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", sys
       strategicIntent,
       costAndSavings: {
         todaysCost: (() => {
-          if (!dashboardData.summary?.optimizedCost) {
-            throw new Error('MISSING DATA: summary.optimizedCost is required for cost display');
+          if (!dashboardData.summary?.netGridCost) {
+            throw new Error('MISSING DATA: summary.netGridCost is required for cost display');
           }
-          return dashboardData.summary.optimizedCost;
+          return dashboardData.summary.netGridCost;
         })(),
         todaysSavings: (() => {
           if (!dashboardData.summary?.totalSavings) {
@@ -426,7 +426,7 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", sys
       title: "Today's Cost & Savings",
       icon: DollarSign,
       color: "blue" as const,
-      keyMetric: "Today's Costs",
+      keyMetric: "Net Grid Cost",
       keyValue: statusData.costAndSavings?.todaysCost?.text,
       keyUnit: "",
       metrics: [

@@ -10,7 +10,7 @@ from datetime import date, datetime
 from unittest.mock import MagicMock
 
 from api import router
-from api_dataclasses import APIDashboardHourlyData
+from api_dataclasses import APIDashboardHourlyData, APIDashboardSummary
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -193,6 +193,44 @@ def test_net_grid_cost_excludes_battery_wear():
     net_grid_cost = sum(h.gridCost.value for h in hours)
 
     assert net_grid_cost == 3.0  # 1.0 + 2.0, wear excluded
+
+
+def test_from_totals_wires_net_grid_cost_from_costs_dict():
+    """APIDashboardSummary.from_totals must source netGridCost from
+    costs["netGrid"], not any other cost key.
+
+    Regression guard: a copy-paste bug (e.g. wiring netGridCost from
+    costs["optimized"]) would silently make it equal the wear-inclusive
+    bundled cost instead of the wear-exclusive net grid cost. Distinct
+    values for each cost key ensure such a mistake produces a wrong
+    number here rather than passing unnoticed.
+    """
+    totals = {
+        "totalSolarProduction": 0.0,
+        "totalHomeConsumption": 0.0,
+        "totalBatteryCharged": 0.0,
+        "totalBatteryDischarged": 0.0,
+        "totalGridImport": 0.0,
+        "totalGridExport": 0.0,
+        "totalSolarToHome": 0.0,
+        "totalSolarToBattery": 0.0,
+        "totalSolarToGrid": 0.0,
+        "totalGridToHome": 0.0,
+        "totalGridToBattery": 0.0,
+        "totalBatteryToHome": 0.0,
+        "totalBatteryToGrid": 0.0,
+    }
+    costs = {"gridOnly": 10.0, "solarOnly": 8.0, "optimized": 5.0, "netGrid": 3.0}
+
+    summary = APIDashboardSummary.from_totals(
+        totals, costs, battery_capacity=10.0, currency="EUR"
+    )
+
+    assert summary.netGridCost.value == 3.0
+    # Confirm netGridCost isn't accidentally aliased to the wear-inclusive
+    # optimized cost, and totalSavings math is untouched by the new field.
+    assert summary.optimizedCost.value == 5.0
+    assert summary.totalSavings.value == 5.0  # gridOnly(10) - optimized(5)
 
 
 # ===========================================================================

@@ -1,17 +1,16 @@
 import React, { useState } from 'react';
 import { Battery, ChevronRight, Home, Sun, Zap } from 'lucide-react';
 import { FormattedValue } from '../types';
-import FormattedValueComponent from './FormattedValue';
 import { useDashboardData } from '../hooks/useDashboardData';
 import { DataResolution } from '../hooks/useUserPreferences';
 import { periodToTimeString, periodToEndTime } from '../utils/timeUtils';
 import { getIntent } from '../utils/intent';
 
-interface SavingsOverviewProps {
+interface BatteryActionsTableProps {
   resolution: DataResolution;
 }
 
-export const SavingsOverview: React.FC<SavingsOverviewProps> = ({ resolution }) => {
+export const BatteryActionsTable: React.FC<BatteryActionsTableProps> = ({ resolution }) => {
   const { data: dashboardData, loading, error } = useDashboardData(undefined, resolution);
   const [showTomorrow, setShowTomorrow] = useState(false);
 
@@ -97,56 +96,10 @@ export const SavingsOverview: React.FC<SavingsOverviewProps> = ({ resolution }) 
   return (
     <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow overflow-x-auto">
       <div className="mb-6">
-        <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">Hourly Battery Actions & Savings</h2>
+        <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">Battery Actions</h2>
         <p className="text-sm text-gray-600 dark:text-gray-300">
           Current hour highlighted in purple.
         </p>
-      </div>
-
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-        <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg text-center border border-blue-200 dark:border-blue-800">
-          <FormattedValueComponent
-            data={dashboardData.summary?.gridOnlyCost || 'N/A'}
-            size="lg"
-            align="center"
-            color="default"
-            className="block"
-          />
-          <div className="text-sm text-gray-600 dark:text-gray-300">Grid-Only Cost</div>
-          <div className="text-xs text-gray-500 dark:text-gray-400">Without solar or battery</div>
-        </div>
-
-        <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-lg text-center border border-green-200 dark:border-green-800">
-          <FormattedValueComponent
-            data={dashboardData.summary?.optimizedCost || 'N/A'}
-            size="lg"
-            align="center"
-            color="default"
-            className="block"
-          />
-          <div className="text-sm text-gray-600 dark:text-gray-300">Optimized Cost</div>
-          <div className="text-xs text-gray-500 dark:text-gray-400">With solar & battery</div>
-        </div>
-
-        <div className="bg-purple-50 dark:bg-purple-900/20 p-4 rounded-lg text-center border border-purple-200 dark:border-purple-800">
-          <FormattedValueComponent
-            data={dashboardData.summary?.totalSavings || 'N/A'}
-            size="lg"
-            align="center"
-            color="default"
-            className="block"
-          />
-          <div className="text-sm text-gray-600 dark:text-gray-300">Total Savings</div>
-          <div className="text-xs text-gray-500 dark:text-gray-400">
-            <FormattedValueComponent
-              data={dashboardData.summary?.totalSavingsPercentage || 'N/A'}
-              size="sm"
-              align="center"
-              color="default"
-            />
-          </div>
-        </div>
       </div>
 
       {/* Simplified Hourly Table */}
@@ -413,8 +366,13 @@ export const SavingsOverview: React.FC<SavingsOverviewProps> = ({ resolution }) 
                     {getDisplayValue(hour.hourlyCost)}
                   </div>
                   <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(hour.hourlyCost)}</div>
+                  {getNumericValue(hour.batteryCycleCost) > 0.001 && (
+                    <div className="text-xs text-gray-400 dark:text-gray-500">
+                      of which {getDisplayValue(hour.batteryCycleCost)} wear
+                    </div>
+                  )}
                 </td>
-                
+
                 <td className="px-3 py-2 whitespace-nowrap text-sm border border-gray-300 dark:border-gray-600 text-center">
                   <div className={`font-medium ${
                     Math.abs(getNumericValue(hour.hourlySavings)) < 0.01 ? 'text-gray-900 dark:text-white' :
@@ -812,6 +770,11 @@ export const SavingsOverview: React.FC<SavingsOverviewProps> = ({ resolution }) 
                             {getDisplayValue(hour.hourlyCost)}
                           </div>
                           <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(hour.hourlyCost)}</div>
+                          {getNumericValue(hour.batteryCycleCost) > 0.001 && (
+                            <div className="text-xs text-gray-400 dark:text-gray-500">
+                              of which {getDisplayValue(hour.batteryCycleCost)} wear
+                            </div>
+                          )}
                         </td>
 
                         <td className="px-3 py-2 whitespace-nowrap text-sm border border-gray-300 dark:border-gray-600 text-center">

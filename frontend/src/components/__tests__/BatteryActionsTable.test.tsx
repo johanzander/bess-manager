@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
-import { SavingsOverview } from '../SavingsOverview'
+import { BatteryActionsTable } from '../BatteryActionsTable'
 
 const fv = (value: number, display: string, unit = 'kWh') => ({
   value,
@@ -52,10 +52,10 @@ vi.mock('../../hooks/useDashboardData', () => ({
   }),
 }))
 
-describe('SavingsOverview grid-export badge', () => {
+describe('BatteryActionsTable grid-export badge', () => {
   it('shows the battery-to-grid badge when the backend classified the period as BATTERY_EXPORT, even below the old 0.05 kWh display threshold', () => {
     mockHour = baseHour
-    render(<SavingsOverview resolution="quarter-hourly" />)
+    render(<BatteryActionsTable resolution="quarter-hourly" />)
 
     // The badge renders the batteryToGrid display value only when the
     // period is recognized as an export period. It should appear (Battery
@@ -74,8 +74,22 @@ describe('SavingsOverview grid-export badge', () => {
       strategicIntent: 'IDLE',
       observedIntent: 'BATTERY_EXPORT',
     }
-    render(<SavingsOverview resolution="quarter-hourly" />)
+    render(<BatteryActionsTable resolution="quarter-hourly" />)
 
     expect(screen.getAllByText('0.04-export-badge').length).toBeGreaterThan(0)
+  })
+})
+
+describe('BatteryActionsTable wear breakdown', () => {
+  it('shows a wear sub-line under Actual Cost when batteryCycleCost is present', () => {
+    mockHour = {
+      ...baseHour,
+      hourlyCost: fv(0.12, '0.12', 'EUR'),
+      batteryCycleCost: fv(0.02, '0.02', 'EUR'),
+    }
+    render(<BatteryActionsTable resolution="quarter-hourly" />)
+
+    expect(screen.getByText('0.12')).toBeInTheDocument()
+    expect(screen.getByText((content) => content.includes('0.02') && content.includes('wear'))).toBeInTheDocument()
   })
 })

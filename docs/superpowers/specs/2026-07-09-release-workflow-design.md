@@ -51,13 +51,46 @@ manually reconciled with main's changelog when features are ported.
   experimental integrations (gated behind a stability flag/marker, not a
   branch) — merges here via normal PR + CI. Nothing is ever committed
   directly to the beta repo.
-- **`beta/main`** is a pure mirror. It only ever advances by fast-forwarding
-  from `origin/main`, plus a version-stamp + changelog commit for the beta
-  release itself. The beta release skill must fast-forward-merge
-  (`git merge --ff-only origin/main`); if that fails because beta carries
-  local commits, that is a hard error meaning the "beta never gets its own
-  commits" rule was violated somewhere, not something to silently resolve
-  with a force-push.
+- **`beta/main`** is a *content* mirror, not a literal git fast-forward of
+  `origin/main` — those are not the same thing here, and the original version
+  of this doc conflated them. Each beta release adds a version-stamp +
+  changelog-heading-rename commit that changes `bess_manager/config.yaml`'s
+  `version`/`name`/`slug`/`image` fields and renames `CHANGELOG.md`'s
+  `## [Unreleased]` heading. Because that commit only exists on `beta/main`,
+  `beta/main`'s tip is never again an ancestor of `origin/main` after the
+  very first release — a literal `git merge --ff-only origin/main` run from
+  `beta/main` **cannot succeed from the second release onward**, by
+  construction, not as a failure mode. (An earlier version of this doc
+  described that ff-only merge as the steady-state mechanism and treated a
+  conflict as a hard error signaling a rule violation; two releases into the
+  new model that turned out to be wrong — see the retrospective note below.)
+
+  The actual mechanism: each release branches fresh from `origin/main`,
+  applies the version-stamp + changelog-rename commit, then merges
+  `beta/main` into that branch (not the other way around) before opening the
+  beta PR. This merge has exactly two **structurally guaranteed, mechanical**
+  conflicts every single time — not a sign anything is wrong:
+  - `bess_manager/config.yaml`'s `version:` line (`origin/main`-based branch
+    says the new `bN`; `beta/main` says the previous release's `bN` — always
+    keep the new one)
+  - `CHANGELOG.md`'s heading line (`origin/main`-based branch renames
+    `## [Unreleased]` to the new version; `beta/main` already renamed it to
+    the previous version — always keep the new one, and splice the previous
+    release's already-published section back in immediately below rather
+    than dropping it)
+
+  Any *other* conflicting file is not expected and needs real investigation
+  — it usually means `origin/main` moved between when a beta build's base
+  commit was chosen and when the merge runs, surfacing content `beta/main`
+  hasn't seen yet (normal beta-lag, resolved by taking the newer side, not a
+  rule violation).
+
+  **Retrospective note (added after the `v9.9.0b11` release):** the
+  recurring two-line conflict above was initially mistaken for something
+  needing a one-off "reconciliation," the same framing as the one-time
+  13/13 divergence cleanup in the Migration section below. It isn't one-off
+  — it recurs every release by construction, as explained above. The release
+  skill now documents it as an expected step instead of a surprise.
 - **`release-X.Y` branches** are the one exception: created on demand from a
   stable tag, living only as long as a hotfix takes (see §4), then deleted.
 

@@ -65,6 +65,7 @@ export interface DashboardSummary {
   gridOnlyCost: FormattedValue;
   solarOnlyCost: FormattedValue;
   optimizedCost: FormattedValue;
+  netGridCost: FormattedValue;
 
   // Savings calculations - CANONICAL
   totalSavings: FormattedValue;
@@ -188,7 +189,7 @@ export interface DashboardResponse {
 // Export default dashboard fetch function
 export default fetchDashboardData;
 
-export type SavingsAggregatePeriod = 'week' | 'month' | 'year';
+export type SavingsAggregatePeriod = 'day' | 'week' | 'month' | 'year';
 
 export interface SavingsBucket {
   label: string;

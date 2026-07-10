@@ -199,11 +199,15 @@ class TestStartLifecycle:
 class TestHandleSpecialCases:
     def test_period_zero_captures_initial_soc(self, system, mock_controller):
         mock_controller.settings["battery_soc"] = 75
-        system._handle_special_cases(period=0, prepare_next_day=False)
+        system._handle_special_cases(
+            period=0, prepare_next_day=False, is_first_run=True
+        )
         assert system._initial_soc_pct == 75
 
     def test_non_zero_period_does_not_capture_soc(self, system):
-        system._handle_special_cases(period=5, prepare_next_day=False)
+        system._handle_special_cases(
+            period=5, prepare_next_day=False, is_first_run=True
+        )
         assert system._initial_soc_pct is None
 
     def test_prepare_next_day_clears_stores_and_refetches(self, system):
@@ -214,7 +218,9 @@ class TestHandleSpecialCases:
             patch.object(system.daily_view_store, "save_day"),
             patch.object(system, "_fetch_predictions") as mock_fetch,
         ):
-            system._handle_special_cases(period=0, prepare_next_day=True)
+            system._handle_special_cases(
+                period=0, prepare_next_day=True, is_first_run=False
+            )
             mock_fetch.assert_called_once()
 
     def test_prepare_next_day_saves_daily_view_before_clearing(self, system, tmp_path):
@@ -238,11 +244,37 @@ class TestHandleSpecialCases:
 
         with patch.object(system, "get_current_daily_view", return_value=fake_view):
             with patch.object(system, "_fetch_predictions"):
-                system._handle_special_cases(period=0, prepare_next_day=True)
+                system._handle_special_cases(
+                    period=0, prepare_next_day=True, is_first_run=False
+                )
 
         saved = system.daily_view_store.load_day(date_cls(2026, 7, 9))
         assert saved is not None
         assert saved.total_savings == 1.5
+
+    def test_prepare_next_day_skips_save_on_first_run(self, system, tmp_path):
+        """No schedule has ever been created yet, so there is nothing to save.
+
+        This reproduces the CI failure in PR #260: build_daily_view() raises
+        ValueError("No optimization schedule available") when schedule_store
+        is empty, which previously aborted update_battery_schedule entirely
+        on the very first call of a fresh run.
+        """
+        from core.bess.daily_view_store import DailyViewStore
+
+        system.daily_view_store = DailyViewStore(persist_dir=tmp_path)
+
+        with (
+            patch.object(system, "get_current_daily_view") as mock_get_view,
+            patch.object(system.daily_view_store, "save_day") as mock_save,
+            patch.object(system, "_fetch_predictions"),
+        ):
+            system._handle_special_cases(
+                period=0, prepare_next_day=True, is_first_run=True
+            )
+
+        mock_get_view.assert_not_called()
+        mock_save.assert_not_called()
 
 
 class TestRuntimeFailureTracking:

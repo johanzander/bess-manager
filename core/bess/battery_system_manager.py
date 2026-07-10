@@ -13,6 +13,7 @@ from typing import Any, ClassVar
 
 from . import time_utils
 from .daily_view_builder import DailyView, DailyViewBuilder
+from .daily_view_store import DailyViewStore
 from .dp_battery_algorithm import (
     OptimizationResult,
     optimize_battery_schedule,
@@ -125,6 +126,7 @@ class BatterySystemManager:
         self.historical_store = HistoricalDataStore(self.battery_settings)
         self.schedule_store = ScheduleStore()
         self.prediction_snapshot_store = PredictionSnapshotStore()
+        self.daily_view_store = DailyViewStore()
 
         # Initialize specialized components
         self.sensor_collector = SensorCollector(controller, self.battery_settings)
@@ -523,7 +525,7 @@ class BatterySystemManager:
 
         try:
             # Handle special cases (midnight, next day prep)
-            self._handle_special_cases(current_period, prepare_next_day)
+            self._handle_special_cases(current_period, prepare_next_day, is_first_run)
 
             # Get price data
             prices, price_entries = self._get_price_data(prepare_next_day)
@@ -1264,7 +1266,9 @@ class BatterySystemManager:
 
         return quarterly_profile
 
-    def _handle_special_cases(self, period: int, prepare_next_day: bool) -> None:
+    def _handle_special_cases(
+        self, period: int, prepare_next_day: bool, is_first_run: bool
+    ) -> None:
         """Handle special cases like midnight transition."""
         if period == 0 and not prepare_next_day:
             try:
@@ -1285,6 +1289,14 @@ class BatterySystemManager:
             logger.info(
                 "Preparing for next day - clearing historical store and refreshing predictions"
             )
+            if is_first_run:
+                # No schedule has ever been created yet (fresh start/restart), so
+                # there is no completed day's view to persist.
+                logger.info(
+                    "Skipping daily view save: no schedule exists yet for today"
+                )
+            else:
+                self.daily_view_store.save_day(self.get_current_daily_view())
             # Clear historical store to prevent yesterday's data from appearing as today's future data
             self.historical_store.clear()
             self.prediction_snapshot_store.clear()

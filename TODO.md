@@ -508,6 +508,27 @@ This would make the profitability gate compare apples-to-apples with the dashboa
 
 ## 🔧 **TECHNICAL DEBT**
 
+### Consolidate HistoricalDataStore, PredictionSnapshotStore, and DailyViewStore
+
+**Impact**: Low | **Effort**: Medium | **Dependencies**: `core/bess/historical_data_store.py`, `core/bess/prediction_snapshot.py`, `core/bess/daily_view_store.py`
+
+**Description**: The Daily Savings History feature (issue #126, `docs/superpowers/specs/2026-07-09-daily-savings-history-design.md`) added a third `DailyView`/`PeriodData`-shaped store alongside the existing `HistoricalDataStore` (today-only, cleared nightly) and `PredictionSnapshotStore` (today-only, cleared nightly). All three persist overlapping period-level data with slightly different lifecycles. The new store deliberately kept its schema close to `DailyView`/`PeriodData` rather than inventing a divergent shape, specifically so this consolidation stays feasible later. No action taken now — noted for a future pass once the aggregate-savings feature has shipped and settled.
+
+**Files**: `core/bess/historical_data_store.py`, `core/bess/prediction_snapshot.py`, `core/bess/daily_view_store.py`, `core/bess/battery_system_manager.py`
+
+---
+
+### Savings history: untested error paths and swallowed fetch failures
+
+**Impact**: Low | **Effort**: Low | **Dependencies**: `backend/api.py`, `frontend/src/components/settings/SavingsHistorySection.tsx`
+
+**Description**: Two related test/UX gaps from the Daily Savings History feature. First, none of the three new `/api/savings/*` routes in `backend/api.py` has a test exercising its failure path — all three share an identical try/except-to-500 wrapper with no coverage proving it actually returns a 500 on an underlying error. Second, `SavingsHistorySection` fetches disk usage with a bare `.catch(() => {})`, so a failed request silently renders a plausible-but-wrong "0 days recorded" instead of an error state, unlike `SavingsAggregateView`, which has proper loading/error handling for the same kind of fetch. Neither is architecturally significant, but both are cheap to close and worth picking up together.
+
+**Files**: `backend/api.py`, `frontend/src/components/settings/SavingsHistorySection.tsx`
+
+---
+
+
 ### Move inverter-specific logic out of BatterySystemManager
 
 **Impact**: Low | **Effort**: Medium | **Dependencies**: `InverterController` base class

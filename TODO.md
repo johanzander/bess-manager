@@ -725,3 +725,13 @@ Based on the code analysis: The function `_get_hour_readings` in SensorCollector
 Both are valid given each has its own matching frontend hook, but it's an inconsistent precedent for the next tracker-style endpoint someone adds. Worth standardizing next time either is touched.
 
 The `_get_hour_readings` (and thus the InfluxDB query) is called at startup (to reconstruct history) and whenever a new hour is completed and needs to be recorded. It is not called every hour by a scheduler, but it is called for each hour that needs to be reconstructed or recorded.
+
+## From #249 net-grid-cost-savings-redesign whole-branch review (non-blocking, low severity)
+
+**Stale comment in `BatteryActionsTable.tsx:91`**: `// Use backend-calculated summary data instead of frontend calculations` was the header of the now-deleted Summary Cards block; it now floats above the `finalHour` declaration with nothing to describe. Harmless, mildly misleading.
+
+**`BatteryActionsTable.tsx` TOTAL footer row shows Actual Cost as the wear-inclusive total with no "of which wear" sub-line**, while every per-period row above it now carries that breakdown. Consistent with "table content otherwise unchanged" but the totals row is the one place the per-column wear breakdown silently drops. Purely cosmetic.
+
+**`SavingsPage.test.tsx` doesn't assert DOM order** of `SavingsAggregateView` vs `DetailedSavingsAnalysis`, even though their reorder was the one functional change in that task. Cosmetic reorder, not a regression risk worth a merge block, but a `compareDocumentPosition` assertion would close the gap cheaply if this file is touched again.
+
+**`today_view` is built unconditionally for `period=day`** in `backend/api.py` even when today is already persisted (post-rollover) or `count>1`, cases where `build_buckets` ignores it. One wasted `daily_view_builder.build_daily_view()` call per request; negligible cost.

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { HourlyData } from '../types';
 import { DataResolution } from '../hooks/useUserPreferences';
+import { getIntent, StrategicIntent } from '../utils/intent';
 
 // Must match the YAxis width and ComposedChart margin used in EnergyFlowChart and BatteryLevelChart
 // so the timeline bar aligns horizontally with the chart plot areas.
@@ -8,8 +9,6 @@ import { DataResolution } from '../hooks/useUserPreferences';
 // Both charts: margin.right=5 + YAxis.width=60 → plot ends at W-65px
 const CHART_LEFT_OFFSET = 65;
 const CHART_RIGHT_OFFSET = 65;
-
-type StrategicIntent = 'GRID_CHARGING' | 'SOLAR_STORAGE' | 'LOAD_SUPPORT' | 'BATTERY_EXPORT' | 'SOLAR_EXPORT' | 'IDLE';
 
 const INTENT_CONFIG: Record<StrategicIntent, { label: string; color: string; darkColor: string }> = {
   GRID_CHARGING: { label: 'Charging from Grid', color: '#a855f7', darkColor: '#a855f7' },
@@ -46,8 +45,7 @@ function buildSegments(
 
   for (let i = 0; i < hourlyData.length; i++) {
     const h = hourlyData[i];
-    const rawIntent = (h.dataSource === 'actual' && h.observedIntent) ? h.observedIntent : h.strategicIntent;
-    const intent = (rawIntent as StrategicIntent) || 'IDLE';
+    const intent = getIntent(h);
     const startHour = resolution === 'quarter-hourly' ? i * 0.25 : i;
     const endHour = startHour + step;
 
@@ -61,7 +59,7 @@ function buildSegments(
 
   if (tomorrowData && tomorrowData.length > 0) {
     for (let i = 0; i < tomorrowData.length; i++) {
-      const intent = (tomorrowData[i].strategicIntent as StrategicIntent) || 'IDLE';
+      const intent = getIntent(tomorrowData[i]);
       const startHour = 24 + (resolution === 'quarter-hourly' ? i * 0.25 : i);
       const endHour = startHour + step;
 

@@ -159,6 +159,11 @@ class SolaxController(InverterController):
         current_mode = controller.get_solax_power_control_mode()
         logger.debug("SolaX: current power control mode = %r", current_mode)
 
+        actual_min_soc = controller.get_solax_min_soc()
+        if actual_min_soc == configured_min_soc:
+            logger.info("SolaX: battery minimum SOC verified: %d%%", configured_min_soc)
+            return
+
         controller.set_solax_min_soc(configured_min_soc)
         logger.info("SolaX: battery minimum SOC set to %d%%", configured_min_soc)
 

@@ -72,6 +72,7 @@ class MockHomeAssistantController(HomeAssistantAPIController):
             "l3_current": 12.0,
             "charge_stop_soc": 100,
             "discharge_stop_soc": 10,
+            "solax_min_soc": 10,
             "charging_power_rate": 40,
             "test_mode": False,
             "tou_settings": [],
@@ -115,6 +116,9 @@ class MockHomeAssistantController(HomeAssistantAPIController):
             # SPH
             "ac_charge_times": [],
             "ac_discharge_times": [],
+            # MIN
+            "charge_stop_soc": [],
+            "discharge_stop_soc": [],
             # SolaX
             "vpp_calls": [],
             "vpp_disabled": [],
@@ -199,10 +203,12 @@ class MockHomeAssistantController(HomeAssistantAPIController):
     def set_charge_stop_soc(self, soc):
         """Set charge stop SOC."""
         self.settings["charge_stop_soc"] = soc
+        self.calls["charge_stop_soc"].append(soc)
 
     def set_discharge_stop_soc(self, soc):
         """Set discharge stop SOC."""
         self.settings["discharge_stop_soc"] = soc
+        self.calls["discharge_stop_soc"].append(soc)
 
     def is_test_mode(self):
         """Check if test mode is enabled."""
@@ -328,7 +334,12 @@ class MockHomeAssistantController(HomeAssistantAPIController):
 
     def set_solax_min_soc(self, min_soc: int) -> None:
         """Record SolaX min SOC write."""
+        self.settings["solax_min_soc"] = min_soc
         self.calls["min_soc"].append(min_soc)
+
+    def get_solax_min_soc(self) -> int | None:
+        """Return mock SolaX min SOC."""
+        return self.settings["solax_min_soc"]
 
     def get_solax_power_control_mode(self) -> str | None:
         """Return mock power control mode."""

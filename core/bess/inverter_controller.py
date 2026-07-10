@@ -21,7 +21,7 @@ class InverterController(ABC):
     Subclasses implement hardware-specific schedule conversion and deployment.
 
     Strategic Intent → Control Mapping:
-    - GRID_CHARGING  → grid_charge=True,  charge_rate=100, discharge_rate=0
+    - GRID_CHARGING  → grid_charge=True,  charge_rate=<action-derived>, discharge_rate=0
     - SOLAR_STORAGE  → grid_charge=False, charge_rate=100, discharge_rate=0
     - LOAD_SUPPORT   → grid_charge=False, charge_rate=0,   discharge_rate=<action-derived>
     - BATTERY_EXPORT → grid_charge=False, charge_rate=0,   discharge_rate=<action-derived>
@@ -117,6 +117,28 @@ class InverterController(ABC):
         intent = self.strategic_intents[period]
         return self._map_intent_to_rates(intent, battery_action_kw)
 
+    @staticmethod
+    def _scale_to_percent(power_kw: float, max_power_kw: float) -> int:
+        """Scale a power value to a 0-100 percent rate, clamped to range."""
+        return min(100, max(0, round(power_kw / max_power_kw * 100)))
+
+    def _compute_charge_rate(
+        self, intent: str, control: dict[str, bool | int], battery_action_kw: float
+    ) -> int:
+        """Compute charge_rate for a period, action-derived for GRID_CHARGING.
+
+        Args:
+            intent: Strategic intent string
+            control: The INTENT_TO_CONTROL entry for this intent
+            battery_action_kw: Battery power in kW (positive=charge)
+
+        Returns:
+            Charge rate percent (0-100)
+        """
+        if intent == "GRID_CHARGING" and battery_action_kw > 0.01:
+            return self._scale_to_percent(battery_action_kw, self.max_charge_power_kw)
+        return control["charge_rate"]
+
     def _map_intent_to_rates(
         self, intent: str, battery_action_kw: float
     ) -> tuple[bool, int]:
@@ -133,30 +155,10 @@ class InverterController(ABC):
             return True, 0
         elif intent == "SOLAR_STORAGE":
             return False, 0
-        elif intent == "LOAD_SUPPORT":
+        elif intent in ("LOAD_SUPPORT", "BATTERY_EXPORT"):
             if battery_action_kw < -0.01:
-                discharge_rate = min(
-                    100,
-                    max(
-                        0,
-                        round(
-                            abs(battery_action_kw) / self.max_discharge_power_kw * 100
-                        ),
-                    ),
-                )
-            else:
-                discharge_rate = 0
-            return False, discharge_rate
-        elif intent == "BATTERY_EXPORT":
-            if battery_action_kw < -0.01:
-                discharge_rate = min(
-                    100,
-                    max(
-                        0,
-                        round(
-                            abs(battery_action_kw) / self.max_discharge_power_kw * 100
-                        ),
-                    ),
+                discharge_rate = self._scale_to_percent(
+                    abs(battery_action_kw), self.max_discharge_power_kw
                 )
             else:
                 discharge_rate = 0
@@ -218,13 +220,9 @@ class InverterController(ABC):
             grid_charge, discharge_rate = self.compute_rates_for_period(
                 period, battery_action_kw
             )
-            if intent == "GRID_CHARGING" and battery_action_kw > 0.01:
-                charge_rate = min(
-                    100,
-                    max(0, round(battery_action_kw / self.max_charge_power_kw * 100)),
-                )
-            else:
-                charge_rate = self.INTENT_TO_CONTROL[intent]["charge_rate"]
+            charge_rate = self._compute_charge_rate(
+                intent, self.INTENT_TO_CONTROL[intent], battery_action_kw
+            )
         else:
             control = self.INTENT_TO_CONTROL[intent]
             grid_charge = control["grid_charge"]
@@ -326,6 +324,7 @@ class InverterController(ABC):
             action_kw = action_kwh / 0.25
 
             _, discharge_rate = self._map_intent_to_rates(intent, action_kw)
+            charge_rate = self._compute_charge_rate(intent, control, action_kw)
 
             period_settings.append(
                 {
@@ -333,7 +332,7 @@ class InverterController(ABC):
                     "intent": intent,
                     "mode": mode,
                     "grid_charge": control["grid_charge"],
-                    "charge_rate": control["charge_rate"],
+                    "charge_rate": charge_rate,
                     "discharge_rate": discharge_rate,
                     "action_kwh": action_kwh,
                 }

@@ -61,8 +61,11 @@ jobs:
             BUILD_VERSION=${{ steps.version.outputs.version }}
             BUILD_DATE=${{ github.event.release.published_at }}
             BUILD_REF=${{ github.sha }}
+          # Image repo derived from the current GitHub repo so each repo pushes to
+          # its own GHCR packages: prod → bess-manager-{arch}, beta → bess-manager-beta-{arch}.
+          # (config.yaml image: must match per repo.)
           tags: |
-            ${{ env.REGISTRY }}/johanzander/bess-manager-${{ matrix.arch }}:${{ steps.version.outputs.version }}
-            ${{ env.REGISTRY }}/johanzander/bess-manager-${{ matrix.arch }}:latest
+            ${{ env.REGISTRY }}/${{ github.repository }}-${{ matrix.arch }}:${{ steps.version.outputs.version }}
+            ${{ env.REGISTRY }}/${{ github.repository }}-${{ matrix.arch }}:latest
           cache-from: type=gha,scope=${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=${{ matrix.arch }}

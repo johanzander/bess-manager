@@ -47,6 +47,10 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ steps.app-token.outputs.token }}
+          # Anyone can open an issue, so triage must run for non-collaborators
+          # too — otherwise external bug reports never get asked for a debug
+          # log. Safe here: Haiku, classify/label/comment only, no code access.
+          allowed_non_write_users: "*"
           # Haiku is plenty for classify+label; saves ~3x vs Sonnet.
           claude_args: "--max-turns 12 --permission-mode bypassPermissions --model claude-haiku-4-5"
           prompt: |

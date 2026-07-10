@@ -1623,6 +1623,10 @@ class HomeAssistantAPIController:
         """Read the current SolaX power control mode."""
         return self._get_raw_state("solax_power_control_mode")
 
+    def get_solax_min_soc(self) -> float | None:
+        """Read the current battery minimum SOC from the SolaX inverter."""
+        return self._get_sensor_value("solax_battery_min_soc")
+
     # ─────────────────────────────────────────────────────────────────────────
 
     def set_test_mode(self, enabled):

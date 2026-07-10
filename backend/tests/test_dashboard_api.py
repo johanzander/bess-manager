@@ -10,6 +10,7 @@ from datetime import date, datetime
 from unittest.mock import MagicMock
 
 from api import router
+from api_dataclasses import APIDashboardHourlyData
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -494,3 +495,39 @@ class TestHealthRecoveries:
         sys.modules["app"].bess_controller = _unconfigured_controller()
         resp = _client.post("/api/health-recoveries/acknowledge")
         assert resp.status_code == 503
+
+
+# ===========================================================================
+# APIDashboardHourlyData unit tests
+# ===========================================================================
+
+
+def test_hourly_data_exposes_grid_cost_and_battery_cycle_cost():
+    hourly = PeriodData(
+        period=0,
+        energy=EnergyData(
+            solar_production=1.0,
+            home_consumption=1.0,
+            battery_charged=0.0,
+            battery_discharged=0.0,
+            grid_imported=1.0,
+            grid_exported=0.0,
+            battery_soe_start=5.0,
+            battery_soe_end=5.0,
+        ),
+        economic=EconomicData(
+            buy_price=2.0,
+            sell_price=1.0,
+            grid_cost=2.0,
+            battery_cycle_cost=0.1,
+            hourly_cost=2.1,
+        ),
+        decision=DecisionData(strategic_intent="IDLE"),
+    )
+
+    api_hourly = APIDashboardHourlyData.from_internal(
+        hourly, battery_capacity=10.0, currency="EUR"
+    )
+
+    assert api_hourly.gridCost.value == 2.0
+    assert api_hourly.batteryCycleCost.value == 0.1

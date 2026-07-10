@@ -492,6 +492,14 @@ def _aggregate_quarterly_to_hourly(
             hourlyCost=create_formatted_value(
                 sum(p.hourlyCost.value for p in quarter_periods), "currency", currency
             ),
+            gridCost=create_formatted_value(
+                sum(p.gridCost.value for p in quarter_periods), "currency", currency
+            ),
+            batteryCycleCost=create_formatted_value(
+                sum(p.batteryCycleCost.value for p in quarter_periods),
+                "currency",
+                currency,
+            ),
             hourlySavings=create_formatted_value(
                 sum(p.hourlySavings.value for p in quarter_periods),
                 "currency",

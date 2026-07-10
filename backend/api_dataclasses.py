@@ -361,6 +361,8 @@ class APIDashboardHourlyData:
     buyPrice: FormattedValue
     sellPrice: FormattedValue
     hourlyCost: FormattedValue
+    gridCost: FormattedValue
+    batteryCycleCost: FormattedValue
     hourlySavings: FormattedValue
     gridOnlyCost: FormattedValue
     solarOnlyCost: FormattedValue
@@ -437,6 +439,10 @@ class APIDashboardHourlyData:
             buyPrice=safe_format(hourly.economic.buy_price, "price"),
             sellPrice=safe_format(hourly.economic.sell_price, "price"),
             hourlyCost=safe_format(hourly.economic.hourly_cost, "currency"),
+            gridCost=safe_format(hourly.economic.grid_cost, "currency"),
+            batteryCycleCost=safe_format(
+                hourly.economic.battery_cycle_cost, "currency"
+            ),
             hourlySavings=safe_format(hourly.economic.hourly_savings, "currency"),
             gridOnlyCost=safe_format(hourly.economic.grid_only_cost, "currency"),
             solarOnlyCost=safe_format(hourly.economic.solar_only_cost, "currency"),

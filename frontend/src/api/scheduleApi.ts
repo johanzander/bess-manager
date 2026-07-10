@@ -187,3 +187,52 @@ export interface DashboardResponse {
 
 // Export default dashboard fetch function
 export default fetchDashboardData;
+
+export type SavingsAggregatePeriod = 'week' | 'month' | 'year';
+
+export interface SavingsBucket {
+  label: string;
+  startDate: string;
+  endDate: string;
+  dayCount: number;
+  importKwh: FormattedValue;
+  importEur: FormattedValue;
+  exportKwh: FormattedValue;
+  exportEur: FormattedValue;
+  gridCost: FormattedValue;
+  batteryCycleCost: FormattedValue;
+  savingsVsGridOnly: FormattedValue;
+  solarKwh: FormattedValue;
+  batteryChargedKwh: FormattedValue;
+  batteryDischargedKwh: FormattedValue;
+}
+
+export interface SavingsAggregateResponse {
+  buckets: SavingsBucket[];
+  count: number;
+}
+
+export const fetchSavingsAggregate = async (
+  period: SavingsAggregatePeriod,
+  count?: number
+): Promise<SavingsAggregateResponse> => {
+  const params: Record<string, string | number> = { period };
+  if (count) params.count = count;
+  const response = await api.get('/api/savings/aggregate', { params });
+  return response.data;
+};
+
+export interface SavingsHistoryDiskUsage {
+  dayCount: number;
+  totalBytes: number;
+}
+
+export const fetchSavingsHistoryDiskUsage = async (): Promise<SavingsHistoryDiskUsage> => {
+  const response = await api.get('/api/savings/history/disk-usage');
+  return response.data;
+};
+
+export const clearSavingsHistory = async (): Promise<SavingsHistoryDiskUsage> => {
+  const response = await api.delete('/api/savings/history');
+  return response.data;
+};

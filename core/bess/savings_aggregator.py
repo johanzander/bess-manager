@@ -22,6 +22,7 @@ class DailyTotals:
     export_kwh: float = 0.0
     export_eur: float = 0.0
     grid_cost: float = 0.0
+    grid_only_cost: float = 0.0
     battery_cycle_cost: float = 0.0
     savings_vs_grid_only: float = 0.0
     solar_kwh: float = 0.0
@@ -44,6 +45,7 @@ class DailyTotals:
             export_kwh=export_kwh,
             export_eur=export_eur,
             grid_cost=import_eur - export_eur,
+            grid_only_cost=sum(p.economic.grid_only_cost for p in view.periods),
             battery_cycle_cost=sum(p.economic.battery_cycle_cost for p in view.periods),
             savings_vs_grid_only=view.total_savings,
             solar_kwh=sum(p.energy.solar_production for p in view.periods),
@@ -60,6 +62,7 @@ class DailyTotals:
             export_kwh=self.export_kwh + other.export_kwh,
             export_eur=self.export_eur + other.export_eur,
             grid_cost=self.grid_cost + other.grid_cost,
+            grid_only_cost=self.grid_only_cost + other.grid_only_cost,
             battery_cycle_cost=self.battery_cycle_cost + other.battery_cycle_cost,
             savings_vs_grid_only=self.savings_vs_grid_only + other.savings_vs_grid_only,
             solar_kwh=self.solar_kwh + other.solar_kwh,

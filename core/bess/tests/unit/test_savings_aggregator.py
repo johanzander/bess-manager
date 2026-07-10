@@ -21,7 +21,12 @@ def _period(grid_imported: float, grid_exported: float) -> PeriodData:
         battery_soe_start=10.0,
         battery_soe_end=10.0,
     )
-    economic = EconomicData(buy_price=2.0, sell_price=1.0, battery_cycle_cost=0.1)
+    economic = EconomicData(
+        buy_price=2.0,
+        sell_price=1.0,
+        battery_cycle_cost=0.1,
+        grid_only_cost=grid_imported * 2.0,
+    )
     return PeriodData(period=0, energy=energy, economic=economic)
 
 
@@ -64,6 +69,17 @@ class TestWeekBuckets:
         assert bucket.totals.export_eur == 2.0  # 2.0 * sell_price 1.0
         assert bucket.totals.grid_cost == 0.0
         assert bucket.totals.savings_vs_grid_only == 3.0
+
+    def test_grid_only_cost_is_summed(self, tmp_path):
+        store = DailyViewStore(persist_dir=tmp_path)
+        _seed_day(
+            store, date(2026, 7, 8), grid_imported=1.0, grid_exported=2.0, savings=3.0
+        )
+
+        buckets = build_buckets("week", count=1, store=store, today=date(2026, 7, 9))
+
+        # _period() sets home_consumption == grid_imported and buy_price 2.0
+        assert buckets[0].totals.grid_only_cost == 2.0  # 1.0 * 2.0
 
     def test_two_days_in_the_same_week_are_summed(self, tmp_path):
         store = DailyViewStore(persist_dir=tmp_path)

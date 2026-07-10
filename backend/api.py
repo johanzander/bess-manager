@@ -2224,7 +2224,7 @@ async def get_prediction_timeline():
 @router.get("/api/savings/aggregate")
 async def get_savings_aggregate(
     period: str = Query(..., pattern="^(week|month|year)$"),
-    count: int | None = Query(None, ge=1, le=520),
+    count: int | None = Query(None, ge=1, le=520),  # 520 weeks is roughly 10 years
 ):
     """Get week/month/year savings aggregates from the persisted daily history."""
     from app import bess_controller

@@ -57,6 +57,10 @@ describe('SavingsAggregateView', () => {
     });
     expect(screen.getByText('Savings History')).toBeInTheDocument();
     expect(screen.queryByText(/could not load savings history/i)).not.toBeInTheDocument();
+    // The table view must not be rendered by default - this guards against the
+    // regression this branch already reintroduced once (default silently
+    // reverting to 'table').
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
   });
 
   it('refetches with the new period when the toggle is changed', async () => {

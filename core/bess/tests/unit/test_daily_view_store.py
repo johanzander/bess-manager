@@ -1,6 +1,9 @@
 """Unit tests for DailyViewStore."""
 
+import json
+import logging
 from datetime import date, datetime
+from pathlib import Path
 
 from core.bess.daily_view_builder import DailyView
 from core.bess.daily_view_store import DailyViewStore
@@ -73,6 +76,38 @@ class TestSaveAndLoad:
 
         assert loaded.total_savings == 9.0
         assert len(loaded.periods) == 1
+
+
+class TestSaveDayResilience:
+    def test_save_day_does_not_raise_when_mkdir_fails(
+        self, tmp_path, monkeypatch, caplog
+    ):
+        store = DailyViewStore(persist_dir=tmp_path / "unwritable")
+
+        def _raise_mkdir(*args, **kwargs):
+            raise OSError("Read-only file system")
+
+        monkeypatch.setattr(Path, "mkdir", _raise_mkdir)
+
+        with caplog.at_level(logging.WARNING):
+            store.save_day(_make_view(date(2026, 7, 8)))
+
+        assert any(
+            "Failed to persist daily view" in record.message
+            for record in caplog.records
+        )
+
+
+class TestLoadDayResilience:
+    def test_load_day_returns_none_for_schema_invalid_json(self, tmp_path, caplog):
+        store = DailyViewStore(persist_dir=tmp_path)
+        path = tmp_path / "2026-07-08.json"
+        path.write_text(json.dumps({"foo": "bar"}))
+
+        with caplog.at_level(logging.WARNING):
+            loaded = store.load_day(date(2026, 7, 8))
+
+        assert loaded is None
 
 
 class TestListAvailableDates:

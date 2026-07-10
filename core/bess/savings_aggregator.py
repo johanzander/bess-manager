@@ -113,7 +113,9 @@ def _step_back(period: str, bucket_start: date) -> date:
         return bucket_start - timedelta(days=7)
     if period == "month":
         return bucket_start - timedelta(days=1)  # last day of the previous month
-    return date(bucket_start.year - 1, 6, 15)
+    return date(
+        bucket_start.year - 1, 6, 15
+    )  # any date in the prior year works since _year_bounds only reads .year
 
 
 def build_buckets(

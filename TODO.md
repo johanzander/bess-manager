@@ -518,6 +518,16 @@ This would make the profitability gate compare apples-to-apples with the dashboa
 
 ---
 
+### Savings history: untested error paths and swallowed fetch failures
+
+**Impact**: Low | **Effort**: Low | **Dependencies**: `backend/api.py`, `frontend/src/components/settings/SavingsHistorySection.tsx`
+
+**Description**: Two related test/UX gaps from the Daily Savings History feature. First, none of the three new `/api/savings/*` routes in `backend/api.py` has a test exercising its failure path — all three share an identical try/except-to-500 wrapper with no coverage proving it actually returns a 500 on an underlying error. Second, `SavingsHistorySection` fetches disk usage with a bare `.catch(() => {})`, so a failed request silently renders a plausible-but-wrong "0 days recorded" instead of an error state, unlike `SavingsAggregateView`, which has proper loading/error handling for the same kind of fetch. Neither is architecturally significant, but both are cheap to close and worth picking up together.
+
+**Files**: `backend/api.py`, `frontend/src/components/settings/SavingsHistorySection.tsx`
+
+---
+
 
 ### Move inverter-specific logic out of BatterySystemManager
 

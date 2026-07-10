@@ -32,10 +32,13 @@ class DailyViewStore:
 
     def save_day(self, view: DailyView) -> None:
         """Persist the given day's full view, overwriting any existing file for that date."""
-        self._persist_dir.mkdir(parents=True, exist_ok=True)
-        path = self._persist_dir / f"{view.date.isoformat()}.json"
-        with open(path, "w") as f:
-            json.dump(asdict(view), f, default=str)
+        try:
+            self._persist_dir.mkdir(parents=True, exist_ok=True)
+            path = self._persist_dir / f"{view.date.isoformat()}.json"
+            with open(path, "w") as f:
+                json.dump(asdict(view), f, default=str)
+        except OSError as e:
+            logger.warning("Failed to persist daily view for %s: %s", view.date, e)
 
     def load_day(self, day: date) -> DailyView | None:
         """Load the persisted view for a specific day, or None if not saved."""
@@ -48,7 +51,11 @@ class DailyViewStore:
         except (json.JSONDecodeError, OSError) as e:
             logger.warning("Could not load %s: %s", path, e)
             return None
-        return _daily_view_from_dict(data)
+        try:
+            return _daily_view_from_dict(data)
+        except (KeyError, ValueError) as e:
+            logger.warning("Could not parse daily view %s: %s", path, e)
+            return None
 
     def list_available_dates(self) -> list[str]:
         """Return ISO dates that have a saved snapshot, sorted ascending."""

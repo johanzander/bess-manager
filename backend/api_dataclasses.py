@@ -541,6 +541,7 @@ class APIDashboardSummary:
     gridOnlyCost: FormattedValue
     solarOnlyCost: FormattedValue
     optimizedCost: FormattedValue
+    netGridCost: FormattedValue
 
     # Savings calculations
     totalSavings: FormattedValue
@@ -614,6 +615,7 @@ class APIDashboardSummary:
             optimizedCost=create_formatted_value(
                 total_optimized_cost, "currency", currency
             ),
+            netGridCost=create_formatted_value(costs["netGrid"], "currency", currency),
             # Savings calculations
             totalSavings=create_formatted_value(total_savings, "currency", currency),
             solarSavings=create_formatted_value(solar_savings, "currency", currency),

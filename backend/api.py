@@ -706,11 +706,13 @@ async def get_dashboard_data(
         total_solar_only_cost = sum(
             h.solarOnlyCost.value for h in hourly_dataclass_instances
         )
+        total_net_grid_cost = sum(h.gridCost.value for h in hourly_dataclass_instances)
 
         costs = {
             "gridOnly": total_grid_only_cost,
             "solarOnly": total_solar_only_cost,
             "optimized": total_optimized_cost,
+            "netGrid": total_net_grid_cost,
         }
 
         battery_soc: float = controller.get_battery_soc()

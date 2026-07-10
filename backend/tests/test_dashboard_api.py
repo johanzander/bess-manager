@@ -161,6 +161,40 @@ class TestDashboard:
         assert resp.status_code == 503
 
 
+def test_net_grid_cost_excludes_battery_wear():
+    def _hour(grid_cost, cycle_cost):
+        return APIDashboardHourlyData.from_internal(
+            PeriodData(
+                period=0,
+                energy=EnergyData(
+                    solar_production=0.0,
+                    home_consumption=1.0,
+                    battery_charged=0.0,
+                    battery_discharged=0.0,
+                    grid_imported=1.0,
+                    grid_exported=0.0,
+                    battery_soe_start=5.0,
+                    battery_soe_end=5.0,
+                ),
+                economic=EconomicData(
+                    buy_price=1.0,
+                    sell_price=1.0,
+                    grid_cost=grid_cost,
+                    battery_cycle_cost=cycle_cost,
+                    hourly_cost=grid_cost + cycle_cost,
+                ),
+                decision=DecisionData(strategic_intent="IDLE"),
+            ),
+            battery_capacity=10.0,
+            currency="EUR",
+        )
+
+    hours = [_hour(1.0, 0.5), _hour(2.0, 0.5)]
+    net_grid_cost = sum(h.gridCost.value for h in hours)
+
+    assert net_grid_cost == 3.0  # 1.0 + 2.0, wear excluded
+
+
 # ===========================================================================
 # GET /api/decision-intelligence
 # ===========================================================================

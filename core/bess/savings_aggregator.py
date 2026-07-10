@@ -8,9 +8,9 @@ from datetime import date, timedelta
 
 from .daily_view_builder import DailyView
 
-VALID_PERIODS = ("week", "month", "year")
+VALID_PERIODS = ("day", "week", "month", "year")
 
-DEFAULT_COUNTS: dict[str, int] = {"week": 12, "month": 12, "year": 5}
+DEFAULT_COUNTS: dict[str, int] = {"day": 1, "week": 12, "month": 12, "year": 5}
 
 
 @dataclass
@@ -83,6 +83,10 @@ class SavingsBucket:
     totals: DailyTotals = field(default_factory=DailyTotals)
 
 
+def _day_bounds(d: date) -> tuple[date, date]:
+    return d, d
+
+
 def _week_bounds(d: date) -> tuple[date, date]:
     start = d - timedelta(days=d.weekday())  # Monday
     return start, start + timedelta(days=6)
@@ -98,10 +102,17 @@ def _year_bounds(d: date) -> tuple[date, date]:
     return date(d.year, 1, 1), date(d.year, 12, 31)
 
 
-_BOUNDS_FN = {"week": _week_bounds, "month": _month_bounds, "year": _year_bounds}
+_BOUNDS_FN = {
+    "day": _day_bounds,
+    "week": _week_bounds,
+    "month": _month_bounds,
+    "year": _year_bounds,
+}
 
 
 def _bucket_label(period: str, start: date) -> str:
+    if period == "day":
+        return start.isoformat()
     if period == "week":
         iso_year, iso_week, _ = start.isocalendar()
         return f"{iso_year}-W{iso_week:02d}"
@@ -112,6 +123,8 @@ def _bucket_label(period: str, start: date) -> str:
 
 def _step_back(period: str, bucket_start: date) -> date:
     """Return a reference date inside the previous bucket."""
+    if period == "day":
+        return bucket_start - timedelta(days=1)
     if period == "week":
         return bucket_start - timedelta(days=7)
     if period == "month":
@@ -126,11 +139,17 @@ def build_buckets(
     count: int,
     store,
     today: date | None = None,
+    today_view: DailyView | None = None,
 ) -> list[SavingsBucket]:
     """Build the last `count` buckets of the given period type, oldest first.
 
     `store` needs only `list_available_dates() -> list[str]` and
     `load_day(day: date) -> DailyView | None` (duck-typed to DailyViewStore).
+
+    `today_view`, if given, is used only for `period="day"` and only for the
+    bucket whose single date equals `today` and has no persisted snapshot yet
+    (i.e. today, before the 23:55 rollover writes it to the store). It never
+    overrides a persisted snapshot.
     """
     if period not in VALID_PERIODS:
         raise ValueError(f"Unknown period type: {period!r}")
@@ -138,8 +157,9 @@ def build_buckets(
     bounds_fn = _BOUNDS_FN[period]
     available_dates = {date.fromisoformat(d) for d in store.list_available_dates()}
 
+    reference_today = today or date.today()
     buckets: list[SavingsBucket] = []
-    cursor = today or date.today()
+    cursor = reference_today
     for _ in range(count):
         start, end = bounds_fn(cursor)
         days_in_bucket = sorted(d for d in available_dates if start <= d <= end)
@@ -149,13 +169,23 @@ def build_buckets(
             view = store.load_day(day)
             if view is not None:
                 totals = totals + DailyTotals.from_daily_view(view)
+        day_count = len(days_in_bucket)
+
+        if (
+            period == "day"
+            and today_view is not None
+            and start == reference_today
+            and reference_today not in available_dates
+        ):
+            totals = totals + DailyTotals.from_daily_view(today_view)
+            day_count += 1
 
         buckets.append(
             SavingsBucket(
                 label=_bucket_label(period, start),
                 start_date=start.isoformat(),
                 end_date=end.isoformat(),
-                day_count=len(days_in_bucket),
+                day_count=day_count,
                 totals=totals,
             )
         )

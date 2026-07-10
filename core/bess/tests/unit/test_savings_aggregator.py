@@ -205,6 +205,100 @@ class TestYearBuckets:
         assert buckets[1].end_date == "2026-12-31"
 
 
+class TestDayBuckets:
+    def test_single_day_bucket_bounds_and_label(self, tmp_path):
+        store = DailyViewStore(persist_dir=tmp_path)
+        _seed_day(
+            store, date(2026, 7, 8), grid_imported=1.0, grid_exported=2.0, savings=3.0
+        )
+
+        buckets = build_buckets("day", count=1, store=store, today=date(2026, 7, 8))
+
+        assert len(buckets) == 1
+        bucket = buckets[0]
+        assert bucket.label == "2026-07-08"
+        assert bucket.start_date == "2026-07-08"
+        assert bucket.end_date == "2026-07-08"
+        assert bucket.day_count == 1
+        assert bucket.totals.grid_cost == 0.0  # 2.0 import_eur - 2.0 export_eur
+
+    def test_multi_day_sequence_returned_oldest_first(self, tmp_path):
+        store = DailyViewStore(persist_dir=tmp_path)
+        _seed_day(
+            store, date(2026, 7, 7), grid_imported=1.0, grid_exported=0.0, savings=1.0
+        )
+        _seed_day(
+            store, date(2026, 7, 8), grid_imported=1.0, grid_exported=0.0, savings=1.0
+        )
+
+        buckets = build_buckets("day", count=2, store=store, today=date(2026, 7, 8))
+
+        assert [b.label for b in buckets] == ["2026-07-07", "2026-07-08"]
+
+    def test_today_with_no_snapshot_uses_live_today_view(self, tmp_path):
+        store = DailyViewStore(persist_dir=tmp_path)  # nothing persisted yet
+        live_view = DailyView(
+            date=date(2026, 7, 9),
+            periods=[_period(grid_imported=0.5, grid_exported=1.5)],
+            total_savings=2.0,
+            actual_count=1,
+            predicted_count=0,
+        )
+
+        buckets = build_buckets(
+            "day", count=1, store=store, today=date(2026, 7, 9), today_view=live_view
+        )
+
+        assert buckets[0].day_count == 1
+        assert buckets[0].totals.import_eur == 1.0  # 0.5 * buy_price 2.0
+        assert buckets[0].totals.export_eur == 1.5  # 1.5 * sell_price 1.0
+
+    def test_today_view_ignored_for_a_day_that_is_already_persisted(self, tmp_path):
+        store = DailyViewStore(persist_dir=tmp_path)
+        _seed_day(
+            store, date(2026, 7, 9), grid_imported=9.0, grid_exported=0.0, savings=1.0
+        )
+        live_view = DailyView(
+            date=date(2026, 7, 9),
+            periods=[_period(grid_imported=0.5, grid_exported=0.0)],
+            total_savings=2.0,
+            actual_count=1,
+            predicted_count=0,
+        )
+
+        buckets = build_buckets(
+            "day", count=1, store=store, today=date(2026, 7, 9), today_view=live_view
+        )
+
+        # persisted snapshot wins; live_view is only a fallback for missing days
+        assert buckets[0].totals.import_kwh == 9.0
+        assert buckets[0].day_count == 1
+
+    def test_today_view_only_applies_to_the_bucket_matching_today(self, tmp_path):
+        store = DailyViewStore(persist_dir=tmp_path)
+        live_view = DailyView(
+            date=date(2026, 7, 9),
+            periods=[_period(grid_imported=0.5, grid_exported=0.0)],
+            total_savings=2.0,
+            actual_count=1,
+            predicted_count=0,
+        )
+
+        buckets = build_buckets(
+            "day", count=2, store=store, today=date(2026, 7, 9), today_view=live_view
+        )
+
+        assert buckets[0].label == "2026-07-08"
+        assert buckets[0].day_count == 0  # yesterday: no snapshot, no live view
+        assert buckets[1].label == "2026-07-09"
+        assert buckets[1].day_count == 1  # today: live view used
+
+
+class TestDefaultCountsDay:
+    def test_day_default_count_is_one(self):
+        assert DEFAULT_COUNTS["day"] == 1
+
+
 class TestInvalidPeriod:
     def test_unknown_period_raises(self, tmp_path):
         store = DailyViewStore(persist_dir=tmp_path)
@@ -214,4 +308,4 @@ class TestInvalidPeriod:
 
 class TestDefaultCounts:
     def test_has_an_entry_for_every_valid_period(self):
-        assert set(DEFAULT_COUNTS.keys()) == {"week", "month", "year"}
+        assert set(DEFAULT_COUNTS.keys()) == {"day", "week", "month", "year"}

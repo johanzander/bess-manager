@@ -2,43 +2,47 @@
 
 ## Beta Release (`release beta`)
 
-1. **Determine next version**: Run `git fetch beta main` then check `git show beta/main:config.yaml | grep '^version:'` to see the version **currently on beta/main**. Also check `gh release list -L 5 -R johanzander/bess-manager-beta` for published releases. The new version MUST be higher than both. Increment the beta number (e.g. `9.0.0b12` → `9.0.0b13`). **CRITICAL: If local config.yaml already matches beta/main, you MUST still bump — same version = HA won't detect the update.**
-2. **Sync with target branch** — `git fetch beta main && git merge beta/main`. Resolve any conflicts locally. Never push a branch that is behind the target.
-3. **Run tests locally** — ALL of these must pass before proceeding:
+1. **Sync local `main` with `origin/main`** — `git fetch origin main && git merge --ff-only origin/main` (run this from a plain `main` checkout, not a feature branch). If this fails to fast-forward, something is wrong locally — do not force it, investigate first.
+2. **Check beta's only unique commits are its own past release stamps** — `git fetch beta main && git log --oneline origin/main..beta/main`. Each prior beta release adds exactly one commit here (titled `release: v<version>`, or `chore: reset beta/main to mirror origin/main...` for the one-time migration reset) — that's expected, not a problem. What's NOT expected is anything else: a feature commit, a fix, an unexplained message. If you see a commit that isn't one of this skill's own release-stamp commits, stop — something landed on beta directly, breaking the one-directional flow this skill exists to enforce. Do not silently overwrite it; surface it to the user. (Note: `bess-manager-beta`'s branch protection forbids force-push, so this history accumulates one merge commit per release rather than staying literally empty — that's fine, the check is about content, not commit count.)
+3. **Build the release commit locally, on top of `origin/main`, before touching the beta remote** — `git checkout -b beta-release-tmp origin/main`. Bump `bess_manager/config.yaml`'s `version` field to the next beta number (check `git show beta/main:bess_manager/config.yaml | grep '^version:'` and `gh release list -L 5 -R johanzander/bess-manager-beta` first — e.g. `9.9.0b9` → `9.9.0b10`, or start `X.Y.0b1` if promoting past what main last shipped as stable). In the same commit, re-apply the beta identity fields, which never exist on main by design:
+   - `bess_manager/config.yaml`: `name: "BESS Manager (Beta)"`, `slug: "bess_manager_beta"`, `image: "ghcr.io/johanzander/bess-manager-beta-{arch}"`
+   - `repository.yaml`: `name: BESS Battery Manager (Beta) Repository`, `url: https://github.com/johanzander/bess-manager-beta`
+
+   Commit as `git commit -am "release: v<beta-version>"`. Pushing this single commit (not raw `origin/main`) is what keeps the beta repo from ever momentarily claiming to be the prod add-on.
+4. **Copy the changelog, don't author it** — on the same `beta-release-tmp` branch from step 3, take the current `## [Unreleased]` section verbatim from `origin/main`'s `CHANGELOG.md` (synced in step 1) and rename it to `## [<beta-version>] - <date>` in `CHANGELOG.md`. Amend it into the same commit (`git commit --amend`) rather than adding a second commit. Do not hand-write beta-specific entries — if content is missing from `Unreleased`, it means a PR merged to main without a changelog entry, which is a bug in that PR's merge process, not something to patch around here.
+5. **Run tests locally** — ALL of these must pass before proceeding:
    - `pytest -m "not slow"` (includes scenario discovery regression tests)
    - `pytest core/bess/tests/unit/test_scenario_discovery.py -v` (show individual scenario results)
    - `npx vitest run` (frontend tests)
    - `cd frontend && npx tsc --noEmit` (TypeScript type check — catches errors that vitest and vite build miss)
    - If any fix during this session revealed another bug, fix it now. Do not cut a release per fix — batch fixes locally until all tests pass.
-4. **Bump version** in `config.yaml` to the next version determined in step 1.
-4. **Update CHANGELOG.md** — add entry at the top following Keep a Changelog format (Fixed/Added/Changed sections). This is NOT optional. When an item links to a PR, keep it to one line (bold title + a short clause) — the PR description already has the full explanation, don't duplicate it in the changelog.
-5. **Run `black --check .` and `ruff check .`** — fix any formatting issues before committing.
-6. **Commit** all changes to the current branch.
-7. **Push branch to beta remote**: `git push beta <branch>:<branch>`
-8. **Create PR** against `beta/main`:
+6. **Run `black --check .` and `ruff check .`** — fix any formatting issues before committing.
+7. **Commit** all changes to the beta-release-tmp branch.
+8. **Push branch to beta remote**: `git push beta beta-release-tmp:beta-release-tmp`
+9. **Create PR** against `beta/main`:
    ```
    gh pr create --repo johanzander/bess-manager-beta \
-     --base main --head <branch> \
+     --base main --head beta-release-tmp \
      --title "release: v<version>" --body "<changelog>"
    ```
-9. **Monitor CI** on the PR. Check with:
+10. **Monitor CI** on the PR. Check with:
    ```
    gh pr checks <pr-number> --repo johanzander/bess-manager-beta --watch
    ```
    **If any check fails**: read the failure logs with `gh run view <run-id> --repo johanzander/bess-manager-beta --log-failed`, fix the issue locally, commit, push, and re-check. Do NOT proceed to merge until all required checks pass. Also run `npx tsc --noEmit` locally before pushing — the CI type-check catches errors that `npm run build` misses.
-10. **Merge PR**: `gh pr merge <pr-number> --repo johanzander/bess-manager-beta --squash`
-11. **Tag and push tag**:
+11. **Merge PR**: `gh pr merge <pr-number> --repo johanzander/bess-manager-beta --squash`
+12. **Tag and push tag**:
     ```
     git fetch beta main
     git tag v<version> beta/main
     git push beta v<version>
     ```
-12. **Create a published GitHub Release** — pushing the tag alone does NOT trigger the image build; `release-addon.yml` only fires on `release: published`:
+13. **Create a published GitHub Release** — pushing the tag alone does NOT trigger the image build; `release-addon.yml` only fires on `release: published`:
     ```
     gh release create v<version> --repo johanzander/bess-manager-beta \
       --title "v<version>" --prerelease --notes "<changelog>"
     ```
-13. **Verify the build and images**:
+14. **Verify the build and images**:
     ```
     gh run list --repo johanzander/bess-manager-beta --workflow release-addon.yml -L 1
     podman pull ghcr.io/johanzander/bess-manager-beta-amd64:<version>
@@ -53,11 +57,25 @@
 
 ## Production Release (`release` or `release prod`)
 
-1. **Check version**: `gh release list -L 5` (origin repo)
-2. **Run full test suite** — including `pytest -m slow`
-3. **Bump version** in `config.yaml`
-4. **Update CHANGELOG.md** — this is NOT optional. Same rule as beta: one line per PR-linked item, no restating the PR body.
-5. **Run `black --check .` and `ruff check .`** — fix any formatting issues.
-6. **Create PR** against `origin/main`, wait for CI
-7. **Merge**, tag, push tag to origin
-8. **Create GitHub Release**: `gh release create v<version> --title "v<version>" --notes "<changelog>"`
+1. **Check the current stable version**: `gh release list -L 5` (origin repo) and `git show origin/main:bess_manager/config.yaml | grep '^version:'` — they should match; if not, stop and investigate before releasing.
+2. **Confirm the commit being promoted has already shipped as a beta** — `git log --oneline` on `origin/main` should show the exact commit was previously synced to `beta/main` and released there (check `gh release list -L 10 -R johanzander/bess-manager-beta` for a matching `bN` version pointing at content you recognize). Promoting a commit that was never validated on beta defeats the point of having a beta channel — if this is a small, fully self-validated change (see project memory on beta-vs-prod channel choice), that's fine, just confirm it deliberately rather than by default.
+3. **Run the full test suite locally**, including `pytest -m slow`.
+4. **Bump `config.yaml`** — drop the `bN` suffix (e.g. `9.9.0b12` → `9.9.0`).
+5. **Rename the changelog heading** — `## [Unreleased]` becomes `## [<version>] - <date>` in `CHANGELOG.md` on `origin/main`. This is the only changelog edit a production release makes; do not also hand-add entries, they should already be there from each PR's merge.
+6. **Run `black --check .` and `ruff check .`** — fix any formatting issues.
+7. **Create a PR** against `origin/main` (a version-bump-only PR, branched from `origin/main`), wait for CI.
+8. **Get explicit user approval, then merge, tag, and push the tag** to `origin`.
+9. **Create a GitHub Release**: `gh release create v<version> --title "v<version>" --notes "<changelog>"`.
+
+## Hotfix Release (`release hotfix`)
+
+Use when a bug is found in the **currently-published stable version** and `origin/main` has since moved on with unrelated, unreleased work you don't want to ship alongside the fix. If `origin/main` is still close to the last stable tag (no risky or unvalidated work merged since), skip this — just fix on `main` and run a normal Production Release instead.
+
+1. **Fix on `main` first**, via a normal PR. `main` remains the only place any fix is ever authored — this procedure only moves it backward to where users already are, never authors it directly on a release branch.
+2. **Branch from the stable tag**: `git fetch origin --tags && git checkout -b release-X.Y vX.Y.Z` (the currently-published stable tag, not `main`).
+3. **Cherry-pick the fix commit(s)** from `main` onto `release-X.Y`: `git cherry-pick <sha>`.
+4. **Bump the patch version** in `config.yaml` (`X.Y.Z` → `X.Y.(Z+1)`) and add a changelog entry directly on `release-X.Y` (this content also needs to make it back into `origin/main`'s next `Unreleased` section by hand, since `release-X.Y` isn't merged back into `main` — the fix code already is, only the changelog line and version bump are release-branch-only).
+5. **Run the fast test suite** on `release-X.Y`: `pytest -m "not slow"`.
+6. **Push, tag, and release** from `origin`: `git push origin release-X.Y`, then tag `vX.Y.(Z+1)` on `release-X.Y` and `gh release create` as in a normal production release — get explicit user approval before each push/tag/release.
+7. **Delete `release-X.Y`** once the patch is published: `git push origin --delete release-X.Y`. It is not long-lived.
+8. **Sync beta**: run the normal `release beta` flow afterward so beta picks up both the original fix (already on `main`) and stays ahead — no special handling needed since `main` already has the fix from step 1.

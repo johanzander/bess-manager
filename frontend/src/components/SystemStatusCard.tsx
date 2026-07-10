@@ -3,6 +3,7 @@ import api from '../lib/api';
 import { useDashboardData } from '../hooks/useDashboardData';
 import { FormattedValue } from '../types';
 import { DashboardResponse } from '../api/scheduleApi';
+import { getIntent } from '../utils/intent';
 import { 
   DollarSign, 
   Battery, 
@@ -241,7 +242,7 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", sys
       SOLAR_EXPORT: 'Solar Exporting',
       IDLE: 'Standby',
     };
-    const rawIntent = currentHourData.strategicIntent?.toUpperCase().replace(/ /g, '_') ?? 'IDLE';
+    const rawIntent = getIntent(currentHourData).toUpperCase().replace(/ /g, '_');
     const strategicIntent = intentDisplayNames[rawIntent] ?? rawIntent;
 
     return {

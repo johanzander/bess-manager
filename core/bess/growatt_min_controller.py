@@ -424,8 +424,11 @@ class GrowattMinController(InverterController):
             f"Using {len(self.strategic_intents)} strategic intents from DP algorithm (quarterly resolution)"
         )
 
-        # Log intent transitions
-        for period in range(1, len(self.strategic_intents)):
+        # Log intent transitions from current_period onward — periods before
+        # current_period are already elapsed and re-log identically on every
+        # hourly re-optimization otherwise (downstream TOU-segment building
+        # only processes from current_period onward too, see below).
+        for period in range(max(1, current_period), len(self.strategic_intents)):
             if self.strategic_intents[period] != self.strategic_intents[period - 1]:
                 logger.info(
                     "Intent transition at period %d: %s → %s",
@@ -464,9 +467,6 @@ class GrowattMinController(InverterController):
             "Converting %d strategic intents to TOU intervals using 15-minute resolution",
             len(self.strategic_intents),
         )
-
-        # Log the intent-to-mode mapping being used
-        logger.info("Intent to mode mapping: %s", self.INTENT_TO_MODE)
 
         # Check for corrupted existing intervals before clearing
         if self.tou_intervals:
@@ -1321,15 +1321,13 @@ class GrowattMinController(InverterController):
         return writes, disables
 
     def sync_soc_limits(self, controller) -> None:
-        """Sync SOC limits from config to inverter hardware via entity writes."""
+        """Sync SOC limits from config to inverter hardware via entity writes.
+
+        Reads current charge/discharge stop SOC from the inverter and writes
+        back only if they differ from the configured max_soc / min_soc.
+        """
         configured_min_soc = self.battery_settings.min_soc
         configured_max_soc = self.battery_settings.max_soc
-
-        controller.set_discharge_stop_soc(configured_min_soc)
-        logger.info("Set discharge_stop_soc to %d%%", configured_min_soc)
-
-        controller.set_charge_stop_soc(configured_max_soc)
-        logger.info("Set charge_stop_soc to %d%%", configured_max_soc)
 
         actual_min_soc = controller.get_discharge_stop_soc()
         actual_max_soc = controller.get_charge_stop_soc()
@@ -1343,14 +1341,24 @@ class GrowattMinController(InverterController):
                 actual_min_soc,
                 actual_max_soc,
             )
-        else:
-            logger.warning(
-                "SOC limit mismatch detected! Configured: min=%d%%, max=%d%% | Actual: min=%s%%, max=%s%%",
-                configured_min_soc,
-                configured_max_soc,
-                actual_min_soc,
-                actual_max_soc,
-            )
+            return
+
+        logger.info(
+            "SOC limit mismatch — configured: min=%d%%, max=%d%% | "
+            "actual: min=%s%%, max=%s%% — syncing",
+            configured_min_soc,
+            configured_max_soc,
+            actual_min_soc,
+            actual_max_soc,
+        )
+
+        if actual_min_soc != configured_min_soc:
+            controller.set_discharge_stop_soc(configured_min_soc)
+            logger.info("Set discharge_stop_soc to %d%%", configured_min_soc)
+
+        if actual_max_soc != configured_max_soc:
+            controller.set_charge_stop_soc(configured_max_soc)
+            logger.info("Set charge_stop_soc to %d%%", configured_max_soc)
 
     def initialize_hardware(self, controller) -> None:
         self.sync_soc_limits(controller)

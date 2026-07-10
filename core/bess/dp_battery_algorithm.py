@@ -16,31 +16,9 @@ total cost over the remaining time horizon.
 KEY FEATURES:
 - 24-hour optimization horizon with perfect foresight
 - Cost basis tracking for stored energy (FIFO accounting)
-- Profitability checks to prevent unprofitable discharging
-- Minimum profit threshold system to prevent excessive cycling for low-profit actions
 - Multi-objective optimization: cost minimization + battery longevity
 - Simultaneous energy flow optimization across multiple sources/destinations
 - Strategic intent capture at decision time for transparency and hardware control
-
-MINIMUM PROFIT THRESHOLD SYSTEM:
-The minimum profit threshold prevents unprofitable battery operations through a post-optimization profitability gate.
-After optimization completes, the total savings are compared against an effective threshold derived from the configured
-value scaled proportionally to the remaining horizon fraction:
-
-    effective_threshold = min_action_profit_threshold * max(THRESHOLD_HORIZON_FLOOR, horizon / total_periods)
-
-- If total_savings >= effective_threshold: Execute the optimized schedule
-- If total_savings < effective_threshold: Reject optimization and use all-IDLE schedule (do nothing)
-
-The scaling ensures the bar is proportional to how much of the day remains. A run at midnight faces the full threshold;
-a run at 20:00 with only 4 hours left faces roughly 1/6 of it. Without scaling, late-day runs are held to an
-unreachable standard and legitimate evening discharge opportunities get blocked.
-
-THRESHOLD_HORIZON_FLOOR (0.15) prevents the effective threshold from collapsing to near-zero at end of day, which
-would allow the battery to cycle for trivially small gains in the final hour or two.
-
-Configurable via battery.min_action_profit_threshold in config.yaml (in your currency).
-Example: a threshold of 8.0 at 16:00 (8/24 remaining) becomes an effective threshold of 8.0 * 0.33 = 2.67
 
 STRATEGIC INTENT CAPTURE:
 The algorithm now captures the strategic reasoning behind each decision:
@@ -106,6 +84,12 @@ logger = logging.getLogger(__name__)
 SOE_STEP_KWH = 0.1
 POWER_STEP_KW = 0.2
 POWER_TOLERANCE_KW = 0.001  # Threshold to distinguish IDLE from charge/discharge
+# Matches decision_intelligence.classify_strategic_intent's own
+# battery_to_grid threshold for BATTERY_EXPORT classification -- keep these
+# in sync: the DP's own reward search must value a discharge's export
+# credit consistently with whether that discharge will actually be
+# classified (and executed via grid_first) as a real export.
+BATTERY_EXPORT_THRESHOLD_KWH = 0.01
 
 
 class StrategicIntent(Enum):
@@ -267,26 +251,18 @@ def _compute_reward(
     - Grid costs applied to energy throughput (what you draw from grid)
     - Cost basis includes BOTH grid costs AND cycle costs for profitability analysis
 
-    PROFITABILITY CHECK (opportunity-cost floor):
-    - A discharge is worthwhile only if its value beats the opportunity cost of
-      the stored kWh — not its sunk cost basis and not zero.
-    - Value = max(avoided grid purchase, grid export revenue), after discharge
-      efficiency.
-    - The effective floor is raised to sell_price whenever upcoming solar will
-      replenish the discharged capacity (replenishment): the kWh could be exported
-      later, so sell_price is its true replacement cost. Since
-      sell_price * efficiency_discharge < sell_price, marginal round-trip and
-      refill trades are correctly blocked.
-
-    Example for stored energy costing 2.61/kWh:
-    - If buy_price = 2.58, sell_price = 1.81
-    - Avoid purchase value: 2.58 x 0.95 = 2.45/kWh stored
-    - Export value: 1.81 x 0.95 = 1.72/kWh stored
-    - Best value: max(2.45, 1.72) = 2.45/kWh stored
-    - 2.45 < 2.61 → UNPROFITABLE (correctly blocked)
+    DISCHARGE ACCOUNTING:
+    - No profitability veto: every physically valid discharge gets a finite
+      reward. IDLE, competing in the same max() during backward induction,
+      already makes the hold-vs-discharge call correctly via the
+      forward-looking value function -- a separate floor on top of that is
+      redundant at best (see docs/superpowers/specs/2026-07-06-dp-bellman-guardrail-removal-design.md).
+    - Self-throttling (#240): a discharge overshooting home_consumption by
+      less than BATTERY_EXPORT_THRESHOLD_KWH is not credited as export
+      revenue -- load-first hardware never actually delivers it to the grid.
 
     Returns:
-        (reward, new_cost_basis) or (float("-inf"), cost_basis) if discharge is unprofitable.
+        (reward, new_cost_basis).
     """
     current_buy_price = buy_price[period]
     current_sell_price = sell_price[period]
@@ -358,48 +334,15 @@ def _compute_reward(
     elif power < -POWER_TOLERANCE_KW:  # Discharging
         battery_wear_cost = 0.0
 
-        # Profitability check: only discharge if value exceeds cost basis
-        avoid_purchase_value = current_buy_price * battery_settings.efficiency_discharge
-        export_value = current_sell_price * battery_settings.efficiency_discharge
-
-        # If solar already covers all home load this period, there is no grid
-        # purchase for the discharge to displace — its only realizable value is
-        # the export price. Including avoid_purchase_value here would credit the
-        # discharge for a purchase that was never going to happen.
-        excess_solar = max(0.0, solar_production - home_consumption)
-        if excess_solar > POWER_TOLERANCE_KW:
-            effective_value_per_kwh_stored = export_value
-        else:
-            effective_value_per_kwh_stored = max(avoid_purchase_value, export_value)
-
-        # Anti-cycling: use sell_price as cost basis floor to prevent wasteful
-        # charge/discharge cycling.  Stored energy has an opportunity cost —
-        # it could be exported at sell_price.  Any discharge is only worthwhile
-        # if its value exceeds this opportunity cost.
-        #
-        # Two cases where cycling occurs:
-        #
-        # 1. Grid arbitrage (sell > buy): discharge to export at sell, re-buy
-        #    at buy.  Always unprofitable because sell * eff_d < sell — the
-        #    round-trip efficiency loss eats the spread.
-        #
-        # 2. Solar displacement: excess solar will refill discharged capacity.
-        #    The displaced solar could have been exported at sell_price, so
-        #    sell_price is the true replacement cost.  Check capacity AFTER
-        #    the proposed discharge (a full battery that discharges opens room).
-        effective_cost_basis = cost_basis
-        if current_sell_price > current_buy_price:
-            effective_cost_basis = max(effective_cost_basis, current_sell_price)
-        else:
-            capacity_after_discharge = battery_settings.max_soe_kwh - next_soe
-            if (
-                excess_solar > POWER_TOLERANCE_KW
-                and capacity_after_discharge > SOE_STEP_KWH
-            ):
-                effective_cost_basis = max(effective_cost_basis, current_sell_price)
-
-        if effective_value_per_kwh_stored <= effective_cost_basis:
-            return float("-inf"), cost_basis
+        # Self-throttling fix (#240): load-first hardware never actually
+        # exports a small discharge overshoot beyond home_consumption -- it
+        # delivers only what the home needs. Below BATTERY_EXPORT_THRESHOLD_KWH
+        # (the same battery_to_grid boundary decision_intelligence.
+        # classify_strategic_intent uses to call something BATTERY_EXPORT vs
+        # LOAD_SUPPORT), treat the overshoot as self-throttled: no export
+        # credit. At or above it, it's a genuine deliberate export.
+        if grid_exported <= BATTERY_EXPORT_THRESHOLD_KWH:
+            grid_exported = 0.0
 
     else:  # IDLE — passive solar charging
         energy_stored = next_soe - soe  # kWh stored in battery after efficiency
@@ -669,13 +612,10 @@ def _run_dynamic_programming(
     terminal_value_per_kwh: float = 0.0,
     currency: str = "SEK",
     max_charge_power_per_period: list[float] | None = None,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict]:
+) -> np.ndarray:
     """
-    Enhanced DP that stores the PeriodData objects calculated during optimization.
-    This eliminates the need for reward recalculation in simulation.
+    Run backward induction DP to compute optimal battery control policy.
     """
-
-    logger.debug("Starting DP optimization with PeriodData storage")
 
     # Set defaults if not provided
     if solar_production is None:
@@ -683,10 +623,9 @@ def _run_dynamic_programming(
     if initial_soe is None:
         initial_soe = battery_settings.min_soe_kwh
 
-    # Discretize state and action spaces (same as before)
+    # Discretize state and action spaces
     soe_levels, power_levels = _discretize_state_action_space(battery_settings)
 
-    # Initialize DP arrays (same as before)
     V = np.zeros((horizon + 1, len(soe_levels)))
 
     # Terminal value: assign value to usable energy remaining at end of horizon
@@ -695,19 +634,10 @@ def _run_dynamic_programming(
             usable_energy = soe - battery_settings.min_soe_kwh
             V[horizon, i] = max(0.0, usable_energy) * terminal_value_per_kwh
 
-    policy = np.zeros((horizon, len(soe_levels)))
-    C = np.full((horizon + 1, len(soe_levels)), initial_cost_basis)
-
-    # Store PeriodData objects calculated during DP
-    stored_period_data = {}  # Key: (t, i), Value: PeriodData
-
-    # Backward induction (same structure as before)
+    # Backward induction
     for t in reversed(range(horizon)):
         for i, soe in enumerate(soe_levels):
             best_value = float("-inf")
-            best_action = 0
-            best_new_cost_basis = C[t, i]
-            best_next_soe = soe  # tracked for _build_period_data after inner loop
 
             # Per-period charge power limit (from temperature derating or None)
             period_max_charge = (
@@ -755,7 +685,7 @@ def _run_dynamic_programming(
                     continue
 
                 # Compute reward scalars only — no dataclass allocation in hot path
-                reward, new_cost_basis = _compute_reward(
+                reward, _ = _compute_reward(
                     power=power,
                     soe=soe,
                     next_soe=next_soe,
@@ -766,12 +696,8 @@ def _run_dynamic_programming(
                     solar_production=solar_production[t],
                     buy_price=buy_price,
                     sell_price=sell_price,
-                    cost_basis=C[t, i],
+                    cost_basis=initial_cost_basis,
                 )
-
-                # Skip if unprofitable
-                if reward == float("-inf"):
-                    continue
 
                 # Find next state index
                 next_i = round((next_soe - battery_settings.min_soe_kwh) / SOE_STEP_KWH)
@@ -783,128 +709,116 @@ def _run_dynamic_programming(
                 # Update if better
                 if value > best_value:
                     best_value = value
-                    best_action = power
-                    best_new_cost_basis = new_cost_basis
-                    best_next_soe = next_soe
 
-            # Store results
+            # IDLE is always a feasible, finite-reward action (no physical
+            # constraint check applies to it, and _compute_reward never
+            # returns -inf), so best_value can never remain -inf here.
             V[t, i] = best_value
-            policy[t, i] = best_action
 
-            # Build PeriodData once for the winning action (not in the hot path)
-            if best_value > float("-inf"):
-                stored_period_data[(t, i)] = _build_period_data(
-                    power=best_action,
-                    soe=soe,
-                    next_soe=best_next_soe,
-                    period=t,
-                    home_consumption=home_consumption[t],
-                    battery_settings=battery_settings,
-                    dt=dt,
-                    solar_production=solar_production[t],
-                    buy_price=buy_price,
-                    sell_price=sell_price,
-                    new_cost_basis=best_new_cost_basis,
-                    currency=currency,
-                )
-            else:
-                # No valid action found - create a default IDLE PeriodData
-                # This can happen at boundary states (e.g., max SOE with unprofitable discharge)
-                logger.warning(
-                    f"No valid action found for period {t}, state {i} (SOE={soe:.1f}). "
-                    f"Creating default IDLE state."
-                )
-                # Calculate IDLE scenario with passive solar charging
-                idle_next_soe = _state_transition(
-                    soe,
-                    0.0,
-                    battery_settings,
-                    dt,
-                    solar_production=solar_production[t],
-                    home_consumption=home_consumption[t],
-                )
-                idle_passive_stored = idle_next_soe - soe
-                idle_battery_charged, _ = _idle_battery_flows(
-                    soe, idle_next_soe, battery_settings
-                )
-                idle_energy_balance = (
-                    solar_production[t] - home_consumption[t] - idle_battery_charged
-                )
-                idle_grid_imported = max(0, -idle_energy_balance)
-                idle_grid_exported = max(0, idle_energy_balance)
-                idle_wear_cost = (
-                    idle_passive_stored * battery_settings.cycle_cost_per_kwh
-                )
-                idle_energy = EnergyData(
-                    solar_production=solar_production[t],
-                    home_consumption=home_consumption[t],
-                    battery_charged=idle_battery_charged,
-                    battery_discharged=0.0,
-                    grid_imported=idle_grid_imported,
-                    grid_exported=idle_grid_exported,
-                    battery_soe_start=soe,
-                    battery_soe_end=idle_next_soe,
-                )
-                idle_economic = EconomicData.from_energy_data(
-                    energy_data=idle_energy,
-                    buy_price=buy_price[t],
-                    sell_price=sell_price[t],
-                    battery_cycle_cost=idle_wear_cost,
-                )
-                idle_decision = DecisionData(
-                    strategic_intent=classify_strategic_intent(0.0, idle_energy),
-                    battery_action=0.0,
-                    cost_basis=C[t, i],
-                )
-                idle_period_data = PeriodData(
-                    period=t,
-                    energy=idle_energy,
-                    timestamp=None,
-                    data_source="predicted",
-                    economic=idle_economic,
-                    decision=idle_decision,
-                )
-                stored_period_data[(t, i)] = idle_period_data
-                # Also update V[t, i] to the actual IDLE cost (not -inf),
-                # including future value to preserve backward propagation.
-                idle_next_i = round(
-                    (idle_next_soe - battery_settings.min_soe_kwh) / SOE_STEP_KWH
-                )
-                idle_next_i = min(max(0, idle_next_i), len(soe_levels) - 1)
-                V[t, i] = (
-                    -(
-                        idle_grid_imported * buy_price[t]
-                        - idle_grid_exported * sell_price[t]
-                        + idle_wear_cost
-                    )
-                    + V[t + 1, idle_next_i]
-                )
+    return V
 
-            # Update cost basis for next time step
-            if best_action != 0 and t + 1 < horizon:
-                next_i = round(
-                    (best_next_soe - battery_settings.min_soe_kwh) / SOE_STEP_KWH
-                )
-                next_i = min(max(0, next_i), len(soe_levels) - 1)
-                C[t + 1, next_i] = best_new_cost_basis
 
-    # Final safety check
-    if max_charge_power_per_period is not None:
-        # Apply per-period charge limits
-        for t in range(horizon):
-            policy[t] = np.clip(
-                policy[t],
-                -battery_settings.max_discharge_power_kw,
-                max_charge_power_per_period[t],
+def _interpolate_value(
+    V_row: np.ndarray, soe: float, battery_settings: BatterySettings
+) -> float:
+    """Linearly interpolate a value-function row (V[t, :]) at a continuous
+    SoE, rather than snapping to the nearest discretized grid point."""
+    idx = (soe - battery_settings.min_soe_kwh) / SOE_STEP_KWH
+    idx = min(max(0.0, idx), len(V_row) - 1)
+    lo = int(idx)
+    hi = min(lo + 1, len(V_row) - 1)
+    frac = idx - lo
+    return V_row[lo] * (1 - frac) + V_row[hi] * frac
+
+
+def _best_action_at_continuous_state(
+    soe: float,
+    t: int,
+    V_next: np.ndarray,
+    power_levels: np.ndarray,
+    home_consumption: list[float],
+    battery_settings: BatterySettings,
+    dt: float,
+    solar_production: list[float],
+    buy_price: list[float],
+    sell_price: list[float],
+    cost_basis: float,
+    max_charge_power_per_period: list[float] | None,
+) -> tuple[float, float, float, float]:
+    """One-step Bellman recompute at a true continuous SoE, using the
+    already-known V[t+1, :] (linearly interpolated) as the continuation
+    value -- the same reward+max(V) logic as _run_dynamic_programming's
+    backward pass, applied at the true replay state instead of one snapped
+    to the nearest grid index. Used by optimize_battery_schedule's Step 2 to
+    reconstruct the continuous path without trusting a policy table computed
+    for a slightly different state. See
+    docs/superpowers/specs/2026-07-06-dp-bellman-guardrail-removal-design.md.
+
+    Returns (best_action, best_next_soe, best_new_cost_basis, best_reward).
+    """
+    period_max_charge = (
+        max_charge_power_per_period[t]
+        if max_charge_power_per_period is not None
+        else None
+    )
+    best_value = float("-inf")
+    best_action = 0.0
+    best_next_soe = soe
+    best_new_cost_basis = cost_basis
+    best_reward = 0.0
+    for power in power_levels:
+        if power < -POWER_TOLERANCE_KW:
+            available_energy = soe - battery_settings.min_soe_kwh
+            max_discharge_power = (
+                available_energy / dt * battery_settings.efficiency_discharge
             )
-    else:
-        policy = np.clip(
-            policy,
-            -battery_settings.max_discharge_power_kw,
-            battery_settings.max_charge_power_kw,
-        )
+            if abs(power) > max_discharge_power:
+                continue
+        elif power > POWER_TOLERANCE_KW:
+            if period_max_charge is not None and power > period_max_charge:
+                continue
+            available_capacity = battery_settings.max_soe_kwh - soe
+            max_charge_power = (
+                available_capacity / dt / battery_settings.efficiency_charge
+            )
+            if power > max_charge_power:
+                continue
 
-    return V, policy, C, stored_period_data
+        next_soe = _state_transition(
+            soe,
+            power,
+            battery_settings,
+            dt,
+            solar_production=solar_production[t],
+            home_consumption=home_consumption[t],
+        )
+        if (
+            next_soe < battery_settings.min_soe_kwh
+            or next_soe > battery_settings.max_soe_kwh
+        ):
+            continue
+
+        reward, new_cost_basis = _compute_reward(
+            power=power,
+            soe=soe,
+            next_soe=next_soe,
+            period=t,
+            home_consumption=home_consumption[t],
+            battery_settings=battery_settings,
+            dt=dt,
+            solar_production=solar_production[t],
+            buy_price=buy_price,
+            sell_price=sell_price,
+            cost_basis=cost_basis,
+        )
+        value = reward + _interpolate_value(V_next, next_soe, battery_settings)
+        if value > best_value:
+            best_value = value
+            best_action = power
+            best_next_soe = next_soe
+            best_new_cost_basis = new_cost_basis
+            best_reward = reward
+    return best_action, best_next_soe, best_new_cost_basis, best_reward
 
 
 def _create_idle_schedule(
@@ -1096,9 +1010,10 @@ def optimize_battery_schedule(
         f"Starting direct optimization: horizon={horizon}, initial_soe={initial_soe:.1f}, initial_cost_basis={initial_cost_basis:.3f}"
     )
 
-    # Step 1: Run DP — capture policy for continuous reconstruction and the
-    # value-to-go array V for the per-period shadow price (dV/dSoE).
-    V, policy, _, _ = _run_dynamic_programming(
+    # Step 1: Run DP to compute the value-to-go array V. Step 2 recomputes
+    # each replay action directly from V (interpolated at the true
+    # continuous SoE) rather than looking up a grid-snapped policy table.
+    V = _run_dynamic_programming(
         horizon=horizon,
         buy_price=buy_price,
         sell_price=sell_price,
@@ -1126,41 +1041,27 @@ def optimize_battery_schedule(
         battery_settings.max_soe_kwh + SOE_STEP_KWH,
         SOE_STEP_KWH,
     )
+    _, power_levels = _discretize_state_action_space(battery_settings)
 
     for t in range(horizon):
-        # Map continuous SoE to the nearest grid index to look up the policy action
-        i = round((current_soe - battery_settings.min_soe_kwh) / SOE_STEP_KWH)
-        i = min(max(0, i), len(soe_levels) - 1)
-        action = float(policy[t, i])
-
-        # Propagate SoE continuously using the exact same physics as the simulator
-        next_soe = _state_transition(
-            current_soe,
-            action,
-            battery_settings,
-            dt,
-            solar_production=solar_production[t],
-            home_consumption=home_consumption[t],
-        )
-
-        # Thread cost_basis continuously forward
-        reward, new_cost_basis = _compute_reward(
-            power=action,
+        # Recompute the action directly at the true continuous SoE using the
+        # already-known V[t+1, :] (linearly interpolated) as the continuation
+        # value -- the same reward+max(V) logic as the backward pass, applied
+        # at the true state instead of one snapped to the nearest grid index.
+        action, next_soe, new_cost_basis, _ = _best_action_at_continuous_state(
             soe=current_soe,
-            next_soe=next_soe,
-            period=t,
-            home_consumption=home_consumption[t],
+            t=t,
+            V_next=V[t + 1],
+            power_levels=power_levels,
+            home_consumption=home_consumption,
             battery_settings=battery_settings,
             dt=dt,
+            solar_production=solar_production,
             buy_price=buy_price,
             sell_price=sell_price,
-            solar_production=solar_production[t],
             cost_basis=current_cost_basis,
+            max_charge_power_per_period=max_charge_power_per_period,
         )
-        # _compute_reward returns (-inf, cost_basis) for a blocked discharge; when
-        # replaying the already-chosen policy action just keep the current basis.
-        if reward == float("-inf"):
-            new_cost_basis = current_cost_basis
 
         period_data = _build_period_data(
             power=action,
@@ -1178,11 +1079,12 @@ def optimize_battery_schedule(
         )
 
         # Shadow price = marginal opportunity value of stored energy (dV/dSoE),
-        # by backward difference at the chosen grid level i (the kWh we would
-        # remove by discharging). V is in reward units (SEK, higher = better),
-        # increasing in SoE, so this is positive. Exact at a full battery
-        # (i = len-1); undefined at i = 0 (nothing to discharge) -> leave 0.0.
-        # Used downstream to gate intra-period SOLAR_EXPORT discharge.
+        # by backward difference at the nearest grid level i (the kWh we
+        # would remove by discharging). Unchanged from the previous
+        # implementation -- this task only changes action selection, not
+        # shadow_price reporting.
+        i = round((current_soe - battery_settings.min_soe_kwh) / SOE_STEP_KWH)
+        i = min(max(0, i), len(soe_levels) - 1)
         if i > 0:
             period_data.decision.shadow_price = float(
                 (V[t, i] - V[t, i - 1]) / SOE_STEP_KWH
@@ -1234,48 +1136,28 @@ def optimize_battery_schedule(
     )
 
     # ============================================================================
-    # PROFITABILITY GATE: Reject optimization if savings below effective threshold
+    # NUMERICAL SAFETY NET: guard against SoE-grid discretization residual
     # ============================================================================
-    # Scale the threshold proportionally to the remaining horizon so that mid-day
-    # and late-day runs are not held to a full-day savings bar.
-    # A floor of 15% prevents the threshold from collapsing to near-zero at end of day.
-    THRESHOLD_HORIZON_FLOOR = 0.15
-    total_periods = round(24.0 / dt)
-    horizon_fraction = max(THRESHOLD_HORIZON_FLOOR, horizon / total_periods)
-    effective_threshold = (
-        battery_settings.min_action_profit_threshold * horizon_fraction
+    # Bellman's principle of optimality guarantees the DP's own schedule is
+    # never worse than doing nothing: IDLE is always a feasible action every
+    # period, so backward induction already picks it whenever it's the best
+    # available option. The only way the realized schedule can still cost
+    # slightly more than an all-IDLE schedule is SoE-grid discretization
+    # residual (see docs/superpowers/specs/2026-07-06-dp-bellman-guardrail-removal-design.md)
+    # -- a numerical artifact, not an economic one. This is a trivial O(1)
+    # comparison, not a configurable threshold.
+    idle_schedule = _create_idle_schedule(
+        horizon=horizon,
+        buy_price=buy_price,
+        sell_price=sell_price,
+        home_consumption=home_consumption,
+        solar_production=solar_production,
+        initial_soe=initial_soe,
+        battery_settings=battery_settings,
+        dt=dt,
     )
-    if solar_to_battery_solar_savings < effective_threshold:
-        idle_schedule = _create_idle_schedule(
-            horizon=horizon,
-            buy_price=buy_price,
-            sell_price=sell_price,
-            home_consumption=home_consumption,
-            solar_production=solar_production,
-            initial_soe=initial_soe,
-            battery_settings=battery_settings,
-            dt=dt,
-        )
-        # The all-IDLE fallback still pays wear cost on solar passively absorbed
-        # into any available room, but never discharges to recoup any of it —
-        # it is not guaranteed to be cheaper than the schedule it would replace.
-        # Only substitute it if it actually is.
-        if idle_schedule.economic_summary.battery_solar_cost < total_optimized_cost:
-            logger.warning(
-                f"Optimization savings vs solar-only baseline ({solar_to_battery_solar_savings:.2f} "
-                f"{currency}) below effective threshold ({effective_threshold:.2f} {currency}) "
-                f"(configured: {battery_settings.min_action_profit_threshold:.2f}, "
-                f"horizon: {horizon}/{total_periods} periods, scale: {horizon_fraction:.2f}). "
-                f"Using all-IDLE schedule instead."
-            )
-            return idle_schedule
-        logger.warning(
-            f"Optimization savings vs solar-only baseline ({solar_to_battery_solar_savings:.2f} "
-            f"{currency}) below effective threshold ({effective_threshold:.2f} {currency}), but "
-            f"the all-IDLE fallback ({idle_schedule.economic_summary.battery_solar_cost:.2f} "
-            f"{currency}) is not cheaper than the optimized schedule ({total_optimized_cost:.2f} "
-            f"{currency}). Keeping the optimized schedule."
-        )
+    if idle_schedule.economic_summary.battery_solar_cost < total_optimized_cost:
+        return idle_schedule
 
     return OptimizationResult(
         period_data=hourly_results,

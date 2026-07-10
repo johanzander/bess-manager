@@ -297,11 +297,12 @@ class TestCompareSchedules:
 
 
 class TestSyncSocLimits:
-    def test_sync_soc_limits_calls_set_solax_min_soc(
+    def test_sync_soc_limits_calls_set_solax_min_soc_on_mismatch(
         self, controller: SolaxController, battery_settings: BatterySettings
     ) -> None:
         mock_hw = MagicMock()
         mock_hw.get_solax_power_control_mode.return_value = "Self Use Mode"
+        mock_hw.get_solax_min_soc.return_value = int(battery_settings.min_soc) + 1
         controller.sync_soc_limits(mock_hw)
 
         mock_hw.set_solax_min_soc.assert_called_once_with(int(battery_settings.min_soc))
@@ -313,9 +314,20 @@ class TestSyncSocLimits:
         ctrl = SolaxController(battery_settings=battery_settings)
         mock_hw = MagicMock()
         mock_hw.get_solax_power_control_mode.return_value = "Self Use Mode"
+        mock_hw.get_solax_min_soc.return_value = 10
         ctrl.sync_soc_limits(mock_hw)
 
         mock_hw.set_solax_min_soc.assert_called_once_with(20)
+
+    def test_sync_soc_limits_skips_write_when_no_mismatch(
+        self, controller: SolaxController, battery_settings: BatterySettings
+    ) -> None:
+        mock_hw = MagicMock()
+        mock_hw.get_solax_power_control_mode.return_value = "Self Use Mode"
+        mock_hw.get_solax_min_soc.return_value = int(battery_settings.min_soc)
+        controller.sync_soc_limits(mock_hw)
+
+        mock_hw.set_solax_min_soc.assert_not_called()
 
 
 # ── check_health ──────────────────────────────────────────────────────────────

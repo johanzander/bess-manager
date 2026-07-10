@@ -16,11 +16,13 @@ This skill orchestrates other skills — it does not re-implement them:
 - **Gates are human-in-the-loop.** Stages 2 and 5 wait for the user. Do not
   fabricate logs or confirmation. Post a clear ask, then stop and poll.
 - **Communicate in the open.** Use `gh pr comment` / `gh issue comment` for every
-  ask and every result. The PR is the source of truth for lifecycle state.
+  ask and every result. The **originating issue** is the source of truth for
+  lifecycle state — the Stage 1 PR merges immediately and can't carry state
+  across later stages.
 - **Never claim real-world validation** until Stage 5. Keep the `experimental`
   marker until the user confirms against their own hardware.
-- **Track state with a checklist** in the PR body (one box per stage) so a
-  resumed agent knows where it is.
+- **Track state with a checklist** in the issue body/comments (one box per
+  stage) so a resumed agent knows where it is.
 - Honour repo rules: tests green before push, draft PRs, beta vs prod remotes
   (`release` skill owns the remote logic), CHANGELOG always updated.
 
@@ -29,14 +31,40 @@ This skill orchestrates other skills — it does not re-implement them:
 1. Run the **implementation skill** end-to-end (`add-price-provider`): verified
    discovery from integration source, source class + wiring + frontend, unit +
    discovery tests, a **source-derived** scenario fixture, and the wizard E2E.
-2. Mark the feature **experimental** everywhere the user sees it:
-   - UI: provider/platform option label or help text (e.g. "(experimental)").
-   - Docs: `README.md` tag + `docs/USER_GUIDE.md` note.
-3. Open a **draft PR** against `main`, `Closes #<issue>`. Put the lifecycle
-   checklist in the body (see template below).
-4. Ship to beta: run `release beta`. Comment on the issue that an experimental
+2. Mark the feature **experimental** everywhere the user sees it — this label
+   *is* the stability flag for this codebase. Only the README/USER_GUIDE tag
+   has real precedent today (used for the ENTSO-e/Belpex price provider);
+   the other two are new conventions this feature would establish:
+   - Docs (real, precedented): `README.md` tag `*(experimental)*` +
+     `docs/USER_GUIDE.md` note in the style of the ENTSO-e/Belpex entry
+     ("*Experimental: not yet real-world validated*").
+   - UI (aspirational — not implemented anywhere in `frontend/src` today):
+     if feasible, add a provider/platform option label or help text such as
+     "(experimental)"; otherwise skip it and rely on the docs tag alone.
+   - Maturity record (new — does not exist on `main` yet): create
+     `docs/agents/memory/project_platform_maturity.md` with an "Experimental /
+     not yet real-world validated" section naming the new platform/provider
+     key. This is the **first** feature to use this file; there is no
+     existing GEN3/SolaX entry to extend — those platforms are candidates for
+     future entries, not current precedent. Once created, later features
+     extend this same file instead of re-creating it.
+3. Open a **draft PR against `origin/main`** referencing the issue (e.g.
+   "Relates to #<issue>") — **do not** use `Closes`/`Fixes #<issue>` here.
+   This PR merges immediately in step 4, long before the feature is
+   real-world validated or graduated, so it must not close the reporter's
+   issue; only Stage 6's graduation PR does that. Put the lifecycle checklist
+   in the **issue** (see template below), not the PR body — the PR won't
+   persist across later stages. `origin/main` is the PR target for **every**
+   stage of this lifecycle, including this initial experimental merge — there
+   is no beta-first branch. Beta is a downstream mirror of `main` (see
+   `release` skill) and is never a place code is authored.
+4. Merge to `origin/main` with the experimental markers from step 2 in place.
+   Then run `release beta` to mirror the current `main` (now including this
+   feature) into a beta build. Comment on the issue that an experimental
    build is available and **ask the user to install it and report back**.
-- **Exit:** beta build published, issue comment posted requesting a trial.
+- **Exit:** feature merged to `origin/main` behind the experimental markers,
+  mirrored into a published beta build, issue comment posted requesting a
+  trial.
 
 ## Stage 2 — User provides logs (GATE)
 
@@ -49,7 +77,8 @@ config: inverter platform, sensors, and the new provider entity).
 2. When the log arrives, **verify it against the real data**:
    - Confirm the new integration's entity + attributes are present and parse.
    - If discovery/parse fails, this is a real bug — loop back to Stage 1
-     (fix, re-ship beta) before proceeding. Do not skip.
+     (fix on `main`, re-run `release beta` to re-mirror) before proceeding.
+     Do not skip.
 - **Exit:** a real debug log is in hand and the feature demonstrably works on it.
 
 ## Stage 3 — Lock the user's real config into the regression suite
@@ -82,13 +111,15 @@ provider together never silently break.
 This stage is usually a **loop of rapid minor fixes** (the feature can't be
 self-validated, so issues surface only against real configs). **Batch them** —
 do NOT cut a beta release + CHANGELOG entry per fix; that spams users and the
-changelog. Accumulate fixes as commits on the PR and cut a *consolidated* beta
-drop only at a meaningful checkpoint, with one combined CHANGELOG entry.
+changelog. Accumulate fixes as commits on the PR to `origin/main` and cut a
+*consolidated* beta mirror only at a meaningful checkpoint, with one combined
+CHANGELOG entry.
 
 1. Local gate on each iteration: `pytest -m "not slow"`, `black`/`ruff`,
    `tsc`/`vitest`/build, and the new scenario's wizard E2E.
-2. At a checkpoint (not per fix): `release beta` with the accumulated fixes +
-   regression fixture, one consolidated CHANGELOG entry.
+2. At a checkpoint (not per fix): merge the accumulated fixes + regression
+   fixture to `origin/main`, then run `release beta` to mirror that
+   checkpoint into beta, one consolidated CHANGELOG entry.
 3. **Poll CI** until green:
    ```
    gh pr checks <pr> --repo <repo> --watch
@@ -107,22 +138,40 @@ drop only at a meaningful checkpoint, with one combined CHANGELOG entry.
 
 ## Stage 6 — Graduate (remove experimental)
 
-1. Strip the `experimental` markers added in Stage 1 (UI label/help, README tag,
-   USER_GUIDE note).
-2. Update the maturity record (the project maturity memory / docs) to list the
-   feature as real-world tested, crediting the confirming user's scenario.
-3. Run the production `release` skill (`release` / `release prod`): version bump,
-   CHANGELOG "Added — now stable", PR to `origin/main`, CI green, tag, GitHub
-   Release.
-4. Mark the PR ready (un-draft), ensure it closes the issue, and post a final
-   thank-you comment to the user.
+Graduation only removes the stability flag from Stage 1 — it is a follow-up
+PR to `origin/main`, never a branch change (the feature already lives on
+`main`; beta was only ever a mirror of it).
+
+1. Open a **follow-up PR to `origin/main`**, `Closes #<issue>` — this
+   graduation PR is the one that closes the reporter's issue, per repo rule
+   (only the final prod PR closes the issue; Stage 1's PR must not). It
+   changes only the experimental markers added in Stage 1's step 2: strip the
+   UI label/help text, the `README.md` tag, the `docs/USER_GUIDE.md` note, and
+   move the platform/provider key in
+   `docs/agents/memory/project_platform_maturity.md` from "Experimental / not
+   yet real-world validated" to the real-world-tested list, crediting the
+   confirming user's scenario. No implementation changes belong in this PR.
+   Also hand-add a `## [Unreleased]` CHANGELOG entry ("Added — now stable")
+   as part of this PR's merge, so it lands on `main` ahead of the next
+   `release prod` run.
+2. Merge the graduation PR, then run the production `release` skill
+   (`release` / `release prod`): version bump, rename `## [Unreleased]` to the
+   version heading (the entry from step 1 is already there — the release
+   skill's only changelog edit is the rename, it does not hand-author
+   content), PR to `origin/main`, CI green, tag, GitHub Release.
+3. Update the issue's lifecycle checklist to all-checked and post a final
+   thank-you comment to the user; the graduation PR merged in step 2 already
+   closed the issue.
 - **Exit:** feature stable in a production release; issue closed.
 
-## PR body checklist template
+## Issue checklist template
+
+Post/update this on the **originating issue** (not the PR body — the Stage 1
+PR merges immediately and doesn't persist as a lifecycle tracker):
 
 ```
 ### Lifecycle: <feature> (#<issue>)
-- [x] 1. Implemented + shipped experimental (beta vX.Y.Zb_)
+- [x] 1. Merged to main + shipped experimental (beta vX.Y.Zb_)
 - [ ] 2. User debug log received + verified
 - [ ] 3. Anonymized user-config regression scenario added (backend + E2E)
 - [ ] 4. Re-shipped beta, CI green
@@ -139,5 +188,5 @@ drop only at a meaningful checkpoint, with one combined CHANGELOG entry.
 | Debug log → scenario | `scripts/mock_ha/scenarios/from_debug_log.py` |
 | Backend regression harness | `core/bess/tests/unit/test_scenario_discovery.py` |
 | Frontend wizard E2E | `e2e/tests/setup-wizard.spec.ts`, `e2e/run-e2e.sh`, `.github/workflows/ci.yml` |
-| Maturity record | project maturity memory (`docs/agents/memory/`) + `README.md` |
+| Maturity record (the stability flag) | `README.md` `*(experimental)*` tag + `docs/USER_GUIDE.md` note (real, precedented today via ENTSO-e/Belpex) + `docs/agents/memory/project_platform_maturity.md` (new file, first created by this feature) + optional UI "(experimental)" label (aspirational, no current precedent in `frontend/src`) |
 | Agent comms | `gh pr comment`, `gh issue comment`, `gh pr checks --watch` |

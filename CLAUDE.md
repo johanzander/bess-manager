@@ -130,6 +130,8 @@ of `analyzed`.
 - Confirm the target remote and branch BEFORE pushing releases (beta vs main, origin vs beta remote)
 - Run the full test suite locally before any release tag or beta push
 - Never skip the CHANGELOG.md update or version bump
+- `beta/main` only ever advances by fast-forward from `origin/main` — never commit directly to the beta repo. If a fix is needed on the currently-published stable version while main has moved on, use the hotfix procedure (short-lived `release-X.Y` branch cherry-picking from main), never a direct beta commit.
+- `CHANGELOG.md` is authored once, on `origin/main`, under `## [Unreleased]`. Beta and stable releases both consume that section (copy for beta, rename for stable) — never hand-write a beta-specific or duplicate changelog entry.
 
 ## Scope Discipline
 

@@ -84,8 +84,10 @@ class SolaxModbusGrowattController(GrowattMinController):
             len(self.strategic_intents),
         )
 
-        # Log intent transitions
-        for period in range(1, len(self.strategic_intents)):
+        # Log intent transitions from current_period onward — periods before
+        # current_period are already elapsed and re-log identically on every
+        # hourly re-optimization otherwise.
+        for period in range(max(1, current_period), len(self.strategic_intents)):
             if self.strategic_intents[period] != self.strategic_intents[period - 1]:
                 logger.info(
                     "Intent transition at period %d: %s -> %s",

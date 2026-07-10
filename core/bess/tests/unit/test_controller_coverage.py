@@ -215,6 +215,27 @@ class TestMinCompareSchedules:
         assert "orruption" in reason
 
 
+class TestMinSyncSocLimits:
+    def test_no_mismatch_skips_write(self, min_ctrl, mock_controller):
+        mock_controller.settings["charge_stop_soc"] = 100
+        mock_controller.settings["discharge_stop_soc"] = 10
+        min_ctrl.sync_soc_limits(mock_controller)
+        assert mock_controller.calls["charge_stop_soc"] == []
+        assert mock_controller.calls["discharge_stop_soc"] == []
+
+    def test_charge_mismatch_syncs(self, min_ctrl, mock_controller):
+        min_ctrl.battery_settings.max_soc = 90
+        min_ctrl.sync_soc_limits(mock_controller)
+        assert mock_controller.calls["charge_stop_soc"] == [90]
+        assert mock_controller.calls["discharge_stop_soc"] == []
+
+    def test_discharge_mismatch_syncs(self, min_ctrl, mock_controller):
+        min_ctrl.battery_settings.min_soc = 20
+        min_ctrl.sync_soc_limits(mock_controller)
+        assert mock_controller.calls["discharge_stop_soc"] == [20]
+        assert mock_controller.calls["charge_stop_soc"] == []
+
+
 # ── GrowattSphController ─────────────────────────────────────────────────────
 
 

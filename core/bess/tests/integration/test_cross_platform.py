@@ -159,9 +159,10 @@ class TestCrossPlatformHardwareWrites:
             assert len(mock_controller.calls["vpp_disabled"]) == 1
             assert len(mock_controller.calls["vpp_calls"]) == 0
         elif _is_solax_modbus(platform_system):
-            # IDLE → load_first; inverter-native control, EMS registers not written
-            assert mock_controller.calls["grid_charge"] == []
-            assert mock_controller.calls["discharge_rate"] == []
+            # IDLE → load_first; EMS registers now written unconditionally
+            # (experimental, see #166/#261)
+            assert mock_controller.calls["grid_charge"][-1] is False
+            assert mock_controller.calls["discharge_rate"][-1] == 0
         else:
             # IDLE: grid_charge=False and discharge_rate=0
             assert mock_controller.calls["grid_charge"][-1] is False
@@ -179,8 +180,9 @@ class TestCrossPlatformHardwareWrites:
         elif _is_solax(platform_system):
             assert len(mock_controller.calls["vpp_disabled"]) == 1
         elif _is_solax_modbus(platform_system):
-            # SOLAR_STORAGE → load_first; inverter-native control, EMS register not written
-            assert mock_controller.calls["grid_charge"] == []
+            # SOLAR_STORAGE → load_first; EMS registers now written
+            # unconditionally (experimental, see #166/#261)
+            assert mock_controller.calls["grid_charge"][-1] is False
         else:
             assert mock_controller.calls["grid_charge"][-1] is False
 

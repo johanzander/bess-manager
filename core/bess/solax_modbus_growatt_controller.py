@@ -150,16 +150,18 @@ class SolaxModbusGrowattController(GrowattMinController):
                     logger.error("FAILED: set TOU segment mode to %s: %s", mode, e)
                     errors.append(str(e))
 
-        # load_first uses inverter-native discharge control; touching the EMS
-        # discharge rate register with 0 disables discharge entirely. But
-        # LOAD_SUPPORT also maps to load_first and can carry a real non-zero
-        # rate (#200) — only withhold the write when there's nothing to write.
-        if mode != "load_first" or discharge_rate != 0:
-            success, error_msg = self._write_period_to_hardware(
-                controller, grid_charge, discharge_rate
-            )
-            if not success:
-                errors.append(error_msg)
+        # #166 added a gate here to skip writing discharge_rate=0 in load_first
+        # mode, on the theory that it disables the inverter's native self-use
+        # discharge. That theory was never confirmed against real hardware and
+        # left SOLAR_STORAGE/IDLE with a stale discharge_rate register (#issue
+        # reported by Doodlehusse on #200 follow-up). This beta build removes
+        # the gate to test on real GEN4 hardware — writes unconditionally, same
+        # as GrowattMinController's cloud path.
+        success, error_msg = self._write_period_to_hardware(
+            controller, grid_charge, discharge_rate
+        )
+        if not success:
+            errors.append(error_msg)
 
         if errors:
             return False, "; ".join(errors)

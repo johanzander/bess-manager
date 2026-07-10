@@ -205,11 +205,15 @@ class TestApplyPeriod:
         assert mock_ha.calls["grid_charge"][-1] is True
         assert len(mock_ha.calls["discharge_rate"]) == 1
 
-    def test_load_first_skips_ems_discharge_write(self, controller, mock_ha):
-        """EMS discharge rate must not be written in load_first mode.
+    def test_load_first_writes_zero_ems_discharge_rate(self, controller, mock_ha):
+        """EMS discharge rate=0 must be written in load_first mode (experimental).
 
-        Writing discharge_rate=0 to the EMS register disables inverter discharge,
-        defeating Load First's inverter-native discharge control.
+        #166 previously gated this write out, on the unconfirmed theory that
+        writing discharge_rate=0 to the EMS register disables the inverter's
+        native self-use discharge. That gate left SOLAR_STORAGE/IDLE with a
+        stale discharge_rate register (reported against #200 by Doodlehusse).
+        This beta build removes the gate to test on real GEN4 hardware — it
+        now writes unconditionally, same as GrowattMinController's cloud path.
         """
         intents = hourly_to_quarterly({0: "IDLE"})
         schedule = make_schedule(intents)
@@ -218,8 +222,7 @@ class TestApplyPeriod:
 
         self._apply_at_period(controller, mock_ha, 0, "IDLE")
 
-        assert len(mock_ha.calls["discharge_rate"]) == 0
-        assert len(mock_ha.calls["grid_charge"]) == 0
+        assert mock_ha.calls["discharge_rate"] == [0]
 
     def test_load_first_writes_nonzero_load_support_discharge_rate(
         self, controller, mock_ha
@@ -227,9 +230,8 @@ class TestApplyPeriod:
         """LOAD_SUPPORT's real discharge rate must reach the inverter.
 
         Regression test for #200: LOAD_SUPPORT maps to load_first, same as
-        IDLE, but unlike IDLE it can compute a non-zero discharge rate. The
-        load_first gate must only withhold zero-rate writes (see
-        test_load_first_skips_ems_discharge_write above), not this one.
+        IDLE, and both now write discharge_rate unconditionally (see
+        test_load_first_writes_zero_ems_discharge_rate above).
         """
         from datetime import datetime
 

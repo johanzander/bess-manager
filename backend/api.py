@@ -2223,18 +2223,34 @@ async def get_prediction_timeline():
 
 @router.get("/api/savings/aggregate")
 async def get_savings_aggregate(
-    period: str = Query(..., pattern="^(week|month|year)$"),
+    period: str = Query(..., pattern="^(day|week|month|year)$"),
     count: int | None = Query(None, ge=1, le=520),  # 520 weeks is roughly 10 years
 ):
-    """Get week/month/year savings aggregates from the persisted daily history."""
+    """Get day/week/month/year savings aggregates.
+
+    `day` is today's live (in-progress) view when no snapshot has been
+    persisted for it yet; week/month/year read the persisted daily history.
+    """
     from app import bess_controller
 
     _require_configured_system(bess_controller)
 
     try:
         resolved_count = count or DEFAULT_COUNTS[period]
+
+        today_view = None
+        if period == "day":
+            now = time_utils.now()
+            current_period = now.hour * 4 + now.minute // 15
+            today_view = bess_controller.system.daily_view_builder.build_daily_view(
+                current_period
+            )
+
         buckets = build_buckets(
-            period, resolved_count, bess_controller.system.daily_view_store
+            period,
+            resolved_count,
+            bess_controller.system.daily_view_store,
+            today_view=today_view,
         )
         currency = bess_controller.system.home_settings.currency
 

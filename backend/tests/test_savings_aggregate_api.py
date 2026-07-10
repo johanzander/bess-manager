@@ -28,7 +28,12 @@ def _period(grid_imported: float, grid_exported: float) -> PeriodData:
         battery_soe_start=10.0,
         battery_soe_end=10.0,
     )
-    economic = EconomicData(buy_price=2.0, sell_price=1.0, battery_cycle_cost=0.1)
+    economic = EconomicData(
+        buy_price=2.0,
+        sell_price=1.0,
+        battery_cycle_cost=0.1,
+        grid_only_cost=grid_imported * 2.0,
+    )
     return PeriodData(period=0, energy=energy, economic=economic)
 
 
@@ -112,6 +117,51 @@ class TestSavingsAggregate:
         resp = _client.get("/api/savings/aggregate?period=week")
 
         assert resp.status_code == 503
+
+    def test_grid_only_cost_present_on_bucket(self, tmp_path):
+        sys.modules["app"].bess_controller = _make_started_controller(
+            _seeded_store(tmp_path)
+        )
+
+        resp = _client.get("/api/savings/aggregate?period=week&count=1")
+
+        assert resp.status_code == 200
+        bucket = resp.json()["buckets"][0]
+        assert bucket["gridOnlyCost"]["value"] == 2.0  # 1.0 import_kwh * buy_price 2.0
+
+    def test_day_period_uses_live_daily_view_for_today(self, tmp_path):
+        controller = _make_started_controller(DailyViewStore(persist_dir=tmp_path))
+        controller.system.daily_view_builder.build_daily_view.return_value = DailyView(
+            date=date(2026, 7, 9),
+            periods=[_period(1.0, 0.0)],
+            total_savings=1.0,
+            actual_count=1,
+            predicted_count=0,
+        )
+        sys.modules["app"].bess_controller = controller
+
+        resp = _client.get("/api/savings/aggregate?period=day&count=1")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["count"] == 1
+        assert body["buckets"][0]["dayCount"] == 1
+
+    def test_day_period_default_count_is_one(self, tmp_path):
+        controller = _make_started_controller(_seeded_store(tmp_path))
+        controller.system.daily_view_builder.build_daily_view.return_value = DailyView(
+            date=date(2026, 7, 9),
+            periods=[_period(1.0, 0.0)],
+            total_savings=1.0,
+            actual_count=1,
+            predicted_count=0,
+        )
+        sys.modules["app"].bess_controller = controller
+
+        resp = _client.get("/api/savings/aggregate?period=day")
+
+        assert resp.status_code == 200
+        assert resp.json()["count"] == 1
 
 
 class TestDiskUsage:

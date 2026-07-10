@@ -90,6 +90,7 @@ class APISavingsBucket:
     exportKwh: FormattedValue
     exportEur: FormattedValue
     gridCost: FormattedValue
+    gridOnlyCost: FormattedValue
     batteryCycleCost: FormattedValue
     savingsVsGridOnly: FormattedValue
     solarKwh: FormattedValue
@@ -109,6 +110,7 @@ class APISavingsBucket:
             exportKwh=create_formatted_value(t.export_kwh, "energy_kwh_only", currency),
             exportEur=create_formatted_value(t.export_eur, "currency", currency),
             gridCost=create_formatted_value(t.grid_cost, "currency", currency),
+            gridOnlyCost=create_formatted_value(t.grid_only_cost, "currency", currency),
             batteryCycleCost=create_formatted_value(
                 t.battery_cycle_cost, "currency", currency
             ),

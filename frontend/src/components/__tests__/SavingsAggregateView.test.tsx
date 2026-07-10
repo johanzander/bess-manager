@@ -13,6 +13,7 @@ const bucket = (label: string, dayCount: number) => ({
   exportKwh: { value: 2, display: '2.0', unit: 'kWh', text: '2.0 kWh' },
   exportEur: { value: 2, display: '2.00', unit: 'EUR', text: '2.00 EUR' },
   gridCost: { value: 0, display: '0.00', unit: 'EUR', text: '0.00 EUR' },
+  gridOnlyCost: { value: 5, display: '5.00', unit: 'EUR', text: '5.00 EUR' },
   batteryCycleCost: { value: 0.1, display: '0.10', unit: 'EUR', text: '0.10 EUR' },
   savingsVsGridOnly: { value: 3, display: '3.00', unit: 'EUR', text: '3.00 EUR' },
   solarKwh: { value: 1, display: '1.0', unit: 'kWh', text: '1.0 kWh' },
@@ -55,7 +56,7 @@ describe('SavingsAggregateView', () => {
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /^chart$/i })).toBeInTheDocument();
     });
-    expect(screen.getByText('Savings History')).toBeInTheDocument();
+    expect(screen.getByText('Savings')).toBeInTheDocument();
     expect(screen.queryByText(/could not load savings history/i)).not.toBeInTheDocument();
     // The table view must not be rendered by default - this guards against the
     // regression this branch already reintroduced once (default silently
@@ -86,5 +87,57 @@ describe('SavingsAggregateView', () => {
     await waitFor(() => {
       expect(screen.getByText(/no savings history yet/i)).toBeInTheDocument();
     });
+  });
+
+  it('fetches the day period when the Today button is clicked', async () => {
+    const fetchSpy = vi.spyOn(scheduleApi, 'fetchSavingsAggregate').mockResolvedValue({
+      buckets: [bucket('2026-07-10', 1)],
+      count: 1,
+    });
+
+    render(<SavingsAggregateView />);
+
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledWith('week', undefined));
+
+    fireEvent.click(screen.getByRole('button', { name: /^today$/i }));
+
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledWith('day', undefined));
+  });
+
+  it('renders a Grid-Only Cost column populated from bucket.gridOnlyCost.text', async () => {
+    vi.spyOn(scheduleApi, 'fetchSavingsAggregate').mockResolvedValue({
+      buckets: [bucket('2026-W28', 1)],
+      count: 1,
+    });
+
+    render(<SavingsAggregateView />);
+
+    fireEvent.click(screen.getByRole('button', { name: /table/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Grid-Only Cost')).toBeInTheDocument();
+    });
+    expect(screen.getByText('5.00 EUR')).toBeInTheDocument();
+  });
+
+  it('never renders Battery Wear, even when batteryCycleCost is non-zero', async () => {
+    vi.spyOn(scheduleApi, 'fetchSavingsAggregate').mockResolvedValue({
+      buckets: [bucket('2026-W28', 1)],
+      count: 1,
+    });
+
+    render(<SavingsAggregateView />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /^chart$/i })).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/battery wear/i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /table/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('2026-W28')).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/battery wear/i)).not.toBeInTheDocument();
   });
 });

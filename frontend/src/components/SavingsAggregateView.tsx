@@ -3,7 +3,14 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { useSavingsAggregate } from '../hooks/useSavingsAggregate';
 import { SavingsAggregatePeriod } from '../api/scheduleApi';
 
-const PERIODS: SavingsAggregatePeriod[] = ['week', 'month', 'year'];
+const PERIODS: SavingsAggregatePeriod[] = ['day', 'week', 'month', 'year'];
+
+const PERIOD_LABELS: Record<SavingsAggregatePeriod, string> = {
+  day: 'Today',
+  week: 'Week',
+  month: 'Month',
+  year: 'Year',
+};
 
 export const SavingsAggregateView: React.FC = () => {
   const [period, setPeriod] = useState<SavingsAggregatePeriod>('week');
@@ -33,7 +40,7 @@ export const SavingsAggregateView: React.FC = () => {
   return (
     <div className="bg-white dark:bg-gray-800 rounded-lg shadow border border-gray-200 dark:border-gray-700 p-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 gap-3">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Savings History</h2>
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Savings</h2>
         <div className="flex gap-2">
           <div className="flex bg-gray-100 dark:bg-gray-700 rounded-lg p-1">
             {PERIODS.map((p) => (
@@ -46,7 +53,7 @@ export const SavingsAggregateView: React.FC = () => {
                     : 'text-gray-600 dark:text-gray-300'
                 }`}
               >
-                {p}
+                {PERIOD_LABELS[p]}
               </button>
             ))}
           </div>
@@ -93,6 +100,7 @@ export const SavingsAggregateView: React.FC = () => {
             <BarChart
               data={data!.map((b) => ({
                 label: b.label,
+                gridOnlyCost: b.gridOnlyCost.value,
                 gridCost: b.gridCost.value,
                 savings: b.savingsVsGridOnly.value,
               }))}
@@ -102,6 +110,7 @@ export const SavingsAggregateView: React.FC = () => {
               <XAxis dataKey="label" stroke={colors.text} tick={{ fill: colors.text, fontSize: 11 }} />
               <YAxis stroke={colors.text} tick={{ fill: colors.text, fontSize: 11 }} />
               <Tooltip />
+              <Bar dataKey="gridOnlyCost" name="Grid-Only Cost" fill={colors.text} fillOpacity={0.35} isAnimationActive={false} />
               <Bar dataKey="gridCost" name="Net Grid Cost" fill={colors.cost} fillOpacity={0.8} isAnimationActive={false} />
               <Bar dataKey="savings" name="Savings" fill={colors.savings} fillOpacity={0.8} isAnimationActive={false} />
             </BarChart>
@@ -118,8 +127,8 @@ export const SavingsAggregateView: React.FC = () => {
                 <th className="pr-4 py-1">Days</th>
                 <th className="pr-4 py-1">Import</th>
                 <th className="pr-4 py-1">Export</th>
+                <th className="pr-4 py-1">Grid-Only Cost</th>
                 <th className="pr-4 py-1">Net Grid Cost</th>
-                <th className="pr-4 py-1">Battery Wear</th>
                 <th className="pr-4 py-1">Savings</th>
               </tr>
             </thead>
@@ -130,8 +139,8 @@ export const SavingsAggregateView: React.FC = () => {
                   <td className="pr-4 py-1 text-gray-500 dark:text-gray-400">{b.dayCount}</td>
                   <td className="pr-4 py-1 text-gray-600 dark:text-gray-300">{b.importEur.text}</td>
                   <td className="pr-4 py-1 text-gray-600 dark:text-gray-300">{b.exportEur.text}</td>
+                  <td className="pr-4 py-1 text-gray-500 dark:text-gray-400">{b.gridOnlyCost.text}</td>
                   <td className="pr-4 py-1 font-medium text-gray-900 dark:text-white">{b.gridCost.text}</td>
-                  <td className="pr-4 py-1 text-gray-500 dark:text-gray-400">{b.batteryCycleCost.text}</td>
                   <td className="pr-4 py-1 text-gray-600 dark:text-gray-300">{b.savingsVsGridOnly.text}</td>
                 </tr>
               ))}

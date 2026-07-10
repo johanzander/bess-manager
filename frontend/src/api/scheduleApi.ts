@@ -201,6 +201,7 @@ export interface SavingsBucket {
   exportKwh: FormattedValue;
   exportEur: FormattedValue;
   gridCost: FormattedValue;
+  gridOnlyCost: FormattedValue;
   batteryCycleCost: FormattedValue;
   savingsVsGridOnly: FormattedValue;
   solarKwh: FormattedValue;

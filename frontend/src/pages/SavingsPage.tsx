@@ -56,7 +56,7 @@ const SavingsPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Resolution Selector */}
+        {/* Resolution Selector (applies to Scenario Comparison, which is period-of-day granular) */}
         <div className="mt-4 flex items-center justify-end">
           <div className="flex bg-gray-100 dark:bg-gray-700 rounded-lg p-1">
             <button
@@ -83,8 +83,9 @@ const SavingsPage: React.FC = () => {
         </div>
       </div>
 
-      <DetailedSavingsAnalysis settings={mergedSettings} resolution={dataResolution} />
       <SavingsAggregateView />
+
+      <DetailedSavingsAnalysis settings={mergedSettings} resolution={dataResolution} />
     </div>
   );
 };

@@ -1346,3 +1346,212 @@ Use the `verify` skill (mock-HA + backend E2E stack) to confirm: dashboard headl
 - [ ] **Step 5: Commit any fixes found during verification, then stop for review**
 
 No auto-merge, no PR creation — this plan ends with local verification. Follow `docs/agents/workflow.md` for the PR/review step once the user confirms the UI looks right.
+
+---
+
+## Task 12: `netSavings` — wear-free companion to the wear-inclusive savings formula
+
+Added after the final whole-branch review (see the design spec's Addendum section) found that `Net Grid Cost` (headline, wear-free) and `Today's Savings`/`Total Savings` (wear-inclusive) no longer reconcile on the same card. This task does not touch the savings formula — it adds a second, purely additive figure and swaps which one two specific UI surfaces display.
+
+**Files:**
+- Modify: `backend/api_dataclasses.py` (`APIDashboardSummary` field list + `from_totals`; `APISavingsBucket` field list + `from_internal`)
+- Modify: `frontend/src/api/scheduleApi.ts` (`DashboardSummary`, `SavingsBucket`)
+- Modify: `frontend/src/components/SystemStatusCard.tsx:257-262,440-445`
+- Modify: `frontend/src/components/SavingsAggregateView.tsx:101-106,113-115,128,144`
+- Test: `backend/tests/test_dashboard_api.py`, `backend/tests/test_savings_aggregate_api.py`, `frontend/src/components/__tests__/SystemStatusCard.test.tsx`, `frontend/src/components/__tests__/SavingsAggregateView.test.tsx`
+
+**Interfaces:**
+- Produces: `APIDashboardSummary.netSavings: FormattedValue` = `gridOnlyCost − netGridCost`. `APISavingsBucket.netSavings: FormattedValue` = `gridOnlyCost − gridCost`. Both purely additive/derived — no new internal model field, no change to `hourly_savings`/`total_savings`/`savings_vs_grid_only`.
+
+- [ ] **Step 1: Write the failing backend tests**
+
+Add to `backend/tests/test_dashboard_api.py`, near `test_from_totals_wires_net_grid_cost_from_costs_dict`:
+
+```python
+def test_from_totals_computes_net_savings_as_grid_only_minus_net_grid():
+    from api_dataclasses import APIDashboardSummary
+
+    totals = {
+        "totalSolarProduction": 0.0,
+        "totalHomeConsumption": 0.0,
+        "totalBatteryCharged": 0.0,
+        "totalBatteryDischarged": 0.0,
+        "totalGridImport": 0.0,
+        "totalGridExport": 0.0,
+        "totalSolarToHome": 0.0,
+        "totalSolarToBattery": 0.0,
+        "totalSolarToGrid": 0.0,
+        "totalGridToHome": 0.0,
+        "totalGridToBattery": 0.0,
+        "totalBatteryToHome": 0.0,
+        "totalBatteryToGrid": 0.0,
+    }
+    costs = {"gridOnly": 10.0, "solarOnly": 8.0, "optimized": 5.0, "netGrid": 3.0}
+
+    summary = APIDashboardSummary.from_totals(
+        totals, costs, battery_capacity=10.0, currency="EUR"
+    )
+
+    assert summary.netSavings.value == 7.0  # gridOnly(10) - netGrid(3)
+    # Unchanged: still wear-inclusive, still independent of the new field
+    assert summary.totalSavings.value == 5.0  # gridOnly(10) - optimized(5)
+```
+
+(Check the real `totals` dict keys against `from_totals`'s current signature before running — copy the exact keys used by the neighboring `test_from_totals_wires_net_grid_cost_from_costs_dict` test rather than retyping them, they must match.)
+
+Add to `backend/tests/test_savings_aggregate_api.py`, inside `TestSavingsAggregate`:
+
+```python
+    def test_net_savings_present_on_bucket(self, tmp_path):
+        sys.modules["app"].bess_controller = _make_started_controller(
+            _seeded_store(tmp_path)
+        )
+
+        resp = _client.get("/api/savings/aggregate?period=week&count=1")
+
+        assert resp.status_code == 200
+        bucket = resp.json()["buckets"][0]
+        # _seeded_store's _period(1.0, 2.0): grid_only_cost = 1.0*2.0 = 2.0,
+        # grid_cost = import_eur(2.0) - export_eur(2.0) = 0.0
+        assert bucket["netSavings"]["value"] == 2.0  # gridOnly(2.0) - gridCost(0.0)
+```
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+Run: `.venv/bin/pytest backend/tests/test_dashboard_api.py backend/tests/test_savings_aggregate_api.py -v`
+Expected: FAIL — `AttributeError`/`KeyError` on `netSavings`.
+
+- [ ] **Step 3: Implement**
+
+In `backend/api_dataclasses.py`, add `netSavings` to `APIDashboardSummary`'s field list, next to `netGridCost`:
+
+```python
+    optimizedCost: FormattedValue
+    netGridCost: FormattedValue
+    netSavings: FormattedValue
+```
+
+In `from_totals`, compute and add it alongside `netGridCost`:
+
+```python
+            netGridCost=create_formatted_value(
+                costs["netGrid"], "currency", currency
+            ),
+            netSavings=create_formatted_value(
+                total_grid_only_cost - costs["netGrid"], "currency", currency
+            ),
+```
+
+Add `netSavings` to `APISavingsBucket`'s field list. Current order (verify against the live file — it may have shifted since this plan was written) is `gridCost, gridOnlyCost, batteryCycleCost, savingsVsGridOnly`; insert `netSavings` after `gridOnlyCost`:
+
+```python
+    gridCost: FormattedValue
+    gridOnlyCost: FormattedValue
+    netSavings: FormattedValue
+    batteryCycleCost: FormattedValue
+    savingsVsGridOnly: FormattedValue
+```
+
+In `from_internal`, compute and add it in the same position, between the existing `gridOnlyCost=...` and `batteryCycleCost=...` lines:
+
+```python
+            gridOnlyCost=create_formatted_value(t.grid_only_cost, "currency", currency),
+            netSavings=create_formatted_value(
+                t.grid_only_cost - t.grid_cost, "currency", currency
+            ),
+            batteryCycleCost=create_formatted_value(
+                t.battery_cycle_cost, "currency", currency
+            ),
+```
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `.venv/bin/pytest backend/tests/test_dashboard_api.py backend/tests/test_savings_aggregate_api.py -v`
+Expected: all PASS.
+
+- [ ] **Step 5: Commit backend changes**
+
+```bash
+git add backend/api_dataclasses.py backend/tests/test_dashboard_api.py backend/tests/test_savings_aggregate_api.py
+git commit -m "feat: add wear-free netSavings alongside existing savings formula"
+```
+
+- [ ] **Step 6: Write the failing frontend tests**
+
+In `frontend/src/components/__tests__/SystemStatusCard.test.tsx`, extend the existing headline test (or add a new one) asserting the "Today's Cost & Savings" card's savings sub-metric reads `summary.netSavings.text` and the label is "Net Savings" — not the old `summary.totalSavings.text`/"Today's Savings" label. Mirror the existing test's mock-data shape, giving `netSavings` and `totalSavings` distinct values so a wrong-field regression would be caught.
+
+In `frontend/src/components/__tests__/SavingsAggregateView.test.tsx`, extend the existing bucket-fixture-based tests (or add one) asserting the table's savings column reads `bucket.netSavings.text` and the chart's savings bar is keyed off `netSavings.value`, not `savingsVsGridOnly.value` — again with distinct fixture values for the two fields.
+
+- [ ] **Step 7: Run tests to verify they fail**
+
+Run: `cd frontend && npm test -- SystemStatusCard SavingsAggregateView`
+Expected: FAIL — old field/label still in use.
+
+- [ ] **Step 8: Implement**
+
+In `frontend/src/api/scheduleApi.ts`, add `netSavings: FormattedValue` to `DashboardSummary` (next to `netGridCost`) and to `SavingsBucket` (next to `gridOnlyCost`).
+
+In `frontend/src/components/SystemStatusCard.tsx`, change the `todaysSavings` derivation (`257-262`) to read `netSavings`:
+
+```typescript
+        todaysSavings: (() => {
+          if (!dashboardData.summary?.netSavings) {
+            throw new Error('MISSING DATA: summary.netSavings is required for savings display');
+          }
+          return dashboardData.summary.netSavings;
+        })(),
+```
+
+Change the card's sub-metric label (`440-445` area) from `"Today's Savings"` to `"Net Savings"`:
+
+```typescript
+        {
+          label: "Net Savings",
+          value: statusData.costAndSavings?.todaysSavings?.text,
+          unit: "",
+          icon: DollarSign,
+          color: (statusData.costAndSavings?.todaysSavings?.value || 0) >= 0 ? 'green' as const : 'red' as const
+        },
+```
+
+(internal prop name `todaysSavings` stays as-is, same minimal-diff convention Task 7 used for `todaysCost`/`netGridCost`.)
+
+In `frontend/src/components/SavingsAggregateView.tsx`, update the chart data mapping (`101-106`):
+
+```typescript
+              data={data!.map((b) => ({
+                label: b.label,
+                gridOnlyCost: b.gridOnlyCost.value,
+                gridCost: b.gridCost.value,
+                savings: b.netSavings.value,
+              }))}
+```
+
+Update the `Savings` bar's name (`115`) to `"Net Savings"`:
+
+```typescript
+              <Bar dataKey="savings" name="Net Savings" fill={colors.savings} fillOpacity={0.8} isAnimationActive={false} />
+```
+
+Update the table header (`128`) from `"Savings"` to `"Net Savings"`, and the table cell (`144`) to read `b.netSavings.text`:
+
+```typescript
+                  <td className="pr-4 py-1 text-gray-600 dark:text-gray-300">{b.netSavings.text}</td>
+```
+
+- [ ] **Step 9: Run tests to verify they pass**
+
+Run: `cd frontend && npm test -- SystemStatusCard SavingsAggregateView && npm run lint:fix && npm run build`
+Expected: all PASS, clean build.
+
+- [ ] **Step 10: Commit frontend changes**
+
+```bash
+git add frontend/src/api/scheduleApi.ts frontend/src/components/SystemStatusCard.tsx frontend/src/components/SavingsAggregateView.tsx frontend/src/components/__tests__/SystemStatusCard.test.tsx frontend/src/components/__tests__/SavingsAggregateView.test.tsx
+git commit -m "feat: dashboard card and Savings page show wear-free Net Savings"
+```
+
+- [ ] **Step 11: Full verification**
+
+Run: `.venv/bin/pytest -m "not slow" -q && cd frontend && npm test -- --run && npm run build` and `./scripts/quality-check.sh`.
+Expected: all green.

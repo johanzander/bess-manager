@@ -222,3 +222,23 @@ Insights-page "Battery Actions" table.
 - Whether "today" via `/api/savings/aggregate` is recomputed live on every
   request (recommended, matches current dashboard behavior — no staleness
   until rollover) or opportunistically cached.
+
+## Addendum (post-implementation): `netSavings`, a wear-free companion to the wear-inclusive savings formula
+
+Found during the final whole-branch review, after all 11 tasks above shipped:
+with `Net Grid Cost` as the headline and `Grid-Only Cost` as a sub-metric, the
+existing wear-inclusive "Today's Savings" / "Total Savings" no longer
+arithmetically reconciles with its own card — `Grid-Only Cost − Today's
+Savings ≠ Net Grid Cost`, off by exactly the wear amount. The savings formula
+itself is still deliberately unchanged (see Rationale above — this was
+reconfirmed, not reopened).
+
+Resolution: add a second, purely additive savings figure, `netSavings =
+grid_only_cost − grid_cost` (wear-free by construction, so it always
+reconciles with the wear-free headline), and **replace** the wear-inclusive
+savings figure with it everywhere `Net Grid Cost` is the headline — the
+dashboard card and the Savings page's Today/Week/Month/Year view. The
+wear-inclusive formula keeps its existing internal role (percentage-saved
+math, wherever else it's referenced) but is no longer displayed on either of
+these two surfaces, consistent with this whole feature's principle that the
+Savings page and dashboard card are wear-free financial-outcome views.

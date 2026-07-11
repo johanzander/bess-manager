@@ -2307,21 +2307,33 @@ async def get_prediction_timeline():
 async def get_savings_aggregate(
     period: str = Query(..., pattern="^(day|week|month|year)$"),
     count: int | None = Query(None, ge=1, le=520),  # 520 weeks is roughly 10 years
+    date: str | None = Query(
+        None, description="ISO date (YYYY-MM-DD) to anchor the buckets to; omit for now"
+    ),
 ):
-    """Get day/week/month/year savings aggregates.
+    """Get day/week/month/year savings aggregates, anchored to `date` (or now).
 
     `day` is today's live (in-progress) view when no snapshot has been
-    persisted for it yet; week/month/year read the persisted daily history.
+    persisted for it yet and `date` is omitted or equals today; any other
+    date (including a historical `day` request) reads the persisted daily
+    history only, same as `/api/dashboard`'s historical-day handling.
     """
     from app import bess_controller
 
     _require_configured_system(bess_controller)
 
     try:
+        target_date = date_cls.fromisoformat(date) if date else time_utils.today()
+    except ValueError as e:
+        raise HTTPException(
+            status_code=422, detail=f"Invalid date {date!r}: {e}"
+        ) from e
+
+    try:
         resolved_count = count or DEFAULT_COUNTS[period]
 
         today_view = None
-        if period == "day":
+        if period == "day" and target_date == time_utils.today():
             now = time_utils.now()
             current_period = now.hour * 4 + now.minute // 15
             today_view = bess_controller.system.daily_view_builder.build_daily_view(
@@ -2332,6 +2344,7 @@ async def get_savings_aggregate(
             period,
             resolved_count,
             bess_controller.system.daily_view_store,
+            today=target_date,
             today_view=today_view,
         )
         currency = bess_controller.system.home_settings.currency

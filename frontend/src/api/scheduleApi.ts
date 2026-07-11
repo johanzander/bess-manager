@@ -231,10 +231,12 @@ export interface SavingsAggregateResponse {
 
 export const fetchSavingsAggregate = async (
   period: SavingsAggregatePeriod,
-  count?: number
+  count?: number,
+  date?: string
 ): Promise<SavingsAggregateResponse> => {
   const params: Record<string, string | number> = { period };
   if (count) params.count = count;
+  if (date) params.date = date;
   const response = await api.get('/api/savings/aggregate', { params });
   return response.data;
 };

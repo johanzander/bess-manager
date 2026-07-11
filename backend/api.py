@@ -530,6 +530,12 @@ def _aggregate_quarterly_to_hourly(
             solarSavings=create_formatted_value(
                 sum(p.solarSavings.value for p in quarter_periods), "currency", currency
             ),
+            batterySavings=create_formatted_value(
+                sum(p.batterySavings.value for p in quarter_periods), "currency", currency
+            ),
+            netSavings=create_formatted_value(
+                sum(p.netSavings.value for p in quarter_periods), "currency", currency
+            ),
             # Use dominant strategic intent with tie-breaking (same logic as Growatt schedule)
             strategicIntent=dominant_intent,
             observedIntent=last_period.observedIntent,

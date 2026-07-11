@@ -688,3 +688,41 @@ def test_hourly_data_exposes_grid_cost_and_battery_cycle_cost():
 
     assert api_hourly.gridCost.value == 2.0
     assert api_hourly.batteryCycleCost.value == 0.1
+
+
+def test_hourly_data_exposes_wear_free_net_and_battery_savings():
+    hourly = PeriodData(
+        period=0,
+        energy=EnergyData(
+            solar_production=1.0,
+            home_consumption=1.0,
+            battery_charged=0.0,
+            battery_discharged=0.0,
+            grid_imported=1.0,
+            grid_exported=0.0,
+            battery_soe_start=5.0,
+            battery_soe_end=5.0,
+        ),
+        economic=EconomicData(
+            buy_price=2.0,
+            sell_price=1.0,
+            grid_cost=2.0,
+            grid_only_cost=10.0,
+            solar_only_cost=6.0,
+            battery_cycle_cost=0.1,
+            hourly_cost=2.1,
+        ),
+        decision=DecisionData(strategic_intent="IDLE"),
+    )
+
+    api_hourly = APIDashboardHourlyData.from_internal(
+        hourly, battery_capacity=10.0, currency="EUR"
+    )
+
+    # netSavings = gridOnlyCost - gridCost = 10.0 - 2.0
+    assert api_hourly.netSavings.value == 8.0
+    # batterySavings = solarOnlyCost - gridCost = 6.0 - 2.0 = 4.0 (wear-free:
+    # subtracts grid_cost, NOT hourly_cost, which folds in
+    # battery_cycle_cost=0.1 — if wear were included this would instead be
+    # solar_only_cost - hourly_cost = 6.0 - 2.1 = 3.9).
+    assert api_hourly.batterySavings.value == 4.0

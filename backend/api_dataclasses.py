@@ -405,6 +405,12 @@ class APIDashboardHourlyData:
     )
     solarExcess: FormattedValue  # How much solar excess in solar-only scenario
     solarSavings: FormattedValue  # Savings from solar vs grid-only
+    # Wear-free savings, matching APISavingsBucket.from_internal's formula
+    # (this file, above): battery's own contribution on top of solar, and
+    # total savings vs a grid-only baseline. Neither includes battery
+    # wear — that's the pre-existing `hourlySavings` field's job.
+    batterySavings: FormattedValue
+    netSavings: FormattedValue
 
     # Raw values for logic only
     strategicIntent: str
@@ -534,6 +540,14 @@ class APIDashboardHourlyData:
             ),
             solarSavings=safe_format(
                 hourly.economic.solar_savings,
+                "currency",
+            ),
+            batterySavings=safe_format(
+                hourly.economic.solar_only_cost - hourly.economic.grid_cost,
+                "currency",
+            ),
+            netSavings=safe_format(
+                hourly.economic.grid_only_cost - hourly.economic.grid_cost,
                 "currency",
             ),
             # Raw values for logic

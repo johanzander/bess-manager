@@ -108,7 +108,7 @@ const DateSelector = ({
         <button
           onClick={() => navigateDay(-1)}
           className="p-1 hover:bg-gray-100 rounded-full disabled:opacity-30 disabled:cursor-not-allowed"
-          disabled={selectedDate <= minDate || !canNavigate(-1)}
+          disabled={!canNavigate(-1)}
         >
           <ChevronLeft className="w-5 h-5 text-gray-600" />
         </button>
@@ -123,7 +123,7 @@ const DateSelector = ({
         <button
           onClick={() => navigateDay(1)}
           className="p-1 hover:bg-gray-100 rounded-full disabled:opacity-30 disabled:cursor-not-allowed"
-          disabled={selectedDate >= maxDate || !canNavigate(1)}
+          disabled={!canNavigate(1)}
         >
           <ChevronRight className="w-5 h-5 text-gray-600" />
         </button>

@@ -129,4 +129,38 @@ describe('DateSelector resolution', () => {
 
     expect(screen.getByText('2026')).toBeInTheDocument();
   });
+
+  it('does not permanently disable next-year navigation after crossing the default maxDate window', () => {
+    const selected = new Date(2026, 5, 15); // June 2026
+    let current = selected;
+    const onDateChange = vi.fn((d: Date) => {
+      current = d;
+    });
+
+    const { rerender } = render(
+      <DateSelector
+        selectedDate={current}
+        onDateChange={onDateChange}
+        resolution="year"
+        availableDates={null}
+      />
+    );
+
+    const buttons = screen.getAllByRole('button');
+    const nextButton = buttons[buttons.length - 1];
+    fireEvent.click(nextButton); // -> 2027
+
+    rerender(
+      <DateSelector
+        selectedDate={current}
+        onDateChange={onDateChange}
+        resolution="year"
+        availableDates={null}
+      />
+    );
+
+    const buttonsAfter = screen.getAllByRole('button');
+    const nextButtonAfter = buttonsAfter[buttonsAfter.length - 1];
+    expect(nextButtonAfter).not.toBeDisabled();
+  });
 });

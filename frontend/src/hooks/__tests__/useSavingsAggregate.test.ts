@@ -40,7 +40,7 @@ describe('useSavingsAggregate', () => {
 
     await waitFor(() => expect(result.current.loading).toBe(false));
 
-    expect(fetchSpy).toHaveBeenCalledWith('week', 1);
+    expect(fetchSpy).toHaveBeenCalledWith('week', 1, undefined);
     expect(result.current.data).toHaveLength(1);
     expect(result.current.data?.[0].label).toBe('2026-W28');
     expect(result.current.error).toBeNull();
@@ -77,7 +77,7 @@ describe('useSavingsAggregate', () => {
 
     await waitFor(() => expect(result.current.loading).toBe(false));
 
-    expect(fetchSpy).toHaveBeenCalledWith('day', 1);
+    expect(fetchSpy).toHaveBeenCalledWith('day', 1, undefined);
     expect(result.current.data).toHaveLength(1);
     expect(result.current.data?.[0].label).toBe('2026-07-11');
     expect(result.current.error).toBeNull();
@@ -92,5 +92,18 @@ describe('useSavingsAggregate', () => {
 
     expect(result.current.error).toBe('boom');
     expect(result.current.data).toBeNull();
+  });
+
+  it('passes the date param through to fetchSavingsAggregate', async () => {
+    const fetchSpy = vi.spyOn(scheduleApi, 'fetchSavingsAggregate').mockResolvedValue({
+      buckets: [],
+      count: 0,
+    });
+
+    const { result } = renderHook(() => useSavingsAggregate('month', undefined, '2026-05-01'));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(fetchSpy).toHaveBeenCalledWith('month', undefined, '2026-05-01');
   });
 });

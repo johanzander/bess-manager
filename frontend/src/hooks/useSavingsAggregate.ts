@@ -9,7 +9,8 @@ interface UseSavingsAggregateResult {
 
 export const useSavingsAggregate = (
   period: SavingsAggregatePeriod,
-  count?: number
+  count?: number,
+  date?: string
 ): UseSavingsAggregateResult => {
   const [data, setData] = useState<SavingsBucket[] | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -19,7 +20,7 @@ export const useSavingsAggregate = (
     try {
       setLoading(true);
       setError(null);
-      const result = await fetchSavingsAggregate(period, count);
+      const result = await fetchSavingsAggregate(period, count, date);
       setData(result.buckets);
     } catch (err) {
       console.error('Failed to fetch savings aggregate:', err);
@@ -29,7 +30,7 @@ export const useSavingsAggregate = (
     } finally {
       setLoading(false);
     }
-  }, [period, count]);
+  }, [period, count, date]);
 
   useEffect(() => {
     fetchData();

@@ -18,7 +18,7 @@ import { toISODate } from '../utils/timeUtils';
 export const SAVINGS_PERIODS: SavingsAggregatePeriod[] = ['day', 'week', 'month', 'year'];
 
 export const SAVINGS_PERIOD_LABELS: Record<SavingsAggregatePeriod, string> = {
-  day: 'Today',
+  day: 'Day',
   week: 'Week',
   month: 'Month',
   year: 'Year',
@@ -98,13 +98,13 @@ const SavingsHero: React.FC<{ bucket: SavingsBucket; period: SavingsAggregatePer
           { label: 'Grid Only', value: bucket.gridOnlyCost.text, unit: '', icon: DollarSign },
           {
             label: 'Solar Contribution',
-            value: `${bucket.solarSavings.text} (${bucket.solarKwh.display} kWh)`,
+            value: bucket.solarSavings.text,
             unit: '',
             icon: Sun,
           },
           {
             label: 'Battery Contribution',
-            value: `${bucket.batterySavings.text} (${bucket.batteryDischargedKwh.display} kWh)`,
+            value: bucket.batterySavings.text,
             unit: '',
             icon: Battery,
           },
@@ -143,12 +143,18 @@ export const SavingsAggregateView: React.FC<SavingsAggregateViewProps> = ({ peri
     cost: '#3b82f6',
   };
 
-  // Only periods that actually have a recorded day are worth showing — an
-  // empty "0.00" row for a day with no snapshot yet is just noise.
+  // The hero cards always show the bucket anchored to the selected period —
+  // the last item in the response — even when it has no data yet, so an
+  // empty month/year renders as a zeroed-out card instead of vanishing (and
+  // a partial period still shows whatever's accumulated so far).
+  const currentBucket = data && data.length > 0 ? data[data.length - 1] : undefined;
+
+  // The History chart/table below is a trend over time, so periods with no
+  // recorded day are still excluded there — a "0.00" row for a day with no
+  // snapshot yet is just noise in a trend view.
   const bucketsWithData = data ? data.filter(b => b.dayCount > 0) : [];
   const hasData = bucketsWithData.length > 0;
-  const currentBucket = bucketsWithData[bucketsWithData.length - 1];
-  const currencyUnit = bucketsWithData[0]?.gridOnlyCost.unit ?? '';
+  const currencyUnit = bucketsWithData[0]?.gridOnlyCost.unit ?? currentBucket?.gridOnlyCost.unit ?? '';
 
   const formatAxisValue = (value: number): string =>
     value.toLocaleString(undefined, { maximumFractionDigits: 0 });

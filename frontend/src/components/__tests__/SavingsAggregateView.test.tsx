@@ -92,6 +92,24 @@ describe('SavingsAggregateView', () => {
     });
   });
 
+  it('shows the hero cards for the selected period even when it has no recorded data', async () => {
+    vi.spyOn(scheduleApi, 'fetchSavingsAggregate').mockResolvedValue({
+      buckets: [bucket('2026-05', 0)],
+      count: 1,
+    });
+
+    render(<SavingsAggregateView period="month" />);
+
+    // The empty month is still the selected period, so its (zeroed-out)
+    // cards render instead of the whole hero disappearing.
+    await waitFor(() => {
+      expect(screen.getByText('Net Cost')).toBeInTheDocument();
+    });
+    expect(screen.getByText('Net Savings')).toBeInTheDocument();
+    // The History section below still hides periods with no recorded day.
+    expect(screen.getByText(/no savings history yet/i)).toBeInTheDocument();
+  });
+
   it('shows Grid Only in the savings card and Grid-Only Cost in the table', async () => {
     vi.spyOn(scheduleApi, 'fetchSavingsAggregate').mockResolvedValue({
       buckets: [bucket('2026-W28', 1)],
@@ -180,7 +198,7 @@ describe('SavingsAggregateView', () => {
     expect(screen.queryByText('Days')).not.toBeInTheDocument();
   });
 
-  it('shows kWh alongside the EUR value on the Solar/Battery Contribution rows', async () => {
+  it('shows just the EUR value (no kWh) on the Solar/Battery Contribution rows', async () => {
     vi.spyOn(scheduleApi, 'fetchSavingsAggregate').mockResolvedValue({
       buckets: [
         {
@@ -195,9 +213,9 @@ describe('SavingsAggregateView', () => {
     render(<SavingsAggregateView period="week" />);
 
     await waitFor(() => {
-      expect(screen.getByText('2.50 EUR (20.0 kWh)')).toBeInTheDocument();
+      expect(screen.getByText('Solar Contribution')).toBeInTheDocument();
     });
-    expect(screen.getByText('2.00 EUR (10.0 kWh)')).toBeInTheDocument();
+    expect(screen.queryByText(/kWh\)/)).not.toBeInTheDocument();
   });
 
   it('groups the table into a Grid cost section (first) and a Savings section (second)', async () => {
@@ -241,7 +259,9 @@ describe('SavingsAggregateView', () => {
       expect(screen.getByText('From Solar')).toBeInTheDocument();
     });
     expect(screen.getByText('From Battery')).toBeInTheDocument();
-    expect(screen.getByText('2.50 EUR')).toBeInTheDocument();
+    // 2.50 EUR appears both in the hero card and this table row now that
+    // the hero no longer suffixes a kWh value to disambiguate them.
+    expect(screen.getAllByText('2.50 EUR').length).toBeGreaterThan(0);
     expect(screen.getAllByText('2.00 EUR').length).toBeGreaterThan(0);
   });
 

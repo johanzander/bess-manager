@@ -34,7 +34,7 @@ const SavingsPage: React.FC = () => {
           <div>
             <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Savings Report</h1>
             <p className="text-gray-600 dark:text-gray-300">
-              What you actually paid the grid, and how much solar and battery saved you against grid-only power, over time.
+              What you actually paid for grid electricity, and how much solar and battery saved you against grid-only power, over time.
             </p>
             {systemMode === 'demo' && (
               <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">

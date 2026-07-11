@@ -4,6 +4,8 @@ import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
 import { toISODate } from '../utils/timeUtils';
 
+type DateResolution = 'day' | 'month' | 'year';
+
 const DateSelector = ({
   selectedDate,
   onDateChange,
@@ -11,6 +13,7 @@ const DateSelector = ({
   minDate = new Date(new Date().setMonth(new Date().getMonth() - 2)), // Set min date to today minus 2 months
   isLoading = false,
   availableDates = null, // Restrict selection to these ISO dates; null = no restriction (e.g. still loading)
+  resolution = 'day',
 }: {
   selectedDate: Date;
   onDateChange: (date: Date) => void;
@@ -18,11 +21,18 @@ const DateSelector = ({
   minDate?: Date;
   isLoading?: boolean;
   availableDates?: Set<string> | null;
+  resolution?: DateResolution;
 }) => {
   const [isOpen, setIsOpen] = useState(false);
 
-  // Format date for display
+  // Format date for display, matching the selected resolution's granularity.
   const formatDisplayDate = (date: Date): string => {
+    if (resolution === 'month') {
+      return date.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+    }
+    if (resolution === 'year') {
+      return String(date.getFullYear());
+    }
     return date.toLocaleDateString('sv-SE', {
       weekday: 'short',
       year: 'numeric',
@@ -31,18 +41,55 @@ const DateSelector = ({
     });
   };
 
-  const isAvailable = (date: Date): boolean =>
-    !availableDates || availableDates.has(toISODate(date));
-
-  // Walk day-by-day toward `direction` until an available date is found
-  // (skipping gaps in the persisted history) or the min/max bound is hit.
-  const findNextAvailable = (from: Date, direction: number): Date | null => {
-    const candidate = new Date(from);
-    while (true) {
-      candidate.setDate(candidate.getDate() + direction);
-      if (candidate < minDate || candidate > maxDate) return null;
-      if (isAvailable(candidate)) return candidate;
+  // availableDates holds day-level ISO strings even at month/year
+  // resolution — a month/year counts as available if any persisted day
+  // falls inside it.
+  const isAvailable = (date: Date): boolean => {
+    if (!availableDates) return true;
+    if (resolution === 'day') return availableDates.has(toISODate(date));
+    const prefix =
+      resolution === 'month'
+        ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+        : `${date.getFullYear()}-`;
+    for (const d of availableDates) {
+      if (d.startsWith(prefix)) return true;
     }
+    return false;
+  };
+
+  const stepDate = (from: Date, direction: number): Date => {
+    const next = new Date(from);
+    if (resolution === 'month') {
+      next.setMonth(next.getMonth() + direction, 1);
+    } else if (resolution === 'year') {
+      next.setFullYear(next.getFullYear() + direction, 0, 1);
+    } else {
+      next.setDate(next.getDate() + direction);
+    }
+    return next;
+  };
+
+  // Walk day/month/year-by-step toward `direction` until an available
+  // period is found (skipping gaps in the persisted history) or a bound
+  // is hit. The day-level minDate/maxDate props only constrain day
+  // resolution (they default to a narrow "last 2 months / tomorrow"
+  // window); at month/year resolution, availability is governed solely
+  // by availableDates, with an iteration cap as a safety net.
+  const findNextAvailable = (from: Date, direction: number): Date | null => {
+    let candidate = stepDate(from, direction);
+    if (resolution === 'day') {
+      while (candidate >= minDate && candidate <= maxDate) {
+        if (isAvailable(candidate)) return candidate;
+        candidate = stepDate(candidate, direction);
+      }
+      return null;
+    }
+    const maxSteps = 1000;
+    for (let i = 0; i < maxSteps; i++) {
+      if (isAvailable(candidate)) return candidate;
+      candidate = stepDate(candidate, direction);
+    }
+    return null;
   };
 
   const navigateDay = (direction: number) => {
@@ -81,7 +128,7 @@ const DateSelector = ({
           <ChevronRight className="w-5 h-5 text-gray-600" />
         </button>
       </div>
-      
+
       {isLoading && (
         <div className="absolute top-full left-0 right-0 pt-2">
           <div className="flex items-center justify-center space-x-2 text-gray-600">
@@ -90,7 +137,7 @@ const DateSelector = ({
           </div>
         </div>
       )}
-      
+
       {isOpen && (
         <div className="absolute top-20 left-0 z-10 w-64 bg-white rounded-lg shadow-lg border border-gray-200">
           <div className="p-2">
@@ -106,6 +153,8 @@ const DateSelector = ({
               minDate={minDate}
               maxDate={maxDate}
               filterDate={isAvailable}
+              showMonthYearPicker={resolution === 'month'}
+              showYearPicker={resolution === 'year'}
             />
           </div>
         </div>

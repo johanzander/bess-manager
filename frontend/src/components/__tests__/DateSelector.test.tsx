@@ -57,3 +57,76 @@ describe('DateSelector availableDates', () => {
     expect(prevButton).not.toBeDisabled();
   });
 });
+
+describe('DateSelector resolution', () => {
+  it('steps by month when resolution="month"', () => {
+    const selected = new Date(2026, 5, 15); // June 15, 2026
+    const onDateChange = vi.fn();
+
+    render(
+      <DateSelector
+        selectedDate={selected}
+        onDateChange={onDateChange}
+        resolution="month"
+        availableDates={null}
+      />
+    );
+
+    const [prevButton] = screen.getAllByRole('button');
+    fireEvent.click(prevButton);
+
+    expect(onDateChange).toHaveBeenCalledTimes(1);
+    const result = onDateChange.mock.calls[0][0] as Date;
+    expect(result.getFullYear()).toBe(2026);
+    expect(result.getMonth()).toBe(4); // May
+  });
+
+  it('steps by year when resolution="year"', () => {
+    const selected = new Date(2026, 5, 15);
+    const onDateChange = vi.fn();
+
+    render(
+      <DateSelector
+        selectedDate={selected}
+        onDateChange={onDateChange}
+        resolution="year"
+        availableDates={null}
+      />
+    );
+
+    const buttons = screen.getAllByRole('button');
+    const nextButton = buttons[buttons.length - 1];
+    fireEvent.click(nextButton);
+
+    expect(onDateChange).toHaveBeenCalledTimes(1);
+    const result = onDateChange.mock.calls[0][0] as Date;
+    expect(result.getFullYear()).toBe(2027);
+  });
+
+  it('treats a month as available if any persisted day falls inside it', () => {
+    const selected = new Date(2026, 5, 15); // June 2026
+    const onDateChange = vi.fn();
+
+    render(
+      <DateSelector
+        selectedDate={selected}
+        onDateChange={onDateChange}
+        resolution="month"
+        availableDates={new Set(['2026-05-20', '2026-06-01'])}
+      />
+    );
+
+    const [prevButton] = screen.getAllByRole('button');
+    expect(prevButton).not.toBeDisabled();
+  });
+
+  it('displays just the year when resolution="year"', () => {
+    const selected = new Date(2026, 5, 15);
+
+    render(
+      <DateSelector selectedDate={selected} onDateChange={vi.fn()} resolution="year" />
+    );
+
+    expect(screen.getByText('2026')).toBeInTheDocument();
+  });
+});

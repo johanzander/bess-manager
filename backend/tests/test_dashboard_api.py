@@ -233,6 +233,35 @@ def test_from_totals_wires_net_grid_cost_from_costs_dict():
     assert summary.totalSavings.value == 5.0  # gridOnly(10) - optimized(5)
 
 
+def test_from_totals_computes_net_savings_as_grid_only_minus_net_grid():
+    from api_dataclasses import APIDashboardSummary
+
+    totals = {
+        "totalSolarProduction": 0.0,
+        "totalHomeConsumption": 0.0,
+        "totalBatteryCharged": 0.0,
+        "totalBatteryDischarged": 0.0,
+        "totalGridImport": 0.0,
+        "totalGridExport": 0.0,
+        "totalSolarToHome": 0.0,
+        "totalSolarToBattery": 0.0,
+        "totalSolarToGrid": 0.0,
+        "totalGridToHome": 0.0,
+        "totalGridToBattery": 0.0,
+        "totalBatteryToHome": 0.0,
+        "totalBatteryToGrid": 0.0,
+    }
+    costs = {"gridOnly": 10.0, "solarOnly": 8.0, "optimized": 5.0, "netGrid": 3.0}
+
+    summary = APIDashboardSummary.from_totals(
+        totals, costs, battery_capacity=10.0, currency="EUR"
+    )
+
+    assert summary.netSavings.value == 7.0  # gridOnly(10) - netGrid(3)
+    # Unchanged: still wear-inclusive, still independent of the new field
+    assert summary.totalSavings.value == 5.0  # gridOnly(10) - optimized(5)
+
+
 # ===========================================================================
 # GET /api/decision-intelligence
 # ===========================================================================

@@ -91,6 +91,7 @@ class APISavingsBucket:
     exportEur: FormattedValue
     gridCost: FormattedValue
     gridOnlyCost: FormattedValue
+    netSavings: FormattedValue
     batteryCycleCost: FormattedValue
     savingsVsGridOnly: FormattedValue
     solarKwh: FormattedValue
@@ -111,6 +112,9 @@ class APISavingsBucket:
             exportEur=create_formatted_value(t.export_eur, "currency", currency),
             gridCost=create_formatted_value(t.grid_cost, "currency", currency),
             gridOnlyCost=create_formatted_value(t.grid_only_cost, "currency", currency),
+            netSavings=create_formatted_value(
+                t.grid_only_cost - t.grid_cost, "currency", currency
+            ),
             batteryCycleCost=create_formatted_value(
                 t.battery_cycle_cost, "currency", currency
             ),
@@ -542,6 +546,7 @@ class APIDashboardSummary:
     solarOnlyCost: FormattedValue
     optimizedCost: FormattedValue
     netGridCost: FormattedValue
+    netSavings: FormattedValue
 
     # Savings calculations
     totalSavings: FormattedValue
@@ -616,6 +621,9 @@ class APIDashboardSummary:
                 total_optimized_cost, "currency", currency
             ),
             netGridCost=create_formatted_value(costs["netGrid"], "currency", currency),
+            netSavings=create_formatted_value(
+                total_grid_only_cost - costs["netGrid"], "currency", currency
+            ),
             # Savings calculations
             totalSavings=create_formatted_value(total_savings, "currency", currency),
             solarSavings=create_formatted_value(solar_savings, "currency", currency),

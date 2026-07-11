@@ -129,6 +129,19 @@ class TestSavingsAggregate:
         bucket = resp.json()["buckets"][0]
         assert bucket["gridOnlyCost"]["value"] == 2.0  # 1.0 import_kwh * buy_price 2.0
 
+    def test_net_savings_present_on_bucket(self, tmp_path):
+        sys.modules["app"].bess_controller = _make_started_controller(
+            _seeded_store(tmp_path)
+        )
+
+        resp = _client.get("/api/savings/aggregate?period=week&count=1")
+
+        assert resp.status_code == 200
+        bucket = resp.json()["buckets"][0]
+        # _seeded_store's _period(1.0, 2.0): grid_only_cost = 1.0*2.0 = 2.0,
+        # grid_cost = import_eur(2.0) - export_eur(2.0) = 0.0
+        assert bucket["netSavings"]["value"] == 2.0  # gridOnly(2.0) - gridCost(0.0)
+
     def test_day_period_uses_live_daily_view_for_today(self, tmp_path):
         controller = _make_started_controller(DailyViewStore(persist_dir=tmp_path))
         controller.system.daily_view_builder.build_daily_view.return_value = DailyView(

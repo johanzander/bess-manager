@@ -502,6 +502,34 @@ describe('SavingsAggregateView Day-resolution hourly drill-down', () => {
     expect(screen.getByText('01:00')).toBeInTheDocument();
   });
 
+  it('lists hourly rows chronologically (00:00 first), not newest-first like the multi-day trend tables', async () => {
+    vi.spyOn(scheduleApi, 'fetchSavingsAggregate').mockResolvedValue({
+      buckets: [{ ...bucket('2026-07-11', 1), startDate: '2026-07-11', endDate: '2026-07-11' }],
+      count: 1,
+    });
+    vi.spyOn(scheduleApi, 'fetchDashboardData').mockResolvedValue({
+      // The API returns hourly periods in ascending order, same as it
+      // always has; the table must not reverse them the way it does for
+      // month/year trend rows.
+      hourlyData: [hourlyItem(0), hourlyItem(4), hourlyItem(8)], // 00:00, 01:00, 02:00
+    });
+
+    render(<SavingsAggregateView period="day" date="2026-07-11" />);
+
+    fireEvent.click(screen.getByRole('button', { name: /table/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('02:00')).toBeInTheDocument();
+    });
+
+    const rowLabels = screen
+      .getAllByRole('row')
+      .map(row => row.textContent)
+      .filter(text => text?.includes(':'))
+      .map(text => text!.match(/\d{2}:\d{2}/)?.[0]);
+    expect(rowLabels).toEqual(['00:00', '01:00', '02:00']);
+  });
+
   it('renders the API-provided Net Savings and Battery Contribution for hourly rows, not a re-derived value', async () => {
     vi.spyOn(scheduleApi, 'fetchSavingsAggregate').mockResolvedValue({
       buckets: [{ ...bucket('2026-07-11', 1), startDate: '2026-07-11', endDate: '2026-07-11' }],

@@ -452,7 +452,11 @@ export const SavingsAggregateView: React.FC<SavingsAggregateViewProps> = ({ peri
                 </tr>
               </thead>
               <tbody>
-                {[...bucketsWithData].reverse().map(b => (
+                {/* Multi-period trends (day/month/year rows) read best
+                    newest-first; a single day's hours read best in their
+                    natural 00:00-first chronological order, like every
+                    other hourly table in this app. */}
+                {(isHourlyDrillDown ? bucketsWithData : [...bucketsWithData].reverse()).map(b => (
                   <tr key={b.label} className="border-t border-gray-100 dark:border-gray-700">
                     <td className="pr-4 py-2 text-gray-900 dark:text-white">{b.label}</td>
                     <td className="px-3 py-2 text-right text-gray-600 dark:text-gray-300 border-x border-gray-100 dark:border-gray-700">

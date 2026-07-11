@@ -10,10 +10,11 @@ interface UseSavingsAggregateResult {
 export const useSavingsAggregate = (
   period: SavingsAggregatePeriod,
   count?: number,
-  date?: string
+  date?: string,
+  enabled: boolean = true
 ): UseSavingsAggregateResult => {
   const [data, setData] = useState<SavingsBucket[] | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [loading, setLoading] = useState<boolean>(enabled);
   const [error, setError] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
@@ -33,8 +34,12 @@ export const useSavingsAggregate = (
   }, [period, count, date]);
 
   useEffect(() => {
+    if (!enabled) {
+      setLoading(false);
+      return;
+    }
     fetchData();
-  }, [fetchData]);
+  }, [fetchData, enabled]);
 
   return { data, loading, error };
 };

@@ -106,4 +106,13 @@ describe('useSavingsAggregate', () => {
 
     expect(fetchSpy).toHaveBeenCalledWith('month', undefined, '2026-05-01');
   });
+
+  it('does not fetch when enabled is false', async () => {
+    const fetchSpy = vi.spyOn(scheduleApi, 'fetchSavingsAggregate');
+
+    const { result } = renderHook(() => useSavingsAggregate('day', 1, undefined, false));
+
+    expect(result.current.loading).toBe(false);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
 });

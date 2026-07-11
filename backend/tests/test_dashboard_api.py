@@ -10,9 +10,11 @@ from datetime import date, datetime
 from unittest.mock import MagicMock
 
 from api import router
+from api_dataclasses import APIDashboardHourlyData, APIDashboardSummary
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from core.bess import time_utils
 from core.bess.daily_view_builder import DailyView
 from core.bess.models import DecisionData, EconomicData, EnergyData, PeriodData
 
@@ -158,6 +160,167 @@ class TestDashboard:
         sys.modules["app"].bess_controller = _unconfigured_controller()
         resp = _client.get("/api/dashboard")
         assert resp.status_code == 503
+
+    def test_historical_date_returns_persisted_daily_view(self):
+        ctrl = _make_started_controller()
+        historical_date = date(2020, 1, 1)
+        ctrl.system.daily_view_store.load_day.return_value = DailyView(
+            date=historical_date,
+            periods=[_make_period(i) for i in range(96)],
+            total_savings=0.0,
+            actual_count=96,
+            predicted_count=0,
+        )
+        sys.modules["app"].bess_controller = ctrl
+
+        resp = _client.get(f"/api/dashboard?date={historical_date.isoformat()}")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["date"] == historical_date.isoformat()
+        # No row should be flagged as "current" for a past day.
+        assert body["currentPeriod"] == -1
+        assert body["tomorrowData"] is None
+        ctrl.system.daily_view_store.load_day.assert_called_once_with(historical_date)
+        # Historical path must not touch live sensors.
+        ctrl.ha_controller.get_battery_soc.assert_not_called()
+
+    def test_historical_date_with_no_snapshot_returns_404(self):
+        ctrl = _make_started_controller()
+        ctrl.system.daily_view_store.load_day.return_value = None
+        sys.modules["app"].bess_controller = ctrl
+
+        resp = _client.get("/api/dashboard?date=2020-01-01")
+
+        assert resp.status_code == 404
+
+
+class TestDashboardAvailableDates:
+    def test_returns_persisted_dates_plus_today(self):
+        ctrl = _make_started_controller()
+        ctrl.system.daily_view_store.list_available_dates.return_value = [
+            "2020-01-01",
+            "2020-01-03",
+        ]
+        sys.modules["app"].bess_controller = ctrl
+
+        resp = _client.get("/api/dashboard/available-dates")
+
+        assert resp.status_code == 200
+        dates = resp.json()["dates"]
+        assert "2020-01-01" in dates
+        assert "2020-01-03" in dates
+        # The endpoint appends time_utils.today() (HA-configured timezone),
+        # not the stdlib UTC date.today() — comparing against the same
+        # clock the endpoint uses avoids a flaky off-by-one near the
+        # UTC/local-day boundary.
+        assert time_utils.today().isoformat() in dates
+
+    def test_unconfigured_returns_503(self):
+        sys.modules["app"].bess_controller = _unconfigured_controller()
+        resp = _client.get("/api/dashboard/available-dates")
+        assert resp.status_code == 503
+
+
+def test_net_grid_cost_excludes_battery_wear():
+    def _hour(grid_cost, cycle_cost):
+        return APIDashboardHourlyData.from_internal(
+            PeriodData(
+                period=0,
+                energy=EnergyData(
+                    solar_production=0.0,
+                    home_consumption=1.0,
+                    battery_charged=0.0,
+                    battery_discharged=0.0,
+                    grid_imported=1.0,
+                    grid_exported=0.0,
+                    battery_soe_start=5.0,
+                    battery_soe_end=5.0,
+                ),
+                economic=EconomicData(
+                    buy_price=1.0,
+                    sell_price=1.0,
+                    grid_cost=grid_cost,
+                    battery_cycle_cost=cycle_cost,
+                    hourly_cost=grid_cost + cycle_cost,
+                ),
+                decision=DecisionData(strategic_intent="IDLE"),
+            ),
+            battery_capacity=10.0,
+            currency="EUR",
+        )
+
+    hours = [_hour(1.0, 0.5), _hour(2.0, 0.5)]
+    net_grid_cost = sum(h.gridCost.value for h in hours)
+
+    assert net_grid_cost == 3.0  # 1.0 + 2.0, wear excluded
+
+
+def test_from_totals_wires_net_grid_cost_from_costs_dict():
+    """APIDashboardSummary.from_totals must source netGridCost from
+    costs["netGrid"], not any other cost key.
+
+    Regression guard: a copy-paste bug (e.g. wiring netGridCost from
+    costs["optimized"]) would silently make it equal the wear-inclusive
+    bundled cost instead of the wear-exclusive net grid cost. Distinct
+    values for each cost key ensure such a mistake produces a wrong
+    number here rather than passing unnoticed.
+    """
+    totals = {
+        "totalSolarProduction": 0.0,
+        "totalHomeConsumption": 0.0,
+        "totalBatteryCharged": 0.0,
+        "totalBatteryDischarged": 0.0,
+        "totalGridImport": 0.0,
+        "totalGridExport": 0.0,
+        "totalSolarToHome": 0.0,
+        "totalSolarToBattery": 0.0,
+        "totalSolarToGrid": 0.0,
+        "totalGridToHome": 0.0,
+        "totalGridToBattery": 0.0,
+        "totalBatteryToHome": 0.0,
+        "totalBatteryToGrid": 0.0,
+    }
+    costs = {"gridOnly": 10.0, "solarOnly": 8.0, "optimized": 5.0, "netGrid": 3.0}
+
+    summary = APIDashboardSummary.from_totals(
+        totals, costs, battery_capacity=10.0, currency="EUR"
+    )
+
+    assert summary.netGridCost.value == 3.0
+    # Confirm netGridCost isn't accidentally aliased to the wear-inclusive
+    # optimized cost, and totalSavings math is untouched by the new field.
+    assert summary.optimizedCost.value == 5.0
+    assert summary.totalSavings.value == 5.0  # gridOnly(10) - optimized(5)
+
+
+def test_from_totals_computes_net_savings_as_grid_only_minus_net_grid():
+    from api_dataclasses import APIDashboardSummary
+
+    totals = {
+        "totalSolarProduction": 0.0,
+        "totalHomeConsumption": 0.0,
+        "totalBatteryCharged": 0.0,
+        "totalBatteryDischarged": 0.0,
+        "totalGridImport": 0.0,
+        "totalGridExport": 0.0,
+        "totalSolarToHome": 0.0,
+        "totalSolarToBattery": 0.0,
+        "totalSolarToGrid": 0.0,
+        "totalGridToHome": 0.0,
+        "totalGridToBattery": 0.0,
+        "totalBatteryToHome": 0.0,
+        "totalBatteryToGrid": 0.0,
+    }
+    costs = {"gridOnly": 10.0, "solarOnly": 8.0, "optimized": 5.0, "netGrid": 3.0}
+
+    summary = APIDashboardSummary.from_totals(
+        totals, costs, battery_capacity=10.0, currency="EUR"
+    )
+
+    assert summary.netSavings.value == 7.0  # gridOnly(10) - netGrid(3)
+    # Unchanged: still wear-inclusive, still independent of the new field
+    assert summary.totalSavings.value == 5.0  # gridOnly(10) - optimized(5)
 
 
 # ===========================================================================
@@ -494,3 +657,77 @@ class TestHealthRecoveries:
         sys.modules["app"].bess_controller = _unconfigured_controller()
         resp = _client.post("/api/health-recoveries/acknowledge")
         assert resp.status_code == 503
+
+
+# ===========================================================================
+# APIDashboardHourlyData unit tests
+# ===========================================================================
+
+
+def test_hourly_data_exposes_grid_cost_and_battery_cycle_cost():
+    hourly = PeriodData(
+        period=0,
+        energy=EnergyData(
+            solar_production=1.0,
+            home_consumption=1.0,
+            battery_charged=0.0,
+            battery_discharged=0.0,
+            grid_imported=1.0,
+            grid_exported=0.0,
+            battery_soe_start=5.0,
+            battery_soe_end=5.0,
+        ),
+        economic=EconomicData(
+            buy_price=2.0,
+            sell_price=1.0,
+            grid_cost=2.0,
+            battery_cycle_cost=0.1,
+            hourly_cost=2.1,
+        ),
+        decision=DecisionData(strategic_intent="IDLE"),
+    )
+
+    api_hourly = APIDashboardHourlyData.from_internal(
+        hourly, battery_capacity=10.0, currency="EUR"
+    )
+
+    assert api_hourly.gridCost.value == 2.0
+    assert api_hourly.batteryCycleCost.value == 0.1
+
+
+def test_hourly_data_exposes_wear_free_net_and_battery_savings():
+    hourly = PeriodData(
+        period=0,
+        energy=EnergyData(
+            solar_production=1.0,
+            home_consumption=1.0,
+            battery_charged=0.0,
+            battery_discharged=0.0,
+            grid_imported=1.0,
+            grid_exported=0.0,
+            battery_soe_start=5.0,
+            battery_soe_end=5.0,
+        ),
+        economic=EconomicData(
+            buy_price=2.0,
+            sell_price=1.0,
+            grid_cost=2.0,
+            grid_only_cost=10.0,
+            solar_only_cost=6.0,
+            battery_cycle_cost=0.1,
+            hourly_cost=2.1,
+        ),
+        decision=DecisionData(strategic_intent="IDLE"),
+    )
+
+    api_hourly = APIDashboardHourlyData.from_internal(
+        hourly, battery_capacity=10.0, currency="EUR"
+    )
+
+    # netSavings = gridOnlyCost - gridCost = 10.0 - 2.0
+    assert api_hourly.netSavings.value == 8.0
+    # batterySavings = solarOnlyCost - gridCost = 6.0 - 2.0 = 4.0 (wear-free:
+    # subtracts grid_cost, NOT hourly_cost, which folds in
+    # battery_cycle_cost=0.1 — if wear were included this would instead be
+    # solar_only_cost - hourly_cost = 6.0 - 2.1 = 3.9).
+    assert api_hourly.batterySavings.value == 4.0

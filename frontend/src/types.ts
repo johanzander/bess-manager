@@ -44,6 +44,8 @@ export interface HourlyData {
   // All user-facing data via FormattedValue - canonical naming
   buyPrice?: FormattedValue;
   sellPrice?: FormattedValue;
+  importCost?: FormattedValue;
+  exportRevenue?: FormattedValue;
   solarProduction?: FormattedValue;
   homeConsumption?: FormattedValue;
   gridImported?: FormattedValue;

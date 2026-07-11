@@ -28,7 +28,12 @@ def _period(grid_imported: float, grid_exported: float) -> PeriodData:
         battery_soe_start=10.0,
         battery_soe_end=10.0,
     )
-    economic = EconomicData(buy_price=2.0, sell_price=1.0, battery_cycle_cost=0.1)
+    economic = EconomicData(
+        buy_price=2.0,
+        sell_price=1.0,
+        battery_cycle_cost=0.1,
+        grid_only_cost=grid_imported * 2.0,
+    )
     return PeriodData(period=0, energy=energy, economic=economic)
 
 
@@ -112,6 +117,170 @@ class TestSavingsAggregate:
         resp = _client.get("/api/savings/aggregate?period=week")
 
         assert resp.status_code == 503
+
+    def test_grid_only_cost_present_on_bucket(self, tmp_path):
+        sys.modules["app"].bess_controller = _make_started_controller(
+            _seeded_store(tmp_path)
+        )
+
+        resp = _client.get("/api/savings/aggregate?period=week&count=1")
+
+        assert resp.status_code == 200
+        bucket = resp.json()["buckets"][0]
+        assert bucket["gridOnlyCost"]["value"] == 2.0  # 1.0 import_kwh * buy_price 2.0
+
+    def test_net_savings_present_on_bucket(self, tmp_path):
+        sys.modules["app"].bess_controller = _make_started_controller(
+            _seeded_store(tmp_path)
+        )
+
+        resp = _client.get("/api/savings/aggregate?period=week&count=1")
+
+        assert resp.status_code == 200
+        bucket = resp.json()["buckets"][0]
+        # _seeded_store's _period(1.0, 2.0): grid_only_cost = 1.0*2.0 = 2.0,
+        # grid_cost = import_eur(2.0) - export_eur(2.0) = 0.0
+        assert bucket["netSavings"]["value"] == 2.0  # gridOnly(2.0) - gridCost(0.0)
+
+    def test_day_period_uses_live_daily_view_for_today(self, tmp_path):
+        controller = _make_started_controller(DailyViewStore(persist_dir=tmp_path))
+        controller.system.daily_view_builder.build_daily_view.return_value = DailyView(
+            date=date(2026, 7, 9),
+            periods=[_period(1.0, 0.0)],
+            total_savings=1.0,
+            actual_count=1,
+            predicted_count=0,
+        )
+        sys.modules["app"].bess_controller = controller
+
+        resp = _client.get("/api/savings/aggregate?period=day&count=1")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["count"] == 1
+        assert body["buckets"][0]["dayCount"] == 1
+
+    def test_day_period_default_count_is_one(self, tmp_path):
+        controller = _make_started_controller(_seeded_store(tmp_path))
+        controller.system.daily_view_builder.build_daily_view.return_value = DailyView(
+            date=date(2026, 7, 9),
+            periods=[_period(1.0, 0.0)],
+            total_savings=1.0,
+            actual_count=1,
+            predicted_count=0,
+        )
+        sys.modules["app"].bess_controller = controller
+
+        resp = _client.get("/api/savings/aggregate?period=day")
+
+        assert resp.status_code == 200
+        assert resp.json()["count"] == 1
+
+    def test_date_param_anchors_the_buckets_to_that_day(self, tmp_path):
+        store = DailyViewStore(persist_dir=tmp_path)
+        store.save_day(
+            DailyView(
+                date=date(2026, 6, 15),
+                periods=[_period(1.0, 0.0)],
+                total_savings=1.0,
+                actual_count=1,
+                predicted_count=0,
+            )
+        )
+        sys.modules["app"].bess_controller = _make_started_controller(store)
+
+        resp = _client.get("/api/savings/aggregate?period=day&count=1&date=2026-06-15")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["buckets"][0]["label"] == "2026-06-15"
+        assert body["buckets"][0]["dayCount"] == 1
+
+    def test_date_param_for_a_day_with_no_data_returns_empty_bucket(self, tmp_path):
+        store = DailyViewStore(persist_dir=tmp_path)
+        sys.modules["app"].bess_controller = _make_started_controller(store)
+
+        resp = _client.get("/api/savings/aggregate?period=day&count=1&date=2026-05-01")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["buckets"][0]["label"] == "2026-05-01"
+        assert body["buckets"][0]["dayCount"] == 0
+
+    def test_date_param_does_not_use_the_live_daily_view_for_a_historical_day(
+        self, tmp_path
+    ):
+        controller = _make_started_controller(DailyViewStore(persist_dir=tmp_path))
+        sys.modules["app"].bess_controller = controller
+
+        resp = _client.get("/api/savings/aggregate?period=day&count=1&date=2026-05-01")
+
+        assert resp.status_code == 200
+        # The live view (today's in-progress data) must never be consulted
+        # when browsing a historical date — only the persisted store.
+        controller.system.daily_view_builder.build_daily_view.assert_not_called()
+
+    def test_invalid_date_param_returns_422(self, tmp_path):
+        sys.modules["app"].bess_controller = _make_started_controller(
+            _seeded_store(tmp_path)
+        )
+
+        resp = _client.get("/api/savings/aggregate?period=day&date=not-a-date")
+
+        assert resp.status_code == 422
+
+
+class TestSolarBatterySavingsSplit:
+    def _store_with_solar_and_battery(self, tmp_path) -> DailyViewStore:
+        # grid_only_cost=10 (no solar/battery baseline), solar_only_cost=6
+        # (solar alone would have cost 6), grid_cost=2 (actual, with battery
+        # timing on top of solar) -> solar contributes 4, battery contributes 4.
+        energy = EnergyData(
+            solar_production=3.0,
+            home_consumption=5.0,
+            battery_charged=1.0,
+            battery_discharged=1.0,
+            grid_imported=1.0,
+            grid_exported=0.0,
+            battery_soe_start=10.0,
+            battery_soe_end=10.0,
+        )
+        economic = EconomicData(
+            buy_price=2.0,
+            sell_price=1.0,
+            grid_only_cost=10.0,
+            solar_only_cost=6.0,
+        )
+        period = PeriodData(period=0, energy=energy, economic=economic)
+        store = DailyViewStore(persist_dir=tmp_path)
+        store.save_day(
+            DailyView(
+                date=date(2026, 7, 8),
+                periods=[period],
+                total_savings=8.0,
+                actual_count=1,
+                predicted_count=0,
+            )
+        )
+        return store
+
+    def test_solar_and_battery_savings_sum_to_net_savings(self, tmp_path):
+        sys.modules["app"].bess_controller = _make_started_controller(
+            self._store_with_solar_and_battery(tmp_path)
+        )
+
+        resp = _client.get("/api/savings/aggregate?period=week&count=1")
+
+        assert resp.status_code == 200
+        bucket = resp.json()["buckets"][0]
+        assert bucket["gridCost"]["value"] == 2.0  # 1.0 import_eur - 0.0 export_eur
+        assert bucket["solarSavings"]["value"] == 4.0  # 10.0 - 6.0
+        assert bucket["batterySavings"]["value"] == 4.0  # 6.0 - 2.0
+        assert bucket["netSavings"]["value"] == 8.0  # 10.0 - 2.0
+        assert (
+            bucket["solarSavings"]["value"] + bucket["batterySavings"]["value"]
+            == bucket["netSavings"]["value"]
+        )
 
 
 class TestDiskUsage:

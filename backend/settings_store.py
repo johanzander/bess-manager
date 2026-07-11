@@ -385,7 +385,7 @@ class SettingsStore:
             "home": {
                 "default_hourly": HOME_HOURLY_CONSUMPTION_KWH,
                 "currency": DEFAULT_CURRENCY,
-                "consumption_strategy": "fixed",
+                "consumption_strategy": "sensor",
                 "max_fuse_current": HOUSE_MAX_FUSE_CURRENT_A,
                 "voltage": HOUSE_VOLTAGE_V,
                 "safety_margin": SAFETY_MARGIN_FACTOR,

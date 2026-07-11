@@ -16,14 +16,16 @@ interface UseDashboardDataResult {
  * @param date - Optional date filter
  * @param resolution - Data resolution: 'hourly' (24 periods) or 'quarter-hourly' (96 periods). Defaults to 'quarter-hourly'.
  * @param refreshInterval - Auto-refresh interval in ms. 0 = no auto-refresh (default).
+ * @param enabled - When false, skips fetching entirely (loading stays false). Defaults to true.
  */
 export const useDashboardData = (
   date?: string,
   resolution: DataResolution = 'quarter-hourly',
-  refreshInterval: number = 0
+  refreshInterval: number = 0,
+  enabled: boolean = true
 ): UseDashboardDataResult => {
   const [data, setData] = useState<DashboardResponse | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [loading, setLoading] = useState<boolean>(enabled);
   const [error, setError] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
@@ -42,12 +44,16 @@ export const useDashboardData = (
   }, [date, resolution]);
 
   useEffect(() => {
+    if (!enabled) {
+      setLoading(false);
+      return;
+    }
     fetchData();
     if (refreshInterval > 0) {
       const interval = setInterval(fetchData, refreshInterval);
       return () => clearInterval(interval);
     }
-  }, [fetchData, refreshInterval]);
+  }, [fetchData, refreshInterval, enabled]);
 
   const refetch = useCallback(() => {
     fetchData();

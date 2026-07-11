@@ -9,17 +9,19 @@ interface UseSavingsAggregateResult {
 
 export const useSavingsAggregate = (
   period: SavingsAggregatePeriod,
-  count?: number
+  count?: number,
+  date?: string,
+  enabled: boolean = true
 ): UseSavingsAggregateResult => {
   const [data, setData] = useState<SavingsBucket[] | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [loading, setLoading] = useState<boolean>(enabled);
   const [error, setError] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-      const result = await fetchSavingsAggregate(period, count);
+      const result = await fetchSavingsAggregate(period, count, date);
       setData(result.buckets);
     } catch (err) {
       console.error('Failed to fetch savings aggregate:', err);
@@ -29,11 +31,15 @@ export const useSavingsAggregate = (
     } finally {
       setLoading(false);
     }
-  }, [period, count]);
+  }, [period, count, date]);
 
   useEffect(() => {
+    if (!enabled) {
+      setLoading(false);
+      return;
+    }
     fetchData();
-  }, [fetchData]);
+  }, [fetchData, enabled]);
 
   return { data, loading, error };
 };

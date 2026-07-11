@@ -5,7 +5,6 @@ import { periodToTimeString, periodToEndTime } from '../utils/timeUtils';
 import { DataResolution } from '../hooks/useUserPreferences';
 
 interface DetailedSavingsAnalysisProps {
-  settings: any;
   resolution: DataResolution;
 }
 

@@ -38,6 +38,8 @@ const baseHourlyEntry = {
   batterySoeEnd: fv(22.5, '22.5', 'kWh'),
   buyPrice: fv(0.15, '0.15', 'EUR/kWh'),
   sellPrice: fv(0.10, '0.10', 'EUR/kWh'),
+  importCost: fv(0.15, '0.15', 'EUR'),
+  exportRevenue: fv(0, '0.00', 'EUR'),
   hourlyCost: fv(0.15, '0.15', 'EUR'),
   hourlySavings: fv(0.05, '0.05', 'EUR'),
   batteryCycleCost: fv(0.02, '0.02', 'EUR'),

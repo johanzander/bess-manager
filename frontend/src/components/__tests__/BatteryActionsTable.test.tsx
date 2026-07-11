@@ -80,16 +80,20 @@ describe('BatteryActionsTable grid-export badge', () => {
   })
 })
 
-describe('BatteryActionsTable wear breakdown', () => {
-  it('shows a wear sub-line under Actual Cost when batteryCycleCost is present', () => {
+describe('BatteryActionsTable cost breakdown columns', () => {
+  it('shows import cost, export revenue and wear in separate columns', () => {
     mockHour = {
       ...baseHour,
-      hourlyCost: fv(0.12, '0.12', 'EUR'),
+      importCost: fv(0.14, '0.14', 'EUR'),
+      exportRevenue: fv(0.02, '0.02', 'EUR'),
       batteryCycleCost: fv(0.02, '0.02', 'EUR'),
     }
     render(<BatteryActionsTable resolution="quarter-hourly" />)
 
-    expect(screen.getByText('0.12')).toBeInTheDocument()
-    expect(screen.getByText((content) => content.includes('0.02') && content.includes('wear'))).toBeInTheDocument()
+    expect(screen.getByText('Import Cost')).toBeInTheDocument()
+    expect(screen.getByText('Export Revenue')).toBeInTheDocument()
+    expect(screen.getByText('Wear')).toBeInTheDocument()
+    expect(screen.getAllByText('0.14').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('0.02').length).toBeGreaterThan(0)
   })
 })

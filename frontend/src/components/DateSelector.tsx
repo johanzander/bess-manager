@@ -2,47 +2,66 @@ import { useState } from 'react';
 import { Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
+import { toISODate } from '../utils/timeUtils';
 
-const DateSelector = ({ 
+const DateSelector = ({
   selectedDate,
   onDateChange,
   maxDate = new Date(new Date().setDate(new Date().getDate() + 1)), // Allow selecting up to tomorrow
   minDate = new Date(new Date().setMonth(new Date().getMonth() - 2)), // Set min date to today minus 2 months
-  isLoading = false
+  isLoading = false,
+  availableDates = null, // Restrict selection to these ISO dates; null = no restriction (e.g. still loading)
 }: {
   selectedDate: Date;
   onDateChange: (date: Date) => void;
   maxDate?: Date;
   minDate?: Date;
   isLoading?: boolean;
+  availableDates?: Set<string> | null;
 }) => {
   const [isOpen, setIsOpen] = useState(false);
 
   // Format date for display
   const formatDisplayDate = (date: Date): string => {
-    return date.toLocaleDateString('sv-SE', { 
-      weekday: 'short', 
-      year: 'numeric', 
-      month: 'short', 
-      day: 'numeric' 
+    return date.toLocaleDateString('sv-SE', {
+      weekday: 'short',
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
     });
   };
 
+  const isAvailable = (date: Date): boolean =>
+    !availableDates || availableDates.has(toISODate(date));
+
+  // Walk day-by-day toward `direction` until an available date is found
+  // (skipping gaps in the persisted history) or the min/max bound is hit.
+  const findNextAvailable = (from: Date, direction: number): Date | null => {
+    const candidate = new Date(from);
+    while (true) {
+      candidate.setDate(candidate.getDate() + direction);
+      if (candidate < minDate || candidate > maxDate) return null;
+      if (isAvailable(candidate)) return candidate;
+    }
+  };
+
   const navigateDay = (direction: number) => {
-    const newDate = new Date(selectedDate);
-    newDate.setDate(newDate.getDate() + direction);
-    if (newDate >= minDate && newDate <= maxDate) {
+    const newDate = findNextAvailable(selectedDate, direction);
+    if (newDate) {
       onDateChange(newDate);
     }
   };
+
+  const canNavigate = (direction: number): boolean =>
+    findNextAvailable(selectedDate, direction) !== null;
 
   return (
     <div className="relative">
       <div className="bg-white p-4 rounded-lg shadow flex items-center justify-between" style={{ height: '75px', width: '300px' }}>
         <button
           onClick={() => navigateDay(-1)}
-          className="p-1 hover:bg-gray-100 rounded-full"
-          disabled={selectedDate <= minDate}
+          className="p-1 hover:bg-gray-100 rounded-full disabled:opacity-30 disabled:cursor-not-allowed"
+          disabled={selectedDate <= minDate || !canNavigate(-1)}
         >
           <ChevronLeft className="w-5 h-5 text-gray-600" />
         </button>
@@ -56,8 +75,8 @@ const DateSelector = ({
         </button>
         <button
           onClick={() => navigateDay(1)}
-          className="p-1 hover:bg-gray-100 rounded-full"
-          disabled={selectedDate >= maxDate}
+          className="p-1 hover:bg-gray-100 rounded-full disabled:opacity-30 disabled:cursor-not-allowed"
+          disabled={selectedDate >= maxDate || !canNavigate(1)}
         >
           <ChevronRight className="w-5 h-5 text-gray-600" />
         </button>
@@ -86,6 +105,7 @@ const DateSelector = ({
               inline
               minDate={minDate}
               maxDate={maxDate}
+              filterDate={isAvailable}
             />
           </div>
         </div>

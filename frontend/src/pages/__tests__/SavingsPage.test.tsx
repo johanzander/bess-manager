@@ -1,46 +1,39 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import SavingsPage from '../SavingsPage';
-import * as useSettingsHook from '../../hooks/useSettings';
-import * as useUserPreferencesHook from '../../hooks/useUserPreferences';
 import api from '../../lib/api';
 
-vi.mock('../../components/DetailedSavingsAnalysis', () => ({
-  DetailedSavingsAnalysis: () => <div data-testid="detailed-savings-analysis">Detailed Savings Analysis</div>,
-}));
-
 vi.mock('../../components/SavingsAggregateView', () => ({
-  SavingsAggregateView: () => <div data-testid="savings-aggregate-view">Savings Aggregate View</div>,
+  SavingsAggregateView: ({ period }: { period: string }) => (
+    <div data-testid="savings-aggregate-view">{period}</div>
+  ),
+  SAVINGS_PERIODS: ['day', 'week', 'month', 'year'],
+  SAVINGS_PERIOD_LABELS: { day: 'Today', week: 'Week', month: 'Month', year: 'Year' },
 }));
 
 describe('SavingsPage', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-
-    vi.spyOn(useSettingsHook, 'useSettings').mockReturnValue({
-      batterySettings: null,
-      electricitySettings: null,
-      isLoading: false,
-      error: null,
-    });
-
-    vi.spyOn(useUserPreferencesHook, 'useUserPreferences').mockReturnValue({
-      preferences: { dataResolution: 'quarter-hourly', showSellPrice: false },
-      setPreferences: vi.fn(),
-      dataResolution: 'quarter-hourly',
-      setDataResolution: vi.fn(),
-      showSellPrice: false,
-      setShowSellPrice: vi.fn(),
-    });
-
     vi.spyOn(api, 'get').mockResolvedValue({ data: {} });
   });
 
-  it('renders the Scenario Comparison view and the savings aggregate view, with no Overview toggle', () => {
+  it('renders only the savings aggregate view — Scenario Comparison moved to Insights', () => {
     render(<SavingsPage />);
 
-    expect(screen.queryByRole('button', { name: /^overview$/i })).not.toBeInTheDocument();
     expect(screen.getByTestId('savings-aggregate-view')).toBeInTheDocument();
-    expect(screen.getByTestId('detailed-savings-analysis')).toBeInTheDocument();
+    expect(screen.queryByTestId('detailed-savings-analysis')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^overview$/i })).not.toBeInTheDocument();
+  });
+
+  it('defaults to the day period (so it has data even before a full week exists) and lets the header pills change it', () => {
+    render(<SavingsPage />);
+
+    expect(screen.getByTestId('savings-aggregate-view')).toHaveTextContent('day');
+
+    fireEvent.click(screen.getByRole('button', { name: /^week$/i }));
+    expect(screen.getByTestId('savings-aggregate-view')).toHaveTextContent('week');
+
+    fireEvent.click(screen.getByRole('button', { name: /^month$/i }));
+    expect(screen.getByTestId('savings-aggregate-view')).toHaveTextContent('month');
   });
 });

@@ -8,10 +8,80 @@ import { getIntent } from '../utils/intent';
 
 interface BatteryActionsTableProps {
   resolution: DataResolution;
+  date?: string; // ISO date (YYYY-MM-DD); omit for today
 }
 
-export const BatteryActionsTable: React.FC<BatteryActionsTableProps> = ({ resolution }) => {
-  const { data: dashboardData, loading, error } = useDashboardData(undefined, resolution);
+// Column group styling — shared between today's and tomorrow's tables.
+// Conditions = what the optimizer observed, Battery = what it decided, Cost & Savings = the result.
+const GROUP_STYLES = {
+  conditions: 'bg-slate-100 dark:bg-slate-700/60 text-slate-700 dark:text-slate-300',
+  battery: 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300',
+  costSavings: 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300',
+} as const;
+
+const GroupedTableHeader: React.FC<{ variant?: 'default' | 'tomorrow' }> = ({ variant = 'default' }) => {
+  const base = 'px-3 py-1 text-xs font-semibold uppercase tracking-wider border border-gray-300 dark:border-gray-600';
+  const subBase = 'px-3 py-2 text-xs font-medium uppercase tracking-wider border border-gray-300 dark:border-gray-600';
+  const groups = variant === 'tomorrow'
+    ? {
+        conditions: 'bg-indigo-50/70 dark:bg-indigo-900/20 text-indigo-500 dark:text-indigo-400',
+        battery: 'bg-indigo-100/70 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-300',
+        costSavings: 'bg-indigo-50/70 dark:bg-indigo-900/20 text-indigo-500 dark:text-indigo-400',
+      }
+    : GROUP_STYLES;
+  const subGroups = variant === 'tomorrow'
+    ? { text: 'text-indigo-700 dark:text-indigo-300' }
+    : { text: 'text-gray-800 dark:text-gray-200' };
+
+  return (
+    <>
+      <tr>
+        <th colSpan={4} className={`${base} ${groups.conditions} text-left`}>Conditions</th>
+        <th colSpan={2} className={`${base} ${groups.battery} text-center`}>Battery</th>
+        <th colSpan={8} className={`${base} ${groups.costSavings} text-center`}>Cost &amp; Savings</th>
+      </tr>
+      <tr>
+        <th className={`w-[7%] ${subBase} ${subGroups.text} text-left`}>Hour</th>
+        <th className={`w-[5%] ${subBase} ${subGroups.text} text-center`}>Price</th>
+        <th className={`w-[8%] ${subBase} ${subGroups.text} text-center`}>Solar</th>
+        <th className={`w-[8%] ${subBase} ${subGroups.text} text-center`}>Consumption</th>
+        <th className={`w-[7%] ${subBase} ${subGroups.text} text-center`}>Battery Action</th>
+        <th className={`w-[7%] ${subBase} ${subGroups.text} text-center`}>Battery Level</th>
+        <th className={`w-[7.25%] ${subBase} ${subGroups.text} text-center`}>Grid Import</th>
+        <th className={`w-[7.25%] ${subBase} ${subGroups.text} text-center`}>Grid Export</th>
+        <th className={`w-[7.25%] ${subBase} ${subGroups.text} text-center`}>Import Cost</th>
+        <th className={`w-[7.25%] ${subBase} ${subGroups.text} text-center`}>Export Revenue</th>
+        <th className={`w-[7.25%] ${subBase} ${subGroups.text} text-center`}>Wear</th>
+        <th className={`w-[7.25%] ${subBase} ${subGroups.text} text-center`}>Total Cost</th>
+        <th className={`w-[7.25%] ${subBase} ${subGroups.text} text-center`}>Baseline Cost</th>
+        <th className={`w-[7.25%] ${subBase} ${subGroups.text} text-center`}>Savings</th>
+      </tr>
+    </>
+  );
+};
+
+// Single cost/revenue figure with a tone that reflects whether it's money out, money in, or neutral.
+const CostValueCell: React.FC<{ value: any; tone: 'cost' | 'revenue' | 'neutral' }> = ({ value, tone }) => {
+  const amount = value?.value ?? 0;
+  const hasAmount = amount > 0.001;
+  const toneClass = !hasAmount
+    ? 'text-gray-400 dark:text-gray-500'
+    : tone === 'cost'
+      ? 'text-red-600 dark:text-red-400'
+      : tone === 'revenue'
+        ? 'text-green-600 dark:text-green-400'
+        : 'text-gray-600 dark:text-gray-300';
+
+  return (
+    <>
+      <div className={`font-medium ${toneClass}`}>{value?.display ?? amount.toFixed(2)}</div>
+      <div className="text-xs text-gray-500 dark:text-gray-400">{value?.unit}</div>
+    </>
+  );
+};
+
+export const BatteryActionsTable: React.FC<BatteryActionsTableProps> = ({ resolution, date }) => {
+  const { data: dashboardData, loading, error } = useDashboardData(date, resolution);
   const [showTomorrow, setShowTomorrow] = useState(false);
 
   // Helper function to get numeric value from FormattedValue objects (for calculations)
@@ -93,50 +163,32 @@ export const BatteryActionsTable: React.FC<BatteryActionsTableProps> = ({ resolu
   // Get final hour for SOC display
   const finalHour = dashboardData.hourlyData[dashboardData.hourlyData.length - 1];
 
+  // Cost breakdown totals aren't in the backend summary yet — sum the per-hour
+  // backend-calculated values (pure addition, no re-derivation of the cost formula).
+  const costUnit = dashboardData.hourlyData[0]?.importCost?.unit ?? '';
+  const totalImportCost = dashboardData.hourlyData.reduce(
+    (sum: number, h: any) => sum + getNumericValue(h.importCost), 0
+  );
+  const totalExportRevenue = dashboardData.hourlyData.reduce(
+    (sum: number, h: any) => sum + getNumericValue(h.exportRevenue), 0
+  );
+  const totalWear = dashboardData.hourlyData.reduce(
+    (sum: number, h: any) => sum + getNumericValue(h.batteryCycleCost), 0
+  );
+
   return (
     <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow overflow-x-auto">
       <div className="mb-6">
         <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">Battery Actions</h2>
         <p className="text-sm text-gray-600 dark:text-gray-300">
-          Current hour highlighted in purple.
+          {date ? 'Historical day — all periods are actual.' : 'Current hour highlighted in purple.'}
         </p>
       </div>
 
       {/* Simplified Hourly Table */}
       <table className="min-w-full table-fixed divide-y divide-gray-200 dark:divide-gray-700">
-        <thead className="bg-gray-50 dark:bg-gray-700">
-          <tr>
-            <th className="w-[8%] px-3 py-2 text-left text-xs font-medium text-gray-800 dark:text-gray-200 uppercase tracking-wider border border-gray-300 dark:border-gray-600">
-              Hour
-            </th>
-            <th className="w-[7%] px-3 py-2 text-center text-xs font-medium text-gray-800 dark:text-gray-200 uppercase tracking-wider border border-gray-300 dark:border-gray-600">
-              Price
-            </th>
-            <th className="w-[10.625%] px-3 py-2 text-center text-xs font-medium text-gray-800 dark:text-gray-200 uppercase tracking-wider border border-gray-300 dark:border-gray-600">
-              Solar
-            </th>
-            <th className="w-[10.625%] px-3 py-2 text-center text-xs font-medium text-gray-800 dark:text-gray-200 uppercase tracking-wider border border-gray-300 dark:border-gray-600">
-              Consumption
-            </th>
-            <th className="w-[10.625%] px-3 py-2 text-center text-xs font-medium text-gray-800 dark:text-gray-200 uppercase tracking-wider border border-gray-300 dark:border-gray-600">
-              Battery Action
-            </th>
-            <th className="w-[10.625%] px-3 py-2 text-center text-xs font-medium text-gray-800 dark:text-gray-200 uppercase tracking-wider border border-gray-300 dark:border-gray-600">
-              Battery Level
-            </th>
-            <th className="w-[10.625%] px-3 py-2 text-center text-xs font-medium text-gray-800 dark:text-gray-200 uppercase tracking-wider border border-gray-300 dark:border-gray-600">
-              Grid Import
-            </th>
-            <th className="w-[10.625%] px-3 py-2 text-center text-xs font-medium text-gray-800 dark:text-gray-200 uppercase tracking-wider border border-gray-300 dark:border-gray-600">
-              Grid Export
-            </th>
-            <th className="w-[10.625%] px-3 py-2 text-center text-xs font-medium text-gray-800 dark:text-gray-200 uppercase tracking-wider border border-gray-300 dark:border-gray-600">
-              Actual Cost
-            </th>
-            <th className="w-[10.625%] px-3 py-2 text-center text-xs font-medium text-gray-800 dark:text-gray-200 uppercase tracking-wider border border-gray-300 dark:border-gray-600">
-              Savings
-            </th>
-          </tr>
+        <thead>
+          <GroupedTableHeader />
         </thead>
         <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
           {dashboardData.hourlyData.map((hour: any, index: number) => {
@@ -358,19 +410,24 @@ export const BatteryActionsTable: React.FC<BatteryActionsTableProps> = ({ resolu
                   </div>
                 </td>
 
-                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
-                  <div className={`font-medium ${
-                    Math.abs(getNumericValue(hour.hourlyCost)) < 0.01 ? 'text-gray-900 dark:text-white' :
-                    getNumericValue(hour.hourlyCost) > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'
-                  }`}>
-                    {getDisplayValue(hour.hourlyCost)}
-                  </div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(hour.hourlyCost)}</div>
-                  {getNumericValue(hour.batteryCycleCost) > 0.001 && (
-                    <div className="text-xs text-gray-400 dark:text-gray-500">
-                      of which {getDisplayValue(hour.batteryCycleCost)} wear
-                    </div>
-                  )}
+                <td className="px-3 py-2 whitespace-nowrap text-sm border border-gray-300 dark:border-gray-600 text-center">
+                  <CostValueCell value={hour.importCost} tone="cost" />
+                </td>
+
+                <td className="px-3 py-2 whitespace-nowrap text-sm border border-gray-300 dark:border-gray-600 text-center">
+                  <CostValueCell value={hour.exportRevenue} tone="revenue" />
+                </td>
+
+                <td className="px-3 py-2 whitespace-nowrap text-sm border border-gray-300 dark:border-gray-600 text-center">
+                  <CostValueCell value={hour.batteryCycleCost} tone="neutral" />
+                </td>
+
+                <td className="px-3 py-2 whitespace-nowrap text-sm border border-gray-300 dark:border-gray-600 text-center">
+                  <CostValueCell value={hour.hourlyCost} tone="cost" />
+                </td>
+
+                <td className="px-3 py-2 whitespace-nowrap text-sm border border-gray-300 dark:border-gray-600 text-center">
+                  <CostValueCell value={hour.solarOnlyCost} tone="neutral" />
                 </td>
 
                 <td className="px-3 py-2 whitespace-nowrap text-sm border border-gray-300 dark:border-gray-600 text-center">
@@ -453,11 +510,33 @@ export const BatteryActionsTable: React.FC<BatteryActionsTableProps> = ({ resolu
               <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(dashboardData.summary?.totalGridExported)}</div>
             </td>
 
-            <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
+            <td className="px-3 py-2 whitespace-nowrap text-sm border border-gray-300 dark:border-gray-600 text-center">
+              <div className="font-medium text-red-600 dark:text-red-400">{totalImportCost.toFixed(2)}</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">{costUnit}</div>
+            </td>
+
+            <td className="px-3 py-2 whitespace-nowrap text-sm border border-gray-300 dark:border-gray-600 text-center">
+              <div className="font-medium text-green-600 dark:text-green-400">{totalExportRevenue.toFixed(2)}</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">{costUnit}</div>
+            </td>
+
+            <td className="px-3 py-2 whitespace-nowrap text-sm border border-gray-300 dark:border-gray-600 text-center">
+              <div className="font-medium text-gray-600 dark:text-gray-300">{totalWear.toFixed(2)}</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">{costUnit}</div>
+            </td>
+
+            <td className="px-3 py-2 whitespace-nowrap text-sm border border-gray-300 dark:border-gray-600 text-center">
               <div className="font-medium text-red-600 dark:text-red-400">
                 {getDisplayValue(dashboardData.summary?.optimizedCost)}
               </div>
               <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(dashboardData.summary?.optimizedCost)}</div>
+            </td>
+
+            <td className="px-3 py-2 whitespace-nowrap text-sm border border-gray-300 dark:border-gray-600 text-center">
+              <div className="font-medium text-gray-600 dark:text-gray-300">
+                {getDisplayValue(dashboardData.summary?.solarOnlyCost)}
+              </div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(dashboardData.summary?.solarOnlyCost)}</div>
             </td>
 
             <td className="px-3 py-2 whitespace-nowrap text-sm border border-gray-300 dark:border-gray-600 text-center">
@@ -471,12 +550,18 @@ export const BatteryActionsTable: React.FC<BatteryActionsTableProps> = ({ resolu
       </table>
 
       {/* Explanation */}
-      <div className="mt-4 p-3 bg-gray-50 dark:bg-gray-700 rounded-lg text-sm">
+      <div className="mt-4 p-3 bg-gray-50 dark:bg-gray-700 rounded-lg text-sm space-y-2">
         <p className="text-gray-600 dark:text-gray-300">
           Battery actions: <span className="bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 px-1 rounded">blue = charging</span>,
           <span className="bg-orange-100 dark:bg-orange-900/30 text-orange-800 dark:text-orange-300 px-1 rounded">orange = discharging</span>.
           The "Savings" column shows hourly optimization: positive (green) = money saved,
           zero (black) = break-even, negative (red) = additional cost that hour.
+        </p>
+        <p className="text-gray-500 dark:text-gray-400 text-xs border-t border-gray-200 dark:border-gray-600 pt-2">
+          This is the algorithm's own view of cost, including battery wear — it's what the optimizer
+          weighs when deciding whether to charge or discharge. It's not the same number as the
+          <strong className="text-gray-600 dark:text-gray-300"> Net Savings</strong> shown on the Savings page,
+          which compares actual grid cost to a no-battery baseline and excludes wear.
         </p>
       </div>
 
@@ -537,39 +622,8 @@ export const BatteryActionsTable: React.FC<BatteryActionsTableProps> = ({ resolu
 
                 {/* Tomorrow Hourly Table */}
                 <table className="min-w-full table-fixed divide-y divide-gray-200 dark:divide-gray-700 opacity-75">
-                  <thead className="bg-indigo-50 dark:bg-indigo-900/30">
-                    <tr>
-                      <th className="w-[8%] px-3 py-2 text-left text-xs font-medium text-indigo-700 dark:text-indigo-300 uppercase tracking-wider border border-gray-300 dark:border-gray-600">
-                        Hour
-                      </th>
-                      <th className="w-[7%] px-3 py-2 text-center text-xs font-medium text-indigo-700 dark:text-indigo-300 uppercase tracking-wider border border-gray-300 dark:border-gray-600">
-                        Price
-                      </th>
-                      <th className="w-[10.625%] px-3 py-2 text-center text-xs font-medium text-indigo-700 dark:text-indigo-300 uppercase tracking-wider border border-gray-300 dark:border-gray-600">
-                        Solar
-                      </th>
-                      <th className="w-[10.625%] px-3 py-2 text-center text-xs font-medium text-indigo-700 dark:text-indigo-300 uppercase tracking-wider border border-gray-300 dark:border-gray-600">
-                        Consumption
-                      </th>
-                      <th className="w-[10.625%] px-3 py-2 text-center text-xs font-medium text-indigo-700 dark:text-indigo-300 uppercase tracking-wider border border-gray-300 dark:border-gray-600">
-                        Battery Action
-                      </th>
-                      <th className="w-[10.625%] px-3 py-2 text-center text-xs font-medium text-indigo-700 dark:text-indigo-300 uppercase tracking-wider border border-gray-300 dark:border-gray-600">
-                        Battery Level
-                      </th>
-                      <th className="w-[10.625%] px-3 py-2 text-center text-xs font-medium text-indigo-700 dark:text-indigo-300 uppercase tracking-wider border border-gray-300 dark:border-gray-600">
-                        Grid Import
-                      </th>
-                      <th className="w-[10.625%] px-3 py-2 text-center text-xs font-medium text-indigo-700 dark:text-indigo-300 uppercase tracking-wider border border-gray-300 dark:border-gray-600">
-                        Grid Export
-                      </th>
-                      <th className="w-[10.625%] px-3 py-2 text-center text-xs font-medium text-indigo-700 dark:text-indigo-300 uppercase tracking-wider border border-gray-300 dark:border-gray-600">
-                        Actual Cost
-                      </th>
-                      <th className="w-[10.625%] px-3 py-2 text-center text-xs font-medium text-indigo-700 dark:text-indigo-300 uppercase tracking-wider border border-gray-300 dark:border-gray-600">
-                        Savings
-                      </th>
-                    </tr>
+                  <thead>
+                    <GroupedTableHeader variant="tomorrow" />
                   </thead>
                   <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
                     {dashboardData.tomorrowData!.map((hour: any, index: number) => (
@@ -762,19 +816,24 @@ export const BatteryActionsTable: React.FC<BatteryActionsTableProps> = ({ resolu
                           </div>
                         </td>
 
-                        <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 text-center">
-                          <div className={`font-medium ${
-                            Math.abs(getNumericValue(hour.hourlyCost)) < 0.01 ? 'text-gray-900 dark:text-white' :
-                            getNumericValue(hour.hourlyCost) > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'
-                          }`}>
-                            {getDisplayValue(hour.hourlyCost)}
-                          </div>
-                          <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(hour.hourlyCost)}</div>
-                          {getNumericValue(hour.batteryCycleCost) > 0.001 && (
-                            <div className="text-xs text-gray-400 dark:text-gray-500">
-                              of which {getDisplayValue(hour.batteryCycleCost)} wear
-                            </div>
-                          )}
+                        <td className="px-3 py-2 whitespace-nowrap text-sm border border-gray-300 dark:border-gray-600 text-center">
+                          <CostValueCell value={hour.importCost} tone="cost" />
+                        </td>
+
+                        <td className="px-3 py-2 whitespace-nowrap text-sm border border-gray-300 dark:border-gray-600 text-center">
+                          <CostValueCell value={hour.exportRevenue} tone="revenue" />
+                        </td>
+
+                        <td className="px-3 py-2 whitespace-nowrap text-sm border border-gray-300 dark:border-gray-600 text-center">
+                          <CostValueCell value={hour.batteryCycleCost} tone="neutral" />
+                        </td>
+
+                        <td className="px-3 py-2 whitespace-nowrap text-sm border border-gray-300 dark:border-gray-600 text-center">
+                          <CostValueCell value={hour.hourlyCost} tone="cost" />
+                        </td>
+
+                        <td className="px-3 py-2 whitespace-nowrap text-sm border border-gray-300 dark:border-gray-600 text-center">
+                          <CostValueCell value={hour.solarOnlyCost} tone="neutral" />
                         </td>
 
                         <td className="px-3 py-2 whitespace-nowrap text-sm border border-gray-300 dark:border-gray-600 text-center">

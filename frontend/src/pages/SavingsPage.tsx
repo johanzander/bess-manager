@@ -1,14 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { DetailedSavingsAnalysis } from '../components/DetailedSavingsAnalysis';
-import { SavingsAggregateView } from '../components/SavingsAggregateView';
-import { useSettings } from '../hooks/useSettings';
-import { useUserPreferences } from '../hooks/useUserPreferences';
+import { SavingsAggregateView, SAVINGS_PERIODS, SAVINGS_PERIOD_LABELS } from '../components/SavingsAggregateView';
+import { SavingsAggregatePeriod } from '../api/scheduleApi';
 import api from '../lib/api';
 
 const SavingsPage: React.FC = () => {
-  const { batterySettings } = useSettings();
-  const { dataResolution, setDataResolution } = useUserPreferences();
   const [systemMode, setSystemMode] = useState<string>('normal');
+  const [period, setPeriod] = useState<SavingsAggregatePeriod>('day');
 
   useEffect(() => {
     api.get('/api/settings')
@@ -19,34 +16,14 @@ const SavingsPage: React.FC = () => {
       .catch(() => {});
   }, []);
 
-  const mergedSettings = {
-    totalCapacity: batterySettings?.totalCapacity || 10,
-    reservedCapacity: batterySettings?.reservedCapacity || 2,
-    estimatedConsumption: batterySettings?.estimatedConsumption || 1.5,
-    maxChargePowerKw: batterySettings?.maxChargePowerKw || 6,
-    maxDischargePowerKw: batterySettings?.maxDischargePowerKw || 6,
-    cycleCostPerKwh: batterySettings?.cycleCostPerKwh || 10,
-    chargingPowerRate: batterySettings?.chargingPowerRate || 90,
-    minSoc: batterySettings?.minSoc || 20,
-    maxSoc: batterySettings?.maxSoc || 95,
-    efficiencyCharge: batterySettings?.efficiencyCharge || 95,
-    efficiencyDischarge: batterySettings?.efficiencyDischarge || 95,
-    useActualPrice: true,
-    markupRate: 0.05,
-    vatMultiplier: 1.25,
-    additionalCosts: 0.45,
-    taxReduction: 0.1,
-    area: 'SE3'
-  };
-
   return (
     <div className="space-y-6">
       <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
-          <div className="mb-4 sm:mb-0">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Financial Analysis & Savings Report</h1>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Savings Report</h1>
             <p className="text-gray-600 dark:text-gray-300">
-              Compare how your battery system optimizes energy costs and increases solar utilization.
+              What you actually paid the grid, and how much solar and battery saved you against grid-only power, over time.
             </p>
             {systemMode === 'demo' && (
               <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
@@ -54,38 +31,26 @@ const SavingsPage: React.FC = () => {
               </p>
             )}
           </div>
-        </div>
 
-        {/* Resolution Selector (applies to Scenario Comparison, which is period-of-day granular) */}
-        <div className="mt-4 flex items-center justify-end">
-          <div className="flex bg-gray-100 dark:bg-gray-700 rounded-lg p-1">
-            <button
-              onClick={() => setDataResolution('hourly')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                dataResolution === 'hourly'
-                  ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm'
-                  : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
-              }`}
-            >
-              60 min
-            </button>
-            <button
-              onClick={() => setDataResolution('quarter-hourly')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                dataResolution === 'quarter-hourly'
-                  ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm'
-                  : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
-              }`}
-            >
-              15 min
-            </button>
+          <div className="flex bg-gray-100 dark:bg-gray-700 rounded-lg p-1 w-fit">
+            {SAVINGS_PERIODS.map((p) => (
+              <button
+                key={p}
+                onClick={() => setPeriod(p)}
+                className={`px-3 py-1 rounded-md text-sm font-medium capitalize transition-colors ${
+                  period === p
+                    ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm'
+                    : 'text-gray-600 dark:text-gray-300'
+                }`}
+              >
+                {SAVINGS_PERIOD_LABELS[p]}
+              </button>
+            ))}
           </div>
         </div>
       </div>
 
-      <SavingsAggregateView />
-
-      <DetailedSavingsAnalysis settings={mergedSettings} resolution={dataResolution} />
+      <SavingsAggregateView period={period} />
     </div>
   );
 };

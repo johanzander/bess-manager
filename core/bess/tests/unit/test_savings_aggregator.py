@@ -81,6 +81,48 @@ class TestWeekBuckets:
         # _period() sets home_consumption == grid_imported and buy_price 2.0
         assert buckets[0].totals.grid_only_cost == 2.0  # 1.0 * 2.0
 
+    def test_solar_only_cost_is_summed(self, tmp_path):
+        store = DailyViewStore(persist_dir=tmp_path)
+
+        def _period_with_solar_only_cost(solar_only_cost: float) -> PeriodData:
+            energy = EnergyData(
+                solar_production=2.0,
+                home_consumption=1.0,
+                battery_charged=0.0,
+                battery_discharged=0.0,
+                grid_imported=1.0,
+                grid_exported=0.0,
+                battery_soe_start=10.0,
+                battery_soe_end=10.0,
+            )
+            economic = EconomicData(
+                buy_price=2.0, sell_price=1.0, solar_only_cost=solar_only_cost
+            )
+            return PeriodData(period=0, energy=energy, economic=economic)
+
+        store.save_day(
+            DailyView(
+                date=date(2026, 7, 6),
+                periods=[_period_with_solar_only_cost(1.5)],
+                total_savings=0.0,
+                actual_count=1,
+                predicted_count=0,
+            )
+        )
+        store.save_day(
+            DailyView(
+                date=date(2026, 7, 8),
+                periods=[_period_with_solar_only_cost(2.5)],
+                total_savings=0.0,
+                actual_count=1,
+                predicted_count=0,
+            )
+        )
+
+        buckets = build_buckets("week", count=1, store=store, today=date(2026, 7, 9))
+
+        assert buckets[0].totals.solar_only_cost == 4.0  # 1.5 + 2.5
+
     def test_two_days_in_the_same_week_are_summed(self, tmp_path):
         store = DailyViewStore(persist_dir=tmp_path)
         _seed_day(

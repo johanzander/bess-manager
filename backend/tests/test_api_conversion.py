@@ -103,6 +103,8 @@ class TestAPIConversion:
             "batterySocEnd",
             "buyPrice",
             "sellPrice",
+            "importCost",
+            "exportRevenue",
             "gridOnlyCost",
             "hourlyCost",
             "hourlySavings",

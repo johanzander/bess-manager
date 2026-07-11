@@ -92,6 +92,8 @@ class APISavingsBucket:
     gridCost: FormattedValue
     gridOnlyCost: FormattedValue
     netSavings: FormattedValue
+    solarSavings: FormattedValue
+    batterySavings: FormattedValue
     batteryCycleCost: FormattedValue
     savingsVsGridOnly: FormattedValue
     solarKwh: FormattedValue
@@ -101,6 +103,12 @@ class APISavingsBucket:
     @classmethod
     def from_internal(cls, bucket, currency: str) -> APISavingsBucket:
         t = bucket.totals
+        # netSavings splits cleanly into solar's contribution (self-consumption +
+        # export, no battery) and battery's additional contribution (storage/
+        # timing on top of solar) — solarSavings + batterySavings == netSavings.
+        # Both are wear-free, matching netSavings' own wear-free definition.
+        solar_savings = t.grid_only_cost - t.solar_only_cost
+        battery_savings = t.solar_only_cost - t.grid_cost
         return cls(
             label=bucket.label,
             startDate=bucket.start_date,
@@ -114,6 +122,10 @@ class APISavingsBucket:
             gridOnlyCost=create_formatted_value(t.grid_only_cost, "currency", currency),
             netSavings=create_formatted_value(
                 t.grid_only_cost - t.grid_cost, "currency", currency
+            ),
+            solarSavings=create_formatted_value(solar_savings, "currency", currency),
+            batterySavings=create_formatted_value(
+                battery_savings, "currency", currency
             ),
             batteryCycleCost=create_formatted_value(
                 t.battery_cycle_cost, "currency", currency
@@ -364,6 +376,8 @@ class APIDashboardHourlyData:
     batterySoeEnd: FormattedValue
     buyPrice: FormattedValue
     sellPrice: FormattedValue
+    importCost: FormattedValue
+    exportRevenue: FormattedValue
     hourlyCost: FormattedValue
     gridCost: FormattedValue
     batteryCycleCost: FormattedValue
@@ -442,6 +456,8 @@ class APIDashboardHourlyData:
             # Economic data
             buyPrice=safe_format(hourly.economic.buy_price, "price"),
             sellPrice=safe_format(hourly.economic.sell_price, "price"),
+            importCost=safe_format(hourly.economic.import_cost, "currency"),
+            exportRevenue=safe_format(hourly.economic.export_revenue, "currency"),
             hourlyCost=safe_format(hourly.economic.hourly_cost, "currency"),
             gridCost=safe_format(hourly.economic.grid_cost, "currency"),
             batteryCycleCost=safe_format(

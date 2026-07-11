@@ -5,6 +5,7 @@ API endpoints for battery and electricity settings, dashboard data, and decision
 
 import dataclasses
 import threading
+from datetime import date as date_cls
 from datetime import datetime, timedelta
 
 from api_conversion import (
@@ -489,6 +490,14 @@ def _aggregate_quarterly_to_hourly(
                 currency,
             ),
             # Sum costs and savings
+            importCost=create_formatted_value(
+                sum(p.importCost.value for p in quarter_periods), "currency", currency
+            ),
+            exportRevenue=create_formatted_value(
+                sum(p.exportRevenue.value for p in quarter_periods),
+                "currency",
+                currency,
+            ),
             hourlyCost=create_formatted_value(
                 sum(p.hourlyCost.value for p in quarter_periods), "currency", currency
             ),
@@ -532,14 +541,41 @@ def _aggregate_quarterly_to_hourly(
     return hourly_periods
 
 
+@router.get("/api/dashboard/available-dates")
+async def get_dashboard_available_dates():
+    """List ISO dates that have dashboard data available (for date-picker greying).
+
+    Today is always included even though it isn't persisted to the
+    DailyViewStore until day rollover.
+    """
+    from app import bess_controller
+
+    if not bess_controller.system.is_configured:
+        raise HTTPException(
+            status_code=503,
+            detail="System not configured. Complete the setup wizard first.",
+        )
+
+    persisted_dates = bess_controller.system.daily_view_store.list_available_dates()
+    today = time_utils.today().isoformat()
+    dates = sorted(set(persisted_dates) | {today})
+    return {"dates": dates}
+
+
 @router.get("/api/dashboard")
 async def get_dashboard_data(
     resolution: str = Query("quarter-hourly", pattern="^(hourly|quarter-hourly)$"),
+    date: str | None = Query(
+        None, description="ISO date (YYYY-MM-DD) for a historical day; omit for today"
+    ),
 ):
     """Unified dashboard endpoint using dataclass-based implementation for type safety.
 
     Args:
         resolution: Data resolution - 'hourly' (24 periods) or 'quarter-hourly' (96 periods)
+        date: Optional historical date. Past days are read from the persisted
+            DailyViewStore rather than the live in-memory system state, so
+            tomorrow's schedule and real-time battery SOC don't apply.
     """
     from app import bess_controller
 
@@ -562,22 +598,36 @@ async def get_dashboard_data(
             "status": bess_controller.startup_status,
         }
 
+    target_date = date_cls.fromisoformat(date) if date else None
+    is_historical = target_date is not None and target_date != time_utils.today()
+
     try:
-        logger.debug(f"Starting dashboard data retrieval with resolution={resolution}")
+        logger.debug(
+            f"Starting dashboard data retrieval with resolution={resolution}, date={date}"
+        )
 
-        # Guard: if no schedule exists yet the system is still initializing
-        # (post-wizard backfill running in background).
-        if not bess_controller.system.schedule_store.get_latest_schedule():
-            logger.info(
-                "Dashboard requested before schedule is ready — returning initializing state"
-            )
-            return {
-                "error": "initializing",
-                "message": "System is initializing. The optimization schedule will be ready shortly.",
-            }
+        if is_historical:
+            daily_view = bess_controller.system.daily_view_store.load_day(target_date)
+            if daily_view is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No historical data available for {target_date.isoformat()}",
+                )
+        else:
+            # Guard: if no schedule exists yet the system is still initializing
+            # (post-wizard backfill running in background).
+            if not bess_controller.system.schedule_store.get_latest_schedule():
+                logger.info(
+                    "Dashboard requested before schedule is ready — returning initializing state"
+                )
+                return {
+                    "error": "initializing",
+                    "message": "System is initializing. The optimization schedule will be ready shortly.",
+                }
 
-        # Get daily view data (always quarterly internally)
-        daily_view = bess_controller.system.get_current_daily_view()
+            # Get daily view data (always quarterly internally)
+            daily_view = bess_controller.system.get_current_daily_view()
+
         logger.debug(f"Daily view retrieved with {len(daily_view.periods)} periods")
 
         # Get system components
@@ -606,67 +656,70 @@ async def get_dashboard_data(
                 f"Aggregated to {len(hourly_dataclass_instances)} hourly periods"
             )
 
-        # Extract tomorrow's optimization data from ScheduleStore
+        # Extract tomorrow's optimization data from ScheduleStore.
+        # Not applicable when browsing a historical day — there's no "tomorrow"
+        # schedule relative to a past date.
         tomorrow_data: list[APIDashboardHourlyData] | None = None
-        try:
-            stored_schedule = (
-                bess_controller.system.schedule_store.get_latest_schedule()
-            )
-            if stored_schedule:
-                opt_result = stored_schedule.optimization_result
-                opt_period = stored_schedule.optimization_period
-                today_period_count = get_period_count(time_utils.today())
-                tomorrow_period_count = get_period_count(
-                    time_utils.today() + timedelta(days=1)
+        if not is_historical:
+            try:
+                stored_schedule = (
+                    bess_controller.system.schedule_store.get_latest_schedule()
                 )
-                tomorrow_periods = []
-                # Standalone next-day schedule (prepare_next_day path): opt_period=0
-                # and period_data[0] carries tomorrow's date. In that case
-                # period_data[0..95] maps to tomorrow's periods 0..95, so the anchor
-                # is today_period_count rather than opt_period.
-                # Regular schedules (including midnight runs with extended horizon)
-                # have opt_period > 0 or period_data large enough to include tomorrow,
-                # so they continue to use opt_period as the anchor.
-                is_next_day_only = (
-                    opt_period == 0
-                    and bool(opt_result.period_data)
-                    and opt_result.period_data[0].timestamp is not None
-                    and opt_result.period_data[0].timestamp.date()
-                    == time_utils.today() + timedelta(days=1)
-                )
-                period_data_anchor = (
-                    today_period_count if is_next_day_only else opt_period
-                )
-                for period_idx in range(
-                    today_period_count,
-                    today_period_count + tomorrow_period_count,
-                ):
-                    data_idx = period_idx - period_data_anchor
-                    if 0 <= data_idx < len(opt_result.period_data):
-                        tomorrow_periods.append(opt_result.period_data[data_idx])
-                if tomorrow_periods:
-                    tomorrow_data = [
-                        APIDashboardHourlyData.from_internal(
-                            p, battery_capacity, currency
-                        )
-                        for p in tomorrow_periods
-                    ]
-                    if resolution == "hourly":
-                        tomorrow_data = _aggregate_quarterly_to_hourly(
-                            tomorrow_data, battery_capacity, currency
-                        )
-                    else:
-                        # Tomorrow's periods are indexed relative to the start of the
-                        # optimization window (e.g. 96..191 for a 96-period day).
-                        # The frontend maps period index to wall-clock time, so period 0
-                        # must represent 00:00 of the displayed day.
+                if stored_schedule:
+                    opt_result = stored_schedule.optimization_result
+                    opt_period = stored_schedule.optimization_period
+                    today_period_count = get_period_count(time_utils.today())
+                    tomorrow_period_count = get_period_count(
+                        time_utils.today() + timedelta(days=1)
+                    )
+                    tomorrow_periods = []
+                    # Standalone next-day schedule (prepare_next_day path): opt_period=0
+                    # and period_data[0] carries tomorrow's date. In that case
+                    # period_data[0..95] maps to tomorrow's periods 0..95, so the anchor
+                    # is today_period_count rather than opt_period.
+                    # Regular schedules (including midnight runs with extended horizon)
+                    # have opt_period > 0 or period_data large enough to include tomorrow,
+                    # so they continue to use opt_period as the anchor.
+                    is_next_day_only = (
+                        opt_period == 0
+                        and bool(opt_result.period_data)
+                        and opt_result.period_data[0].timestamp is not None
+                        and opt_result.period_data[0].timestamp.date()
+                        == time_utils.today() + timedelta(days=1)
+                    )
+                    period_data_anchor = (
+                        today_period_count if is_next_day_only else opt_period
+                    )
+                    for period_idx in range(
+                        today_period_count,
+                        today_period_count + tomorrow_period_count,
+                    ):
+                        data_idx = period_idx - period_data_anchor
+                        if 0 <= data_idx < len(opt_result.period_data):
+                            tomorrow_periods.append(opt_result.period_data[data_idx])
+                    if tomorrow_periods:
                         tomorrow_data = [
-                            dataclasses.replace(p, period=i)
-                            for i, p in enumerate(tomorrow_data)
+                            APIDashboardHourlyData.from_internal(
+                                p, battery_capacity, currency
+                            )
+                            for p in tomorrow_periods
                         ]
-        except (AttributeError, KeyError, ValueError) as e:
-            logger.warning(f"Failed to get tomorrow's optimization data: {e}")
-            tomorrow_data = None
+                        if resolution == "hourly":
+                            tomorrow_data = _aggregate_quarterly_to_hourly(
+                                tomorrow_data, battery_capacity, currency
+                            )
+                        else:
+                            # Tomorrow's periods are indexed relative to the start of the
+                            # optimization window (e.g. 96..191 for a 96-period day).
+                            # The frontend maps period index to wall-clock time, so period 0
+                            # must represent 00:00 of the displayed day.
+                            tomorrow_data = [
+                                dataclasses.replace(p, period=i)
+                                for i, p in enumerate(tomorrow_data)
+                            ]
+            except (AttributeError, KeyError, ValueError) as e:
+                logger.warning(f"Failed to get tomorrow's optimization data: {e}")
+                tomorrow_data = None
 
         # Calculate basic totals from dataclass fields directly (no dict access)
         basic_totals = {
@@ -715,22 +768,34 @@ async def get_dashboard_data(
             "netGrid": total_net_grid_cost,
         }
 
-        battery_soc: float = controller.get_battery_soc()
+        if is_historical:
+            # No live sensor state applies to a past day — derive SOC from the
+            # last persisted period instead of reading the current battery sensor.
+            last_period = daily_view.periods[-1]
+            battery_soc: float = (
+                last_period.energy.battery_soe_end / battery_capacity
+            ) * 100.0
+            strategic_summary: dict[str, int] = {}
+            for period_data in daily_view.periods:
+                intent = period_data.decision.strategic_intent
+                strategic_summary[intent] = strategic_summary.get(intent, 0) + 1
+        else:
+            battery_soc = controller.get_battery_soc()
 
-        # Strategic intent summary from actual schedule data
-        try:
-            schedule_manager = bess_controller.system._inverter_controller
-            strategic_summary_data = schedule_manager.get_strategic_intent_summary()
-            # Convert to count format expected by frontend
-            strategic_summary = {
-                intent: data.get("count", 0)
-                for intent, data in strategic_summary_data.items()
-            }
-        except Exception as e:
-            logger.error(f"Failed to get strategic intent summary: {e}")
-            raise ValueError(
-                f"Strategic intent summary is required but failed to load: {e}"
-            ) from e
+            # Strategic intent summary from actual schedule data
+            try:
+                schedule_manager = bess_controller.system._inverter_controller
+                strategic_summary_data = schedule_manager.get_strategic_intent_summary()
+                # Convert to count format expected by frontend
+                strategic_summary = {
+                    intent: data.get("count", 0)
+                    for intent, data in strategic_summary_data.items()
+                }
+            except Exception as e:
+                logger.error(f"Failed to get strategic intent summary: {e}")
+                raise ValueError(
+                    f"Strategic intent summary is required but failed to load: {e}"
+                ) from e
 
         # Create the dataclass response using pre-created hourly instances
         response = APIDashboardResponse.from_dashboard_data(
@@ -747,11 +812,18 @@ async def get_dashboard_data(
             tomorrow_data=tomorrow_data,
         )
 
+        if is_historical:
+            # currentPeriod is computed from wall-clock "now" in from_dashboard_data,
+            # which doesn't apply to a past day — no row should show as "Current".
+            response.currentPeriod = -1
+
         logger.debug("Dashboard response created successfully using dataclasses")
 
         # Return dataclass directly - already has camelCase fields
         return response.__dict__
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error generating dashboard data: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e

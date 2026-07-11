@@ -160,6 +160,62 @@ class TestDashboard:
         resp = _client.get("/api/dashboard")
         assert resp.status_code == 503
 
+    def test_historical_date_returns_persisted_daily_view(self):
+        ctrl = _make_started_controller()
+        historical_date = date(2020, 1, 1)
+        ctrl.system.daily_view_store.load_day.return_value = DailyView(
+            date=historical_date,
+            periods=[_make_period(i) for i in range(96)],
+            total_savings=0.0,
+            actual_count=96,
+            predicted_count=0,
+        )
+        sys.modules["app"].bess_controller = ctrl
+
+        resp = _client.get(f"/api/dashboard?date={historical_date.isoformat()}")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["date"] == historical_date.isoformat()
+        # No row should be flagged as "current" for a past day.
+        assert body["currentPeriod"] == -1
+        assert body["tomorrowData"] is None
+        ctrl.system.daily_view_store.load_day.assert_called_once_with(historical_date)
+        # Historical path must not touch live sensors.
+        ctrl.ha_controller.get_battery_soc.assert_not_called()
+
+    def test_historical_date_with_no_snapshot_returns_404(self):
+        ctrl = _make_started_controller()
+        ctrl.system.daily_view_store.load_day.return_value = None
+        sys.modules["app"].bess_controller = ctrl
+
+        resp = _client.get("/api/dashboard?date=2020-01-01")
+
+        assert resp.status_code == 404
+
+
+class TestDashboardAvailableDates:
+    def test_returns_persisted_dates_plus_today(self):
+        ctrl = _make_started_controller()
+        ctrl.system.daily_view_store.list_available_dates.return_value = [
+            "2020-01-01",
+            "2020-01-03",
+        ]
+        sys.modules["app"].bess_controller = ctrl
+
+        resp = _client.get("/api/dashboard/available-dates")
+
+        assert resp.status_code == 200
+        dates = resp.json()["dates"]
+        assert "2020-01-01" in dates
+        assert "2020-01-03" in dates
+        assert date.today().isoformat() in dates
+
+    def test_unconfigured_returns_503(self):
+        sys.modules["app"].bess_controller = _unconfigured_controller()
+        resp = _client.get("/api/dashboard/available-dates")
+        assert resp.status_code == 503
+
 
 def test_net_grid_cost_excludes_battery_wear():
     def _hour(grid_cost, cycle_cost):

@@ -17,7 +17,7 @@ import {
 
 
 // StatusCard component
-interface StatusCardProps {
+export interface StatusCardProps {
   title: string;
   keyMetric: string;
   keyValue: number | string;
@@ -34,9 +34,10 @@ interface StatusCardProps {
   icon: React.ComponentType<{ className?: string }>;
   className?: string;
   systemMode?: string;
+  headerRight?: React.ReactNode;
 }
 
-const StatusCard: React.FC<StatusCardProps> = ({
+export const StatusCard: React.FC<StatusCardProps> = ({
   title,
   icon: Icon,
   color,
@@ -45,7 +46,8 @@ const StatusCard: React.FC<StatusCardProps> = ({
   keyUnit,
   metrics,
   className = "",
-  systemMode
+  systemMode,
+  headerRight
 }) => {
   const colorClasses = {
     blue: 'bg-blue-50 border-blue-200 dark:bg-blue-900/20 dark:border-blue-800',
@@ -80,9 +82,12 @@ const StatusCard: React.FC<StatusCardProps> = ({
   return (
     <div className={`border rounded-lg p-6 ${colorClasses[color]} ${className}`}>
       {/* Header */}
-      <div className="flex items-center mb-4">
-        <Icon className={`h-6 w-6 ${iconColorClasses[color]} mr-3`} />
-        <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{title}</h3>
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center">
+          <Icon className={`h-6 w-6 ${iconColorClasses[color]} mr-3`} />
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{title}</h3>
+        </div>
+        {headerRight}
       </div>
 
       {/* Key Metric */}

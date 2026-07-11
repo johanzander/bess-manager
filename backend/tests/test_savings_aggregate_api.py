@@ -176,6 +176,58 @@ class TestSavingsAggregate:
         assert resp.status_code == 200
         assert resp.json()["count"] == 1
 
+class TestSolarBatterySavingsSplit:
+    def _store_with_solar_and_battery(self, tmp_path) -> DailyViewStore:
+        # grid_only_cost=10 (no solar/battery baseline), solar_only_cost=6
+        # (solar alone would have cost 6), grid_cost=2 (actual, with battery
+        # timing on top of solar) -> solar contributes 4, battery contributes 4.
+        energy = EnergyData(
+            solar_production=3.0,
+            home_consumption=5.0,
+            battery_charged=1.0,
+            battery_discharged=1.0,
+            grid_imported=1.0,
+            grid_exported=0.0,
+            battery_soe_start=10.0,
+            battery_soe_end=10.0,
+        )
+        economic = EconomicData(
+            buy_price=2.0,
+            sell_price=1.0,
+            grid_only_cost=10.0,
+            solar_only_cost=6.0,
+        )
+        period = PeriodData(period=0, energy=energy, economic=economic)
+        store = DailyViewStore(persist_dir=tmp_path)
+        store.save_day(
+            DailyView(
+                date=date(2026, 7, 8),
+                periods=[period],
+                total_savings=8.0,
+                actual_count=1,
+                predicted_count=0,
+            )
+        )
+        return store
+
+    def test_solar_and_battery_savings_sum_to_net_savings(self, tmp_path):
+        sys.modules["app"].bess_controller = _make_started_controller(
+            self._store_with_solar_and_battery(tmp_path)
+        )
+
+        resp = _client.get("/api/savings/aggregate?period=week&count=1")
+
+        assert resp.status_code == 200
+        bucket = resp.json()["buckets"][0]
+        assert bucket["gridCost"]["value"] == 2.0  # 1.0 import_eur - 0.0 export_eur
+        assert bucket["solarSavings"]["value"] == 4.0  # 10.0 - 6.0
+        assert bucket["batterySavings"]["value"] == 4.0  # 6.0 - 2.0
+        assert bucket["netSavings"]["value"] == 8.0  # 10.0 - 2.0
+        assert (
+            bucket["solarSavings"]["value"] + bucket["batterySavings"]["value"]
+            == bucket["netSavings"]["value"]
+        )
+
 
 class TestDiskUsage:
     def test_returns_day_count_and_bytes(self, tmp_path):

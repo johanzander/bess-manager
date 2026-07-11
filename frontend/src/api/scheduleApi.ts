@@ -18,6 +18,15 @@ export const fetchDashboardData = async (date?: string, resolution?: string) => 
   return response.data;
 };
 
+/**
+ * Fetch ISO dates (YYYY-MM-DD) that have dashboard data available, for greying
+ * out unavailable days in a date picker instead of erroring on selection.
+ */
+export const fetchAvailableDashboardDates = async (): Promise<string[]> => {
+  const response = await api.get('/api/dashboard/available-dates');
+  return response.data.dates;
+};
+
 // Type definitions for the unified dashboard response
 export interface DashboardHourlyData {
   hour: number;
@@ -40,6 +49,8 @@ export interface DashboardHourlyData {
   // Financial data - FormattedValue
   buyPrice: FormattedValue;
   sellPrice: FormattedValue;
+  importCost: FormattedValue;
+  exportRevenue: FormattedValue;
   hourlyCost: FormattedValue;
   hourlySavings: FormattedValue;
   batteryCycleCost: FormattedValue;
@@ -204,6 +215,8 @@ export interface SavingsBucket {
   gridCost: FormattedValue;
   gridOnlyCost: FormattedValue;
   netSavings: FormattedValue;
+  solarSavings: FormattedValue;
+  batterySavings: FormattedValue;
   batteryCycleCost: FormattedValue;
   savingsVsGridOnly: FormattedValue;
   solarKwh: FormattedValue;

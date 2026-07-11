@@ -531,7 +531,9 @@ def _aggregate_quarterly_to_hourly(
                 sum(p.solarSavings.value for p in quarter_periods), "currency", currency
             ),
             batterySavings=create_formatted_value(
-                sum(p.batterySavings.value for p in quarter_periods), "currency", currency
+                sum(p.batterySavings.value for p in quarter_periods),
+                "currency",
+                currency,
             ),
             netSavings=create_formatted_value(
                 sum(p.netSavings.value for p in quarter_periods), "currency", currency

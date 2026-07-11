@@ -14,6 +14,7 @@ from api_dataclasses import APIDashboardHourlyData, APIDashboardSummary
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from core.bess import time_utils
 from core.bess.daily_view_builder import DailyView
 from core.bess.models import DecisionData, EconomicData, EnergyData, PeriodData
 
@@ -209,7 +210,11 @@ class TestDashboardAvailableDates:
         dates = resp.json()["dates"]
         assert "2020-01-01" in dates
         assert "2020-01-03" in dates
-        assert date.today().isoformat() in dates
+        # The endpoint appends time_utils.today() (HA-configured timezone),
+        # not the stdlib UTC date.today() — comparing against the same
+        # clock the endpoint uses avoids a flaky off-by-one near the
+        # UTC/local-day boundary.
+        assert time_utils.today().isoformat() in dates
 
     def test_unconfigured_returns_503(self):
         sys.modules["app"].bess_controller = _unconfigured_controller()

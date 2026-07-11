@@ -207,7 +207,9 @@ class TestSavingsAggregate:
         assert body["buckets"][0]["label"] == "2026-05-01"
         assert body["buckets"][0]["dayCount"] == 0
 
-    def test_date_param_does_not_use_the_live_daily_view_for_a_historical_day(self, tmp_path):
+    def test_date_param_does_not_use_the_live_daily_view_for_a_historical_day(
+        self, tmp_path
+    ):
         controller = _make_started_controller(DailyViewStore(persist_dir=tmp_path))
         sys.modules["app"].bess_controller = controller
 

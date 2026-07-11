@@ -255,10 +255,10 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", sys
           return dashboardData.summary.netGridCost;
         })(),
         todaysSavings: (() => {
-          if (!dashboardData.summary?.totalSavings) {
-            throw new Error('MISSING DATA: summary.totalSavings is required for savings display');
+          if (!dashboardData.summary?.netSavings) {
+            throw new Error('MISSING DATA: summary.netSavings is required for savings display');
           }
-          return dashboardData.summary.totalSavings;
+          return dashboardData.summary.netSavings;
         })(),
         gridOnlyCost: (() => {
           if (!dashboardData.summary?.gridOnlyCost) {
@@ -437,7 +437,7 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", sys
           icon: DollarSign
         },
         {
-          label: "Today's Savings",
+          label: "Net Savings",
           value: statusData.costAndSavings?.todaysSavings?.text,
           unit: "",
           icon: DollarSign,

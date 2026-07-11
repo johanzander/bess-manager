@@ -66,6 +66,7 @@ export interface DashboardSummary {
   solarOnlyCost: FormattedValue;
   optimizedCost: FormattedValue;
   netGridCost: FormattedValue;
+  netSavings: FormattedValue;
 
   // Savings calculations - CANONICAL
   totalSavings: FormattedValue;
@@ -202,6 +203,7 @@ export interface SavingsBucket {
   exportEur: FormattedValue;
   gridCost: FormattedValue;
   gridOnlyCost: FormattedValue;
+  netSavings: FormattedValue;
   batteryCycleCost: FormattedValue;
   savingsVsGridOnly: FormattedValue;
   solarKwh: FormattedValue;

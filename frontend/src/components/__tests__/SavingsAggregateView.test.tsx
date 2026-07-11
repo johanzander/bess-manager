@@ -14,6 +14,7 @@ const bucket = (label: string, dayCount: number) => ({
   exportEur: { value: 2, display: '2.00', unit: 'EUR', text: '2.00 EUR' },
   gridCost: { value: 0, display: '0.00', unit: 'EUR', text: '0.00 EUR' },
   gridOnlyCost: { value: 5, display: '5.00', unit: 'EUR', text: '5.00 EUR' },
+  netSavings: { value: 4.5, display: '4.50', unit: 'EUR', text: '4.50 EUR' },
   batteryCycleCost: { value: 0.1, display: '0.10', unit: 'EUR', text: '0.10 EUR' },
   savingsVsGridOnly: { value: 3, display: '3.00', unit: 'EUR', text: '3.00 EUR' },
   solarKwh: { value: 1, display: '1.0', unit: 'kWh', text: '1.0 kWh' },
@@ -42,7 +43,7 @@ describe('SavingsAggregateView', () => {
     await waitFor(() => {
       expect(screen.getByText('2026-W28')).toBeInTheDocument();
     });
-    expect(screen.getByText('3.00 EUR')).toBeInTheDocument();
+    expect(screen.getByText('4.50 EUR')).toBeInTheDocument();
   });
 
   it('defaults to the chart view without crashing', async () => {
@@ -118,6 +119,25 @@ describe('SavingsAggregateView', () => {
       expect(screen.getByText('Grid-Only Cost')).toBeInTheDocument();
     });
     expect(screen.getByText('5.00 EUR')).toBeInTheDocument();
+  });
+
+  it('renders a Net Savings column populated from bucket.netSavings.text, not savingsVsGridOnly', async () => {
+    vi.spyOn(scheduleApi, 'fetchSavingsAggregate').mockResolvedValue({
+      buckets: [bucket('2026-W28', 1)],
+      count: 1,
+    });
+
+    render(<SavingsAggregateView />);
+
+    fireEvent.click(screen.getByRole('button', { name: /table/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Net Savings')).toBeInTheDocument();
+    });
+    // netSavings (4.50 EUR) is distinct from savingsVsGridOnly (3.00 EUR) in
+    // the fixture - a wrong-field regression would show 3.00 EUR instead.
+    expect(screen.getByText('4.50 EUR')).toBeInTheDocument();
+    expect(screen.queryByText('3.00 EUR')).not.toBeInTheDocument();
   });
 
   it('never renders Battery Wear, even when batteryCycleCost is non-zero', async () => {

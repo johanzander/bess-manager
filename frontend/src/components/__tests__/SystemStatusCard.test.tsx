@@ -70,6 +70,7 @@ const mockDashboardData = {
     solarOnlyCost: fv(1.95, '1.95', 'EUR'),
     optimizedCost: fv(1.9, '1.90', 'EUR'), // Old bundled cost (includes battery wear)
     netGridCost: fv(1.5, '1.50', 'EUR'),   // New net cost (grid only, no wear)
+    netSavings: fv(0.65, '0.65', 'EUR'),   // Wear-free savings, distinct from totalSavings
     totalSavings: fv(0.5, '0.50', 'EUR'),
     solarSavings: fv(0.05, '0.05', 'EUR'),
     batterySavings: fv(0.45, '0.45', 'EUR'),
@@ -197,5 +198,20 @@ describe('SystemStatusCard', () => {
 
     // Also verify that the metric label is now "Net Grid Cost" instead of "Today's Costs"
     expect(screen.getByText('Net Grid Cost')).toBeInTheDocument();
+  });
+
+  it('shows wear-free Net Savings sub-metric, not the wear-inclusive Today\'s Savings', async () => {
+    render(<SystemStatusCard systemMode="live" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Home Power')).toBeInTheDocument();
+    });
+
+    // The savings sub-metric should read summary.netSavings (0.65 EUR), not
+    // summary.totalSavings (0.50 EUR), and be labelled "Net Savings".
+    expect(screen.getByText('Net Savings')).toBeInTheDocument();
+    expect(screen.getByText('0.65 EUR')).toBeInTheDocument();
+    expect(screen.queryByText('0.50 EUR')).not.toBeInTheDocument();
+    expect(screen.queryByText("Today's Savings")).not.toBeInTheDocument();
   });
 });

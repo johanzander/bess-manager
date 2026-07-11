@@ -102,7 +102,7 @@ export const SavingsAggregateView: React.FC = () => {
                 label: b.label,
                 gridOnlyCost: b.gridOnlyCost.value,
                 gridCost: b.gridCost.value,
-                savings: b.savingsVsGridOnly.value,
+                savings: b.netSavings.value,
               }))}
               margin={{ top: 10, right: 10, left: 0, bottom: 10 }}
             >
@@ -112,7 +112,7 @@ export const SavingsAggregateView: React.FC = () => {
               <Tooltip />
               <Bar dataKey="gridOnlyCost" name="Grid-Only Cost" fill={colors.text} fillOpacity={0.35} isAnimationActive={false} />
               <Bar dataKey="gridCost" name="Net Grid Cost" fill={colors.cost} fillOpacity={0.8} isAnimationActive={false} />
-              <Bar dataKey="savings" name="Savings" fill={colors.savings} fillOpacity={0.8} isAnimationActive={false} />
+              <Bar dataKey="savings" name="Net Savings" fill={colors.savings} fillOpacity={0.8} isAnimationActive={false} />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -129,7 +129,7 @@ export const SavingsAggregateView: React.FC = () => {
                 <th className="pr-4 py-1">Export</th>
                 <th className="pr-4 py-1">Grid-Only Cost</th>
                 <th className="pr-4 py-1">Net Grid Cost</th>
-                <th className="pr-4 py-1">Savings</th>
+                <th className="pr-4 py-1">Net Savings</th>
               </tr>
             </thead>
             <tbody>
@@ -141,7 +141,7 @@ export const SavingsAggregateView: React.FC = () => {
                   <td className="pr-4 py-1 text-gray-600 dark:text-gray-300">{b.exportEur.text}</td>
                   <td className="pr-4 py-1 text-gray-500 dark:text-gray-400">{b.gridOnlyCost.text}</td>
                   <td className="pr-4 py-1 font-medium text-gray-900 dark:text-white">{b.gridCost.text}</td>
-                  <td className="pr-4 py-1 text-gray-600 dark:text-gray-300">{b.savingsVsGridOnly.text}</td>
+                  <td className="pr-4 py-1 text-gray-600 dark:text-gray-300">{b.netSavings.text}</td>
                 </tr>
               ))}
             </tbody>

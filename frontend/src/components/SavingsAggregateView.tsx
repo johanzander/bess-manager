@@ -119,13 +119,57 @@ const SavingsHero: React.FC<{ bucket: SavingsBucket; period: SavingsAggregatePer
 // earlier are visible without waiting for them to roll into a week total.
 const DAY_VIEW_COUNT = 14;
 
+interface HistoryConfig {
+  period: SavingsAggregatePeriod;
+  count: number;
+  date?: string;
+}
+
+// The History section drills one level finer than the selected resolution
+// instead of showing a trailing window of same-size periods (which reads
+// as "last 5 years" under a Year selector — confusing next to a hero card
+// for one specific year). Year shows the months inside that year; Month
+// shows the days inside that month, capped at today for the in-progress
+// current month/year so it doesn't request future, nonexistent days.
+const getHistoryConfig = (period: SavingsAggregatePeriod, date?: string): HistoryConfig => {
+  const anchorBase = date ? new Date(`${date}T00:00:00`) : new Date();
+  const today = new Date();
+
+  if (period === 'year') {
+    const yearEnd = new Date(anchorBase.getFullYear(), 11, 31);
+    const anchor = yearEnd < today ? yearEnd : today;
+    return { period: 'month', count: anchor.getMonth() + 1, date: toISODate(anchor) };
+  }
+  if (period === 'month') {
+    const monthEnd = new Date(anchorBase.getFullYear(), anchorBase.getMonth() + 1, 0);
+    const anchor = monthEnd < today ? monthEnd : today;
+    return { period: 'day', count: anchor.getDate(), date: toISODate(anchor) };
+  }
+  // day (and week, kept for backward compatibility — not reachable from
+  // the UI): no finer granularity is available, so show a rolling window
+  // of that same period, like before.
+  return { period, count: period === 'day' ? DAY_VIEW_COUNT : 12, date };
+};
+
 export const SavingsAggregateView: React.FC<SavingsAggregateViewProps> = ({ period, date }) => {
   const [viewMode, setViewMode] = useState<'chart' | 'table'>('chart');
-  const { data, loading, error } = useSavingsAggregate(
+
+  // The hero cards show exactly one bucket: the totals for the selected
+  // period itself.
+  const { data: heroData, loading: heroLoading, error: heroError } = useSavingsAggregate(
     period,
-    period === 'day' ? DAY_VIEW_COUNT : undefined,
+    1,
     date
   );
+  const currentBucket = heroData?.[0];
+
+  const historyConfig = getHistoryConfig(period, date);
+  const {
+    data: historyBuckets,
+    loading: historyLoading,
+    error: historyError,
+  } = useSavingsAggregate(historyConfig.period, historyConfig.count, historyConfig.date);
+
   const [isDarkMode, setIsDarkMode] = useState(document.documentElement.classList.contains('dark'));
 
   useEffect(() => {
@@ -143,18 +187,20 @@ export const SavingsAggregateView: React.FC<SavingsAggregateViewProps> = ({ peri
     cost: '#3b82f6',
   };
 
-  // The hero cards always show the bucket anchored to the selected period —
-  // the last item in the response — even when it has no data yet, so an
-  // empty month/year renders as a zeroed-out card instead of vanishing (and
-  // a partial period still shows whatever's accumulated so far).
-  const currentBucket = data && data.length > 0 ? data[data.length - 1] : undefined;
-
-  // The History chart/table below is a trend over time, so periods with no
-  // recorded day are still excluded there — a "0.00" row for a day with no
-  // snapshot yet is just noise in a trend view.
-  const bucketsWithData = data ? data.filter(b => b.dayCount > 0) : [];
+  // The History chart/table is a trend, so periods with no recorded day
+  // are still excluded there — a "0.00" row for a day with no snapshot
+  // yet is just noise in a trend view.
+  const bucketsWithData = historyBuckets ? historyBuckets.filter(b => b.dayCount > 0) : [];
   const hasData = bucketsWithData.length > 0;
   const currencyUnit = bucketsWithData[0]?.gridOnlyCost.unit ?? currentBucket?.gridOnlyCost.unit ?? '';
+
+  const historyTitle = currentBucket
+    ? period === 'year'
+      ? `Months in ${formatPeriodLabel(period, currentBucket)}`
+      : period === 'month'
+        ? `Days in ${formatPeriodLabel(period, currentBucket)}`
+        : 'History'
+    : 'History';
 
   const formatAxisValue = (value: number): string =>
     value.toLocaleString(undefined, { maximumFractionDigits: 0 });
@@ -164,14 +210,14 @@ export const SavingsAggregateView: React.FC<SavingsAggregateViewProps> = ({ peri
 
   return (
     <div className="space-y-6">
-      {!loading && !error && currentBucket && (
+      {!heroLoading && !heroError && currentBucket && (
         <SavingsHero bucket={currentBucket} period={period} />
       )}
 
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow border border-gray-200 dark:border-gray-700 p-6">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 gap-3">
           <h3 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
-            History
+            {historyTitle}
           </h3>
           <div className="flex gap-2">
             <div className="flex bg-gray-100 dark:bg-gray-700 rounded-lg p-1">
@@ -199,21 +245,21 @@ export const SavingsAggregateView: React.FC<SavingsAggregateViewProps> = ({ peri
           </div>
         </div>
 
-        {loading && <p className="text-sm text-gray-500 dark:text-gray-400">Loading...</p>}
+        {historyLoading && <p className="text-sm text-gray-500 dark:text-gray-400">Loading...</p>}
 
-        {!loading && error && (
+        {!historyLoading && historyError && (
           <p className="text-sm text-red-600 dark:text-red-400">
-            Could not load savings history: {error}
+            Could not load savings history: {historyError}
           </p>
         )}
 
-        {!loading && !error && !hasData && (
+        {!historyLoading && !historyError && !hasData && (
           <p className="text-sm text-gray-500 dark:text-gray-400">
             No savings history yet. A record is captured once per day.
           </p>
         )}
 
-        {!loading && !error && hasData && viewMode === 'chart' && (
+        {!historyLoading && !historyError && hasData && viewMode === 'chart' && (
           <div style={{ width: '100%', height: '300px' }}>
             <ResponsiveContainer>
               <BarChart
@@ -288,7 +334,7 @@ export const SavingsAggregateView: React.FC<SavingsAggregateViewProps> = ({ peri
           </div>
         )}
 
-        {!loading && !error && hasData && viewMode === 'table' && (
+        {!historyLoading && !historyError && hasData && viewMode === 'table' && (
           <div className="overflow-x-auto">
             <table className="min-w-full text-base">
               <thead>

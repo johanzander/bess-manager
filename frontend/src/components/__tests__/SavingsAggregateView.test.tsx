@@ -1,5 +1,5 @@
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { SavingsAggregateView } from '../SavingsAggregateView';
 import * as scheduleApi from '../../api/scheduleApi';
 
@@ -75,11 +75,14 @@ describe('SavingsAggregateView', () => {
 
     const { rerender } = render(<SavingsAggregateView period="week" />);
 
-    await waitFor(() => expect(fetchSpy).toHaveBeenCalledWith('week', undefined, undefined));
+    // The hero card always requests exactly one bucket for the selected
+    // period itself; the History drill-down's exact params vary with
+    // "today", so only the stable hero call is asserted here.
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledWith('week', 1, undefined));
 
     rerender(<SavingsAggregateView period="month" />);
 
-    await waitFor(() => expect(fetchSpy).toHaveBeenCalledWith('month', undefined, undefined));
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledWith('month', 1, undefined));
   });
 
   it('shows an empty state when there are no buckets with data', async () => {
@@ -333,5 +336,82 @@ describe('SavingsAggregateView with a historical date', () => {
       expect(screen.getByText('May 1 Cost')).toBeInTheDocument();
     });
     expect(screen.queryByText("Today's Cost")).not.toBeInTheDocument();
+  });
+});
+
+describe('SavingsAggregateView History drill-down', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date('2026-08-20T12:00:00'));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('drills into the months of the selected year, not a trailing window of years', async () => {
+    const fetchSpy = vi
+      .spyOn(scheduleApi, 'fetchSavingsAggregate')
+      .mockImplementation(async (_period, count) => {
+        if (count === 1) {
+          return { buckets: [{ ...bucket('2024', 1), startDate: '2024-01-01' }], count: 1 };
+        }
+        return { buckets: [bucket('2024-12', 1)], count: 1 };
+      });
+
+    render(<SavingsAggregateView period="year" date="2024-03-15" />);
+
+    // The selected year (2024) has fully elapsed by the fake "today"
+    // (2026-08-20), so History should request all 12 of its months,
+    // anchored at its last day — not a trailing window of year buckets
+    // (the hero's own count=1 'year' call is expected and separate).
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledWith('month', 12, '2024-12-31'));
+  });
+
+  it('drills into the days of the selected month, not a trailing window of months', async () => {
+    const fetchSpy = vi
+      .spyOn(scheduleApi, 'fetchSavingsAggregate')
+      .mockImplementation(async (_period, count) => {
+        if (count === 1) {
+          return { buckets: [{ ...bucket('2024-02', 1), startDate: '2024-02-01' }], count: 1 };
+        }
+        return { buckets: [bucket('2024-02-15', 1)], count: 1 };
+      });
+
+    render(<SavingsAggregateView period="month" date="2024-02-10" />);
+
+    // February 2024 (a leap year) has fully elapsed by the fake "today",
+    // so History should request all 29 of its days, anchored at its last
+    // day — not a trailing window of month buckets (the hero's own
+    // count=1 'month' call is expected and separate).
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledWith('day', 29, '2024-02-29'));
+  });
+
+  it('labels the History section by the drilled-down granularity', async () => {
+    vi.spyOn(scheduleApi, 'fetchSavingsAggregate').mockImplementation(async (_period, count) => {
+      if (count === 1) {
+        return { buckets: [{ ...bucket('2024', 1), startDate: '2024-01-01' }], count: 1 };
+      }
+      return { buckets: [bucket('2024-12', 1)], count: 1 };
+    });
+
+    render(<SavingsAggregateView period="year" date="2024-03-15" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Months in 2024')).toBeInTheDocument();
+    });
+  });
+
+  it('caps the drill-down at today for the in-progress current month', async () => {
+    // Fake "today" is 2026-08-20; viewing the current month (no explicit
+    // date) must not request days past today.
+    const fetchSpy = vi
+      .spyOn(scheduleApi, 'fetchSavingsAggregate')
+      .mockResolvedValue({ buckets: [bucket('2026-08', 1)], count: 1 });
+
+    render(<SavingsAggregateView period="month" />);
+
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledWith('day', 20, '2026-08-20'));
   });
 });

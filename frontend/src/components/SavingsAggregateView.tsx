@@ -13,6 +13,7 @@ import { DollarSign, TrendingUp, Sun, Battery } from 'lucide-react';
 import { useSavingsAggregate } from '../hooks/useSavingsAggregate';
 import { StatusCard } from './SystemStatusCard';
 import { SavingsAggregatePeriod, SavingsBucket } from '../api/scheduleApi';
+import { toISODate } from '../utils/timeUtils';
 
 export const SAVINGS_PERIODS: SavingsAggregatePeriod[] = ['day', 'week', 'month', 'year'];
 
@@ -25,7 +26,26 @@ export const SAVINGS_PERIOD_LABELS: Record<SavingsAggregatePeriod, string> = {
 
 interface SavingsAggregateViewProps {
   period: SavingsAggregatePeriod;
+  date?: string;
 }
+
+// Bucket-derived label so titles stay correct when browsing a historical
+// date, not just "now" — e.g. "May 2026" instead of always "Month".
+const formatPeriodLabel = (period: SavingsAggregatePeriod, bucket: SavingsBucket): string => {
+  const start = new Date(`${bucket.startDate}T00:00:00`);
+  if (period === 'day') {
+    return bucket.startDate === toISODate(new Date())
+      ? 'Today'
+      : start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  }
+  if (period === 'month') {
+    return start.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  }
+  if (period === 'year') {
+    return bucket.label;
+  }
+  return SAVINGS_PERIOD_LABELS[period];
+};
 
 const SavingsHero: React.FC<{ bucket: SavingsBucket; period: SavingsAggregatePeriod }> = ({
   bucket,
@@ -36,9 +56,9 @@ const SavingsHero: React.FC<{ bucket: SavingsBucket; period: SavingsAggregatePer
       ? (bucket.netSavings.value / bucket.gridOnlyCost.value) * 100
       : null;
 
-  const costTitle = period === 'day' ? "Today's Cost" : `${SAVINGS_PERIOD_LABELS[period]} Cost`;
-  const savingsTitle =
-    period === 'day' ? "Today's Savings" : `${SAVINGS_PERIOD_LABELS[period]} Savings`;
+  const periodLabel = formatPeriodLabel(period, bucket);
+  const costTitle = periodLabel === 'Today' ? "Today's Cost" : `${periodLabel} Cost`;
+  const savingsTitle = periodLabel === 'Today' ? "Today's Savings" : `${periodLabel} Savings`;
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -99,11 +119,12 @@ const SavingsHero: React.FC<{ bucket: SavingsBucket; period: SavingsAggregatePer
 // earlier are visible without waiting for them to roll into a week total.
 const DAY_VIEW_COUNT = 14;
 
-export const SavingsAggregateView: React.FC<SavingsAggregateViewProps> = ({ period }) => {
+export const SavingsAggregateView: React.FC<SavingsAggregateViewProps> = ({ period, date }) => {
   const [viewMode, setViewMode] = useState<'chart' | 'table'>('chart');
   const { data, loading, error } = useSavingsAggregate(
     period,
-    period === 'day' ? DAY_VIEW_COUNT : undefined
+    period === 'day' ? DAY_VIEW_COUNT : undefined,
+    date
   );
   const [isDarkMode, setIsDarkMode] = useState(document.documentElement.classList.contains('dark'));
 

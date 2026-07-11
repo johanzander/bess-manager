@@ -75,11 +75,11 @@ describe('SavingsAggregateView', () => {
 
     const { rerender } = render(<SavingsAggregateView period="week" />);
 
-    await waitFor(() => expect(fetchSpy).toHaveBeenCalledWith('week', undefined));
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledWith('week', undefined, undefined));
 
     rerender(<SavingsAggregateView period="month" />);
 
-    await waitFor(() => expect(fetchSpy).toHaveBeenCalledWith('month', undefined));
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledWith('month', undefined, undefined));
   });
 
   it('shows an empty state when there are no buckets with data', async () => {
@@ -145,7 +145,7 @@ describe('SavingsAggregateView', () => {
 
     // Previously this always requested count=1 (today only), so yesterday was
     // invisible until it rolled into the week total. Now it asks for a window.
-    await waitFor(() => expect(fetchSpy).toHaveBeenCalledWith('day', 14));
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledWith('day', 14, undefined));
   });
 
   it('omits rows for periods with no recorded day, instead of a zeroed-out row', async () => {
@@ -264,5 +264,54 @@ describe('SavingsAggregateView', () => {
       expect(screen.getByText('2026-W28')).toBeInTheDocument();
     });
     expect(screen.queryByText(/battery wear/i)).not.toBeInTheDocument();
+  });
+});
+
+describe('SavingsAggregateView with a historical date', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('passes the date prop through to fetchSavingsAggregate', async () => {
+    const fetchSpy = vi.spyOn(scheduleApi, 'fetchSavingsAggregate').mockResolvedValue({
+      buckets: [bucket('2026-05-01', 1)],
+      count: 1,
+    });
+
+    render(<SavingsAggregateView period="day" date="2026-05-01" />);
+
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+    expect(fetchSpy).toHaveBeenCalledWith('day', 14, '2026-05-01');
+  });
+
+  it('titles the cards from the bucket label, not "Today", when browsing a historical month', async () => {
+    vi.spyOn(scheduleApi, 'fetchSavingsAggregate').mockResolvedValue({
+      buckets: [{ ...bucket('2026-05', 1), startDate: '2026-05-01', endDate: '2026-05-31' }],
+      count: 1,
+    });
+
+    render(<SavingsAggregateView period="month" date="2026-05-15" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('May 2026 Cost')).toBeInTheDocument();
+    });
+    expect(screen.getByText('May 2026 Savings')).toBeInTheDocument();
+  });
+
+  it('titles a historical single day by its date, not "Today"', async () => {
+    vi.spyOn(scheduleApi, 'fetchSavingsAggregate').mockResolvedValue({
+      buckets: [{ ...bucket('2026-05-01', 1), startDate: '2026-05-01', endDate: '2026-05-01' }],
+      count: 1,
+    });
+
+    render(<SavingsAggregateView period="day" date="2026-05-01" />);
+
+    // "Cost$" alone is ambiguous: the StatusCard body always renders a
+    // "Net Cost" label regardless of the card title, so scope to the
+    // bucket-derived title ("May 1 Cost") rather than a generic suffix match.
+    await waitFor(() => {
+      expect(screen.getByText('May 1 Cost')).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Today's Cost")).not.toBeInTheDocument();
   });
 });

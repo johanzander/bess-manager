@@ -156,26 +156,17 @@ describe('SavingsAggregateView', () => {
     expect(screen.queryByText('3.00 EUR')).not.toBeInTheDocument();
   });
 
-  it('requests a rolling window of days for the "day" period, not just today', async () => {
-    const fetchSpy = vi.spyOn(scheduleApi, 'fetchSavingsAggregate').mockResolvedValue({
-      buckets: [bucket('2026-07-10', 1)],
-      count: 1,
-    });
-
-    render(<SavingsAggregateView period="day" />);
-
-    // Previously this always requested count=1 (today only), so yesterday was
-    // invisible until it rolled into the week total. Now it asks for a window.
-    await waitFor(() => expect(fetchSpy).toHaveBeenCalledWith('day', 14, undefined));
-  });
-
   it('omits rows for periods with no recorded day, instead of a zeroed-out row', async () => {
+    // Day resolution's History is now an hourly drill-down (see the
+    // dedicated describe block below), so this "omit empty periods"
+    // behavior is exercised here via week, which still uses the
+    // savings-aggregate rolling-window path.
     vi.spyOn(scheduleApi, 'fetchSavingsAggregate').mockResolvedValue({
       buckets: [bucket('2026-07-10', 0), bucket('2026-07-11', 1)],
       count: 2,
     });
 
-    render(<SavingsAggregateView period="day" />);
+    render(<SavingsAggregateView period="week" />);
 
     fireEvent.click(screen.getByRole('button', { name: /table/i }));
 
@@ -303,8 +294,12 @@ describe('SavingsAggregateView with a historical date', () => {
 
     render(<SavingsAggregateView period="day" date="2026-05-01" />);
 
+    // The hero always requests exactly one day-level bucket for the
+    // selected date; Day resolution's History no longer requests a
+    // rolling window via fetchSavingsAggregate (it uses the dashboard's
+    // hourly data instead — see the dedicated describe block below).
     await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
-    expect(fetchSpy).toHaveBeenCalledWith('day', 14, '2026-05-01');
+    expect(fetchSpy).toHaveBeenCalledWith('day', 1, '2026-05-01');
   });
 
   it('titles the cards from the bucket label, not "Today", when browsing a historical month', async () => {
@@ -413,5 +408,136 @@ describe('SavingsAggregateView History drill-down', () => {
     render(<SavingsAggregateView period="month" />);
 
     await waitFor(() => expect(fetchSpy).toHaveBeenCalledWith('day', 20, '2026-08-20'));
+  });
+});
+
+describe('SavingsAggregateView Day-resolution hourly drill-down', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const hourlyItem = (
+    period: number,
+    overrides: Partial<{
+      importCost: number;
+      exportRevenue: number;
+      gridCost: number;
+      gridOnlyCost: number;
+      solarSavings: number;
+      batterySavings: number;
+      netSavings: number;
+    }> = {}
+  ) => {
+    const v = (value: number) => ({ value, display: value.toFixed(2), unit: 'EUR', text: `${value.toFixed(2)} EUR` });
+    return {
+      hour: Math.floor(period / 4),
+      period,
+      dataSource: 'actual' as const,
+      solarProduction: v(0),
+      homeConsumption: v(0),
+      gridImported: v(0),
+      gridExported: v(0),
+      batteryCharged: v(0),
+      batteryDischarged: v(0),
+      batterySocStart: v(0),
+      batterySocEnd: v(0),
+      batterySoeEnd: v(0),
+      buyPrice: v(0),
+      sellPrice: v(0),
+      importCost: v(overrides.importCost ?? 0),
+      exportRevenue: v(overrides.exportRevenue ?? 0),
+      hourlyCost: v(0),
+      hourlySavings: v(0),
+      batteryCycleCost: v(0),
+      gridOnlyCost: v(overrides.gridOnlyCost ?? 10),
+      solarOnlyCost: v(6),
+      solarSavings: v(overrides.solarSavings ?? 4),
+      batterySavings: v(overrides.batterySavings ?? 4),
+      netSavings: v(overrides.netSavings ?? 8),
+      gridCost: v(overrides.gridCost ?? 2),
+      gridImportNeeded: v(0),
+      solarExcess: v(0),
+      batteryAction: null,
+    };
+  };
+
+  it('fetches dashboard hourly data (not a savings-aggregate day history) when period is day', async () => {
+    const savingsSpy = vi.spyOn(scheduleApi, 'fetchSavingsAggregate').mockResolvedValue({
+      buckets: [bucket('2026-07-11', 1)],
+      count: 1,
+    });
+    const dashboardSpy = vi.spyOn(scheduleApi, 'fetchDashboardData').mockResolvedValue({
+      hourlyData: [hourlyItem(0), hourlyItem(4)],
+    });
+
+    render(<SavingsAggregateView period="day" date="2026-07-11" />);
+
+    await waitFor(() => expect(dashboardSpy).toHaveBeenCalledWith('2026-07-11', 'quarter-hourly'));
+    // The hero still requests exactly one day-level bucket for its own
+    // totals; History no longer requests a rolling window of days.
+    expect(savingsSpy).toHaveBeenCalledWith('day', 1, '2026-07-11');
+    expect(savingsSpy).not.toHaveBeenCalledWith('day', 14, expect.anything());
+  });
+
+  it('labels the History section "Hours in <day>" and shows HH:MM rows', async () => {
+    vi.spyOn(scheduleApi, 'fetchSavingsAggregate').mockResolvedValue({
+      buckets: [{ ...bucket('2026-07-11', 1), startDate: '2026-07-11', endDate: '2026-07-11' }],
+      count: 1,
+    });
+    vi.spyOn(scheduleApi, 'fetchDashboardData').mockResolvedValue({
+      hourlyData: [hourlyItem(0), hourlyItem(4)], // 00:00 and 01:00
+    });
+
+    render(<SavingsAggregateView period="day" date="2026-07-11" />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/^Hours in /)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /table/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('00:00')).toBeInTheDocument();
+    });
+    expect(screen.getByText('01:00')).toBeInTheDocument();
+  });
+
+  it('renders the API-provided Net Savings and Battery Contribution for hourly rows, not a re-derived value', async () => {
+    vi.spyOn(scheduleApi, 'fetchSavingsAggregate').mockResolvedValue({
+      buckets: [{ ...bucket('2026-07-11', 1), startDate: '2026-07-11', endDate: '2026-07-11' }],
+      count: 1,
+    });
+    vi.spyOn(scheduleApi, 'fetchDashboardData').mockResolvedValue({
+      // netSavings/batterySavings are deliberately set to values that do
+      // NOT match gridOnlyCost/solarOnlyCost/gridCost arithmetic, so this
+      // test fails if the component re-derives them instead of reading
+      // the API's own fields.
+      hourlyData: [hourlyItem(0, { netSavings: 99, batterySavings: 77 })],
+    });
+
+    render(<SavingsAggregateView period="day" date="2026-07-11" />);
+
+    fireEvent.click(screen.getByRole('button', { name: /table/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('00:00')).toBeInTheDocument();
+    });
+    expect(screen.getByText('99.00 EUR')).toBeInTheDocument();
+    expect(screen.getByText('77.00 EUR')).toBeInTheDocument();
+  });
+
+  it('does not affect the History drill-down for month/year resolutions', async () => {
+    const dashboardSpy = vi.spyOn(scheduleApi, 'fetchDashboardData');
+    vi.spyOn(scheduleApi, 'fetchSavingsAggregate').mockResolvedValue({
+      buckets: [{ ...bucket('2026-07', 1), startDate: '2026-07-01', endDate: '2026-07-31' }],
+      count: 1,
+    });
+
+    render(<SavingsAggregateView period="month" date="2026-07-15" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Net Cost')).toBeInTheDocument();
+    });
+    expect(dashboardSpy).not.toHaveBeenCalled();
   });
 });

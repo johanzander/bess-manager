@@ -11,8 +11,11 @@ import {
 } from 'recharts';
 import { DollarSign, TrendingUp, Sun, Battery } from 'lucide-react';
 import { useSavingsAggregate } from '../hooks/useSavingsAggregate';
+import { useDashboardData } from '../hooks/useDashboardData';
+import { useUserPreferences } from '../hooks/useUserPreferences';
 import { StatusCard } from './SystemStatusCard';
-import { SavingsAggregatePeriod, SavingsBucket } from '../api/scheduleApi';
+import { SavingsAggregatePeriod, SavingsBucket, DashboardHourlyData } from '../api/scheduleApi';
+import { FormattedValue } from '../types';
 import { toISODate } from '../utils/timeUtils';
 
 export const SAVINGS_PERIODS: SavingsAggregatePeriod[] = ['day', 'week', 'month', 'year'];
@@ -28,6 +31,49 @@ interface SavingsAggregateViewProps {
   period: SavingsAggregatePeriod;
   date?: string;
 }
+
+// Both History data sources (savings-aggregate buckets for month/year,
+// dashboard hourly data for day) are shaped into this common row type so
+// the chart/table below don't need to know which source they came from.
+interface HistoryRow {
+  label: string;
+  importEur: FormattedValue;
+  exportEur: FormattedValue;
+  gridCost: FormattedValue;
+  gridOnlyCost: FormattedValue;
+  solarSavings: FormattedValue;
+  batterySavings: FormattedValue;
+  netSavings: FormattedValue;
+  dayCount: number;
+}
+
+const formatHourLabel = (item: DashboardHourlyData, resolution: 'hourly' | 'quarter-hourly'): string => {
+  if (resolution === 'quarter-hourly') {
+    const hour = Math.floor(item.period / 4);
+    const minute = (item.period % 4) * 15;
+    return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+  }
+  return `${String(item.hour).padStart(2, '0')}:00`;
+};
+
+// netSavings/batterySavings are computed backend-side (see
+// backend/api_dataclasses.py APIDashboardHourlyData.from_internal) using
+// the same wear-free formula as the daily aggregator — this function only
+// maps/renames fields, it does not compute anything.
+const hourlyToHistoryRow = (
+  item: DashboardHourlyData,
+  resolution: 'hourly' | 'quarter-hourly'
+): HistoryRow => ({
+  label: formatHourLabel(item, resolution),
+  importEur: item.importCost,
+  exportEur: item.exportRevenue,
+  gridCost: item.gridCost,
+  gridOnlyCost: item.gridOnlyCost,
+  solarSavings: item.solarSavings,
+  batterySavings: item.batterySavings,
+  netSavings: item.netSavings,
+  dayCount: 1,
+});
 
 // Bucket-derived label so titles stay correct when browsing a historical
 // date, not just "now" — e.g. "May 2026" instead of always "Month".
@@ -153,6 +199,8 @@ const getHistoryConfig = (period: SavingsAggregatePeriod, date?: string): Histor
 
 export const SavingsAggregateView: React.FC<SavingsAggregateViewProps> = ({ period, date }) => {
   const [viewMode, setViewMode] = useState<'chart' | 'table'>('chart');
+  const { dataResolution } = useUserPreferences();
+  const isHourlyDrillDown = period === 'day';
 
   // The hero cards show exactly one bucket: the totals for the selected
   // period itself.
@@ -163,12 +211,30 @@ export const SavingsAggregateView: React.FC<SavingsAggregateViewProps> = ({ peri
   );
   const currentBucket = heroData?.[0];
 
+  // Month/Year drill-down: finer savings-aggregate buckets. Skipped
+  // entirely for Day resolution, which uses the dashboard's hourly data
+  // instead (below).
   const historyConfig = getHistoryConfig(period, date);
   const {
-    data: historyBuckets,
-    loading: historyLoading,
-    error: historyError,
-  } = useSavingsAggregate(historyConfig.period, historyConfig.count, historyConfig.date);
+    data: historySavingsBuckets,
+    loading: historySavingsLoading,
+    error: historySavingsError,
+  } = useSavingsAggregate(
+    historyConfig.period,
+    historyConfig.count,
+    historyConfig.date,
+    !isHourlyDrillDown
+  );
+
+  // Day drill-down: hour-by-hour (or quarter-hourly) breakdown of the
+  // selected day, from the same endpoint the Dashboard page already uses.
+  // Omitting `date` fetches today's live (in-progress) data, matching the
+  // `date` prop's convention everywhere else on this page.
+  const {
+    data: dashboardData,
+    loading: dashboardLoading,
+    error: dashboardError,
+  } = useDashboardData(date, dataResolution, 0, isHourlyDrillDown);
 
   const [isDarkMode, setIsDarkMode] = useState(document.documentElement.classList.contains('dark'));
 
@@ -187,20 +253,29 @@ export const SavingsAggregateView: React.FC<SavingsAggregateViewProps> = ({ peri
     cost: '#3b82f6',
   };
 
+  const historyLoading = isHourlyDrillDown ? dashboardLoading : historySavingsLoading;
+  const historyError = isHourlyDrillDown ? dashboardError : historySavingsError;
+
+  const historyRows: HistoryRow[] = isHourlyDrillDown
+    ? (dashboardData?.hourlyData ?? []).map(item => hourlyToHistoryRow(item, dataResolution))
+    : (historySavingsBuckets ?? []);
+
   // The History chart/table is a trend, so periods with no recorded day
   // are still excluded there — a "0.00" row for a day with no snapshot
-  // yet is just noise in a trend view.
-  const bucketsWithData = historyBuckets ? historyBuckets.filter(b => b.dayCount > 0) : [];
+  // yet is just noise in a trend view. Hourly rows always have
+  // dayCount=1, so every returned hour is shown (including predicted
+  // future hours of an in-progress "today", same as the rest of the app).
+  const bucketsWithData = historyRows.filter(b => b.dayCount > 0);
   const hasData = bucketsWithData.length > 0;
   const currencyUnit = bucketsWithData[0]?.gridOnlyCost.unit ?? currentBucket?.gridOnlyCost.unit ?? '';
 
-  const historyTitle = currentBucket
-    ? period === 'year'
-      ? `Months in ${formatPeriodLabel(period, currentBucket)}`
-      : period === 'month'
-        ? `Days in ${formatPeriodLabel(period, currentBucket)}`
-        : 'History'
-    : 'History';
+  const historyTitle = (() => {
+    if (!currentBucket) return 'History';
+    if (isHourlyDrillDown) return `Hours in ${formatPeriodLabel(period, currentBucket)}`;
+    if (period === 'year') return `Months in ${formatPeriodLabel(period, currentBucket)}`;
+    if (period === 'month') return `Days in ${formatPeriodLabel(period, currentBucket)}`;
+    return 'History';
+  })();
 
   const formatAxisValue = (value: number): string =>
     value.toLocaleString(undefined, { maximumFractionDigits: 0 });

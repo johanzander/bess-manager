@@ -52,6 +52,7 @@ export interface DashboardHourlyData {
   importCost: FormattedValue;
   exportRevenue: FormattedValue;
   hourlyCost: FormattedValue;
+  gridCost: FormattedValue;
   hourlySavings: FormattedValue;
   batteryCycleCost: FormattedValue;
 
@@ -59,7 +60,11 @@ export interface DashboardHourlyData {
   gridOnlyCost: FormattedValue;
   solarOnlyCost: FormattedValue;
   solarSavings: FormattedValue;
-  batterySavings?: FormattedValue;
+  // Wear-free savings, computed backend-side (see backend/api_dataclasses.py
+  // APIDashboardHourlyData.from_internal) — do not re-derive these from
+  // other fields on the frontend.
+  batterySavings: FormattedValue;
+  netSavings: FormattedValue;
 
   // Detailed analysis fields - FormattedValue
   directSolar?: FormattedValue;

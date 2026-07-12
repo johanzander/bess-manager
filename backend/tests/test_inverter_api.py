@@ -81,6 +81,20 @@ class TestInverterStatus:
         assert resp.json()["inverterPlatform"] == platform
 
 
+class TestInverterStatusChargePowerRate:
+    """chargePowerRate must be a live sensor read, not the config default (issue #271)."""
+
+    def test_charge_power_rate_reflects_live_controller_value(self):
+        ctrl = _make_controller("growatt_server_sph")
+        # 40 is BATTERY_DEFAULT_CHARGING_POWER_RATE - use a different value to
+        # prove this isn't falling back to the config default.
+        ctrl.system._controller.get_charging_power_rate.return_value = 100
+        sys.modules["app"].bess_controller = ctrl
+        resp = _client.get("/api/growatt/inverter_status")
+        assert resp.status_code == 200
+        assert resp.json()["chargePowerRate"] == 100
+
+
 # ===========================================================================
 # GET /api/growatt/detailed_schedule
 # ===========================================================================

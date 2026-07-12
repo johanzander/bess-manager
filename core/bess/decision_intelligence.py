@@ -8,13 +8,16 @@ This module enhances the existing DecisionData fields without creating new class
 maintaining compatibility with the existing software architecture.
 """
 
+from core.bess.dp_constants import POWER_CLASSIFICATION_THRESHOLD_KW
 from core.bess.models import DecisionData, EnergyData
 
-# Minimum absolute power (kW) for the main charge/discharge branches.
-# The DP uses POWER_STEP_KW=0.2, so active actions are always ≥0.2 kW.
-# This threshold filters noise while the fallthroughs below catch passive
-# solar charging (battery_charged > 0) and small residual discharge.
-_POWER_THRESHOLD_KW = 0.1
+# Minimum absolute power (kW) for the main charge/discharge branches. Derived
+# from the DP's own grid resolution (dp_constants.py) rather than hardcoded,
+# so it can never silently collide with a tuned POWER_STEP_KW again -- see
+# dp_constants.py's docstring for the #275 postmortem this fixes. This
+# threshold filters noise while the fallthroughs below catch passive solar
+# charging (battery_charged > 0) and small residual discharge.
+_POWER_THRESHOLD_KW = POWER_CLASSIFICATION_THRESHOLD_KW
 
 
 def generate_advanced_flow_pattern_name(energy_data: EnergyData) -> str:
@@ -39,7 +42,7 @@ def generate_advanced_flow_pattern_name(energy_data: EnergyData) -> str:
         - "SOLAR_TO_HOME_PLUS_BATTERY_TO_GRID"
         - "SOLAR_TO_GRID_PLUS_BATTERY_TO_HOME"
     """
-    threshold = 0.1  # kWh threshold for significant flows
+    threshold = POWER_CLASSIFICATION_THRESHOLD_KW  # kWh threshold for significant flows (see dp_constants.py)
     patterns = []
 
     # Solar source patterns
@@ -127,9 +130,15 @@ def generate_strategic_pattern_name(
     elif strategic_intent == "LOAD_SUPPORT":
         return "Home Load Support"
     else:  # IDLE
-        if energy_data.solar_production > 0.1 and energy_data.grid_imported < 0.1:
+        if (
+            energy_data.solar_production > POWER_CLASSIFICATION_THRESHOLD_KW
+            and energy_data.grid_imported < POWER_CLASSIFICATION_THRESHOLD_KW
+        ):
             return "Solar Self-Sufficiency"
-        elif energy_data.grid_imported > 0.1 and energy_data.solar_production < 0.1:
+        elif (
+            energy_data.grid_imported > POWER_CLASSIFICATION_THRESHOLD_KW
+            and energy_data.solar_production < POWER_CLASSIFICATION_THRESHOLD_KW
+        ):
             return "Grid Supply Mode"
         else:
             return "Optimal Idle"
@@ -151,7 +160,7 @@ def generate_flow_description(energy_data: EnergyData) -> str:
         - "Solar 8.0kWh: 3.0kWh→Home, 2.0kWh→Battery, 3.0kWh→Grid"
     """
     descriptions = []
-    threshold = 0.1  # kWh threshold for reporting
+    threshold = POWER_CLASSIFICATION_THRESHOLD_KW  # kWh threshold for reporting (see dp_constants.py)
 
     # Solar flows description
     if energy_data.solar_production > threshold:
@@ -236,7 +245,7 @@ def generate_economic_chain(
     c = currency
     # Build context-specific economic explanations
     if strategic_intent == "GRID_CHARGING":
-        if energy_data.grid_to_battery > 0.1:
+        if energy_data.grid_to_battery > POWER_CLASSIFICATION_THRESHOLD_KW:
             storage_amount = energy_data.grid_to_battery
             return (
                 f"Hour {hour:02d}: Store {storage_amount:.1f}kWh grid energy "
@@ -253,7 +262,7 @@ def generate_economic_chain(
             )
 
     elif strategic_intent == "SOLAR_STORAGE":
-        if energy_data.solar_to_battery > 0.1:
+        if energy_data.solar_to_battery > POWER_CLASSIFICATION_THRESHOLD_KW:
             storage_amount = energy_data.solar_to_battery
             return (
                 f"Hour {hour:02d}: Store {storage_amount:.1f}kWh free solar "
@@ -270,7 +279,7 @@ def generate_economic_chain(
             )
 
     elif strategic_intent == "BATTERY_EXPORT":
-        if energy_data.battery_to_grid > 0.1:
+        if energy_data.battery_to_grid > POWER_CLASSIFICATION_THRESHOLD_KW:
             export_amount = energy_data.battery_to_grid
             return (
                 f"Hour {hour:02d}: Export {export_amount:.1f}kWh for arbitrage "
@@ -286,7 +295,7 @@ def generate_economic_chain(
             )
 
     elif strategic_intent == "LOAD_SUPPORT":
-        if energy_data.battery_to_home > 0.1:
+        if energy_data.battery_to_home > POWER_CLASSIFICATION_THRESHOLD_KW:
             support_amount = energy_data.battery_to_home
             return (
                 f"Hour {hour:02d}: Battery supplies {support_amount:.1f}kWh to home "
@@ -336,7 +345,7 @@ def calculate_detailed_flow_values(
         }
     """
     flow_values = {}
-    threshold = 0.1  # kWh threshold for reporting
+    threshold = POWER_CLASSIFICATION_THRESHOLD_KW  # kWh threshold for reporting (see dp_constants.py)
 
     # Solar flows (always positive - free energy or avoided costs)
     if energy_data.solar_to_home > threshold:

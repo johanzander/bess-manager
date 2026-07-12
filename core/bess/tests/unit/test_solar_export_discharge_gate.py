@@ -48,17 +48,27 @@ def _solar_export_periods(result):
 
 @pytest.mark.slow
 def test_solar_export_covers_dip_when_buy_exceeds_export():
-    """Normal prices (buy comfortably above shadow). During SOLAR_EXPORT the
-    battery is full and exporting surplus, so the marginal stored kWh is worth
-    only the export price: shadow price converges to sell_price in steady
-    state, per the documented economic law (see
-    docs/agents/bess-knowledge.md and
+    """Normal prices (buy comfortably above shadow). During the solar-surplus
+    window the battery is at/near capacity and exporting surplus, so the
+    marginal stored kWh is worth only the export price: shadow price
+    converges to sell_price in steady state, per the documented economic law
+    (see docs/agents/bess-knowledge.md and
     docs/superpowers/specs/2026-06-27-solar-export-discharge-rate-design.md).
-    The first SOLAR_EXPORT period is a finite-horizon transient (a normal DP
-    boundary effect near the horizon's terminal transition, not an economic
-    constant) and is only checked for the gate property, not the exact value.
-    The gate still ALLOWS discharge (100) here because buy*eff_d clears the
-    shadow price either way.
+
+    Checked across the whole solar-surplus window (periods 0-7) rather than
+    filtering to periods labeled SOLAR_EXPORT specifically: at fine DP
+    discretization (docs/superpowers/specs/2026-07-12-dp-continuous-path-reconstruction-fix-design.md,
+    Option B) some of these periods land on a tiny genuine micro-arbitrage
+    discharge the old coarser grid couldn't represent, and get classified
+    BATTERY_EXPORT instead -- a real, small optimization improvement, not a
+    change to the underlying economic law this test checks. The shadow price
+    still converges to sell_price on those periods either way.
+
+    The first period is a finite-horizon transient (a normal DP boundary
+    effect near the horizon's terminal transition, not an economic constant)
+    and is only checked for the gate property, not the exact value. The gate
+    still ALLOWS discharge (100) here because buy*eff_d clears the shadow
+    price either way.
     """
     bs = make_battery_settings(efficiency_discharge=0.95)
     eff_d = bs.efficiency_discharge
@@ -74,25 +84,28 @@ def test_solar_export_covers_dip_when_buy_exceeds_export():
         home_consumption=consumption,
         battery_settings=bs,
         solar_production=solar,
-        initial_soe=bs.max_soe_kwh,  # full battery -> daytime surplus is SOLAR_EXPORT
+        initial_soe=bs.max_soe_kwh,  # full battery -> daytime surplus is solar-export-driven
     )
 
-    periods = _solar_export_periods(result)
-    assert periods, "scenario did not produce any SOLAR_EXPORT period"
-    for t in periods:
+    for t in range(8):
         shadow = result.period_data[t].decision.shadow_price
-        assert shadow > 0.0, f"period {t}: shadow_price not populated"
-        if t == periods[0]:
-            # First SOLAR_EXPORT period is a finite-horizon transient (verified:
-            # 0.45 here vs. steady-state 0.30 for the rest) -- a normal DP
-            # boundary effect near the horizon's terminal transition, not a
-            # fixed economic constant. Only check the gate property still holds.
-            assert shadow > 0.0
+        if t == 0:
+            # First period is a finite-horizon transient near the horizon's
+            # terminal transition, not a fixed economic constant -- at fine
+            # DP discretization (docs/superpowers/specs/2026-07-12-dp-
+            # continuous-path-reconstruction-fix-design.md, Option B) the
+            # backward-difference V[0,i]-V[0,i-1] can legitimately land on
+            # exactly 0.0 right at max capacity here. Only check the gate
+            # decision itself is still consistent (a zero shadow price still
+            # correctly implies "discharge is fine," so the gate call below
+            # must still be 100).
+            assert shadow >= 0.0, f"period {t}: shadow_price not populated"
         else:
             # Steady state: shadow price converges to sell_price, per
-            # docs/agents/bess-knowledge.md's documented law for SOLAR_EXPORT
-            # (battery full, solar refills it for free -- marginal kWh is
-            # worth only the export price).
+            # docs/agents/bess-knowledge.md's documented law for the
+            # solar-surplus window (battery at/near capacity, solar refills
+            # it for free -- marginal kWh is worth only the export price).
+            assert shadow > 0.0, f"period {t}: shadow_price not populated"
             assert shadow == pytest.approx(
                 sell[t], abs=0.01
             ), f"period {t}: shadow {shadow:.4f} should equal sell_price {sell[t]}"
@@ -110,7 +123,19 @@ def test_solar_export_holds_when_export_more_valuable():
     no-op. (A sustained export premium with no future recharge cost instead
     makes full-day arbitrage strictly better than holding, eliminating
     SOLAR_EXPORT entirely -- hence the expensive window after solar hours,
-    which is what makes preserving stored energy the better choice here.)"""
+    which is what makes preserving stored energy the better choice here.)
+
+    Future consumption (periods 8-15) is set to exceed the battery's usable
+    capacity (bs.max_soe_kwh - bs.min_soe_kwh), not just approach it: with
+    usable capacity > future need, the DP's own exact backward-induction
+    optimum genuinely prefers selling a small "free" slack now (it doesn't
+    reduce what's available to cover the future need either way) even though
+    the coarse discretization grid used to be too coarse to discover that
+    optimum, producing an accidental hold that only looked like the documented
+    law. Verified (docs/superpowers/specs/2026-07-12-dp-continuous-path-reconstruction-fix-design.md,
+    Option B investigation): with genuine future scarcity (no slack), holding
+    is the DP's true optimum at any grid resolution, not just an artifact.
+    """
     bs = make_battery_settings(efficiency_discharge=0.95)
     eff_d = bs.efficiency_discharge
 
@@ -122,7 +147,9 @@ def test_solar_export_holds_when_export_more_valuable():
     # instead, per this scenario's original inputs).
     sell = [1.0] * 8 + [0.5] * 8
     solar = [4.0] * 8 + [0.0] * 8
-    consumption = [0.5] * 8 + [2.0] * 8
+    # 8 * 2.3 = 18.4 kWh future need > 17.8 kWh usable capacity (bs defaults):
+    # genuine scarcity, no free slack to sell now regardless of discretization.
+    consumption = [0.5] * 8 + [2.3] * 8
 
     result = optimize_battery_schedule(
         buy_price=buy,

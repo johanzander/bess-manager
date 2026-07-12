@@ -64,7 +64,11 @@ from core.bess.decision_intelligence import (
     classify_strategic_intent,
     create_decision_data,
 )
-from core.bess.dp_constants import POWER_STEP_KW, SOE_STEP_KWH
+from core.bess.dp_constants import (
+    POWER_CLASSIFICATION_THRESHOLD_KW,
+    POWER_STEP_KW,
+    SOE_STEP_KWH,
+)
 from core.bess.models import (
     DecisionData,
     EconomicData,
@@ -882,6 +886,102 @@ def _interpolate_value(
     return V_row[lo] * (1 - frac) + V_row[hi] * frac
 
 
+def _discharge_candidates(
+    soe: float,
+    battery_settings: BatterySettings,
+    dt: float,
+    home_consumption: float,
+    solar_production: float,
+) -> list[float]:
+    """Candidate discharge magnitudes (kW, positive) to evaluate for the
+    single-period objective (reward + interpolated continuation value) --
+    see docs/superpowers/specs/2026-07-12-dp-continuous-action-reformulation-design.md,
+    Findings 1/2/3/5.
+
+    Real hardware executes discharge as an integer percent (0-100) of
+    `max_discharge_power_kw`
+    (core/bess/simulation/inverter_simulator.py::_map_rates) -- it cannot
+    apply an arbitrary continuous kW value. So the actually-achievable
+    action space is that discrete percent grid, not the real line
+    (postmortem, #282: an earlier version of this function returned exact
+    analytic breakpoints like -7.505 kW out of a 10 kW max, which
+    percent-rounds to 7.5 kW on real hardware -- a planned action execution
+    silently can't reproduce, breaking plan-faithfulness/R==P). Enumerating
+    that percent grid directly is both exact with respect to the true
+    (discrete) action space and guarantees every candidate is executable
+    exactly as planned.
+
+    Second postmortem (#282): `classify_strategic_intent` treats any
+    discharge magnitude at or below `POWER_CLASSIFICATION_THRESHOLD_KW`
+    (derived from the fixed `POWER_STEP_KW`, not from
+    `max_discharge_power_kw`) as noise, falling through to a different
+    classification branch. That was safe by construction under the old
+    fixed grid (smallest nonzero action, `POWER_STEP_KW`, always exceeded
+    it), but 1% of `max_discharge_power_kw` can land at or below it for any
+    battery with `max_discharge_power_kw <= 10 kW` -- so candidates at or
+    below the threshold are excluded here too, not just candidates at or
+    below zero.
+    """
+    available_energy = soe - battery_settings.min_soe_kwh
+    p_max = min(
+        battery_settings.max_discharge_power_kw,
+        available_energy / dt * battery_settings.efficiency_discharge,
+    )
+    if p_max <= POWER_TOLERANCE_KW:
+        return []
+
+    rate_step = battery_settings.max_discharge_power_kw / 100
+    max_pct = int(np.floor(p_max / rate_step + 1e-9))
+    min_pct = int(np.floor(POWER_CLASSIFICATION_THRESHOLD_KW / rate_step)) + 1
+    if min_pct > max_pct:
+        return []
+    candidates = {pct * rate_step for pct in range(min_pct, max_pct + 1)}
+
+    # Finding 5: reward(p) has two immediate-reward breakpoints -- where
+    # energy_balance crosses 0 (import stops) and where it crosses
+    # BATTERY_EXPORT_THRESHOLD_KWH (self-throttle ends, real export
+    # starts). Snap each to its nearest achievable percent step so the
+    # reward plateau's edge is represented too.
+    balance_zero_p = (home_consumption - solar_production) / dt
+    export_starts_p = balance_zero_p + BATTERY_EXPORT_THRESHOLD_KWH / dt
+    for p in (balance_zero_p, export_starts_p):
+        if 0.0 < p < p_max:
+            pct = min(max_pct, max(min_pct, round(p / rate_step)))
+            candidates.add(pct * rate_step)
+
+    return sorted(candidates)
+
+
+def _charge_candidate(
+    soe: float,
+    battery_settings: BatterySettings,
+    dt: float,
+    period_max_charge: float | None,
+) -> float | None:
+    """The single representative STORE (charge) candidate power, or `None`
+    if no genuine charge is possible -- see Finding 4 in
+    docs/superpowers/specs/2026-07-12-dp-continuous-action-reformulation-design.md:
+    any power above `POWER_TOLERANCE_KW` produces an identical reward
+    (binary store physics; actual throughput is governed by
+    `max_charge_power_kw`/solar/room, not the chosen power value), so a
+    single feasible positive power fully represents the action.
+
+    Same classification-threshold guard as `_discharge_candidates`: a
+    candidate at or below `POWER_CLASSIFICATION_THRESHOLD_KW` would be
+    misclassified as noise by `classify_strategic_intent` rather than as a
+    genuine charge (reachable when very little room remains near a full
+    battery), so treat that case as no charge available rather than
+    returning a candidate the classifier can't recognize.
+    """
+    available_capacity = battery_settings.max_soe_kwh - soe
+    max_charge_power = available_capacity / dt / battery_settings.efficiency_charge
+    if period_max_charge is not None:
+        max_charge_power = min(max_charge_power, period_max_charge)
+    if max_charge_power <= POWER_CLASSIFICATION_THRESHOLD_KW:
+        return None
+    return min(POWER_STEP_KW, max_charge_power)
+
+
 def _best_action_at_continuous_state(
     soe: float,
     t: int,
@@ -905,6 +1005,13 @@ def _best_action_at_continuous_state(
     for a slightly different state. See
     docs/superpowers/specs/2026-07-06-dp-bellman-guardrail-removal-design.md.
 
+    Candidate actions are the exact breakpoints of the piecewise-linear
+    reward+continuation objective (see
+    docs/superpowers/specs/2026-07-12-dp-continuous-action-reformulation-design.md)
+    rather than a fixed power grid -- `power_levels` is unused for the
+    search itself, kept only for call-site compatibility with
+    `_discretize_state_action_space`.
+
     Returns (best_action, best_next_soe, best_new_cost_basis, best_reward).
     """
     period_max_charge = (
@@ -912,52 +1019,39 @@ def _best_action_at_continuous_state(
         if max_charge_power_per_period is not None
         else None
     )
+    home = home_consumption[t]
+    solar = solar_production[t]
+
     best_value = float("-inf")
     best_action = 0.0
     best_next_soe = soe
     best_new_cost_basis = cost_basis
     best_reward = 0.0
-    for power in power_levels:
-        if power < -POWER_TOLERANCE_KW:
-            available_energy = soe - battery_settings.min_soe_kwh
-            max_discharge_power = (
-                available_energy / dt * battery_settings.efficiency_discharge
-            )
-            if abs(power) > max_discharge_power:
-                continue
-        elif power > POWER_TOLERANCE_KW:
-            if period_max_charge is not None and power > period_max_charge:
-                continue
-            available_capacity = battery_settings.max_soe_kwh - soe
-            max_charge_power = (
-                available_capacity / dt / battery_settings.efficiency_charge
-            )
-            if power > max_charge_power:
-                continue
 
+    def consider(power: float) -> None:
+        nonlocal best_value, best_action, best_next_soe, best_new_cost_basis, best_reward
         next_soe = _state_transition(
             soe,
             power,
             battery_settings,
             dt,
-            solar_production=solar_production[t],
-            home_consumption=home_consumption[t],
+            solar_production=solar,
+            home_consumption=home,
         )
         if (
             next_soe < battery_settings.min_soe_kwh
             or next_soe > battery_settings.max_soe_kwh
         ):
-            continue
-
+            return
         reward, new_cost_basis = _compute_reward(
             power=power,
             soe=soe,
             next_soe=next_soe,
             period=t,
-            home_consumption=home_consumption[t],
+            home_consumption=home,
             battery_settings=battery_settings,
             dt=dt,
-            solar_production=solar_production[t],
+            solar_production=solar,
             buy_price=buy_price,
             sell_price=sell_price,
             cost_basis=cost_basis,
@@ -969,6 +1063,20 @@ def _best_action_at_continuous_state(
             best_next_soe = next_soe
             best_new_cost_basis = new_cost_basis
             best_reward = reward
+
+    # IDLE -- always a feasible candidate.
+    consider(0.0)
+
+    # Discharge -- exact breakpoint enumeration (Finding 1/2/3/5).
+    for p in _discharge_candidates(soe, battery_settings, dt, home, solar):
+        consider(-p)
+
+    # Charge (STORE) -- Finding 4: no grid search needed on this side at
+    # all, a single representative candidate fully covers it.
+    charge_candidate = _charge_candidate(soe, battery_settings, dt, period_max_charge)
+    if charge_candidate is not None:
+        consider(charge_candidate)
+
     return best_action, best_next_soe, best_new_cost_basis, best_reward
 
 

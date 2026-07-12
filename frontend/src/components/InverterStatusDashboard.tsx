@@ -26,6 +26,7 @@ interface InverterStatus {
   gridPower: number;
   chargeStopSoc: number;
   dischargeStopSoc: number;
+  chargePowerRate: number;
   dischargePowerRate: number;
   dischargeInhibitActive?: boolean;
   maxChargingPower: number;
@@ -697,7 +698,7 @@ const InverterStatusDashboard: React.FC = () => {
             },
             {
               label: "Charge Power Rate",
-              value: batterySettings?.chargingPowerRate || 0,
+              value: inverterStatus?.chargePowerRate || 0,
               unit: "%",
               icon: TrendingUp
             },

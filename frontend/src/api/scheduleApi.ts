@@ -29,7 +29,6 @@ export const fetchAvailableDashboardDates = async (): Promise<string[]> => {
 
 // Type definitions for the unified dashboard response
 export interface DashboardHourlyData {
-  hour: number;
   period: number;  // Period index (0-23 hourly, 0-95 quarterly)
   dataSource: 'actual' | 'predicted';
 

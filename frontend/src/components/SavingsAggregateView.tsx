@@ -53,7 +53,7 @@ const formatHourLabel = (item: DashboardHourlyData, resolution: 'hourly' | 'quar
     const minute = (item.period % 4) * 15;
     return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
   }
-  return `${String(item.hour).padStart(2, '0')}:00`;
+  return `${String(item.period).padStart(2, '0')}:00`;
 };
 
 // netSavings/batterySavings are computed backend-side (see

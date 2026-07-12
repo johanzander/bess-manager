@@ -40,7 +40,10 @@ def run_request(http_method, *args, **kwargs):
 
         return response
     except Exception as e:
-        logger.error("Error during HTTP request: %s", str(e))
+        # Don't log at ERROR here: the caller (_api_request) doesn't yet know
+        # whether this attempt will be retried. It logs WARNING for retryable
+        # attempts and ERROR only once retries are exhausted.
+        logger.debug("Error during HTTP request: %s", str(e))
         raise
 
 

@@ -91,6 +91,14 @@
         "max": 100
       }
     },
+    "number.solax_battery_minimum_capacity_gridtied": {
+      "state": "15",
+      "attributes": {
+        "unit_of_measurement": "%",
+        "min": 0,
+        "max": 100
+      }
+    },
     "sensor.nordpool_kwh_se4_sek_3_10_025": {
       "state": "0.85",
       "attributes": {
@@ -253,6 +261,12 @@
       "platform": "solax_modbus",
       "config_entry_id": "mock_solax_config_entry",
       "unique_id": "solax_battery_minimum_capacity"
+    },
+    {
+      "entity_id": "number.solax_battery_minimum_capacity_gridtied",
+      "platform": "solax_modbus",
+      "config_entry_id": "mock_solax_config_entry",
+      "unique_id": "solax_battery_minimum_capacity_gridtied"
     }
   ],
   "time_segments": [],

@@ -3,3 +3,4 @@
 - [Worktree sibling location](feedback_worktree_location.md) — Create worktrees as sibling folders, not inside .claude/worktrees/
 - [Parallel release train](feedback_parallel_release.md) — Use concurrent subagents for beta releases; check GitHub releases for version numbers
 - [solax_modbus unique_id format](reference_solax_modbus_unique_ids.md) — unique_id = {user_device_name}_{register_key}; suffix maps must use register key only, never hardcode device name prefix
+- [Issue #275 investigation status](project_issue_275_investigation_status.md) — "DP holds charge, exports later at worse price" appears misdiagnosed, not a discretization bug; Approach 2 (#285) paused

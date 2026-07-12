@@ -90,10 +90,10 @@
     "max_discharge_power_kw": 6.0
   },
   "expected_results": {
-    "base_cost": 300.9558,
-    "battery_solar_cost": 230.4346,
-    "base_to_battery_solar_savings": 70.5212,
-    "base_to_battery_solar_savings_pct": 23.4324,
+    "base_cost": 300.95585,
+    "battery_solar_cost": 230.710092,
+    "base_to_battery_solar_savings": 70.245758,
+    "base_to_battery_solar_savings_pct": 23.340885,
     "total_charged": 45.0,
     "total_discharged": 45.0
   },

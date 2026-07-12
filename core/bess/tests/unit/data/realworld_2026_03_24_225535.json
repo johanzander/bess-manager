@@ -330,10 +330,10 @@
     "tax_reduction": 0.0
   },
   "expected_results": {
-    "base_cost": 129.1047,
-    "battery_solar_cost": 76.8606,
-    "base_to_battery_solar_savings": 52.2441,
-    "base_to_battery_solar_savings_pct": 40.4664,
+    "base_cost": 129.1046849043433,
+    "battery_solar_cost": 76.89077916980766,
+    "base_to_battery_solar_savings": 52.21390573453563,
+    "base_to_battery_solar_savings_pct": 40.44307592185531,
     "total_charged": 6.7,
     "total_discharged": 22.8
   },

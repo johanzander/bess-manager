@@ -64,6 +64,7 @@ from core.bess.decision_intelligence import (
     classify_strategic_intent,
     create_decision_data,
 )
+from core.bess.dp_constants import POWER_STEP_KW, SOE_STEP_KWH
 from core.bess.models import (
     DecisionData,
     EconomicData,
@@ -80,9 +81,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Algorithm parameters
-SOE_STEP_KWH = 0.1
-POWER_STEP_KW = 0.2
+# Algorithm parameters. SOE_STEP_KWH/POWER_STEP_KW live in dp_constants.py
+# (shared with decision_intelligence.py -- see that module's docstring for why).
 POWER_TOLERANCE_KW = 0.001  # Threshold to distinguish IDLE from charge/discharge
 # Matches decision_intelligence.classify_strategic_intent's own
 # battery_to_grid threshold for BATTERY_EXPORT classification -- keep these

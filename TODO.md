@@ -726,6 +726,14 @@ Both are valid given each has its own matching frontend hook, but it's an incons
 
 The `_get_hour_readings` (and thus the InfluxDB query) is called at startup (to reconstruct history) and whenever a new hour is completed and needs to be recorded. It is not called every hour by a scheduler, but it is called for each hour that needs to be reconstructed or recorded.
 
+## From #271 charge-power-rate fix code review (non-blocking, nice-to-have)
+
+**`InverterStatusDashboard.tsx`'s `batterySettings` state is now write-only**: after switching the "Charge Power Rate" tile to read `inverterStatus?.chargePowerRate` instead of `batterySettings?.chargingPowerRate`, nothing in the component reads `batterySettings` anymore — only `setBatterySettings` (from `fetchBatterySettings()`) is called. Left as-is deliberately to keep the fix minimal. Worth a follow-up to either remove the now-dead `fetchBatterySettings()` call/state or confirm another consumer still needs it.
+
+**File**: `frontend/src/components/InverterStatusDashboard.tsx`
+
+---
+
 ## From #249 net-grid-cost-savings-redesign whole-branch review (non-blocking, low severity)
 
 **Stale comment in `BatteryActionsTable.tsx:91`**: `// Use backend-calculated summary data instead of frontend calculations` was the header of the now-deleted Summary Cards block; it now floats above the `finalHour` declaration with nothing to describe. Harmless, mildly misleading.

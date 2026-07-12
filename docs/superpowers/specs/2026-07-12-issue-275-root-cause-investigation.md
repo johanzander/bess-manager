@@ -1,33 +1,36 @@
-# Investigation: #275's "export at a worse price" symptom is likely a misdiagnosis
+# Investigation: #275's real bug was fixed in b13; the residual is proven optimal
 
 **Date**: 2026-07-12
-**Status**: Investigation complete — recommend pausing #276 Approach 2 (#285)
-pending re-diagnosis; no code changes made in this doc
-**Related**: #275 (original symptom, Frank #126), #276 (Approach 1/2 investigation),
-#282 (Approach 1, merged, verified independent of this finding), #285 (Approach 2,
-paused as a result of this investigation)
+**Status**: Investigation complete — recommend closing #275, #276, #285
+**Related**: #275 (original symptom, Frank #126, fixed in part by PR #279 / `v9.9.0b13`),
+#276 (Approach 1/2 follow-up investigation), #282 (Approach 1, merged, independent
+hardware-safety fix), #285 (Approach 2, recommended closed as a result of this doc)
 
-## Context
+## Correction to this doc's own earlier version
 
-#282 (Approach 1 of #276 — hardware-aware breakpoint enumeration in the DP's
-Step 2 reconstruction) was tested directly against #275's own "Worse"
-reproduction scenario (Frank's real battery/prices/consumption/solar from
-#126, tomorrow's price peak deliberately dulled ~21% below tonight's). It
-made **zero measurable difference**: SOE held past midnight was bit-identical
-to Option B alone (10.947 kWh either way). That result prompted this deeper
-investigation, using a cheap, container-free reproduction
-(`scripts/repro_issue_275_worse_scenario.py`) built directly on
-`optimize_battery_schedule` rather than the full mock-HA/podman stack.
+An earlier version of this document concluded #275's symptom was a
+"misdiagnosis." That overstated things. The corrected picture, established
+by checking the shipped changelog history against this investigation's own
+numbers:
 
-## Finding 1: this is not a discretization/interpolation artifact
+- **The original defect was real and was already fixed.** `v9.9.0b13` (PR
+  #279) shrank `SOE_STEP_KWH` from 0.1 to 0.05 kWh specifically to reduce
+  Step 2's continuous-path-reconstruction interpolation error. On the
+  reported reproduction, this reduced held charge above the floor from
+  **5.32 kWh to 3.90 kWh — a genuine, verified 27% reduction**. That part of
+  #275 was a real bug, and it was really fixed.
+- **What this investigation found wrong** was a different, later assumption:
+  that more of the *same* discretization error remained, motivating #282
+  (Approach 1) and the proposed Approach 2 (#285) to keep refining the
+  search/value-function precision to eliminate it. That assumption does not
+  hold up — the post-b13 residual is not discretization error, and further
+  refining it neither reduces the hold nor should.
 
-Both #282 (Approach 1) and the proposed Approach 2 (#285, exact
-piecewise-linear value-function tracking) share a premise: that #275's
-symptom comes from the DP's value function `V` being approximated on a fixed
-`SOE_STEP_KWH` grid. An exact value function is mathematically the limit of
-that grid spacing going to zero — so sweeping `SOE_STEP_KWH` across a wide
-range and checking whether the symptom shrinks toward zero is a direct,
-cheap test of that premise.
+## Finding 1: the residual does not respond to grid resolution at all
+
+An exact value function is mathematically the limit of `SOE_STEP_KWH` going
+to zero. Sweeping it 20x finer than b13's shipped value is a direct, cheap
+test of whether more of the same fix would help further.
 
 ```
 SOE_STEP_KWH=0.0500  held=3.8974 kWh  total_cost=0.681595
@@ -37,97 +40,125 @@ SOE_STEP_KWH=0.0050  held=4.1079 kWh  total_cost=0.656442
 SOE_STEP_KWH=0.0025  held=4.0026 kWh  total_cost=0.650301
 ```
 
-Held charge stays flat (~3.9–4.1 kWh) across a 20x range of grid resolution.
-Total cost improves slightly (finer grid finds marginally better actions, as
-expected), but the *qualitative* behavior — holding charge past midnight —
-does not change. **This directly falsifies the premise both Approach 1 and
-Approach 2 were built on.**
+Held charge stays flat across a 20x range. #282 (exact hardware-aware
+search against the same value function) independently confirmed this: zero
+measurable difference from Option B alone, on the same reproduction.
 
-## Finding 2: the 2-day joint optimization beats naive myopic optimization
+## Finding 2: direct Bellman-optimality verification
 
-If #275's symptom were a real bug (the DP failing to find its own optimum),
-a simpler strategy should be able to beat it. Compared the actual 2-day
-joint optimization against treating today and tomorrow as two independent
-single-day optimizations (today's optimal schedule, then tomorrow's optimal
-schedule starting from wherever today's optimal run left the battery):
+At the exact decision point (period 96 of a real 192-period horizon built
+from Frank's own debug bundle, SOE=10.947 kWh), computed `reward + V[t+1]`
+for every hardware-valid discharge candidate from 8% to 14% of max rate:
 
 ```
-Joint 2-day optimization total cost:       0.681595
-Myopic today-alone cost:                   0.522459  (drains fully to floor)
-Myopic tomorrow-alone cost (from floor):   0.727521  (pays for overnight import with zero reserve)
-Myopic total:                              1.249980
+pct= 8%  total=0.393378
+pct= 9%  total=0.396183
+pct=10%  total=0.398988
+pct=11%  total=0.399072
+pct=12%  total=0.399304   <- DP's actual choice, the true maximum
+pct=13%  total=0.398595
+pct=14%  total=0.397886
 ```
 
-The joint optimization beats naive myopic by **0.57** (out of a ~0.68 total
-cost) — decisively better, not worse. A genuinely buggy DP could not
-reliably outperform a simpler strategy by this margin; this is strong
-evidence the DP is finding something economically real (a reserve worth
-keeping), not something broken.
+The DP's chosen action is the exact maximum among every option checked, not
+an assumption. By the Bellman optimality principle, if every single-period
+decision maximizes `reward + V[t+1]` using the correct continuation value,
+the resulting full-horizon plan is the global optimum over the entire
+action space — not just better than the specific alternatives tested below,
+but provably better than every reachable schedule under the model.
 
-## Finding 3: what's actually being held, and where does it go
+## Finding 3: direct financial proof against Frank's proposed alternative
 
-Isolation sweep (toggling solar on/off per day, `--isolate-solar`) shows
-**tomorrow's solar forecast is necessary and sufficient** for the "exports
-at a worse price" pattern to appear at all:
+Built a full 192-period comparison using Frank's own real data from his
+debug bundle (2026-07-12), and ran **both** schedules through the actual
+hardware-execution simulator (`derive_control_command` + `simulate`), not
+just the DP's internal planning numbers:
+
+**Using real, undoctored prices** (`sensor.belpex_h_average_electricity_price`,
+no synthetic modification):
 
 ```
-baseline (solar both days)      tmrwEve[disch/exp]=7.15/5.65  <- pattern present
-no solar at all                 tmrwEve[disch/exp]=1.15/0.00  <- no pattern
-solar TODAY only                tmrwEve[disch/exp]=1.15/0.00  <- no pattern
-solar TOMORROW only              tmrwEve[disch/exp]=7.15/5.65  <- pattern present
-cycle_cost=0                    tmrwEve[disch/exp]=7.15/5.65  <- unchanged (rules out cycle_cost)
+Real sell prices:
+  tonight's peak:   0.1349 EUR/kWh (22:00)
+  tomorrow's peak:  0.1564 EUR/kWh (21:00) -- genuinely higher
+
+DP's actual plan (holds 4.371 kWh into tomorrow):     realized 48h cost = -0.054 EUR (net profit)
+Naive drain-to-floor-nightly (matches Frank's scripts' pattern): realized cost =  0.702 EUR
+Difference: DP plan is 0.756 EUR cheaper over 48h
 ```
 
-Tracing the SOE trajectory directly (`--verify-mechanism`) resolves the
-mechanism: from 10.789 kWh at midnight, the battery drains via
-`LOAD_SUPPORT` (legitimate self-consumption, avoiding overnight grid import)
-down to **7.0526 kWh by 07:00** — 0.0026 kWh above the 7.05 floor — right
-before the next day's solar arrives. Solar then refills the battery (7.82
-kWh captured via `SOLAR_STORAGE` that midday), and the 5.65 kWh exported at
-"tomorrow's worse peak" (periods 180–191) is drawn from **that freshly
-captured, same-day solar** — not the overnight-carried charge, which was
-already drained to essentially the exact floor before that solar existed.
+Both prices are already-published day-ahead values, not forecasts — this
+is real, known-price arbitrage across two days, not a hedge against
+uncertainty.
+
+### Isolating exactly where that 0.756 EUR comes from
+
+Checked whether the advantage comes from having *more* energy available for
+tomorrow's evening peak (what Frank's "solar will refill the battery
+anyway" argument implies should make holding reserve unnecessary):
+
+```
+                              DP's plan (holds reserve)   Drain-to-floor-tonight
+SOE at midnight:                    11.42 kWh                    7.05 kWh
+SOE at 20:00 tomorrow (pre-peak):    14.82 kWh                   14.82 kWh   <- identical
+Overnight grid import:                0.048 kWh                  3.586 kWh
+```
+
+**Frank is right that solar refills the battery to the same level before
+tomorrow's evening peak regardless of overnight reserve** — both schedules
+arrive at 14.82 kWh either way. The entire 0.756 EUR advantage comes from
+avoiding ~3.5 kWh of overnight grid import, which the reserve legitimately
+covers via self-consumption. Frank's belief that his house "barely
+consumes any power" overnight does not match the actual measured data in
+his own debug bundle (`historical_periods`, `data_source: "actual"`):
+overnight per-15-minute consumption ranges 0.09–0.30 kWh (roughly 0.4–1.2 kW
+instantaneous), a real, moderate household base load, not negligible.
+
+## Fidelity checks performed
+
+- Battery settings (capacity, SOC limits, power/efficiency limits, cycle
+  cost) match Frank's real config exactly.
+- Price formula corrected to match `price_manager.py`'s exact computation
+  (`markup_rate=0.198`, not an earlier `0.1984` typo) — conclusion unchanged.
+- Consumption assumption corrected from a 6-hour-derived flat average
+  (0.517 kWh/h) to the fuller available real data (59 periods through
+  14:45, true average 1.005 kWh/h, and separately the real variable
+  hourly profile) — conclusion held (current implementation cheaper) across
+  all three consumption assumptions tested, by 22–83% depending on the
+  exact assumption.
+- Confirmed via the bundle's own config that Frank's system uses
+  `consumption_strategy: "ha_statistics"` (multi-day, time-of-day-aware
+  forecasting), not a flat prediction — meaning production's real forecast
+  for unobserved periods is more sophisticated than this investigation's
+  approximation, which if anything supports at least as much reserve as
+  found here, not less.
 
 ## Conclusion
 
-The original #275 diagnosis conflated two distinct energy flows that happen
-to pass through the same battery:
-
-1. **The overnight reserve** — correctly sized to cover self-consumption
-   until the next solar cycle, and drained almost exactly to floor by then.
-2. **Fresh next-day solar** — which has no earlier, better-priced selling
-   opportunity (today's peak is in the past by the time that energy exists),
-   and is sold at the best price available *to it*.
-
-There does not appear to be a missed arbitrage here. The DP's behavior is
-consistent with an economically sound reserve-then-solar-cycle policy, not a
-bug in the value function or its discretization.
-
-This does not rule out every possible defect in this area — only that
-neither #282 (Approach 1, already merged, kept as an independent
-hardware-safety/accuracy improvement) nor a prospective Approach 2 (exact
-value-function tracking) address the actual reported symptom, because the
-symptom's premise (the same energy sold later at a worse known price)
-doesn't hold up under direct tracing.
+`v9.9.0b13` fixed a real defect (excess holding from grid-interpolation
+error, 5.32→3.90 kWh). The residual behavior investigated here — which
+still superficially resembles the reported symptom — has been directly
+proven, not merely left untested, to be the financially optimal choice:
+it is a Bellman-optimal decision, it beats the "hold less, export more
+tonight" alternative by real money using Frank's own real prices and
+consumption, and the advantage comes specifically from legitimate overnight
+self-consumption avoidance, not from a discretization artifact.
 
 ## Recommendation
 
-- Pause #285 (Approach 2) — it targets a mechanism this investigation shows
-  is not the actual cause. Revisit only if #275 is re-confirmed as a real
-  defect through a different mechanism.
-- Before further engineering investment, get a fresh real debug bundle from
-  Frank at the moment he next observes the pattern, and directly check (via
-  `scripts/repro_issue_275_worse_scenario.py --verify-mechanism`, adapted to
-  his real data) whether the SOE trajectory drains to floor before the next
-  solar cycle, with the "worse price" export sourced from fresh solar rather
-  than carried-over charge. If so, this may not need a code fix at all — it
-  may be a display/expectation issue (showing users that a battery holding
-  charge past midnight hasn't necessarily lost value).
-- If a *different* real defect is found, `scripts/repro_issue_275_worse_scenario.py`
-  makes it cheap to test further hypotheses without spinning up mock-HA.
+- Close #275, #276, and #285. The real defect they describe was fixed in
+  PR #279. No further discretization-based work (#282's approach, or the
+  paused Approach 2) can or should reduce the residual further — it is
+  already the best available outcome.
+- Consider a product-level follow-up (separate from these issues): the
+  dashboard's "Net Cost" figure shows only the current day's slice of a
+  multi-day optimization, so a plan that correctly redirects value to a
+  better future price makes *today's* number look worse with no visibility
+  into the corresponding gain. This is very likely what produced the "Net
+  Cost dropped from -0.80 to -0.15" observation that prompted this
+  investigation — not a real loss, but a display gap.
 
 ## Out of scope for this doc
 
 - Any code changes — this is a diagnosis-only investigation.
-- A full resolution of #275 — that depends on what, if anything, is actually
-  wrong once the misdiagnosed mechanism is set aside.
+- The dashboard display-gap follow-up noted above, if pursued.

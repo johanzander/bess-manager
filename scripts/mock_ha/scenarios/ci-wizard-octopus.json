@@ -79,6 +79,14 @@
         "max": 100
       }
     },
+    "number.abc1234567_battery_discharge_soc_limit_on_grid": {
+      "state": "10",
+      "attributes": {
+        "unit_of_measurement": "%",
+        "min": 0,
+        "max": 100
+      }
+    },
     "switch.abc1234567_charge_from_grid": {
       "state": "off",
       "attributes": {}

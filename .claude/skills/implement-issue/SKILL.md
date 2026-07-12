@@ -114,6 +114,15 @@ not satisfied by re-stating that `quality-check.sh` passed.
 
 ### 9. Commit + draft PR
 
+Add a `CHANGELOG.md` entry under `## [Unreleased]` (create that heading at
+the top if it's not already there), in the matching `### Added` / `### Changed`
+/ `### Fixed` subsection, following the existing entries' style (bold summary
+line, link to the issue/PR). This is a normal part of the PR, not a release
+step — per `docs/superpowers/specs/2026-07-09-release-workflow-design.md`,
+`Unreleased` entries accumulate as each PR merges; the release skill only
+ever renames or copies that section, it never authors it. Skipping this here
+means the release skill has to backfill it later from a colder context.
+
 Commit per `docs/agents/workflow.md` format (subject + blank line + body
 explaining WHY). Open a draft PR against `main` via
 `superpowers:finishing-a-development-branch` (Option 2: push + PR), body:
@@ -139,8 +148,10 @@ Closes #<n>
 
 - Draft PR only. Never auto-merge.
 - Never push directly to `main`.
-- Do NOT modify `CHANGELOG.md` or the version in `bess_manager/config.yaml`
-  — that's a human step at merge time.
+- Do NOT modify the version in `bess_manager/config.yaml` — bumping it is a
+  release-time step, not a per-PR one. DO add a `CHANGELOG.md` entry under
+  `## [Unreleased]` per Step 9 — this is the one CHANGELOG.md edit expected
+  in every PR.
 - If `quality-check.sh` keeps failing after 3 fix attempts, or Step 8 can't
   demonstrate the fix actually works, stop, push the branch as-is, and
   report what failed — don't force a PR through.

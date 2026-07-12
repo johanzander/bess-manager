@@ -27,13 +27,18 @@ and PR #286) found that assumption doesn't hold up:
    hardware-valid candidate, verified by computing all of them, not assumed.
 3. Direct financial proof using Frank's own real prices/consumption/solar,
    verified through the actual hardware simulator (not just planning
-   numbers): the current implementation beats the "hold less, export more
-   tonight" alternative by 0.756 EUR over 48h. Solar refills the battery to
+   numbers): the current implementation beats a "drain fully tonight"
+   hypothesis (matched to Frank's stated goal, not his scripts' actual
+   unverified logic) by 0.756 EUR over 48h. Solar refills the battery to
    the *same* level before tomorrow's evening peak regardless of overnight
-   reserve (confirming that part of the counter-argument) — the entire
-   advantage comes from avoiding real overnight grid import, which the
-   reporter's own measured consumption data shows is not negligible despite
-   his belief that it is.
+   reserve — the reserve provides zero extra capacity for that peak. The
+   entire advantage comes from avoiding real overnight grid import: Frank's
+   own posted debug bundle (`historical_periods`, `data_source: "actual"`)
+   shows 3.89 kWh of measured consumption 00:00-07:00 on 12 July, closely
+   matching the 4.37 kWh reserve held. (Careful: Frank's own separate claim
+   of "~0.1 kWh/day" net import is over a different set of days, 2-11 Jul,
+   under his own scripts' unverified behavior — this doesn't contradict
+   that claim, it's a different measurement on a different night.)
 
 **Status as of 2026-07-12**: #275, #276, #285 recommended closed. The real
 defect was fixed in PR #279; the residual is proven financially optimal, not

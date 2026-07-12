@@ -83,9 +83,16 @@ Real sell prices:
   tomorrow's peak:  0.1564 EUR/kWh (21:00) -- genuinely higher
 
 DP's actual plan (holds 4.371 kWh into tomorrow):     realized 48h cost = -0.054 EUR (net profit)
-Naive drain-to-floor-nightly (matches Frank's scripts' pattern): realized cost =  0.702 EUR
+Drain-to-floor-tonight, then re-optimize tomorrow from there: realized cost = 0.702 EUR
 Difference: DP plan is 0.756 EUR cheaper over 48h
 ```
+
+"Drain-to-floor-tonight" here is the DP's own single-day-optimal schedule
+for today alone (it has no visibility into tomorrow, so it naturally
+drains toward the floor) — a hypothesis matched to Frank's stated goal
+("export tonight at the injection peak down toward ~47–50% floor"), not a
+simulation of his actual scripts' logic, which isn't available to check
+directly.
 
 Both prices are already-published day-ahead values, not forecasts — this
 is real, known-price arbitrage across two days, not a hedge against
@@ -94,8 +101,7 @@ uncertainty.
 ### Isolating exactly where that 0.756 EUR comes from
 
 Checked whether the advantage comes from having *more* energy available for
-tomorrow's evening peak (what Frank's "solar will refill the battery
-anyway" argument implies should make holding reserve unnecessary):
+tomorrow's evening peak, or from something else:
 
 ```
                               DP's plan (holds reserve)   Drain-to-floor-tonight
@@ -104,15 +110,26 @@ SOE at 20:00 tomorrow (pre-peak):    14.82 kWh                   14.82 kWh   <- 
 Overnight grid import:                0.048 kWh                  3.586 kWh
 ```
 
-**Frank is right that solar refills the battery to the same level before
-tomorrow's evening peak regardless of overnight reserve** — both schedules
-arrive at 14.82 kWh either way. The entire 0.756 EUR advantage comes from
-avoiding ~3.5 kWh of overnight grid import, which the reserve legitimately
-covers via self-consumption. Frank's belief that his house "barely
-consumes any power" overnight does not match the actual measured data in
-his own debug bundle (`historical_periods`, `data_source: "actual"`):
-overnight per-15-minute consumption ranges 0.09–0.30 kWh (roughly 0.4–1.2 kW
-instantaneous), a real, moderate household base load, not negligible.
+Solar refills the battery to the same level before tomorrow's evening peak
+regardless of overnight reserve — both schedules arrive at 14.82 kWh
+either way. The entire 0.756 EUR advantage comes from avoiding ~3.5 kWh of
+overnight grid import, which the reserve legitimately covers via
+self-consumption — **not** from selling reserved charge at a better future
+price, which was an earlier overreach in this doc's own analysis and is
+not supported by these numbers.
+
+Cross-checked directly against Frank's own posted bundle
+(`historical_periods`, `data_source: "actual"`, i.e. real measured data,
+not an estimate): total measured home consumption 00:00–07:00 on 12 July
+was **3.89 kWh** — closely matched to the 4.37 kWh reserve the DP actually
+holds. With no solar overnight, that consumption has to come from either
+the battery or the grid; there is no scenario in which it's free. This is
+a direct comparison against Frank's own reported "2–11 Jul" average net
+import figure, so it isn't claimed to contradict that number — it's a
+different measurement (a different set of days, and his scripts' actual
+logic isn't available to compare against directly) — only that on this
+specific night, his own data shows non-trivial real consumption that has
+to be covered by something.
 
 ## Fidelity checks performed
 

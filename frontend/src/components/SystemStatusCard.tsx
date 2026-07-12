@@ -210,7 +210,7 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", sys
 
     // Find current period data - supports both hourly (24 periods) and quarterly (96 periods)
     const currentHourData = dashboardData.hourlyData?.length === 24
-      ? dashboardData.hourlyData.find((h: any) => h.hour === currentHour)  // Hourly mode
+      ? dashboardData.hourlyData.find((h) => h.period === currentHour)  // Hourly mode
       : dashboardData.hourlyData?.[currentPeriodIndex];  // Quarterly mode (direct array access)
 
     // Validate hourlyData exists

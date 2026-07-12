@@ -104,34 +104,34 @@ const DateSelector = ({
 
   return (
     <div className="relative">
-      <div className="bg-white p-4 rounded-lg shadow flex items-center justify-between" style={{ height: '75px', width: '300px' }}>
+      <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow flex items-center justify-between" style={{ height: '75px', width: '300px' }}>
         <button
           onClick={() => navigateDay(-1)}
-          className="p-1 hover:bg-gray-100 rounded-full disabled:opacity-30 disabled:cursor-not-allowed"
+          className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full disabled:opacity-30 disabled:cursor-not-allowed"
           disabled={!canNavigate(-1)}
         >
-          <ChevronLeft className="w-5 h-5 text-gray-600" />
+          <ChevronLeft className="w-5 h-5 text-gray-600 dark:text-gray-400" />
         </button>
         <button
           onClick={() => setIsOpen(!isOpen)}
-          className="flex items-center space-x-2 px-3 py-2 border border-gray-300 rounded-md hover:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="flex items-center space-x-2 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md hover:border-blue-500 dark:hover:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
           disabled={isLoading}
         >
-          <Calendar className="w-5 h-5 text-gray-600" />
-          <span className="text-gray-700">{formatDisplayDate(selectedDate)}</span>
+          <Calendar className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+          <span className="text-gray-700 dark:text-gray-300">{formatDisplayDate(selectedDate)}</span>
         </button>
         <button
           onClick={() => navigateDay(1)}
-          className="p-1 hover:bg-gray-100 rounded-full disabled:opacity-30 disabled:cursor-not-allowed"
+          className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full disabled:opacity-30 disabled:cursor-not-allowed"
           disabled={!canNavigate(1)}
         >
-          <ChevronRight className="w-5 h-5 text-gray-600" />
+          <ChevronRight className="w-5 h-5 text-gray-600 dark:text-gray-400" />
         </button>
       </div>
 
       {isLoading && (
         <div className="absolute top-full left-0 right-0 pt-2">
-          <div className="flex items-center justify-center space-x-2 text-gray-600">
+          <div className="flex items-center justify-center space-x-2 text-gray-600 dark:text-gray-400">
             <div className="animate-spin h-5 w-5 border-2 border-blue-500 rounded-full border-t-transparent"></div>
             <span className="text-sm">Loading...</span>
           </div>
@@ -139,7 +139,7 @@ const DateSelector = ({
       )}
 
       {isOpen && (
-        <div className="absolute top-20 left-0 z-10 w-64 bg-white rounded-lg shadow-lg border border-gray-200">
+        <div className="absolute top-20 left-0 z-10 w-64 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700">
           <div className="p-2">
             <DatePicker
               selected={selectedDate}

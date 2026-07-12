@@ -430,7 +430,6 @@ describe('SavingsAggregateView Day-resolution hourly drill-down', () => {
   ) => {
     const v = (value: number) => ({ value, display: value.toFixed(2), unit: 'EUR', text: `${value.toFixed(2)} EUR` });
     return {
-      hour: Math.floor(period / 4),
       period,
       dataSource: 'actual' as const,
       solarProduction: v(0),
@@ -552,6 +551,32 @@ describe('SavingsAggregateView Day-resolution hourly drill-down', () => {
     });
     expect(screen.getByText('99.00 EUR')).toBeInTheDocument();
     expect(screen.getByText('77.00 EUR')).toBeInTheDocument();
+  });
+
+  it('labels hourly-resolution rows by their period, not the removed hour field', async () => {
+    // Regression test for #126: with dataResolution 'hourly' (24 periods/day,
+    // one period == one hour), the Period column rendered "undefined:00"
+    // because formatHourLabel read a `hour` field the backend never sends.
+    localStorage.setItem('bess_user_preferences', JSON.stringify({ dataResolution: 'hourly' }));
+    vi.spyOn(scheduleApi, 'fetchSavingsAggregate').mockResolvedValue({
+      buckets: [{ ...bucket('2026-07-11', 1), startDate: '2026-07-11', endDate: '2026-07-11' }],
+      count: 1,
+    });
+    vi.spyOn(scheduleApi, 'fetchDashboardData').mockResolvedValue({
+      hourlyData: [hourlyItem(0), hourlyItem(1)],
+    });
+
+    render(<SavingsAggregateView period="day" date="2026-07-11" />);
+
+    fireEvent.click(screen.getByRole('button', { name: /table/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('00:00')).toBeInTheDocument();
+    });
+    expect(screen.getByText('01:00')).toBeInTheDocument();
+    expect(screen.queryByText(/undefined/)).not.toBeInTheDocument();
+
+    localStorage.removeItem('bess_user_preferences');
   });
 
   it('does not affect the History drill-down for month/year resolutions', async () => {

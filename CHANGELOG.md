@@ -42,6 +42,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Internal
 
+- **Vectorized the DP backward-induction hot loop with numpy (~115x faster)** — `_run_dynamic_programming`'s per-period state x action search (~240 SOE levels x ~150 power levels) was a doubly-nested pure-Python loop; new `_state_transition_grid`/`_compute_reward_grid` helpers replicate `_state_transition`/`_compute_reward` operation-for-operation on broadcast `(S,1) x (1,A)` arrays instead, producing bit-identical results per cell. A 96-period optimization dropped from ~12.5s to ~0.1s. Unblocks the discretization-tuning fix candidate for [#275](https://github.com/johanzander/bess-manager/issues/275). No user-facing effect. ([#236](https://github.com/johanzander/bess-manager/issues/236), [#278](https://github.com/johanzander/bess-manager/pull/278))
 - **Release pipeline and issue-triage workflow fixes** — Beta's `release-addon.yml` now derives the image repo from `github.repository` instead of a hardcoded prod name, fixing denied GHCR pushes on beta releases ([#256](https://github.com/johanzander/bess-manager/pull/256)); the issue-triage bot now runs for non-collaborator reporters so external bug reports get auto-labeled ([#257](https://github.com/johanzander/bess-manager/pull/257)). No user-facing effect.
 
 ## [9.8.1] - 2026-06-28

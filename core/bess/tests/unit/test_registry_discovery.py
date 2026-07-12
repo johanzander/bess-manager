@@ -77,10 +77,17 @@ def _growatt_registry() -> list[dict]:
             "growatt_server",
             f"{sn}_battery_charge_soc_limit",
         ),
+        # Off-grid discharge-stop-SOC: real installs always have this
+        # entity too, but it must NOT be matched — see #270.
         _entity(
             f"number.{sn}_battery_discharge_soc_limit",
             "growatt_server",
             f"{sn}_battery_discharge_soc_limit",
+        ),
+        _entity(
+            f"number.{sn}_battery_discharge_soc_limit_on_grid",
+            "growatt_server",
+            f"{sn}_battery_discharge_soc_limit_on_grid",
         ),
         _entity(
             f"sensor.{sn}_lifetime_total_all_batteries_charged",
@@ -252,10 +259,17 @@ def _solax_native_registry() -> list[dict]:
             "solax_modbus",
             "solax_remotecontrol_trigger",
         ),
+        # Off-grid/general minimum capacity: real installs always have this
+        # entity too, but it must NOT be matched — see #270.
         _entity(
             "number.solax_battery_minimum_capacity",
             "solax_modbus",
             "solax_battery_minimum_capacity",
+        ),
+        _entity(
+            "number.solax_battery_minimum_capacity_gridtied",
+            "solax_modbus",
+            "solax_battery_minimum_capacity_gridtied",
         ),
     ]
 
@@ -363,10 +377,17 @@ def _solax_growatt_registry() -> list[dict]:
             "solax_modbus",
             "solax_ems_charging_stop_soc",
         ),
+        # Off-grid discharge-stop-SOC: real installs always have this
+        # descriptor too, but it must NOT be matched — see #270.
         _entity(
             "number.growatt_inverter_solax_ems_discharging_stop_soc",
             "solax_modbus",
             "solax_ems_discharging_stop_soc",
+        ),
+        _entity(
+            "number.growatt_inverter_solax_ems_discharging_stop_soc_on_grid",
+            "solax_modbus",
+            "solax_ems_discharging_stop_soc_on_grid",
         ),
         _entity(
             "switch.growatt_inverter_solax_charger_switch",
@@ -560,7 +581,27 @@ class TestMapRegistryEntities:
         assert result["export_power"] == "sensor.rkm0d7n04x_export_power"
         assert result["pv_power"] == "sensor.rkm0d7n04x_internal_wattage"
         assert result["grid_charge"] == "switch.rkm0d7n04x_charge_from_grid"
+        assert (
+            result["battery_discharge_stop_soc"]
+            == "number.rkm0d7n04x_battery_discharge_soc_limit_on_grid"
+        )
         assert len(result) == 20  # all Growatt MIN entities mapped
+
+    def test_growatt_ignores_off_grid_discharge_stop_soc(self):
+        """The off-grid discharge-stop-SOC entity must never be matched:
+        BESS only operates grid-tied, so that control has no effect and
+        matching it would silently bind a control that does nothing (#270)."""
+        off_grid_entity = _entity(
+            "number.rkm0d7n04x_battery_discharge_soc_limit",
+            "growatt_server",
+            "rkm0d7n04x_battery_discharge_soc_limit",
+        )
+        result = self.ctrl._map_registry_entities(
+            [off_grid_entity],
+            ["growatt_server"],
+            self.ctrl.GROWATT_MIN_SUFFIX_MAP,
+        )
+        assert "battery_discharge_stop_soc" not in result
 
     def test_growatt_sph_entities(self):
         """SPH entities match via mix_* unique_id sensor keys."""
@@ -656,9 +697,27 @@ class TestMapRegistryEntities:
         )
         assert result["solax_active_power"] == "number.solax_remotecontrol_active_power"
         assert (
-            result["solax_battery_min_soc"] == "number.solax_battery_minimum_capacity"
+            result["solax_battery_min_soc"]
+            == "number.solax_battery_minimum_capacity_gridtied"
         )
         assert len(result) >= 10
+
+    def test_solax_native_ignores_off_grid_minimum_capacity(self):
+        """The general/off-grid minimum-capacity entity must never be
+        matched: BESS only operates grid-tied, so that control has no
+        effect and matching it would silently bind a control that does
+        nothing (#270)."""
+        off_grid_entity = _entity(
+            "number.solax_battery_minimum_capacity",
+            "solax_modbus",
+            "solax_battery_minimum_capacity",
+        )
+        result = self.ctrl._map_registry_entities(
+            [off_grid_entity],
+            ["solax_modbus", "solax"],
+            self.ctrl.SOLAX_NATIVE_SUFFIX_MAP,
+        )
+        assert "solax_battery_min_soc" not in result
 
     def test_solax_growatt_entities(self):
         """Growatt GEN4 inverter via solax_modbus matches via SOLAX_GROWATT_MIN_SUFFIX_MAP."""
@@ -694,7 +753,30 @@ class TestMapRegistryEntities:
             == "number.growatt_inverter_solax_ems_charging_rate"
         )
         assert result["grid_charge"] == "switch.growatt_inverter_solax_charger_switch"
+        assert (
+            result["battery_discharge_stop_soc"]
+            == "number.growatt_inverter_solax_ems_discharging_stop_soc_on_grid"
+        )
         assert len(result) == 18
+
+    def test_solax_growatt_ignores_off_grid_discharge_stop_soc(self):
+        """The off-grid EMS discharge-stop-SOC entity must never be matched:
+        BESS only operates grid-tied, so that register has no effect and
+        matching it would silently bind a control that does nothing (#270).
+        If only the off-grid entity is present (e.g. an outdated solax_modbus
+        integration lacking the on-grid descriptor), the key stays
+        unmapped rather than falling back to a non-functional control."""
+        off_grid_entity = _entity(
+            "number.growatt_inverter_solax_ems_discharging_stop_soc",
+            "solax_modbus",
+            "solax_ems_discharging_stop_soc",
+        )
+        result = self.ctrl._map_registry_entities(
+            [off_grid_entity],
+            ["solax_modbus", "solax"],
+            self.ctrl.SOLAX_GROWATT_MIN_SUFFIX_MAP,
+        )
+        assert "battery_discharge_stop_soc" not in result
 
     def test_platform_filter_excludes_other_integrations(self):
         """Entities from non-matching platforms are excluded."""

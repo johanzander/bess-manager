@@ -248,6 +248,26 @@ class TestPatchSettingsInverter:
         )
         assert mock_controller.settings_store.data["inverter"]["control_mode"] == "vpp"
 
+    def test_control_mode_not_switched_live_for_growatt_modbus_sph(
+        self, mock_controller
+    ):
+        """GEN3 is already resolved to 'vpp' by switch_inverter_platform().
+
+        A stale client-side 'tou' default must not be re-applied via
+        switch_control_mode() — the real BatterySystemManager rejects any
+        control_mode other than 'vpp' for this platform and would raise.
+        """
+        _client.patch(
+            "/api/settings",
+            json={
+                "inverter": {
+                    "platform": "solax_modbus_growatt_sph",
+                    "controlMode": "tou",
+                }
+            },
+        )
+        mock_controller.system.switch_control_mode.assert_not_called()
+
 
 class TestPatchSettingsCamelToSnake:
     """camelCase field names from the frontend must be written as snake_case in the store."""

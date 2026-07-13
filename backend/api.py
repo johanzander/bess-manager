@@ -315,11 +315,13 @@ async def patch_settings(updates: dict):
                         detail="Inverter section requires a 'platform' field",
                     )
 
+                # Only GEN4 (solax_modbus_growatt_min) accepts an explicit
+                # control_mode here: GEN3 (solax_modbus_growatt_sph) was
+                # already resolved to "vpp" by switch_inverter_platform()
+                # above, and re-applying a stale client-side "tou" default
+                # would raise, since GEN3 rejects any other value.
                 control_mode = section.get("control_mode")
-                if control_mode and platform in (
-                    "solax_modbus_growatt_min",
-                    "solax_modbus_growatt_sph",
-                ):
+                if control_mode and platform == "solax_modbus_growatt_min":
                     bess_controller.system.switch_control_mode(control_mode)
 
             elif store_key == "sensors":
@@ -3498,15 +3500,16 @@ async def setup_complete(payload: APISetupCompletePayload):
             bess_controller.system.switch_inverter_platform(
                 sections["inverter"]["platform"]
             )
-            # switch_inverter_platform() resets control_mode to its
-            # platform default — apply an explicit wizard choice afterward.
-            # Only meaningful for the two Growatt-via-solax_modbus platforms;
-            # other platforms don't accept this setting.
-            if payload.inverterControlMode is not None and sections["inverter"][
-                "platform"
-            ] in (
-                "solax_modbus_growatt_min",
-                "solax_modbus_growatt_sph",
+            # switch_inverter_platform() resets control_mode to its platform
+            # default — apply an explicit wizard choice afterward. Only
+            # solax_modbus_growatt_min (GEN4) accepts an explicit choice here:
+            # GEN3 (solax_modbus_growatt_sph) was already resolved to "vpp"
+            # by switch_inverter_platform() above, and re-applying a stale
+            # client-side "tou" default would raise, since GEN3 rejects any
+            # other value.
+            if (
+                payload.inverterControlMode is not None
+                and sections["inverter"]["platform"] == "solax_modbus_growatt_min"
             ):
                 bess_controller.system.switch_control_mode(payload.inverterControlMode)
 

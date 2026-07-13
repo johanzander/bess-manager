@@ -2090,18 +2090,21 @@ class BatterySystemManager:
                         period_data.decision.strategic_intent
                     )
 
-            # Store initial SOE (kWh) in OptimizationResult for DailyViewBuilder.
-            # _initial_soc_pct and _get_current_battery_soc() return SOC percent (0-100);
-            # convert to kWh before storing so input_data["initial_soe"] is always kWh.
+            # Store this run's actual starting SOE (kWh) in OptimizationResult.
+            # Must always reflect what the DP started this specific run from,
+            # not the day's midnight SOC - see issue #292.
+            if period_data_list:
+                result.input_data["initial_soe"] = period_data_list[
+                    0
+                ].energy.battery_soe_start
+
+            # Separately record the midnight SOE (kWh), distinct from this
+            # run's starting SOE above, for debug-export/chart-anchoring use.
             total_cap = self.battery_settings.total_capacity
             if self._initial_soc_pct is not None:
-                result.input_data["initial_soe"] = (
+                result.input_data["day_start_soe"] = (
                     self._initial_soc_pct / 100.0 * total_cap
                 )
-            elif not prepare_next_day:
-                current_soc = self._get_current_battery_soc()
-                if current_soc is not None:
-                    result.input_data["initial_soe"] = current_soc / 100.0 * total_cap
 
             # Store in schedule store - now using OptimizationResult directly
             self.schedule_store.store_schedule(

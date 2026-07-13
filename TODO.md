@@ -743,3 +743,5 @@ The `_get_hour_readings` (and thus the InfluxDB query) is called at startup (to 
 **`SavingsPage.test.tsx` doesn't assert DOM order** of `SavingsAggregateView` vs `DetailedSavingsAnalysis`, even though their reorder was the one functional change in that task. Cosmetic reorder, not a regression risk worth a merge block, but a `compareDocumentPosition` assertion would close the gap cheaply if this file is touched again.
 
 **`today_view` is built unconditionally for `period=day`** in `backend/api.py` even when today is already persisted (post-rollover) or `count>1`, cases where `build_buckets` ignores it. One wasted `daily_view_builder.build_daily_view()` call per request; negligible cost.
+
+---

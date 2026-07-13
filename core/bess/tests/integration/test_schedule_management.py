@@ -8,6 +8,8 @@ schedule persistence using PeriodData structures.
 
 from unittest.mock import patch
 
+import pytest
+
 from core.bess.models import PeriodData
 
 
@@ -215,6 +217,51 @@ class TestScheduleUpdates:
         # Both should be stored
         all_schedules = battery_system.schedule_store.get_all_schedules_today()
         assert len(all_schedules) >= 2, "Should store both schedules"
+
+    def test_initial_soe_reflects_run_start_not_midnight_soc(
+        self, quarterly_battery_system, mock_controller
+    ):
+        """input_data['initial_soe'] must be this run's actual starting SOE.
+
+        Regression test for issue #292: after the first optimization of the
+        day, a later re-optimization was overwriting input_data['initial_soe']
+        with the midnight SOC instead of the SOE the DP actually started
+        this run from.
+        """
+        # First run of the day (period 0) sets _initial_soc_pct from the
+        # mocked 50% midnight SOC.
+        mock_controller.settings["battery_soc"] = 50
+        success = quarterly_battery_system.update_battery_schedule(
+            0, prepare_next_day=False
+        )
+        assert success, "Should create midnight schedule"
+
+        midnight_schedule = (
+            quarterly_battery_system.schedule_store.get_latest_schedule()
+        )
+        midnight_initial_soe = midnight_schedule.optimization_result.input_data[
+            "initial_soe"
+        ]
+
+        # Battery discharged since midnight - re-optimize later in the day
+        # from a materially different SOC.
+        mock_controller.settings["battery_soc"] = 20
+        success = quarterly_battery_system.update_battery_schedule(
+            32, prepare_next_day=False
+        )
+        assert success, "Should create period-32 re-optimization schedule"
+
+        latest_schedule = quarterly_battery_system.schedule_store.get_latest_schedule()
+        result = latest_schedule.optimization_result
+        run_start_soe = result.period_data[0].energy.battery_soe_start
+
+        assert result.input_data["initial_soe"] == pytest.approx(run_start_soe), (
+            "input_data['initial_soe'] should be this run's actual starting SOE, "
+            f"got {result.input_data['initial_soe']} vs run start {run_start_soe}"
+        )
+        assert result.input_data["initial_soe"] != pytest.approx(
+            midnight_initial_soe
+        ), "initial_soe should not still be the stale midnight SOC value"
 
     def test_schedule_persistence_across_periods(self, quarterly_battery_system):
         """Test schedule persistence for different optimization scenarios."""

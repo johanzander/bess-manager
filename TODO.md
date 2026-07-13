@@ -744,6 +744,8 @@ The `_get_hour_readings` (and thus the InfluxDB query) is called at startup (to 
 
 **`today_view` is built unconditionally for `period=day`** in `backend/api.py` even when today is already persisted (post-rollover) or `count>1`, cases where `build_buckets` ignores it. One wasted `daily_view_builder.build_daily_view()` call per request; negligible cost.
 
+---
+
 ## From #233 SOE-floor-clamp fix code review (non-blocking, pre-existing)
 
 **`_idle_battery_flows`'s below-floor guard now zeroes real energy, not just floor artefacts** — filed as [#295](https://github.com/johanzander/bess-manager/issues/295).

@@ -171,6 +171,15 @@ def _idle_battery_flows(
     return battery_charged, 0.0
 
 
+def _soe_floor(soe: float, battery_settings: BatterySettings) -> float:
+    """The feasible/reportable SOE floor for a period that *started* at
+    `soe`: `min_soe_kwh` if the period started at/above it, otherwise `soe`
+    itself. Recovering from a below-floor start (e.g. a live sensor reading
+    under Min SOC in demo mode, see #233) must never fabricate a jump to
+    the floor with zero real energy stored."""
+    return battery_settings.min_soe_kwh if soe >= battery_settings.min_soe_kwh else soe
+
+
 def _state_transition(
     soe: float,
     power: float,
@@ -226,9 +235,9 @@ def _state_transition(
         charge_energy = solar_to_battery * battery_settings.efficiency_charge
         next_soe = min(battery_settings.max_soe_kwh, soe + charge_energy)
 
-    # Ensure SOE stays within physical bounds
+    # Ensure SOE stays within physical bounds (see _soe_floor).
     next_soe = min(
-        battery_settings.max_soe_kwh, max(battery_settings.min_soe_kwh, next_soe)
+        battery_settings.max_soe_kwh, max(_soe_floor(soe, battery_settings), next_soe)
     )
 
     return next_soe
@@ -287,7 +296,10 @@ def _state_transition_grid(
         np.where(power < -POWER_TOLERANCE_KW, discharge_next_soe, idle_next_soe),
     )
 
-    next_soe = np.minimum(max_soe, np.maximum(min_soe, next_soe))
+    # See _soe_floor's docstring (#233) -- only raise to the floor when soe
+    # started at/above it.
+    floor = np.where(soe >= min_soe, min_soe, soe)
+    next_soe = np.minimum(max_soe, np.maximum(floor, next_soe))
     return next_soe
 
 
@@ -1038,8 +1050,11 @@ def _best_action_at_continuous_state(
             solar_production=solar,
             home_consumption=home,
         )
+        # See _soe_floor's docstring (#233): the feasible floor for this
+        # candidate is soe itself until real charging crosses back above
+        # min_soe_kwh.
         if (
-            next_soe < battery_settings.min_soe_kwh
+            next_soe < _soe_floor(soe, battery_settings)
             or next_soe > battery_settings.max_soe_kwh
         ):
             return

@@ -271,3 +271,113 @@ def test_battery_export_threshold_matches_classification_boundary():
     assert reward == pytest.approx(
         0.05, abs=1e-9
     ), f"expected 0.05 kWh export credited at sell_price, got reward={reward}"
+
+
+def test_idle_below_floor_does_not_fabricate_soe():
+    """#233: when the period starts below min_soe_kwh (e.g. a live sensor
+    reading below the configured Min SOC, as happens in demo mode or with an
+    external controller), the final safety clamp in _state_transition must
+    not raise next_soe up to the floor with zero real energy stored. Before
+    the fix, an IDLE action with no solar surplus jumped soe straight to
+    min_soe_kwh in a single period -- a fabricated number, not one backed by
+    actual charging."""
+    from core.bess.dp_battery_algorithm import _state_transition
+    from core.bess.tests.helpers import make_battery_settings
+
+    settings = (
+        make_battery_settings()
+    )  # min_soc=11%, total_capacity=20 -> min_soe_kwh=2.2
+    below_floor_soe = 1.0  # below min_soe_kwh=2.2
+
+    next_soe = _state_transition(
+        soe=below_floor_soe,
+        power=0.0,  # IDLE
+        battery_settings=settings,
+        dt=1.0,
+        solar_production=0.0,  # no surplus -- nothing can charge the battery
+        home_consumption=1.0,
+    )
+
+    assert next_soe == pytest.approx(below_floor_soe, abs=1e-9), (
+        f"expected next_soe to stay at {below_floor_soe} (no real charging "
+        f"occurred), but it was raised to {next_soe} -- energy was fabricated "
+        f"by the min_soe_kwh floor clamp"
+    )
+
+
+def test_state_transition_grid_below_floor_matches_scalar():
+    """#233: _state_transition_grid must mirror _state_transition's fix for
+    bit-identical parity (see #236), even though its current DP-search
+    callers never populate soe below min_soe_kwh."""
+    import numpy as np
+
+    from core.bess.dp_battery_algorithm import _state_transition, _state_transition_grid
+    from core.bess.tests.helpers import make_battery_settings
+
+    settings = make_battery_settings()
+    below_floor_soe = 1.0
+
+    scalar_next_soe = _state_transition(
+        soe=below_floor_soe,
+        power=0.0,
+        battery_settings=settings,
+        dt=1.0,
+        solar_production=0.0,
+        home_consumption=1.0,
+    )
+
+    grid_next_soe = _state_transition_grid(
+        soe=np.array([[below_floor_soe]]),
+        power=np.array([[0.0]]),
+        battery_settings=settings,
+        dt=1.0,
+        solar_production=0.0,
+        home_consumption=1.0,
+    )
+
+    assert grid_next_soe[0, 0] == pytest.approx(scalar_next_soe, abs=1e-9)
+
+
+def test_best_action_recovers_from_below_floor_start():
+    """#233 code-review follow-up: once _state_transition stopped
+    fabricating a jump to min_soe_kwh, _best_action_at_continuous_state's
+    consider() closure still used the pre-fix bounds check
+    (`next_soe < min_soe_kwh`), which now silently rejects every candidate
+    -- including plain IDLE -- whenever a period can't fully cross back
+    above the floor in one step. Every candidate falls through to the
+    function's defaults (best_reward=0.0), fabricating a zero-cost period
+    even though grid import to cover home load is genuinely happening.
+    Regression test: with a real arbitrage spread and initial_soe below
+    min_soe_kwh, the optimizer must find nonzero savings, not freeze at
+    the starting SOE for the whole horizon."""
+    from core.bess.dp_battery_algorithm import optimize_battery_schedule
+    from core.bess.tests.helpers import make_battery_settings
+
+    settings = make_battery_settings(
+        total_capacity=20.0, min_soc=25.0, max_charge_power_kw=5.0
+    )  # min_soe_kwh = 5.0
+    buy_price = [0.2, 1.0, 0.2, 1.0, 0.2, 1.0]
+    sell_price = [0.1, 0.8, 0.1, 0.8, 0.1, 0.8]
+    home_consumption = [0.2] * 6
+    solar_production = [0.0] * 6
+
+    result = optimize_battery_schedule(
+        buy_price=buy_price,
+        sell_price=sell_price,
+        home_consumption=home_consumption,
+        solar_production=solar_production,
+        initial_soe=4.5,  # below min_soe_kwh=5.0
+        battery_settings=settings,
+        period_duration_hours=1.0,
+    )
+
+    assert result.economic_summary.grid_to_battery_solar_savings > 0.0, (
+        "optimizer found zero savings starting below the SOE floor -- "
+        "every candidate action was likely rejected by a stale bounds "
+        "check that doesn't account for a below-floor starting soe"
+    )
+    first_period = result.period_data[0]
+    assert (
+        first_period.energy.battery_soe_start != first_period.energy.battery_soe_end
+        or first_period.energy.grid_imported > 0
+    ), "expected either real charging or accounted grid import in period 0"

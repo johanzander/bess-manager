@@ -22,6 +22,7 @@ export interface StatusCardProps {
   keyMetric: string;
   keyValue: number | string;
   keyUnit: string;
+  keyAnnotation?: string[];
   metrics: Array<{
     label: string;
     value: number | string;
@@ -29,6 +30,7 @@ export interface StatusCardProps {
     icon?: React.ComponentType<{ className?: string }>;
     color?: 'green' | 'red' | 'yellow' | 'blue';
     pill?: boolean;
+    breakdown?: string[];
   }>;
   color: 'blue' | 'green' | 'yellow' | 'red' | 'purple';
   icon: React.ComponentType<{ className?: string }>;
@@ -44,6 +46,7 @@ export const StatusCard: React.FC<StatusCardProps> = ({
   keyMetric,
   keyValue,
   keyUnit,
+  keyAnnotation,
   metrics,
   className = "",
   systemMode,
@@ -90,24 +93,48 @@ export const StatusCard: React.FC<StatusCardProps> = ({
         {headerRight}
       </div>
 
-      {/* Key Metric */}
-      <div className="mb-6">
-        <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">{keyMetric}</p>
-        <p className="text-3xl font-bold text-gray-900 dark:text-gray-100">
+      {/*
+        Three-column grid shared by the key metric and every row below it:
+        col 1 = label (left), col 2 = Today/Tomorrow breakdown (only present
+        on some rows), col 3 = value (right). One grid, so column boundaries
+        line up exactly across rows. When no row has a breakdown, col 2 is
+        empty everywhere and col 3 sits flush right against the card edge -
+        i.e. it looks exactly as it did before this feature existed.
+      */}
+      {/*
+        The key metric's label and number are separate grid rows (not one
+        stacked cell), so the breakdown - sharing only the number's row via
+        auto-placement - centers (items-center) against the number itself,
+        not the label+number block.
+      */}
+      <div className="grid grid-cols-[max-content_1fr_max-content] gap-x-3 gap-y-3 items-center mb-2">
+        <p className="col-start-1 text-sm text-gray-600 dark:text-gray-400">{keyMetric}</p>
+        <p className="col-start-1 text-3xl font-bold text-gray-900 dark:text-gray-100">
           {keyValue}
           {keyUnit && <span className="text-lg font-normal text-gray-600 dark:text-gray-400 ml-2">{keyUnit}</span>}
         </p>
-      </div>
+        {keyAnnotation && keyAnnotation.length > 0 && (
+          <div className="col-start-2 justify-self-center flex flex-col items-end">
+            {keyAnnotation.map((line) => (
+              <span key={line} className="text-xs text-gray-500 dark:text-gray-400">{line}</span>
+            ))}
+          </div>
+        )}
 
-      {/* Metrics */}
-      <div className="space-y-3">
         {metrics.map((metric, index) => (
-          <div key={index}>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center">
-                {metric.icon && <metric.icon className="h-4 w-4 mr-2 text-gray-500 dark:text-gray-400" />}
-                <span className="text-sm text-gray-700 dark:text-gray-300">{metric.label}</span>
+          <React.Fragment key={index}>
+            <div className="col-start-1 flex items-center">
+              {metric.icon && <metric.icon className="h-4 w-4 mr-2 text-gray-500 dark:text-gray-400" />}
+              <span className="text-sm text-gray-700 dark:text-gray-300">{metric.label}</span>
+            </div>
+            {metric.breakdown && metric.breakdown.length > 0 && (
+              <div className="col-start-2 justify-self-center flex flex-col items-end">
+                {metric.breakdown.map((line) => (
+                  <span key={line} className="text-xs text-gray-500 dark:text-gray-400">{line}</span>
+                ))}
               </div>
+            )}
+            <div className="col-start-3">
               {metric.pill && metric.color ? (
                 <span className={`text-sm font-semibold px-2 py-0.5 rounded-md ${pillColorClasses[metric.color]}`}>
                   {metric.value}{metric.unit && <span className="opacity-70 ml-1">{metric.unit}</span>}
@@ -122,11 +149,11 @@ export const StatusCard: React.FC<StatusCardProps> = ({
               )}
             </div>
             {systemMode === 'demo' && metric.label === "Today's Savings" && (
-              <div className="mt-1">
+              <div className="col-start-1">
                 <span className="text-xs text-gray-500">theoretical</span>
               </div>
             )}
-          </div>
+          </React.Fragment>
         ))}
       </div>
     </div>
@@ -138,6 +165,14 @@ interface SystemStatusCardProps {
   systemMode?: string;
 }
 
+// Issue #287: tomorrow's own slice isn't a backend field - it's the full-horizon
+// total minus today's slice. Formats to the same "<number> <unit>" shape as
+// the backend's FormattedValue.text.
+const formatDelta = (full?: FormattedValue | null, today?: FormattedValue): string | undefined => {
+  if (!full || !today) return undefined;
+  const delta = full.value - today.value;
+  return `${delta.toFixed(2)} ${today.unit}`;
+};
 
 const DASHBOARD_REFRESH_MS = 60000;
 
@@ -276,7 +311,22 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", sys
             throw new Error('MISSING DATA: summary.totalSavingsPercentage is required for percentage display');
           }
           return dashboardData.summary.totalSavingsPercentage;
-        })()
+        })(),
+        // Issue #287: full-horizon totals, present only when the DP is
+        // running a 2-day plan. Legitimately absent otherwise - no throw.
+        // Tomorrow's own slice isn't a backend field - it's the remainder
+        // of the full-horizon total after subtracting today's slice.
+        horizonDays: dashboardData.summary?.horizonDays ?? 1,
+        netGridCostFullHorizon: dashboardData.summary?.netGridCostFullHorizon ?? null,
+        netSavingsFullHorizon: dashboardData.summary?.netSavingsFullHorizon ?? null,
+        tomorrowCostText: formatDelta(
+          dashboardData.summary?.netGridCostFullHorizon,
+          dashboardData.summary?.netGridCost
+        ),
+        tomorrowSavingsText: formatDelta(
+          dashboardData.summary?.netSavingsFullHorizon,
+          dashboardData.summary?.netSavings
+        ),
       },
       batteryStatus: {
         soc: (() => {
@@ -349,6 +399,7 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", sys
       keyMetric: "Solar Generation",
       keyValue: statusData.realTimePower?.solarPower?.text || '0 W',
       keyUnit: "",
+      keyAnnotation: undefined as string[] | undefined,
       metrics: [
         {
           label: "Home Usage",
@@ -385,6 +436,7 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", sys
       keyMetric: "Strategic Intent",
       keyValue: statusData.strategicIntent ?? 'Idle',
       keyUnit: "",
+      keyAnnotation: undefined as string[] | undefined,
       metrics: [
         {
           label: "State of Charge",
@@ -428,12 +480,25 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", sys
       ]
     },
     {
-      title: "Today's Cost & Savings",
+      title: statusData.costAndSavings?.horizonDays === 2
+        ? "Cost & Savings (2 days)"
+        : "Today's Cost & Savings",
       icon: DollarSign,
       color: "blue" as const,
       keyMetric: "Net Grid Cost",
-      keyValue: statusData.costAndSavings?.todaysCost?.text,
+      // Issue #287: when a 2-day plan is active, the full-horizon total is
+      // the headline (a decision that defers value to tomorrow shouldn't
+      // look like a loss), with a Today/Tomorrow breakdown after it.
+      keyValue: statusData.costAndSavings?.horizonDays === 2
+        ? statusData.costAndSavings?.netGridCostFullHorizon?.text
+        : statusData.costAndSavings?.todaysCost?.text,
       keyUnit: "",
+      keyAnnotation: statusData.costAndSavings?.horizonDays === 2
+        ? [
+            `Today: ${statusData.costAndSavings?.todaysCost?.text}`,
+            `Tomorrow: ${statusData.costAndSavings?.tomorrowCostText}`,
+          ]
+        : undefined,
       metrics: [
         {
           label: "Grid-Only Cost",
@@ -443,10 +508,22 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", sys
         },
         {
           label: "Net Savings",
-          value: statusData.costAndSavings?.todaysSavings?.text,
+          value: statusData.costAndSavings?.horizonDays === 2
+            ? statusData.costAndSavings?.netSavingsFullHorizon?.text
+            : statusData.costAndSavings?.todaysSavings?.text,
           unit: "",
           icon: DollarSign,
-          color: (statusData.costAndSavings?.todaysSavings?.value || 0) >= 0 ? 'green' as const : 'red' as const
+          color: (
+            (statusData.costAndSavings?.horizonDays === 2
+              ? statusData.costAndSavings?.netSavingsFullHorizon?.value
+              : statusData.costAndSavings?.todaysSavings?.value) || 0
+          ) >= 0 ? 'green' as const : 'red' as const,
+          breakdown: statusData.costAndSavings?.horizonDays === 2
+            ? [
+                `Today: ${statusData.costAndSavings?.todaysSavings?.text}`,
+                `Tomorrow: ${statusData.costAndSavings?.tomorrowSavingsText}`,
+              ]
+            : undefined
         },
         {
           label: "Percentage Saved",
@@ -471,6 +548,7 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", sys
           keyMetric={card.keyMetric}
           keyValue={card.keyValue}
           keyUnit={card.keyUnit}
+          keyAnnotation={card.keyAnnotation}
           metrics={card.metrics}
           systemMode={systemMode}
         />

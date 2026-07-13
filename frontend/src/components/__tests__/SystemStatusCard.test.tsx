@@ -219,4 +219,65 @@ describe('SystemStatusCard', () => {
     expect(screen.queryByText('0.50 EUR')).not.toBeInTheDocument();
     expect(screen.queryByText("Today's Savings")).not.toBeInTheDocument();
   });
+
+  it('does not show a horizon annotation for a single-day plan', async () => {
+    render(<SystemStatusCard systemMode="live" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Home Power')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText(/Today:/)).not.toBeInTheDocument();
+  });
+
+  it('shows the full-horizon total as headline with Today/Tomorrow breakdown when a 2-day plan is active', async () => {
+    vi.mocked(useDashboardData).mockReturnValue({
+      data: {
+        ...mockDashboardData,
+        summary: {
+          ...mockDashboardData.summary,
+          horizonDays: 2,
+          netGridCostFullHorizon: fv(-0.05, '-0.05', 'EUR'),
+          netSavingsFullHorizon: fv(2.05, '2.05', 'EUR'),
+        },
+      },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    render(<SystemStatusCard systemMode="live" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Home Power')).toBeInTheDocument();
+    });
+
+    // Title reflects the 2-day horizon.
+    expect(screen.getByText('Cost & Savings (2 days)')).toBeInTheDocument();
+    expect(screen.queryByText("Today's Cost & Savings")).not.toBeInTheDocument();
+
+    // Full-horizon totals become the headline values...
+    expect(screen.getByText('-0.05 EUR')).toBeInTheDocument();
+    expect(screen.getByText('2.05 EUR')).toBeInTheDocument();
+    // ...with a Today/Tomorrow breakdown after the headline (netGridCost today
+    // 1.50, so tomorrow = -0.05 - 1.50 = -1.55).
+    expect(screen.getByText('Today: 1.50 EUR')).toBeInTheDocument();
+    expect(screen.getByText('Tomorrow: -1.55 EUR')).toBeInTheDocument();
+    // ...and Today/Tomorrow beside Net Savings too (today 0.65, so
+    // tomorrow = 2.05 - 0.65 = 1.40).
+    expect(screen.getByText('Today: 0.65 EUR')).toBeInTheDocument();
+    expect(screen.getByText('Tomorrow: 1.40 EUR')).toBeInTheDocument();
+  });
+
+  it('keeps the single-day title and no breakdown when only today is planned', async () => {
+    render(<SystemStatusCard systemMode="live" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Home Power')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("Today's Cost & Savings")).toBeInTheDocument();
+    expect(screen.queryByText(/Cost & Savings \(2 days\)/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Tomorrow:/)).not.toBeInTheDocument();
+  });
 });

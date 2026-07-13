@@ -315,6 +315,10 @@ async def patch_settings(updates: dict):
                         detail="Inverter section requires a 'platform' field",
                     )
 
+                control_mode = section.get("control_mode")
+                if control_mode:
+                    bess_controller.system.switch_control_mode(control_mode)
+
             elif store_key == "sensors":
                 # Update live ha_controller.sensors from the merged flat view
                 active = bess_controller.settings_store.get_active_sensors()

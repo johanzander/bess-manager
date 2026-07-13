@@ -557,6 +557,14 @@ class HomeAssistantAPIController:
         # silently bind a control that does nothing.
         "ems_discharging_stop_soc_on_grid": "battery_discharge_stop_soc",
         "charger_switch": "grid_charge",
+        # VPP remote power control (registers 30100/30407-30410, GEN3|GEN4).
+        # See issue #118 — verified against wills106/homeassistant-solax-modbus
+        # plugin_growatt.py NUMBER_TYPES/SELECT_TYPES.
+        "vpp_status": "growatt_vpp_status",
+        "vpp_remote_control": "growatt_vpp_remote_control",
+        "vpp_allow_ac_charging": "growatt_vpp_allow_ac_charging",
+        "vpp_time": "growatt_vpp_time",
+        "vpp_power": "growatt_vpp_power",
         # TOU time slots (9 slots)
         "time_1_enabled": "tou_time_1_enabled",
         "time_1_begin": "tou_time_1_begin",
@@ -629,6 +637,14 @@ class HomeAssistantAPIController:
         "battery_first_maximum_soc": "battery_charge_stop_soc",
         "load_first_battery_minimum_soc": "battery_discharge_stop_soc",
         "charger_switch": "grid_charge",
+        # VPP remote power control (registers 30100/30407-30410, GEN3|GEN4).
+        # Same registers as GEN4 — verified allowedtypes=GEN3|GEN4 in
+        # wills106/homeassistant-solax-modbus plugin_growatt.py.
+        "vpp_status": "growatt_vpp_status",
+        "vpp_remote_control": "growatt_vpp_remote_control",
+        "vpp_allow_ac_charging": "growatt_vpp_allow_ac_charging",
+        "vpp_time": "growatt_vpp_time",
+        "vpp_power": "growatt_vpp_power",
     }
 
     # SolaX native inverters via solax_modbus integration
@@ -1640,6 +1656,114 @@ class HomeAssistantAPIController:
     def get_solax_min_soc(self) -> float | None:
         """Read the current battery minimum SOC from the SolaX inverter."""
         return self._get_sensor_value("solax_battery_min_soc")
+
+    # ── Growatt VPP remote power control (solax_modbus GEN3|GEN4) ─────────────
+    #
+    # VPP registers (30100/30407/30408/30409/30410) are available on both
+    # Growatt GEN3 (MIX/SPA/SPH) and GEN4 (MIN/MOD/MID) via the solax_modbus
+    # Growatt plugin — verified against plugin_growatt.py NUMBER_TYPES /
+    # SELECT_TYPES (allowedtypes=GEN3|GEN4). Unlike TOU slots, VPP gives
+    # per-period power control with no persistent schedule (see issue #118).
+
+    def set_growatt_vpp_status(self, enabled: bool) -> None:
+        """Enable/disable the Growatt VPP Status register (30100).
+
+        Written once at startup (or after a restart finds it disabled) —
+        VPP Remote Control has no effect while VPP Status is disabled.
+        """
+        entity_id = self._get_entity_for_service("growatt_vpp_status")
+        option = "Enabled" if enabled else "Disabled"
+        logger.info("Growatt VPP: status -> %s", option)
+        self._service_call_with_retry(
+            "select",
+            "select_option",
+            operation=f"Growatt VPP status -> {option}",
+            entity_id=entity_id,
+            option=option,
+        )
+
+    def set_growatt_vpp_allow_ac_charging(self, enabled: bool) -> None:
+        """Enable/disable AC charging via the Growatt VPP register (30410).
+
+        Written once at startup — controls whether ``vpp_power`` may charge
+        the battery from the grid (positive values) as opposed to solar-only.
+        """
+        entity_id = self._get_entity_for_service("growatt_vpp_allow_ac_charging")
+        option = "Enabled" if enabled else "Disabled"
+        logger.info("Growatt VPP: allow AC charging -> %s", option)
+        self._service_call_with_retry(
+            "select",
+            "select_option",
+            operation=f"Growatt VPP allow AC charging -> {option}",
+            entity_id=entity_id,
+            option=option,
+        )
+
+    def set_growatt_vpp_period(
+        self, remote_control_enabled: bool, power_pct: int, fallback_minutes: int
+    ) -> None:
+        """Write one period's VPP command: remote control, power, and fallback timer.
+
+        ``vpp_time`` is rewritten every period the command is active, resetting
+        the inverter's own fallback timer (register 30408) — if BESS stops
+        writing (crash, restart), the inverter reverts to ``load_first`` on its
+        own once the timer lapses, giving a hardware dead-man's-switch.
+
+        Args:
+            remote_control_enabled: Whether VPP Remote Control (30407) should
+                be enabled for this period. False reverts the inverter to
+                load_first.
+            power_pct: Target power as a percentage (-100..100). Negative =
+                discharge/export, positive = charge from grid. Ignored when
+                ``remote_control_enabled`` is False.
+            fallback_minutes: Value to (re)write to ``vpp_time`` (30408) when
+                ``remote_control_enabled`` is True.
+        """
+        remote_control_entity = self._get_entity_for_service(
+            "growatt_vpp_remote_control"
+        )
+        option = "Enabled" if remote_control_enabled else "Disabled"
+        logger.info(
+            "Growatt VPP: remote control -> %s%s",
+            option,
+            f", power={power_pct}%" if remote_control_enabled else "",
+        )
+        self._service_call_with_retry(
+            "select",
+            "select_option",
+            operation=f"Growatt VPP remote control -> {option}",
+            entity_id=remote_control_entity,
+            option=option,
+        )
+
+        if not remote_control_enabled:
+            return
+
+        power_entity = self._get_entity_for_service("growatt_vpp_power")
+        self._service_call_with_retry(
+            "number",
+            "set_value",
+            operation=f"Growatt VPP set power -> {power_pct}%",
+            entity_id=power_entity,
+            value=power_pct,
+        )
+
+        time_entity = self._get_entity_for_service("growatt_vpp_time")
+        self._service_call_with_retry(
+            "number",
+            "set_value",
+            operation=f"Growatt VPP reset fallback timer -> {fallback_minutes} min",
+            entity_id=time_entity,
+            value=fallback_minutes,
+        )
+
+    def get_growatt_vpp_status(self) -> str | None:
+        """Read the current Growatt VPP Status register state."""
+        return self._get_raw_state("growatt_vpp_status")
+
+    def get_growatt_vpp_remote_control(self) -> str | None:
+        """Read the current Growatt VPP Remote Control register state."""
+        return self._get_raw_state("growatt_vpp_remote_control")
 
     # ─────────────────────────────────────────────────────────────────────────
 

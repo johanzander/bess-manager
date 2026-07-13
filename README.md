@@ -48,8 +48,8 @@ Something look off? The built-in AI Analyst explains every decision in plain lan
 ## Supported Hardware & Markets
 
 ### Inverters
-- **Growatt MIC/MIN/MOD/MID** — via Growatt Server (cloud) or Modbus (local)
-- **Growatt SPH** — via Growatt Server(cloud) or Modbus (local)
+- **Growatt MIC/MIN/MOD/MID** — via Growatt Server (cloud) or Modbus (local, TOU or VPP control mode *(VPP experimental)*)
+- **Growatt SPH** — via Growatt Server (cloud) or Modbus (local, VPP control mode *(experimental)*)
 - **SolaX** — via Solax modbus integration
 
 ### Electricity Markets

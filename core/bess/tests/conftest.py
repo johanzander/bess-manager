@@ -123,7 +123,13 @@ class MockHomeAssistantController(HomeAssistantAPIController):
             "vpp_calls": [],
             "vpp_disabled": [],
             "min_soc": [],
+            # Growatt VPP (solax_modbus GEN3|GEN4)
+            "growatt_vpp_status": [],
+            "growatt_vpp_allow_ac_charging": [],
+            "growatt_vpp_periods": [],
         }
+        self._growatt_vpp_status_state: str = "Disabled"
+        self._growatt_vpp_remote_control_state: str | None = None
 
     # Required methods for Home Assistant Controller interface
     def get_battery_soc(self):
@@ -344,6 +350,40 @@ class MockHomeAssistantController(HomeAssistantAPIController):
     def get_solax_power_control_mode(self) -> str | None:
         """Return mock power control mode."""
         return "Self Use Mode"
+
+    # Growatt VPP methods (used by SolaxModbusGrowattController control_mode="vpp")
+
+    def set_growatt_vpp_status(self, enabled: bool) -> None:
+        """Record Growatt VPP Status write."""
+        self._growatt_vpp_status_state = "Enabled" if enabled else "Disabled"
+        self.calls["growatt_vpp_status"].append(enabled)
+
+    def set_growatt_vpp_allow_ac_charging(self, enabled: bool) -> None:
+        """Record Growatt VPP AC-charging write."""
+        self.calls["growatt_vpp_allow_ac_charging"].append(enabled)
+
+    def set_growatt_vpp_period(
+        self, remote_control_enabled: bool, power_pct: int, fallback_minutes: int
+    ) -> None:
+        """Record one period's Growatt VPP command."""
+        self._growatt_vpp_remote_control_state = (
+            "Enabled" if remote_control_enabled else "Disabled"
+        )
+        self.calls["growatt_vpp_periods"].append(
+            {
+                "remote_control_enabled": remote_control_enabled,
+                "power_pct": power_pct,
+                "fallback_minutes": fallback_minutes,
+            }
+        )
+
+    def get_growatt_vpp_status(self) -> str | None:
+        """Return mock Growatt VPP Status state."""
+        return self._growatt_vpp_status_state
+
+    def get_growatt_vpp_remote_control(self) -> str | None:
+        """Return mock Growatt VPP Remote Control state."""
+        return self._growatt_vpp_remote_control_state
 
     def get_statistics_during_period(
         self, statistic_ids, start_time, end_time=None, period="hour", types=None

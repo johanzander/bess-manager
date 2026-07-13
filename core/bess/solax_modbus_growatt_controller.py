@@ -1,28 +1,42 @@
-"""Growatt MIN inverter controller using solax_modbus with single-segment TOU.
+"""Growatt MIN/SPH inverter controller using solax_modbus (TOU or VPP mode).
 
-This controller supports Growatt MIN inverters connected via the solax_modbus
-HACS integration (local Modbus) instead of the growatt_server cloud integration.
+This controller supports Growatt inverters connected via the solax_modbus
+HACS integration (local Modbus) instead of the growatt_server cloud
+integration, covering both GEN4 (MIN/MOD/MID) and GEN3 (MIX/SPA/SPH) hardware.
 
-Unlike the cloud controller (GrowattMinController) which pre-programs up to 9
-TOU segments, this controller uses a **single TOU segment** (slot 1) with a
-full-day time window (00:00-23:59).  The battery mode is updated per-period
-via ``apply_period`` — only when the mode actually changes — reducing the
-required entity count from 45 (9 slots x 5 entities) to just 5.
+Two control strategies are supported, selected via ``control_mode``:
 
-This is analogous to how ``SolaxController`` applies per-period VPP commands
-with ``write_schedule_to_hardware`` as a near no-op.
+- ``"tou"`` (default, GEN4 only) — a **single TOU segment** (slot 1) with a
+  full-day time window (00:00-23:59). The battery mode is updated per-period
+  via ``apply_period`` — only when the mode actually changes — reducing the
+  required entity count from 45 (9 slots x 5 entities) to just 5.
+- ``"vpp"`` — Growatt's VPP remote power control registers (30100/30407-30410,
+  present on both GEN3 and GEN4 per the solax_modbus Growatt plugin source),
+  applying per-period power commands with no persistent schedule at all —
+  the same "SM-Ephemeral" model ``SolaxController`` already uses for real
+  SolaX hardware. See issue #118: GEN3 has no working TOU path today, so VPP
+  is its only control mode; GEN4 gets a choice, with VPP intended to
+  eventually replace TOU once proven on real hardware.
 
-Per-period control (``set_grid_charge``, ``set_discharging_power_rate``) uses
-generic HA service calls that resolve entity IDs from sensor config, so no
-override is needed for those.
-
-Mode semantics:
+Mode semantics (TOU):
 - ``load_first`` — inverter default when no TOU segment is active
 - ``battery_first`` — charge from grid + solar (GRID_CHARGING intent)
 - ``grid_first`` — export to grid (BATTERY_EXPORT intent)
+
+VPP intent -> power mapping mirrors ``SolaxController``:
+- GRID_CHARGING              -> power=+100%, remote_control enabled
+- LOAD_SUPPORT/BATTERY_EXPORT (rate>0) -> power=-rate%, remote_control enabled
+- SOLAR_STORAGE/IDLE/rate=0  -> remote_control disabled (load_first)
+
+The VPP fallback timer (``vpp_time``, register 30408) is rewritten every
+active period, resetting the inverter's own dead-man's-switch: if BESS stops
+writing (crash, restart), the inverter reverts to load_first on its own once
+the timer lapses — the same safety property ``SolaxController`` gets from
+SolaX's autorepeat duration.
 """
 
 import logging
+import time
 
 from . import time_utils
 from .dp_schedule import DPSchedule
@@ -32,24 +46,56 @@ from .settings import BatterySettings
 
 logger = logging.getLogger(__name__)
 
+# VPP fallback timer, in minutes. Must be > 15 (period length) so a normal
+# hourly re-optimization cadence never lets the timer lapse; keeps the
+# inverter's dead-man's-switch tight if BESS actually stops writing.
+_VPP_FALLBACK_MINUTES = 20
+
 
 class SolaxModbusGrowattController(GrowattMinController):
-    """Growatt MIN controller using solax_modbus with single-segment TOU.
+    """Growatt MIN/SPH controller using solax_modbus, TOU or VPP control.
 
-    Instead of pre-programming 9 TOU segments, this controller manages a single
-    TOU segment (slot 1) and updates its mode each period when needed.
+    ``control_mode="tou"`` manages a single TOU segment (slot 1), updating its
+    mode each period when needed. ``control_mode="vpp"`` issues per-period VPP
+    power commands instead, with no persistent TOU schedule — analogous to
+    how ``SolaxController`` applies per-period VPP commands for real SolaX
+    hardware, with ``write_schedule_to_hardware`` doing only the one-time VPP
+    enable sequence.
     """
 
-    def __init__(self, battery_settings: BatterySettings) -> None:
-        """Initialize the Growatt solax_modbus controller."""
+    def __init__(
+        self, battery_settings: BatterySettings, control_mode: str = "tou"
+    ) -> None:
+        """Initialize the Growatt solax_modbus controller.
+
+        Args:
+            battery_settings: Battery configuration.
+            control_mode: "tou" (single-segment TOU, GEN4 default) or "vpp"
+                (VPP remote power control, GEN3's only control mode).
+        """
         super().__init__(battery_settings)
+        if control_mode not in ("tou", "vpp"):
+            raise ValueError(
+                f"Unknown control_mode {control_mode!r}, expected 'tou' or 'vpp'"
+            )
+        self.control_mode = control_mode
         self._last_written_tou_mode: str | None = None
+        # VPP-only state, seeded from hardware in read_and_initialize_from_hardware
+        # rather than persisted as class-level statics — controllers are
+        # recreated each optimization cycle, so state must survive via
+        # read-back, the same pattern TOU mode already uses.
+        self._vpp_status_confirmed: bool = False
+        self._last_written_vpp_remote_control: bool | None = None
+        self._last_written_vpp_power: int | None = None
 
     # ── Abstract property ────────────────────────────────────────────────────
 
     @property
     def active_tou_intervals(self) -> list[dict]:
-        """Return the single TOU segment if active, else empty list."""
+        """Return the single TOU segment if active, else empty list.
+
+        Always empty in VPP mode — there is no persistent TOU schedule.
+        """
         return self._active_tou_intervals
 
     @active_tou_intervals.setter
@@ -64,7 +110,7 @@ class SolaxModbusGrowattController(GrowattMinController):
         current_period: int = 0,
         previous_tou_intervals: list[dict] | None = None,
     ) -> None:
-        """Store strategic intents — TOU mode is applied per-period, no batch TOU needed.
+        """Store strategic intents — control is applied per-period, no batch TOU needed.
 
         Skips the parent's 9-segment TOU interval computation.  Strategic intents
         are stored and hourly settings calculated for API/display consumption.
@@ -72,15 +118,18 @@ class SolaxModbusGrowattController(GrowattMinController):
         Args:
             schedule: DPSchedule containing strategic_intent list.
             current_period: Current 15-minute period (0-95).
-            previous_tou_intervals: Unused for single-segment approach.
+            previous_tou_intervals: Unused for single-segment/VPP approach.
         """
-        logger.info("Creating Modbus single-segment schedule from strategic intents")
+        logger.info(
+            "Creating %s schedule from strategic intents", self.control_mode.upper()
+        )
 
         self.strategic_intents = schedule.original_dp_results["strategic_intent"]
         self.current_schedule = schedule
 
         logger.info(
-            "Modbus: %d strategic intents loaded (quarterly resolution)",
+            "%s: %d strategic intents loaded (quarterly resolution)",
+            self.control_mode.upper(),
             len(self.strategic_intents),
         )
 
@@ -96,19 +145,15 @@ class SolaxModbusGrowattController(GrowattMinController):
                     self.strategic_intents[period],
                 )
 
-        # Build single-segment TOU state for API display
-        self._update_tou_display_state()
+        if self.control_mode == "tou":
+            self._update_tou_display_state()
 
     # ── Hardware interface ────────────────────────────────────────────────────
 
     def apply_period(
         self, controller, grid_charge: bool, discharge_rate: int
     ) -> tuple[bool, str]:
-        """Write period control settings, including TOU mode update when needed.
-
-        Derives the required TOU mode from the current period's strategic intent.
-        Only writes the TOU segment when the mode actually changes, minimising
-        inverter writes.
+        """Write period control settings for the current control mode.
 
         Args:
             controller: HomeAssistantAPIController instance
@@ -117,6 +162,19 @@ class SolaxModbusGrowattController(GrowattMinController):
 
         Returns:
             Tuple of (success, error_message). error_message is empty on success.
+        """
+        if self.control_mode == "vpp":
+            return self._apply_period_vpp(controller, grid_charge, discharge_rate)
+        return self._apply_period_tou(controller, grid_charge, discharge_rate)
+
+    def _apply_period_tou(
+        self, controller, grid_charge: bool, discharge_rate: int
+    ) -> tuple[bool, str]:
+        """Write period control settings, including TOU mode update when needed.
+
+        Derives the required TOU mode from the current period's strategic intent.
+        Only writes the TOU segment when the mode actually changes, minimising
+        inverter writes.
         """
         errors = []
         now = time_utils.now()
@@ -167,17 +225,85 @@ class SolaxModbusGrowattController(GrowattMinController):
             return False, "; ".join(errors)
         return True, ""
 
+    def _intent_to_vpp(
+        self, grid_charge: bool, discharge_rate: int
+    ) -> tuple[int, bool]:
+        """Map (grid_charge, discharge_rate) to (power_pct, remote_control_enabled).
+
+        Mirrors ``SolaxController._write_period_to_hardware``:
+        - grid_charge=True                -> +100% (charge at max rate)
+        - grid_charge=False, rate=0        -> 0%, VPP disabled (load_first)
+        - grid_charge=False, rate>0        -> -rate% (discharge/export)
+        """
+        if grid_charge:
+            return 100, True
+        if discharge_rate == 0:
+            return 0, False
+        return -discharge_rate, True
+
+    def _ensure_vpp_status_enabled(self, controller) -> None:
+        """Enable the VPP Status register once, if not already confirmed.
+
+        VPP Remote Control has no effect while VPP Status is disabled — this
+        must be written (with a settle delay) before the first Remote Control
+        write, per real-hardware testing on issue #118.
+        """
+        if self._vpp_status_confirmed:
+            return
+        controller.set_growatt_vpp_status(True)
+        controller.set_growatt_vpp_allow_ac_charging(True)
+        time.sleep(1)
+        self._vpp_status_confirmed = True
+
+    def _apply_period_vpp(
+        self, controller, grid_charge: bool, discharge_rate: int
+    ) -> tuple[bool, str]:
+        """Write one period's VPP power command.
+
+        Only writes when the command actually changes (remote-control state or
+        power level), minimising inverter writes — the fallback timer is
+        rewritten alongside any active command to keep the dead-man's-switch
+        from lapsing during a stable run of identical periods.
+        """
+        power_pct, remote_control_enabled = self._intent_to_vpp(
+            grid_charge, discharge_rate
+        )
+
+        command_changed = (
+            remote_control_enabled != self._last_written_vpp_remote_control
+            or (remote_control_enabled and power_pct != self._last_written_vpp_power)
+        )
+        if not command_changed:
+            return True, ""
+
+        try:
+            self._ensure_vpp_status_enabled(controller)
+            controller.set_growatt_vpp_period(
+                remote_control_enabled=remote_control_enabled,
+                power_pct=power_pct,
+                fallback_minutes=_VPP_FALLBACK_MINUTES,
+            )
+            self._last_written_vpp_remote_control = remote_control_enabled
+            self._last_written_vpp_power = power_pct if remote_control_enabled else None
+            return True, ""
+        except Exception as e:
+            logger.error("FAILED: Growatt VPP period write: %s", e)
+            return False, str(e)
+
     def write_schedule_to_hardware(
         self,
         controller,
         effective_period: int,
         current_tou: list,
     ) -> tuple[int, int]:
-        """Initialise single TOU segment on hardware.
+        """Initialise hardware for the current control mode.
 
-        Sets segment 1 to the current period's mode with a full-day window.
-        Legacy segments 2-9 are cleaned up at startup (read_and_initialize_from_hardware),
-        not here, to avoid repeated attempts on unconfigured entities.
+        TOU mode: sets segment 1 to the current period's mode with a full-day
+        window. Legacy segments 2-9 are cleaned up at startup
+        (read_and_initialize_from_hardware), not here.
+
+        VPP mode: enables VPP Status/AC-charging once, then issues the initial
+        per-period power command — subsequent periods go through apply_period.
 
         Args:
             controller: HomeAssistantAPIController instance
@@ -187,6 +313,16 @@ class SolaxModbusGrowattController(GrowattMinController):
         Returns:
             Tuple of (segments_updated, segments_disabled)
         """
+        if self.control_mode == "vpp":
+            grid_charge, discharge_rate = False, 0
+            if effective_period < len(self.strategic_intents):
+                intent = self.strategic_intents[effective_period]
+                grid_charge, discharge_rate = self._map_intent_to_rates(
+                    intent, battery_action_kw=0.0
+                )
+            success, _ = self._apply_period_vpp(controller, grid_charge, discharge_rate)
+            return (1, 0) if success else (0, 0)
+
         mode = "load_first"
         if effective_period < len(self.strategic_intents):
             intent = self.strategic_intents[effective_period]
@@ -212,16 +348,29 @@ class SolaxModbusGrowattController(GrowattMinController):
         return 1, 0
 
     def read_and_initialize_from_hardware(self, controller, current_hour: int) -> None:
-        """Read TOU state from hardware and seed the mode tracker.
+        """Read current control state from hardware and seed internal trackers.
 
-        Reads all available TOU slots to determine segment 1's current mode
-        and sets up internal display state.  Pure read — no hardware writes.
-
-        Args:
-            controller: HomeAssistantAPIController instance
-            current_hour: Current hour (0-23)
+        Pure read — no hardware writes. VPP mode reads back the VPP Status and
+        Remote Control registers so state survives controller
+        re-instantiation (BESS recreates the controller each optimization
+        cycle) without resorting to class-level statics.
         """
         self.current_hour = current_hour
+
+        if self.control_mode == "vpp":
+            status = controller.get_growatt_vpp_status()
+            self._vpp_status_confirmed = status == "Enabled"
+            remote_control = controller.get_growatt_vpp_remote_control()
+            self._last_written_vpp_remote_control = (
+                remote_control == "Enabled" if remote_control is not None else None
+            )
+            logger.info(
+                "Growatt VPP: initialised from hardware — status=%s remote_control=%s",
+                status,
+                remote_control,
+            )
+            return
+
         segments = controller.read_tou_segments_from_entities()
 
         # Seed mode tracker from segment 1
@@ -273,6 +422,20 @@ class SolaxModbusGrowattController(GrowattMinController):
             logger.info("Migration: disabled %d legacy TOU slot(s)", disabled_count)
 
     def initialize_hardware(self, controller) -> None:
+        if self.control_mode == "vpp":
+            # No legacy TOU slots to clean up for a VPP-only install, but a
+            # GEN4 install switching tou -> vpp may have slot 1 (or legacy
+            # slots) still active — disable all of them so TOU can't fight
+            # the VPP command.
+            self._disable_legacy_tou_slots(controller)
+            controller.set_tou_segment_via_entities(
+                segment_id=1,
+                batt_mode="load_first",
+                start_time="00:00",
+                end_time="00:00",
+                enabled=False,
+            )
+            return
         self._disable_legacy_tou_slots(controller)
         super().initialize_hardware(controller)
 
@@ -340,7 +503,7 @@ class SolaxModbusGrowattController(GrowattMinController):
             self._active_tou_intervals = []
 
     def get_daily_TOU_settings(self) -> list[dict]:
-        """Return the single TOU segment if active."""
+        """Return the single TOU segment if active. Always empty in VPP mode."""
         if not self.tou_intervals:
             return []
         return [seg.copy() for seg in self.tou_intervals]
@@ -348,8 +511,8 @@ class SolaxModbusGrowattController(GrowattMinController):
     def get_all_tou_segments(self, current_period: int | None = None):
         """Return TOU segments with defaults for complete 24-hour coverage.
 
-        For the single-segment approach, returns the active segment (if any)
-        plus default load_first segments filling the gaps.
+        For the single-segment/VPP approach, returns strategic-intent groups
+        as display segments (no hardware TOU segments exist in VPP mode).
         """
         groups = self.get_detailed_period_groups()
         if not groups:
@@ -387,9 +550,19 @@ class SolaxModbusGrowattController(GrowattMinController):
         return result
 
     def log_current_TOU_schedule(self, header=None) -> None:
-        """Log current single-segment TOU state."""
+        """Log current single-segment TOU state, or VPP command state."""
         if header:
             logger.info(header)
+
+        if self.control_mode == "vpp":
+            if self._last_written_vpp_remote_control:
+                logger.info(
+                    "Growatt VPP: remote control enabled, power=%s%%",
+                    self._last_written_vpp_power,
+                )
+            else:
+                logger.info("Growatt VPP: remote control disabled (load_first)")
+            return
 
         mode = self._last_written_tou_mode or "load_first"
         if mode == "load_first":
@@ -400,7 +573,7 @@ class SolaxModbusGrowattController(GrowattMinController):
     # ── Health check ─────────────────────────────────────────────────────────
 
     def check_health(self, controller) -> list:
-        """Check battery control capabilities including TOU schedule entities."""
+        """Check battery control capabilities for the active control mode."""
         health_check = perform_health_check(
             component_name="Battery Control",
             description="Controls battery charging and discharging schedule",
@@ -415,15 +588,25 @@ class SolaxModbusGrowattController(GrowattMinController):
             ],
         )
 
-        # Verify TOU schedule entities are configured (required for schedule application)
-        tou_keys = [
-            "tou_time_1_enabled",
-            "tou_time_1_begin",
-            "tou_time_1_end",
-            "tou_time_1_mode",
-            "tou_time_1_update",
-        ]
-        for key in tou_keys:
+        required_keys = (
+            [
+                "growatt_vpp_status",
+                "growatt_vpp_remote_control",
+                "growatt_vpp_allow_ac_charging",
+                "growatt_vpp_time",
+                "growatt_vpp_power",
+            ]
+            if self.control_mode == "vpp"
+            else [
+                "tou_time_1_enabled",
+                "tou_time_1_begin",
+                "tou_time_1_end",
+                "tou_time_1_mode",
+                "tou_time_1_update",
+            ]
+        )
+        entity_label = "VPP Entity" if self.control_mode == "vpp" else "TOU Entity"
+        for key in required_keys:
             entity_id = controller.sensors.get(key, "")
             if entity_id:
                 status, error = "OK", None
@@ -431,7 +614,7 @@ class SolaxModbusGrowattController(GrowattMinController):
                 status, error = "ERROR", "Not configured — re-run setup wizard"
             health_check["checks"].append(
                 {
-                    "name": f"TOU Entity: {key}",
+                    "name": f"{entity_label}: {key}",
                     "key": key,
                     "method_name": None,
                     "entity_id": entity_id or "Not configured",
@@ -442,7 +625,7 @@ class SolaxModbusGrowattController(GrowattMinController):
                 }
             )
 
-        # Re-evaluate overall status including TOU checks
+        # Re-evaluate overall status including the mode-specific checks
         has_error = any(c["status"] == "ERROR" for c in health_check["checks"])
         has_warning = any(c["status"] == "WARNING" for c in health_check["checks"])
         if has_error:

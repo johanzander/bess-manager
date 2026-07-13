@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- **Growatt VPP control mode for Growatt-via-solax_modbus, GEN3 + GEN4** *(experimental)* — `SolaxModbusGrowattController` gains a second control strategy, `inverter.control_mode="vpp"`, using Growatt's remote power control registers (verified against `wills106/homeassistant-solax-modbus`'s `plugin_growatt.py`) instead of a persistent TOU schedule — the same per-period "SM-Ephemeral" model `SolaxController` already uses for real SolaX hardware. GEN3 (`solax_modbus_growatt_sph`), which previously had no working control path, now controls the battery via VPP by default; GEN4 (`solax_modbus_growatt_min`) can opt in via the new setting, with its existing single-segment TOU mode staying the default and unaffected. Not yet real-world validated — see `docs/agents/memory/project_platform_maturity.md`. ([#118](https://github.com/johanzander/bess-manager/issues/118))
 - **Daily savings history with week/month/year aggregates** — A new `DailyViewStore` persists a per-day savings snapshot at day rollover. `GET /api/savings/aggregate` and a new Savings page section expose week/month/year rollups built from that history, plus disk-usage and clear-history controls. ([#260](https://github.com/johanzander/bess-manager/pull/260))
 
 ### Changed

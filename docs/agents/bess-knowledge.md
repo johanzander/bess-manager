@@ -286,8 +286,14 @@ is always caused by a specific, identifiable change.
 The optimizer needs a consumption forecast.  Four strategies exist:
 
 - **ha_statistics** (recommended): Builds a 96-period time-of-day profile
-  from the past 7 days of HA Recorder data.  Uses trimmed mean to filter
-  out spikes like EV charging.  Higher during evening peaks, lower overnight.
+  from the past 7 days of HA Recorder data, bucketed by hour-of-day.  For
+  each hour it drops only the single highest (and lowest, if ≥5 samples)
+  of the 7 daily values before averaging.  This discounts a one-off
+  irregular spike (e.g. an unusual EV charging session on one day) but
+  does **not** strip out a regular/nightly EV charging habit — if most of
+  the 7 samples for an hour are elevated together, the average stays high
+  and the forecast correctly bakes that load in.  Higher during evening
+  peaks, lower overnight.
 - **influxdb_7d_avg**: Same concept but queries InfluxDB instead of HA.
 - **sensor**: Reads a 48-hour rolling average sensor.  Produces a flat
   prediction (same value all day).

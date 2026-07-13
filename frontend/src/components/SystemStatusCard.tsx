@@ -22,7 +22,7 @@ export interface StatusCardProps {
   keyMetric: string;
   keyValue: number | string;
   keyUnit: string;
-  keyAnnotation?: string;
+  keyAnnotation?: string[];
   metrics: Array<{
     label: string;
     value: number | string;
@@ -100,8 +100,12 @@ export const StatusCard: React.FC<StatusCardProps> = ({
           {keyValue}
           {keyUnit && <span className="text-lg font-normal text-gray-600 dark:text-gray-400 ml-2">{keyUnit}</span>}
         </p>
-        {keyAnnotation && (
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{keyAnnotation}</p>
+        {keyAnnotation && keyAnnotation.length > 0 && (
+          <div className="mt-3 space-y-0.5">
+            {keyAnnotation.map((line) => (
+              <p key={line} className="text-sm text-gray-600 dark:text-gray-400">{line}</p>
+            ))}
+          </div>
         )}
       </div>
 
@@ -149,6 +153,14 @@ interface SystemStatusCardProps {
   systemMode?: string;
 }
 
+// Issue #287: tomorrow's own slice isn't a backend field - it's the full-horizon
+// total minus today's slice. Formats to the same "<number> <unit>" shape as
+// the backend's FormattedValue.text.
+const formatDelta = (full?: FormattedValue | null, today?: FormattedValue): string | undefined => {
+  if (!full || !today) return undefined;
+  const delta = full.value - today.value;
+  return `${delta.toFixed(2)} ${today.unit}`;
+};
 
 const DASHBOARD_REFRESH_MS = 60000;
 
@@ -290,9 +302,19 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", sys
         })(),
         // Issue #287: full-horizon totals, present only when the DP is
         // running a 2-day plan. Legitimately absent otherwise - no throw.
+        // Tomorrow's own slice isn't a backend field - it's the remainder
+        // of the full-horizon total after subtracting today's slice.
         horizonDays: dashboardData.summary?.horizonDays ?? 1,
         netGridCostFullHorizon: dashboardData.summary?.netGridCostFullHorizon ?? null,
         netSavingsFullHorizon: dashboardData.summary?.netSavingsFullHorizon ?? null,
+        tomorrowCostText: formatDelta(
+          dashboardData.summary?.netGridCostFullHorizon,
+          dashboardData.summary?.netGridCost
+        ),
+        tomorrowSavingsText: formatDelta(
+          dashboardData.summary?.netSavingsFullHorizon,
+          dashboardData.summary?.netSavings
+        ),
       },
       batteryStatus: {
         soc: (() => {
@@ -365,7 +387,7 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", sys
       keyMetric: "Solar Generation",
       keyValue: statusData.realTimePower?.solarPower?.text || '0 W',
       keyUnit: "",
-      keyAnnotation: undefined as string | undefined,
+      keyAnnotation: undefined as string[] | undefined,
       metrics: [
         {
           label: "Home Usage",
@@ -402,7 +424,7 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", sys
       keyMetric: "Strategic Intent",
       keyValue: statusData.strategicIntent ?? 'Idle',
       keyUnit: "",
-      keyAnnotation: undefined as string | undefined,
+      keyAnnotation: undefined as string[] | undefined,
       metrics: [
         {
           label: "State of Charge",
@@ -446,19 +468,24 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", sys
       ]
     },
     {
-      title: "Today's Cost & Savings",
+      title: statusData.costAndSavings?.horizonDays === 2
+        ? "Cost & Savings (2 days)"
+        : "Today's Cost & Savings",
       icon: DollarSign,
       color: "blue" as const,
       keyMetric: "Net Grid Cost",
       // Issue #287: when a 2-day plan is active, the full-horizon total is
       // the headline (a decision that defers value to tomorrow shouldn't
-      // look like a loss), with today's slice shown as an annotation.
+      // look like a loss), with a Today/Tomorrow breakdown after it.
       keyValue: statusData.costAndSavings?.horizonDays === 2
         ? statusData.costAndSavings?.netGridCostFullHorizon?.text
         : statusData.costAndSavings?.todaysCost?.text,
       keyUnit: "",
       keyAnnotation: statusData.costAndSavings?.horizonDays === 2
-        ? `Today: ${statusData.costAndSavings?.todaysCost?.text}`
+        ? [
+            `Today: ${statusData.costAndSavings?.todaysCost?.text}`,
+            `Tomorrow: ${statusData.costAndSavings?.tomorrowCostText}`,
+          ]
         : undefined,
       metrics: [
         {
@@ -480,7 +507,7 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", sys
               : statusData.costAndSavings?.todaysSavings?.value) || 0
           ) >= 0 ? 'green' as const : 'red' as const,
           subLabel: statusData.costAndSavings?.horizonDays === 2
-            ? `Today: ${statusData.costAndSavings?.todaysSavings?.text}`
+            ? `Today: ${statusData.costAndSavings?.todaysSavings?.text} · Tomorrow: ${statusData.costAndSavings?.tomorrowSavingsText}`
             : undefined
         },
         {

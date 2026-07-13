@@ -230,7 +230,7 @@ describe('SystemStatusCard', () => {
     expect(screen.queryByText(/Today:/)).not.toBeInTheDocument();
   });
 
-  it('shows the full-horizon total as headline with a "Today" annotation when a 2-day plan is active', async () => {
+  it('shows the full-horizon total as headline with Today/Tomorrow breakdown when a 2-day plan is active', async () => {
     vi.mocked(useDashboardData).mockReturnValue({
       data: {
         ...mockDashboardData,
@@ -252,11 +252,31 @@ describe('SystemStatusCard', () => {
       expect(screen.getByText('Home Power')).toBeInTheDocument();
     });
 
+    // Title reflects the 2-day horizon.
+    expect(screen.getByText('Cost & Savings (2 days)')).toBeInTheDocument();
+    expect(screen.queryByText("Today's Cost & Savings")).not.toBeInTheDocument();
+
     // Full-horizon totals become the headline values...
     expect(screen.getByText('-0.05 EUR')).toBeInTheDocument();
     expect(screen.getByText('2.05 EUR')).toBeInTheDocument();
-    // ...with today's slice shown as a secondary annotation, not hidden.
-    expect(screen.getByText(/Today: 1\.50 EUR/)).toBeInTheDocument();
-    expect(screen.getByText(/Today: 0\.65 EUR/)).toBeInTheDocument();
+    // ...with a Today/Tomorrow breakdown after the headline (netGridCost today
+    // 1.50, so tomorrow = -0.05 - 1.50 = -1.55).
+    expect(screen.getByText('Today: 1.50 EUR')).toBeInTheDocument();
+    expect(screen.getByText('Tomorrow: -1.55 EUR')).toBeInTheDocument();
+    // ...and a compact Today/Tomorrow line under Net Savings (today 0.65, so
+    // tomorrow = 2.05 - 0.65 = 1.40).
+    expect(screen.getByText('Today: 0.65 EUR · Tomorrow: 1.40 EUR')).toBeInTheDocument();
+  });
+
+  it('keeps the single-day title and no breakdown when only today is planned', async () => {
+    render(<SystemStatusCard systemMode="live" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Home Power')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("Today's Cost & Savings")).toBeInTheDocument();
+    expect(screen.queryByText(/Cost & Savings \(2 days\)/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Tomorrow:/)).not.toBeInTheDocument();
   });
 });

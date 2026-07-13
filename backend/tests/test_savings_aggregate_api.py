@@ -73,7 +73,7 @@ class TestSavingsAggregate:
             _seeded_store(tmp_path)
         )
 
-        resp = _client.get("/api/savings/aggregate?period=week&count=1")
+        resp = _client.get("/api/savings/aggregate?period=week&count=1&date=2026-07-08")
 
         assert resp.status_code == 200
         body = resp.json()
@@ -123,7 +123,7 @@ class TestSavingsAggregate:
             _seeded_store(tmp_path)
         )
 
-        resp = _client.get("/api/savings/aggregate?period=week&count=1")
+        resp = _client.get("/api/savings/aggregate?period=week&count=1&date=2026-07-08")
 
         assert resp.status_code == 200
         bucket = resp.json()["buckets"][0]
@@ -134,7 +134,7 @@ class TestSavingsAggregate:
             _seeded_store(tmp_path)
         )
 
-        resp = _client.get("/api/savings/aggregate?period=week&count=1")
+        resp = _client.get("/api/savings/aggregate?period=week&count=1&date=2026-07-08")
 
         assert resp.status_code == 200
         bucket = resp.json()["buckets"][0]
@@ -269,7 +269,7 @@ class TestSolarBatterySavingsSplit:
             self._store_with_solar_and_battery(tmp_path)
         )
 
-        resp = _client.get("/api/savings/aggregate?period=week&count=1")
+        resp = _client.get("/api/savings/aggregate?period=week&count=1&date=2026-07-08")
 
         assert resp.status_code == 200
         bucket = resp.json()["buckets"][0]

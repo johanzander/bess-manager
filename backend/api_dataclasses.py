@@ -620,6 +620,13 @@ class APIDashboardSummary:
     averagePrice: FormattedValue
     finalBatterySoe: FormattedValue
 
+    # Full-horizon totals (issue #287): populated only when the DP is running
+    # a 2-day plan, so a decision that correctly defers value to tomorrow
+    # doesn't look like a loss when only today's slice is shown.
+    horizonDays: int = 1
+    netGridCostFullHorizon: FormattedValue | None = None
+    netSavingsFullHorizon: FormattedValue | None = None
+
     @classmethod
     def from_totals(
         cls, totals: dict, costs: dict, battery_capacity: float, currency: str
@@ -651,6 +658,23 @@ class APIDashboardSummary:
                 total_optimized_cost, "currency", currency
             ),
             netGridCost=create_formatted_value(costs["netGrid"], "currency", currency),
+            horizonDays=costs.get("horizonDays", 1),
+            netGridCostFullHorizon=(
+                create_formatted_value(
+                    costs["netGridFullHorizon"], "currency", currency
+                )
+                if "netGridFullHorizon" in costs
+                else None
+            ),
+            netSavingsFullHorizon=(
+                create_formatted_value(
+                    costs["gridOnlyFullHorizon"] - costs["netGridFullHorizon"],
+                    "currency",
+                    currency,
+                )
+                if "netGridFullHorizon" in costs
+                else None
+            ),
             netSavings=create_formatted_value(
                 total_grid_only_cost - costs["netGrid"], "currency", currency
             ),

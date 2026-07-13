@@ -56,7 +56,7 @@ const EMPTY_PRICING: PricingForm = {
   area: '', markupRate: 0, vatMultiplier: 1.25, additionalCosts: 0,
   taxReduction: 0, spotMultiplier: 1.0, exportSpotMultiplier: 1.0,
 };
-const EMPTY_INVERTER: InverterForm = { inverterPlatform: 'growatt_server_min', deviceId: '' };
+const EMPTY_INVERTER: InverterForm = { inverterPlatform: 'growatt_server_min', deviceId: '', controlMode: 'tou' };
 
 // ---------------------------------------------------------------------------
 // Component
@@ -212,6 +212,7 @@ const SettingsPage: React.FC = () => {
       const inv: InverterForm = {
         inverterPlatform: uiType,
         deviceId: growatt_s.deviceId ?? '',
+        controlMode: (invNew.controlMode as 'tou' | 'vpp' | undefined) ?? 'tou',
       };
       setInverterForm(inv);
       savedInverter.current = JSON.stringify(inv);
@@ -457,6 +458,7 @@ const SettingsPage: React.FC = () => {
         },
         inverter: {
           platform: inverterForm.inverterPlatform,
+          controlMode: inverterForm.controlMode ?? 'tou',
         },
       });
       savedBattery.current = JSON.stringify(batteryForm);

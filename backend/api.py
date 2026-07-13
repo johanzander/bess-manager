@@ -316,7 +316,10 @@ async def patch_settings(updates: dict):
                     )
 
                 control_mode = section.get("control_mode")
-                if control_mode:
+                if control_mode and platform in (
+                    "solax_modbus_growatt_min",
+                    "solax_modbus_growatt_sph",
+                ):
                     bess_controller.system.switch_control_mode(control_mode)
 
             elif store_key == "sensors":
@@ -3458,6 +3461,8 @@ async def setup_complete(payload: APISetupCompletePayload):
                 )
             inv_section = bess_controller.settings_store.get_section("inverter")
             inv_section["platform"] = _platform
+            if payload.inverterControlMode is not None:
+                inv_section["control_mode"] = payload.inverterControlMode
             sections["inverter"] = inv_section
             if payload.growattDeviceId:
                 growatt_section = bess_controller.settings_store.get_section("growatt")
@@ -3478,6 +3483,17 @@ async def setup_complete(payload: APISetupCompletePayload):
             bess_controller.system.switch_inverter_platform(
                 sections["inverter"]["platform"]
             )
+            # switch_inverter_platform() resets control_mode to its
+            # platform default — apply an explicit wizard choice afterward.
+            # Only meaningful for the two Growatt-via-solax_modbus platforms;
+            # other platforms don't accept this setting.
+            if payload.inverterControlMode is not None and sections["inverter"][
+                "platform"
+            ] in (
+                "solax_modbus_growatt_min",
+                "solax_modbus_growatt_sph",
+            ):
+                bess_controller.system.switch_control_mode(payload.inverterControlMode)
 
         # Apply settings to live system so BESS starts immediately
         # without requiring a restart.

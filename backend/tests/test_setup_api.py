@@ -605,6 +605,43 @@ class TestSetupComplete:
             "growatt_server_sph"
         )
 
+    def test_control_mode_persisted_for_solax_modbus_growatt_min(
+        self, complete_controller
+    ):
+        _client.post(
+            "/api/setup/complete",
+            json=_full_wizard_payload(
+                inverterPlatform="solax_modbus_growatt_min",
+                inverterControlMode="vpp",
+            ),
+        )
+        call_args = complete_controller.settings_store.save_all.call_args[0][0]
+        assert call_args["inverter"]["control_mode"] == "vpp"
+
+    def test_control_mode_switched_live_for_solax_modbus_growatt_min(
+        self, complete_controller
+    ):
+        _client.post(
+            "/api/setup/complete",
+            json=_full_wizard_payload(
+                inverterPlatform="solax_modbus_growatt_min",
+                inverterControlMode="vpp",
+            ),
+        )
+        complete_controller.system.switch_control_mode.assert_called_once_with("vpp")
+
+    def test_control_mode_not_switched_live_for_other_platforms(
+        self, complete_controller
+    ):
+        _client.post(
+            "/api/setup/complete",
+            json=_full_wizard_payload(
+                inverterPlatform="growatt_server_min",
+                inverterControlMode="tou",
+            ),
+        )
+        complete_controller.system.switch_control_mode.assert_not_called()
+
     def test_sensors_applied_to_ha_controller(self, complete_controller):
         _client.post("/api/setup/complete", json=_full_wizard_payload())
         assert (

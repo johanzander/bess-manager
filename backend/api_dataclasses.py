@@ -1128,6 +1128,9 @@ class APISetupCompletePayload(BaseModel):
     entsoeEntity: str | None = None
     # Inverter
     inverterPlatform: str | None = None
+    # Growatt-via-solax_modbus control strategy ("tou" or "vpp"); ignored by
+    # other platforms and forced to "vpp" server-side for GEN3.
+    inverterControlMode: str | None = None
     # Control mode
     demoMode: bool | None = None
 

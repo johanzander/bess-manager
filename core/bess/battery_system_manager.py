@@ -144,6 +144,9 @@ class BatterySystemManager:
         self.inverter_platform: str | None = self._resolve_initial_platform(
             addon_options or {}
         )
+        self.control_mode: str = self._resolve_control_mode(
+            addon_options or {}, self.inverter_platform
+        )
         self._inverter_controller: InverterController | None = (
             self._create_inverter_controller()
         )
@@ -260,6 +263,28 @@ class BatterySystemManager:
         )
         return platform
 
+    VALID_CONTROL_MODES: ClassVar[set[str]] = {"tou", "vpp"}
+
+    @staticmethod
+    def _resolve_control_mode(options: dict, platform: str | None) -> str:
+        """Determine control_mode for solax_modbus_growatt_min/_sph platforms.
+
+        GEN3 (solax_modbus_growatt_sph) has no working TOU path — it always
+        runs "vpp" regardless of what's stored. GEN4 (solax_modbus_growatt_min)
+        reads ``inverter.control_mode``, defaulting to "tou" (existing
+        behaviour, unchanged for current installs). Other platforms don't use
+        this setting at all; it's returned as "tou" but ignored by their
+        controllers.
+        """
+        if platform == "solax_modbus_growatt_sph":
+            return "vpp"
+        mode = options.get("inverter", {}).get("control_mode", "tou")
+        assert mode in BatterySystemManager.VALID_CONTROL_MODES, (
+            f"Unknown control_mode '{mode}', "
+            f"expected one of {sorted(BatterySystemManager.VALID_CONTROL_MODES)}"
+        )
+        return mode
+
     @property
     def _supports_charge_rate_control(self) -> bool:
         if not self._inverter_controller:
@@ -282,7 +307,10 @@ class BatterySystemManager:
             "solax_modbus_growatt_min",
             "solax_modbus_growatt_sph",
         ):
-            return SolaxModbusGrowattController(battery_settings=self.battery_settings)
+            return SolaxModbusGrowattController(
+                battery_settings=self.battery_settings,
+                control_mode=self.control_mode,
+            )
         return GrowattMinController(battery_settings=self.battery_settings)
 
     def switch_inverter_platform(self, platform: str) -> None:
@@ -313,6 +341,58 @@ class BatterySystemManager:
         )
 
         self.inverter_platform = platform
+        self.control_mode = self._resolve_control_mode({}, platform)
+        self._inverter_controller = self._create_inverter_controller()
+        logger.info(
+            "Inverter controller recreated: %s",
+            type(self._inverter_controller).__name__,
+        )
+
+    def switch_control_mode(self, control_mode: str) -> None:
+        """Switch control_mode (tou/vpp) for the current Growatt-modbus platform.
+
+        Only meaningful for ``solax_modbus_growatt_min`` (GEN4) — GEN3
+        (``solax_modbus_growatt_sph``) always runs "vpp" and rejects any
+        other value, since it has no working TOU path.
+
+        Args:
+            control_mode: "tou" or "vpp"
+
+        Raises:
+            SystemConfigurationError: If control_mode is invalid, or the
+                current platform doesn't use this setting.
+        """
+        if control_mode not in self.VALID_CONTROL_MODES:
+            raise SystemConfigurationError(
+                message=f"Unknown control_mode '{control_mode}', "
+                f"expected one of {sorted(self.VALID_CONTROL_MODES)}"
+            )
+        if self.inverter_platform not in (
+            "solax_modbus_growatt_min",
+            "solax_modbus_growatt_sph",
+        ):
+            raise SystemConfigurationError(
+                message=f"control_mode is not applicable to platform "
+                f"'{self.inverter_platform}'"
+            )
+        if (
+            self.inverter_platform == "solax_modbus_growatt_sph"
+            and control_mode != "vpp"
+        ):
+            raise SystemConfigurationError(
+                message="solax_modbus_growatt_sph (GEN3) has no working TOU "
+                "path — control_mode must be 'vpp'"
+            )
+
+        if control_mode == self.control_mode:
+            return
+
+        logger.info(
+            "Switching Growatt-modbus control_mode: %s -> %s",
+            self.control_mode,
+            control_mode,
+        )
+        self.control_mode = control_mode
         self._inverter_controller = self._create_inverter_controller()
         logger.info(
             "Inverter controller recreated: %s",

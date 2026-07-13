@@ -116,6 +116,43 @@ class TestSwitchInverterPlatform:
             system.switch_inverter_platform("nonexistent_platform")
 
 
+class TestSwitchControlMode:
+    def test_gen4_defaults_to_tou(self, system):
+        system.switch_inverter_platform("solax_modbus_growatt_min")
+        assert system.control_mode == "tou"
+
+    def test_gen4_can_switch_to_vpp(self, system):
+        system.switch_inverter_platform("solax_modbus_growatt_min")
+        system.switch_control_mode("vpp")
+        assert system.control_mode == "vpp"
+        assert system._inverter_controller.control_mode == "vpp"
+
+    def test_gen3_always_vpp(self, system):
+        system.switch_inverter_platform("solax_modbus_growatt_sph")
+        assert system.control_mode == "vpp"
+
+    def test_gen3_rejects_tou(self, system):
+        system.switch_inverter_platform("solax_modbus_growatt_sph")
+        with pytest.raises(SystemConfigurationError):
+            system.switch_control_mode("tou")
+
+    def test_invalid_control_mode_raises(self, system):
+        system.switch_inverter_platform("solax_modbus_growatt_min")
+        with pytest.raises(SystemConfigurationError):
+            system.switch_control_mode("bogus")
+
+    def test_not_applicable_to_other_platforms(self, system):
+        system.switch_inverter_platform("solax_modbus_native")
+        with pytest.raises(SystemConfigurationError):
+            system.switch_control_mode("vpp")
+
+    def test_same_control_mode_is_noop(self, system):
+        system.switch_inverter_platform("solax_modbus_growatt_min")
+        original_controller = system._inverter_controller
+        system.switch_control_mode("tou")
+        assert system._inverter_controller is original_controller
+
+
 class TestResolveInitialPlatform:
     def test_new_format_platform_key(self):
         result = BatterySystemManager._resolve_initial_platform(

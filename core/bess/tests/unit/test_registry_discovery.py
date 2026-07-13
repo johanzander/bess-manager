@@ -424,6 +424,42 @@ def _solax_growatt_tou_registry() -> list[dict]:
     return base + tou_entities
 
 
+def _solax_growatt_vpp_entities() -> list[dict]:
+    """VPP remote-power-control entities (registers 30100/30407-30410).
+
+    Present on both GEN3 and GEN4 hardware alongside their existing TOU/EMS
+    entities — solax_modbus exposes all entities for the detected model
+    regardless of which control mode BESS actually uses (see issue #118).
+    """
+    return [
+        _entity(
+            "select.growatt_inverter_solax_vpp_status",
+            "solax_modbus",
+            "solax_vpp_status",
+        ),
+        _entity(
+            "select.growatt_inverter_solax_vpp_remote_control",
+            "solax_modbus",
+            "solax_vpp_remote_control",
+        ),
+        _entity(
+            "select.growatt_inverter_solax_vpp_allow_ac_charging",
+            "solax_modbus",
+            "solax_vpp_allow_ac_charging",
+        ),
+        _entity(
+            "number.growatt_inverter_solax_vpp_time",
+            "solax_modbus",
+            "solax_vpp_time",
+        ),
+        _entity(
+            "number.growatt_inverter_solax_vpp_power",
+            "solax_modbus",
+            "solax_vpp_power",
+        ),
+    ]
+
+
 def _solax_growatt_gen3_registry() -> list[dict]:
     """Entity registry for a GEN3 Growatt (MIX/SPA/SPH) via solax_modbus.
 
@@ -967,6 +1003,53 @@ class TestDiscoverSensorsFromRegistry:
         assert (
             sensors["solax_modbus_growatt_sph"]["lifetime_load_consumption"]
             == "sensor.growatt_sph_solax_total_load"
+        )
+
+    def test_solax_growatt_gen4_vpp_entities_discovered(self):
+        """GEN4 VPP entities are mapped alongside TOU entities (issue #118).
+
+        Real hardware exposes both TOU and VPP entities regardless of which
+        control_mode BESS uses — detection still keys off the TOU marker.
+        """
+        registry = _solax_growatt_tou_registry() + _solax_growatt_vpp_entities()
+        sensors, platform = self.ctrl.discover_sensors_from_registry(registry)
+        assert platform == "solax_modbus_growatt_min"
+        growatt_min = sensors["solax_modbus_growatt_min"]
+        assert (
+            growatt_min["growatt_vpp_status"]
+            == "select.growatt_inverter_solax_vpp_status"
+        )
+        assert (
+            growatt_min["growatt_vpp_remote_control"]
+            == "select.growatt_inverter_solax_vpp_remote_control"
+        )
+        assert (
+            growatt_min["growatt_vpp_allow_ac_charging"]
+            == "select.growatt_inverter_solax_vpp_allow_ac_charging"
+        )
+        assert (
+            growatt_min["growatt_vpp_time"] == "number.growatt_inverter_solax_vpp_time"
+        )
+        assert (
+            growatt_min["growatt_vpp_power"]
+            == "number.growatt_inverter_solax_vpp_power"
+        )
+        # TOU entities still present — VPP is additive, not a replacement
+        assert "tou_time_1_enabled" in growatt_min
+
+    def test_solax_growatt_gen3_vpp_entities_discovered(self):
+        """GEN3 VPP entities are mapped — GEN3's only working control path."""
+        registry = _solax_growatt_gen3_registry() + _solax_growatt_vpp_entities()
+        sensors, platform = self.ctrl.discover_sensors_from_registry(registry)
+        assert platform == "solax_modbus_growatt_sph"
+        growatt_sph = sensors["solax_modbus_growatt_sph"]
+        assert (
+            growatt_sph["growatt_vpp_status"]
+            == "select.growatt_inverter_solax_vpp_status"
+        )
+        assert (
+            growatt_sph["growatt_vpp_power"]
+            == "number.growatt_inverter_solax_vpp_power"
         )
 
     def test_gen3_marker_not_detected_for_gen4(self):

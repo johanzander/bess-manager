@@ -83,6 +83,13 @@ export interface DashboardSummary {
   netGridCost: FormattedValue;
   netSavings: FormattedValue;
 
+  // Full-horizon totals (issue #287): present only when the DP is running a
+  // 2-day plan, so a decision that defers value to tomorrow doesn't look
+  // like a loss when only today's slice is shown.
+  horizonDays?: number;
+  netGridCostFullHorizon?: FormattedValue | null;
+  netSavingsFullHorizon?: FormattedValue | null;
+
   // Savings calculations - CANONICAL
   totalSavings: FormattedValue;
   solarSavings: FormattedValue;

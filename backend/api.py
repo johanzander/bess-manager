@@ -783,6 +783,21 @@ async def get_dashboard_data(
             "netGrid": total_net_grid_cost,
         }
 
+        # Issue #287: when a 2-day DP plan is active, tomorrow_data already
+        # holds the deferred-to-tomorrow slice — fold it into a full-horizon
+        # total so the dashboard doesn't make a correctly-deferred decision
+        # look like a loss.
+        if tomorrow_data:
+            costs["netGridFullHorizon"] = total_net_grid_cost + sum(
+                h.gridCost.value for h in tomorrow_data
+            )
+            costs["gridOnlyFullHorizon"] = total_grid_only_cost + sum(
+                h.gridOnlyCost.value for h in tomorrow_data
+            )
+            costs["horizonDays"] = 2
+        else:
+            costs["horizonDays"] = 1
+
         if is_historical:
             # No live sensor state applies to a past day — derive SOC from the
             # last persisted period instead of reading the current battery sensor.

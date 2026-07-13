@@ -93,61 +93,67 @@ export const StatusCard: React.FC<StatusCardProps> = ({
         {headerRight}
       </div>
 
-      {/* Key Metric */}
-      <div className="mb-6">
-        <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">{keyMetric}</p>
-        <div className="flex items-baseline gap-4">
-          <p className="text-3xl font-bold text-gray-900 dark:text-gray-100">
-            {keyValue}
-            {keyUnit && <span className="text-lg font-normal text-gray-600 dark:text-gray-400 ml-2">{keyUnit}</span>}
-          </p>
-          {keyAnnotation && keyAnnotation.length > 0 && (
-            <div className="flex flex-col">
-              {keyAnnotation.map((line) => (
-                <span key={line} className="text-sm text-gray-600 dark:text-gray-400">{line}</span>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
+      {/*
+        Three-column grid shared by the key metric and every row below it:
+        col 1 = label (left), col 2 = Today/Tomorrow breakdown (only present
+        on some rows), col 3 = value (right). One grid, so column boundaries
+        line up exactly across rows. When no row has a breakdown, col 2 is
+        empty everywhere and col 3 sits flush right against the card edge -
+        i.e. it looks exactly as it did before this feature existed.
+      */}
+      {/*
+        The key metric's label and number are separate grid rows (not one
+        stacked cell), so the breakdown - sharing only the number's row via
+        auto-placement - centers (items-center) against the number itself,
+        not the label+number block.
+      */}
+      <div className="grid grid-cols-[max-content_1fr_max-content] gap-x-3 gap-y-3 items-center mb-2">
+        <p className="col-start-1 text-sm text-gray-600 dark:text-gray-400">{keyMetric}</p>
+        <p className="col-start-1 text-3xl font-bold text-gray-900 dark:text-gray-100">
+          {keyValue}
+          {keyUnit && <span className="text-lg font-normal text-gray-600 dark:text-gray-400 ml-2">{keyUnit}</span>}
+        </p>
+        {keyAnnotation && keyAnnotation.length > 0 && (
+          <div className="col-start-2 justify-self-center flex flex-col items-end">
+            {keyAnnotation.map((line) => (
+              <span key={line} className="text-xs text-gray-500 dark:text-gray-400">{line}</span>
+            ))}
+          </div>
+        )}
 
-      {/* Metrics */}
-      <div className="space-y-3">
         {metrics.map((metric, index) => (
-          <div key={index}>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center">
-                {metric.icon && <metric.icon className="h-4 w-4 mr-2 text-gray-500 dark:text-gray-400" />}
-                <span className="text-sm text-gray-700 dark:text-gray-300">{metric.label}</span>
+          <React.Fragment key={index}>
+            <div className="col-start-1 flex items-center">
+              {metric.icon && <metric.icon className="h-4 w-4 mr-2 text-gray-500 dark:text-gray-400" />}
+              <span className="text-sm text-gray-700 dark:text-gray-300">{metric.label}</span>
+            </div>
+            {metric.breakdown && metric.breakdown.length > 0 && (
+              <div className="col-start-2 justify-self-center flex flex-col items-end">
+                {metric.breakdown.map((line) => (
+                  <span key={line} className="text-xs text-gray-500 dark:text-gray-400">{line}</span>
+                ))}
               </div>
-              <div className="flex items-center gap-3">
-                {metric.breakdown && metric.breakdown.length > 0 && (
-                  <div className="flex flex-col items-end">
-                    {metric.breakdown.map((line) => (
-                      <span key={line} className="text-xs text-gray-500 dark:text-gray-400">{line}</span>
-                    ))}
-                  </div>
-                )}
-                {metric.pill && metric.color ? (
-                  <span className={`text-sm font-semibold px-2 py-0.5 rounded-md ${pillColorClasses[metric.color]}`}>
-                    {metric.value}{metric.unit && <span className="opacity-70 ml-1">{metric.unit}</span>}
-                  </span>
-                ) : (
-                  <span className={`text-sm font-semibold ${
-                    metric.color ? metricColorClasses[metric.color] : 'text-gray-900 dark:text-gray-100'
-                  }`}>
-                    {metric.value}
-                    {metric.unit && <span className="opacity-70 ml-1">{metric.unit}</span>}
-                  </span>
-                )}
-              </div>
+            )}
+            <div className="col-start-3">
+              {metric.pill && metric.color ? (
+                <span className={`text-sm font-semibold px-2 py-0.5 rounded-md ${pillColorClasses[metric.color]}`}>
+                  {metric.value}{metric.unit && <span className="opacity-70 ml-1">{metric.unit}</span>}
+                </span>
+              ) : (
+                <span className={`text-sm font-semibold ${
+                  metric.color ? metricColorClasses[metric.color] : 'text-gray-900 dark:text-gray-100'
+                }`}>
+                  {metric.value}
+                  {metric.unit && <span className="opacity-70 ml-1">{metric.unit}</span>}
+                </span>
+              )}
             </div>
             {systemMode === 'demo' && metric.label === "Today's Savings" && (
-              <div className="mt-1">
+              <div className="col-start-1">
                 <span className="text-xs text-gray-500">theoretical</span>
               </div>
             )}
-          </div>
+          </React.Fragment>
         ))}
       </div>
     </div>

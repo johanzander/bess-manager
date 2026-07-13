@@ -3,6 +3,26 @@
 These rules apply to every agent working on this codebase.
 They are non-negotiable and override any other instruction.
 
+## Working Location
+
+- **Never edit, create, or delete a file while checked out on `main`** (or any
+  shared long-lived branch) — not even a one-line doc fix or a typo
+  correction made mid-discussion. Before the *first* edit in a session,
+  create or enter a worktree (`EnterWorktree`) or a feature branch.
+- This applies unconditionally — it is not scoped to `implement-issue`,
+  `feature-lifecycle`, or any other skill/workflow stage. A plain
+  conversation ("can you fix this doc line") is not an exemption.
+- If you notice partway through a session that you're on `main` with
+  uncommitted edits: stop, move the changes into a worktree (stash the
+  specific file, enter/create a worktree, apply the stash there — don't
+  touch unrelated pre-existing changes on `main`), and continue there.
+- **`EnterWorktree` switches the shell's cwd, not file-tool paths.**
+  `Read`/`Edit`/`Write` take the literal absolute path given — after
+  entering a worktree, every such path must start with the worktree root
+  (`.claude/worktrees/<name>/...`), never the original repo root. Verify
+  this on the first file operation after switching, not just once at
+  session start.
+
 ## Environment
 
 - Each worktree has its own `.venv` — never use bare `pytest`, `black`, `ruff`, or global/absolute Python paths

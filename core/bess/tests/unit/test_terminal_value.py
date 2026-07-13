@@ -196,13 +196,18 @@ class TestTerminalValueCapRegression:
         export_uncapped = total_export(result_uncapped)
         export_capped = total_export(result_capped)
 
-        assert export_uncapped == pytest.approx(0.0, abs=1e-6), (
-            "sanity check: uncapped buy-median value should reproduce the "
-            "reported bug (holds through the peak instead of exporting)"
-        )
         assert export_capped > 0.0, (
             "capped terminal value should let the DP export during the real "
             "evening peak instead of holding for a fictitious bonus"
+        )
+        assert export_capped > export_uncapped, (
+            "sanity check: capping the terminal value should still export "
+            "strictly more at the peak than the uncapped (buggy) value -- "
+            "at fine DP discretization (docs/superpowers/specs/2026-07-12-"
+            "dp-continuous-path-reconstruction-fix-design.md, Option B) the "
+            "uncapped case no longer holds through the peak with exactly zero "
+            "export (a side effect of the same fix reducing Step 2's general "
+            "reconstruction error), but the cap must still measurably help"
         )
 
     def test_nordic_shaped_market_retains_reserve(self):

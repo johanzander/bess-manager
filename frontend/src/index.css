@@ -1,3 +1,42 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* react-datepicker ships light-only styles; override for dark mode
+   (Tailwind class-based dark mode toggles a `.dark` class on <html>). */
+.dark .react-datepicker {
+  background-color: #1f2937;
+  border-color: #374151;
+  color: #d1d5db;
+}
+.dark .react-datepicker__header {
+  background-color: #1f2937;
+  border-bottom-color: #374151;
+}
+.dark .react-datepicker__current-month,
+.dark .react-datepicker__day-name,
+.dark .react-datepicker__day,
+.dark .react-datepicker__month-text,
+.dark .react-datepicker__year-text {
+  color: #d1d5db;
+}
+.dark .react-datepicker__day:hover,
+.dark .react-datepicker__month-text:hover,
+.dark .react-datepicker__year-text:hover {
+  background-color: #374151;
+}
+.dark .react-datepicker__day--selected,
+.dark .react-datepicker__day--keyboard-selected,
+.dark .react-datepicker__month-text--selected,
+.dark .react-datepicker__year-text--selected {
+  background-color: #2563eb;
+  color: #fff;
+}
+.dark .react-datepicker__day--disabled,
+.dark .react-datepicker__month-text--disabled,
+.dark .react-datepicker__year-text--disabled {
+  color: #4b5563;
+}
+.dark .react-datepicker__navigation-icon::before {
+  border-color: #9ca3af;
+}

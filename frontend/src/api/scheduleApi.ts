@@ -18,9 +18,17 @@ export const fetchDashboardData = async (date?: string, resolution?: string) => 
   return response.data;
 };
 
+/**
+ * Fetch ISO dates (YYYY-MM-DD) that have dashboard data available, for greying
+ * out unavailable days in a date picker instead of erroring on selection.
+ */
+export const fetchAvailableDashboardDates = async (): Promise<string[]> => {
+  const response = await api.get('/api/dashboard/available-dates');
+  return response.data.dates;
+};
+
 // Type definitions for the unified dashboard response
 export interface DashboardHourlyData {
-  hour: number;
   period: number;  // Period index (0-23 hourly, 0-95 quarterly)
   dataSource: 'actual' | 'predicted';
 
@@ -40,7 +48,10 @@ export interface DashboardHourlyData {
   // Financial data - FormattedValue
   buyPrice: FormattedValue;
   sellPrice: FormattedValue;
+  importCost: FormattedValue;
+  exportRevenue: FormattedValue;
   hourlyCost: FormattedValue;
+  gridCost: FormattedValue;
   hourlySavings: FormattedValue;
   batteryCycleCost: FormattedValue;
 
@@ -48,7 +59,11 @@ export interface DashboardHourlyData {
   gridOnlyCost: FormattedValue;
   solarOnlyCost: FormattedValue;
   solarSavings: FormattedValue;
-  batterySavings?: FormattedValue;
+  // Wear-free savings, computed backend-side (see backend/api_dataclasses.py
+  // APIDashboardHourlyData.from_internal) — do not re-derive these from
+  // other fields on the frontend.
+  batterySavings: FormattedValue;
+  netSavings: FormattedValue;
 
   // Detailed analysis fields - FormattedValue
   directSolar?: FormattedValue;
@@ -65,6 +80,8 @@ export interface DashboardSummary {
   gridOnlyCost: FormattedValue;
   solarOnlyCost: FormattedValue;
   optimizedCost: FormattedValue;
+  netGridCost: FormattedValue;
+  netSavings: FormattedValue;
 
   // Savings calculations - CANONICAL
   totalSavings: FormattedValue;
@@ -188,7 +205,7 @@ export interface DashboardResponse {
 // Export default dashboard fetch function
 export default fetchDashboardData;
 
-export type SavingsAggregatePeriod = 'week' | 'month' | 'year';
+export type SavingsAggregatePeriod = 'day' | 'week' | 'month' | 'year';
 
 export interface SavingsBucket {
   label: string;
@@ -200,6 +217,10 @@ export interface SavingsBucket {
   exportKwh: FormattedValue;
   exportEur: FormattedValue;
   gridCost: FormattedValue;
+  gridOnlyCost: FormattedValue;
+  netSavings: FormattedValue;
+  solarSavings: FormattedValue;
+  batterySavings: FormattedValue;
   batteryCycleCost: FormattedValue;
   savingsVsGridOnly: FormattedValue;
   solarKwh: FormattedValue;
@@ -214,10 +235,12 @@ export interface SavingsAggregateResponse {
 
 export const fetchSavingsAggregate = async (
   period: SavingsAggregatePeriod,
-  count?: number
+  count?: number,
+  date?: string
 ): Promise<SavingsAggregateResponse> => {
   const params: Record<string, string | number> = { period };
   if (count) params.count = count;
+  if (date) params.date = date;
   const response = await api.get('/api/savings/aggregate', { params });
   return response.data;
 };

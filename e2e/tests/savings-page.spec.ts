@@ -1,18 +1,17 @@
 import { test, expect } from '@playwright/test';
 
-// Helper: wait for the savings page to fully render (heading + child content settled)
+// Helper: wait for the savings page to render its static structure. The
+// hero cards' data (especially for "Day", which reads the *live* view for
+// today) can legitimately be empty/erroring against a CI mock scenario
+// whose price data is pinned to a fixed past date, not the real container
+// clock — so this only waits for structure, not data content, and callers
+// that check data-dependent text do so tolerantly.
 async function waitForSavingsPage(page: import('@playwright/test').Page) {
   await page.goto('/savings');
-  // Wait for the heading that confirms we're on the savings page and past the loading gate
   await expect(
-    page.getByRole('heading', { name: /Financial Analysis/i })
+    page.getByRole('heading', { name: 'Savings Report' })
   ).toBeVisible({ timeout: 15_000 });
-  // Wait for the child component to finish loading (spinner disappears)
-  await expect(page.getByText('Loading schedule...')).not.toBeVisible({ timeout: 15_000 });
-  // Confirm the page hasn't crashed (error boundary replaces everything)
-  await expect(
-    page.getByRole('heading', { name: /Financial Analysis/i })
-  ).toBeVisible();
+  await expect(page.getByText('Something went wrong')).not.toBeVisible();
 }
 
 test.describe('Savings Page', () => {
@@ -20,119 +19,72 @@ test.describe('Savings Page', () => {
     await page.goto('/savings');
 
     await expect(
-      page.getByRole('heading', { name: /Financial Analysis/i })
+      page.getByRole('heading', { name: 'Savings Report' })
     ).toBeVisible({ timeout: 15_000 });
   });
 
-  test('shows view mode switcher (Overview / Scenario Comparison)', async ({ page }) => {
+  test('shows the Day/Month/Year resolution selector, date picker, and Chart/Table toggle', async ({ page }) => {
     await waitForSavingsPage(page);
 
-    await expect(page.getByRole('button', { name: /Overview/i })).toBeVisible();
-    await expect(page.getByRole('button', { name: /Scenario Comparison/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Day' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Month' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Year' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Chart' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Table' })).toBeVisible();
   });
 
-  test('shows resolution selector (60 min / 15 min)', async ({ page }) => {
+  test('shows Cost/Savings hero content or a graceful empty state, never a crash', async ({ page }) => {
     await waitForSavingsPage(page);
 
-    await expect(page.getByRole('button', { name: '60 min' })).toBeVisible();
-    await expect(page.getByRole('button', { name: '15 min' })).toBeVisible();
+    // The hero cards render once their fetch settles, with real data or a
+    // zeroed-out bucket — either way "Net Cost" appears unless the fetch
+    // itself errored (e.g. no live data for today in this CI fixture), in
+    // which case the hero silently omits itself. Both are acceptable; a
+    // crash is not.
+    await page.waitForTimeout(3000);
+    await expect(page.getByText('Something went wrong')).not.toBeVisible();
   });
 
-  test('shows data content or no-data state', async ({ page }) => {
+  test('switching to Table view shows a table or a no-data message', async ({ page }) => {
     await waitForSavingsPage(page);
 
-    // The savings page shows one of: chart data, loading, error, or no-data
-    const hasChart = await page.getByText(/Hourly Battery Actions/i).isVisible().catch(() => false);
-    const noData = await page.getByText(/No schedule data/i).isVisible().catch(() => false);
-    const loadingState = await page.getByText(/Loading schedule/i).isVisible().catch(() => false);
-    const errorState = await page.getByText(/Error Loading Schedule/i).isVisible().catch(() => false);
+    await page.getByRole('button', { name: 'Table' }).click();
 
-    expect(hasChart || noData || loadingState || errorState).toBe(true);
-  });
-
-  test('switching to scenario comparison shows table or handles no data', async ({ page }) => {
-    await waitForSavingsPage(page);
-
-    await page.getByRole('button', { name: /Scenario Comparison/i }).click();
-
-    // At minimum the page should not crash
-    await expect(page.getByRole('heading', { name: /Financial Analysis/i })).toBeVisible();
-
-    // Wait for the scenario comparison view to settle — either a table or a no-data message
     await expect(
-      page.locator('table').first().or(page.getByText(/No schedule data|no.*data/i))
+      page
+        .locator('table')
+        .first()
+        .or(page.getByText(/No savings history yet/i))
     ).toBeVisible({ timeout: 10_000 });
   });
 
-  test('switching to 15 min resolution does not crash', async ({ page }) => {
+  test('switching between Day, Month, and Year resolutions does not crash', async ({ page }) => {
     await waitForSavingsPage(page);
 
-    // Click 15 min resolution
-    await page.getByRole('button', { name: '15 min' }).click();
+    await page.getByRole('button', { name: 'Month' }).click();
+    await expect(page.getByRole('heading', { name: 'Savings Report' })).toBeVisible();
+    await expect(page.getByText('Something went wrong')).not.toBeVisible();
 
-    // Page should remain stable (no error boundary)
-    await expect(
-      page.getByRole('heading', { name: /Financial Analysis/i })
-    ).toBeVisible();
+    await page.getByRole('button', { name: 'Year' }).click();
+    await expect(page.getByRole('heading', { name: 'Savings Report' })).toBeVisible();
+    await expect(page.getByText('Something went wrong')).not.toBeVisible();
+
+    await page.getByRole('button', { name: 'Day' }).click();
+    await expect(page.getByRole('heading', { name: 'Savings Report' })).toBeVisible();
     await expect(page.getByText('Something went wrong')).not.toBeVisible();
   });
 
-  test('switching resolutions does not crash', async ({ page }) => {
+  test('navigating the date picker does not crash', async ({ page }) => {
     await waitForSavingsPage(page);
 
-    // Toggle back and forth between resolutions
-    await page.getByRole('button', { name: '15 min' }).click();
-    await expect(page.getByRole('heading', { name: /Financial Analysis/i })).toBeVisible();
-
-    await page.getByRole('button', { name: '60 min' }).click();
-    await expect(page.getByRole('heading', { name: /Financial Analysis/i })).toBeVisible();
-
-    await expect(page.getByText('Something went wrong')).not.toBeVisible();
-  });
-
-  test('scenario comparison at 60 min shows table when data available', async ({ page }) => {
-    await waitForSavingsPage(page);
-
-    await page.getByRole('button', { name: '60 min' }).click();
-    await page.getByRole('button', { name: /Scenario Comparison/i }).click();
-
-    // Wait for either table or no-data state
-    await page.waitForTimeout(2000);
-
-    const table = page.locator('table').first();
-    const hasTable = await table.isVisible().catch(() => false);
-
-    if (hasTable) {
-      // 60 min should have reasonable row count
-      const rows = table.locator('tbody tr');
-      const count = await rows.count();
-      expect(count).toBeGreaterThanOrEqual(1);
-      expect(count).toBeLessThanOrEqual(48);
-    }
-  });
-
-  test('15 min scenario comparison has more rows than 60 min when data available', async ({ page }) => {
-    await waitForSavingsPage(page);
-
-    // Get row count at 60 min
-    await page.getByRole('button', { name: '60 min' }).click();
-    await page.getByRole('button', { name: /Scenario Comparison/i }).click();
-    await page.waitForTimeout(2000);
-
-    const table = page.locator('table').first();
-    const hasTable = await table.isVisible().catch(() => false);
-    if (!hasTable) return; // skip if no data
-
-    const count60 = await table.locator('tbody tr').count();
-
-    // Switch to 15 min
-    await page.getByRole('button', { name: '15 min' }).click();
-    await page.waitForTimeout(2000);
-    const count15 = await table.locator('tbody tr').count();
-
-    // 15 min resolution should produce more rows than 60 min
-    if (count60 > 0) {
-      expect(count15).toBeGreaterThan(count60);
+    // The date picker's previous button is the one containing the
+    // chevron-left icon; it's disabled once there's no earlier available
+    // date, so only click if enabled.
+    const prevButton = page.locator('button:has(svg.lucide-chevron-left)');
+    if (await prevButton.isEnabled().catch(() => false)) {
+      await prevButton.click();
+      await expect(page.getByRole('heading', { name: 'Savings Report' })).toBeVisible();
+      await expect(page.getByText('Something went wrong')).not.toBeVisible();
     }
   });
 });

@@ -97,11 +97,11 @@
   },
   "expected_results": {
     "base_cost": 67.67,
-    "battery_solar_cost": 14.7426,
-    "base_to_battery_solar_savings": 52.9274,
-    "base_to_battery_solar_savings_pct": 78.2139,
-    "total_charged": 28.4,
-    "total_discharged": 25.6
+    "battery_solar_cost": 14.796632,
+    "base_to_battery_solar_savings": 52.873368,
+    "base_to_battery_solar_savings_pct": 78.134134,
+    "total_charged": 28.421053,
+    "total_discharged": 25.62
   },
   "expected_behavior": {
     "description": "Spring day: solar storage and export arbitrage with grid charging backup",

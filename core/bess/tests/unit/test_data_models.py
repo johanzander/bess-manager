@@ -186,7 +186,34 @@ class TestEconomicData:
         assert economic.hourly_cost == 0.0
         assert economic.hourly_savings == 0.0
         assert economic.battery_cycle_cost == 0.0
+        assert economic.import_cost == 0.0
+        assert economic.export_revenue == 0.0
         assert economic.calculate_net_value() == 0.0
+
+    def test_from_energy_data_splits_import_and_export(self):
+        """import_cost and export_revenue should be split out, not just netted into grid_cost."""
+        energy = EnergyData(
+            solar_production=1.0,
+            home_consumption=1.0,
+            grid_imported=2.0,
+            grid_exported=3.0,
+            battery_charged=0.0,
+            battery_discharged=0.0,
+            battery_soe_start=10.0,
+            battery_soe_end=10.0,
+        )
+
+        economic = EconomicData.from_energy_data(
+            energy_data=energy,
+            buy_price=1.5,
+            sell_price=0.5,
+            battery_cycle_cost=0.2,
+        )
+
+        assert economic.import_cost == 3.0  # 2.0 kWh * 1.5
+        assert economic.export_revenue == 1.5  # 3.0 kWh * 0.5
+        assert economic.grid_cost == 1.5  # import_cost - export_revenue
+        assert economic.hourly_cost == 1.7  # grid_cost + battery_cycle_cost
 
 
 class TestDecisionData:

@@ -17,7 +17,7 @@ import {
 
 
 // StatusCard component
-interface StatusCardProps {
+export interface StatusCardProps {
   title: string;
   keyMetric: string;
   keyValue: number | string;
@@ -34,9 +34,10 @@ interface StatusCardProps {
   icon: React.ComponentType<{ className?: string }>;
   className?: string;
   systemMode?: string;
+  headerRight?: React.ReactNode;
 }
 
-const StatusCard: React.FC<StatusCardProps> = ({
+export const StatusCard: React.FC<StatusCardProps> = ({
   title,
   icon: Icon,
   color,
@@ -45,7 +46,8 @@ const StatusCard: React.FC<StatusCardProps> = ({
   keyUnit,
   metrics,
   className = "",
-  systemMode
+  systemMode,
+  headerRight
 }) => {
   const colorClasses = {
     blue: 'bg-blue-50 border-blue-200 dark:bg-blue-900/20 dark:border-blue-800',
@@ -80,9 +82,12 @@ const StatusCard: React.FC<StatusCardProps> = ({
   return (
     <div className={`border rounded-lg p-6 ${colorClasses[color]} ${className}`}>
       {/* Header */}
-      <div className="flex items-center mb-4">
-        <Icon className={`h-6 w-6 ${iconColorClasses[color]} mr-3`} />
-        <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{title}</h3>
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center">
+          <Icon className={`h-6 w-6 ${iconColorClasses[color]} mr-3`} />
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{title}</h3>
+        </div>
+        {headerRight}
       </div>
 
       {/* Key Metric */}
@@ -205,7 +210,7 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", sys
 
     // Find current period data - supports both hourly (24 periods) and quarterly (96 periods)
     const currentHourData = dashboardData.hourlyData?.length === 24
-      ? dashboardData.hourlyData.find((h: any) => h.hour === currentHour)  // Hourly mode
+      ? dashboardData.hourlyData.find((h) => h.period === currentHour)  // Hourly mode
       : dashboardData.hourlyData?.[currentPeriodIndex];  // Quarterly mode (direct array access)
 
     // Validate hourlyData exists
@@ -249,16 +254,16 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", sys
       strategicIntent,
       costAndSavings: {
         todaysCost: (() => {
-          if (!dashboardData.summary?.optimizedCost) {
-            throw new Error('MISSING DATA: summary.optimizedCost is required for cost display');
+          if (!dashboardData.summary?.netGridCost) {
+            throw new Error('MISSING DATA: summary.netGridCost is required for cost display');
           }
-          return dashboardData.summary.optimizedCost;
+          return dashboardData.summary.netGridCost;
         })(),
         todaysSavings: (() => {
-          if (!dashboardData.summary?.totalSavings) {
-            throw new Error('MISSING DATA: summary.totalSavings is required for savings display');
+          if (!dashboardData.summary?.netSavings) {
+            throw new Error('MISSING DATA: summary.netSavings is required for savings display');
           }
-          return dashboardData.summary.totalSavings;
+          return dashboardData.summary.netSavings;
         })(),
         gridOnlyCost: (() => {
           if (!dashboardData.summary?.gridOnlyCost) {
@@ -426,7 +431,7 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", sys
       title: "Today's Cost & Savings",
       icon: DollarSign,
       color: "blue" as const,
-      keyMetric: "Today's Costs",
+      keyMetric: "Net Grid Cost",
       keyValue: statusData.costAndSavings?.todaysCost?.text,
       keyUnit: "",
       metrics: [
@@ -437,7 +442,7 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", sys
           icon: DollarSign
         },
         {
-          label: "Today's Savings",
+          label: "Net Savings",
           value: statusData.costAndSavings?.todaysSavings?.text,
           unit: "",
           icon: DollarSign,

@@ -97,11 +97,11 @@
   },
   "expected_results": {
     "base_cost": 107.11,
-    "battery_solar_cost": 57.0457,
-    "base_to_battery_solar_savings": 50.0643,
-    "base_to_battery_solar_savings_pct": 46.7410,
-    "total_charged": 34.4,
-    "total_discharged": 31.0
+    "battery_solar_cost": 57.142842,
+    "base_to_battery_solar_savings": 49.967158,
+    "base_to_battery_solar_savings_pct": 46.65032,
+    "total_charged": 34.421053,
+    "total_discharged": 31.02
   },
   "expected_behavior": {
     "description": "Winter day: no solar, grid-charge at night lows, export during peaks",

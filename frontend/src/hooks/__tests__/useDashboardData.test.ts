@@ -48,6 +48,31 @@ describe('useDashboardData', () => {
     expect(mockFetch).toHaveBeenCalledWith('2026-05-01', 'hourly')
   })
 
+  it('does not fetch when enabled is false', async () => {
+    const { result } = renderHook(() => useDashboardData(undefined, 'quarter-hourly', 0, false))
+
+    expect(result.current.loading).toBe(false)
+    expect(mockFetch).not.toHaveBeenCalled()
+  })
+
+  it('fetches once enabled flips from false to true', async () => {
+    mockFetch.mockResolvedValueOnce(fakeDashboard)
+
+    const { result, rerender } = renderHook(
+      ({ enabled }: { enabled: boolean }) => useDashboardData(undefined, 'quarter-hourly', 0, enabled),
+      { initialProps: { enabled: false } }
+    )
+
+    expect(mockFetch).not.toHaveBeenCalled()
+
+    rerender({ enabled: true })
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false)
+    })
+    expect(mockFetch).toHaveBeenCalledWith(undefined, 'quarter-hourly')
+  })
+
   it('sets error on fetch failure', async () => {
     mockFetch.mockRejectedValueOnce(new Error('Server down'))
 

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
-import { SavingsOverview } from '../SavingsOverview'
+import { BatteryActionsTable } from '../BatteryActionsTable'
 
 const fv = (value: number, display: string, unit = 'kWh') => ({
   value,
@@ -52,10 +52,10 @@ vi.mock('../../hooks/useDashboardData', () => ({
   }),
 }))
 
-describe('SavingsOverview grid-export badge', () => {
+describe('BatteryActionsTable grid-export badge', () => {
   it('shows the battery-to-grid badge when the backend classified the period as BATTERY_EXPORT, even below the old 0.05 kWh display threshold', () => {
     mockHour = baseHour
-    render(<SavingsOverview resolution="quarter-hourly" />)
+    render(<BatteryActionsTable resolution="quarter-hourly" />)
 
     // The badge renders the batteryToGrid display value only when the
     // period is recognized as an export period. It should appear (Battery
@@ -74,8 +74,26 @@ describe('SavingsOverview grid-export badge', () => {
       strategicIntent: 'IDLE',
       observedIntent: 'BATTERY_EXPORT',
     }
-    render(<SavingsOverview resolution="quarter-hourly" />)
+    render(<BatteryActionsTable resolution="quarter-hourly" />)
 
     expect(screen.getAllByText('0.04-export-badge').length).toBeGreaterThan(0)
+  })
+})
+
+describe('BatteryActionsTable cost breakdown columns', () => {
+  it('shows import cost, export revenue and wear in separate columns', () => {
+    mockHour = {
+      ...baseHour,
+      importCost: fv(0.14, '0.14', 'EUR'),
+      exportRevenue: fv(0.02, '0.02', 'EUR'),
+      batteryCycleCost: fv(0.02, '0.02', 'EUR'),
+    }
+    render(<BatteryActionsTable resolution="quarter-hourly" />)
+
+    expect(screen.getByText('Import Cost')).toBeInTheDocument()
+    expect(screen.getByText('Export Revenue')).toBeInTheDocument()
+    expect(screen.getByText('Wear')).toBeInTheDocument()
+    expect(screen.getAllByText('0.14').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('0.02').length).toBeGreaterThan(0)
   })
 })

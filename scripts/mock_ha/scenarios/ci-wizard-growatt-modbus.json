@@ -409,7 +409,7 @@
     {
       "entity_id": "number.growatt_inverter_solax_inverter_ems_discharging_stop_soc_on_grid",
       "platform": "solax_modbus",
-      "unique_id": "solax_ems_discharging_stop_soc",
+      "unique_id": "solax_ems_discharging_stop_soc_on_grid",
       "device_id": "dev-solax-001"
     },
     {

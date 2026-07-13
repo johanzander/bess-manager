@@ -64,6 +64,11 @@ from core.bess.decision_intelligence import (
     classify_strategic_intent,
     create_decision_data,
 )
+from core.bess.dp_constants import (
+    POWER_CLASSIFICATION_THRESHOLD_KW,
+    POWER_STEP_KW,
+    SOE_STEP_KWH,
+)
 from core.bess.models import (
     DecisionData,
     EconomicData,
@@ -80,9 +85,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Algorithm parameters
-SOE_STEP_KWH = 0.1
-POWER_STEP_KW = 0.2
+# Algorithm parameters. SOE_STEP_KWH/POWER_STEP_KW live in dp_constants.py
+# (shared with decision_intelligence.py -- see that module's docstring for why).
 POWER_TOLERANCE_KW = 0.001  # Threshold to distinguish IDLE from charge/discharge
 # Matches decision_intelligence.classify_strategic_intent's own
 # battery_to_grid threshold for BATTERY_EXPORT classification -- keep these
@@ -167,6 +171,15 @@ def _idle_battery_flows(
     return battery_charged, 0.0
 
 
+def _soe_floor(soe: float, battery_settings: BatterySettings) -> float:
+    """The feasible/reportable SOE floor for a period that *started* at
+    `soe`: `min_soe_kwh` if the period started at/above it, otherwise `soe`
+    itself. Recovering from a below-floor start (e.g. a live sensor reading
+    under Min SOC in demo mode, see #233) must never fabricate a jump to
+    the floor with zero real energy stored."""
+    return battery_settings.min_soe_kwh if soe >= battery_settings.min_soe_kwh else soe
+
+
 def _state_transition(
     soe: float,
     power: float,
@@ -222,12 +235,174 @@ def _state_transition(
         charge_energy = solar_to_battery * battery_settings.efficiency_charge
         next_soe = min(battery_settings.max_soe_kwh, soe + charge_energy)
 
-    # Ensure SOE stays within physical bounds
+    # Ensure SOE stays within physical bounds (see _soe_floor).
     next_soe = min(
-        battery_settings.max_soe_kwh, max(battery_settings.min_soe_kwh, next_soe)
+        battery_settings.max_soe_kwh, max(_soe_floor(soe, battery_settings), next_soe)
     )
 
     return next_soe
+
+
+def _state_transition_grid(
+    soe: np.ndarray,
+    power: np.ndarray,
+    battery_settings: BatterySettings,
+    dt: float,
+    solar_production: float,
+    home_consumption: float,
+) -> np.ndarray:
+    """Vectorized form of `_state_transition` for the DP backward pass.
+
+    `soe` is a column vector (S, 1) of SoE levels and `power` is a row
+    vector (1, A) of candidate actions; the result broadcasts to (S, A).
+    Every arithmetic step mirrors `_state_transition` exactly (same
+    operations, same order) so results are bit-identical per cell -- this
+    is what lets `_run_dynamic_programming` vectorize without changing the
+    DP's numerics. See #236.
+    """
+    max_soe = battery_settings.max_soe_kwh
+    min_soe = battery_settings.min_soe_kwh
+    eff_charge = battery_settings.efficiency_charge
+    eff_discharge = battery_settings.efficiency_discharge
+
+    surplus = max(0.0, solar_production - home_consumption)
+    rate_throughput = battery_settings.max_charge_power_kw * dt
+
+    # STORE disposition (power > TOL): binary physics -- next_soe does not
+    # depend on the exact positive power value, only on soe (see
+    # _build_period_data's "STORE physics are binary" note).
+    room_throughput = (max_soe - soe) / eff_charge
+    solar_to_battery = np.minimum(np.minimum(surplus, rate_throughput), room_throughput)
+    remaining_rate = np.maximum(
+        0.0, np.minimum(rate_throughput, room_throughput) - solar_to_battery
+    )
+    grid_to_battery = remaining_rate
+    store_charge_energy = (solar_to_battery + grid_to_battery) * eff_charge
+    store_next_soe = np.minimum(max_soe, soe + store_charge_energy)
+
+    # Discharging (power < -TOL)
+    discharge_energy = np.abs(power) * dt / eff_discharge
+    available_energy = soe - min_soe
+    actual_discharge = np.minimum(discharge_energy, available_energy)
+    discharge_next_soe = soe - actual_discharge
+
+    # IDLE -- passive solar charging only, no grid top-up
+    idle_charge_energy = solar_to_battery * eff_charge
+    idle_next_soe = np.minimum(max_soe, soe + idle_charge_energy)
+
+    next_soe = np.where(
+        power > POWER_TOLERANCE_KW,
+        store_next_soe,
+        np.where(power < -POWER_TOLERANCE_KW, discharge_next_soe, idle_next_soe),
+    )
+
+    # See _soe_floor's docstring (#233) -- only raise to the floor when soe
+    # started at/above it.
+    floor = np.where(soe >= min_soe, min_soe, soe)
+    next_soe = np.minimum(max_soe, np.maximum(floor, next_soe))
+    return next_soe
+
+
+def _compute_reward_grid(
+    power: np.ndarray,
+    soe: np.ndarray,
+    next_soe: np.ndarray,
+    home_consumption: float,
+    battery_settings: BatterySettings,
+    dt: float,
+    current_buy_price: float,
+    current_sell_price: float,
+    solar_production: float,
+) -> np.ndarray:
+    """Vectorized form of `_compute_reward`'s reward calculation.
+
+    Only the reward is needed by the DP backward pass (it discards
+    `new_cost_basis`), so this omits the cost-basis bookkeeping entirely --
+    same simplification the caller already applies to the scalar path
+    (`reward, _ = _compute_reward(...)`). Formulas mirror `_compute_reward`
+    exactly, branch for branch, for numerical parity. See #236.
+    """
+    max_soe = battery_settings.max_soe_kwh
+    min_soe = battery_settings.min_soe_kwh
+    eff_charge = battery_settings.efficiency_charge
+    cycle_cost = battery_settings.cycle_cost_per_kwh
+
+    is_charge = power > POWER_TOLERANCE_KW
+    is_discharge = power < -POWER_TOLERANCE_KW
+
+    # Battery flows
+    battery_charged_active = power * dt
+    battery_discharged_active = np.abs(power) * dt
+
+    idle_below_min = soe < min_soe
+    passive_energy_stored = next_soe - soe
+    idle_battery_charged = np.where(
+        (~idle_below_min) & (passive_energy_stored > 0),
+        passive_energy_stored / eff_charge,
+        0.0,
+    )
+
+    battery_charged = np.where(
+        is_charge,
+        battery_charged_active,
+        np.where(is_discharge, 0.0, idle_battery_charged),
+    )
+    battery_discharged = np.where(is_discharge, battery_discharged_active, 0.0)
+
+    energy_balance = (
+        solar_production + battery_discharged - home_consumption - battery_charged
+    )
+    grid_imported = np.maximum(0.0, -energy_balance)
+    grid_exported = np.maximum(0.0, energy_balance)
+
+    # STORE disposition reward (mirrors the early-return branch in
+    # _compute_reward, which redefines grid_imported/grid_exported locally)
+    surplus = max(0.0, solar_production - home_consumption)
+    rate_throughput = battery_settings.max_charge_power_kw * dt
+    room_throughput = (max_soe - soe) / eff_charge
+    solar_to_battery = np.minimum(np.minimum(surplus, rate_throughput), room_throughput)
+    remaining_rate = np.maximum(
+        0.0, np.minimum(rate_throughput, room_throughput) - solar_to_battery
+    )
+    grid_to_battery = remaining_rate
+    energy_stored_store = (solar_to_battery + grid_to_battery) * eff_charge
+    battery_wear_cost_store = energy_stored_store * cycle_cost
+    surplus_exported = np.maximum(0.0, surplus - solar_to_battery)
+    grid_imported_store = grid_to_battery + max(
+        0.0, home_consumption - solar_production
+    )
+    grid_exported_store = surplus_exported
+    total_cost_store = (
+        grid_imported_store * current_buy_price
+        - grid_exported_store * current_sell_price
+        + battery_wear_cost_store
+    )
+    reward_store = -total_cost_store
+
+    # Discharging reward -- self-throttling fix (#240): overshoot below
+    # BATTERY_EXPORT_THRESHOLD_KWH gets no export credit.
+    grid_exported_discharge = np.where(
+        grid_exported <= BATTERY_EXPORT_THRESHOLD_KWH, 0.0, grid_exported
+    )
+    total_cost_discharge = (
+        grid_imported * current_buy_price - grid_exported_discharge * current_sell_price
+    )
+    reward_discharge = -total_cost_discharge
+
+    # IDLE reward
+    energy_stored_idle = next_soe - soe
+    battery_wear_cost_idle = energy_stored_idle * cycle_cost
+    total_cost_idle = (
+        grid_imported * current_buy_price
+        - grid_exported * current_sell_price
+        + battery_wear_cost_idle
+    )
+    reward_idle = -total_cost_idle
+
+    reward = np.where(
+        is_charge, reward_store, np.where(is_discharge, reward_discharge, reward_idle)
+    )
+    return reward
 
 
 def _compute_reward(
@@ -634,86 +809,78 @@ def _run_dynamic_programming(
             usable_energy = soe - battery_settings.min_soe_kwh
             V[horizon, i] = max(0.0, usable_energy) * terminal_value_per_kwh
 
+    min_soe_kwh = battery_settings.min_soe_kwh
+    max_soe_kwh = battery_settings.max_soe_kwh
+    n_states = len(soe_levels)
+
+    # (S, 1) and (1, A) broadcast columns/rows for the vectorized state x
+    # action grid -- same discretized values _run_dynamic_programming's
+    # scalar loop iterated over, just evaluated all at once per period.
+    soe_col = soe_levels.reshape(-1, 1)
+    power_row = power_levels.reshape(1, -1)
+
+    is_discharge = power_row < -POWER_TOLERANCE_KW
+    is_charge = power_row > POWER_TOLERANCE_KW
+
+    # Charging feasibility depends only on soe (not on the period), so the
+    # non-derating part of the mask is period-invariant and can be
+    # precomputed once instead of recomputed every backward-induction step.
+    available_capacity = max_soe_kwh - soe_col
+    max_charge_power = available_capacity / dt / battery_settings.efficiency_charge
+    charge_feasible_base = ~is_charge | (power_row <= max_charge_power)
+
+    available_energy = soe_col - min_soe_kwh
+    max_discharge_power = available_energy / dt * battery_settings.efficiency_discharge
+    discharge_feasible = ~is_discharge | (np.abs(power_row) <= max_discharge_power)
+
     # Backward induction
     for t in reversed(range(horizon)):
-        for i, soe in enumerate(soe_levels):
-            best_value = float("-inf")
-
-            # Per-period charge power limit (from temperature derating or None)
-            period_max_charge = (
-                max_charge_power_per_period[t]
-                if max_charge_power_per_period is not None
-                else None
+        period_max_charge = (
+            max_charge_power_per_period[t]
+            if max_charge_power_per_period is not None
+            else None
+        )
+        if period_max_charge is not None:
+            charge_feasible = charge_feasible_base & (
+                ~is_charge | (power_row <= period_max_charge)
             )
+        else:
+            charge_feasible = charge_feasible_base
 
-            # Try all possible actions
-            for power in power_levels:
-                # Skip physically impossible actions
-                if power < -POWER_TOLERANCE_KW:  # Discharging
-                    available_energy = soe - battery_settings.min_soe_kwh
-                    max_discharge_power = (
-                        available_energy / dt * battery_settings.efficiency_discharge
-                    )
-                    if abs(power) > max_discharge_power:
-                        continue
-                elif power > POWER_TOLERANCE_KW:  # Charging
-                    # Apply temperature derating limit if provided
-                    if period_max_charge is not None and power > period_max_charge:
-                        continue
+        feasible = charge_feasible & discharge_feasible
 
-                    available_capacity = battery_settings.max_soe_kwh - soe
-                    max_charge_power = (
-                        available_capacity / dt / battery_settings.efficiency_charge
-                    )
-                    if power > max_charge_power:
-                        continue
-                # else: IDLE (near-zero power) - no physical constraints to check
+        next_soe = _state_transition_grid(
+            soe_col,
+            power_row,
+            battery_settings,
+            dt,
+            solar_production=solar_production[t],
+            home_consumption=home_consumption[t],
+        )
+        feasible &= (next_soe >= min_soe_kwh) & (next_soe <= max_soe_kwh)
 
-                # Calculate next state
-                next_soe = _state_transition(
-                    soe,
-                    power,
-                    battery_settings,
-                    dt,
-                    solar_production=solar_production[t],
-                    home_consumption=home_consumption[t],
-                )
-                if (
-                    next_soe < battery_settings.min_soe_kwh
-                    or next_soe > battery_settings.max_soe_kwh
-                ):
-                    continue
+        reward = _compute_reward_grid(
+            power_row,
+            soe_col,
+            next_soe,
+            home_consumption=home_consumption[t],
+            battery_settings=battery_settings,
+            dt=dt,
+            current_buy_price=buy_price[t],
+            current_sell_price=sell_price[t],
+            solar_production=solar_production[t],
+        )
 
-                # Compute reward scalars only — no dataclass allocation in hot path
-                reward, _ = _compute_reward(
-                    power=power,
-                    soe=soe,
-                    next_soe=next_soe,
-                    period=t,
-                    home_consumption=home_consumption[t],
-                    battery_settings=battery_settings,
-                    dt=dt,
-                    solar_production=solar_production[t],
-                    buy_price=buy_price,
-                    sell_price=sell_price,
-                    cost_basis=initial_cost_basis,
-                )
+        next_i = np.round((next_soe - min_soe_kwh) / SOE_STEP_KWH).astype(np.int64)
+        next_i = np.clip(next_i, 0, n_states - 1)
 
-                # Find next state index
-                next_i = round((next_soe - battery_settings.min_soe_kwh) / SOE_STEP_KWH)
-                next_i = min(max(0, next_i), len(soe_levels) - 1)
+        value = reward + V[t + 1][next_i]
+        value = np.where(feasible, value, -np.inf)
 
-                # Calculate total value
-                value = reward + V[t + 1, next_i]
-
-                # Update if better
-                if value > best_value:
-                    best_value = value
-
-            # IDLE is always a feasible, finite-reward action (no physical
-            # constraint check applies to it, and _compute_reward never
-            # returns -inf), so best_value can never remain -inf here.
-            V[t, i] = best_value
+        # IDLE is always a feasible, finite-reward action (no physical
+        # constraint check applies to it, and _compute_reward_grid never
+        # returns -inf), so the max over actions can never remain -inf here.
+        V[t, :] = np.max(value, axis=1)
 
     return V
 
@@ -729,6 +896,102 @@ def _interpolate_value(
     hi = min(lo + 1, len(V_row) - 1)
     frac = idx - lo
     return V_row[lo] * (1 - frac) + V_row[hi] * frac
+
+
+def _discharge_candidates(
+    soe: float,
+    battery_settings: BatterySettings,
+    dt: float,
+    home_consumption: float,
+    solar_production: float,
+) -> list[float]:
+    """Candidate discharge magnitudes (kW, positive) to evaluate for the
+    single-period objective (reward + interpolated continuation value) --
+    see docs/superpowers/specs/2026-07-12-dp-continuous-action-reformulation-design.md,
+    Findings 1/2/3/5.
+
+    Real hardware executes discharge as an integer percent (0-100) of
+    `max_discharge_power_kw`
+    (core/bess/simulation/inverter_simulator.py::_map_rates) -- it cannot
+    apply an arbitrary continuous kW value. So the actually-achievable
+    action space is that discrete percent grid, not the real line
+    (postmortem, #282: an earlier version of this function returned exact
+    analytic breakpoints like -7.505 kW out of a 10 kW max, which
+    percent-rounds to 7.5 kW on real hardware -- a planned action execution
+    silently can't reproduce, breaking plan-faithfulness/R==P). Enumerating
+    that percent grid directly is both exact with respect to the true
+    (discrete) action space and guarantees every candidate is executable
+    exactly as planned.
+
+    Second postmortem (#282): `classify_strategic_intent` treats any
+    discharge magnitude at or below `POWER_CLASSIFICATION_THRESHOLD_KW`
+    (derived from the fixed `POWER_STEP_KW`, not from
+    `max_discharge_power_kw`) as noise, falling through to a different
+    classification branch. That was safe by construction under the old
+    fixed grid (smallest nonzero action, `POWER_STEP_KW`, always exceeded
+    it), but 1% of `max_discharge_power_kw` can land at or below it for any
+    battery with `max_discharge_power_kw <= 10 kW` -- so candidates at or
+    below the threshold are excluded here too, not just candidates at or
+    below zero.
+    """
+    available_energy = soe - battery_settings.min_soe_kwh
+    p_max = min(
+        battery_settings.max_discharge_power_kw,
+        available_energy / dt * battery_settings.efficiency_discharge,
+    )
+    if p_max <= POWER_TOLERANCE_KW:
+        return []
+
+    rate_step = battery_settings.max_discharge_power_kw / 100
+    max_pct = int(np.floor(p_max / rate_step + 1e-9))
+    min_pct = int(np.floor(POWER_CLASSIFICATION_THRESHOLD_KW / rate_step)) + 1
+    if min_pct > max_pct:
+        return []
+    candidates = {pct * rate_step for pct in range(min_pct, max_pct + 1)}
+
+    # Finding 5: reward(p) has two immediate-reward breakpoints -- where
+    # energy_balance crosses 0 (import stops) and where it crosses
+    # BATTERY_EXPORT_THRESHOLD_KWH (self-throttle ends, real export
+    # starts). Snap each to its nearest achievable percent step so the
+    # reward plateau's edge is represented too.
+    balance_zero_p = (home_consumption - solar_production) / dt
+    export_starts_p = balance_zero_p + BATTERY_EXPORT_THRESHOLD_KWH / dt
+    for p in (balance_zero_p, export_starts_p):
+        if 0.0 < p < p_max:
+            pct = min(max_pct, max(min_pct, round(p / rate_step)))
+            candidates.add(pct * rate_step)
+
+    return sorted(candidates)
+
+
+def _charge_candidate(
+    soe: float,
+    battery_settings: BatterySettings,
+    dt: float,
+    period_max_charge: float | None,
+) -> float | None:
+    """The single representative STORE (charge) candidate power, or `None`
+    if no genuine charge is possible -- see Finding 4 in
+    docs/superpowers/specs/2026-07-12-dp-continuous-action-reformulation-design.md:
+    any power above `POWER_TOLERANCE_KW` produces an identical reward
+    (binary store physics; actual throughput is governed by
+    `max_charge_power_kw`/solar/room, not the chosen power value), so a
+    single feasible positive power fully represents the action.
+
+    Same classification-threshold guard as `_discharge_candidates`: a
+    candidate at or below `POWER_CLASSIFICATION_THRESHOLD_KW` would be
+    misclassified as noise by `classify_strategic_intent` rather than as a
+    genuine charge (reachable when very little room remains near a full
+    battery), so treat that case as no charge available rather than
+    returning a candidate the classifier can't recognize.
+    """
+    available_capacity = battery_settings.max_soe_kwh - soe
+    max_charge_power = available_capacity / dt / battery_settings.efficiency_charge
+    if period_max_charge is not None:
+        max_charge_power = min(max_charge_power, period_max_charge)
+    if max_charge_power <= POWER_CLASSIFICATION_THRESHOLD_KW:
+        return None
+    return min(POWER_STEP_KW, max_charge_power)
 
 
 def _best_action_at_continuous_state(
@@ -754,6 +1017,13 @@ def _best_action_at_continuous_state(
     for a slightly different state. See
     docs/superpowers/specs/2026-07-06-dp-bellman-guardrail-removal-design.md.
 
+    Candidate actions are the exact breakpoints of the piecewise-linear
+    reward+continuation objective (see
+    docs/superpowers/specs/2026-07-12-dp-continuous-action-reformulation-design.md)
+    rather than a fixed power grid -- `power_levels` is unused for the
+    search itself, kept only for call-site compatibility with
+    `_discretize_state_action_space`.
+
     Returns (best_action, best_next_soe, best_new_cost_basis, best_reward).
     """
     period_max_charge = (
@@ -761,52 +1031,42 @@ def _best_action_at_continuous_state(
         if max_charge_power_per_period is not None
         else None
     )
+    home = home_consumption[t]
+    solar = solar_production[t]
+
     best_value = float("-inf")
     best_action = 0.0
     best_next_soe = soe
     best_new_cost_basis = cost_basis
     best_reward = 0.0
-    for power in power_levels:
-        if power < -POWER_TOLERANCE_KW:
-            available_energy = soe - battery_settings.min_soe_kwh
-            max_discharge_power = (
-                available_energy / dt * battery_settings.efficiency_discharge
-            )
-            if abs(power) > max_discharge_power:
-                continue
-        elif power > POWER_TOLERANCE_KW:
-            if period_max_charge is not None and power > period_max_charge:
-                continue
-            available_capacity = battery_settings.max_soe_kwh - soe
-            max_charge_power = (
-                available_capacity / dt / battery_settings.efficiency_charge
-            )
-            if power > max_charge_power:
-                continue
 
+    def consider(power: float) -> None:
+        nonlocal best_value, best_action, best_next_soe, best_new_cost_basis, best_reward
         next_soe = _state_transition(
             soe,
             power,
             battery_settings,
             dt,
-            solar_production=solar_production[t],
-            home_consumption=home_consumption[t],
+            solar_production=solar,
+            home_consumption=home,
         )
+        # See _soe_floor's docstring (#233): the feasible floor for this
+        # candidate is soe itself until real charging crosses back above
+        # min_soe_kwh.
         if (
-            next_soe < battery_settings.min_soe_kwh
+            next_soe < _soe_floor(soe, battery_settings)
             or next_soe > battery_settings.max_soe_kwh
         ):
-            continue
-
+            return
         reward, new_cost_basis = _compute_reward(
             power=power,
             soe=soe,
             next_soe=next_soe,
             period=t,
-            home_consumption=home_consumption[t],
+            home_consumption=home,
             battery_settings=battery_settings,
             dt=dt,
-            solar_production=solar_production[t],
+            solar_production=solar,
             buy_price=buy_price,
             sell_price=sell_price,
             cost_basis=cost_basis,
@@ -818,6 +1078,20 @@ def _best_action_at_continuous_state(
             best_next_soe = next_soe
             best_new_cost_basis = new_cost_basis
             best_reward = reward
+
+    # IDLE -- always a feasible candidate.
+    consider(0.0)
+
+    # Discharge -- exact breakpoint enumeration (Finding 1/2/3/5).
+    for p in _discharge_candidates(soe, battery_settings, dt, home, solar):
+        consider(-p)
+
+    # Charge (STORE) -- Finding 4: no grid search needed on this side at
+    # all, a single representative candidate fully covers it.
+    charge_candidate = _charge_candidate(soe, battery_settings, dt, period_max_charge)
+    if charge_candidate is not None:
+        consider(charge_candidate)
+
     return best_action, best_next_soe, best_new_cost_basis, best_reward
 
 

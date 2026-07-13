@@ -20,7 +20,8 @@
       "Bash(podman machine stop)",
       "Bash(podman-compose *)",
       "Bash(git commit *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(git merge --ff-only *)"
     ],
     "deny": [
       "Bash(podman machine rm *)",

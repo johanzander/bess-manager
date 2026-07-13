@@ -40,7 +40,10 @@ def run_request(http_method, *args, **kwargs):
 
         return response
     except Exception as e:
-        logger.error("Error during HTTP request: %s", str(e))
+        # Don't log at ERROR here: the caller (_api_request) doesn't yet know
+        # whether this attempt will be retried. It logs WARNING for retryable
+        # attempts and ERROR only once retries are exhausted.
+        logger.debug("Error during HTTP request: %s", str(e))
         raise
 
 
@@ -343,7 +346,7 @@ class HomeAssistantAPIController:
     # battery_charging_power_rate    battery_charge_power_limit         solax_ems_charging_rate
     # battery_discharging_power_rate battery_discharge_power_limit      solax_ems_discharging_rate
     # battery_charge_stop_soc        battery_charge_soc_limit           solax_ems_charging_stop_soc
-    # battery_discharge_stop_soc     battery_discharge_soc_limit        solax_ems_discharging_stop_soc
+    # battery_discharge_stop_soc     soc_limit_on_grid                  solax_ems_discharging_stop_soc_on_grid
     # lifetime_battery_charged       lifetime_total_all_batteries_charged  solax_battery_input_energy_total / solax_total_battery_input_energy
     # lifetime_battery_discharged    lifetime_total_all_batteries_discharged  solax_battery_output_energy_total / solax_total_battery_output_energy
     # lifetime_solar_energy          lifetime_total_solar_energy        solax_total_solar_energy
@@ -362,7 +365,7 @@ class HomeAssistantAPIController:
     # solax_active_power             —                                  solax_remotecontrol_active_power
     # solax_autorepeat_duration      —                                  solax_remotecontrol_autorepeat_duration
     # solax_power_control_trigger    —                                  solax_remotecontrol_trigger
-    # solax_battery_min_soc          —                                  solax_battery_minimum_capacity
+    # solax_battery_min_soc          —                                  solax_battery_minimum_capacity_gridtied
     # solax_charger_use_mode         —                                  solax_charger_use_mode (SolaX native only)
     #
     # GROWATT-VIA-SOLAX-ONLY (TOU time slots — Growatt MIN via solax_modbus):
@@ -423,7 +426,10 @@ class HomeAssistantAPIController:
         "battery_charge_power_limit": "battery_charging_power_rate",
         "battery_discharge_power_limit": "battery_discharging_power_rate",
         "battery_charge_soc_limit": "battery_charge_stop_soc",
-        "battery_discharge_soc_limit": "battery_discharge_stop_soc",
+        # Only the on-grid variant is mapped: BESS only operates grid-tied,
+        # and "battery_discharge_soc_limit" (off-grid, api_key
+        # wdisChargeSOCLowLimit) has no effect while grid-connected — see
+        # #270. Matching it would silently bind a control that does nothing.
         "soc_limit_on_grid": "battery_discharge_stop_soc",
         # ── Lifetime energy sensors ──────────────────────────────────────
         "lifetime_total_all_batteries_charged": "lifetime_battery_charged",
@@ -545,7 +551,11 @@ class HomeAssistantAPIController:
         "ems_charging_rate": "battery_charging_power_rate",
         "ems_discharging_rate": "battery_discharging_power_rate",
         "ems_charging_stop_soc": "battery_charge_stop_soc",
-        "ems_discharging_stop_soc": "battery_discharge_stop_soc",
+        # Only the on-grid variant is mapped: BESS only operates grid-tied,
+        # and "ems_discharging_stop_soc" (off-grid, register 3037) has no
+        # effect while grid-connected — see #270. Matching it would
+        # silently bind a control that does nothing.
+        "ems_discharging_stop_soc_on_grid": "battery_discharge_stop_soc",
         "charger_switch": "grid_charge",
         # TOU time slots (9 slots)
         "time_1_enabled": "tou_time_1_enabled",
@@ -645,8 +655,12 @@ class HomeAssistantAPIController:
         "remotecontrol_active_power": "solax_active_power",
         "remotecontrol_autorepeat_duration": "solax_autorepeat_duration",
         "remotecontrol_trigger": "solax_power_control_trigger",
-        "battery_minimum_capacity": "solax_battery_min_soc",
-        "battery_minimum_capacity_grid_tied": "solax_battery_min_soc",
+        # Only the on-grid variant is mapped: BESS only operates grid-tied,
+        # and "battery_minimum_capacity" (register 0x20, general/off-grid)
+        # has no effect while grid-connected — see #270. Also fixes a
+        # pre-existing typo: upstream's key is "gridtied" (no underscore),
+        # not "grid_tied", so this suffix never matched before.
+        "battery_minimum_capacity_gridtied": "solax_battery_min_soc",
         "charger_use_mode": "solax_charger_use_mode",
     }
 

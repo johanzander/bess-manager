@@ -10,39 +10,52 @@
 
    Commit as `git commit -am "release: v<beta-version>"`. Pushing this single commit (not raw `origin/main`) is what keeps the beta repo from ever momentarily claiming to be the prod add-on.
 4. **Copy the changelog, don't author it** — on the same `beta-release-tmp` branch from step 3, take the current `## [Unreleased]` section verbatim from `origin/main`'s `CHANGELOG.md` (synced in step 1) and rename it to `## [<beta-version>] - <date>` in `CHANGELOG.md`. Amend it into the same commit (`git commit --amend`) rather than adding a second commit. Do not hand-write beta-specific entries — if content is missing from `Unreleased`, it means a PR merged to main without a changelog entry, which is a bug in that PR's merge process, not something to patch around here.
-5. **Run tests locally** — ALL of these must pass before proceeding:
+
+   **Then curate, don't dump.** `origin/main`'s `Unreleased` section only ever grows — it's cleared by a *stable* release, not a beta one — so by the second beta release it typically contains content already shipped in an earlier `bN`. Check each entry's PR against `git log --oneline origin/main | grep '(#N)'` relative to the previous beta release's sync-point commit (the last "chore: re-sync..." or release PR merge on `origin/main`); anything that merged *before* that point already shipped and must be dropped from this release's section, not re-listed. Keep only what's new since the last beta, plus a one-line note pointing at the previous release for context (see the `v9.9.0b10`/`v9.9.0b11` entries for the pattern). Getting this wrong silently double-announces old work as new in every subsequent release — it compounds.
+5. **Merge `beta/main` into this branch — expect exactly two conflicts, and that's normal, not an error:**
+
+   ```
+   git fetch beta main && git merge beta/main --no-ff
+   ```
+
+   `beta/main`'s tip is never an ancestor of `origin/main` after the very first beta release (its own version-stamp commit only exists there), so this is never a fast-forward and a plain merge is the correct tool going forward — a failed `--ff-only` here does *not* mean the "beta never gets its own commits" rule was broken. Two conflicts are guaranteed by construction and mechanical to resolve:
+   - `bess_manager/config.yaml`'s `version:` line — keep **ours** (the new `bN` this release just set in step 3).
+   - `CHANGELOG.md`'s heading — keep **ours** (the new version heading + step 4's curated entries), then make sure the previous release's already-published section (which `beta/main` has and this branch doesn't) still appears immediately below it. If your merge tool put it somewhere else or dropped it, fix that before committing — the historical section must survive.
+
+   Any *other* file conflicting is not expected and needs real investigation (usually: `origin/main` moved between when this branch's base was chosen and now, surfacing content `beta/main` hasn't seen — resolve by taking the newer, `origin/main`-based side, since that's always the more current code). Commit the resolution as `git commit -m "merge: reconcile beta/main history for v<beta-version> release"`.
+6. **Run tests locally** — ALL of these must pass before proceeding:
    - `pytest -m "not slow"` (includes scenario discovery regression tests)
    - `pytest core/bess/tests/unit/test_scenario_discovery.py -v` (show individual scenario results)
    - `npx vitest run` (frontend tests)
    - `cd frontend && npx tsc --noEmit` (TypeScript type check — catches errors that vitest and vite build miss)
    - If any fix during this session revealed another bug, fix it now. Do not cut a release per fix — batch fixes locally until all tests pass.
-6. **Run `black --check .` and `ruff check .`** — fix any formatting issues before committing.
-7. **Commit** all changes to the beta-release-tmp branch.
-8. **Push branch to beta remote**: `git push beta beta-release-tmp:beta-release-tmp`
-9. **Create PR** against `beta/main`:
+7. **Run `black --check .` and `ruff check .`** — fix any formatting issues before committing.
+8. **Commit** all changes to the beta-release-tmp branch.
+9. **Push branch to beta remote**: `git push beta beta-release-tmp:beta-release-tmp`
+10. **Create PR** against `beta/main`:
    ```
    gh pr create --repo johanzander/bess-manager-beta \
      --base main --head beta-release-tmp \
      --title "release: v<version>" --body "<changelog>"
    ```
-10. **Monitor CI** on the PR. Check with:
+11. **Monitor CI** on the PR. Check with:
    ```
    gh pr checks <pr-number> --repo johanzander/bess-manager-beta --watch
    ```
    **If any check fails**: read the failure logs with `gh run view <run-id> --repo johanzander/bess-manager-beta --log-failed`, fix the issue locally, commit, push, and re-check. Do NOT proceed to merge until all required checks pass. Also run `npx tsc --noEmit` locally before pushing — the CI type-check catches errors that `npm run build` misses.
-11. **Merge PR**: `gh pr merge <pr-number> --repo johanzander/bess-manager-beta --squash`
-12. **Tag and push tag**:
+12. **Merge PR**: `gh pr merge <pr-number> --repo johanzander/bess-manager-beta --squash`
+13. **Tag and push tag**:
     ```
     git fetch beta main
     git tag v<version> beta/main
     git push beta v<version>
     ```
-13. **Create a published GitHub Release** — pushing the tag alone does NOT trigger the image build; `release-addon.yml` only fires on `release: published`:
+14. **Create a published GitHub Release** — pushing the tag alone does NOT trigger the image build; `release-addon.yml` only fires on `release: published`:
     ```
     gh release create v<version> --repo johanzander/bess-manager-beta \
       --title "v<version>" --prerelease --notes "<changelog>"
     ```
-14. **Verify the build and images**:
+15. **Verify the build and images**:
     ```
     gh run list --repo johanzander/bess-manager-beta --workflow release-addon.yml -L 1
     podman pull ghcr.io/johanzander/bess-manager-beta-amd64:<version>

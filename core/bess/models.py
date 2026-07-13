@@ -172,6 +172,10 @@ class EconomicData:
 
     buy_price: float = 0.0  # per kWh - price to buy from grid
     sell_price: float = 0.0  # per kWh - price to sell to grid
+    import_cost: float = 0.0  # cost of grid imports (grid_imported * buy_price)
+    export_revenue: float = (
+        0.0  # revenue from grid exports (grid_exported * sell_price)
+    )
     grid_cost: float = 0.0  # cost of grid interactions (imports - exports)
     battery_cycle_cost: float = 0.0  # battery degradation cost
     hourly_cost: float = 0.0  # total optimized cost for this hour
@@ -215,10 +219,9 @@ class EconomicData:
             EconomicData with all calculated fields
         """
         # Grid cost: what we paid/earned from grid
-        grid_cost = (
-            energy_data.grid_imported * buy_price
-            - energy_data.grid_exported * sell_price
-        )
+        import_cost = energy_data.grid_imported * buy_price
+        export_revenue = energy_data.grid_exported * sell_price
+        grid_cost = import_cost - export_revenue
 
         # Total cost: grid interactions + battery wear
         hourly_cost = grid_cost + battery_cycle_cost
@@ -242,6 +245,8 @@ class EconomicData:
         return cls(
             buy_price=buy_price,
             sell_price=sell_price,
+            import_cost=import_cost,
+            export_revenue=export_revenue,
             grid_cost=grid_cost,
             battery_cycle_cost=battery_cycle_cost,
             hourly_cost=hourly_cost,

@@ -22,6 +22,7 @@ export interface StatusCardProps {
   keyMetric: string;
   keyValue: number | string;
   keyUnit: string;
+  keyAnnotation?: string;
   metrics: Array<{
     label: string;
     value: number | string;
@@ -29,6 +30,7 @@ export interface StatusCardProps {
     icon?: React.ComponentType<{ className?: string }>;
     color?: 'green' | 'red' | 'yellow' | 'blue';
     pill?: boolean;
+    subLabel?: string;
   }>;
   color: 'blue' | 'green' | 'yellow' | 'red' | 'purple';
   icon: React.ComponentType<{ className?: string }>;
@@ -44,6 +46,7 @@ export const StatusCard: React.FC<StatusCardProps> = ({
   keyMetric,
   keyValue,
   keyUnit,
+  keyAnnotation,
   metrics,
   className = "",
   systemMode,
@@ -97,6 +100,9 @@ export const StatusCard: React.FC<StatusCardProps> = ({
           {keyValue}
           {keyUnit && <span className="text-lg font-normal text-gray-600 dark:text-gray-400 ml-2">{keyUnit}</span>}
         </p>
+        {keyAnnotation && (
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{keyAnnotation}</p>
+        )}
       </div>
 
       {/* Metrics */}
@@ -124,6 +130,11 @@ export const StatusCard: React.FC<StatusCardProps> = ({
             {systemMode === 'demo' && metric.label === "Today's Savings" && (
               <div className="mt-1">
                 <span className="text-xs text-gray-500">theoretical</span>
+              </div>
+            )}
+            {metric.subLabel && (
+              <div className="mt-1">
+                <span className="text-xs text-gray-500 dark:text-gray-400">{metric.subLabel}</span>
               </div>
             )}
           </div>
@@ -276,7 +287,12 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", sys
             throw new Error('MISSING DATA: summary.totalSavingsPercentage is required for percentage display');
           }
           return dashboardData.summary.totalSavingsPercentage;
-        })()
+        })(),
+        // Issue #287: full-horizon totals, present only when the DP is
+        // running a 2-day plan. Legitimately absent otherwise - no throw.
+        horizonDays: dashboardData.summary?.horizonDays ?? 1,
+        netGridCostFullHorizon: dashboardData.summary?.netGridCostFullHorizon ?? null,
+        netSavingsFullHorizon: dashboardData.summary?.netSavingsFullHorizon ?? null,
       },
       batteryStatus: {
         soc: (() => {
@@ -349,6 +365,7 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", sys
       keyMetric: "Solar Generation",
       keyValue: statusData.realTimePower?.solarPower?.text || '0 W',
       keyUnit: "",
+      keyAnnotation: undefined as string | undefined,
       metrics: [
         {
           label: "Home Usage",
@@ -385,6 +402,7 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", sys
       keyMetric: "Strategic Intent",
       keyValue: statusData.strategicIntent ?? 'Idle',
       keyUnit: "",
+      keyAnnotation: undefined as string | undefined,
       metrics: [
         {
           label: "State of Charge",
@@ -432,8 +450,16 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", sys
       icon: DollarSign,
       color: "blue" as const,
       keyMetric: "Net Grid Cost",
-      keyValue: statusData.costAndSavings?.todaysCost?.text,
+      // Issue #287: when a 2-day plan is active, the full-horizon total is
+      // the headline (a decision that defers value to tomorrow shouldn't
+      // look like a loss), with today's slice shown as an annotation.
+      keyValue: statusData.costAndSavings?.horizonDays === 2
+        ? statusData.costAndSavings?.netGridCostFullHorizon?.text
+        : statusData.costAndSavings?.todaysCost?.text,
       keyUnit: "",
+      keyAnnotation: statusData.costAndSavings?.horizonDays === 2
+        ? `Today: ${statusData.costAndSavings?.todaysCost?.text}`
+        : undefined,
       metrics: [
         {
           label: "Grid-Only Cost",
@@ -443,10 +469,19 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", sys
         },
         {
           label: "Net Savings",
-          value: statusData.costAndSavings?.todaysSavings?.text,
+          value: statusData.costAndSavings?.horizonDays === 2
+            ? statusData.costAndSavings?.netSavingsFullHorizon?.text
+            : statusData.costAndSavings?.todaysSavings?.text,
           unit: "",
           icon: DollarSign,
-          color: (statusData.costAndSavings?.todaysSavings?.value || 0) >= 0 ? 'green' as const : 'red' as const
+          color: (
+            (statusData.costAndSavings?.horizonDays === 2
+              ? statusData.costAndSavings?.netSavingsFullHorizon?.value
+              : statusData.costAndSavings?.todaysSavings?.value) || 0
+          ) >= 0 ? 'green' as const : 'red' as const,
+          subLabel: statusData.costAndSavings?.horizonDays === 2
+            ? `Today: ${statusData.costAndSavings?.todaysSavings?.text}`
+            : undefined
         },
         {
           label: "Percentage Saved",
@@ -471,6 +506,7 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", sys
           keyMetric={card.keyMetric}
           keyValue={card.keyValue}
           keyUnit={card.keyUnit}
+          keyAnnotation={card.keyAnnotation}
           metrics={card.metrics}
           systemMode={systemMode}
         />

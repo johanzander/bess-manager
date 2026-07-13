@@ -219,4 +219,44 @@ describe('SystemStatusCard', () => {
     expect(screen.queryByText('0.50 EUR')).not.toBeInTheDocument();
     expect(screen.queryByText("Today's Savings")).not.toBeInTheDocument();
   });
+
+  it('does not show a horizon annotation for a single-day plan', async () => {
+    render(<SystemStatusCard systemMode="live" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Home Power')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText(/Today:/)).not.toBeInTheDocument();
+  });
+
+  it('shows the full-horizon total as headline with a "Today" annotation when a 2-day plan is active', async () => {
+    vi.mocked(useDashboardData).mockReturnValue({
+      data: {
+        ...mockDashboardData,
+        summary: {
+          ...mockDashboardData.summary,
+          horizonDays: 2,
+          netGridCostFullHorizon: fv(-0.05, '-0.05', 'EUR'),
+          netSavingsFullHorizon: fv(2.05, '2.05', 'EUR'),
+        },
+      },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    render(<SystemStatusCard systemMode="live" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Home Power')).toBeInTheDocument();
+    });
+
+    // Full-horizon totals become the headline values...
+    expect(screen.getByText('-0.05 EUR')).toBeInTheDocument();
+    expect(screen.getByText('2.05 EUR')).toBeInTheDocument();
+    // ...with today's slice shown as a secondary annotation, not hidden.
+    expect(screen.getByText(/Today: 1\.50 EUR/)).toBeInTheDocument();
+    expect(screen.getByText(/Today: 0\.65 EUR/)).toBeInTheDocument();
+  });
 });

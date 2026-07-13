@@ -263,9 +263,10 @@ describe('SystemStatusCard', () => {
     // 1.50, so tomorrow = -0.05 - 1.50 = -1.55).
     expect(screen.getByText('Today: 1.50 EUR')).toBeInTheDocument();
     expect(screen.getByText('Tomorrow: -1.55 EUR')).toBeInTheDocument();
-    // ...and a compact Today/Tomorrow line under Net Savings (today 0.65, so
+    // ...and Today/Tomorrow beside Net Savings too (today 0.65, so
     // tomorrow = 2.05 - 0.65 = 1.40).
-    expect(screen.getByText('Today: 0.65 EUR · Tomorrow: 1.40 EUR')).toBeInTheDocument();
+    expect(screen.getByText('Today: 0.65 EUR')).toBeInTheDocument();
+    expect(screen.getByText('Tomorrow: 1.40 EUR')).toBeInTheDocument();
   });
 
   it('keeps the single-day title and no breakdown when only today is planned', async () => {

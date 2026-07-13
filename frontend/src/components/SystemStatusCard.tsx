@@ -30,7 +30,7 @@ export interface StatusCardProps {
     icon?: React.ComponentType<{ className?: string }>;
     color?: 'green' | 'red' | 'yellow' | 'blue';
     pill?: boolean;
-    subLabel?: string;
+    breakdown?: string[];
   }>;
   color: 'blue' | 'green' | 'yellow' | 'red' | 'purple';
   icon: React.ComponentType<{ className?: string }>;
@@ -96,17 +96,19 @@ export const StatusCard: React.FC<StatusCardProps> = ({
       {/* Key Metric */}
       <div className="mb-6">
         <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">{keyMetric}</p>
-        <p className="text-3xl font-bold text-gray-900 dark:text-gray-100">
-          {keyValue}
-          {keyUnit && <span className="text-lg font-normal text-gray-600 dark:text-gray-400 ml-2">{keyUnit}</span>}
-        </p>
-        {keyAnnotation && keyAnnotation.length > 0 && (
-          <div className="mt-3 space-y-0.5">
-            {keyAnnotation.map((line) => (
-              <p key={line} className="text-sm text-gray-600 dark:text-gray-400">{line}</p>
-            ))}
-          </div>
-        )}
+        <div className="flex items-baseline gap-4">
+          <p className="text-3xl font-bold text-gray-900 dark:text-gray-100">
+            {keyValue}
+            {keyUnit && <span className="text-lg font-normal text-gray-600 dark:text-gray-400 ml-2">{keyUnit}</span>}
+          </p>
+          {keyAnnotation && keyAnnotation.length > 0 && (
+            <div className="flex flex-col">
+              {keyAnnotation.map((line) => (
+                <span key={line} className="text-sm text-gray-600 dark:text-gray-400">{line}</span>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Metrics */}
@@ -118,27 +120,31 @@ export const StatusCard: React.FC<StatusCardProps> = ({
                 {metric.icon && <metric.icon className="h-4 w-4 mr-2 text-gray-500 dark:text-gray-400" />}
                 <span className="text-sm text-gray-700 dark:text-gray-300">{metric.label}</span>
               </div>
-              {metric.pill && metric.color ? (
-                <span className={`text-sm font-semibold px-2 py-0.5 rounded-md ${pillColorClasses[metric.color]}`}>
-                  {metric.value}{metric.unit && <span className="opacity-70 ml-1">{metric.unit}</span>}
-                </span>
-              ) : (
-                <span className={`text-sm font-semibold ${
-                  metric.color ? metricColorClasses[metric.color] : 'text-gray-900 dark:text-gray-100'
-                }`}>
-                  {metric.value}
-                  {metric.unit && <span className="opacity-70 ml-1">{metric.unit}</span>}
-                </span>
-              )}
+              <div className="flex items-center gap-3">
+                {metric.breakdown && metric.breakdown.length > 0 && (
+                  <div className="flex flex-col items-end">
+                    {metric.breakdown.map((line) => (
+                      <span key={line} className="text-xs text-gray-500 dark:text-gray-400">{line}</span>
+                    ))}
+                  </div>
+                )}
+                {metric.pill && metric.color ? (
+                  <span className={`text-sm font-semibold px-2 py-0.5 rounded-md ${pillColorClasses[metric.color]}`}>
+                    {metric.value}{metric.unit && <span className="opacity-70 ml-1">{metric.unit}</span>}
+                  </span>
+                ) : (
+                  <span className={`text-sm font-semibold ${
+                    metric.color ? metricColorClasses[metric.color] : 'text-gray-900 dark:text-gray-100'
+                  }`}>
+                    {metric.value}
+                    {metric.unit && <span className="opacity-70 ml-1">{metric.unit}</span>}
+                  </span>
+                )}
+              </div>
             </div>
             {systemMode === 'demo' && metric.label === "Today's Savings" && (
               <div className="mt-1">
                 <span className="text-xs text-gray-500">theoretical</span>
-              </div>
-            )}
-            {metric.subLabel && (
-              <div className="mt-1">
-                <span className="text-xs text-gray-500 dark:text-gray-400">{metric.subLabel}</span>
               </div>
             )}
           </div>
@@ -506,8 +512,11 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", sys
               ? statusData.costAndSavings?.netSavingsFullHorizon?.value
               : statusData.costAndSavings?.todaysSavings?.value) || 0
           ) >= 0 ? 'green' as const : 'red' as const,
-          subLabel: statusData.costAndSavings?.horizonDays === 2
-            ? `Today: ${statusData.costAndSavings?.todaysSavings?.text} · Tomorrow: ${statusData.costAndSavings?.tomorrowSavingsText}`
+          breakdown: statusData.costAndSavings?.horizonDays === 2
+            ? [
+                `Today: ${statusData.costAndSavings?.todaysSavings?.text}`,
+                `Tomorrow: ${statusData.costAndSavings?.tomorrowSavingsText}`,
+              ]
             : undefined
         },
         {

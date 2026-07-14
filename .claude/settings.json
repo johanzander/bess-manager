@@ -21,7 +21,15 @@
       "Bash(podman-compose *)",
       "Bash(git commit *)",
       "Bash(git push *)",
-      "Bash(git merge --ff-only *)"
+      "Bash(git merge --ff-only *)",
+      "Bash(gh issue view *)",
+      "Bash(gh issue edit *)",
+      "Bash(gh issue comment *)",
+      "Bash(gh pr view *)",
+      "Bash(gh pr diff *)",
+      "Bash(gh pr list *)",
+      "Bash(gh pr review *)",
+      "Bash(gh pr create *)"
     ],
     "deny": [
       "Bash(podman machine rm *)",

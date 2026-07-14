@@ -394,6 +394,7 @@ class APIDashboardHourlyData:
     solarToHome: FormattedValue
     solarToBattery: FormattedValue
     solarToGrid: FormattedValue
+    clippedSolar: FormattedValue
     gridToHome: FormattedValue
     gridToBattery: FormattedValue
     batteryToHome: FormattedValue
@@ -511,6 +512,10 @@ class APIDashboardHourlyData:
             ),
             solarToGrid=safe_format(
                 hourly.energy.solar_to_grid,
+                "energy_kwh_only",
+            ),
+            clippedSolar=safe_format(
+                hourly.energy.clipped_solar,
                 "energy_kwh_only",
             ),
             gridToHome=safe_format(

@@ -469,6 +469,11 @@ def _aggregate_quarterly_to_hourly(
                 "energy_kwh_only",
                 currency,
             ),
+            clippedSolar=create_formatted_value(
+                sum(p.clippedSolar.value for p in quarter_periods),
+                "energy_kwh_only",
+                currency,
+            ),
             gridToHome=create_formatted_value(
                 sum(p.gridToHome.value for p in quarter_periods),
                 "energy_kwh_only",

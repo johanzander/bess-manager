@@ -74,6 +74,11 @@ class EnergyData:
     battery_soe_start: float  # kWh (changed from battery_soc_start)
     battery_soe_end: float  # kWh (changed from battery_soc_end)
 
+    # Solar lost to the inverter AC output cap (kWh) — DC production the
+    # inverter could neither convert to AC nor store in a full/rate-limited
+    # battery. Zero unless the inverter_max_ac_power_kw feature is enabled.
+    clipped_solar: float = 0.0
+
     # Detailed flows (calculated automatically in __post_init__)
     solar_to_home: float = field(default=0.0, init=False)
     solar_to_battery: float = field(default=0.0, init=False)
@@ -103,9 +108,11 @@ class EnergyData:
         remaining_solar = self.solar_production - solar_to_home
         remaining_consumption = self.home_consumption - solar_to_home
 
-        # Solar priority: home first, then battery charging, then grid export
+        # Solar priority: home first, then battery charging, then grid export.
+        # Clipped solar never reached the AC stage or the battery, so it is
+        # excluded from the exportable remainder.
         solar_to_battery = min(remaining_solar, self.battery_charged)
-        solar_to_grid = max(0, remaining_solar - solar_to_battery)
+        solar_to_grid = max(0, remaining_solar - solar_to_battery - self.clipped_solar)
 
         # Step 2: Battery discharge allocation (home consumption priority)
         battery_to_home = min(self.battery_discharged, remaining_consumption)
@@ -157,7 +164,12 @@ class EnergyData:
 
     def validate_energy_balance(self, tolerance: float = 0.2) -> tuple[bool, str]:
         """Validate energy balance - always warn and continue, never fail."""
-        energy_in = self.solar_production + self.grid_imported + self.battery_discharged
+        energy_in = (
+            self.solar_production
+            - self.clipped_solar
+            + self.grid_imported
+            + self.battery_discharged
+        )
         energy_out = self.home_consumption + self.grid_exported + self.battery_charged
         balance_error = abs(energy_in - energy_out)
 

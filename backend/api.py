@@ -1716,12 +1716,20 @@ async def get_growatt_detailed_schedule():
             )
             today_soc_values: list[float | None] = []
             today_actions: list[float] = []
+            today_reconciled_intents: list[str] | None = None
             if stored_schedule_for_today:
                 opt_result_today = stored_schedule_for_today.optimization_result
                 opt_period_today = stored_schedule_for_today.optimization_period
                 today_period_count_local = get_period_count(time_utils.today())
+                planned_intents = schedule_manager.strategic_intents
+                today_reconciled_intents = []
                 for period_idx in range(today_period_count_local):
                     data_idx = period_idx - opt_period_today
+                    planned_intent = (
+                        planned_intents[period_idx]
+                        if planned_intents and period_idx < len(planned_intents)
+                        else "IDLE"
+                    )
                     if 0 <= data_idx < len(opt_result_today.period_data):
                         pd_today = opt_result_today.period_data[data_idx]
                         soe = pd_today.energy.battery_soe_end
@@ -1731,10 +1739,20 @@ async def get_growatt_detailed_schedule():
                             else None
                         )
                         today_actions.append(pd_today.decision.battery_action or 0.0)
+                        # Reconcile with observed_intent for actual periods so the
+                        # label reflects real physical flow, not the stale plan.
+                        observed_intent = pd_today.decision.observed_intent
+                        today_reconciled_intents.append(
+                            observed_intent
+                            if pd_today.data_source == "actual" and observed_intent
+                            else planned_intent
+                        )
                     else:
                         today_soc_values.append(None)
                         today_actions.append(0.0)
+                        today_reconciled_intents.append(planned_intent)
             raw_groups = schedule_manager.get_detailed_period_groups(
+                intents=today_reconciled_intents,
                 actions=today_actions if today_actions else None,
                 soc_values=today_soc_values if today_soc_values else None,
             )

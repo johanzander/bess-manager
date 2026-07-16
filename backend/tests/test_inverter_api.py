@@ -6,6 +6,7 @@ produce broken UI (wrong platform badge, "Segment #undefined" labels).
 """
 
 import sys
+from datetime import datetime
 from unittest.mock import MagicMock
 
 import pytest
@@ -13,6 +14,10 @@ from api import router
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from settings_store import VALID_PLATFORMS
+
+from core.bess import time_utils
+from core.bess.models import DecisionData, EnergyData, OptimizationResult, PeriodData
+from core.bess.schedule_store import StoredSchedule
 
 _test_app = FastAPI()
 _test_app.include_router(router)
@@ -184,3 +189,97 @@ class TestScheduleDataChargeRate:
         schedule = resp.json()["scheduleData"]
         for entry in schedule:
             assert entry["chargePowerRate"] == 100
+
+
+# ===========================================================================
+# GET /api/growatt/detailed_schedule — period_groups intent reconciliation
+# (issue #317)
+# ===========================================================================
+
+
+def _make_period_data(
+    period: int, data_source: str, strategic_intent: str, observed_intent: str | None
+) -> PeriodData:
+    energy = EnergyData(
+        solar_production=0.0,
+        home_consumption=0.0,
+        battery_charged=0.0,
+        battery_discharged=0.0,
+        grid_imported=0.0,
+        grid_exported=0.0,
+        battery_soe_start=15.0,
+        battery_soe_end=15.0,
+    )
+    decision = DecisionData(
+        strategic_intent=strategic_intent, observed_intent=observed_intent
+    )
+    return PeriodData(
+        period=period,
+        energy=energy,
+        timestamp=datetime(2025, 7, 13, period // 4, (period % 4) * 15),
+        data_source=data_source,
+        decision=decision,
+    )
+
+
+def _group_per_period(**kwargs) -> list[dict]:
+    """Fake get_detailed_period_groups: one ungrouped group per period, echoing
+    back whatever `intents` list was actually passed in — lets the test see
+    exactly what the endpoint decided each period's reconciled intent is."""
+    intents = kwargs["intents"]
+    return [
+        {
+            "start_time": f"{i // 4:02d}:{(i % 4) * 15:02d}",
+            "end_time": f"{i // 4:02d}:{(i % 4) * 15 + 15:02d}",
+            "mode": "load_first",
+            "intent": intents[i],
+            "period_count": 1,
+            "duration_minutes": 15,
+            "charge_rate": 100,
+            "discharge_rate": 0,
+            "grid_charge": False,
+            "total_action_kwh": 0.0,
+            "soc_end_pct": None,
+        }
+        for i in range(len(intents))
+    ]
+
+
+class TestPeriodGroupsIntentReconciliation:
+    """dominant_intent must reflect observed_intent for actual periods, not the
+    stale DP-planned strategic_intent (issue #317)."""
+
+    def test_actual_period_uses_observed_intent_not_planned(self):
+        ctrl = _make_controller("growatt_server_sph")
+        sm = ctrl.system._inverter_controller
+        # Planned schedule says period 0 was BATTERY_EXPORT...
+        sm.strategic_intents = ["BATTERY_EXPORT"] + ["IDLE"] * 95
+        sm.get_detailed_period_groups.side_effect = _group_per_period
+
+        num_periods = time_utils.get_period_count(time_utils.today())
+        period_data = [
+            _make_period_data(0, "actual", "BATTERY_EXPORT", "IDLE"),
+        ] + [
+            _make_period_data(i, "predicted", "IDLE", None)
+            for i in range(1, num_periods)
+        ]
+        stored_schedule = StoredSchedule(
+            timestamp=datetime.now(),
+            optimization_period=0,
+            optimization_result=OptimizationResult(
+                input_data={}, period_data=period_data
+            ),
+        )
+        ctrl.system.schedule_store.get_latest_schedule.return_value = stored_schedule
+
+        sys.modules["app"].bess_controller = ctrl
+        resp = _client.get("/api/growatt/detailed_schedule")
+        assert resp.status_code == 200
+
+        groups = resp.json()["periodGroups"]
+        period_0_group = next(
+            g for g in groups if g["startTime"] == "00:00" and g["endTime"] == "00:15"
+        )
+        # ...but the actual physical flow was IDLE (no battery discharge) — the
+        # reconciled dominant_intent must say so, not the stale plan.
+        assert period_0_group["dominantIntent"] == "IDLE"

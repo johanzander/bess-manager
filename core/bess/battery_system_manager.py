@@ -2177,7 +2177,14 @@ class BatterySystemManager:
                     f"No previous strategic intents available, initializing {num_periods} periods to IDLE"
                 )
 
-            # Fill in optimized periods from the new optimization result
+            # Fill in optimized periods from the new optimization result.
+            # Unlike full_day_strategic_intents (which carries forward real
+            # values for already-elapsed periods too, see above),
+            # full_day_period_data has no equivalent "previous" source to
+            # carry forward, so pre-optimization-period entries stay None
+            # -- the two lists are the same length but not both fully
+            # populated at the same indices. A future consumer zipping them
+            # together must treat None as "no data for this period."
             full_day_period_data: list = [None] * len(full_day_strategic_intents)
             for i, period_data in enumerate(period_data_list):
                 target_period = optimization_period + i
@@ -2306,7 +2313,9 @@ class BatterySystemManager:
                 original_dp_results={
                     "strategic_intent": full_day_strategic_intents,
                     "period_data": full_day_period_data,
-                },  # Store strategic intents and period data (#320: debounce needs grid_exported)
+                },  # Store strategic intents and period data (#320: period_data is
+                # preparatory plumbing for a future controller-side flip-
+                # suppression feature, deferred, no consumer in this repo yet)
             )
 
             # Override the strategic intents in the schedule with corrected data

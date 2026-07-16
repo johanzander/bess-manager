@@ -575,18 +575,26 @@ class SolaxModbusGrowattController(GrowattMinController):
 
     def check_health(self, controller) -> list:
         """Check battery control capabilities for the active control mode."""
-        health_check = perform_health_check(
-            component_name="Battery Control",
-            description="Controls battery charging and discharging schedule",
-            is_required=True,
-            controller=controller,
-            all_methods=[
+        # grid_charge_enabled is shared by both modes; the EMS rate/stop-SOC
+        # entities are TOU-only — VPP setups commonly have them disabled in
+        # HA since VPP mode never reads or writes them (issue #308).
+        all_methods = (
+            ["grid_charge_enabled"]
+            if self.control_mode == "vpp"
+            else [
                 "get_charging_power_rate",
                 "get_discharging_power_rate",
                 "grid_charge_enabled",
                 "get_charge_stop_soc",
                 "get_discharge_stop_soc",
-            ],
+            ]
+        )
+        health_check = perform_health_check(
+            component_name="Battery Control",
+            description="Controls battery charging and discharging schedule",
+            is_required=True,
+            controller=controller,
+            all_methods=all_methods,
         )
 
         required_keys = (

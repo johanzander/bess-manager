@@ -313,6 +313,7 @@ def _compute_reward_grid(
     current_buy_price: float,
     current_sell_price: float,
     solar_production: float,
+    self_throttle_export_threshold_kwh: float = BATTERY_EXPORT_THRESHOLD_KWH,
 ) -> np.ndarray:
     """Vectorized form of `_compute_reward`'s reward calculation.
 
@@ -382,7 +383,7 @@ def _compute_reward_grid(
     # Discharging reward -- self-throttling fix (#240): overshoot below
     # BATTERY_EXPORT_THRESHOLD_KWH gets no export credit.
     grid_exported_discharge = np.where(
-        grid_exported <= BATTERY_EXPORT_THRESHOLD_KWH, 0.0, grid_exported
+        grid_exported <= self_throttle_export_threshold_kwh, 0.0, grid_exported
     )
     total_cost_discharge = (
         grid_imported * current_buy_price - grid_exported_discharge * current_sell_price
@@ -417,6 +418,7 @@ def _compute_reward(
     sell_price: list[float],
     solar_production: float,
     cost_basis: float,
+    self_throttle_export_threshold_kwh: float = BATTERY_EXPORT_THRESHOLD_KWH,
 ) -> tuple[float, float]:
     """Hot-path reward computation — returns scalars only, no dataclass allocation.
 
@@ -516,7 +518,7 @@ def _compute_reward(
         # classify_strategic_intent uses to call something BATTERY_EXPORT vs
         # LOAD_SUPPORT), treat the overshoot as self-throttled: no export
         # credit. At or above it, it's a genuine deliberate export.
-        if grid_exported <= BATTERY_EXPORT_THRESHOLD_KWH:
+        if grid_exported <= self_throttle_export_threshold_kwh:
             grid_exported = 0.0
 
     else:  # IDLE — passive solar charging

@@ -497,24 +497,24 @@ def test_optimize_battery_schedule_accepts_capability_parameters():
     exact same result as today when they're left at their defaults (None)."""
     settings = make_battery_settings(max_discharge_power_kw=5.0)
     horizon = 8
-    kwargs = dict(
-        buy_price=[0.30] * horizon,
-        sell_price=[0.10] * horizon,
-        home_consumption=[1.0] * horizon,
-        battery_settings=settings,
-        solar_production=[0.0] * horizon,
-        initial_soe=10.0,
-        period_duration_hours=1.0,
-    )
+    kwargs = {
+        "buy_price": [0.30] * horizon,
+        "sell_price": [0.10] * horizon,
+        "home_consumption": [1.0] * horizon,
+        "battery_settings": settings,
+        "solar_production": [0.0] * horizon,
+        "initial_soe": 10.0,
+        "period_duration_hours": 1.0,
+    }
     baseline = optimize_battery_schedule(**kwargs)
     with_explicit_defaults = optimize_battery_schedule(
         **kwargs,
         discharge_resolution_kw=settings.max_discharge_power_kw / 100,
         self_throttle_export_threshold_kwh=0.01,
     )
-    assert [
-        p.decision.strategic_intent for p in baseline.period_data
-    ] == [p.decision.strategic_intent for p in with_explicit_defaults.period_data]
+    assert [p.decision.strategic_intent for p in baseline.period_data] == [
+        p.decision.strategic_intent for p in with_explicit_defaults.period_data
+    ]
     assert baseline.economic_summary.battery_solar_cost == pytest.approx(
         with_explicit_defaults.economic_summary.battery_solar_cost, abs=1e-9
     )

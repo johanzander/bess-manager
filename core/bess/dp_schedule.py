@@ -49,6 +49,10 @@ class DPSchedule:
 
         # Extract strategic intents if available
         self.strategic_intents = self.original_dp_results.get("strategic_intent", [])
+        # Extract PeriodData objects if available (#320: needed for
+        # controllers to debounce marginal BATTERY_EXPORT/LOAD_SUPPORT
+        # flips using real export volume, not just the intent string).
+        self.period_data = self.original_dp_results.get("period_data", [])
 
         logger.debug(
             "Created DPSchedule with %d hours, %d strategic intents",

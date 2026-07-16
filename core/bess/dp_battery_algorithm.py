@@ -941,6 +941,8 @@ def _discharge_candidates(
     dt: float,
     home_consumption: float,
     solar_production: float,
+    discharge_resolution_kw: float | None = None,
+    self_throttle_export_threshold_kwh: float = BATTERY_EXPORT_THRESHOLD_KWH,
 ) -> list[float]:
     """Candidate discharge magnitudes (kW, positive) to evaluate for the
     single-period objective (reward + interpolated continuation value) --
@@ -979,7 +981,11 @@ def _discharge_candidates(
     if p_max <= POWER_TOLERANCE_KW:
         return []
 
-    rate_step = battery_settings.max_discharge_power_kw / 100
+    rate_step = (
+        discharge_resolution_kw
+        if discharge_resolution_kw is not None
+        else battery_settings.max_discharge_power_kw / 100
+    )
     max_pct = int(np.floor(p_max / rate_step + 1e-9))
     min_pct = int(np.floor(POWER_CLASSIFICATION_THRESHOLD_KW / rate_step)) + 1
     if min_pct > max_pct:
@@ -988,11 +994,11 @@ def _discharge_candidates(
 
     # Finding 5: reward(p) has two immediate-reward breakpoints -- where
     # energy_balance crosses 0 (import stops) and where it crosses
-    # BATTERY_EXPORT_THRESHOLD_KWH (self-throttle ends, real export
-    # starts). Snap each to its nearest achievable percent step so the
-    # reward plateau's edge is represented too.
+    # self_throttle_export_threshold_kwh (self-throttle ends, real export
+    # starts). Snap each to its nearest achievable step so the reward
+    # plateau's edge is represented too.
     balance_zero_p = (home_consumption - solar_production) / dt
-    export_starts_p = balance_zero_p + BATTERY_EXPORT_THRESHOLD_KWH / dt
+    export_starts_p = balance_zero_p + self_throttle_export_threshold_kwh / dt
     for p in (balance_zero_p, export_starts_p):
         if 0.0 < p < p_max:
             pct = min(max_pct, max(min_pct, round(p / rate_step)))

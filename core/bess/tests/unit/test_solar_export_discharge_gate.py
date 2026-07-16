@@ -16,25 +16,25 @@ See docs/superpowers/specs/2026-06-27-solar-export-discharge-rate-design.md.
 
 import pytest
 
-from core.bess.battery_system_manager import solar_export_discharge_rate
+from core.bess.battery_system_manager import intra_period_discharge_gate
 from core.bess.dp_battery_algorithm import optimize_battery_schedule
 from core.bess.tests.helpers import make_battery_settings
 
 
-def test_solar_export_discharge_rate_gate_boundary():
+def test_intra_period_discharge_gate_gate_boundary():
     """Gate is 100 iff buy*eff_d >= shadow; equality discharges (>=)."""
     eff_d = 0.95
     # stored energy worth less than buying now -> cover from battery
     assert (
-        solar_export_discharge_rate(buy_price=2.0, shadow_price=1.0, eff_d=eff_d) == 100
+        intra_period_discharge_gate(buy_price=2.0, shadow_price=1.0, eff_d=eff_d) == 100
     )
     # stored energy worth more (reserved for a peak) -> hold, buy from grid
     assert (
-        solar_export_discharge_rate(buy_price=0.5, shadow_price=4.0, eff_d=eff_d) == 0
+        intra_period_discharge_gate(buy_price=0.5, shadow_price=4.0, eff_d=eff_d) == 0
     )
     # exact equality -> discharge (>=)
     assert (
-        solar_export_discharge_rate(buy_price=1.0, shadow_price=0.95, eff_d=0.95) == 100
+        intra_period_discharge_gate(buy_price=1.0, shadow_price=0.95, eff_d=0.95) == 100
     )
 
 
@@ -110,7 +110,7 @@ def test_solar_export_covers_dip_when_buy_exceeds_export():
                 sell[t], abs=0.01
             ), f"period {t}: shadow {shadow:.4f} should equal sell_price {sell[t]}"
         assert shadow < buy[t] * eff_d
-        assert solar_export_discharge_rate(buy[t], shadow, eff_d) == 100
+        assert intra_period_discharge_gate(buy[t], shadow, eff_d) == 100
 
 
 @pytest.mark.slow
@@ -168,4 +168,4 @@ def test_solar_export_holds_when_export_more_valuable():
             f"period {t}: shadow {shadow:.3f} should exceed buy*eff_d "
             f"{buy[t] * eff_d:.3f} (export worth more than grid import)"
         )
-        assert solar_export_discharge_rate(buy[t], shadow, eff_d) == 0
+        assert intra_period_discharge_gate(buy[t], shadow, eff_d) == 0

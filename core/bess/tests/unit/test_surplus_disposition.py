@@ -375,6 +375,61 @@ def test_solar_export_maps_to_load_first():
     assert cmd.discharge_rate_pct == 0
 
 
+def test_solar_export_blocks_passive_charge_issue_313():
+    """Issue #313: SOLAR_EXPORT must block passive solar->battery charging
+    (charge_rate=0), not allow it (charge_rate=100). Before this fix,
+    SOLAR_EXPORT's mapping was identical to IDLE's -- harmless while
+    SOLAR_EXPORT only ever occurred with a full battery (nothing left to
+    charge anyway), but wrong once the DP can choose SOLAR_EXPORT below max
+    SOE (see test_issue_313_solar_export_below_max.py): charge_rate=100
+    would let the real inverter passively recharge from solar despite the
+    plan calling for it to bypass, silently reverting to IDLE's behavior."""
+    from core.bess.inverter_controller import InverterController
+    from core.bess.simulation.inverter_simulator import derive_control_command
+
+    bs = make_battery_settings()
+    assert InverterController.INTENT_TO_CONTROL["SOLAR_EXPORT"]["charge_rate"] == 0
+
+    cmd = derive_control_command("SOLAR_EXPORT", battery_action_kw=0.0, settings=bs)
+    assert cmd.charge_rate_pct == 0
+    # Mode is unchanged -- no new hardware mode needed, see investigation doc.
+    assert cmd.battery_mode == "load_first"
+    assert cmd.discharge_rate_pct == 0
+
+
+def test_simulate_honors_solar_export_charge_rate_zero_issue_313():
+    """Issue #313, R==P: `derive_control_command`/`mode_to_power` must
+    actually realize SOLAR_EXPORT's charge_rate=0 -- solar bypasses the
+    battery -- not just carry it as an unused field. Before this fix,
+    `mode_to_power`'s load_first branch ignored charge_rate_pct entirely and
+    always fell through to passive solar charging, so a planned SOLAR_EXPORT
+    period got silently replayed as SOLAR_STORAGE by the simulator: the plan
+    promises solar bypasses to grid, but real execution would recharge the
+    battery instead, a genuine plan-vs-hardware mismatch (this is exactly
+    the R==P check `test_scenarios.py` runs on every scenario)."""
+    from core.bess.simulation.inverter_simulator import derive_control_command, simulate
+
+    bs = make_battery_settings(max_charge_power_kw=10.0)
+    cmd = derive_control_command("SOLAR_EXPORT", battery_action_kw=0.0, settings=bs)
+
+    result = simulate(
+        commands=[cmd],
+        solar_production=[1.5],
+        home_consumption=[0.1],
+        buy_price=PRICES_BUY,
+        sell_price=PRICES_SELL,
+        initial_soe=5.0,
+        settings=bs,
+        dt=DT,
+    )
+    pd = result.period_data[0]
+    assert pd.energy.battery_charged == 0.0, (
+        f"Expected SOLAR_EXPORT to leave the battery untouched (charge_rate=0 "
+        f"blocks passive charging), got battery_charged={pd.energy.battery_charged}"
+    )
+    assert round(pd.energy.grid_exported, 4) == round(1.4, 4)
+
+
 def test_battery_export_active_discharge_still_grid_first():
     """BATTERY_EXPORT with real discharge action → grid_first + action-derived rate."""
     from core.bess.simulation.inverter_simulator import derive_control_command

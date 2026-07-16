@@ -746,6 +746,16 @@ The `_get_hour_readings` (and thus the InfluxDB query) is called at startup (to 
 
 ---
 
+## From #317 period-group intent reconciliation code review (non-blocking)
+
+**`backend/api.py`'s new `today_reconciled_intents` build has two silent fallbacks** (`planned_intent` defaults to `"IDLE"` when `period_idx >= len(planned_intents)`, and out-of-range periods also append `planned_intent`) that follow the existing `INTENT_TO_MODE.get(intent, "load_first")` convention in `inverter_controller.py`, but technically fall under `docs/agents/rules.md`'s "Explicit failure over silent degradation" rule. Low risk since it's a display-only path, not a control path, and the pattern is already pervasive in this file — not filed as a blocker.
+
+**Behavior change on cold start**: previously, if `schedule_manager.strategic_intents` was empty (e.g. right after startup, before the controller applies a schedule) but `schedule_store.get_latest_schedule()` already had a stored schedule, `get_detailed_period_groups()` returned `[]` outright (its `if not effective_intents: return []` early exit). Now the endpoint always builds a full per-period `today_reconciled_intents` list (defaulting missing planned entries to `"IDLE"`), so period_groups will render partial data (actual periods reconciled, future periods shown as `"IDLE"`) in that window instead of nothing. This looks like an improvement in line with the issue's intent (show what's real, not what's stale) but is a user-visible behavior change worth knowing about if it's ever reported as "showing IDLE for periods with no plan yet."
+
+**Files**: `backend/api.py` (`get_growatt_detailed_schedule`, ~lines 1719-1758)
+
+---
+
 ## From #233 SOE-floor-clamp fix code review (non-blocking, pre-existing)
 
 **`_idle_battery_flows`'s below-floor guard now zeroes real energy, not just floor artefacts** — filed as [#295](https://github.com/johanzander/bess-manager/issues/295).

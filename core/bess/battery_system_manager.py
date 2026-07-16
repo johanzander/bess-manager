@@ -1997,6 +1997,18 @@ class BatterySystemManager:
             )
 
             # Run DP optimization with strategic intent capture - returns OptimizationResult directly
+            discharge_resolution_kw = (
+                self._inverter_controller.discharge_resolution_kw(
+                    self.battery_settings.max_discharge_power_kw
+                )
+                if self._inverter_controller is not None
+                else None
+            )
+            self_throttle_export_threshold_kwh = (
+                self._inverter_controller.self_throttle_export_threshold_kwh
+                if self._inverter_controller is not None
+                else None
+            )
             result = optimize_battery_schedule(
                 buy_price=buy_prices,
                 sell_price=sell_prices,
@@ -2009,6 +2021,8 @@ class BatterySystemManager:
                 terminal_value_per_kwh=terminal_value,
                 currency=self.home_settings.currency,
                 max_charge_power_per_period=max_charge_power_per_period,
+                discharge_resolution_kw=discharge_resolution_kw,
+                self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
             )
 
             # Add timestamps to period data (algorithm is time-agnostic, operates on relative indices)

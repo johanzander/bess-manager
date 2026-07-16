@@ -88,6 +88,15 @@ class SolaxModbusGrowattController(GrowattMinController):
         self._last_written_vpp_remote_control: bool | None = None
         self._last_written_vpp_power: int | None = None
 
+    @property
+    def supports_charge_rate_control(self) -> bool:
+        """VPP mode drives power via vpp_power (RAM); no EMS rate writes.
+
+        TOU mode still uses the EMS charge/discharge-rate registers
+        directly, so this stays True there (base class default).
+        """
+        return self.control_mode != "vpp"
+
     # ── Abstract property ────────────────────────────────────────────────────
 
     @property
@@ -423,18 +432,10 @@ class SolaxModbusGrowattController(GrowattMinController):
 
     def initialize_hardware(self, controller) -> None:
         if self.control_mode == "vpp":
-            # No legacy TOU slots to clean up for a VPP-only install, but a
-            # GEN4 install switching tou -> vpp may have slot 1 (or legacy
-            # slots) still active — disable all of them so TOU can't fight
-            # the VPP command.
-            self._disable_legacy_tou_slots(controller)
-            controller.set_tou_segment_via_entities(
-                segment_id=1,
-                batt_mode="load_first",
-                start_time="00:00",
-                end_time="00:00",
-                enabled=False,
-            )
+            # VPP mode must never touch TOU entities — not even to disable
+            # them. A GEN4 install switching tou -> vpp with a still-active
+            # TOU segment relies on the user (or setup wizard guidance) to
+            # clear it, not on a runtime write here — see issue #309.
             return
         self._disable_legacy_tou_slots(controller)
         super().initialize_hardware(controller)
@@ -574,18 +575,26 @@ class SolaxModbusGrowattController(GrowattMinController):
 
     def check_health(self, controller) -> list:
         """Check battery control capabilities for the active control mode."""
-        health_check = perform_health_check(
-            component_name="Battery Control",
-            description="Controls battery charging and discharging schedule",
-            is_required=True,
-            controller=controller,
-            all_methods=[
+        # grid_charge_enabled is shared by both modes; the EMS rate/stop-SOC
+        # entities are TOU-only — VPP setups commonly have them disabled in
+        # HA since VPP mode never reads or writes them (issue #308).
+        all_methods = (
+            ["grid_charge_enabled"]
+            if self.control_mode == "vpp"
+            else [
                 "get_charging_power_rate",
                 "get_discharging_power_rate",
                 "grid_charge_enabled",
                 "get_charge_stop_soc",
                 "get_discharge_stop_soc",
-            ],
+            ]
+        )
+        health_check = perform_health_check(
+            component_name="Battery Control",
+            description="Controls battery charging and discharging schedule",
+            is_required=True,
+            controller=controller,
+            all_methods=all_methods,
         )
 
         required_keys = (

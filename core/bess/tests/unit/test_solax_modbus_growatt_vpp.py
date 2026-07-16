@@ -243,9 +243,32 @@ class TestCheckHealthVpp:
         [health] = controller.check_health(mock_ha)
         assert health["status"] == "ERROR"
 
+    def test_ems_rate_and_stop_soc_not_required(self, controller, mock_ha):
+        """VPP setups commonly have these EMS entities disabled in HA
+        (they're unused in VPP mode) — health check must not require them."""
+        mock_ha.sensors.update(
+            {
+                "growatt_vpp_status": "select.growatt_vpp_status",
+                "growatt_vpp_remote_control": "select.growatt_vpp_remote_control",
+                "growatt_vpp_allow_ac_charging": "select.growatt_vpp_allow_ac_charging",
+                "growatt_vpp_time": "number.growatt_vpp_time",
+                "growatt_vpp_power": "number.growatt_vpp_power",
+            }
+        )
 
-class TestDisableLegacyTouOnVppInit:
-    def test_initialize_hardware_disables_tou_slot_1(self, controller, mock_ha):
+        [health] = controller.check_health(mock_ha)
+
+        checked_methods = {c["method_name"] for c in health["checks"]}
+        assert "get_charge_stop_soc" not in checked_methods
+        assert "get_discharge_stop_soc" not in checked_methods
+        assert "get_charging_power_rate" not in checked_methods
+        assert "get_discharging_power_rate" not in checked_methods
+        assert health["status"] == "OK"
+
+
+class TestVppInitDoesNotTouchTou:
+    def test_initialize_hardware_writes_no_tou_segments(self, controller, mock_ha):
+        """VPP mode must never read or write TOU entities (#309, #302)."""
         mock_ha.read_tou_segments_from_entities = lambda: [
             {
                 "segment_id": 1,
@@ -258,6 +281,4 @@ class TestDisableLegacyTouOnVppInit:
 
         controller.initialize_hardware(mock_ha)
 
-        seg = mock_ha.calls["tou_segments"][-1]
-        assert seg["segment_id"] == 1
-        assert seg["enabled"] is False
+        assert mock_ha.calls["tou_segments"] == []

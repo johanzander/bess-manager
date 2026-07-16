@@ -164,26 +164,32 @@ def test_solar_storage_holds_during_early_reserve_accumulation():
 
 @pytest.mark.slow
 def test_solar_storage_opens_when_shadow_price_is_low():
-    """Flat, low prices with no future scarcity: the marginal stored kWh has
-    negligible opportunity value (nothing expensive ahead to protect it for),
-    so shadow price stays low/zero and the gate opens -- a small deficit gets
-    covered from battery instead of grid.
+    """Abundant morning solar against a modest evening price step: the DP
+    genuinely charges to cover the evening consumption (cycle cost + losses
+    are still worth paying against the buy/sell spread), but solar supply
+    comfortably exceeds what that evening need requires -- so the marginal
+    stored kWh has low opportunity value, shadow price stays low, and the
+    gate opens.
 
-    Only the finite-horizon transient (period 0, a normal DP boundary effect
-    near the horizon's terminal transition -- see the analogous t==0 handling
-    in test_solar_export_discharge_gate.py) lands on SOLAR_STORAGE in this
-    scenario; that's sufficient to prove the gate opens when shadow price is
-    genuinely low, matching the economic law documented for SOLAR_EXPORT.
+    (A prior version of this test relied on a finite-horizon boundary
+    artifact -- the pre-#313 DP forcing a passive charge at period 0 with
+    nothing to use it for -- which #313 correctly eliminated: bypass now
+    strictly dominates a charge nothing ever discharges. This scenario
+    instead gives the stored energy genuine future use, so storing remains
+    the DP's real choice.)
     """
     bs = make_battery_settings(efficiency_discharge=0.95)
     eff_d = bs.efficiency_discharge
 
-    # No future price spike to protect a reserve for -- flat, cheap prices
-    # throughout, so accumulated solar has low marginal opportunity value.
-    buy = [0.3] * 16
+    # Morning solar (0.75 kWh/period) far exceeds the modest evening draw
+    # (0.125 kWh/period) it needs to cover, so extra stored energy has low
+    # marginal value once the evening need is satisfied -- shadow price
+    # stays low even though storing at all is worthwhile against the
+    # evening price step.
+    buy = [0.3] * 8 + [3.0] * 8
     sell = [0.1] * 16
     solar = [3.0] * 8 + [0.0] * 8
-    consumption = [0.5] * 16
+    consumption = [0.3] * 8 + [0.5] * 8
 
     result = optimize_battery_schedule(
         buy_price=buy,

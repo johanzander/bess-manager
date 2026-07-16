@@ -88,6 +88,15 @@ class SolaxModbusGrowattController(GrowattMinController):
         self._last_written_vpp_remote_control: bool | None = None
         self._last_written_vpp_power: int | None = None
 
+    @property
+    def supports_charge_rate_control(self) -> bool:
+        """VPP mode drives power via vpp_power (RAM); no EMS rate writes.
+
+        TOU mode still uses the EMS charge/discharge-rate registers
+        directly, so this stays True there (base class default).
+        """
+        return self.control_mode != "vpp"
+
     # ── Abstract property ────────────────────────────────────────────────────
 
     @property

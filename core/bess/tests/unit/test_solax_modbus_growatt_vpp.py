@@ -244,8 +244,9 @@ class TestCheckHealthVpp:
         assert health["status"] == "ERROR"
 
 
-class TestDisableLegacyTouOnVppInit:
-    def test_initialize_hardware_disables_tou_slot_1(self, controller, mock_ha):
+class TestVppInitDoesNotTouchTou:
+    def test_initialize_hardware_writes_no_tou_segments(self, controller, mock_ha):
+        """VPP mode must never read or write TOU entities (#309, #302)."""
         mock_ha.read_tou_segments_from_entities = lambda: [
             {
                 "segment_id": 1,
@@ -258,6 +259,4 @@ class TestDisableLegacyTouOnVppInit:
 
         controller.initialize_hardware(mock_ha)
 
-        seg = mock_ha.calls["tou_segments"][-1]
-        assert seg["segment_id"] == 1
-        assert seg["enabled"] is False
+        assert mock_ha.calls["tou_segments"] == []

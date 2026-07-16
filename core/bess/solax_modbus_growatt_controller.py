@@ -432,18 +432,10 @@ class SolaxModbusGrowattController(GrowattMinController):
 
     def initialize_hardware(self, controller) -> None:
         if self.control_mode == "vpp":
-            # No legacy TOU slots to clean up for a VPP-only install, but a
-            # GEN4 install switching tou -> vpp may have slot 1 (or legacy
-            # slots) still active — disable all of them so TOU can't fight
-            # the VPP command.
-            self._disable_legacy_tou_slots(controller)
-            controller.set_tou_segment_via_entities(
-                segment_id=1,
-                batt_mode="load_first",
-                start_time="00:00",
-                end_time="00:00",
-                enabled=False,
-            )
+            # VPP mode must never touch TOU entities — not even to disable
+            # them. A GEN4 install switching tou -> vpp with a still-active
+            # TOU segment relies on the user (or setup wizard guidance) to
+            # clear it, not on a runtime write here — see issue #309.
             return
         self._disable_legacy_tou_slots(controller)
         super().initialize_hardware(controller)

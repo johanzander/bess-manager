@@ -558,6 +558,45 @@ to:
         )
 ```
 
+**This function has a second `_compute_reward_grid` call site that must also be updated** — #313 (merged to `main` after this plan's source reading was done on a different branch) added a "SOLAR_EXPORT-below-max" backward-pass candidate later in the same loop body. Search for it:
+
+Run: `grep -n "reward_bypass = _compute_reward_grid" core/bess/dp_battery_algorithm.py`
+
+Change that second call (currently, a few lines below the first, inside the same `for t in reversed(range(horizon)):` loop) from:
+
+```python
+        reward_bypass = _compute_reward_grid(
+            zeros_col,
+            soe_col,
+            soe_col,
+            home_consumption=home_consumption[t],
+            battery_settings=battery_settings,
+            dt=dt,
+            current_buy_price=buy_price[t],
+            current_sell_price=sell_price[t],
+            solar_production=solar_production[t],
+        )
+```
+
+to:
+
+```python
+        reward_bypass = _compute_reward_grid(
+            zeros_col,
+            soe_col,
+            soe_col,
+            home_consumption=home_consumption[t],
+            battery_settings=battery_settings,
+            dt=dt,
+            current_buy_price=buy_price[t],
+            current_sell_price=sell_price[t],
+            solar_production=solar_production[t],
+            self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
+        )
+```
+
+Before moving on, run `grep -n "_compute_reward_grid(" core/bess/dp_battery_algorithm.py` yourself and confirm there are exactly two call sites and both now pass `self_throttle_export_threshold_kwh` — if there is a third, it was added after this plan was written; thread the parameter through that one too using the same pattern, and note it in your task report.
+
 - [ ] **Step 4: Thread through `_best_action_at_continuous_state`**
 
 Change the signature at line 997 (find the `def _best_action_at_continuous_state(` block ending at the `max_charge_power_per_period` parameter, currently line 1009) by adding two parameters at the end, before the closing `) -> tuple[...]:`:
@@ -605,6 +644,49 @@ to:
             self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
         )
 ```
+
+**This function also has a second `_compute_reward` call site that must be updated** — the same #313 addition as above has a forward-replay counterpart here: a standalone "SOLAR_EXPORT-below-max" candidate evaluated right after `consider(0.0)` (the IDLE candidate), not wrapped in the `consider()` closure. Search for it:
+
+Run: `grep -n "SOLAR_EXPORT-below-max" core/bess/dp_battery_algorithm.py`
+
+Change that call (immediately follows the `consider(0.0)` line, before the `_discharge_candidates` loop) from:
+
+```python
+    reward, new_cost_basis = _compute_reward(
+        power=0.0,
+        soe=soe,
+        next_soe=soe,
+        period=t,
+        home_consumption=home,
+        battery_settings=battery_settings,
+        dt=dt,
+        solar_production=solar,
+        buy_price=buy_price,
+        sell_price=sell_price,
+        cost_basis=cost_basis,
+    )
+```
+
+to:
+
+```python
+    reward, new_cost_basis = _compute_reward(
+        power=0.0,
+        soe=soe,
+        next_soe=soe,
+        period=t,
+        home_consumption=home,
+        battery_settings=battery_settings,
+        dt=dt,
+        solar_production=solar,
+        buy_price=buy_price,
+        sell_price=sell_price,
+        cost_basis=cost_basis,
+        self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
+    )
+```
+
+Before moving on, run `grep -n "_compute_reward(" core/bess/dp_battery_algorithm.py` yourself and confirm both call sites in this function now pass `self_throttle_export_threshold_kwh` — if a third exists, it was added after this plan was written; thread it through the same way and note it in your task report.
 
 Change the `_discharge_candidates` call at line 1086 from:
 
@@ -1501,35 +1583,54 @@ git commit -m "feat: debounce isolated marginal BATTERY_EXPORT flips on Growatt 
 
 ---
 
-### Task 9: Wire the debounce into `SolaxModbusGrowattController`
+### Task 9: Wire the debounce into `SolaxModbusGrowattController` — TOU mode only, never VPP
+
+**IMPORTANT — read before starting:** this file has diverged from what the
+design spec assumed when it was written (the spec was drafted against an
+older revision that only had a single-segment TOU path). It now supports
+**two control modes**, selected by `self.control_mode` ("tou" or "vpp"),
+covering both GEN4 and GEN3 Growatt hardware reached via the `solax_modbus`
+integration. This changes the task materially: the debounce is a TOU-only
+concern.
+
+Read the file's module docstring and class docstring first:
+
+Run: `sed -n '1,65p' core/bess/solax_modbus_growatt_controller.py`
+
+Confirm your understanding matches this before proceeding: in `"tou"` mode,
+a single persistent TOU segment's `batt_mode` is rewritten only when it
+changes (`_apply_period_tou`, checked against `self._last_written_tou_mode`)
+— the same real TOU-rewrite cost `GrowattMinController`'s cloud path has,
+so it needs the same debounce. In `"vpp"` mode, `_intent_to_vpp` maps
+`LOAD_SUPPORT` and `BATTERY_EXPORT` to the **same kind of command** (a
+signed power percentage, `-rate%` for both) — there is no separate "mode"
+register at all in VPP mode, so flipping between the two intents costs
+nothing extra beyond the rate itself changing, exactly like real
+`SolaxController` hardware. Applying the debounce in VPP mode would be the
+same category of mistake the design spec's Non-goals section already
+warns against for `SolaxController` — suppressing genuine marginal exports
+where there is no mode-flip cost to justify it.
 
 **Files:**
-- Modify: `core/bess/solax_modbus_growatt_controller.py:61-101` (`create_schedule`)
-- Test: `core/bess/tests/unit/test_solax_modbus_growatt_single_segment.py` (existing file, add test)
+- Modify: `core/bess/solax_modbus_growatt_controller.py` (`create_schedule`, currently around lines 116-158 — confirm with `grep -n "def create_schedule" core/bess/solax_modbus_growatt_controller.py` since line numbers may have shifted further by the time you start)
+- Test: `core/bess/tests/unit/test_solax_modbus_growatt_single_segment.py` (existing file, add tests)
 
 **Interfaces:**
 - Consumes: `GrowattMinController._debounce_battery_export_flips` (inherited, Task 8).
 
 - [ ] **Step 1: Read the existing test file's construction pattern**
 
-Run: `sed -n '1,40p' core/bess/tests/unit/test_solax_modbus_growatt_single_segment.py`
+Run: `sed -n '1,50p' core/bess/tests/unit/test_solax_modbus_growatt_single_segment.py`
 
-Use whatever fixture/helper pattern it already uses for constructing a `SolaxModbusGrowattController` and a minimal `DPSchedule` — match that style in the new test below rather than introducing a second construction pattern.
+Note in particular how existing tests construct `SolaxModbusGrowattController` — check whether they pass `control_mode="tou"` explicitly or rely on the `"tou"` default, and match that style. Use whatever fixture/helper pattern it already uses for a minimal `DPSchedule` — match that style in the new tests below rather than introducing a second construction pattern.
 
-- [ ] **Step 2: Write the failing test**
+- [ ] **Step 2: Write the failing tests**
 
 Append to `core/bess/tests/unit/test_solax_modbus_growatt_single_segment.py` (adjust the fixture/import names to match whatever Step 1 found):
 
 ```python
-def test_create_schedule_applies_the_debounce():
-    """#320: SolaxModbusGrowattController overrides create_schedule and
-    skips GrowattMinController's batch TOU grouping entirely, so it must
-    call the inherited debounce itself -- it does not get it for free just
-    by being a subclass."""
-    from core.bess.dp_schedule import DPSchedule
+def _make_debounce_test_period_data():
     from core.bess.models import DecisionData, EnergyData, PeriodData
-    from core.bess.solax_modbus_growatt_controller import SolaxModbusGrowattController
-    from core.bess.tests.helpers import make_battery_settings
 
     def _pd(period, intent, grid_exported):
         return PeriodData(
@@ -1547,11 +1648,23 @@ def test_create_schedule_applies_the_debounce():
             decision=DecisionData(strategic_intent=intent),
         )
 
-    period_data = [
+    return [
         _pd(0, "LOAD_SUPPORT", 0.0),
         _pd(1, "BATTERY_EXPORT", 0.02),  # isolated + marginal -> should fold
         _pd(2, "LOAD_SUPPORT", 0.0),
     ] + [_pd(i, "IDLE", 0.0) for i in range(3, 96)]
+
+
+def test_create_schedule_applies_the_debounce_in_tou_mode():
+    """#320: SolaxModbusGrowattController overrides create_schedule and
+    skips GrowattMinController's batch TOU grouping entirely, so in "tou"
+    mode it must call the inherited debounce itself -- it does not get it
+    for free just by being a subclass."""
+    from core.bess.dp_schedule import DPSchedule
+    from core.bess.solax_modbus_growatt_controller import SolaxModbusGrowattController
+    from core.bess.tests.helpers import make_battery_settings
+
+    period_data = _make_debounce_test_period_data()
     strategic_intents = [p.decision.strategic_intent for p in period_data]
 
     schedule = DPSchedule(
@@ -1564,40 +1677,51 @@ def test_create_schedule_applies_the_debounce():
         },
     )
     controller = SolaxModbusGrowattController(
-        make_battery_settings(max_discharge_power_kw=5.0)
+        make_battery_settings(max_discharge_power_kw=5.0), control_mode="tou"
     )
     controller.create_schedule(schedule, current_period=0)
     assert controller.strategic_intents[1] == "LOAD_SUPPORT"
+
+
+def test_create_schedule_does_not_debounce_in_vpp_mode():
+    """#320: VPP mode has no separate mode register -- LOAD_SUPPORT and
+    BATTERY_EXPORT both map to a signed power percentage in _intent_to_vpp,
+    so there is no TOU-rewrite cost to avoid. The debounce must not run
+    here, or it would silently suppress genuine marginal exports for no
+    reason, exactly like it must not run for real SolaxController."""
+    from core.bess.dp_schedule import DPSchedule
+    from core.bess.solax_modbus_growatt_controller import SolaxModbusGrowattController
+    from core.bess.tests.helpers import make_battery_settings
+
+    period_data = _make_debounce_test_period_data()
+    strategic_intents = [p.decision.strategic_intent for p in period_data]
+
+    schedule = DPSchedule(
+        actions=[0.0] * 96,
+        state_of_energy=[10.0] * 96,
+        prices=[0.3] * 96,
+        original_dp_results={
+            "strategic_intent": strategic_intents,
+            "period_data": period_data,
+        },
+    )
+    controller = SolaxModbusGrowattController(
+        make_battery_settings(max_discharge_power_kw=5.0), control_mode="vpp"
+    )
+    controller.create_schedule(schedule, current_period=0)
+    assert controller.strategic_intents[1] == "BATTERY_EXPORT"
 ```
 
-- [ ] **Step 3: Run test to verify it fails**
+- [ ] **Step 3: Run tests to verify the TOU-mode one fails and the VPP-mode one already passes**
 
-Run: `.venv/bin/pytest core/bess/tests/unit/test_solax_modbus_growatt_single_segment.py::test_create_schedule_applies_the_debounce -v`
-Expected: FAIL — `controller.strategic_intents[1]` is still `"BATTERY_EXPORT"` (the override doesn't call the debounce yet)
+Run: `.venv/bin/pytest core/bess/tests/unit/test_solax_modbus_growatt_single_segment.py::test_create_schedule_applies_the_debounce_in_tou_mode core/bess/tests/unit/test_solax_modbus_growatt_single_segment.py::test_create_schedule_does_not_debounce_in_vpp_mode -v`
+Expected: the `_in_tou_mode` test FAILs (`controller.strategic_intents[1]` is still `"BATTERY_EXPORT"` — the override doesn't call the debounce yet); the `_in_vpp_mode` test already PASSes (nothing calls the debounce yet at all, so it trivially holds — this is a guard test, not a red/green cycle. Do not let this fool you into thinking Step 4 needs no gating logic: adding an unconditional debounce call in Step 4 would break this now-passing test, which is exactly the case it exists to catch.)
 
-- [ ] **Step 4: Call the debounce in the override**
+- [ ] **Step 4: Call the debounce in the override, gated on `control_mode == "tou"`**
 
-In `core/bess/solax_modbus_growatt_controller.py`, change `create_schedule` (currently lines 61-85) from:
+In `core/bess/solax_modbus_growatt_controller.py`, find the current `create_schedule` body (`grep -n "self.strategic_intents = schedule.original_dp_results" core/bess/solax_modbus_growatt_controller.py` to confirm the exact line) and change:
 
 ```python
-    def create_schedule(
-        self,
-        schedule: DPSchedule,
-        current_period: int = 0,
-        previous_tou_intervals: list[dict] | None = None,
-    ) -> None:
-        """Store strategic intents — TOU mode is applied per-period, no batch TOU needed.
-
-        Skips the parent's 9-segment TOU interval computation.  Strategic intents
-        are stored and hourly settings calculated for API/display consumption.
-
-        Args:
-            schedule: DPSchedule containing strategic_intent list.
-            current_period: Current 15-minute period (0-95).
-            previous_tou_intervals: Unused for single-segment approach.
-        """
-        logger.info("Creating Modbus single-segment schedule from strategic intents")
-
         self.strategic_intents = schedule.original_dp_results["strategic_intent"]
         self.current_schedule = schedule
 ```
@@ -1605,40 +1729,30 @@ In `core/bess/solax_modbus_growatt_controller.py`, change `create_schedule` (cur
 to:
 
 ```python
-    def create_schedule(
-        self,
-        schedule: DPSchedule,
-        current_period: int = 0,
-        previous_tou_intervals: list[dict] | None = None,
-    ) -> None:
-        """Store strategic intents — TOU mode is applied per-period, no batch TOU needed.
-
-        Skips the parent's 9-segment TOU interval computation.  Strategic intents
-        are stored and hourly settings calculated for API/display consumption.
-
-        Args:
-            schedule: DPSchedule containing strategic_intent list.
-            current_period: Current 15-minute period (0-95).
-            previous_tou_intervals: Unused for single-segment approach.
-        """
-        logger.info("Creating Modbus single-segment schedule from strategic intents")
-
         raw_strategic_intents = schedule.original_dp_results["strategic_intent"]
-        # #320: same Growatt MIN hardware as the cloud path (this class
-        # subclasses GrowattMinController) -- an isolated marginal
-        # BATTERY_EXPORT still triggers a real per-period TOU mode write
-        # via apply_period below, so it needs the same debounce, applied
-        # explicitly since this override skips the parent's create_schedule.
-        self.strategic_intents = self._debounce_battery_export_flips(
-            raw_strategic_intents, schedule.period_data
-        )
+        if self.control_mode == "tou":
+            # #320: same Growatt MIN/SPH hardware as the cloud path (this
+            # class subclasses GrowattMinController) -- an isolated marginal
+            # BATTERY_EXPORT still triggers a real per-period TOU mode write
+            # via _apply_period_tou, so it needs the same debounce, applied
+            # explicitly since this override skips the parent's
+            # create_schedule. VPP mode has no separate mode register
+            # (_intent_to_vpp treats LOAD_SUPPORT/BATTERY_EXPORT identically)
+            # so there is nothing to debounce there -- must not apply it.
+            self.strategic_intents = self._debounce_battery_export_flips(
+                raw_strategic_intents, schedule.period_data
+            )
+        else:
+            self.strategic_intents = raw_strategic_intents
         self.current_schedule = schedule
 ```
 
-- [ ] **Step 5: Run test to verify it passes**
+Do not change anything else in `create_schedule` — the surrounding logger calls, the intent-transition logging loop, and the `if self.control_mode == "tou": self._update_tou_display_state()` line that follows all reference `self.strategic_intents`, and must keep doing so unchanged (they should observe the debounced list in "tou" mode, and the raw list in "vpp" mode, which is exactly what this edit produces).
+
+- [ ] **Step 5: Run both tests to verify they pass**
 
 Run: `.venv/bin/pytest core/bess/tests/unit/test_solax_modbus_growatt_single_segment.py -v`
-Expected: PASS (all tests in the file, including the new one)
+Expected: PASS (all tests in the file, including both new ones)
 
 - [ ] **Step 6: Run the fast suite**
 
@@ -1649,7 +1763,7 @@ Expected: PASS
 
 ```bash
 git add core/bess/solax_modbus_growatt_controller.py core/bess/tests/unit/test_solax_modbus_growatt_single_segment.py
-git commit -m "feat: apply the same TOU-flip debounce to SolaxModbusGrowattController (#320)"
+git commit -m "feat: apply the TOU-flip debounce to SolaxModbusGrowattController's tou mode only (#320)"
 ```
 
 ---

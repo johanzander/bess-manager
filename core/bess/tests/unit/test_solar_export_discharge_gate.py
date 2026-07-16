@@ -14,28 +14,123 @@ opportunity value of stored energy), persisted per period on DecisionData.
 See docs/superpowers/specs/2026-06-27-solar-export-discharge-rate-design.md.
 """
 
+from types import SimpleNamespace
+
 import pytest
 
-from core.bess.battery_system_manager import solar_export_discharge_rate
+from core.bess.battery_system_manager import (
+    BatterySystemManager,
+    intra_period_discharge_gate,
+)
 from core.bess.dp_battery_algorithm import optimize_battery_schedule
+from core.bess.models import (
+    DecisionData,
+    EconomicData,
+    EnergyData,
+    OptimizationResult,
+    PeriodData,
+)
+from core.bess.price_manager import MockSource
+from core.bess.tests.conftest import MockHomeAssistantController
 from core.bess.tests.helpers import make_battery_settings
 
+PERIOD = 20  # Arbitrary test period (quarter-hour slot)
 
-def test_solar_export_discharge_rate_gate_boundary():
+
+def test_intra_period_discharge_gate_gate_boundary():
     """Gate is 100 iff buy*eff_d >= shadow; equality discharges (>=)."""
     eff_d = 0.95
     # stored energy worth less than buying now -> cover from battery
     assert (
-        solar_export_discharge_rate(buy_price=2.0, shadow_price=1.0, eff_d=eff_d) == 100
+        intra_period_discharge_gate(buy_price=2.0, shadow_price=1.0, eff_d=eff_d) == 100
     )
     # stored energy worth more (reserved for a peak) -> hold, buy from grid
     assert (
-        solar_export_discharge_rate(buy_price=0.5, shadow_price=4.0, eff_d=eff_d) == 0
+        intra_period_discharge_gate(buy_price=0.5, shadow_price=4.0, eff_d=eff_d) == 0
     )
     # exact equality -> discharge (>=)
     assert (
-        solar_export_discharge_rate(buy_price=1.0, shadow_price=0.95, eff_d=0.95) == 100
+        intra_period_discharge_gate(buy_price=1.0, shadow_price=0.95, eff_d=0.95) == 100
     )
+
+
+def _make_bsm(
+    buy_prices: list[float],
+) -> tuple[BatterySystemManager, MockHomeAssistantController]:
+    controller = MockHomeAssistantController()
+    bsm = BatterySystemManager(
+        controller=controller,
+        price_source=MockSource(buy_prices),
+        addon_options={"inverter": {"platform": "growatt_server_min"}},
+    )
+    return bsm, controller
+
+
+def _set_intent(bsm: BatterySystemManager, period: int, intent: str) -> None:
+    intents = ["IDLE"] * 96
+    intents[period] = intent
+    bsm._inverter_controller.strategic_intents = intents
+    bsm._inverter_controller.current_schedule = SimpleNamespace(actions=[0.0] * 96)
+
+
+def _store_shadow_price(
+    bsm: BatterySystemManager, period: int, shadow_price: float
+) -> None:
+    """Populate the schedule store with a SOLAR_EXPORT period at the given shadow price."""
+    energy = EnergyData(
+        solar_production=0.0,
+        home_consumption=0.0,
+        battery_charged=0.0,
+        battery_discharged=0.0,
+        grid_imported=0.0,
+        grid_exported=0.0,
+        battery_soe_start=10.0,
+        battery_soe_end=10.0,
+    )
+    decision = DecisionData(strategic_intent="SOLAR_EXPORT", shadow_price=shadow_price)
+    period_data = PeriodData(
+        period=period,
+        energy=energy,
+        economic=EconomicData(),
+        decision=decision,
+    )
+    result = OptimizationResult(input_data={}, period_data=[period_data])
+    bsm.schedule_store.store_schedule(result, optimization_period=period)
+
+
+class TestSolarExportDischargeGate:
+    """BSM-integration coverage: proves the gate actually fires in the real
+    hardware-write path (_apply_period_schedule), not just the standalone
+    gate function. Mirrors TestSolarStorageDischargeGate."""
+
+    def test_dip_covered_when_battery_worth_less_than_grid(self):
+        """High buy price, low shadow price -> gate opens, dip covered from battery."""
+        bsm, controller = _make_bsm(buy_prices=[2.0] * 96)
+        _set_intent(bsm, PERIOD, "SOLAR_EXPORT")
+        _store_shadow_price(bsm, PERIOD, shadow_price=0.5)
+
+        bsm._apply_period_schedule(PERIOD)
+
+        assert controller.calls["discharge_rate"][-1] == 100
+
+    def test_reserve_protected_when_shadow_price_high(self):
+        """Low buy price, high shadow price -> gate stays closed, reserve protected."""
+        bsm, controller = _make_bsm(buy_prices=[0.2] * 96)
+        _set_intent(bsm, PERIOD, "SOLAR_EXPORT")
+        _store_shadow_price(bsm, PERIOD, shadow_price=4.0)
+
+        bsm._apply_period_schedule(PERIOD)
+
+        assert controller.calls["discharge_rate"][-1] == 0
+
+    def test_no_stored_schedule_holds_discharge(self):
+        """No schedule stored yet -> gate cannot evaluate, discharge stays 0 (safe default)."""
+        bsm, controller = _make_bsm(buy_prices=[2.0] * 96)
+        _set_intent(bsm, PERIOD, "SOLAR_EXPORT")
+
+        bsm._apply_period_schedule(PERIOD)
+
+        assert controller.calls["discharge_rate"][-1] == 0
 
 
 def _solar_export_periods(result):
@@ -110,7 +205,7 @@ def test_solar_export_covers_dip_when_buy_exceeds_export():
                 sell[t], abs=0.01
             ), f"period {t}: shadow {shadow:.4f} should equal sell_price {sell[t]}"
         assert shadow < buy[t] * eff_d
-        assert solar_export_discharge_rate(buy[t], shadow, eff_d) == 100
+        assert intra_period_discharge_gate(buy[t], shadow, eff_d) == 100
 
 
 @pytest.mark.slow
@@ -168,4 +263,4 @@ def test_solar_export_holds_when_export_more_valuable():
             f"period {t}: shadow {shadow:.3f} should exceed buy*eff_d "
             f"{buy[t] * eff_d:.3f} (export worth more than grid import)"
         )
-        assert solar_export_discharge_rate(buy[t], shadow, eff_d) == 0
+        assert intra_period_discharge_gate(buy[t], shadow, eff_d) == 0

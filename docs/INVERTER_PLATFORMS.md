@@ -230,6 +230,16 @@ into BESS — BESS stays on its 15-minute period model. Users wanting tighter
 self-consumption can add their own HA automation nudging `growatt_vpp_power`
 between BESS's writes, using the sensor key above as the target entity.
 
+**Why VPP over TOU long-term:** VPP's per-period writes
+(`growatt_vpp_power`/`growatt_vpp_time`) target RAM-backed registers, safe to
+rewrite every period. TOU mode's per-period rate control instead writes
+`ems_charging_rate`/`ems_discharging_rate`, which are flash-backed — fine at
+TOU's lower write frequency, but not something VPP mode should ever fall back
+to, since it writes far more often. This is the reasoning behind the
+"Path to deprecating TOU" plan above, not yet a recommendation: GEN4 default
+stays `"tou"` until VPP is validated on real hardware (see the platform
+maturity note at the top of this section).
+
 **Path to deprecating TOU:** once GEN4 VPP is validated on real hardware, the
 GEN4 default flips to `"vpp"`, then the `"tou"` code path and setting are
 removed entirely in a later release — no user migration needed, since this is

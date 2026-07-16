@@ -55,8 +55,12 @@ def _map_rates(
         else:
             charge_rate_pct = 100
         return True, 0, charge_rate_pct
-    if intent in ("SOLAR_STORAGE", "IDLE", "SOLAR_EXPORT"):
+    if intent in ("SOLAR_STORAGE", "IDLE"):
         return False, 0, 100
+    if intent == "SOLAR_EXPORT":
+        # #313: charge_rate=0 blocks passive solar->battery charging so solar
+        # bypasses to grid even below max SOE -- unlike IDLE/SOLAR_STORAGE.
+        return False, 0, 0
     if intent == "LOAD_SUPPORT":
         if action_kw < -0.01:
             rate = min(
@@ -85,10 +89,18 @@ def mode_to_power(
     soe: float,
     settings: BatterySettings,
     dt: float,
-) -> float:
+) -> float | None:
     """Battery power (kW; + charge, - discharge) the Growatt MIN inverter applies
     for one period under the given command and conditions. This is the v1 mode
-    policy; check 1 (plan-faithfulness) validates/refines it."""
+    policy; check 1 (plan-faithfulness) validates/refines it.
+
+    Returns `None` for SOLAR_EXPORT-below-max (#313): charge_rate=0 blocks
+    passive solar->battery charging entirely (battery untouched, solar
+    bypasses to grid), a genuinely different outcome from IDLE/SOLAR_STORAGE's
+    `power=0.0` (which still passively charges via `_state_transition`'s IDLE
+    branch) -- the same distinction the DP's own reward function makes
+    between its IDLE and SOLAR_EXPORT-below-max candidates.
+    """
     if command.battery_mode == "battery_first":  # grid charging
         room = settings.max_soe_kwh - soe
         rate_kw = settings.max_charge_power_kw * command.charge_rate_pct / 100
@@ -112,6 +124,11 @@ def mode_to_power(
             deficit, rate_kw * dt, available * settings.efficiency_discharge
         )
         return -delivered_kwh / dt
+
+    if command.charge_rate_pct == 0:
+        # SOLAR_EXPORT-below-max (#313): charge blocked, no discharge --
+        # battery held exactly unchanged, solar bypasses to grid.
+        return None
 
     # IDLE/SOLAR_STORAGE (load_first + no discharge): passive solar charging.
     # Return 0.0 so _state_transition uses its IDLE branch (power=0), which charges
@@ -145,14 +162,21 @@ def simulate(
         power = mode_to_power(
             cmd, solar_production[t], home_consumption[t], soe, settings, dt
         )
-        next_soe = _state_transition(
-            soe,
-            power,
-            settings,
-            dt,
-            solar_production=solar_production[t],
-            home_consumption=home_consumption[t],
-        )
+        if power is None:
+            # SOLAR_EXPORT-below-max (#313): battery held exactly unchanged,
+            # bypassing _state_transition's IDLE branch (which would
+            # passively charge from solar instead).
+            next_soe = soe
+            power = 0.0
+        else:
+            next_soe = _state_transition(
+                soe,
+                power,
+                settings,
+                dt,
+                solar_production=solar_production[t],
+                home_consumption=home_consumption[t],
+            )
         pd = _build_period_data(
             power=power,
             soe=soe,

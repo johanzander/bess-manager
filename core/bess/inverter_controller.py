@@ -25,8 +25,16 @@ class InverterController(ABC):
     - SOLAR_STORAGE  → grid_charge=False, charge_rate=100, discharge_rate=0
     - LOAD_SUPPORT   → grid_charge=False, charge_rate=0,   discharge_rate=<action-derived>
     - BATTERY_EXPORT → grid_charge=False, charge_rate=0,   discharge_rate=<action-derived>
-    - SOLAR_EXPORT   → grid_charge=False, charge_rate=100, discharge_rate=0
+    - SOLAR_EXPORT   → grid_charge=False, charge_rate=0,   discharge_rate=0
     - IDLE           → grid_charge=False, charge_rate=100, discharge_rate=0
+
+    SOLAR_EXPORT's charge_rate=0 (#313): blocks passive solar->battery
+    charging so solar bypasses to grid even when the battery has room --
+    unlike IDLE, which is meant to pass through to hardware's normal
+    self-use charging. Before #313 these were identical (charge_rate=100),
+    harmless while SOLAR_EXPORT only ever occurred with a full battery
+    (nothing left to charge anyway either way), but wrong once the DP can
+    choose SOLAR_EXPORT below max SOE.
     """
 
     # Map strategic intents to inverter control settings.
@@ -44,7 +52,7 @@ class InverterController(ABC):
             "charge_rate": 0,
             "discharge_rate": 100,
         },
-        "SOLAR_EXPORT": {"grid_charge": False, "charge_rate": 100, "discharge_rate": 0},
+        "SOLAR_EXPORT": {"grid_charge": False, "charge_rate": 0, "discharge_rate": 0},
         "IDLE": {"grid_charge": False, "charge_rate": 100, "discharge_rate": 0},
     }
 

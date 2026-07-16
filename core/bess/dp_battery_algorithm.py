@@ -790,6 +790,17 @@ def _run_dynamic_programming(
 ) -> np.ndarray:
     """
     Run backward induction DP to compute optimal battery control policy.
+
+    Also considers, at every state, a distinct SOLAR_EXPORT-below-max
+    candidate (#313) -- battery SOE held exactly unchanged (no passive
+    charge) while this period's own solar surplus exports directly -- as an
+    alternative to IDLE's forced full passive charge. Without this, IDLE's
+    mandatory charge conflates "let solar bypass the battery" with "how much
+    room to keep" into one decision, forcing a genuinely necessary
+    headroom-creating action into whichever period first needs the room
+    even when a better-priced, side-effect-free slot for it existed earlier
+    in the same horizon. See
+    docs/superpowers/specs/2026-07-16-issue-313-root-cause-investigation.md.
     """
 
     # Set defaults if not provided
@@ -881,6 +892,30 @@ def _run_dynamic_programming(
         # constraint check applies to it, and _compute_reward_grid never
         # returns -inf), so the max over actions can never remain -inf here.
         V[t, :] = np.max(value, axis=1)
+
+        # SOLAR_EXPORT-below-max candidate (#313): soe held exactly
+        # unchanged (next_soe == soe, same grid index), solar surplus
+        # exports directly instead of passively charging. Reusing
+        # _compute_reward_grid with next_soe == soe already produces the
+        # correct economics (see _idle_battery_flows: zero SOE delta ->
+        # battery_charged=0, so grid_exported reflects the full surplus) --
+        # the same reward shape IDLE gets when the battery happens to be
+        # full, just made reachable below max_soe too. One extra
+        # O(n_states) column, not O(n_states x n_actions).
+        zeros_col = np.zeros_like(soe_col)
+        reward_bypass = _compute_reward_grid(
+            zeros_col,
+            soe_col,
+            soe_col,
+            home_consumption=home_consumption[t],
+            battery_settings=battery_settings,
+            dt=dt,
+            current_buy_price=buy_price[t],
+            current_sell_price=sell_price[t],
+            solar_production=solar_production[t],
+        )
+        value_bypass = reward_bypass.reshape(-1) + V[t + 1][np.arange(n_states)]
+        V[t, :] = np.maximum(V[t, :], value_bypass)
 
     return V
 
@@ -1081,6 +1116,34 @@ def _best_action_at_continuous_state(
 
     # IDLE -- always a feasible candidate.
     consider(0.0)
+
+    # SOLAR_EXPORT-below-max (#313): soe held exactly unchanged, this
+    # period's own solar surplus exports directly instead of passively
+    # charging -- see _run_dynamic_programming's matching backward-pass
+    # candidate for the full rationale. Bypasses _state_transition (whose
+    # power=0 branch always charges as much as room/rate permit) to force
+    # next_soe == soe directly, then reuses the same _compute_reward call
+    # every other candidate uses.
+    reward, new_cost_basis = _compute_reward(
+        power=0.0,
+        soe=soe,
+        next_soe=soe,
+        period=t,
+        home_consumption=home,
+        battery_settings=battery_settings,
+        dt=dt,
+        solar_production=solar,
+        buy_price=buy_price,
+        sell_price=sell_price,
+        cost_basis=cost_basis,
+    )
+    value = reward + _interpolate_value(V_next, soe, battery_settings)
+    if value > best_value:
+        best_value = value
+        best_action = 0.0
+        best_next_soe = soe
+        best_new_cost_basis = new_cost_basis
+        best_reward = reward
 
     # Discharge -- exact breakpoint enumeration (Finding 1/2/3/5).
     for p in _discharge_candidates(soe, battery_settings, dt, home, solar):

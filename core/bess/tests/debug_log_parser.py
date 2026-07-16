@@ -32,6 +32,14 @@ _SECTION_ENTITY_SNAPSHOT = "## Entity Snapshot"
 _SECTION_INVERTER_TOU = "## Inverter TOU Segments"
 _SECTION_HISTORICAL = "## Historical Sensor Data"
 _SECTION_SCHEDULES = "## Optimization Schedules"
+# The "compact" debug export format's actual per-run input_data (the exact
+# buy_price/sell_price/home_consumption/solar_production/initial_soe/
+# initial_cost_basis/horizon a run used) lives under this header instead of
+# _SECTION_SCHEDULES, inside a collapsible <details> block -- not just an
+# economic summary. Same list-with-optimization_period shape, so it's parsed
+# identically; see issue #313 investigation for how this was found (the
+# parser silently returned empty input_data instead of erroring).
+_SECTION_RAW_SCHEDULE = "## Raw Schedule JSON (deep debugging)"
 _SECTION_PREDICTION_SNAPSHOTS = "## Prediction Snapshots"
 _SECTION_SYSTEM_LOGS = "## System Logs (Today)"
 
@@ -130,7 +138,10 @@ def parse_debug_log(path: str) -> DebugLogData:
             elif isinstance(parsed, dict):
                 # Some versions wrap the list in a dict
                 result.historical_periods = list(parsed.values())
-        elif section == _SECTION_SCHEDULES and not result.last_schedule:
+        elif (
+            section in (_SECTION_SCHEDULES, _SECTION_RAW_SCHEDULE)
+            and not result.last_schedule
+        ):
             # The compact format emits economic_summary and input_meta JSON blocks
             # before the full schedule JSON (in a collapsible). Only accept a block
             # that has the "optimization_period" key, which identifies a real schedule.
@@ -161,6 +172,7 @@ def parse_debug_log(path: str) -> DebugLogData:
             _SECTION_INVERTER_TOU,
             _SECTION_HISTORICAL,
             _SECTION_SCHEDULES,
+            _SECTION_RAW_SCHEDULE,
             _SECTION_PREDICTION_SNAPSHOTS,
             _SECTION_SYSTEM_LOGS,
         ):

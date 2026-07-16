@@ -51,7 +51,9 @@ def test_raw_schedule_json_section_populates_input_data(tmp_path):
 
     log = parse_debug_log(str(log_path))
 
-    assert log.input_data, "Expected input_data to be populated from the Raw Schedule JSON section"
+    assert (
+        log.input_data
+    ), "Expected input_data to be populated from the Raw Schedule JSON section"
     assert log.input_data["initial_soe"] == 15.0
     assert log.input_data["initial_cost_basis"] == 0.035
     assert log.input_data["horizon"] == 2

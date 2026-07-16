@@ -1,7 +1,10 @@
 # Design: Platform-capability abstraction for discharge resolution, self-throttle modeling, and TOU-flip avoidance (#320)
 
 **Date**: 2026-07-16
-**Status**: Design approved — not yet implemented
+**Status**: Parts 1-2 (capability abstraction — sections 1-2 below) implemented
+and shipped. Part 3 (TOU-flip debounce) is **deferred, not implemented** — see
+"Part 3 status update" below; do not treat the debounce design in this doc as
+current.
 **Related**: #320 (this issue), #282 (postmortem — exact analytic breakpoints
 broke plan-faithfulness, established today's percent-grid candidate search),
 #240 (self-throttling reward fix — established `BATTERY_EXPORT_THRESHOLD_KWH`),
@@ -266,6 +269,33 @@ revisit during implementation, not to silently widen scope here.
 `GrowattSphController` and `SolaxController` do not call this method — see
 Non-goals for why applying it there would be actively wrong, not merely
 unnecessary.
+
+## Part 3 status update (deferred during implementation)
+
+Section 3 above assumed each of the 31 "marginal" `BATTERY_EXPORT` periods in
+the real trace was an isolated single-period flip, bordered by `LOAD_SUPPORT`
+on both sides. Implementation against the real fixture
+(`core/bess/tests/unit/fixtures/issue_320_period_data.json`, added as part of
+this work) disproved that assumption: the trace has only **7 contiguous
+`BATTERY_EXPORT` runs total**, not 62 isolated flips. Only one run (periods
+96-103, 8 periods) is wholly marginal — every period under 0.05 kWh, bordered
+by `LOAD_SUPPORT` both sides. The other six runs mix marginal and clearly
+substantial exports (e.g. 0.222, 0.234, 1.039 kWh) within the same contiguous
+run — the "isolated single period" rule cannot touch these at all, and
+folding individual marginal periods *inside* a mixed run would fragment one
+continuous export block into several alternating `LOAD_SUPPORT`/
+`BATTERY_EXPORT` sub-segments, which would *increase* TOU rewrites rather
+than reduce them — the opposite of this section's goal.
+
+**Decision:** Part 3 is deferred as its own follow-up, to be redesigned
+against this real run structure (e.g. a "fold the whole run only if every
+period in it is marginal" rule, or a different formulation entirely) rather
+than the single-period assumption above. Parts 1-2 (the capability
+abstraction — a pure, behavior-preserving refactor) are unaffected by this
+and shipped independently; they do not depend on Part 3 in either direction.
+An interactive explorer against the real trace, useful for prototyping the
+next attempt, was built during this investigation — ask if you need it
+reconstructed, it was not committed to the repo (a throwaway HTML artifact).
 
 ## Testing
 

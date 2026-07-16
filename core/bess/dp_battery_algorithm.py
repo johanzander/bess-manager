@@ -789,6 +789,7 @@ def _run_dynamic_programming(
     terminal_value_per_kwh: float = 0.0,
     currency: str = "SEK",
     max_charge_power_per_period: list[float] | None = None,
+    self_throttle_export_threshold_kwh: float = BATTERY_EXPORT_THRESHOLD_KWH,
 ) -> np.ndarray:
     """
     Run backward induction DP to compute optimal battery control policy.
@@ -882,6 +883,7 @@ def _run_dynamic_programming(
             current_buy_price=buy_price[t],
             current_sell_price=sell_price[t],
             solar_production=solar_production[t],
+            self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
         )
 
         next_i = np.round((next_soe - min_soe_kwh) / SOE_STEP_KWH).astype(np.int64)
@@ -915,6 +917,7 @@ def _run_dynamic_programming(
             current_buy_price=buy_price[t],
             current_sell_price=sell_price[t],
             solar_production=solar_production[t],
+            self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
         )
         value_bypass = reward_bypass.reshape(-1) + V[t + 1][np.arange(n_states)]
         V[t, :] = np.maximum(V[t, :], value_bypass)
@@ -1050,6 +1053,8 @@ def _best_action_at_continuous_state(
     sell_price: list[float],
     cost_basis: float,
     max_charge_power_per_period: list[float] | None,
+    discharge_resolution_kw: float | None = None,
+    self_throttle_export_threshold_kwh: float = BATTERY_EXPORT_THRESHOLD_KWH,
 ) -> tuple[float, float, float, float]:
     """One-step Bellman recompute at a true continuous SoE, using the
     already-known V[t+1, :] (linearly interpolated) as the continuation
@@ -1113,6 +1118,7 @@ def _best_action_at_continuous_state(
             buy_price=buy_price,
             sell_price=sell_price,
             cost_basis=cost_basis,
+            self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
         )
         value = reward + _interpolate_value(V_next, next_soe, battery_settings)
         if value > best_value:
@@ -1144,6 +1150,7 @@ def _best_action_at_continuous_state(
         buy_price=buy_price,
         sell_price=sell_price,
         cost_basis=cost_basis,
+        self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
     )
     value = reward + _interpolate_value(V_next, soe, battery_settings)
     if value > best_value:
@@ -1154,7 +1161,15 @@ def _best_action_at_continuous_state(
         best_reward = reward
 
     # Discharge -- exact breakpoint enumeration (Finding 1/2/3/5).
-    for p in _discharge_candidates(soe, battery_settings, dt, home, solar):
+    for p in _discharge_candidates(
+        soe,
+        battery_settings,
+        dt,
+        home,
+        solar,
+        discharge_resolution_kw=discharge_resolution_kw,
+        self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
+    ):
         consider(-p)
 
     # Charge (STORE) -- Finding 4: no grid search needed on this side at
@@ -1298,6 +1313,8 @@ def optimize_battery_schedule(
     terminal_value_per_kwh: float = 0.0,
     currency: str = "SEK",
     max_charge_power_per_period: list[float] | None = None,
+    discharge_resolution_kw: float | None = None,
+    self_throttle_export_threshold_kwh: float | None = None,
 ) -> OptimizationResult:
     """
     Battery optimization that eliminates dual cost calculation by using
@@ -1336,6 +1353,8 @@ def optimize_battery_schedule(
         initial_soe = battery_settings.min_soe_kwh
     if initial_cost_basis is None:
         initial_cost_basis = battery_settings.cycle_cost_per_kwh
+    if self_throttle_export_threshold_kwh is None:
+        self_throttle_export_threshold_kwh = BATTERY_EXPORT_THRESHOLD_KWH
 
     # Validate inputs to prevent impossible scenarios
     if initial_soe > battery_settings.max_soe_kwh:
@@ -1371,6 +1390,7 @@ def optimize_battery_schedule(
         terminal_value_per_kwh=terminal_value_per_kwh,
         currency=currency,
         max_charge_power_per_period=max_charge_power_per_period,
+        self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
     )
 
     # Step 2: Reconstruct the optimal path with continuous SoE propagation.
@@ -1406,6 +1426,8 @@ def optimize_battery_schedule(
             sell_price=sell_price,
             cost_basis=current_cost_basis,
             max_charge_power_per_period=max_charge_power_per_period,
+            discharge_resolution_kw=discharge_resolution_kw,
+            self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
         )
 
         period_data = _build_period_data(

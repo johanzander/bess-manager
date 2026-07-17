@@ -84,6 +84,23 @@ class InverterController(ABC):
     # TOU schedule writes (SPH, SolaX native).
     supports_charge_rate_control: ClassVar[bool] = True
 
+    def discharge_resolution_kw(self, max_discharge_power_kw: float) -> float:
+        """Smallest controllable discharge increment this platform can
+        execute, in kW. Default: Growatt's integer-percent-of-max grid (1%
+        steps) -- real hardware only accepts an integer percent rate
+        (core/bess/simulation/inverter_simulator.py::_map_rates, postmortem
+        #282). Override on a platform whose hardware resolution differs."""
+        return max_discharge_power_kw / 100
+
+    @property
+    def self_throttle_export_threshold_kwh(self) -> float:
+        """Discharge overshoot (kWh) below which this platform silently
+        delivers only what the home needs rather than exporting the excess
+        (Growatt MIN's `load_first` behavior, #240). Default: 0.01 kWh.
+        Override on a platform with no such self-throttle (e.g. one that
+        always writes an exact watt target)."""
+        return 0.01
+
     def __init__(self, battery_settings: BatterySettings) -> None:
         """Initialize shared inverter controller state."""
         if battery_settings is None:

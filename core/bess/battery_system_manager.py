@@ -1997,6 +1997,18 @@ class BatterySystemManager:
             )
 
             # Run DP optimization with strategic intent capture - returns OptimizationResult directly
+            discharge_resolution_kw = (
+                self._inverter_controller.discharge_resolution_kw(
+                    self.battery_settings.max_discharge_power_kw
+                )
+                if self._inverter_controller is not None
+                else None
+            )
+            self_throttle_export_threshold_kwh = (
+                self._inverter_controller.self_throttle_export_threshold_kwh
+                if self._inverter_controller is not None
+                else None
+            )
             result = optimize_battery_schedule(
                 buy_price=buy_prices,
                 sell_price=sell_prices,
@@ -2009,6 +2021,8 @@ class BatterySystemManager:
                 terminal_value_per_kwh=terminal_value,
                 currency=self.home_settings.currency,
                 max_charge_power_per_period=max_charge_power_per_period,
+                discharge_resolution_kw=discharge_resolution_kw,
+                self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
             )
 
             # Add timestamps to period data (algorithm is time-agnostic, operates on relative indices)
@@ -2163,13 +2177,22 @@ class BatterySystemManager:
                     f"No previous strategic intents available, initializing {num_periods} periods to IDLE"
                 )
 
-            # Fill in optimized periods from the new optimization result
+            # Fill in optimized periods from the new optimization result.
+            # Unlike full_day_strategic_intents (which carries forward real
+            # values for already-elapsed periods too, see above),
+            # full_day_period_data has no equivalent "previous" source to
+            # carry forward, so pre-optimization-period entries stay None
+            # -- the two lists are the same length but not both fully
+            # populated at the same indices. A future consumer zipping them
+            # together must treat None as "no data for this period."
+            full_day_period_data: list = [None] * len(full_day_strategic_intents)
             for i, period_data in enumerate(period_data_list):
                 target_period = optimization_period + i
                 if target_period < len(full_day_strategic_intents):
                     full_day_strategic_intents[target_period] = (
                         period_data.decision.strategic_intent
                     )
+                    full_day_period_data[target_period] = period_data
 
             # Store this run's actual starting SOE (kWh) in OptimizationResult.
             # Must always reflect what the DP started this specific run from,
@@ -2288,8 +2311,11 @@ class BatterySystemManager:
                 summary=summary_dict,  # Now properly converted to dict
                 solar_charged=solar_charged,
                 original_dp_results={
-                    "strategic_intent": full_day_strategic_intents
-                },  # Store strategic intents
+                    "strategic_intent": full_day_strategic_intents,
+                    "period_data": full_day_period_data,
+                },  # Store strategic intents and period data (#320: period_data is
+                # preparatory plumbing for a future controller-side flip-
+                # suppression feature, deferred, no consumer in this repo yet)
             )
 
             # Override the strategic intents in the schedule with corrected data

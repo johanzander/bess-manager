@@ -2865,6 +2865,7 @@ async def export_debug_data(compact: bool = True):
         aggregator = DebugDataAggregator(
             bess_controller.system,
             settings_data=bess_controller.settings_store.data,
+            active_sensors=bess_controller.settings_store.get_active_sensors(),
         )
         export_data = aggregator.aggregate_all_data(compact=compact)
 

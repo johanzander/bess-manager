@@ -323,6 +323,7 @@ class DebugDataAggregator:
         self,
         system: BatterySystemManager,
         settings_data: dict | None = None,
+        active_sensors: dict | None = None,
     ):
         """Initialize aggregator with system manager.
 
@@ -330,9 +331,17 @@ class DebugDataAggregator:
             system: BatterySystemManager instance to export data from
             settings_data: Full settings store data for debug export.
                 If None, addon_options in the export will be empty.
+            active_sensors: Fresh SettingsStore.get_active_sensors() result —
+                the flat, currently-active sensor_key -> entity_id map. Used
+                for the entity snapshot instead of controller.sensors, which
+                is a one-time copy taken at process startup and can go stale
+                if sensors are reconfigured without a restart (only the
+                settings-PATCH "sensors" branch refreshes it live). If None,
+                falls back to controller.sensors.
         """
         self.system = system
         self._settings_data = settings_data or {}
+        self._active_sensors = active_sensors
         self._start_time = datetime.now()
 
     def aggregate_all_data(self, compact: bool = True) -> DebugDataExport:
@@ -665,6 +674,15 @@ class DebugDataAggregator:
         """Return a copy of a HA state dict with HA-internal metadata removed."""
         return {k: v for k, v in state.items() if k not in self._HA_METADATA_KEYS}
 
+    def _capture_entity_state(self, snapshot: dict, controller, entity_id: str) -> None:
+        """Fetch one entity's raw state into snapshot, logging (not raising) on failure."""
+        try:
+            state = controller.get_entity_state_raw(entity_id)
+            if state:
+                snapshot[entity_id] = self._strip_ha_metadata(state)
+        except Exception as e:
+            logger.warning("Failed to fetch entity %s: %s", entity_id, e)
+
     def _serialize_entity_snapshot(self) -> dict:
         """Fetch raw HA entity state for every entity BESS reads.
 
@@ -681,42 +699,41 @@ class DebugDataAggregator:
             return {}
         snapshot: dict = {}
 
-        # All entities registered in the sensor map — use the public info API to resolve
-        # entity IDs so resolution goes through the same path as normal sensor reads.
-        seen_entities: set[str] = set()
-        for method_name in controller.METHOD_SENSOR_MAP:
-            info = controller.get_method_sensor_info(method_name)
-            entity_id = info.get("entity_id")
-            if (
-                not entity_id
-                or info.get("status") == "not_configured"
-                or entity_id in seen_entities
-            ):
-                continue
-            seen_entities.add(entity_id)
-            try:
-                state = controller.get_entity_state_raw(entity_id)
-                if state:
-                    snapshot[entity_id] = self._strip_ha_metadata(state)
-            except Exception as e:
-                logger.warning("Failed to fetch entity %s: %s", entity_id, e)
+        # The active sensor map is the single source of truth for every
+        # entity_id this installation is configured to know about — every
+        # resolution path (METHOD_SENSOR_MAP, _get_entity_for_service,
+        # _get_raw_state) ultimately looks up this same map
+        # (_resolve_entity_id). Capturing it directly, rather than deriving
+        # from a curated subset like METHOD_SENSOR_MAP, means a new
+        # entity-reading code path (TOU segments, VPP registers, ...) is
+        # automatically captured for replay without needing a matching
+        # special case here.
+        #
+        # Prefer the freshly-computed active_sensors (SettingsStore.
+        # get_active_sensors(), re-derived at export time) over
+        # controller.sensors, which is a one-time copy taken at process
+        # startup — it only gets refreshed if a settings PATCH happens to hit
+        # the "sensors" branch specifically, so it can go stale (missing
+        # entities added via the setup wizard or other flows) without a
+        # restart, even though get_active_sensors() would show them.
+        active_sensors = (
+            self._active_sensors
+            if self._active_sensors is not None
+            else controller.sensors
+        )
+        seen_entities: set[str] = set(active_sensors.values())
+        for entity_id in seen_entities:
+            if entity_id:
+                self._capture_entity_state(snapshot, controller, entity_id)
 
-        # Price provider entities (not in METHOD_SENSOR_MAP)
+        # Price provider entities (not in controller.sensors)
         config = self.system._energy_provider_config
         provider = config["provider"]
 
         if provider == "nordpool_hacs":
-            nordpool_cfg = config["nordpool_hacs"]
-            entity_id = nordpool_cfg.get("entity")
+            entity_id = config["nordpool_hacs"].get("entity")
             if entity_id:
-                try:
-                    state = controller.get_entity_state_raw(entity_id)
-                    if state:
-                        snapshot[entity_id] = self._strip_ha_metadata(state)
-                except Exception as e:
-                    logger.warning(
-                        "Failed to fetch nordpool entity %s: %s", entity_id, e
-                    )
+                self._capture_entity_state(snapshot, controller, entity_id)
 
         elif provider == "octopus":
             octopus_cfg = config["octopus"]
@@ -728,25 +745,12 @@ class DebugDataAggregator:
             ):
                 entity_id = octopus_cfg.get(key)
                 if entity_id:
-                    try:
-                        state = controller.get_entity_state_raw(entity_id)
-                        if state:
-                            snapshot[entity_id] = self._strip_ha_metadata(state)
-                    except Exception as e:
-                        logger.warning(
-                            "Failed to fetch octopus entity %s: %s", entity_id, e
-                        )
+                    self._capture_entity_state(snapshot, controller, entity_id)
 
         elif provider == "entsoe":
-            entsoe_cfg = config["entsoe"]
-            entity_id = entsoe_cfg.get("entity")
+            entity_id = config["entsoe"].get("entity")
             if entity_id:
-                try:
-                    state = controller.get_entity_state_raw(entity_id)
-                    if state:
-                        snapshot[entity_id] = self._strip_ha_metadata(state)
-                except Exception as e:
-                    logger.warning("Failed to fetch entsoe entity %s: %s", entity_id, e)
+                self._capture_entity_state(snapshot, controller, entity_id)
 
         elif provider != "nordpool_official":
             # nordpool_official uses service calls — no entity state to capture

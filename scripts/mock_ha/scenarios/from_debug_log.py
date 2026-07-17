@@ -264,6 +264,7 @@ def generate_scenario(log_path: str) -> None:
         "historical_periods": (
             log.historical_periods if log.historical_periods else None
         ),
+        "ha_statistics": log.ha_statistics if log.ha_statistics else None,
         "mock_time": mock_time,
         "time_segments": time_segments if inverter_platform == "min" else None,
         "ac_charge_times": (

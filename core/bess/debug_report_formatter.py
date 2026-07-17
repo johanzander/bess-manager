@@ -36,6 +36,7 @@ class DebugReportFormatter:
                 self._format_ha_ws_discovery(export),
                 self._format_addon_options(export),
                 self._format_entity_snapshot(export),
+                self._format_ha_statistics(export),
                 self._format_inverter_tou(export),
                 self._format_historical_data(export),
                 self._format_schedules(export),
@@ -338,6 +339,30 @@ Findings (top) and System Logs (bottom).*
 ```
 
 </details>"""
+
+    def _format_ha_statistics(self, export: DebugDataExport) -> str:
+        """Format the raw HA Recorder statistics behind ha_statistics.
+
+        Lets a mock replay serve the exact recorder response back instead of
+        approximating a 7-day profile from a single real day of history.
+        """
+        ha_stats = export.ha_statistics
+        stats = ha_stats.get("stats", [])
+
+        summary = f"""## HA Statistics (recorder replay data)
+
+**Statistic ID**: {ha_stats.get("statistic_id", "N/A")}
+
+**Entries**: {len(stats)}"""
+
+        if not stats:
+            return summary + "\n\n*No recorder statistics available*"
+
+        return summary + f"""
+
+```json
+{self._format_json(ha_stats)}
+```"""
 
     def _format_inverter_tou(self, export: DebugDataExport) -> str:
         segments = export.inverter_tou_segments

@@ -50,6 +50,11 @@ class SolaxController(InverterController):
 
     supports_charge_rate_control: ClassVar[bool] = False
 
+    # SolaX has no mode concept -- discharge_rate always becomes an
+    # immediate forced watt-level command (_write_period_to_hardware),
+    # never a load-following ceiling. See #324.
+    discharge_rate_is_load_following: ClassVar[bool] = False
+
     def __init__(self, battery_settings: BatterySettings) -> None:
         """Initialise the SolaX controller."""
         super().__init__(battery_settings)

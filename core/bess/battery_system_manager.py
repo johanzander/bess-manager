@@ -176,6 +176,7 @@ class BatterySystemManager:
 
         # Discharge inhibit tracking
         self._desired_discharge_rate: int = 0  # Rate from schedule before inhibit
+        self._desired_grid_charge: bool = False  # grid_charge alongside the rate above
         self._last_applied_discharge_rate: int = 0  # Last rate written to inverter
 
         # Prediction caches (populated by _fetch_predictions)
@@ -2475,8 +2476,18 @@ class BatterySystemManager:
         # solar/load dip. Allow that only when the stored energy is worth less
         # than buying from grid now (shadow_price = DP marginal value of
         # stored SoE). This is a sub-period hardware-robustness behaviour,
-        # invisible to the 15-min plan/sim.
-        if strategic_intent in ("SOLAR_EXPORT", "SOLAR_STORAGE"):
+        # invisible to the 15-min plan/sim. Only valid where discharge_rate is
+        # a load-following ceiling -- on platforms where it's an immediate
+        # forced power command (VPP-style control), opening the gate would
+        # force a full-power discharge instead of gently covering a dip (#324).
+        if (
+            strategic_intent
+            in (
+                "SOLAR_EXPORT",
+                "SOLAR_STORAGE",
+            )
+            and self._inverter_controller.discharge_rate_is_load_following
+        ):
             stored = self.schedule_store.get_latest_schedule()
             if stored is not None:
                 idx = period - stored.optimization_period
@@ -2494,6 +2505,7 @@ class BatterySystemManager:
         # Store the schedule's desired discharge rate before inhibit check so that
         # apply_discharge_inhibit() can restore it when the inhibit sensor clears.
         self._desired_discharge_rate = discharge_rate
+        self._desired_grid_charge = grid_charge
 
         # Check discharge inhibit (e.g. EV actively charging during Tibber grid award)
         if discharge_rate > 0:
@@ -3032,7 +3044,14 @@ class BatterySystemManager:
                 self._desired_discharge_rate,
             )
 
-        self.controller.set_discharging_power_rate(target_rate)
+        # Route through the inverter controller's own per-period write path
+        # (same as _apply_period_schedule) rather than writing the EMS
+        # discharge_rate entity directly -- on VPP-style platforms
+        # (discharge_rate_is_load_following False) that entity is never
+        # read by hardware, which made this a dead write there (#324).
+        self._inverter_controller.apply_period(
+            self.controller, self._desired_grid_charge, target_rate
+        )
         self._last_applied_discharge_rate = target_rate
 
     def get_settings(self):

@@ -19,6 +19,7 @@ def _minimal_export(**overrides) -> DebugDataExport:
         "energy_provider_config": {},
         "addon_options": {},
         "entity_snapshot": {},
+        "ha_statistics": {},
         "historical_periods": [],
         "historical_summary": {"total_periods": 0, "periods_with_data": 0},
         "inverter_tou_segments": [],

@@ -29,6 +29,7 @@ _SECTION_HOME = "### Home Settings"
 _SECTION_ENERGY_PROVIDER = "### Energy Provider Configuration"
 _SECTION_BESS_CONFIG = "## BESS Configuration"
 _SECTION_ENTITY_SNAPSHOT = "## Entity Snapshot"
+_SECTION_HA_STATISTICS = "## HA Statistics (recorder replay data)"
 _SECTION_INVERTER_TOU = "## Inverter TOU Segments"
 _SECTION_HISTORICAL = "## Historical Sensor Data"
 _SECTION_SCHEDULES = "## Optimization Schedules"
@@ -55,6 +56,7 @@ class DebugLogData:
     home_settings: dict = field(default_factory=dict)
     addon_options: dict = field(default_factory=dict)
     entity_snapshot: dict = field(default_factory=dict)
+    ha_statistics: dict = field(default_factory=dict)
     inverter_tou_segments: list[dict] = field(default_factory=list)
     historical_periods: list[dict] = field(default_factory=list)
     last_schedule: dict = field(default_factory=dict)
@@ -129,6 +131,9 @@ def parse_debug_log(path: str) -> DebugLogData:
         elif section == _SECTION_ENTITY_SNAPSHOT:
             if isinstance(parsed, dict):
                 result.entity_snapshot = parsed
+        elif section == _SECTION_HA_STATISTICS:
+            if isinstance(parsed, dict):
+                result.ha_statistics = parsed
         elif section == _SECTION_INVERTER_TOU:
             if isinstance(parsed, list):
                 result.inverter_tou_segments = parsed
@@ -169,6 +174,7 @@ def parse_debug_log(path: str) -> DebugLogData:
             _SECTION_ENERGY_PROVIDER,
             _SECTION_BESS_CONFIG,
             _SECTION_ENTITY_SNAPSHOT,
+            _SECTION_HA_STATISTICS,
             _SECTION_INVERTER_TOU,
             _SECTION_HISTORICAL,
             _SECTION_SCHEDULES,

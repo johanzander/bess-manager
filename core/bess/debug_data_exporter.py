@@ -301,6 +301,7 @@ class DebugDataExport:
     energy_provider_config: dict
     addon_options: dict
     entity_snapshot: dict
+    ha_statistics: dict
     historical_periods: list[dict]
     historical_summary: dict
     inverter_tou_segments: list[dict]
@@ -344,6 +345,8 @@ class DebugDataAggregator:
             addon_options       — entity ID mappings + inverter device config
             inverter_tou_segments — seeds mock inverter with real hardware state
             historical_periods  — full JSON seeds the in-memory historical store
+            ha_statistics       — raw recorder stats behind ha_statistics strategy;
+                                  mock replays them verbatim instead of approximating
             price_data          — raw pre-markup prices for the optimization replay
 
         UC2 (AI behaviour analysis):
@@ -386,6 +389,7 @@ class DebugDataAggregator:
             energy_provider_config=self._serialize_energy_provider_config(),
             addon_options=self._serialize_addon_options(),
             entity_snapshot=self._serialize_entity_snapshot(),
+            ha_statistics=self._serialize_ha_statistics(),
             inverter_tou_segments=self._serialize_inverter_tou(),
             historical_periods=self._serialize_historical_data(),
             historical_summary=self._summarize_historical_data(),
@@ -768,6 +772,24 @@ class DebugDataAggregator:
         except Exception as e:
             logger.warning("Failed to serialize inverter TOU segments: %s", e)
             return []
+
+    def _serialize_ha_statistics(self) -> dict:
+        """Serialize the raw HA Recorder statistics behind the ha_statistics
+        consumption strategy, for exact-fidelity mock replay.
+
+        Best-effort: returns {} if the data source isn't available (not
+        configured, or the recorder has insufficient history) — this must
+        never break the debug export.
+
+        Returns:
+            {"statistic_id": str, "stats": list[{"start": ..., "change": ...}]}
+            or {} if unavailable.
+        """
+        try:
+            return self.system.get_ha_statistics_for_debug_export() or {}
+        except Exception as e:
+            logger.warning("Failed to serialize HA statistics: %s", e)
+            return {}
 
     def _serialize_historical_data(self) -> list[dict]:
         """Serialize historical data from today's periods.

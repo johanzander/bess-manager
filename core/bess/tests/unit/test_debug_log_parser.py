@@ -59,3 +59,39 @@ def test_raw_schedule_json_section_populates_input_data(tmp_path):
     assert log.input_data["horizon"] == 2
     assert log.input_data["buy_price"] == [0.3, 0.31]
     assert log.optimization_period == 63
+
+
+_HA_STATISTICS_LOG = """### Battery Settings
+
+```json
+{"total_capacity": 15.0, "min_soc": 47.0}
+```
+
+## HA Statistics (recorder replay data)
+
+**Statistic ID**: sensor.pv_growatt_total_load_energy
+
+**Entries**: 2
+
+```json
+{
+  "statistic_id": "sensor.pv_growatt_total_load_energy",
+  "stats": [
+    {"start": "2026-07-10T08:00:00+02:00", "change": 1.2},
+    {"start": "2026-07-10T09:00:00+02:00", "change": 0.8}
+  ]
+}
+```
+"""
+
+
+def test_ha_statistics_section_populates_raw_recorder_data(tmp_path):
+    log_path = tmp_path / "debug.md"
+    log_path.write_text(_HA_STATISTICS_LOG)
+
+    log = parse_debug_log(str(log_path))
+
+    assert log.ha_statistics, "Expected ha_statistics to be populated"
+    assert log.ha_statistics["statistic_id"] == "sensor.pv_growatt_total_load_energy"
+    assert len(log.ha_statistics["stats"]) == 2
+    assert log.ha_statistics["stats"][0]["change"] == 1.2

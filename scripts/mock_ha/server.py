@@ -13,7 +13,7 @@ import json
 import logging
 import os
 import re
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -58,6 +58,105 @@ _entity_registry: list[dict] = []
 _config_entries: list[dict] = []
 _devices: list[dict] = []
 _services: dict[str, Any] = {}
+# Hour-of-day (0-23) -> kWh consumed, derived from the scenario's replayed
+# historical periods. Stands in for HA Recorder statistics so the
+# ha_statistics consumption strategy can be exercised in mock replays when no
+# real recorder capture (_ha_statistics_raw) is available.
+_hourly_consumption_kwh: dict[int, float] = {}
+# statistic_id -> raw HA Recorder {"start", "change"} entries, captured
+# verbatim from the debug log's "## HA Statistics" section (exact real data,
+# preferred over _hourly_consumption_kwh's single-day approximation).
+_ha_statistics_raw: dict[str, list[dict]] = {}
+
+
+def _hourly_consumption_from_periods(periods: list) -> dict[int, float]:
+    """Sum actual home_consumption into hour-of-day buckets (period // 4).
+
+    A real HA Recorder reports the hourly 'change' in a cumulative load-energy
+    sensor; this reconstructs the same shape from the one real day of
+    consumption a debug log replay carries.
+    """
+    hourly: dict[int, float] = {}
+    for period_idx, entry in enumerate(periods):
+        if not isinstance(entry, dict) or entry.get("data_source") != "actual":
+            continue
+        hour = period_idx // 4
+        consumption = entry.get("energy", {}).get("home_consumption", 0.0)
+        hourly[hour] = hourly.get(hour, 0.0) + consumption
+    return hourly
+
+
+def _synthetic_recorder_statistics(start_time: str, end_time: str | None) -> list[dict]:
+    """Repeat the replayed day's hour-of-day consumption shape across the window.
+
+    _get_ha_statistics_forecast (battery_system_manager.py) groups hourly
+    'change' values by hour-of-day across a 7-day lookback; with only one real
+    day of history available, the same shape is replayed for every day.
+    """
+    start_dt = datetime.fromisoformat(start_time)
+    # No end_time means "up to now" — the mock has no live clock to bound
+    # against, so generate one day's worth (matches HA Recorder's hourly
+    # granularity; the caller only cares about hour-of-day buckets anyway).
+    end_dt = (
+        datetime.fromisoformat(end_time) if end_time else start_dt + timedelta(days=1)
+    )
+    stats = []
+    current = start_dt
+    while current < end_dt:
+        change = _hourly_consumption_kwh.get(current.hour)
+        if change is not None:
+            stats.append({"start": current.isoformat(), "change": change})
+        current += timedelta(hours=1)
+    return stats
+
+
+def _parse_recorder_start(start_val: Any, fallback_tz) -> datetime:
+    """Parse a HA Recorder statistics 'start' value (epoch ms/s or ISO string).
+
+    Duplicates the equivalent parsing in battery_system_manager.py's
+    _get_ha_statistics_forecast: scripts/mock_ha builds a standalone Docker
+    image with no access to core/bess (see scripts/mock_ha/Dockerfile), so the
+    two can't share a helper without restructuring that build.
+    """
+    if isinstance(start_val, (int, float)):
+        ts = start_val / 1000 if start_val > 1e12 else start_val
+        return datetime.fromtimestamp(ts, tz=fallback_tz)
+    return datetime.fromisoformat(str(start_val))
+
+
+def _real_recorder_statistics(
+    statistic_id: str, start_time: str, end_time: str | None
+) -> list[dict] | None:
+    """Raw recorder entries captured from a real debug log export, if any.
+
+    Returns None (not a list) when statistic_id has no captured data, so
+    callers can fall back to the synthesized approximation.
+    """
+    stats = _ha_statistics_raw.get(statistic_id)
+    if stats is None:
+        return None
+    start_dt = datetime.fromisoformat(start_time)
+    end_dt = datetime.fromisoformat(end_time) if end_time else None
+    # start_time/end_time are always timezone-aware in practice (the only
+    # caller, _fetch_ha_statistics_raw, builds them with an explicit tzinfo),
+    # but fall back to UTC rather than the host's local zone if that ever
+    # isn't true.
+    fallback_tz = start_dt.tzinfo or timezone.utc
+    filtered = []
+    for entry in stats:
+        start_val = entry.get("start")
+        if start_val is None:
+            continue
+        try:
+            entry_dt = _parse_recorder_start(start_val, fallback_tz)
+        except (ValueError, OverflowError, OSError):
+            continue
+        if entry_dt < start_dt:
+            continue
+        if end_dt is not None and entry_dt >= end_dt:
+            continue
+        filtered.append(entry)
+    return filtered
 
 
 def _generate_entity_registry(inverter_platform: str) -> list[dict]:
@@ -191,6 +290,27 @@ def _load_scenario() -> None:
     _ac_charge_times.update(scenario.get("ac_charge_times", {}))
     _ac_discharge_times.update(scenario.get("ac_discharge_times", {}))
     _timezone = scenario.get("timezone", "UTC")
+
+    ha_statistics = scenario.get("ha_statistics") or {}
+    statistic_id = ha_statistics.get("statistic_id")
+    stats = ha_statistics.get("stats")
+    if statistic_id and stats:
+        _ha_statistics_raw[statistic_id] = stats
+        logger.info(
+            "Loaded real recorder statistics for %s: %d entries (exact replay)",
+            statistic_id,
+            len(stats),
+        )
+    else:
+        _hourly_consumption_kwh.update(
+            _hourly_consumption_from_periods(scenario.get("historical_periods") or [])
+        )
+        if _hourly_consumption_kwh:
+            logger.info(
+                "No captured HA statistics in scenario — synthesized recorder "
+                "statistics from historical periods: %d hour(s) with data",
+                len(_hourly_consumption_kwh),
+            )
 
     # Build nordpool prices lookup for the mock get_prices_for_date service call.
     # Prices can come from two sources:
@@ -463,19 +583,52 @@ async def ha_websocket(ws: WebSocket) -> None:
             }
 
             if cmd_type == "recorder/statistics_during_period":
-                # Return empty statistics — mock has no recorder DB.
-                # Backend gracefully handles missing statistics.
-                empty = {sid: [] for sid in msg.get("statistic_ids", [])}
+                statistic_ids = msg.get("statistic_ids", [])
+                start_time = msg.get("start_time")
+                end_time = msg.get("end_time")
+                result = {}
+                for sid in statistic_ids:
+                    real = _real_recorder_statistics(sid, start_time, end_time)
+                    if real is not None:
+                        result[sid] = real
+                        logger.info(
+                            "WS %-40s → %s: captured HA statistics (exact replay)",
+                            cmd_type,
+                            sid,
+                        )
+                    elif _hourly_consumption_kwh:
+                        # Synthesize from the scenario's replayed historical
+                        # periods — no real recorder capture available. Same
+                        # values regardless of which statistic_id was asked
+                        # for; only used for load-consumption forecasting.
+                        result[sid] = _synthetic_recorder_statistics(
+                            start_time, end_time
+                        )
+                        logger.info(
+                            "WS %-40s → %s: synthesized from historical periods",
+                            cmd_type,
+                            sid,
+                        )
+                    else:
+                        result[sid] = []
+                        logger.info(
+                            "WS %-40s → %s: empty (no recorder in mock)", cmd_type, sid
+                        )
                 await ws.send_json(
-                    {"id": cmd_id, "type": "result", "success": True, "result": empty}
+                    {"id": cmd_id, "type": "result", "success": True, "result": result}
                 )
-                logger.info("WS %-40s → empty (no recorder in mock)", cmd_type)
             elif cmd_type == "recorder/list_statistic_ids":
-                # Return no known statistic ids — mock has no recorder DB.
+                # Advertise captured statistic_ids so find_statistic_id() can
+                # discover them when a WS caller queries under a different
+                # entity_id than the one the debug-log capture recorded (the
+                # mock has no other recorder DB to draw statistic_ids from).
+                result = [{"statistic_id": sid} for sid in _ha_statistics_raw]
                 await ws.send_json(
-                    {"id": cmd_id, "type": "result", "success": True, "result": []}
+                    {"id": cmd_id, "type": "result", "success": True, "result": result}
                 )
-                logger.info("WS %-40s → empty (no recorder in mock)", cmd_type)
+                logger.info(
+                    "WS %-40s → %d known statistic_id(s)", cmd_type, len(result)
+                )
             elif (result := _WS_HANDLERS.get(cmd_type)) is not None:
                 await ws.send_json(
                     {"id": cmd_id, "type": "result", "success": True, "result": result}

@@ -830,12 +830,6 @@ class BatterySystemManager:
 
     def _fetch_and_initialize_historical_data(self, status_callback=None) -> None:
         """Fetch and initialize historical data using quarterly resolution."""
-        if not is_influxdb_configured():
-            logger.info(
-                "InfluxDB is not configured — skipping historical data backfill"
-            )
-            return
-
         try:
             now = time_utils.now()
             current_period = now.hour * 4 + now.minute // 15
@@ -846,6 +840,12 @@ class BatterySystemManager:
 
             if current_period > 0 and self._load_historical_seed(current_period):
                 self.sensor_collector.warm_readings_cache()
+                return
+
+            if not is_influxdb_configured():
+                logger.info(
+                    "InfluxDB is not configured — skipping historical data backfill"
+                )
                 return
 
             if current_period > 0:
@@ -1218,15 +1218,22 @@ class BatterySystemManager:
 
         return avg_profile
 
-    def _get_ha_statistics_forecast(self) -> list[float]:
-        """Get consumption forecast from HA Recorder long-term statistics.
+    def _fetch_ha_statistics_raw(self) -> tuple[str, list[dict]]:
+        """Resolve the load-consumption statistic_id and fetch its raw 7-day stats.
 
-        Queries the last 7 days of hourly energy statistics for the load
-        consumption sensor and builds a time-of-day-shaped profile. Unlike
-        the flat "sensor" strategy, this captures intra-day variation
-        (morning/evening peaks, overnight baseline).
+        Shared by _get_ha_statistics_forecast (which reduces this to a
+        time-of-day profile) and get_ha_statistics_for_debug_export (which
+        exports it verbatim for exact-fidelity mock replay).
+
+        Returns:
+            (statistic_id, stats) — stats is the raw HA Recorder
+            list of {"start": ..., "change": ...} entries.
+
+        Raises:
+            HAStatisticsUnavailableError: sensor not configured, or no
+                statistics data available for it in the past 7 days.
         """
-        from datetime import time, timezone
+        from datetime import time
 
         # Resolve entity_id via controller's canonical resolution path
         try:
@@ -1286,6 +1293,39 @@ class BatterySystemManager:
                 f"No statistics data returned for {target_sensor} "
                 f"(statistic_id: {statistic_id}) in the past 7 days"
             )
+
+        return statistic_id, stats
+
+    def get_ha_statistics_for_debug_export(self) -> dict | None:
+        """Best-effort raw HA Recorder statistics, for the debug export.
+
+        Captures the exact {start, change} entries HA returned so a mock
+        replay can serve them back verbatim instead of approximating from
+        a single day of historical periods. Returns None if the
+        ha_statistics data source isn't available (e.g. not configured, or
+        the recorder has insufficient history) — this must never break the
+        debug export.
+        """
+        if self._controller is None:
+            return None
+        try:
+            statistic_id, stats = self._fetch_ha_statistics_raw()
+        except HAStatisticsUnavailableError:
+            return None
+        return {"statistic_id": statistic_id, "stats": stats}
+
+    def _get_ha_statistics_forecast(self) -> list[float]:
+        """Get consumption forecast from HA Recorder long-term statistics.
+
+        Queries the last 7 days of hourly energy statistics for the load
+        consumption sensor and builds a time-of-day-shaped profile. Unlike
+        the flat "sensor" strategy, this captures intra-day variation
+        (morning/evening peaks, overnight baseline).
+        """
+        from datetime import timezone
+
+        target_sensor, stats = self._fetch_ha_statistics_raw()
+        tz = time_utils.TIMEZONE
 
         # Group hourly change values by hour-of-day (0-23)
         hourly_buckets: dict[int, list[float]] = {h: [] for h in range(24)}

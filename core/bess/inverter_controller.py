@@ -84,6 +84,16 @@ class InverterController(ABC):
     # TOU schedule writes (SPH, SolaX native).
     supports_charge_rate_control: ClassVar[bool] = True
 
+    # Whether discharge_rate acts as a ceiling under native load-following
+    # firmware (only draws what's needed to cover an actual deficit) rather
+    # than an immediate forced power command executed regardless of actual
+    # load. True for TOU/load_first-based control (Growatt MIN cloud,
+    # solax_modbus TOU mode). False for VPP-style direct power control
+    # (SolaxController, solax_modbus VPP mode), where a discharge_rate>0
+    # written by the intra-period discharge gate (#187/#318) would force a
+    # full-power discharge instead of gently covering a dip (#324).
+    discharge_rate_is_load_following: ClassVar[bool] = True
+
     def discharge_resolution_kw(self, max_discharge_power_kw: float) -> float:
         """Smallest controllable discharge increment this platform can
         execute, in kW. Default: Growatt's integer-percent-of-max grid (1%

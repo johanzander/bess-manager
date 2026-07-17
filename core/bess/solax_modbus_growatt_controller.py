@@ -89,13 +89,32 @@ class SolaxModbusGrowattController(GrowattMinController):
         self._last_written_vpp_power: int | None = None
 
     @property
+    def _is_tou_control(self) -> bool:
+        """Single source of truth for the TOU-vs-VPP capability split below.
+
+        True in TOU mode: the EMS charge/discharge-rate registers are used
+        directly, and discharge_rate acts as a load_first ceiling. False in
+        VPP mode: power is driven by vpp_power (RAM) instead, as an
+        immediate forced command (#324) -- neither EMS-rate-control nor
+        load-following semantics apply.
+        """
+        return self.control_mode != "vpp"
+
+    @property
     def supports_charge_rate_control(self) -> bool:
         """VPP mode drives power via vpp_power (RAM); no EMS rate writes.
 
         TOU mode still uses the EMS charge/discharge-rate registers
         directly, so this stays True there (base class default).
         """
-        return self.control_mode != "vpp"
+        return self._is_tou_control
+
+    @property
+    def discharge_rate_is_load_following(self) -> bool:
+        """TOU mode's discharge_rate is a load_first ceiling; VPP mode's is
+        an immediate forced vpp_power command. See #324.
+        """
+        return self._is_tou_control
 
     # ── Abstract property ────────────────────────────────────────────────────
 

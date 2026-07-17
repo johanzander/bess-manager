@@ -62,6 +62,63 @@ class TestChargeRateControlCapability:
         assert controller.supports_charge_rate_control is False
 
 
+class TestDischargeRateLoadFollowingCapability:
+    """Verify discharge_rate_is_load_following is declared correctly per platform.
+
+    True means discharge_rate acts as a ceiling under native load-following
+    firmware (only draws what's needed to cover an actual deficit) — the
+    assumption intra_period_discharge_gate's SOLAR_EXPORT/SOLAR_STORAGE
+    override relies on (#187/#318). False means discharge_rate is executed
+    as an immediate forced power command regardless of actual load (VPP-style
+    control), where that override would force a full-power discharge instead
+    of gently covering a dip (#324).
+    """
+
+    def test_base_class_defaults_to_true(self):
+        assert InverterController.discharge_rate_is_load_following is True
+
+    def test_growatt_min_is_load_following(self):
+        assert GrowattMinController.discharge_rate_is_load_following is True
+
+    def test_growatt_sph_is_not_load_following(self):
+        # Currently inert (SPH's per-period write is a no-op and its batch
+        # grouping excludes SOLAR_EXPORT/SOLAR_STORAGE) -- explicit False
+        # guards against a future per-period write silently defaulting to
+        # load-following semantics.
+        assert GrowattSphController.discharge_rate_is_load_following is False
+
+    def test_solax_native_is_not_load_following(self):
+        assert SolaxController.discharge_rate_is_load_following is False
+
+    def test_solax_modbus_growatt_tou_mode_is_load_following(self):
+        controller = SolaxModbusGrowattController(
+            BatterySettings(
+                total_capacity=50.0,
+                max_charge_power_kw=5.0,
+                max_discharge_power_kw=5.0,
+                min_soc=10.0,
+                max_soc=95.0,
+                cycle_cost_per_kwh=0.05,
+            ),
+            control_mode="tou",
+        )
+        assert controller.discharge_rate_is_load_following is True
+
+    def test_solax_modbus_growatt_vpp_mode_is_not_load_following(self):
+        controller = SolaxModbusGrowattController(
+            BatterySettings(
+                total_capacity=50.0,
+                max_charge_power_kw=5.0,
+                max_discharge_power_kw=5.0,
+                min_soc=10.0,
+                max_soc=95.0,
+                cycle_cost_per_kwh=0.05,
+            ),
+            control_mode="vpp",
+        )
+        assert controller.discharge_rate_is_load_following is False
+
+
 # ── BSM capability property ─────────────────────────────────────────────────
 
 

@@ -313,6 +313,7 @@ def _compute_reward_grid(
     current_buy_price: float,
     current_sell_price: float,
     solar_production: float,
+    self_throttle_export_threshold_kwh: float = BATTERY_EXPORT_THRESHOLD_KWH,
 ) -> np.ndarray:
     """Vectorized form of `_compute_reward`'s reward calculation.
 
@@ -382,7 +383,7 @@ def _compute_reward_grid(
     # Discharging reward -- self-throttling fix (#240): overshoot below
     # BATTERY_EXPORT_THRESHOLD_KWH gets no export credit.
     grid_exported_discharge = np.where(
-        grid_exported <= BATTERY_EXPORT_THRESHOLD_KWH, 0.0, grid_exported
+        grid_exported <= self_throttle_export_threshold_kwh, 0.0, grid_exported
     )
     total_cost_discharge = (
         grid_imported * current_buy_price - grid_exported_discharge * current_sell_price
@@ -417,6 +418,7 @@ def _compute_reward(
     sell_price: list[float],
     solar_production: float,
     cost_basis: float,
+    self_throttle_export_threshold_kwh: float = BATTERY_EXPORT_THRESHOLD_KWH,
 ) -> tuple[float, float]:
     """Hot-path reward computation — returns scalars only, no dataclass allocation.
 
@@ -516,7 +518,7 @@ def _compute_reward(
         # classify_strategic_intent uses to call something BATTERY_EXPORT vs
         # LOAD_SUPPORT), treat the overshoot as self-throttled: no export
         # credit. At or above it, it's a genuine deliberate export.
-        if grid_exported <= BATTERY_EXPORT_THRESHOLD_KWH:
+        if grid_exported <= self_throttle_export_threshold_kwh:
             grid_exported = 0.0
 
     else:  # IDLE — passive solar charging
@@ -787,6 +789,7 @@ def _run_dynamic_programming(
     terminal_value_per_kwh: float = 0.0,
     currency: str = "SEK",
     max_charge_power_per_period: list[float] | None = None,
+    self_throttle_export_threshold_kwh: float = BATTERY_EXPORT_THRESHOLD_KWH,
 ) -> np.ndarray:
     """
     Run backward induction DP to compute optimal battery control policy.
@@ -880,6 +883,7 @@ def _run_dynamic_programming(
             current_buy_price=buy_price[t],
             current_sell_price=sell_price[t],
             solar_production=solar_production[t],
+            self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
         )
 
         next_i = np.round((next_soe - min_soe_kwh) / SOE_STEP_KWH).astype(np.int64)
@@ -913,6 +917,7 @@ def _run_dynamic_programming(
             current_buy_price=buy_price[t],
             current_sell_price=sell_price[t],
             solar_production=solar_production[t],
+            self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
         )
         value_bypass = reward_bypass.reshape(-1) + V[t + 1][np.arange(n_states)]
         V[t, :] = np.maximum(V[t, :], value_bypass)
@@ -939,6 +944,8 @@ def _discharge_candidates(
     dt: float,
     home_consumption: float,
     solar_production: float,
+    discharge_resolution_kw: float | None = None,
+    self_throttle_export_threshold_kwh: float = BATTERY_EXPORT_THRESHOLD_KWH,
 ) -> list[float]:
     """Candidate discharge magnitudes (kW, positive) to evaluate for the
     single-period objective (reward + interpolated continuation value) --
@@ -977,7 +984,11 @@ def _discharge_candidates(
     if p_max <= POWER_TOLERANCE_KW:
         return []
 
-    rate_step = battery_settings.max_discharge_power_kw / 100
+    rate_step = (
+        discharge_resolution_kw
+        if discharge_resolution_kw is not None
+        else battery_settings.max_discharge_power_kw / 100
+    )
     max_pct = int(np.floor(p_max / rate_step + 1e-9))
     min_pct = int(np.floor(POWER_CLASSIFICATION_THRESHOLD_KW / rate_step)) + 1
     if min_pct > max_pct:
@@ -986,11 +997,11 @@ def _discharge_candidates(
 
     # Finding 5: reward(p) has two immediate-reward breakpoints -- where
     # energy_balance crosses 0 (import stops) and where it crosses
-    # BATTERY_EXPORT_THRESHOLD_KWH (self-throttle ends, real export
-    # starts). Snap each to its nearest achievable percent step so the
-    # reward plateau's edge is represented too.
+    # self_throttle_export_threshold_kwh (self-throttle ends, real export
+    # starts). Snap each to its nearest achievable step so the reward
+    # plateau's edge is represented too.
     balance_zero_p = (home_consumption - solar_production) / dt
-    export_starts_p = balance_zero_p + BATTERY_EXPORT_THRESHOLD_KWH / dt
+    export_starts_p = balance_zero_p + self_throttle_export_threshold_kwh / dt
     for p in (balance_zero_p, export_starts_p):
         if 0.0 < p < p_max:
             pct = min(max_pct, max(min_pct, round(p / rate_step)))
@@ -1042,6 +1053,8 @@ def _best_action_at_continuous_state(
     sell_price: list[float],
     cost_basis: float,
     max_charge_power_per_period: list[float] | None,
+    discharge_resolution_kw: float | None = None,
+    self_throttle_export_threshold_kwh: float = BATTERY_EXPORT_THRESHOLD_KWH,
 ) -> tuple[float, float, float, float]:
     """One-step Bellman recompute at a true continuous SoE, using the
     already-known V[t+1, :] (linearly interpolated) as the continuation
@@ -1105,6 +1118,7 @@ def _best_action_at_continuous_state(
             buy_price=buy_price,
             sell_price=sell_price,
             cost_basis=cost_basis,
+            self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
         )
         value = reward + _interpolate_value(V_next, next_soe, battery_settings)
         if value > best_value:
@@ -1136,6 +1150,7 @@ def _best_action_at_continuous_state(
         buy_price=buy_price,
         sell_price=sell_price,
         cost_basis=cost_basis,
+        self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
     )
     value = reward + _interpolate_value(V_next, soe, battery_settings)
     if value > best_value:
@@ -1146,7 +1161,15 @@ def _best_action_at_continuous_state(
         best_reward = reward
 
     # Discharge -- exact breakpoint enumeration (Finding 1/2/3/5).
-    for p in _discharge_candidates(soe, battery_settings, dt, home, solar):
+    for p in _discharge_candidates(
+        soe,
+        battery_settings,
+        dt,
+        home,
+        solar,
+        discharge_resolution_kw=discharge_resolution_kw,
+        self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
+    ):
         consider(-p)
 
     # Charge (STORE) -- Finding 4: no grid search needed on this side at
@@ -1290,6 +1313,8 @@ def optimize_battery_schedule(
     terminal_value_per_kwh: float = 0.0,
     currency: str = "SEK",
     max_charge_power_per_period: list[float] | None = None,
+    discharge_resolution_kw: float | None = None,
+    self_throttle_export_threshold_kwh: float | None = None,
 ) -> OptimizationResult:
     """
     Battery optimization that eliminates dual cost calculation by using
@@ -1328,6 +1353,8 @@ def optimize_battery_schedule(
         initial_soe = battery_settings.min_soe_kwh
     if initial_cost_basis is None:
         initial_cost_basis = battery_settings.cycle_cost_per_kwh
+    if self_throttle_export_threshold_kwh is None:
+        self_throttle_export_threshold_kwh = BATTERY_EXPORT_THRESHOLD_KWH
 
     # Validate inputs to prevent impossible scenarios
     if initial_soe > battery_settings.max_soe_kwh:
@@ -1363,6 +1390,7 @@ def optimize_battery_schedule(
         terminal_value_per_kwh=terminal_value_per_kwh,
         currency=currency,
         max_charge_power_per_period=max_charge_power_per_period,
+        self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
     )
 
     # Step 2: Reconstruct the optimal path with continuous SoE propagation.
@@ -1398,6 +1426,8 @@ def optimize_battery_schedule(
             sell_price=sell_price,
             cost_basis=current_cost_basis,
             max_charge_power_per_period=max_charge_power_per_period,
+            discharge_resolution_kw=discharge_resolution_kw,
+            self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
         )
 
         period_data = _build_period_data(

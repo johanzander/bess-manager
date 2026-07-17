@@ -6,10 +6,12 @@ Tests schedule creation, updates, strategic intent classification, and
 schedule persistence using PeriodData structures.
 """
 
+from datetime import datetime, time
 from unittest.mock import patch
 
 import pytest
 
+from core.bess import time_utils
 from core.bess.models import PeriodData
 
 
@@ -244,11 +246,19 @@ class TestScheduleUpdates:
         ]
 
         # Battery discharged since midnight - re-optimize later in the day
-        # from a materially different SOC.
+        # from a materially different SOC. Pin wall-clock time so period 31
+        # (07:45) is treated as complete regardless of when this test runs
+        # (sensor_collector.collect_energy_data rejects collecting data for
+        # the current/future period).
         mock_controller.settings["battery_soc"] = 20
-        success = quarterly_battery_system.update_battery_schedule(
-            32, prepare_next_day=False
-        )
+        real_today = time_utils.today()
+        with patch("core.bess.battery_system_manager.time_utils.now") as mock_now:
+            mock_now.return_value = datetime.combine(
+                real_today, time(8, 15), tzinfo=time_utils.TIMEZONE
+            )
+            success = quarterly_battery_system.update_battery_schedule(
+                32, prepare_next_day=False
+            )
         assert success, "Should create period-32 re-optimization schedule"
 
         latest_schedule = quarterly_battery_system.schedule_store.get_latest_schedule()

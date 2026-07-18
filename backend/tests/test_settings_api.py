@@ -106,9 +106,14 @@ def mock_controller():
         result.update(sensors.get(platform, {}))
         return result
 
+    def _refresh_active_sensors() -> None:
+        active = _get_active_sensors()
+        ctrl.ha_controller.sensors = {k: v for k, v in active.items() if v}
+
     ctrl.settings_store.get_section.side_effect = _get_section
     ctrl.settings_store.save_section.side_effect = _save_section
     ctrl.settings_store.get_active_sensors.side_effect = _get_active_sensors
+    ctrl.refresh_active_sensors.side_effect = _refresh_active_sensors
 
     ctrl.ha_controller.sensors = {}
 

@@ -5,6 +5,7 @@ exercising the real _api_request / _service_call_with_retry / _get_raw_state
 code paths without needing a live Home Assistant instance.
 """
 
+import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -137,6 +138,21 @@ class TestApiRequest:
         )
         result = ctrl._api_request("get", "/api/states/sensor.battery_soc")
         assert result == {"state": "50"}
+
+    def test_404_logs_error_by_default(self, ctrl, caplog):
+        ctrl.session.get = _session_method_mock("get", return_value=_mock_404())
+        with caplog.at_level(logging.DEBUG, logger="core.bess.ha_api_controller"):
+            with pytest.raises(requests.HTTPError):
+                ctrl._api_request("get", "/api/states/sensor.missing")
+        assert any(r.levelno == logging.ERROR for r in caplog.records)
+
+    def test_404_logs_debug_when_optional(self, ctrl, caplog):
+        ctrl.session.get = _session_method_mock("get", return_value=_mock_404())
+        with caplog.at_level(logging.DEBUG, logger="core.bess.ha_api_controller"):
+            with pytest.raises(requests.HTTPError):
+                ctrl._api_request("get", "/api/states/sensor.missing", optional=True)
+        assert not any(r.levelno == logging.ERROR for r in caplog.records)
+        assert any(r.levelno == logging.DEBUG for r in caplog.records)
 
 
 # ── _service_call_with_retry ─────────────────────────────────────────────────

@@ -95,3 +95,44 @@ def test_ha_statistics_section_populates_raw_recorder_data(tmp_path):
     assert log.ha_statistics["statistic_id"] == "sensor.pv_growatt_total_load_energy"
     assert len(log.ha_statistics["stats"]) == 2
     assert log.ha_statistics["stats"][0]["change"] == 1.2
+
+
+# Regression test: the real "## System Health Status (point-in-time snapshot
+# at export)" header (debug_report_formatter.py) has a parenthetical suffix
+# that _SECTION_HEALTH_STATUS's exact-string match didn't account for, so the
+# section-header scan never advanced past "## System Information" and the
+# Health Status JSON block that follows got silently captured as if it were
+# System Information -- overwriting the real system_info dict, and with it
+# the timezone field every debug log actually carries. Found while replaying
+# a real production debug log: from_debug_log.py reported "No timezone in
+# log" even though the log's own "## System Information" section plainly had
+# one, and the mock replay's day-boundary/price-lookup logic misbehaved as a
+# result of falling back to local server time instead.
+_SYSTEM_INFO_THEN_HEALTH_STATUS_LOG = """## System Information
+
+```json
+{"bess_version": "9.9.0", "timezone": "Europe/Stockholm"}
+```
+
+## System Health Status (point-in-time snapshot at export)
+
+```json
+{"timestamp": "2026-07-18T01:03:15", "system_mode": "demo", "checks": []}
+```
+
+### Battery Settings
+
+```json
+{"total_capacity": 15.0, "min_soc": 47.0}
+```
+"""
+
+
+def test_health_status_header_does_not_overwrite_system_info(tmp_path):
+    log_path = tmp_path / "debug.md"
+    log_path.write_text(_SYSTEM_INFO_THEN_HEALTH_STATUS_LOG)
+
+    log = parse_debug_log(str(log_path))
+
+    assert log.timezone == "Europe/Stockholm"
+    assert log.system_info == {"bess_version": "9.9.0", "timezone": "Europe/Stockholm"}

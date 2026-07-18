@@ -319,3 +319,72 @@ class TestSerializePreviousDays:
         agg = self._make_aggregator(store)
 
         assert agg._serialize_previous_days() == []
+
+
+class TestSerializeEntitySnapshot:
+    """Regression coverage: the entity snapshot used to only walk
+    METHOD_SENSOR_MAP (a curated subset for health-check display), missing
+    entities read via other paths that are only registered in
+    controller.sensors — e.g. per-slot TOU segment entities and Growatt VPP
+    registers, both resolved via _get_entity_for_service/_resolve_entity_id,
+    which look up controller.sensors directly, bypassing METHOD_SENSOR_MAP.
+    Fixed by capturing controller.sensors directly instead. (controller.sensors
+    itself is kept fresh by BESSController.refresh_active_sensors(), see #332
+    — the exporter can rely on it without needing its own freshness plumbing.)
+    """
+
+    def _make_aggregator(self, controller):
+        agg = DebugDataAggregator.__new__(DebugDataAggregator)
+        agg.system = MagicMock()
+        agg.system._controller = controller
+        agg.system._energy_provider_config = {"provider": "nordpool_official"}
+        return agg
+
+    def test_no_controller_returns_empty(self):
+        agg = self._make_aggregator(None)
+        assert agg._serialize_entity_snapshot() == {}
+
+    def test_captures_every_entity_in_controller_sensors(self):
+        controller = MagicMock()
+        controller.sensors = {
+            "battery_soc": "sensor.battery_soc",
+            # TOU segment sub-entity — not in METHOD_SENSOR_MAP, only ever
+            # resolved via _get_entity_for_service("tou_time_3_end").
+            "tou_time_3_end": "select.pv_growatt_time_3_end",
+            # Growatt VPP register — same gap, resolved via _get_raw_state.
+            "growatt_vpp_status": "select.pv_growatt_vpp_status",
+        }
+        controller.get_entity_state_raw.side_effect = lambda entity_id: {
+            "entity_id": entity_id,
+            "state": "42",
+        }
+        agg = self._make_aggregator(controller)
+
+        out = agg._serialize_entity_snapshot()
+
+        assert set(out.keys()) == {
+            "sensor.battery_soc",
+            "select.pv_growatt_time_3_end",
+            "select.pv_growatt_vpp_status",
+        }
+
+    def test_fetch_failure_for_one_entity_does_not_drop_others(self):
+        controller = MagicMock()
+        controller.sensors = {
+            "battery_soc": "sensor.battery_soc",
+            "broken": "sensor.broken",
+        }
+
+        def fake_get(entity_id):
+            if entity_id == "sensor.broken":
+                raise RuntimeError("HA unreachable")
+            return {"entity_id": entity_id, "state": "1"}
+
+        controller.get_entity_state_raw.side_effect = fake_get
+        agg = self._make_aggregator(controller)
+
+        out = agg._serialize_entity_snapshot()
+
+        assert out == {
+            "sensor.battery_soc": {"entity_id": "sensor.battery_soc", "state": "1"}
+        }

@@ -6,8 +6,11 @@ itself, which closes the loop on issue #91 (wrong Nordpool area discovered
 because BESS never saw the actual config-entry shape).
 """
 
+from datetime import timedelta
 from unittest.mock import MagicMock
 
+from core.bess import time_utils
+from core.bess.daily_view_builder import DailyView
 from core.bess.debug_data_exporter import (
     _REDACTED,
     DebugDataAggregator,
@@ -17,6 +20,7 @@ from core.bess.debug_data_exporter import (
     _scrub_config_entry,
     _scrub_device,
 )
+from core.bess.models import EnergyData, PeriodData
 
 
 class TestIsSecretKey:
@@ -261,6 +265,60 @@ class TestSerializeHaWsDiscovery:
             "read_time_segments",
             "update_time_segment",
         ]
+
+
+def _make_energy() -> EnergyData:
+    return EnergyData(
+        solar_production=0.0,
+        home_consumption=0.0,
+        battery_charged=0.0,
+        battery_discharged=0.0,
+        grid_imported=0.0,
+        grid_exported=0.0,
+        battery_soe_start=10.0,
+        battery_soe_end=10.0,
+    )
+
+
+class TestSerializePreviousDays:
+    def _make_aggregator(self, daily_view_store):
+        agg = DebugDataAggregator.__new__(DebugDataAggregator)
+        agg.system = MagicMock()
+        agg.system.daily_view_store = daily_view_store
+        return agg
+
+    def test_includes_yesterdays_persisted_view(self):
+        yesterday = time_utils.today() - timedelta(days=1)
+        view = DailyView(
+            date=yesterday,
+            periods=[PeriodData(period=0, energy=_make_energy())],
+            total_savings=12.5,
+            actual_count=1,
+            predicted_count=0,
+        )
+        store = MagicMock()
+        store.load_day.side_effect = lambda day: view if day == yesterday else None
+        agg = self._make_aggregator(store)
+
+        out = agg._serialize_previous_days()
+
+        assert len(out) == 1
+        assert out[0]["date"] == yesterday
+        assert out[0]["total_savings"] == 12.5
+
+    def test_no_persisted_views_returns_empty_list(self):
+        store = MagicMock()
+        store.load_day.return_value = None
+        agg = self._make_aggregator(store)
+
+        assert agg._serialize_previous_days() == []
+
+    def test_store_exception_returns_empty_list(self):
+        store = MagicMock()
+        store.load_day.side_effect = RuntimeError("disk error")
+        agg = self._make_aggregator(store)
+
+        assert agg._serialize_previous_days() == []
 
 
 class TestSerializeEntitySnapshot:

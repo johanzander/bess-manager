@@ -20,12 +20,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
-from settings_store import SettingsStore
 
 # Import BESS system modules
 from core.bess import time_utils
 from core.bess.battery_system_manager import BatterySystemManager
 from core.bess.ha_api_controller import HomeAssistantAPIController
+from core.bess.settings_store import SettingsStore
 
 # Get ingress prefix from environment variable
 INGRESS_PREFIX = os.environ.get("INGRESS_PREFIX", "")

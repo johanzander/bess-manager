@@ -13,11 +13,11 @@ import pytest
 from api import router
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from settings_store import VALID_PLATFORMS
 
 from core.bess import time_utils
 from core.bess.models import DecisionData, EnergyData, OptimizationResult, PeriodData
 from core.bess.schedule_store import StoredSchedule
+from core.bess.settings_store import VALID_PLATFORMS
 
 _test_app = FastAPI()
 _test_app.include_router(router)

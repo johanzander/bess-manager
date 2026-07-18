@@ -123,6 +123,20 @@ step — per `docs/superpowers/specs/2026-07-09-release-workflow-design.md`,
 ever renames or copies that section, it never authors it. Skipping this here
 means the release skill has to backfill it later from a colder context.
 
+**Documentation check (mandatory, not optional):** if the fix changed a
+mechanism, formula, threshold, or code path that `docs/agents/bess-knowledge.md`
+or `docs/SOFTWARE_DESIGN.md` describes, update the affected section in this
+same PR. These two files are read as ground truth by the AI chat, the
+GitHub analysis agent, and future implementers — a removed/changed mechanism
+left undocumented silently rots into a wrong answer later (found in practice:
+a "Bellman-optimality guardrail removal" refactor left both docs describing a
+profit-threshold gate and a reward floor that no longer existed, and a FIFO
+cost-basis claim that was never true). Concretely: grep both files for any
+function/field/formula your diff touches before opening the PR, not after.
+If neither file mentions anything your change touches, say so explicitly in
+the PR description rather than silently skipping — a reviewer shouldn't have
+to guess whether it was checked.
+
 Commit per `docs/agents/workflow.md` format (subject + blank line + body
 explaining WHY). Open a draft PR against `main` via
 `superpowers:finishing-a-development-branch` (Option 2: push + PR), body:
@@ -204,6 +218,7 @@ flow above, which stops at draft-PR-open per the Step 10 constraints.
 | "the plan doc is useful context, keep it in the PR" | Once code and tests exist, the plan only drifts — it's not the source of truth. Delete it before Step 9; keep the spec if one exists. |
 | "the user is in a hurry, just open the PR" | Time pressure from the user is not permission to skip Step 8 — it's the reason to say so explicitly and give a real ETA instead. |
 | "I'll just watch the background agent run" | Defeats the point — the whole reason it's backgrounded is so the session isn't held open through the slow suite. Let the notification bring you back. |
+| "the fix is small, docs don't need touching" | Small fixes are exactly what silently invalidates a one-line doc claim (a removed threshold, a renamed formula). Grep the two design docs before opening the PR, every time. |
 
 ## Red Flags — Stop and Go Back
 
@@ -216,6 +231,8 @@ flow above, which stops at draft-PR-open per the Step 10 constraints.
   comment already exists.
 - About to run the slow suite inline in the main session instead of
   dispatching the Step 6 background agent.
+- About to open the PR without checking whether the fix invalidates a claim
+  in `docs/agents/bess-knowledge.md` or `docs/SOFTWARE_DESIGN.md`.
 
 ## Quick Reference
 

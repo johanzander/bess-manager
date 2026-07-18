@@ -80,7 +80,7 @@ def start() -> None
 2. **Backward Induction**: Starting from the last period, work backwards evaluating all feasible actions (charge/discharge/idle) at each (period, SOE) cell
 3. **Reward + Future Value**: For each action, compute the immediate reward (grid cost savings minus cycle cost) plus the optimal future value from the resulting SOE state
 4. **Policy Extraction**: Forward-simulate from the initial SOE, following the optimal action at each step to produce the final schedule
-5. **Profitability Gate**: Reject the schedule in favour of all-IDLE if total savings fall below a horizon-scaled minimum threshold
+5. **All-IDLE Safety Net**: Unconditionally compute an all-IDLE schedule and swap it in only if its cost is cheaper than the optimized schedule's — a plain O(1) comparison, not a configurable/horizon-scaled threshold. This catches numerical residual from SOE discretization; it is not an economic profitability gate. (An earlier threshold-based gate was removed in the "Bellman-optimality guardrail removal" refactor — the DP's backward induction already finds the Bellman-optimal schedule, so an extra economic veto was redundant. See `core/bess/dp_battery_algorithm.py:1514-1536`.)
 
 **Inputs**:
 
@@ -163,7 +163,7 @@ class StoredSchedule:
 **Base class** `InverterController` provides shared intent-to-control mapping, hourly settings aggregation, and the abstract schedule interface. Four subclasses implement hardware-specific logic:
 
 - **GrowattMinController** — Growatt MIN/MID/MOD (AC-coupled, cloud). Groups quarterly periods into TOU intervals (max 9 segments). Only creates segments for battery-first/grid-first; idle periods use load-first default. Writes via `growatt_server.update_time_segment` service call.
-- **GrowattSolaxModbusController** — Growatt MIN/MID/MOD (AC-coupled, local Modbus). Subclasses `GrowattMinController` — identical scheduling algorithm. Overrides only the I/O layer: writes via `select.select_option` (4 per slot) + `button.press` (1 per slot). Reads via entity state queries.
+- **SolaxModbusGrowattController** — Growatt MIN/MID/MOD (AC-coupled, local Modbus). Subclasses `GrowattMinController` — identical scheduling algorithm. Overrides only the I/O layer: writes via `select.select_option` (4 per slot) + `button.press` (1 per slot). Reads via entity state queries.
 - **GrowattSphController** — Growatt SPH (DC-coupled). Uses separate charge/discharge period lists (max 3 each) with global power and SOC settings per write call. Writes via `growatt_server.write_ac_charge_times` / `write_ac_discharge_times`.
 - **SolaxController** — SolaX (Modbus VPP). Issues per-period active-power commands instead of storing a persistent TOU schedule. Idle/solar periods disable VPP; charge/discharge periods set a watt target with autorepeat.
 
@@ -271,34 +271,33 @@ The DP algorithm uses **backward induction** to find the globally optimal batter
 
 **Actions**: Discretized charge/discharge power levels, filtered by physical constraints (available energy, remaining capacity, power limits, temperature derating).
 
-**Transition**: Each action updates SOE accounting for charging/discharging efficiency losses, and updates the cost basis of stored energy (FIFO accounting).
+**Temperature derating**: on cold days, max charge power can be capped below the configured limit via a weather-forecast-driven derating curve (`core/bess/battery_system_manager.py:1917-1966`, `_get_temperature_derated_charge_limits`). If the weather entity isn't configured, this silently returns no derating rather than failing — an installation without a weather entity behaves as if derating doesn't exist, by design, not by error.
+
+**`charging_power_rate` limitation**: this settings-page value only seeds the initial charge-power target before the first control cycle; every cycle after that, `adjust_charging_power()` (`core/bess/battery_system_manager.py:2037-2064`) derives the actual hardware rate from `INTENT_TO_CONTROL` (always 0% or 100%), never re-reading the configured percentage. Tracked as a known bug in `TODO.md`, not a documented feature.
+
+**Discharge inhibit**: an externally detected `binary_sensor` (entity ID suffix `_charging`/`_is_charging`) can force `discharge_rate` to 0 independent of the DP schedule, polled every minute (`core/bess/battery_system_manager.py:3089-3113`) and applied at schedule-write time (`core/bess/battery_system_manager.py:2578-2582`). This is the most common reason observed hardware behavior diverges from the planned schedule.
+
+**Transition**: Each action updates SOE accounting for charging/discharging efficiency losses, and updates the cost basis of stored energy. Cost basis is a **weighted average**, not FIFO — there is no queue of cost "layers". On charge: `new_cost_basis = (soe * cost_basis + new_energy_cost) / next_soe` (`core/bess/dp_battery_algorithm.py:496-498`). On discharge, `cost_basis` is left unchanged.
 
 **Objective**: Minimize net electricity cost (grid import cost minus export revenue) while accounting for battery cycle degradation costs and a terminal value for energy remaining at end of horizon.
 
 **Output**: For each period, the algorithm produces the optimal battery action, the resulting detailed energy flows (solar-to-home, grid-to-battery, etc.), economic data (costs, savings), and the strategic intent classification.
 
-**Profit threshold**: After optimization, total savings are compared against a horizon-scaled minimum threshold. If savings are too low relative to remaining day fraction, the schedule is rejected in favor of all-IDLE to prevent excessive cycling for marginal gains.
+**All-IDLE safety net**: See the "All-IDLE Safety Net" step above — this is a numerical residual check, not an economic profit threshold.
 
 ### Energy Flow Calculation
 
-The system decomposes measured energy totals into detailed flows (e.g., solar-to-home, grid-to-battery) using energy conservation constraints:
+The system decomposes measured energy totals into detailed flows (e.g., solar-to-battery, grid-to-battery) using energy conservation, but flows are **clamped to measured grid totals** (`grid_imported`/`grid_exported`) rather than derived by pure subtraction — pure subtraction can invent flows out of cross-sensor noise (fixed in PR #342). See `core/bess/models.py` (`EnergyData._calculate_detailed_flows`, ~lines 90-146) and `core/bess/energy_flow_calculator.py` (~lines 176-183) for the current formulas, e.g.:
 
 ```python
-
-# Home load priority - consume solar directly first
-
-solar_to_home = min(solar_production, home_consumption)
-
-# Remaining solar allocated to battery then grid
-
-solar_to_battery = min(remaining_solar, battery_charged)
-solar_to_grid = remaining_solar - solar_to_battery
-
-# Grid fills remaining consumption and battery charging
-
-grid_to_home = max(0, home_consumption - solar_to_home)
-grid_to_battery = max(0, battery_charged - solar_to_battery)
+solar_to_battery = max(0, solar_production - export_to_grid
+                         - self_consumption + battery_discharged)
+solar_to_battery = min(solar_to_battery, battery_charged, solar_production)
 ```
+
+Home consumption gets solar first (free), then grid; battery charges from
+solar first (free), then grid (paid) — but the split is reconciled against
+measured grid import/export, not assumed from production figures alone.
 
 ### Decision Intelligence
 
@@ -382,13 +381,13 @@ The system supports multiple inverter platforms, each with a dedicated controlle
 | Platform ID | Inverter | HA Integration | Control Method | Controller Class |
 |---|---|---|---|---|
 | `growatt_min` | Growatt MIC/MIN/MOD/MID | `growatt_server` (cloud) | TOU service calls | `GrowattMinController` |
-| `growatt_solax_modbus` | Growatt MIC/MIN/MOD/MID | `solax_modbus` (local Modbus) | TOU entity writes | `GrowattSolaxModbusController` |
+| `growatt_solax_modbus` | Growatt MIC/MIN/MOD/MID | `solax_modbus` (local Modbus) | TOU entity writes | `SolaxModbusGrowattController` |
 | `growatt_sph` | Growatt SPH | `growatt_server` (cloud) | AC charge/discharge periods | `GrowattSphController` |
 | `solax` | SolaX | `solax_modbus` (local Modbus) | VPP active-power commands | `SolaxController` |
 
 The active platform is stored in `inverter.platform`. Switching platform at runtime calls `BatterySystemManager.switch_inverter_platform()`, which destroys the current `InverterController` and creates the correct subclass. No restart is required.
 
-`GrowattSolaxModbusController` subclasses `GrowattMinController` — the scheduling algorithm (9 TOU slots, differential updates, corruption recovery) is identical. Only the hardware I/O differs: `growatt_server` uses a single service call per slot, while `solax_modbus` uses 4 entity writes (`select.select_option`) plus a button press per slot.
+`SolaxModbusGrowattController` subclasses `GrowattMinController` — the scheduling algorithm (9 TOU slots, differential updates, corruption recovery) is identical. Only the hardware I/O differs: `growatt_server` uses a single service call per slot, while `solax_modbus` uses 4 entity writes (`select.select_option`) plus a button press per slot.
 
 ### Platform Capabilities
 
@@ -608,6 +607,20 @@ The system includes comprehensive health checking:
 - **Energy Balance**: Physics validation of measured energy flows
 - **Optimization Health**: Algorithm convergence and result validation
 - **Hardware Connection**: Inverter communication and control verification
+
+**Severity model**: each component check is governed by two flags —
+`is_required` (is this component critical to the system, used to set the
+dashboard's `has_critical_errors` banner) and `required_methods` (which
+specific sensors within the component must succeed for it to be ERROR
+rather than WARNING). `determine_health_status()`
+(`core/bess/health_check.py:80-127`) combines them into three outcomes: ERROR
+only when a *required* sensor is missing/failing, WARNING when only an
+*optional* sensor fails, and SKIPPED for sensors intentionally left
+unconfigured (these don't count as a failure at all). A component with
+`is_required=False` should never surface as ERROR — if it does, check
+whether `required_methods` was mistakenly passed as "all methods" instead
+of derived from `is_required` (see `TODO.md`'s "Simplify Health Check
+Severity Model" for the known fragility here).
 
 ## API Architecture
 

@@ -133,6 +133,32 @@ class TestEnergyData:
         assert is_valid, f"Energy balance should be valid: {message}"
         assert "Energy balance OK" in message
 
+    def test_detailed_flows_never_exceed_aggregate_totals(self):
+        """Cross-sensor noise must not be misattributed to a real-looking flow.
+
+        Reproduces a real bundle period where independent lifetime-counter
+        sensors disagreed by ~0.1 kWh (within validate_energy_balance's 0.2 kWh
+        tolerance). home_consumption and battery_discharged both derive to
+        exactly 0, but grid_imported/grid_exported are nonzero. The detailed
+        flow split must not invent grid_to_home or battery_to_grid flows for
+        entities that consumed/discharged nothing.
+        """
+        energy = EnergyData(
+            solar_production=0.3999999999996362,
+            home_consumption=0.0,
+            grid_imported=0.3000000000001819,
+            grid_exported=0.3999999999996362,
+            battery_charged=0.4000000000005457,
+            battery_discharged=0.0,
+            battery_soe_start=2.0,
+            battery_soe_end=2.2,
+        )
+
+        # No home consumption -> no flow can be attributed to home.
+        assert energy.grid_to_home == 0.0
+        # No battery discharge -> no flow can be attributed to battery export.
+        assert energy.battery_to_grid == 0.0
+
     def test_energy_balance_validation_with_tolerance(self):
         """Test energy balance validation respects tolerance."""
         energy = EnergyData(

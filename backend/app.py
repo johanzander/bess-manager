@@ -250,6 +250,21 @@ class BESSController:
 
         return options
 
+    def refresh_active_sensors(self) -> None:
+        """Sync the live ha_controller.sensors map from persisted settings.
+
+        ha_controller.sensors is a plain dict copy, not a live view of the
+        settings store — it only reflects the sensor map that was active when
+        it was last assigned. Any settings mutation that can change which
+        sensors are active (a direct sensor edit, or an inverter/growatt
+        platform switch, which selects a different per-platform sensor
+        sub-dict) must call this afterward, or the copy goes stale until the
+        next call or a process restart. This is the single place that
+        performs the sync — call sites should not reimplement it.
+        """
+        active = self.settings_store.get_active_sensors()
+        self.ha_controller.sensors = {k: v for k, v in active.items() if v}
+
     def apply_discovered_config(
         self,
         sensor_map: dict,
@@ -273,7 +288,7 @@ class BESSController:
         )
 
         # Apply to running controller so BESS starts using new sensors immediately
-        self.ha_controller.sensors.update({k: v for k, v in sensor_map.items() if v})
+        self.refresh_active_sensors()
         if growatt_device_id:
             self.ha_controller.growatt_device_id = growatt_device_id
         if nordpool_area:

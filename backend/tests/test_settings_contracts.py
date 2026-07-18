@@ -41,7 +41,6 @@ from datetime import date
 from unittest.mock import MagicMock, patch
 
 import pytest
-import settings_store as _sm
 from api_conversion import (
     BATTERY_MODEL_ATTRS,
     BATTERY_REQUIRED_FIELDS,
@@ -49,9 +48,10 @@ from api_conversion import (
     HOME_REQUIRED_FIELDS,
     PRICE_REQUIRED_FIELDS,
 )
-from settings_store import SettingsStore
 
+import core.bess.settings_store as _sm
 from core.bess.settings import BatterySettings, HomeSettings
+from core.bess.settings_store import SettingsStore
 
 # ---------------------------------------------------------------------------
 # Helpers

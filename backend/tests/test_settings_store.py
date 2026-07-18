@@ -8,13 +8,14 @@ import json
 import os
 
 import pytest
-import settings_store as _sm
 from api_dataclasses import (
     APISensorsPayload,
     APISetupCompletePayload,
 )
 from pydantic import ValidationError
-from settings_store import SettingsStore
+
+import core.bess.settings_store as _sm
+from core.bess.settings_store import SettingsStore
 
 # ---------------------------------------------------------------------------
 # Helpers

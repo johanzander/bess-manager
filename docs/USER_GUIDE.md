@@ -2,6 +2,8 @@
 
 Welcome to the BESS Manager! This guide will help you understand the interface, interpret optimization results, and get the most out of your battery storage system.
 
+For a full explanation of *why* the optimizer decides what it decides — the economics, the reasoning model, and what the intent labels mean — see [ALGORITHM_EXPLAINED.md](ALGORITHM_EXPLAINED.md).
+
 ## Getting Started
 
 Once installed and configured, access your BESS Manager dashboard through:

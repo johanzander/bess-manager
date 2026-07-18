@@ -4,6 +4,8 @@
 
 The Battery Energy Storage System (BESS) Manager is a Home Assistant add-on that optimizes battery storage systems for cost savings through price-based arbitrage and solar integration. The system uses dynamic programming optimization to generate optimal daily battery schedules at 15-minute (quarterly) resolution while adapting to real-time conditions.
 
+For the reasoning model and economics behind the algorithm's decisions — not just its implementation — see [ALGORITHM_EXPLAINED.md](ALGORITHM_EXPLAINED.md).
+
 ## Architecture Principles
 
 - **Event-Driven Design**: Hourly updates and schedule adaptations based on real measurements

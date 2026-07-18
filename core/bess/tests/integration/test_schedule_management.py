@@ -6,10 +6,12 @@ Tests schedule creation, updates, strategic intent classification, and
 schedule persistence using PeriodData structures.
 """
 
+from datetime import datetime, time
 from unittest.mock import patch
 
 import pytest
 
+from core.bess import time_utils
 from core.bess.models import PeriodData
 
 
@@ -228,12 +230,28 @@ class TestScheduleUpdates:
         with the midnight SOC instead of the SOE the DP actually started
         this run from.
         """
+        # Pin wall-clock time for both runs so period 31 (07:45) is treated
+        # as complete regardless of when this test executes
+        # (sensor_collector.collect_energy_data rejects collecting data for
+        # the current/future period), and so the two runs get monotonically
+        # increasing ScheduleStore timestamps: get_latest_schedule() picks
+        # the schedule with the max stored timestamp, so if only the second
+        # call were pinned (to an earlier wall-clock hour than whatever real
+        # time the first, unpinned call happened to run at), it would look
+        # "older" than the midnight schedule and get_latest_schedule() would
+        # silently return the stale one instead.
+        real_today = time_utils.today()
+
         # First run of the day (period 0) sets _initial_soc_pct from the
         # mocked 50% midnight SOC.
         mock_controller.settings["battery_soc"] = 50
-        success = quarterly_battery_system.update_battery_schedule(
-            0, prepare_next_day=False
-        )
+        with patch("core.bess.battery_system_manager.time_utils.now") as mock_now:
+            mock_now.return_value = datetime.combine(
+                real_today, time(0, 0), tzinfo=time_utils.TIMEZONE
+            )
+            success = quarterly_battery_system.update_battery_schedule(
+                0, prepare_next_day=False
+            )
         assert success, "Should create midnight schedule"
 
         midnight_schedule = (
@@ -246,9 +264,13 @@ class TestScheduleUpdates:
         # Battery discharged since midnight - re-optimize later in the day
         # from a materially different SOC.
         mock_controller.settings["battery_soc"] = 20
-        success = quarterly_battery_system.update_battery_schedule(
-            32, prepare_next_day=False
-        )
+        with patch("core.bess.battery_system_manager.time_utils.now") as mock_now:
+            mock_now.return_value = datetime.combine(
+                real_today, time(8, 15), tzinfo=time_utils.TIMEZONE
+            )
+            success = quarterly_battery_system.update_battery_schedule(
+                32, prepare_next_day=False
+            )
         assert success, "Should create period-32 re-optimization schedule"
 
         latest_schedule = quarterly_battery_system.schedule_store.get_latest_schedule()

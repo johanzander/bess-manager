@@ -283,17 +283,39 @@ class TestGatherOptimizationDataExtended:
 class TestCalculateTerminalValue:
     """Test _calculate_terminal_value() method."""
 
-    def test_zero_when_horizon_extends_past_today(self):
-        """Terminal value should be 0.0 when DP has explicit tomorrow data."""
+    def test_nonzero_when_horizon_extends_past_today(self):
+        """Terminal value should still apply the median/cap formula when the
+        horizon extends past today (#345) — the caller already truncates
+        buy_prices/sell_prices to the current optimization window, so there
+        is no reason to zero out the estimate just because that window
+        happens to cross midnight-today.
+        """
         source = MockSource([1.0] * 96)
         system = _make_system(source)
 
-        # 192 buy prices remaining but only ~96 today periods remaining from period 0
+        # 192 buy prices remaining (extends past today's ~96 remaining periods
+        # from period 0) — should use the same median/cap formula as the
+        # today-only case, not return 0.0.
         terminal_value = system._calculate_terminal_value(
             buy_prices=[1.0] * 192, sell_prices=[0.8] * 192, optimization_period=0
         )
 
-        assert terminal_value == 0.0
+        median_price = 1.0
+        max_sell_price = 0.8
+        buy_based = max(
+            0.0,
+            median_price * system.battery_settings.efficiency_discharge
+            - system.battery_settings.cycle_cost_per_kwh,
+        )
+        sell_cap = max(
+            0.0,
+            max_sell_price * system.battery_settings.efficiency_discharge
+            - system.battery_settings.cycle_cost_per_kwh,
+        )
+        expected = min(buy_based, sell_cap)
+
+        assert terminal_value == pytest.approx(expected)
+        assert terminal_value > 0.0
 
     def test_positive_when_today_only(self):
         """Terminal value should be positive when only today's data is available."""

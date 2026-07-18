@@ -323,7 +323,6 @@ class DebugDataAggregator:
         self,
         system: BatterySystemManager,
         settings_data: dict | None = None,
-        active_sensors: dict | None = None,
     ):
         """Initialize aggregator with system manager.
 
@@ -331,17 +330,9 @@ class DebugDataAggregator:
             system: BatterySystemManager instance to export data from
             settings_data: Full settings store data for debug export.
                 If None, addon_options in the export will be empty.
-            active_sensors: Fresh SettingsStore.get_active_sensors() result —
-                the flat, currently-active sensor_key -> entity_id map. Used
-                for the entity snapshot instead of controller.sensors, which
-                is a one-time copy taken at process startup and can go stale
-                if sensors are reconfigured without a restart (only the
-                settings-PATCH "sensors" branch refreshes it live). If None,
-                falls back to controller.sensors.
         """
         self.system = system
         self._settings_data = settings_data or {}
-        self._active_sensors = active_sensors
         self._start_time = datetime.now()
 
     def aggregate_all_data(self, compact: bool = True) -> DebugDataExport:
@@ -699,7 +690,7 @@ class DebugDataAggregator:
             return {}
         snapshot: dict = {}
 
-        # The active sensor map is the single source of truth for every
+        # controller.sensors is the single source of truth for every
         # entity_id this installation is configured to know about — every
         # resolution path (METHOD_SENSOR_MAP, _get_entity_for_service,
         # _get_raw_state) ultimately looks up this same map
@@ -707,21 +698,10 @@ class DebugDataAggregator:
         # from a curated subset like METHOD_SENSOR_MAP, means a new
         # entity-reading code path (TOU segments, VPP registers, ...) is
         # automatically captured for replay without needing a matching
-        # special case here.
-        #
-        # Prefer the freshly-computed active_sensors (SettingsStore.
-        # get_active_sensors(), re-derived at export time) over
-        # controller.sensors, which is a one-time copy taken at process
-        # startup — it only gets refreshed if a settings PATCH happens to hit
-        # the "sensors" branch specifically, so it can go stale (missing
-        # entities added via the setup wizard or other flows) without a
-        # restart, even though get_active_sensors() would show them.
-        active_sensors = (
-            self._active_sensors
-            if self._active_sensors is not None
-            else controller.sensors
-        )
-        seen_entities: set[str] = set(active_sensors.values())
+        # special case here. BESSController.refresh_active_sensors() keeps
+        # this map synced with SettingsStore after every settings mutation,
+        # so it's never a stale startup-time copy.
+        seen_entities: set[str] = set(controller.sensors.values())
         for entity_id in seen_entities:
             if entity_id:
                 self._capture_entity_state(snapshot, controller, entity_id)

@@ -270,23 +270,16 @@ class TestSerializeEntitySnapshot:
     controller.sensors — e.g. per-slot TOU segment entities and Growatt VPP
     registers, both resolved via _get_entity_for_service/_resolve_entity_id,
     which look up controller.sensors directly, bypassing METHOD_SENSOR_MAP.
-    Fixed by capturing the active sensor map directly instead.
-
-    Also covers a second, related gap found while validating the first fix
-    against a real export: controller.sensors is a one-time copy taken at
-    process startup, only refreshed if a settings PATCH happens to hit the
-    "sensors" branch specifically — so it can go stale (e.g. after the setup
-    wizard adds sensors via a different code path) even though
-    SettingsStore.get_active_sensors() would show them fresh. The exporter
-    now prefers an explicitly-passed active_sensors map when given one.
+    Fixed by capturing controller.sensors directly instead. (controller.sensors
+    itself is kept fresh by BESSController.refresh_active_sensors(), see #332
+    — the exporter can rely on it without needing its own freshness plumbing.)
     """
 
-    def _make_aggregator(self, controller, active_sensors=None):
+    def _make_aggregator(self, controller):
         agg = DebugDataAggregator.__new__(DebugDataAggregator)
         agg.system = MagicMock()
         agg.system._controller = controller
         agg.system._energy_provider_config = {"provider": "nordpool_official"}
-        agg._active_sensors = active_sensors
         return agg
 
     def test_no_controller_returns_empty(self):
@@ -337,24 +330,3 @@ class TestSerializeEntitySnapshot:
         assert out == {
             "sensor.battery_soc": {"entity_id": "sensor.battery_soc", "state": "1"}
         }
-
-    def test_active_sensors_preferred_over_stale_controller_sensors(self):
-        """If controller.sensors is stale (e.g. process started before the
-        setup wizard added sensors), the freshly-passed active_sensors map
-        must win — not the stale copy on the controller object.
-        """
-        controller = MagicMock()
-        controller.sensors = {"battery_soc": "sensor.battery_soc"}  # stale
-        controller.get_entity_state_raw.side_effect = lambda entity_id: {
-            "entity_id": entity_id,
-            "state": "1",
-        }
-        fresh_active_sensors = {
-            "battery_soc": "sensor.battery_soc",
-            "growatt_vpp_status": "select.pv_growatt_vpp_status",
-        }
-        agg = self._make_aggregator(controller, active_sensors=fresh_active_sensors)
-
-        out = agg._serialize_entity_snapshot()
-
-        assert set(out.keys()) == {"sensor.battery_soc", "select.pv_growatt_vpp_status"}

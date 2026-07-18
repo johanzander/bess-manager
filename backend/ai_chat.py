@@ -739,7 +739,6 @@ class AIAnalystService:
             aggregator = DebugDataAggregator(
                 system_manager,
                 settings_data=self._settings_store.data,
-                active_sensors=self._settings_store.get_active_sensors(),
             )
             export = aggregator.aggregate_all_data(compact=True)
 

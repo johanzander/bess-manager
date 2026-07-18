@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 # Section header strings as they appear in the debug log markdown
 _SECTION_SYSTEM_INFO = "## System Information"
-_SECTION_HEALTH_STATUS = "## System Health Status"
+_SECTION_HEALTH_STATUS = "## System Health Status (point-in-time snapshot at export)"
 _SECTION_SETTINGS = "## Settings"
 _SECTION_BATTERY = "### Battery Settings"
 _SECTION_PRICE = "### Price Settings"

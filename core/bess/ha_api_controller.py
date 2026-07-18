@@ -832,6 +832,7 @@ class HomeAssistantAPIController:
         operation=None,
         category=None,
         context: dict | None = None,
+        optional: bool = False,
         **kwargs,
     ):
         """Make an API request to Home Assistant with retry logic.
@@ -842,6 +843,8 @@ class HomeAssistantAPIController:
             operation: Optional human-readable operation description for failure tracking
             category: Optional operation category for failure tracking
             context: Optional dict of contextual parameters for failure diagnostics
+            optional: If True, a 404 is expected (e.g. probing a legacy/disabled
+                entity) and is logged at debug level instead of error
             **kwargs: Additional arguments for requests
 
         Returns:
@@ -878,10 +881,16 @@ class HomeAssistantAPIController:
                     and e.response is not None
                     and e.response.status_code == 404
                 ):
-                    logger.error(
-                        "API request to %s failed: Sensor not found (404). This indicates a missing or misconfigured sensor.",
-                        url,
-                    )
+                    if optional:
+                        logger.debug(
+                            "API request to %s failed: Sensor not found (404, optional).",
+                            url,
+                        )
+                    else:
+                        logger.error(
+                            "API request to %s failed: Sensor not found (404). This indicates a missing or misconfigured sensor.",
+                            url,
+                        )
                     raise  # Fail immediately on 404
 
                 if attempt < self.max_attempts - 1:  # Not the last attempt
@@ -1414,10 +1423,18 @@ class HomeAssistantAPIController:
                 continue
 
             try:
-                enabled_state = self._api_request("get", f"/api/states/{enabled_id}")
-                begin_state = self._api_request("get", f"/api/states/{begin_id}")
-                end_state = self._api_request("get", f"/api/states/{end_id}")
-                mode_state = self._api_request("get", f"/api/states/{mode_id}")
+                enabled_state = self._api_request(
+                    "get", f"/api/states/{enabled_id}", optional=True
+                )
+                begin_state = self._api_request(
+                    "get", f"/api/states/{begin_id}", optional=True
+                )
+                end_state = self._api_request(
+                    "get", f"/api/states/{end_id}", optional=True
+                )
+                mode_state = self._api_request(
+                    "get", f"/api/states/{mode_id}", optional=True
+                )
 
                 enabled_val = enabled_state.get("state", "Disabled")
                 batt_mode = mode_reverse.get(

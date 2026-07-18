@@ -1050,6 +1050,8 @@ class BatterySystemManager:
                     quarterly = self.home_settings.default_hourly / 4.0
                     forecast = [quarterly] * 96
                 elif name == "influxdb_7d_avg":
+                    if not is_influxdb_configured():
+                        raise ValueError("InfluxDB not configured")
                     forecast = self._get_influxdb_7d_avg_forecast()
                 elif name == "ha_statistics":
                     forecast = self._get_ha_statistics_forecast()

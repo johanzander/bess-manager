@@ -584,6 +584,16 @@ This eliminates the `required_methods` parameter entirely and makes the policy s
 
 ---
 
+### Reconsider whether the all-IDLE numerical safety net is still needed
+
+**Impact**: Low | **Effort**: Low-Medium | **Dependencies**: `dp_battery_algorithm.py`, `docs/superpowers/specs/2026-07-06-dp-bellman-guardrail-removal-design.md`
+
+**Description**: After the "Bellman-optimality guardrail removal" refactor, `optimize_battery_schedule` still unconditionally computes a plain all-IDLE schedule and swaps it in if cheaper (`core/bess/dp_battery_algorithm.py:1514-1536`). Backward induction is optimal by construction — `IDLE` is always an available action at every period, so the DP's own schedule should never come out worse. The design doc's own investigation found this only guards a small residual (~0.16 SEK on one fixture, down from 0.27 SEK after an earlier partial fix) from SOE-grid discretization, "not provably zero without it." Worth revisiting whether finer discretization, the continuous-action reformulation mentioned as out-of-scope in that design doc, or another approach could close the residual gap fully, making this comparison genuinely removable rather than kept indefinitely as insurance.
+
+**Files**: `core/bess/dp_battery_algorithm.py` (lines 1514-1536), `docs/superpowers/specs/2026-07-06-dp-bellman-guardrail-removal-design.md`
+
+---
+
 ### Move `charging_power_rate` out of `BatterySettings`
 
 **Impact**: Low | **Effort**: Medium | **Dependencies**: `power_monitor.py`, `settings_store.py`, migration

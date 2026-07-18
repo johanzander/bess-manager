@@ -149,6 +149,21 @@ def _refresh_health(bess_controller) -> None:
         logger.warning("Could not refresh health state after settings update: %s", exc)
 
 
+def _refresh_active_sensors(bess_controller) -> None:
+    """Sync the live ha_controller.sensors map from persisted settings.
+
+    ha_controller.sensors is a plain dict copy, not a live view of the
+    settings store — it only reflects the sensor map that was active when it
+    was last assigned. Any settings mutation that can change which sensors
+    are active (a direct "sensors" edit, or an inverter/growatt platform
+    switch, which selects a different per-platform sensor sub-dict) must call
+    this afterward, unconditionally, or the copy goes stale until the next
+    "sensors"-specific PATCH or a process restart.
+    """
+    active = bess_controller.settings_store.get_active_sensors()
+    bess_controller.ha_controller.sensors = {k: v for k, v in active.items() if v}
+
+
 # ---------------------------------------------------------------------------
 # Unified settings endpoints
 # ---------------------------------------------------------------------------
@@ -324,17 +339,14 @@ async def patch_settings(updates: dict):
                 if control_mode and platform == "solax_modbus_growatt_min":
                     bess_controller.system.switch_control_mode(control_mode)
 
-            elif store_key == "sensors":
-                # Update live ha_controller.sensors from the merged flat view
-                active = bess_controller.settings_store.get_active_sensors()
-                bess_controller.ha_controller.sensors = {
-                    k: v for k, v in active.items() if v
-                }
-
             elif store_key == "demo_mode":
                 enabled = section.get("enabled", False)
                 bess_controller.system.set_demo_mode(enabled)
 
+        # Any of the sections above (sensors directly, or growatt/inverter via
+        # a platform switch) can change which sensors are active — refresh
+        # unconditionally rather than only on a "sensors" key match.
+        _refresh_active_sensors(bess_controller)
         _refresh_health(bess_controller)
         return await get_settings()
 
@@ -3532,13 +3544,10 @@ async def setup_complete(payload: APISetupCompletePayload):
                 bess_controller.system.switch_control_mode(payload.inverterControlMode)
 
         # Apply settings to live system so BESS starts immediately
-        # without requiring a restart.
-        if payload.sensors:
-            # Update live ha_controller.sensors from the merged flat view
-            active = bess_controller.settings_store.get_active_sensors()
-            bess_controller.ha_controller.sensors = {
-                k: v for k, v in active.items() if v
-            }
+        # without requiring a restart. Unconditional, not gated on
+        # payload.sensors: an inverter platform switch above also changes
+        # which per-platform sensor sub-dict is active.
+        _refresh_active_sensors(bess_controller)
         if payload.growattDeviceId:
             bess_controller.ha_controller.growatt_device_id = payload.growattDeviceId
 

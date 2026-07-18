@@ -99,9 +99,14 @@ def complete_controller():
         result.update(sensors.get(platform, {}))
         return result
 
+    def _refresh_active_sensors() -> None:
+        active = _get_active_sensors()
+        ctrl.ha_controller.sensors = {k: v for k, v in active.items() if v}
+
     ctrl.settings_store.get_section.side_effect = _get_section
     ctrl.settings_store.save_all.side_effect = _save_all
     ctrl.settings_store.get_active_sensors.side_effect = _get_active_sensors
+    ctrl.refresh_active_sensors.side_effect = _refresh_active_sensors
 
     sys.modules["app"].bess_controller = ctrl
     return ctrl
@@ -155,7 +160,10 @@ class TestGetSetupStatus:
     """GET /api/setup/status."""
 
     def test_wizard_needed_when_no_sensors(self, mock_controller):
-        mock_controller.ha_controller.sensors = {"battery_soc": "", "solar_power": ""}
+        mock_controller.settings_store.get_active_sensors.return_value = {
+            "battery_soc": "",
+            "solar_power": "",
+        }
         resp = _client.get("/api/setup/status")
         assert resp.status_code == 200
         body = resp.json()
@@ -163,7 +171,7 @@ class TestGetSetupStatus:
         assert body["configuredSensors"] == 0
 
     def test_wizard_not_needed_when_sensors_configured(self, mock_controller):
-        mock_controller.ha_controller.sensors = {
+        mock_controller.settings_store.get_active_sensors.return_value = {
             "battery_soc": "sensor.growatt_battery_soc",
             "solar_power": "sensor.growatt_solar_power",
         }
@@ -175,7 +183,7 @@ class TestGetSetupStatus:
         assert body["totalSensors"] == 2
 
     def test_partially_configured_still_needs_wizard(self, mock_controller):
-        mock_controller.ha_controller.sensors = {
+        mock_controller.settings_store.get_active_sensors.return_value = {
             "battery_soc": "sensor.growatt_battery_soc",
             "solar_power": "",
             "import_power": "",

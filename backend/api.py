@@ -33,11 +33,11 @@ from api_dataclasses import (
 )
 from fastapi import APIRouter, HTTPException, Query
 from loguru import logger
-from settings_store import VALID_PLATFORMS
 
 from core.bess import time_utils
 from core.bess.health_check import describe_failing_checks, run_system_health_checks
 from core.bess.savings_aggregator import DEFAULT_COUNTS, build_buckets
+from core.bess.settings_store import VALID_PLATFORMS
 from core.bess.time_utils import get_period_count
 
 router = APIRouter()
@@ -324,17 +324,14 @@ async def patch_settings(updates: dict):
                 if control_mode and platform == "solax_modbus_growatt_min":
                     bess_controller.system.switch_control_mode(control_mode)
 
-            elif store_key == "sensors":
-                # Update live ha_controller.sensors from the merged flat view
-                active = bess_controller.settings_store.get_active_sensors()
-                bess_controller.ha_controller.sensors = {
-                    k: v for k, v in active.items() if v
-                }
-
             elif store_key == "demo_mode":
                 enabled = section.get("enabled", False)
                 bess_controller.system.set_demo_mode(enabled)
 
+        # Any of the sections above (sensors directly, or growatt/inverter via
+        # a platform switch) can change which sensors are active — refresh
+        # unconditionally rather than only on a "sensors" key match.
+        bess_controller.refresh_active_sensors()
         _refresh_health(bess_controller)
         return await get_settings()
 
@@ -3128,7 +3125,7 @@ async def get_setup_status():
     """
     from app import bess_controller
 
-    sensors = bess_controller.ha_controller.sensors
+    sensors = bess_controller.settings_store.get_active_sensors()
     total = len(sensors)
     configured = sum(1 for v in sensors.values() if v)
     system_configured = bess_controller.system.is_configured
@@ -3533,13 +3530,10 @@ async def setup_complete(payload: APISetupCompletePayload):
                 bess_controller.system.switch_control_mode(payload.inverterControlMode)
 
         # Apply settings to live system so BESS starts immediately
-        # without requiring a restart.
-        if payload.sensors:
-            # Update live ha_controller.sensors from the merged flat view
-            active = bess_controller.settings_store.get_active_sensors()
-            bess_controller.ha_controller.sensors = {
-                k: v for k, v in active.items() if v
-            }
+        # without requiring a restart. Unconditional, not gated on
+        # payload.sensors: an inverter platform switch above also changes
+        # which per-platform sensor sub-dict is active.
+        bess_controller.refresh_active_sensors()
         if payload.growattDeviceId:
             bess_controller.ha_controller.growatt_device_id = payload.growattDeviceId
 

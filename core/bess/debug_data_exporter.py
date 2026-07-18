@@ -50,7 +50,7 @@ import os
 import re
 import sys
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -283,6 +283,13 @@ _LOG_KEY_PATTERNS = re.compile(
 
 _COMPACT_LOG_TAIL = 50  # Always include this many trailing lines for recent context
 
+# How many prior calendar days' persisted DailyViews to include. The "today"
+# stores (historical_store, schedule_store, prediction_snapshot_store) are
+# cleared at midnight, so a bundle exported shortly after day rollover has
+# no way to show what happened yesterday evening unless it also reads from
+# DailyViewStore, which is never cleared.
+_PREVIOUS_DAYS_TO_INCLUDE = 2
+
 
 @dataclass
 class DebugDataExport:
@@ -304,6 +311,7 @@ class DebugDataExport:
     ha_statistics: dict
     historical_periods: list[dict]
     historical_summary: dict
+    previous_days: list[dict]
     inverter_tou_segments: list[dict]
     schedules: list[dict]
     schedules_summary: dict
@@ -393,6 +401,7 @@ class DebugDataAggregator:
             inverter_tou_segments=self._serialize_inverter_tou(),
             historical_periods=self._serialize_historical_data(),
             historical_summary=self._summarize_historical_data(),
+            previous_days=self._serialize_previous_days(),
             schedules=self._serialize_schedules(compact=compact),
             schedules_summary=self._summarize_schedules(),
             snapshots=self._serialize_snapshots(compact=compact),
@@ -840,6 +849,32 @@ class DebugDataAggregator:
         except Exception as e:
             logger.exception(f"Failed to summarize historical data: {e}")
             return {"error": str(e)}
+
+    def _serialize_previous_days(self) -> list[dict]:
+        """Serialize the most recently persisted DailyViews (yesterday, etc.).
+
+        DailyViewStore keeps one full day (planned intent + observed actuals
+        per period) forever, independent of the in-memory "today" stores
+        that get cleared at midnight — this is the only source a debug
+        export can use to show what happened on a prior calendar day.
+
+        Returns:
+            List of DailyView dicts, most recent day first. Skips days with
+            no persisted view (e.g. add-on wasn't running yet).
+        """
+        try:
+            today = time_utils.today()
+            result = []
+            for days_ago in range(1, _PREVIOUS_DAYS_TO_INCLUDE + 1):
+                view = self.system.daily_view_store.load_day(
+                    today - timedelta(days=days_ago)
+                )
+                if view is not None:
+                    result.append(asdict(view))
+            return result
+        except Exception as e:
+            logger.warning("Failed to serialize previous days: %s", e)
+            return []
 
     def _serialize_schedules(self, compact: bool = True) -> list[dict]:
         """Serialize optimization schedules from today.

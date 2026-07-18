@@ -20,6 +20,7 @@ which is both exact with respect to the *true* action space and always
 executable exactly as planned.
 """
 
+import numpy as np
 import pytest
 
 from core.bess.dp_battery_algorithm import (
@@ -338,3 +339,33 @@ def test_discharge_candidates_use_injected_resolution():
     for p in finer_candidates:
         pct = p / step
         assert pct == pytest.approx(round(pct), abs=1e-6)
+
+
+def test_interpolate_value_extrapolates_below_min_soe():
+    """#336: a below-floor SOE (a live sensor reading under min_soe_kwh,
+    tolerated per #233's _soe_floor) must not be flattened to V_row[0].
+
+    Real bundle evidence (bess-debug-2026-07-18-104523.md): with
+    initial_soe=3.75kWh < min_soe_kwh=4.05kWh, every candidate whose
+    next_soe stayed below the floor was clamped to the same degenerate
+    V_row[0] value, so "charge a little" and "don't charge" looked equally
+    worthless and the DP exported free solar at negative prices for 24
+    straight periods instead of storing it. The value function must
+    extrapolate the local gradient below the floor instead of clamping,
+    so states below the floor are still distinguishable by how close they
+    are to it.
+    """
+    settings = make_battery_settings(
+        total_capacity=20.0, min_soc=11.0
+    )  # min_soe_kwh = 2.2
+    step = 0.05  # SOE_STEP_KWH
+    # V_row has a gradient of 1.0 value/kWh between the first two grid points
+    V_row = np.array([2.0, 2.0 + step, 4.0, 6.0])
+
+    soe_one_step_below_floor = settings.min_soe_kwh - step
+    value = _interpolate_value(V_row, soe_one_step_below_floor, settings)
+
+    # Extrapolating the V_row[0]->V_row[1] gradient one step below the
+    # floor should yield ~1.95, not the clamped-flat 2.0.
+    assert value == pytest.approx(1.95, abs=1e-9)
+    assert value != pytest.approx(V_row[0], abs=1e-9)

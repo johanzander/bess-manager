@@ -567,6 +567,23 @@ This eliminates the `required_methods` parameter entirely and makes the policy s
 
 ---
 
+### Remove dead `min_action_profit_threshold` config
+
+**Impact**: Low | **Effort**: Low | **Dependencies**: `settings.py`, `settings_store.py`
+
+**Description**: `min_action_profit_threshold` was the configurable gate for the DP's old profit-threshold/all-IDLE-rejection mechanism. That mechanism was removed in the "Bellman-optimality guardrail removal" refactor (commit `ee24537f`/`f57d4fed`, `docs/superpowers/specs/2026-07-06-dp-bellman-guardrail-removal-design.md`) — the current all-IDLE safety net (`core/bess/dp_battery_algorithm.py:1514-1536`) is a plain cost comparison that doesn't read this setting at all. The field is still declared in `core/bess/settings.py:127` and migrated in `backend/settings_store.py:389,480`, and likely still surfaced in the setup wizard/settings UI, but nothing consumes it anymore. Found while auditing `docs/agents/bess-knowledge.md` and `docs/SOFTWARE_DESIGN.md` for staleness (2026-07-19).
+
+**What needs to change**:
+
+- Remove `min_action_profit_threshold` from `BatterySettings` (`core/bess/settings.py`)
+- Remove it from the settings-store schema/migration (`backend/settings_store.py`)
+- Check the frontend (settings forms, setup wizard) for a corresponding field and remove it
+- Verify no other code path reads it (grep before deleting)
+
+**Files**: `core/bess/settings.py`, `backend/settings_store.py`, frontend settings components
+
+---
+
 ### Move `charging_power_rate` out of `BatterySettings`
 
 **Impact**: Low | **Effort**: Medium | **Dependencies**: `power_monitor.py`, `settings_store.py`, migration

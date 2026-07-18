@@ -54,20 +54,59 @@ efficiency losses and updates the **cost basis** of stored energy.
 revenue) while accounting for battery cycle degradation costs and a terminal
 value for energy remaining at end of horizon.
 
-**Cost basis tracking (FIFO)**: When the battery charges at different prices
-over time, the system tracks the cost of stored energy using FIFO (first-in,
-first-out) accounting.  When the battery discharges, the oldest (cheapest)
-energy is used first.  This determines the true profit of a discharge action.
+**Terminal value**: Only applies when the horizon does *not* already extend
+into tomorrow (i.e. tomorrow's prices aren't yet available). Without it, the
+DP has no visibility past the horizon and would have no reason not to drain
+the battery completely in the last period. Each leftover kWh at the horizon's
+end is valued at:
 
-**Profit threshold**: After optimization, the battery's own contribution
-(`solar_only_cost - battery_solar_cost` — how much better the schedule is
-than solar alone, not than a zero-solar grid-only baseline) is compared
-against a minimum threshold scaled by remaining day fraction. If that's too
-low, an all-IDLE fallback is computed as a candidate replacement — but it is
-only used if it's actually cheaper than the rejected schedule. The fallback
-still passively absorbs any solar surplus into available battery room and
-pays wear cost on it, but never discharges to recoup that cost, so it isn't
-automatically better than what it would replace.
+    terminal_value = median(buy_prices) * efficiency_discharge - cycle_cost
+
+capped at `max(sell_prices) * efficiency_discharge - cycle_cost` — an
+**arbitrage-consistency cap** that prevents the estimate from exceeding what
+could actually be realized by selling right now at the best available price
+(`core/bess/battery_system_manager.py:1840-1908`,
+`_calculate_terminal_value`; see issues #126/#244/#246). This is the
+mechanism to check first for "why didn't the battery discharge everything
+right before midnight" or "why does it hold charge near the end of the
+horizon" — once tomorrow's prices arrive and the horizon extends, this
+formula no longer applies; the real future prices take over.
+
+**Self-throttling near self-consumption (issue #240)**: In `_compute_reward`,
+a discharge whose overshoot above `home_consumption` is
+`<= BATTERY_EXPORT_THRESHOLD_KWH` (0.01 kWh,
+`core/bess/dp_battery_algorithm.py:96`) has its `grid_exported` forced to
+zero for reward purposes — the DP treats it as pure self-consumption, not an
+export sale, because load-first hardware doesn't reliably deliver a trivial
+overshoot to the grid in practice. When evaluating whether a small discharge
+was "worth" `sell_price`, check this threshold first: below it, the relevant
+alternative-value comparison is against the buy price avoided, not the sell
+price (`core/bess/dp_battery_algorithm.py:511-522`).
+
+**Cost basis tracking (weighted average)**: When the battery charges at
+different prices over time, the system tracks the cost of stored energy as a
+**weighted average**, not FIFO. On charge: `new_cost_basis = (soe *
+cost_basis + new_energy_cost) / next_soe`
+(`core/bess/dp_battery_algorithm.py:496-498`). On discharge, `cost_basis` is
+left unchanged — there is no "oldest energy first" queue or layered
+accounting anywhere in the code.
+
+**All-IDLE safety net (not a profit threshold)**: After optimization, an
+all-IDLE schedule is unconditionally computed and swapped in only if its
+`battery_solar_cost` is cheaper than the optimized schedule's
+(`core/bess/dp_battery_algorithm.py:1514-1536`). This is a plain cost
+comparison — there is **no minimum-profit threshold and no day-fraction
+scaling**. An earlier design had a threshold/guardrail here; it was removed
+in the "Bellman-optimality guardrail removal" refactor (commit
+`ee24537f`/`f57d4fed`,
+`docs/superpowers/specs/2026-07-06-dp-bellman-guardrail-removal-design.md`)
+because the DP's backward induction already finds the Bellman-optimal
+schedule, making an extra economic gate redundant. What remains is a
+numerical safety net for SOE-discretization residual, not an economic
+judgment call. The fallback still passively absorbs any solar surplus into
+available battery room and pays wear cost on it, but never discharges to
+recoup that cost, so it isn't automatically better than what it would
+replace.
 
 **Shadow price (marginal value of stored energy)**: The backward induction
 builds a value-to-go for every (period, SOE-level) state — the best achievable
@@ -110,11 +149,17 @@ which must still clear the wear cost. A 6 öre differential against a 40 öre we
 cost is a loss, not a 6 öre gain.
 
 **Reconciliation with the code:** `_compute_reward`
-(`core/bess/dp_battery_algorithm.py:361-394`) implements this as an anti-cycling
-floor — for a discharge it raises the effective floor to `sell_price` whenever solar
-will replenish the discharged capacity, so `sell × efficiency_discharge < sell ≤
-floor` blocks the trade. The function's older docstring phrasing ("value >
-cost_basis") describes that floor's implementation, not the user-facing law above.
+(`core/bess/dp_battery_algorithm.py:409-541`) no longer implements an explicit
+profitability floor. That anti-cycling floor was removed in the
+"Bellman-optimality guardrail removal" refactor (commit
+`ee24537f`/`f57d4fed`,
+`docs/superpowers/specs/2026-07-06-dp-bellman-guardrail-removal-design.md`);
+the function's current docstring states "No profitability veto: every
+physically valid discharge gets a finite reward... a separate floor on top
+of that is redundant at best." The governing economic law above still holds
+as the *outcome* of backward induction (the DP won't choose a discharge that
+isn't marginally worthwhile), but it is enforced by the value-to-go
+comparison across the whole horizon, not by a floor inside `_compute_reward`.
 
 ### Facts vs Economics — where each lives in a debug bundle
 
@@ -151,16 +196,11 @@ A battery discharges a small amount to grid in a slot where `sell = 0.46`,
 ## Strategic Intents
 
 Every 15-minute slot gets a strategic intent based on the energy flows the
-optimizer chose.  These are classified from the actual flow pattern:
-
-| Intent | Condition | What it means |
-|--------|-----------|---------------|
-| **GRID_CHARGING** | grid_to_battery >= 0.1 kWh | Buying cheap grid electricity to store in battery |
-| **SOLAR_STORAGE** | solar_to_battery > 0.1 kWh, grid_to_battery < 0.1 | Storing excess solar production for later |
-| **LOAD_SUPPORT** | battery_to_home > 0.1 kWh, battery_to_grid <= 0.1 | Using battery to power home (avoid expensive grid) |
-| **BATTERY_EXPORT** | battery_to_grid > 0.1 kWh | Selling stored battery energy to grid at high prices |
-| **SOLAR_EXPORT** | power ≈ 0, solar_to_grid > 0.01 kWh | Solar surplus exporting directly to grid, battery idle |
-| **IDLE** | No significant battery flows | No profitable action — direct solar/grid consumption |
+optimizer chose: **GRID_CHARGING**, **SOLAR_STORAGE**, **LOAD_SUPPORT**,
+**BATTERY_EXPORT**, **SOLAR_EXPORT**, **IDLE**. The exact classification
+thresholds live in `core/bess/decision_intelligence.py` — read that file
+directly rather than relying on a copy of the numbers here, since they are
+implementation detail that can change independently of this doc.
 
 **Hardware mapping**: Intents control actual inverter behavior:
 - GRID_CHARGING → battery_first mode + grid charge ON
@@ -217,6 +257,40 @@ surplus (deficit 0), so planned vs realized economics are unchanged.  The gate
 only affects *sub-15-minute* hardware behaviour.
 
 
+## Execution Layer: What Can Override the Schedule
+
+The DP schedule is not the last word — several mechanisms outside the
+optimizer can change what the hardware actually does. Check these *before*
+concluding a mechanism is "missing" from the DP when observed behavior
+doesn't match the schedule:
+
+- **Discharge inhibit sensor**: an external `binary_sensor` (auto-detected by
+  entity ID suffix `_charging`/`_is_charging`, e.g. EV charging status) can
+  force `discharge_rate` to 0 regardless of what the schedule says, checked
+  independently of the 15-min optimization cycle
+  (`core/bess/battery_system_manager.py:3089-3113`, polled every minute) and
+  applied at schedule-write time
+  (`core/bess/battery_system_manager.py:2578-2582`). If a period's
+  `Observed` behavior shows no discharge despite `Intent: BATTERY_EXPORT` or
+  `LOAD_SUPPORT`, check for an active discharge-inhibit sensor before
+  suspecting the DP or the intent-to-hardware mapping.
+- **Temperature derating**: charge power can be capped below the configured
+  max on cold days via a weather-forecast-driven derating curve
+  (`core/bess/battery_system_manager.py:1917-1966`,
+  `_get_temperature_derated_charge_limits`). If the weather entity isn't
+  configured, this **silently returns no derating** rather than failing —
+  so its absence in one installation vs. presence in another is expected,
+  not a bug.
+- **`charging_power_rate` setting is cosmetic after startup (known
+  limitation, not a documented mechanism)**: this settings-page value only
+  seeds the initial charge-power target once, before the first control
+  cycle. Every cycle after that, the actual hardware charge rate comes from
+  `INTENT_TO_CONTROL`, which only ever emits 0% or 100% — it never reads
+  this setting again (`core/bess/battery_system_manager.py:2037-2064`,
+  `adjust_charging_power`). If a user reports "changing the charge power
+  rate slider did nothing," this is why — it is a known bug, tracked in
+  `TODO.md`, not a settings-propagation issue to re-diagnose from scratch.
+
 ## Price Calculation
 
 The optimizer works with buy and sell prices derived from spot prices:
@@ -234,16 +308,21 @@ counterfactual is.
 ## Energy Flow Decomposition
 
 The system decomposes measured energy totals into detailed flows using
-energy conservation:
+energy conservation, but flows are **clamped to measured grid totals**
+(`grid_imported`/`grid_exported`) rather than derived by pure subtraction —
+pure subtraction can invent flows out of cross-sensor noise (fixed in PR
+#342). See `core/bess/models.py` (`EnergyData._calculate_detailed_flows`,
+~lines 90-146) and `core/bess/energy_flow_calculator.py` (~lines 176-183) for
+the current formulas, e.g.:
 
-    solar_to_home    = min(solar_production, home_consumption)
-    solar_to_battery = min(remaining_solar, battery_charged)
-    solar_to_grid    = remaining_solar - solar_to_battery
-    grid_to_home     = home_consumption - solar_to_home
-    grid_to_battery  = battery_charged - solar_to_battery
+    solar_to_battery = max(0, solar_production - export_to_grid
+                             - self_consumption + battery_discharged)
+    solar_to_battery = min(solar_to_battery, battery_charged, solar_production)
 
 Home consumption gets solar first (free), then grid.  Battery charges from
-solar first (free), then grid (paid).
+solar first (free), then grid (paid) — but the exact split is reconciled
+against measured grid import/export, not assumed from production figures
+alone.
 
 
 ## Prediction Snapshots and Expected Savings

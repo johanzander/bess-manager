@@ -929,9 +929,18 @@ def _interpolate_value(
     V_row: np.ndarray, soe: float, battery_settings: BatterySettings
 ) -> float:
     """Linearly interpolate a value-function row (V[t, :]) at a continuous
-    SoE, rather than snapping to the nearest discretized grid point."""
+    SoE, rather than snapping to the nearest discretized grid point.
+
+    `V_row` has no grid points below `min_soe_kwh` (#233's below-floor
+    tolerance lets `soe` itself go below it). Clamping those states to
+    `V_row[0]` made every below-floor state look identically worthless,
+    masking real differences in how close each was to the floor (#336).
+    Extrapolate the V_row[0]->V_row[1] gradient instead."""
     idx = (soe - battery_settings.min_soe_kwh) / SOE_STEP_KWH
-    idx = min(max(0.0, idx), len(V_row) - 1)
+    if idx < 0.0:
+        gradient = V_row[1] - V_row[0] if len(V_row) > 1 else 0.0
+        return V_row[0] + idx * gradient
+    idx = min(idx, len(V_row) - 1)
     lo = int(idx)
     hi = min(lo + 1, len(V_row) - 1)
     frac = idx - lo

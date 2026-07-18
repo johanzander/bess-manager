@@ -119,14 +119,22 @@ class EnergyData:
         grid_to_battery = min(
             max(0, self.battery_charged - solar_to_battery), self.grid_imported
         )
-        # Grid to home is the remainder of actual imports
-        grid_to_home = self.grid_imported - grid_to_battery
+        # Grid to home is capped by what home still needs after solar+battery.
+        # Any leftover grid_imported beyond that is cross-sensor noise between
+        # independent lifetime counters (see validate_energy_balance's
+        # tolerance) - it must not be invented as a flow to an entity that
+        # consumed nothing.
+        grid_to_home = min(
+            remaining_consumption, max(0, self.grid_imported - grid_to_battery)
+        )
 
-        # Step 4: Export flow reconciliation (ensure exports match measured total)
-        calculated_export = solar_to_grid + battery_to_grid
-        if self.grid_exported != calculated_export:
-            # Adjust battery_to_grid to match actual grid export total
-            battery_to_grid = self.grid_exported - solar_to_grid
+        # Step 4: Export flow reconciliation, capped by what the battery
+        # actually discharged - never invented to force-match grid_exported,
+        # for the same cross-sensor-noise reason as grid_to_home above.
+        battery_to_grid = min(
+            max(0, self.grid_exported - solar_to_grid),
+            self.battery_discharged - battery_to_home,
+        )
 
         # Assign calculated flows
         self.solar_to_home = solar_to_home

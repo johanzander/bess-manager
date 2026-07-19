@@ -301,6 +301,17 @@ Home consumption gets solar first (free), then grid; battery charges from
 solar first (free), then grid (paid) — but the split is reconciled against
 measured grid import/export, not assumed from production figures alone.
 
+A related noise source survives even after #342's cap: a `battery_to_grid`
+residual can still appear when its governing aggregate (`battery_discharged`)
+is itself nonzero, indistinguishable from ordinary lifetime-counter
+quantization (0.1 kWh resolution) rather than a real export — and it
+corrupts the observational `infer_intent_from_flows` classifier's
+`BATTERY_EXPORT` label. Fixed in #350: any `battery_to_grid` below the 0.1
+kWh floor folds back into `battery_to_home`, but only when
+`battery_to_home > 0` (the battery was already covering a genuine home
+deficit) — when `battery_to_home == 0`, any nonzero export stays a real
+export, since it has no other channel to have come from.
+
 ### Decision Intelligence
 
 Each optimization provides detailed economic reasoning:

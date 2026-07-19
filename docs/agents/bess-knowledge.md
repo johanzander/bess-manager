@@ -324,6 +324,28 @@ solar first (free), then grid (paid) — but the exact split is reconciled
 against measured grid import/export, not assumed from production figures
 alone.
 
+A second, related noise source lives one level up: even after #342's
+zero-aggregate cap, a `battery_to_grid` residual can still survive when its
+governing aggregate (`battery_discharged`) is itself nonzero — the residual
+is then indistinguishable from ordinary lifetime-counter quantization
+(documented 0.1 kWh resolution, `sensor_collector.py:231`) rather than a real
+export, and it corrupts `infer_intent_from_flows`'s `observed_intent`
+(`BATTERY_EXPORT` requires an inverter mode change; a residual this small
+proves nothing about mode). Fixed in #350: `_calculate_detailed_flows` folds
+any `battery_to_grid` below the 0.1 kWh floor back into `battery_to_home`,
+but *only* when `battery_to_home > 0` — i.e. only when the battery was
+already covering a genuine home deficit and the residual plausibly reflects
+under-reading on that same deficit. When `battery_to_home == 0` (home's need
+already fully met by solar), any nonzero export — however small — has no
+other channel to have come from and is left as a real export (see the R==P
+Bellman-guardrail regression test in `test_dp_no_guardrails.py`, which
+requires exactly this for a genuine 0.05 kWh 100%-export discharge). Note the
+DP's own planning-time classifier, `classify_strategic_intent` in
+`decision_intelligence.py`, already used `battery_to_grid > 0.1 kWh` as its
+threshold — #350 brings the observational path's noise handling in line with
+that existing precedent, though the two classifiers remain otherwise
+distinct (planning vs. after-the-fact labeling).
+
 
 ## Prediction Snapshots and Expected Savings
 

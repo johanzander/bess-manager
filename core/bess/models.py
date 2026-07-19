@@ -136,6 +136,23 @@ class EnergyData:
             self.battery_discharged - battery_to_home,
         )
 
+        # A battery_to_grid below the lifetime counter's own 0.1 kWh resolution
+        # can't be told apart from counter noise between battery_discharged and
+        # home_consumption - and unlike a real export, it doesn't require the
+        # inverter to have been in an export-capable mode. Fold it back into
+        # battery_to_home rather than let it flip the observed intent to
+        # BATTERY_EXPORT (see issue #350).
+        #
+        # Only when battery_to_home > 0: the battery was already covering a
+        # genuine home deficit, so a sub-resolution overshoot plausibly means
+        # home_consumption's own meter under-read by that amount. When
+        # battery_to_home == 0 (home's need was already fully met by solar),
+        # there's no deficit to fold into - any nonzero export, however small,
+        # has nowhere else to have gone and must stay a real export.
+        if battery_to_home > 0 and 0 < battery_to_grid < 0.1:
+            battery_to_home += battery_to_grid
+            battery_to_grid = 0.0
+
         # Assign calculated flows
         self.solar_to_home = solar_to_home
         self.solar_to_battery = solar_to_battery

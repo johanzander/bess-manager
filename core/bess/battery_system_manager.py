@@ -1845,11 +1845,15 @@ class BatterySystemManager:
     ) -> float:
         """Calculate terminal value per kWh for the DP optimization.
 
-        When the horizon already extends past today (i.e. tomorrow's prices are
-        included), return 0.0 since the DP has explicit future data. Otherwise,
-        estimate value from the median buy price adjusted for efficiency and
-        cycle cost ("avoid tomorrow's purchase"), capped at the best achievable
-        in-horizon export value ("arbitrage-consistency cap").
+        Estimate value from the median buy price (over whatever horizon window
+        the caller passed in) adjusted for efficiency and cycle cost ("avoid a
+        future purchase"), capped at the best achievable in-horizon export
+        value ("arbitrage-consistency cap"). This applies unconditionally,
+        whether the horizon boundary is midnight-today or midnight-tomorrow:
+        the caller already truncates buy_prices/sell_prices to the current
+        optimization window, so the median/cap formula reflects genuine
+        future price uncertainty beyond that window regardless of where it
+        ends (#345).
 
         The cap is required because cycle cost is only ever charged on
         charging, never on discharge (see `_compute_reward`): an uncapped
@@ -1870,19 +1874,6 @@ class BatterySystemManager:
         Returns:
             Terminal value per kWh (floored at 0.0)
         """
-        today_period_count = get_period_count(time_utils.today())
-        remaining_today = today_period_count - optimization_period
-        total_horizon = len(buy_prices)
-
-        # If horizon extends past today, DP has explicit tomorrow data
-        if total_horizon > remaining_today:
-            logger.info(
-                "Horizon extends past today (%d > %d remaining), terminal value = 0.0",
-                total_horizon,
-                remaining_today,
-            )
-            return 0.0
-
         # Estimate terminal value using median (resistant to peak price outliers)
         if not buy_prices:
             return 0.0

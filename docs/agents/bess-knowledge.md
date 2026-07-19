@@ -54,23 +54,30 @@ efficiency losses and updates the **cost basis** of stored energy.
 revenue) while accounting for battery cycle degradation costs and a terminal
 value for energy remaining at end of horizon.
 
-**Terminal value**: Only applies when the horizon does *not* already extend
-into tomorrow (i.e. tomorrow's prices aren't yet available). Without it, the
-DP has no visibility past the horizon and would have no reason not to drain
-the battery completely in the last period. Each leftover kWh at the horizon's
-end is valued at:
+**Terminal value**: Applies unconditionally at whatever the current horizon
+boundary is — midnight-today when only today's prices are available,
+midnight-tomorrow once tomorrow's prices have landed and the horizon
+extends. Without it, the DP has no visibility past the horizon and would
+have no reason not to drain the battery completely in the last period; this
+holds regardless of where that boundary currently sits, since no provider
+ever supplies data past midnight-tomorrow either. Each leftover kWh at the
+horizon's end is valued at:
 
     terminal_value = median(buy_prices) * efficiency_discharge - cycle_cost
 
-capped at `max(sell_prices) * efficiency_discharge - cycle_cost` — an
-**arbitrage-consistency cap** that prevents the estimate from exceeding what
-could actually be realized by selling right now at the best available price
-(`core/bess/battery_system_manager.py:1840-1908`,
-`_calculate_terminal_value`; see issues #126/#244/#246). This is the
+where `buy_prices`/`sell_prices` are already truncated to whatever the
+current horizon is, capped at `max(sell_prices) * efficiency_discharge -
+cycle_cost` — an **arbitrage-consistency cap** that prevents the estimate
+from exceeding what could actually be realized by selling right now at the
+best available price (`core/bess/battery_system_manager.py:1840-1908`,
+`_calculate_terminal_value`; see issues #126/#244/#246/#345). This is the
 mechanism to check first for "why didn't the battery discharge everything
 right before midnight" or "why does it hold charge near the end of the
-horizon" — once tomorrow's prices arrive and the horizon extends, this
-formula no longer applies; the real future prices take over.
+horizon" — it applies at both the today-only and today+tomorrow boundary,
+so this remains the first thing to check even after tomorrow's prices have
+arrived (until #345, it was incorrectly zeroed in that case; see the #345/
+#126 threads for the "tonight's export moves a day later" symptom this was
+suspected of, and ultimately ruled out for a specific bundle).
 
 **Self-throttling near self-consumption (issue #240)**: In `_compute_reward`,
 a discharge whose overshoot above `home_consumption` is

@@ -26,6 +26,7 @@ from core.bess.dp_battery_algorithm import (
     _effective_ac_cap_kwh,
     _state_transition,
 )
+from core.bess.models import EconomicData, EnergyData
 from core.bess.simulation.inverter_simulator import (
     derive_control_command,
     simulate,
@@ -408,3 +409,118 @@ def test_feature_off_plan_costs_more_under_cap_reality():
         f"passive-absorption baseline should clip most of the overflow, "
         f"got {clipped_idle:.2f} kWh"
     )
+
+
+def test_detailed_flows_respect_ac_cap_when_home_load_coexists_with_clipping():
+    """solar_to_home cannot exceed what the AC stage actually delivered.
+
+    10 kWh DC production, 5 kWh AC cap, 6 kWh home load, no battery: only
+    5 kWh can physically reach home, and the remaining 1 kWh must be imported.
+    """
+    energy = EnergyData(
+        solar_production=10.0,
+        home_consumption=6.0,
+        battery_charged=0.0,
+        battery_discharged=0.0,
+        grid_imported=1.0,
+        grid_exported=0.0,
+        battery_soe_start=3.0,
+        battery_soe_end=3.0,
+        clipped_solar=5.0,
+    )
+
+    assert energy.solar_to_home == pytest.approx(5.0)
+    assert energy.solar_to_grid == pytest.approx(0.0)
+    assert energy.grid_to_home == pytest.approx(1.0)
+
+    is_valid, message = energy.validate_energy_balance()
+    assert is_valid, message
+
+
+def test_detailed_flows_charge_battery_dc_side_before_the_cap():
+    """Battery charging is DC-coupled, so it is not limited by the AC cap.
+
+    10 kWh DC production, 5 kWh AC cap, 6 kWh home load, 3 kWh charged
+    DC-side: 7 kWh reaches the AC stage, 5 gets through, 2 is clipped.
+    """
+    energy = EnergyData(
+        solar_production=10.0,
+        home_consumption=6.0,
+        battery_charged=3.0,
+        battery_discharged=0.0,
+        grid_imported=1.0,
+        grid_exported=0.0,
+        battery_soe_start=3.0,
+        battery_soe_end=6.0,
+        clipped_solar=2.0,
+    )
+
+    assert energy.solar_to_battery == pytest.approx(3.0)
+    assert energy.solar_to_home == pytest.approx(5.0)
+    assert energy.solar_to_grid == pytest.approx(0.0)
+    assert energy.grid_to_home == pytest.approx(1.0)
+
+    is_valid, message = energy.validate_energy_balance()
+    assert is_valid, message
+
+
+def test_detailed_flows_unchanged_without_clipping():
+    """With clipped_solar = 0 the split is exactly the pre-feature behavior."""
+    energy = EnergyData(
+        solar_production=10.0,
+        home_consumption=6.0,
+        battery_charged=3.0,
+        battery_discharged=0.0,
+        grid_imported=0.0,
+        grid_exported=1.0,
+        battery_soe_start=3.0,
+        battery_soe_end=6.0,
+    )
+
+    assert energy.solar_to_home == pytest.approx(6.0)
+    assert energy.solar_to_battery == pytest.approx(3.0)
+    assert energy.solar_to_grid == pytest.approx(1.0)
+
+
+def test_solar_only_baseline_is_subject_to_the_same_ac_cap():
+    """The no-battery counterfactual cannot use clipped solar either.
+
+    A solar-only system sees the same 5 kWh cap, so its 4 kWh deficit against
+    a 9 kWh load is imported — the baseline must not be credited the full
+    10 kWh of DC production.
+    """
+    energy = EnergyData(
+        solar_production=10.0,
+        home_consumption=9.0,
+        battery_charged=0.0,
+        battery_discharged=0.0,
+        grid_imported=4.0,
+        grid_exported=0.0,
+        battery_soe_start=3.0,
+        battery_soe_end=3.0,
+        clipped_solar=5.0,
+    )
+    economic = EconomicData.from_energy_data(
+        energy, buy_price=1.0, sell_price=0.5, battery_cycle_cost=0.0
+    )
+
+    assert economic.solar_only_cost == pytest.approx(4.0)
+
+
+def test_solar_only_baseline_unchanged_without_clipping():
+    """Without clipping the baseline keeps its raw-production behavior."""
+    energy = EnergyData(
+        solar_production=10.0,
+        home_consumption=9.0,
+        battery_charged=0.0,
+        battery_discharged=0.0,
+        grid_imported=0.0,
+        grid_exported=1.0,
+        battery_soe_start=3.0,
+        battery_soe_end=3.0,
+    )
+    economic = EconomicData.from_energy_data(
+        energy, buy_price=1.0, sell_price=0.5, battery_cycle_cost=0.0
+    )
+
+    assert economic.solar_only_cost == pytest.approx(-0.5)

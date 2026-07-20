@@ -32,6 +32,7 @@ export interface HourlyData {
   solarToHome?: FormattedValue;
   solarToBattery?: FormattedValue;
   solarToGrid?: FormattedValue;
+  clippedSolar?: FormattedValue; // solar lost to the inverter AC output cap
   gridToHome?: FormattedValue;
   gridToBattery?: FormattedValue;
   batteryToHome?: FormattedValue;
@@ -115,7 +116,11 @@ export interface BatterySettings {
   // Efficiency settings (%)
   efficiencyCharge: number;     // % charging efficiency
   efficiencyDischarge: number;  // % discharge efficiency
-  
+
+  // Inverter AC output cap (solar clipping avoidance); 0 disables
+  inverterMaxAcPowerKw: number;     // kW total AC output cap
+  inverterAcPowerMargin: number; // 0-1 model-side haircut on the cap
+
   // Consumption estimate
   estimatedConsumption: number; // kWh daily estimate
   consumptionStrategy: string;  // "sensor", "fixed", or "influxdb_7d_avg"

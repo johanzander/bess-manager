@@ -263,6 +263,43 @@ actual house deficit, and at 15-minute resolution a SOLAR_EXPORT period is net
 surplus (deficit 0), so planned vs realized economics are unchanged.  The gate
 only affects *sub-15-minute* hardware behaviour.
 
+### The inverter AC output cap (solar clipping avoidance)
+
+`inverter_max_ac_power_kw` (BatterySettings, default 0 = disabled) models a
+hybrid inverter whose **total AC output** (PV DC→AC conversion plus battery
+discharge) is capped — e.g. 5 kW on a Growatt MIN 5000TL-XH — while DC-coupled
+PV *above* the cap can still charge the battery directly, but only while the
+battery has room.  With the cap set:
+
+- **Clipped solar is worth zero** in the DP: per period, solar not stored
+  DC-side is deliverable to home/grid only up to
+  `cap × (1 − inverter_ac_power_margin) × dt`; the excess is `clipped_solar`
+  (reported per period on `EnergyData` and as `clippedSolar` in the API).
+  A full battery during above-cap solar is therefore genuinely costly, which
+  is what pushes the optimizer to reserve headroom for the midday peak.
+- **Deferring absorption uses the SOLAR_EXPORT-below-max bypass (#313)**:
+  normally IDLE passively absorbs surplus, so a reward change alone cannot
+  defer charging.  The existing bypass candidate (SoE held exactly unchanged,
+  surplus exports up to the cap, the rest clips) is what expresses "export
+  the surplus, keep the room" — with the cap set, its reward is cap-aware, so
+  the DP chooses it ahead of the above-cap window.  These periods classify as
+  **SOLAR_EXPORT** with `battery_action = 0` and a not-full battery, meaning
+  "deliberately holding for later overflow".
+- **Hardware mapping**: SOLAR_EXPORT writes `charge_rate=0` (#313, all
+  configurations), stopping `load_first` from passively filling the battery.
+  On a genuinely full battery this is a no-op.  The shadow-price *discharge*
+  gate above is unchanged and orthogonal.
+- **Discharge shares the cap**: battery discharge is limited to the AC
+  headroom the (possibly clipped) solar leaves
+  (`cap − min(solar, cap)` per period), both in the DP's feasible actions and
+  in the simulator.
+- The **margin** (default 0.05) is a model-side haircut on the cap
+  compensating for hourly Solcast forecasts flattening sub-period peaks; it is
+  never written to hardware.
+- Requires per-period charge-rate control (Growatt MIN).  On platforms
+  without it (SPH, SolaX native) the plan is cap-aware but deferred
+  absorption is not hardware-enforceable.
+
 
 ## Execution Layer: What Can Override the Schedule
 

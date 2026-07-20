@@ -211,10 +211,59 @@ Verified against `wills106/homeassistant-solax-modbus`'s
 | `growatt_vpp_time` | number | 30408 | Fallback timer, minutes — reset every active period; reverts inverter to `load_first` on its own if BESS stops writing |
 | `growatt_vpp_power` | number | 30409 | Power target, -100..100% (negative=discharge/export, positive=charge) |
 
-**Intent → VPP mapping** (mirrors `SolaxController`):
+**Intent → VPP mapping** (mirrors `SolaxController`, plus a
+`block_passive_charging` distinction at rate=0 — see "SOLAR_EXPORT
+semantics" below):
 - `GRID_CHARGING` → `vpp_power=+100%`, remote control enabled
 - `LOAD_SUPPORT`/`BATTERY_EXPORT` (rate>0) → `vpp_power=-rate%`, remote control enabled
-- `SOLAR_STORAGE`/`IDLE`/rate=0 → remote control disabled (`load_first`)
+- `SOLAR_STORAGE`/`IDLE` (rate=0, `block_passive_charging=False`) → remote
+  control disabled (`load_first`/self-use — battery may absorb solar surplus)
+- `SOLAR_EXPORT` (rate=0, `block_passive_charging=True`) → `vpp_power=0`,
+  remote control **enabled** (`grid_first` hold)
+
+**SOLAR_EXPORT semantics (fixed — issue [#355](https://github.com/johanzander/bess-manager/issues/355)):**
+The Growatt VPP protocol
+([`GROWATT VPP COMMUNICATION PROTOCOL OF INVERTER V2.01`](https://github.com/user-attachments/files/18301858/2.1.GROWATT.VPP.COMMUNICATION.PROTOCOL.OF.INVERTER_V2.01.pdf),
+2024-9-20, linked from issue #118 — the authoritative vendor register
+reference for all Growatt VPP work; check here first before assuming any
+Growatt VPP register behavior), §3.5 "Remote power control schematic
+diagram", p.32) documents that with
+`vpp_remote_control` (30407) *enabled*, the sign of `vpp_power` (30409)
+selects the firmware priority mode: **`> 0` → battery first (charge); `≤ 0`
+→ grid first**. That is, `vpp_power=0` while remote control stays *enabled*
+is a distinct, documented state — `grid first`, the same solar-goes-to-load-
+then-grid priority TOU mode uses for `BATTERY_EXPORT` — not the same thing as
+*disabling* remote control, which instead falls through to plain `load
+first` self-use (battery-first for any solar surplus).
+
+The controller previously conflated these two zero-power states: it always
+disabled remote control at `rate=0`, landing in self-use `load_first`
+instead of the documented `grid_first` hold, which let solar surplus
+recharge the battery during `SOLAR_EXPORT` periods instead of holding it out
+and exporting. The DP's SOLAR_EXPORT-below-max candidate (issue #313)
+assumes charging can be blocked, an assumption that only holds for
+TOU-style hardware rate control unless VPP mode is given an equivalent
+signal — see
+[`docs/superpowers/specs/2026-07-20-vpp-passive-charge-block-design.md`](superpowers/specs/2026-07-20-vpp-passive-charge-block-design.md)
+for the full design (a `block_passive_charging` flag threaded through
+`InverterController.apply_period`, computed once from intent, acted on only
+by forced-power/VPP-style controllers).
+
+`SOLAR_EXPORT` now keeps `vpp_remote_control` **enabled** and writes
+`vpp_power=0` instead of disabling remote control, selecting the documented
+`grid first` state instead of self-use `load_first`. **Not yet
+real-hardware-validated**: whether `grid first` reached via a forced
+`vpp_power=0` command holds the battery exactly like `grid_first` under TOU
+is a firmware behavior claim the register table documents the *mode
+selection logic* for, not the runtime power-flow guarantee — ships as
+experimental pending confirmation from a real debug export (no existing TOU
+code path exercises `grid_first` with a zero target either, so there's no
+already-proven precedent to lean on).
+
+`SolaxController` (real SolaX hardware) has the same underlying
+architectural gap but is **not** fixed here — no SolaX vendor protocol has
+been verified the way the Growatt spec was, so extending this fix there
+would be speculation, not a verified command. Tracked as a follow-up.
 
 **Enable sequence** (real-hardware-tested, see issue #118 comments): write
 `vpp_status=Enabled` + `vpp_allow_ac_charging=Enabled`, wait ~1s, then write

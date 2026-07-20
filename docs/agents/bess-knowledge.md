@@ -209,7 +209,10 @@ thresholds live in `core/bess/decision_intelligence.py` — read that file
 directly rather than relying on a copy of the numbers here, since they are
 implementation detail that can change independently of this doc.
 
-**Hardware mapping**: Intents control actual inverter behavior:
+**Hardware mapping**: Intents control actual inverter behavior (register-
+based platforms — Growatt TOU/cloud/SPH; VPP-style platforms select
+`grid_first`/`load_first` per-period instead of via a persistent mode, see
+the SOLAR_EXPORT hardware-mapping note below):
 - GRID_CHARGING → battery_first mode + grid charge ON
 - LOAD_SUPPORT → load_first mode
 - BATTERY_EXPORT → grid_first mode (battery discharge to grid)
@@ -285,10 +288,16 @@ battery has room.  With the cap set:
   the DP chooses it ahead of the above-cap window.  These periods classify as
   **SOLAR_EXPORT** with `battery_action = 0` and a not-full battery, meaning
   "deliberately holding for later overflow".
-- **Hardware mapping**: SOLAR_EXPORT writes `charge_rate=0` (#313, all
-  configurations), stopping `load_first` from passively filling the battery.
-  On a genuinely full battery this is a no-op.  The shadow-price *discharge*
-  gate above is unchanged and orthogonal.
+- **Hardware mapping**: SOLAR_EXPORT blocks passive charging (#313), stopping
+  `load_first` from filling the battery from surplus solar. On a genuinely
+  full battery this is a no-op. The mechanism differs by platform: register-
+  based hardware (Growatt TOU/cloud/SPH) writes `charge_rate=0` via the EMS
+  register; VPP-style hardware has no such register — it instead selects
+  `grid_first` (battery held flat) via a forced `vpp_power=0` command with
+  remote control kept enabled, instead of disabling remote control into
+  self-use (#355, not yet real-hardware-validated — see
+  `docs/superpowers/specs/2026-07-20-vpp-passive-charge-block-design.md`).
+  The shadow-price *discharge* gate above is unchanged and orthogonal.
 - **Discharge shares the cap**: battery discharge is limited to the AC
   headroom the (possibly clipped) solar leaves
   (`cap − min(solar, cap)` per period), both in the DP's feasible actions and

@@ -69,7 +69,11 @@ class GrowattSphController(InverterController):
         self._discharge_periods: list[dict] = []
 
     def _write_period_to_hardware(
-        self, controller, grid_charge: bool, discharge_rate: int
+        self,
+        controller,
+        grid_charge: bool,
+        discharge_rate: int,
+        block_passive_charging: bool = False,
     ) -> tuple[bool, str]:
         """No-op: SPH deploys the full schedule atomically via service calls.
 

@@ -26,6 +26,17 @@ investigation). Forecast periods (from the bundle's `Raw Schedule JSON`,
 latest optimization run) are used as-is, since they're the DP's own planning
 output, not sensor-derived.
 
+**One implementation, not two.** Every threshold, comparison, and formula the
+tooltip shows (which price the shadow price is weighed against, whether it
+clears, breakeven/profit, reward/total value, net savings) is computed once
+in Python (`build_chart.py`'s `compute_decision_view`), reusing the same
+`POWER_CLASSIFICATION_THRESHOLD_KW` core's own code classifies flows with.
+`template_tail.js` only formats the resulting `view` dict per row — it never
+re-derives a threshold or an economic formula from raw numbers. A bug fix or
+behavior change in the real economics only has to happen in Python to reach
+the chart; adding JS-side logic that duplicates something Python already
+knows is the mistake this design exists to prevent.
+
 ## When to Use
 
 - User asks to "visualize" a debug log, debug bundle, or a PR/issue that has
@@ -70,7 +81,7 @@ frontend) — this is for a point-in-time bundle snapshot only.
 | `scripts/build_chart.py` | Parses the bundle, recomputes actual periods via real `EnergyData`, merges with forecast `period_data`, renders the final HTML |
 | `scripts/template_head.html` | CSS + page skeleton, `{{TITLE}}`/`{{SUBTITLE}}` placeholders |
 | `scripts/template_tail.js` | Chart rendering, legend/ledger toggles, tooltip — reads `ROWS` and `SUMMARY` globals the build script injects |
-| `ROWS` | One object per period: raw aggregates, detailed flows, intent, DP-reasoning fields (`shadow_price`, `cost_basis`, `economic_chain`, `immediate_value`, `future_value`) |
+| `ROWS` | One object per period: raw aggregates, detailed flows, intent, DP-reasoning fields (`shadow_price`, `cost_basis`, `economic_chain`, `immediate_value`, `future_value`), plus a `view` sub-object with every derived tooltip value (`compare`, `breakeven`, `home_profit`, `export_profit`, `reward`, `total_value`, `net_savings`, `charge_parts`, `discharge_parts`) |
 | `SUMMARY` | Whole-trace totals: `grid_only_cost`, `actual_cost`, `savings`, `cycle_cost`, `capacity`, period counts |
 
 ## Common Mistakes
@@ -85,6 +96,10 @@ frontend) — this is for a point-in-time bundle snapshot only.
 - **Assuming the bundle's own stored `energy`/`decision` fields for actual
   periods are current.** They're a snapshot from export time; that's the
   entire reason this skill recomputes them instead of reading them directly.
+- **Adding a threshold/comparison/formula to `template_tail.js`.** If the
+  tooltip needs a new derived number, add it to `compute_decision_view` in
+  `build_chart.py` and read it off `r.view` in JS — don't re-derive it from
+  raw fields in JavaScript, even for "just this one case."
 - **Forgetting `--title`.** Without it the title is auto-generated from
   period counts only (no bundle date/version) — fine for a quick look, but
   add a real title when publishing something you'll want to find again.

@@ -25,6 +25,7 @@ REPO_ROOT = SCRIPT_DIR.parents[
 ]  # .claude/skills/visualize-debug-log/scripts -> repo root
 sys.path.insert(0, str(REPO_ROOT))
 
+from core.bess.dp_constants import POWER_CLASSIFICATION_THRESHOLD_KW  # noqa: E402
 from core.bess.models import EnergyData, infer_intent_from_flows  # noqa: E402
 
 
@@ -55,6 +56,113 @@ def parse_bundle(text: str) -> dict:
         "battery_settings": battery_settings,
         "historical": hist,
         "forecast": period_data_list,
+    }
+
+
+def _clean_flow(v: float) -> float:
+    """Zero out sub-threshold energy flows.
+
+    Below core's own POWER_CLASSIFICATION_THRESHOLD_KW, a flow value is
+    floating-point/cross-sensor noise, not a real physical transfer (same
+    threshold core.bess.decision_intelligence uses to classify flows) --
+    reused here so the chart never displays a phantom "0.00 grid" a raw
+    float epsilon would otherwise trigger.
+    """
+    return v if abs(v) > POWER_CLASSIFICATION_THRESHOLD_KW else 0.0
+
+
+def compute_decision_view(r: dict, cycle_cost: float) -> dict:
+    """All decision/outcome math the tooltip needs, computed once here.
+
+    This is the single implementation: the chart's JS only formats these
+    numbers, it never re-derives a threshold, comparison, or formula from
+    raw fields. A fix or behavior change in the real economics (reward,
+    thresholds, formulas) only has to happen here to reach the chart.
+    """
+    solar_to_batt = r["solar_to_batt"]
+    grid_to_batt = r["grid_to_batt"]
+    batt_to_home = r["batt_to_home"]
+    batt_to_grid = r["batt_to_grid"]
+
+    charge_parts = []
+    if solar_to_batt > 0:
+        charge_parts.append({"source": "solar", "kwh": solar_to_batt})
+    if grid_to_batt > 0:
+        charge_parts.append({"source": "grid", "kwh": grid_to_batt})
+    discharge_parts = []
+    if batt_to_home > 0:
+        discharge_parts.append({"source": "home", "kwh": batt_to_home})
+    if batt_to_grid > 0:
+        discharge_parts.append({"source": "grid", "kwh": batt_to_grid})
+
+    # Which price the shadow price is actually being weighed against, and
+    # whether it clears -- mirrors the DP's own reward/wear-cost policy
+    # (discharge never incurs wear cost; charging always does).
+    compare = None
+    shadow = r["shadow_price"]
+    if shadow > 0:
+        if batt_to_grid > 0:
+            compare = {
+                "case": "export",
+                "label": "sell price",
+                "price": r["sell"],
+                "clears": r["sell"] >= shadow,
+            }
+        elif batt_to_home > 0:
+            compare = {
+                "case": "home",
+                "label": "buy price avoided",
+                "price": r["buy"],
+                "clears": r["buy"] >= shadow,
+            }
+        elif grid_to_batt > 0:
+            cost = r["buy"] + cycle_cost
+            compare = {
+                "case": "grid_charge",
+                "label": "buy price + cycle cost",
+                "price": cost,
+                "clears": shadow >= cost,
+                "buy": r["buy"],
+                "cycle_cost": cycle_cost,
+            }
+        elif solar_to_batt > 0:
+            cost = r["sell"] + cycle_cost
+            compare = {
+                "case": "solar_store",
+                "label": "sell price + cycle cost",
+                "price": cost,
+                "clears": shadow >= cost,
+                "sell": r["sell"],
+                "cycle_cost": cycle_cost,
+            }
+
+    breakeven = r["cost_basis"] + cycle_cost if r["cost_basis"] > 0 else None
+    home_profit = (
+        batt_to_home * (r["buy"] - breakeven)
+        if breakeven is not None and batt_to_home > 0
+        else None
+    )
+    export_profit = (
+        batt_to_grid * (r["sell"] - breakeven)
+        if breakeven is not None and batt_to_grid > 0
+        else None
+    )
+    reward = r["export_revenue"] - r["import_cost"] - r["battery_wear_cost"]
+
+    return {
+        "charge_parts": charge_parts,
+        "discharge_parts": discharge_parts,
+        "charge_total": solar_to_batt + grid_to_batt,
+        "discharge_total": batt_to_home + batt_to_grid,
+        "export_total": r["solar_to_grid"] + batt_to_grid,
+        "import_total": r["grid_to_home"] + grid_to_batt,
+        "compare": compare,
+        "breakeven": breakeven,
+        "home_profit": home_profit,
+        "export_profit": export_profit,
+        "reward": reward,
+        "total_value": reward + r["future_value"],
+        "net_savings": r["grid_only_cost"] - r["grid_cost"],
     }
 
 
@@ -93,13 +201,13 @@ def build_rows(parsed: dict) -> list[dict]:
             "grid_export": energy.grid_exported,
             "batt_charged": energy.battery_charged,
             "batt_discharged": energy.battery_discharged,
-            "solar_to_batt": energy.solar_to_battery,
-            "grid_to_batt": energy.grid_to_battery,
-            "batt_to_home": energy.battery_to_home,
-            "batt_to_grid": energy.battery_to_grid,
-            "solar_to_home": energy.solar_to_home,
-            "solar_to_grid": energy.solar_to_grid,
-            "grid_to_home": energy.grid_to_home,
+            "solar_to_batt": _clean_flow(energy.solar_to_battery),
+            "grid_to_batt": _clean_flow(energy.grid_to_battery),
+            "batt_to_home": _clean_flow(energy.battery_to_home),
+            "batt_to_grid": _clean_flow(energy.battery_to_grid),
+            "solar_to_home": _clean_flow(energy.solar_to_home),
+            "solar_to_grid": _clean_flow(energy.solar_to_grid),
+            "grid_to_home": _clean_flow(energy.grid_to_home),
             "source": "actual",
             "shadow_price": dec.get("shadow_price", 0.0),
             "cost_basis": dec.get("cost_basis", 0.0),
@@ -109,6 +217,19 @@ def build_rows(parsed: dict) -> list[dict]:
             "hourly_cost": econ.get("hourly_cost", 0.0),
             "grid_only_cost": econ.get("grid_only_cost", 0.0),
             "hourly_savings": econ.get("hourly_savings", 0.0),
+            # Same formula backing the live dashboard's "Net Grid Cost" tile
+            # (EconomicData.grid_cost, core/bess/models.py:232) -- wear-free,
+            # import_cost - export_revenue. Net savings (grid_only_cost -
+            # grid_cost) matches the dashboard's "Net Savings" exactly
+            # (backend/api_dataclasses.py's netSavings).
+            "grid_cost": econ.get("grid_cost", 0.0),
+            # The DP's own two reward terms (core/bess/dp_battery_algorithm.py
+            # _compute_reward: import_cost, export_revenue, battery_wear_cost),
+            # so the chart can show reward = export_revenue - import_cost -
+            # battery_wear_cost as its own breakdown, not just the result.
+            "import_cost": econ.get("import_cost", 0.0),
+            "export_revenue": econ.get("export_revenue", 0.0),
+            "battery_wear_cost": econ.get("battery_cycle_cost", 0.0),
         }
 
     for pd_ in parsed["forecast"]:
@@ -132,13 +253,13 @@ def build_rows(parsed: dict) -> list[dict]:
             "grid_export": e["grid_exported"],
             "batt_charged": e["battery_charged"],
             "batt_discharged": e["battery_discharged"],
-            "solar_to_batt": e["solar_to_battery"],
-            "grid_to_batt": e["grid_to_battery"],
-            "batt_to_home": e["battery_to_home"],
-            "batt_to_grid": e["battery_to_grid"],
-            "solar_to_home": e["solar_to_home"],
-            "solar_to_grid": e["solar_to_grid"],
-            "grid_to_home": e["grid_to_home"],
+            "solar_to_batt": _clean_flow(e["solar_to_battery"]),
+            "grid_to_batt": _clean_flow(e["grid_to_battery"]),
+            "batt_to_home": _clean_flow(e["battery_to_home"]),
+            "batt_to_grid": _clean_flow(e["battery_to_grid"]),
+            "solar_to_home": _clean_flow(e["solar_to_home"]),
+            "solar_to_grid": _clean_flow(e["solar_to_grid"]),
+            "grid_to_home": _clean_flow(e["grid_to_home"]),
             "source": "forecast",
             "shadow_price": dec.get("shadow_price", 0.0),
             "cost_basis": dec.get("cost_basis", 0.0),
@@ -148,9 +269,26 @@ def build_rows(parsed: dict) -> list[dict]:
             "hourly_cost": econ.get("hourly_cost", 0.0),
             "grid_only_cost": econ.get("grid_only_cost", 0.0),
             "hourly_savings": econ.get("hourly_savings", 0.0),
+            # Same formula backing the live dashboard's "Net Grid Cost" tile
+            # (EconomicData.grid_cost, core/bess/models.py:232) -- wear-free,
+            # import_cost - export_revenue. Net savings (grid_only_cost -
+            # grid_cost) matches the dashboard's "Net Savings" exactly
+            # (backend/api_dataclasses.py's netSavings).
+            "grid_cost": econ.get("grid_cost", 0.0),
+            # The DP's own two reward terms (core/bess/dp_battery_algorithm.py
+            # _compute_reward: import_cost, export_revenue, battery_wear_cost),
+            # so the chart can show reward = export_revenue - import_cost -
+            # battery_wear_cost as its own breakdown, not just the result.
+            "import_cost": econ.get("import_cost", 0.0),
+            "export_revenue": econ.get("export_revenue", 0.0),
+            "battery_wear_cost": econ.get("battery_cycle_cost", 0.0),
         }
 
-    return [rows_by_period[p] for p in sorted(rows_by_period)]
+    rows = [rows_by_period[p] for p in sorted(rows_by_period)]
+    cycle_cost = parsed["battery_settings"].get("cycle_cost_per_kwh", 0.0)
+    for r in rows:
+        r["view"] = compute_decision_view(r, cycle_cost)
+    return rows
 
 
 def build_summary(rows: list[dict], battery_settings: dict) -> dict:

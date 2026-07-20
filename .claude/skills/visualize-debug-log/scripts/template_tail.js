@@ -14,20 +14,20 @@ const CYCLE_COST = SUMMARY.cycle_cost;
 // "gapped" (only populated for forecast periods, so the line breaks rather than
 // dropping to zero across the actual/historical morning).
 const PRICE_SERIES = [
-  { key: 'sell', label: 'Sell price', color: 'var(--sell-line)', get: r => r.sell, panel: 'price', defaultOn: true },
-  { key: 'buy', label: 'Buy price', color: 'var(--buy-line)', get: r => r.buy, panel: 'price', defaultOn: true, dashed: true },
-  { key: 'shadow', label: 'Shadow price', color: 'var(--c-shadow)', get: r => r.shadow_price, panel: 'price', defaultOn: false, gapped: true },
-  { key: 'costbasis', label: 'Cost basis (stored energy)', color: 'var(--c-solar-flow)', get: r => r.cost_basis, panel: 'price', defaultOn: false, gapped: true },
-  { key: 'breakeven', label: 'Breakeven (cost basis + cycle cost)', color: 'var(--c-solar-store)', get: r => r.cost_basis > 0 ? r.cost_basis + CYCLE_COST : 0, panel: 'price', defaultOn: false, gapped: true, dashed: true },
+  { key: 'sell', label: 'Sell price', def: 'What exporting to the grid earns per kWh, right now.', color: 'var(--sell-line)', get: r => r.sell, panel: 'price', defaultOn: true },
+  { key: 'buy', label: 'Buy price', def: 'What importing from the grid costs per kWh, right now.', color: 'var(--buy-line)', get: r => r.buy, panel: 'price', defaultOn: true, dashed: true },
+  { key: 'shadow', label: 'Shadow price', def: "The optimizer's own marginal value of one more kWh in the battery right now — a genuine decision input (see Why in the tooltip).", color: 'var(--c-shadow)', get: r => r.shadow_price, panel: 'price', defaultOn: false, gapped: true },
+  { key: 'costbasis', label: 'Cost basis (stored energy)', def: 'Acquisition cost: the weighted-average price paid per kWh of energy currently stored. Retrospective only — never affects the decision (see Outcome in the tooltip).', color: 'var(--c-solar-flow)', get: r => r.cost_basis, panel: 'price', defaultOn: false, gapped: true },
+  { key: 'breakeven', label: 'Breakeven (cost basis + cycle cost)', def: 'Cost basis plus battery wear cost — the price a discharge must clear to be profitable, by this retrospective accounting. Also never affects the decision (see Outcome in the tooltip).', color: 'var(--c-solar-store)', get: r => r.cost_basis > 0 ? r.cost_basis + CYCLE_COST : 0, panel: 'price', defaultOn: false, gapped: true, dashed: true },
 ];
 // Energy Trend series — Growatt-app style: six independently toggleable overlaid series.
 const ENERGY_SERIES = [
-  { key: 'export', label: 'Exported to Grid', color: 'var(--s-export)', get: r => r.solar_to_grid + r.batt_to_grid, panel: 'energy', defaultOn: true },
-  { key: 'pv', label: 'Photovoltaic Output', color: 'var(--s-pv)', get: r => r.solar, panel: 'energy', defaultOn: true },
-  { key: 'dis', label: 'Discharging', color: 'var(--s-dis)', get: r => r.batt_to_home + r.batt_to_grid, panel: 'energy', defaultOn: true },
-  { key: 'imp', label: 'Imported From Grid', color: 'var(--s-imp)', get: r => r.grid_to_home + r.grid_to_batt, panel: 'energy', defaultOn: true },
-  { key: 'chg', label: 'Charging', color: 'var(--s-chg)', get: r => r.solar_to_batt + r.grid_to_batt, panel: 'energy', defaultOn: true },
-  { key: 'load', label: 'Load Consumption', color: 'var(--s-load)', get: r => r.load, panel: 'energy', defaultOn: true },
+  { key: 'export', label: 'Exported to Grid', def: 'kWh sold to the grid this period (solar surplus + battery discharge).', color: 'var(--s-export)', get: r => r.solar_to_grid + r.batt_to_grid, panel: 'energy', defaultOn: true },
+  { key: 'pv', label: 'Photovoltaic Output', def: 'Total solar production this period, before any allocation.', color: 'var(--s-pv)', get: r => r.solar, panel: 'energy', defaultOn: true },
+  { key: 'dis', label: 'Discharging', def: 'kWh leaving the battery this period, to home or grid.', color: 'var(--s-dis)', get: r => r.batt_to_home + r.batt_to_grid, panel: 'energy', defaultOn: true },
+  { key: 'imp', label: 'Imported From Grid', def: 'kWh bought from the grid this period, for home or battery.', color: 'var(--s-imp)', get: r => r.grid_to_home + r.grid_to_batt, panel: 'energy', defaultOn: true },
+  { key: 'chg', label: 'Charging', def: 'kWh entering the battery this period, from solar or grid.', color: 'var(--s-chg)', get: r => r.solar_to_batt + r.grid_to_batt, panel: 'energy', defaultOn: true },
+  { key: 'load', label: 'Load Consumption', def: 'Total home electricity use this period.', color: 'var(--s-load)', get: r => r.load, panel: 'energy', defaultOn: true },
 ];
 const ALL_SERIES = [...PRICE_SERIES, ...ENERGY_SERIES];
 const activeSeries = new Set(ALL_SERIES.filter(s => s.defaultOn).map(s => s.key));
@@ -48,17 +48,60 @@ stats.innerHTML = `
 const legend = document.getElementById('legend');
 function seriesButton(s) {
   const off = !activeSeries.has(s.key) ? ' off' : '';
-  return `<button type="button" class="swatch${off}" data-key="${s.key}"><span class="dot" style="background:${s.color}"></span>${s.label}</button>`;
+  return `<button type="button" class="swatch${off}" data-key="${s.key}" title="${s.def}"><span class="dot" style="background:${s.color}"></span>${s.label}</button>`;
 }
 const priceButtons = PRICE_SERIES.map(seriesButton).join('');
 const energyButtons = ENERGY_SERIES.map(seriesButton).join('');
+// Not a line/point series (draws a rect pair per discharging period, not a
+// path) -- own toggle button + group, kept out of ALL_SERIES so the generic
+// line-drawing and hover-dot code don't try to treat it as one.
+const PROFIT_TOGGLE = { key: 'profit', label: 'Profit areas', def: 'Shaded per-period brackets: buy/sell price vs. breakeven, sized by the actual profit (see tooltip for the number).', color: 'var(--c-load)' };
+const profitButton = seriesButton(PROFIT_TOGGLE);
+const INTENT_DEF = {
+  SOLAR_STORAGE: 'Charging the battery from solar surplus.',
+  SOLAR_EXPORT: 'Solar surplus sold to the grid; battery untouched.',
+  BATTERY_EXPORT: 'Discharging with some or all going to the grid.',
+  LOAD_SUPPORT: 'Discharging to cover home load only, nothing exported.',
+  GRID_CHARGING: 'Charging the battery from the grid.',
+  IDLE: 'No beneficial battery action this period.',
+};
 const intentSwatches = INTENT_ORDER.map(k =>
-  `<span class="swatch"><span class="dot" style="background:${INTENT_COLOR[k]}"></span>${k}</span>`
+  `<span class="swatch" title="${INTENT_DEF[k]}"><span class="dot" style="background:${INTENT_COLOR[k]}"></span>${k}</span>`
 ).join('');
-legend.innerHTML = `${priceButtons}` +
-  `<span class="swatch" style="opacity:0.7">|</span>${energyButtons}` +
-  `<span class="swatch" style="opacity:0.7">|</span>${intentSwatches}` +
-  `<span class="swatch" style="opacity:0.75">(background tint = optimizer intent)</span>`;
+
+// ---- glossary: short definition for every term, grouped by category so a
+// mix of prices/energies/states doesn't read as one flat, unordered list ----
+const glossary = document.getElementById('glossary');
+function glossEntry(label, color, def) {
+  return `<div><dt>${color ? `<span class="dot" style="background:${color}"></span>` : ''}${label}</dt><dd>${def}</dd></div>`;
+}
+function glossHeader(text) {
+  return `<div class="section-header">${text}</div>`;
+}
+glossary.innerHTML = [
+  glossHeader('Price'),
+  ...PRICE_SERIES.map(s => glossEntry(s.label, s.color, s.def)),
+  glossEntry(PROFIT_TOGGLE.label, null, PROFIT_TOGGLE.def),
+  glossHeader('Energy'),
+  ...ENERGY_SERIES.map(s => glossEntry(s.label, s.color, s.def)),
+  glossHeader('Battery'),
+  glossEntry('SOE', null, 'Battery State of Energy, in kWh — this system tracks charge as an energy quantity, not a percentage.'),
+  glossHeader('Decision'),
+  glossEntry('Total value', null, "The winning candidate action's score: reward + future value. The optimizer tries every candidate action this period (idle, several discharge levels, one charge option) and picks whichever scores highest on this sum."),
+  glossEntry('Reward', null, "This period's own grid cost/revenue for the chosen action (export revenue &minus; import cost &minus; battery wear) — one of total value's two components."),
+  glossEntry('Future value', null, "The precomputed best-achievable outcome from the resulting battery level onward — total value's other component. Shadow price is this same table's local slope, not a separate ingredient."),
+  glossHeader('Intent'),
+  glossEntry('Background tint', null, "The optimizer's intent label for that period (hover an intent name in the legend below for its meaning)."),
+].join('');
+
+// ---- ledger: same grouping, one labeled row per category, own toggles ----
+function legendGroup(label, contentHtml) {
+  return `<span class="group-label">${label}</span><span class="group">${contentHtml}</span><span class="group-sep"></span>`;
+}
+legend.innerHTML =
+  legendGroup('Price', `${priceButtons}${profitButton}`) +
+  legendGroup('Energy', energyButtons) +
+  legendGroup('Intent', `${intentSwatches}<span class="swatch" style="opacity:0.75">(background tint)</span>`);
 
 legend.querySelectorAll('button.swatch[data-key]').forEach(btn => {
   btn.addEventListener('click', () => {
@@ -205,6 +248,32 @@ dayBoundaries.forEach(({ i }, dayNum) => {
   svg += `<text class="ref-label" x="${x(i) + 4}" y="${priceTop + 10}">day ${dayNum + 2} &rarr;</text>`;
 });
 
+// ---- Profit areas: every discharge period, not just one example ----
+// Two brackets per period, same breakeven reference as the tooltip's profit
+// rows: home-serving profit priced at buy price (what it avoided), export
+// profit priced at sell price (what it earned). Bracket height = per-kWh
+// margin × that period's column width -- hover for the exact SEK figure
+// (already in the tooltip's DP-reasoning section). Off by default (one rect
+// pair per discharging period can get busy); toggle in the ledger.
+const profitBarW = Math.max(1.5, segW * 0.7);
+let profitAreasSvg = '';
+ROWS.forEach((r, i) => {
+  const v = r.view;
+  if (v.breakeven === null) return;
+  const px = x(i);
+  const yBreakeven = yPrice(v.breakeven);
+  if (v.home_profit !== null) {
+    const yBuy = yPrice(r.buy);
+    profitAreasSvg += `<rect x="${(px - profitBarW / 2).toFixed(2)}" y="${Math.min(yBuy, yBreakeven).toFixed(2)}" width="${profitBarW.toFixed(2)}" height="${Math.abs(yBreakeven - yBuy).toFixed(2)}" fill="var(--c-load)" opacity="0.35"/>`;
+  }
+  if (v.export_profit !== null) {
+    const ySell = yPrice(r.sell);
+    profitAreasSvg += `<rect x="${(px - profitBarW / 2).toFixed(2)}" y="${Math.min(ySell, yBreakeven).toFixed(2)}" width="${profitBarW.toFixed(2)}" height="${Math.abs(yBreakeven - ySell).toFixed(2)}" fill="var(--c-export)" opacity="0.35"/>`;
+  }
+});
+const profitHidden = activeSeries.has('profit') ? '' : ' series-hidden';
+svg += `<g class="series-group${profitHidden}" id="series-profit">${profitAreasSvg}</g>`;
+
 // ---- energy trend panel (six overlaid, independently toggleable series) ----
 svg += bgRects(energyTop, ENERGY_H);
 for (const t of energyYTicks) {
@@ -279,54 +348,118 @@ function renderTooltip(idx) {
   tooltip.style.top = (yPrice(Math.max(r.sell, r.buy)) * scale - 8) + 'px';
   tooltip.style.opacity = 1;
 
-  const chargeTotal = r.solar_to_batt + r.grid_to_batt;
-  const dischargeTotal = r.batt_to_home + r.batt_to_grid;
+  const v = r.view;
   let actionLine, actionColor;
-  if (chargeTotal > 0) {
-    const parts = [];
-    if (r.solar_to_batt > 0) parts.push(`${r.solar_to_batt.toFixed(2)} solar`);
-    if (r.grid_to_batt > 0) parts.push(`${r.grid_to_batt.toFixed(2)} grid`);
-    actionLine = `⚡ +${chargeTotal.toFixed(2)} kWh charge (${parts.join(' + ')})`;
+  if (v.charge_total > 0) {
+    const parts = v.charge_parts.map(p => `${p.kwh.toFixed(2)} ${p.source}`);
+    actionLine = `⚡ +${v.charge_total.toFixed(2)} kWh charge (${parts.join(' + ')})`;
     actionColor = 'var(--s-chg)';
-  } else if (dischargeTotal > 0) {
-    const parts = [];
-    if (r.batt_to_home > 0) parts.push(`${r.batt_to_home.toFixed(2)} home`);
-    if (r.batt_to_grid > 0) parts.push(`${r.batt_to_grid.toFixed(2)} grid`);
-    actionLine = `⚡ −${dischargeTotal.toFixed(2)} kWh discharge (${parts.join(' + ')})`;
+  } else if (v.discharge_total > 0) {
+    const parts = v.discharge_parts.map(p => `${p.kwh.toFixed(2)} ${p.source}`);
+    actionLine = `⚡ −${v.discharge_total.toFixed(2)} kWh discharge (${parts.join(' + ')})`;
     actionColor = 'var(--s-dis)';
   } else {
     actionLine = 'no battery action';
     actionColor = 'var(--text-muted)';
   }
 
-  const showDpReasoning = activeSeries.has('shadow') || activeSeries.has('costbasis') || activeSeries.has('breakeven');
+  // Every row gets the same color dot as its matching chart line/series, so
+  // a tooltip value can be traced back to what's drawn without re-reading
+  // the legend each time.
+  function dotRow(label, value, color) {
+    const dot = color ? `<span class="dot" style="background:${color}"></span>` : '<span class="dot" style="background:transparent"></span>';
+    return `<div class="t-row"><span>${dot}${label}</span><b>${value}</b></div>`;
+  }
+  function subRow(text) {
+    return `<div class="t-row" style="font-size:10px; opacity:0.75"><span>&nbsp;&nbsp;${text}</span></div>`;
+  }
 
-  let priceRows = `<div class="t-row"><span>sell</span><b>${r.sell.toFixed(2)} SEK/kWh</b></div>
-    <div class="t-row"><span>buy</span><b>${r.buy.toFixed(2)} SEK/kWh</b></div>`;
-  if (activeSeries.has('shadow') && r.shadow_price > 0) priceRows += `<div class="t-row"><span>shadow price</span><b>${r.shadow_price.toFixed(2)} SEK/kWh</b></div>`;
-  if (activeSeries.has('costbasis') && r.cost_basis > 0) priceRows += `<div class="t-row"><span>cost basis (stored energy)</span><b>${r.cost_basis.toFixed(2)} SEK/kWh</b></div>`;
-  if (activeSeries.has('breakeven') && r.cost_basis > 0) priceRows += `<div class="t-row"><span>breakeven (this period)</span><b>${(r.cost_basis + CYCLE_COST).toFixed(2)} SEK/kWh</b></div>`;
+  let priceRows = dotRow('buy', `${r.buy.toFixed(2)} SEK/kWh`, 'var(--buy-line)') +
+    dotRow('sell', `${r.sell.toFixed(2)} SEK/kWh`, 'var(--sell-line)');
+  if (activeSeries.has('shadow') && r.shadow_price > 0) priceRows += dotRow('shadow price', `${r.shadow_price.toFixed(2)} SEK/kWh`, 'var(--c-shadow)');
+  if (activeSeries.has('costbasis') && r.cost_basis > 0) priceRows += dotRow('cost basis (stored energy)', `${r.cost_basis.toFixed(2)} SEK/kWh`, 'var(--c-solar-flow)');
+  if (activeSeries.has('breakeven') && r.cost_basis > 0) priceRows += dotRow('breakeven (this period)', `${(r.cost_basis + CYCLE_COST).toFixed(2)} SEK/kWh`, 'var(--c-solar-store)');
 
-  const energyRows = `<div class="t-row"><span>PV output</span><b>${r.solar.toFixed(2)} kWh</b></div>
-    <div class="t-row"><span>load</span><b>${r.load.toFixed(2)} kWh</b></div>
-    <div class="t-row"><span>exported to grid</span><b>${(r.solar_to_grid + r.batt_to_grid).toFixed(2)} kWh</b></div>
-    <div class="t-row"><span>imported from grid</span><b>${(r.grid_to_home + r.grid_to_batt).toFixed(2)} kWh</b></div>`;
+  const energyRows = dotRow('PV output', `${r.solar.toFixed(2)} kWh`, 'var(--s-pv)') +
+    dotRow('load', `${r.load.toFixed(2)} kWh`, 'var(--s-load)') +
+    dotRow('exported to grid', `${v.export_total.toFixed(2)} kWh`, 'var(--s-export)') +
+    dotRow('imported from grid', `${v.import_total.toFixed(2)} kWh`, 'var(--s-imp)');
 
-  const batteryRows = `<div class="t-row"><span>SOE</span><b>${r.soe_start.toFixed(2)} &rarr; ${r.soe_end.toFixed(2)} kWh</b></div>
-    <div class="t-row"><span>SOE &Delta;</span><b>${(r.soe_end - r.soe_start >= 0 ? '+' : '')}${(r.soe_end - r.soe_start).toFixed(2)} kWh</b></div>`;
+  const batteryRows = dotRow('SOE', `${r.soe_start.toFixed(2)} &rarr; ${r.soe_end.toFixed(2)} kWh`, 'var(--text-primary)') +
+    dotRow('SOE &Delta;', `${(r.soe_end - r.soe_start >= 0 ? '+' : '')}${(r.soe_end - r.soe_start).toFixed(2)} kWh`, 'var(--text-primary)');
 
-  let dpRows = '';
-  if (showDpReasoning && r.immediate_value !== 0) dpRows += `<div class="t-row"><span>immediate value</span><b>${r.immediate_value.toFixed(2)} SEK</b></div>`;
-  if (showDpReasoning && r.future_value !== 0) dpRows += `<div class="t-row"><span>future value</span><b>${r.future_value.toFixed(2)} SEK</b></div>`;
-  if (showDpReasoning && r.economic_chain) dpRows += `<div class="t-row" style="display:block; white-space:normal; margin-top:2px; color:var(--text-secondary)">${r.economic_chain}</div>`;
-  if (showDpReasoning && !dpRows) dpRows = `<div class="t-row" style="color:var(--text-muted)">no DP decision recorded this period</div>`;
+  // ---- Why: ONLY what genuinely entered the DP's comparison -- price and ----
+  // shadow price (the value-to-go readout). Cost basis, breakeven, and the
+  // profit-vs-breakeven math below are real numbers but NEVER part of the
+  // reward or value-to-go the DP actually maximizes (verified by tracing
+  // _compute_reward: cost_basis only updates bookkeeping, never total_cost)
+  // -- they belong in Outcome (a retrospective check), not here. Always
+  // shown regardless of chart-line toggles: toggles control what's drawn,
+  // not what the tooltip is allowed to explain.
+  // ---- Decision: shadow price + whichever price is relevant, the plain- ----
+  // language read of them, then the actual math -- total value (the winning
+  // candidate's score) broken into its two real components, reward broken
+  // into its three. The optimizer tries every candidate action this period
+  // (idle, several discharge levels, one charge option) and picks whichever
+  // scores highest on reward + future value; this is that winner's own
+  // breakdown, not a side-by-side vs. the candidates that lost (the debug
+  // bundle doesn't record those).
+  // Sentence copy keyed by the case Python already decided (compute_decision_view
+  // in build_chart.py) -- this layer only picks a template and fills in numbers
+  // it's handed, it never re-derives a threshold or a clears/falls-short call.
+  const DECISION_SENTENCE = {
+    export: c => `Sell price ${c.clears ? 'clears' : 'falls short of'} the optimizer's own marginal value of holding this energy — ${c.clears ? 'a good reason to let it go to the grid now rather than hold for later.' : 'holding a bit longer would likely have been worth more.'}`,
+    home: c => `Using this energy now ${c.clears ? 'clears' : 'falls short of'} its own marginal value — ${c.clears ? 'worth spending here rather than saving it.' : 'a close call; saving it a bit longer might have been worth more.'}`,
+    grid_charge: c => `Shadow price ${c.clears ? 'clears' : 'falls short of'} the cost of buying and storing this energy (${c.buy.toFixed(2)} buy + ${c.cycle_cost.toFixed(2)} cycle cost) — ${c.clears ? 'worth it.' : 'a marginal call; this charge may lean on other considerations, not this price alone.'}`,
+    solar_store: c => `Shadow price ${c.clears ? 'clears' : 'falls short of'} what this solar would earn by exporting right now, plus the cost of storing it (${c.sell.toFixed(2)} sell + ${c.cycle_cost.toFixed(2)} cycle cost) — ${c.clears ? 'worth storing for later rather than selling it now.' : 'exporting it now would likely have been worth more.'}`,
+  };
+  let decisionRows = '';
+  if (v.compare) {
+    const c = v.compare;
+    decisionRows += dotRow('shadow price', `${r.shadow_price.toFixed(2)} SEK/kWh`, 'var(--c-shadow)');
+    decisionRows += dotRow(c.label, `${c.price.toFixed(2)} SEK/kWh`, null);
+    decisionRows += `<div class="t-row" style="display:block; white-space:normal; margin-top:2px; color:var(--text-secondary)">${DECISION_SENTENCE[c.case](c)}</div>`;
+  } else {
+    decisionRows += `<div class="t-row" style="color:var(--text-muted)">no shadow price recorded this period</div>`;
+  }
+
+  decisionRows += `<div class="t-row" style="opacity:0.8; margin-top:6px"><span>total value (top candidate)</span><b>${v.total_value >= 0 ? '+' : ''}${v.total_value.toFixed(2)} SEK</b></div>`;
+  decisionRows += dotRow('reward', `${v.reward >= 0 ? '+' : ''}${v.reward.toFixed(2)} SEK`, null) +
+    // import_cost/export_revenue/battery_wear_cost are all non-negative
+    // magnitudes by construction (a price × a kWh flow) -- plain subtraction.
+    subRow(`${r.export_revenue.toFixed(2)} export revenue &minus; ${r.import_cost.toFixed(2)} import cost &minus; ${r.battery_wear_cost.toFixed(2)} battery wear`);
+  decisionRows += dotRow('future value', `${r.future_value >= 0 ? '+' : ''}${r.future_value.toFixed(2)} SEK`, null) +
+    subRow('best achievable outcome from the resulting battery level onward');
+
+  // ---- Outcome: what actually resulted -- both a retrospective accounting ----
+  // check (cost basis/breakeven, which never entered the decision above) and
+  // the same two KPIs the real dashboard shows (Net Grid Cost, Net Savings;
+  // core/bess/models.py's EconomicData.grid_cost and
+  // backend/api_dataclasses.py's netSavings) rather than the DP's internal
+  // immediate_value, which duplicates them and isn't surfaced anywhere in
+  // the live app (see TODO.md, issue #353).
+  let outcomeRows = '';
+  if (v.breakeven !== null && (v.home_profit !== null || v.export_profit !== null)) {
+    outcomeRows += `<div class="t-row" style="opacity:0.8"><span>breakeven this period</span><b>${v.breakeven.toFixed(2)} SEK/kWh</b></div>` +
+      subRow(`${r.cost_basis.toFixed(2)} cost basis + ${CYCLE_COST.toFixed(2)} cycle cost`);
+    if (v.home_profit !== null) outcomeRows += dotRow('serving home profit', `${v.home_profit >= 0 ? '+' : ''}${v.home_profit.toFixed(2)} SEK`, 'var(--c-load)') +
+      subRow(`${r.batt_to_home.toFixed(2)} kWh &times; (${r.buy.toFixed(2)} buy &minus; ${v.breakeven.toFixed(2)} breakeven)`);
+    if (v.export_profit !== null) outcomeRows += dotRow('exporting profit', `${v.export_profit >= 0 ? '+' : ''}${v.export_profit.toFixed(2)} SEK`, 'var(--c-export)') +
+      subRow(`${r.batt_to_grid.toFixed(2)} kWh &times; (${r.sell.toFixed(2)} sell &minus; ${v.breakeven.toFixed(2)} breakeven)`);
+    if (v.home_profit !== null && v.export_profit !== null) outcomeRows += dotRow('combined marginal margin', `${((v.home_profit || 0) + (v.export_profit || 0)) >= 0 ? '+' : ''}${((v.home_profit || 0) + (v.export_profit || 0)).toFixed(2)} SEK`, null);
+  }
+  outcomeRows += dotRow('net grid cost', `${r.grid_cost.toFixed(2)} SEK`, null) +
+    subRow('import cost &minus; export revenue') +
+    dotRow('net savings', `${v.net_savings >= 0 ? '+' : ''}${v.net_savings.toFixed(2)} SEK`, null) +
+    subRow('grid-only baseline &minus; net grid cost');
 
   tooltip.innerHTML = `<div class="t-time">${r.time} &middot; <span style="color:${INTENT_COLOR[r.intent]}">${r.intent}</span></div>
     <div class="t-action" style="color:${actionColor}">${actionLine}</div>
+    <div class="t-section">Decision</div>${decisionRows}
+    <div class="t-section">Outcome</div>${outcomeRows}
     <div class="t-section">Price</div>${priceRows}
     <div class="t-section">Energy</div>${energyRows}
     <div class="t-section">Battery</div>${batteryRows}
-    ${showDpReasoning ? `<div class="t-section">DP reasoning</div>${dpRows}` : ''}
     <div class="t-section">Source</div>
     <div class="t-row"><span>data</span><b>${r.source}</b></div>`;
 }

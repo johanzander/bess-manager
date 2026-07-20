@@ -92,9 +92,14 @@ svg { display: block; width: 100%; height: auto; overflow: visible; font-family:
 .series-group.series-hidden { display: none; }
 .zero-line { stroke: var(--text-secondary); stroke-width: 1; }
 .panel-title { fill: var(--text-secondary); font-size: 10.5px; font-family: var(--sans); font-weight: 650; text-transform: uppercase; letter-spacing: 0.04em; }
-.legend { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; font-size: 0.76rem; color: var(--text-secondary); margin: 10px 0 16px; }
+.legend { display: flex; flex-wrap: wrap; align-items: center; row-gap: 8px; font-size: 0.76rem; color: var(--text-secondary); margin: 10px 0 16px; }
+.legend .group { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.legend .group-label { font-size: 0.62rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--text-muted); margin-right: 2px; }
+.legend .group-sep { width: 100%; height: 0; }
 .legend .swatch { display: inline-flex; align-items: center; gap: 6px; }
-.legend .dot { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+.dot { width: 9px; height: 9px; border-radius: 2px; display: inline-block; flex-shrink: 0; }
+.legend .dot { }
 .legend button.swatch { border: none; background: none; padding: 2px 6px 2px 2px; margin: -2px 0; border-radius: 6px;
   font: inherit; color: var(--text-secondary); cursor: pointer; }
 .legend button.swatch:hover { background: var(--surface-2); }
@@ -110,11 +115,20 @@ svg { display: block; width: 100%; height: auto; overflow: visible; font-family:
   letter-spacing: 0.05em; color: var(--text-muted); margin: 7px 0 2px; }
 .tooltip .t-section:first-of-type { margin-top: 4px; }
 .tooltip .t-row { display: flex; justify-content: space-between; gap: 14px; color: var(--text-secondary); }
+.tooltip .t-row > span:first-child { display: inline-flex; align-items: center; gap: 5px; }
 .tooltip .t-row b { color: var(--text-primary); font-weight: 600; }
 .tooltip .t-action { display: flex; justify-content: space-between; gap: 14px; font-size: 12.5px; font-weight: 700;
   padding: 4px 6px; margin: 0 -4px 5px; border-radius: 5px; background: var(--surface-1); }
 .chart-wrap { position: relative; }
 .footnote { color: var(--text-muted); font-size: 0.76rem; margin-top: 4px; max-width: 76ch; }
+.glossary { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px 16px;
+  margin: 10px 0 14px; padding: 12px 14px; background: var(--surface-2); border-radius: 10px; }
+.glossary dt { font-size: 0.72rem; font-weight: 700; color: var(--text-primary); display: flex; align-items: center; gap: 5px; }
+.glossary dt .dot { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
+.glossary dd { margin: 1px 0 0; font-size: 0.7rem; color: var(--text-secondary); line-height: 1.35; }
+.glossary .section-header { grid-column: 1 / -1; font-size: 0.62rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.05em; color: var(--text-muted); margin-top: 6px; }
+.glossary .section-header:first-child { margin-top: 0; }
 .source-note { color: var(--text-muted); font-size: 0.7rem; margin-top: 16px; }
 table.data-table { border-collapse: collapse; width: 100%; font-family: var(--mono); font-size: 0.72rem; margin-top: 4px; }
 table.data-table caption { text-align: left; color: var(--text-muted); font-size: 0.76rem; margin-bottom: 6px; font-family: var(--sans); }
@@ -137,7 +151,9 @@ details.table-toggle summary { cursor: pointer; color: var(--text-secondary); fo
 <div class="legend" id="legend"></div>
 <p class="legend-hint">One ledger, every line individually toggleable — click any item (price lines, energy-trend series) to show/hide it. Price-panel lines listed first, then Energy Trend, then the (non-toggleable) intent-tint key.</p>
 
-<p class="footnote">Panel 1 (price, all 5 lines individually toggleable, off by default except sell/buy): solid black = sell price, dashed gray = buy price. Shadow price (magenta) and cost basis (yellow) are the DP's own per-period figures — cost basis is the actual weighted-average cost of currently-stored energy, which moves as new charging events blend in; it is <em>not</em> constant across the day. Breakeven (dashed aqua) is <code>cost basis + this system's cycle cost</code>, computed <em>per period</em> from that period's own cost basis. All three DP-reasoning lines are only populated for periods with a real optimizer decision recorded — they don't draw across periods with no decision data (e.g. pure historical/actual periods before the latest run, or idle periods with no beneficial action). Panel 2 (Energy Trend): six independently toggleable series — Photovoltaic Output, Load Consumption, Exported to Grid, Imported From Grid, Charging, Discharging (all six on by default, mirroring the Growatt app's own energy-trend legend). Panel 3: battery SOE in kWh. The background tint in all panels is the optimizer's own intent classification for that period. Dotted vertical lines mark day boundaries (00:00) when the trace spans more than one day.</p>
+<dl class="glossary" id="glossary"></dl>
+
+<p class="footnote">DP-reasoning lines (shadow price, cost basis, breakeven) only draw for periods with a recorded optimizer decision — gaps are periods with no decision data (e.g. idle periods with no beneficial action), not missing data. Dotted vertical lines mark day boundaries (00:00) when the trace spans more than one day. Hover any legend item above for its one-line definition.</p>
 
 <details class="table-toggle">
 <summary>View as table</summary>

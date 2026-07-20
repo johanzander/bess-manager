@@ -353,6 +353,11 @@ The InverterController converts action intents into hardware-specific schedules.
 
 **Why SOLAR_EXPORT uses load_first (not grid_first)**: Solar exports naturally in `load_first` when generation exceeds consumption — no special inverter mode is needed. `SOLAR_EXPORT` exists as a distinct intent purely for UI display (distinguishing "solar actively exporting" from "nothing happening"). Using `grid_first` for battery-idle periods would lock the inverter in a mode that prevents the battery from supporting house load during temporary solar deficits.
 
+**VPP-style control is the exception to this table** (`SolaxModbusGrowattController` `control_mode="vpp"`, `SolaxController`): these platforms have no `charge_rate` register at all (`supports_charge_rate_control=False`), so `load_first` vs. `grid_first` isn't selected via a persistent TOU mode the way it is here — it's chosen per-period from a `block_passive_charging` signal (derived from this same table's `charge_rate` column: `0` → block) threaded through `InverterController.apply_period`. See
+[`docs/INVERTER_PLATFORMS.md`](INVERTER_PLATFORMS.md)'s "SOLAR_EXPORT semantics" section and
+[`docs/superpowers/specs/2026-07-20-vpp-passive-charge-block-design.md`](superpowers/specs/2026-07-20-vpp-passive-charge-block-design.md)
+for the full VPP-mode design (issue #355).
+
 **Why BATTERY_EXPORT requires grid_first**: The inverter must route battery discharge toward the grid rather than the home. In `load_first`, discharge would serve home load first; only `grid_first` guarantees battery energy reaches the grid.
 
 **Schedule generation**:

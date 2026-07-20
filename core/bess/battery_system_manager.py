@@ -177,6 +177,7 @@ class BatterySystemManager:
         # Discharge inhibit tracking
         self._desired_discharge_rate: int = 0  # Rate from schedule before inhibit
         self._desired_grid_charge: bool = False  # grid_charge alongside the rate above
+        self._desired_block_passive_charging: bool = False  # alongside the rate above
         self._last_applied_discharge_rate: int = 0  # Last rate written to inverter
 
         # Prediction caches (populated by _fetch_predictions)
@@ -2524,7 +2525,7 @@ class BatterySystemManager:
                 battery_action_kw = battery_action_kwh / period_duration_hours
 
         # Delegate intent→rates mapping to the inverter controller
-        grid_charge, discharge_rate = (
+        grid_charge, discharge_rate, block_passive_charging = (
             self._inverter_controller.compute_rates_for_period(
                 period, battery_action_kw
             )
@@ -2565,6 +2566,7 @@ class BatterySystemManager:
         # apply_discharge_inhibit() can restore it when the inhibit sensor clears.
         self._desired_discharge_rate = discharge_rate
         self._desired_grid_charge = grid_charge
+        self._desired_block_passive_charging = block_passive_charging
 
         # Check discharge inhibit (e.g. EV actively charging during Tibber grid award)
         if discharge_rate > 0:
@@ -2603,7 +2605,7 @@ class BatterySystemManager:
         # full TOU schedule on the next hourly cycle).  This retry targets the
         # per-period write at finer granularity within the 15-min window.
         success, error_msg = self._inverter_controller.apply_period(
-            self.controller, grid_charge, discharge_rate
+            self.controller, grid_charge, discharge_rate, block_passive_charging
         )
 
         if not success:
@@ -2617,7 +2619,9 @@ class BatterySystemManager:
                 ),
                 error=Exception(error_msg),
             )
-            self._schedule_period_retry(period, grid_charge, discharge_rate)
+            self._schedule_period_retry(
+                period, grid_charge, discharge_rate, block_passive_charging
+            )
         else:
             self._last_applied_discharge_rate = discharge_rate
 
@@ -2634,6 +2638,7 @@ class BatterySystemManager:
         period: int,
         grid_charge: bool,
         discharge_rate: int,
+        block_passive_charging: bool = False,
         attempt: int = 1,
     ) -> None:
         """Schedule a one-shot retry of period hardware write.
@@ -2665,7 +2670,7 @@ class BatterySystemManager:
                 max_attempts + 1,
             )
             success, error_msg = self._inverter_controller.apply_period(
-                self.controller, grid_charge, discharge_rate
+                self.controller, grid_charge, discharge_rate, block_passive_charging
             )
             self._runtime_failure_tracker.dismiss_by_category("period_apply")
             if not success:
@@ -2679,7 +2684,11 @@ class BatterySystemManager:
                         error=Exception(error_msg),
                     )
                     self._schedule_period_retry(
-                        period, grid_charge, discharge_rate, attempt + 1
+                        period,
+                        grid_charge,
+                        discharge_rate,
+                        block_passive_charging,
+                        attempt + 1,
                     )
                 else:
                     self._runtime_failure_tracker.record_failure(
@@ -3109,7 +3118,10 @@ class BatterySystemManager:
         # (discharge_rate_is_load_following False) that entity is never
         # read by hardware, which made this a dead write there (#324).
         self._inverter_controller.apply_period(
-            self.controller, self._desired_grid_charge, target_rate
+            self.controller,
+            self._desired_grid_charge,
+            target_rate,
+            self._desired_block_passive_charging,
         )
         self._last_applied_discharge_rate = target_rate
 

@@ -139,7 +139,7 @@ class InverterController(ABC):
 
     def compute_rates_for_period(
         self, period: int, battery_action_kw: float
-    ) -> tuple[bool, int]:
+    ) -> tuple[bool, int, bool]:
         """Map strategic intent for a period to hardware control rates.
 
         Args:
@@ -147,10 +147,22 @@ class InverterController(ABC):
             battery_action_kw: Battery power in kW (positive=charge, negative=discharge)
 
         Returns:
-            Tuple of (grid_charge, discharge_rate_percent)
+            Tuple of (grid_charge, discharge_rate_percent, block_passive_charging).
+            block_passive_charging is True when this intent's
+            INTENT_TO_CONTROL charge_rate is 0 -- i.e. passive solar->battery
+            charging should be blocked (SOLAR_EXPORT), not just left at a
+            forced discharge rate of 0 (LOAD_SUPPORT/BATTERY_EXPORT with no
+            action this period). Register-based platforms already realize
+            this via the separate charge_rate register (adjust_charging_power());
+            forced-power/VPP-style platforms have no such register and must
+            act on this flag directly at apply_period (see #355).
         """
         intent = self.strategic_intents[period]
-        return self._map_intent_to_rates(intent, battery_action_kw)
+        grid_charge, discharge_rate = self._map_intent_to_rates(
+            intent, battery_action_kw
+        )
+        block_passive_charging = self.INTENT_TO_CONTROL[intent]["charge_rate"] == 0
+        return grid_charge, discharge_rate, block_passive_charging
 
     @staticmethod
     def _scale_to_percent(power_kw: float, max_power_kw: float) -> int:
@@ -206,7 +218,11 @@ class InverterController(ABC):
             raise ValueError(f"Unknown strategic intent: {intent}")
 
     def apply_period(
-        self, controller, grid_charge: bool, discharge_rate: int
+        self,
+        controller,
+        grid_charge: bool,
+        discharge_rate: int,
+        block_passive_charging: bool = False,
     ) -> tuple[bool, str]:
         """Write period control settings to hardware.
 
@@ -217,11 +233,19 @@ class InverterController(ABC):
             controller: HomeAssistantAPIController instance
             grid_charge: Whether to enable grid charging
             discharge_rate: Discharge power rate (0-100%), post-inhibit
+            block_passive_charging: Whether passive solar->battery charging
+                should be blocked this period (SOLAR_EXPORT). Register-based
+                platforms realize this via the separate charge_rate register
+                (adjust_charging_power()) and ignore this flag. Forced-power
+                platforms with no such register (VPP-style) act on it
+                directly -- see #355.
 
         Returns:
             Tuple of (success, error_message). error_message is empty on success.
         """
-        return self._write_period_to_hardware(controller, grid_charge, discharge_rate)
+        return self._write_period_to_hardware(
+            controller, grid_charge, discharge_rate, block_passive_charging
+        )
 
     def get_period_settings(self, period: int) -> dict:
         """Get control settings for a specific 15-minute period.
@@ -252,8 +276,8 @@ class InverterController(ABC):
             num_periods = len(self.current_schedule.actions)
             period_duration_hours = 24.0 / num_periods
             battery_action_kw = battery_action_kwh / period_duration_hours
-            grid_charge, discharge_rate = self.compute_rates_for_period(
-                period, battery_action_kw
+            grid_charge, discharge_rate, _block_passive_charging = (
+                self.compute_rates_for_period(period, battery_action_kw)
             )
             charge_rate = self._compute_charge_rate(
                 intent, self.INTENT_TO_CONTROL[intent], battery_action_kw
@@ -489,17 +513,28 @@ class InverterController(ABC):
         """
 
     def _write_period_to_hardware(
-        self, controller, grid_charge: bool, discharge_rate: int
+        self,
+        controller,
+        grid_charge: bool,
+        discharge_rate: int,
+        block_passive_charging: bool = False,
     ) -> tuple[bool, str]:
         """Write per-period control settings to hardware.
 
         Default implementation uses Growatt register interface (grid_charge +
         discharge_rate). SolaX overrides with VPP commands.
 
+        block_passive_charging is unused here: register-based platforms
+        (Growatt TOU/cloud, this default) realize "block passive solar
+        charging" via the separate charge_rate register, written by
+        BatterySystemManager.adjust_charging_power() -- not via this method.
+
         Args:
             controller: HomeAssistantAPIController instance
             grid_charge: Whether to enable grid charging
             discharge_rate: Discharge power rate (0-100%)
+            block_passive_charging: Unused by this default implementation --
+                see docstring above.
 
         Returns:
             Tuple of (success, error_message). error_message is empty on success.

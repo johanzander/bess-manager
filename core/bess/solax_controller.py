@@ -98,7 +98,11 @@ class SolaxController(InverterController):
     # ── Hardware interface ────────────────────────────────────────────────────
 
     def _write_period_to_hardware(
-        self, controller, grid_charge: bool, discharge_rate: int
+        self,
+        controller,
+        grid_charge: bool,
+        discharge_rate: int,
+        block_passive_charging: bool = False,
     ) -> tuple[bool, str]:
         """Issue a SolaX VPP command for the current period.
 
@@ -109,10 +113,19 @@ class SolaxController(InverterController):
         - ``grid_charge=False, discharge_rate=0`` → disable VPP (IDLE / SOLAR_STORAGE).
         - ``grid_charge=False, discharge_rate>0`` → discharge at the given rate.
 
+        ``block_passive_charging`` is accepted but currently unused: unlike
+        the Growatt VPP fix (#355, register-verified against the vendor
+        protocol spec), no equivalent real-SolaX-hardware verification has
+        been done here. SolaX likely has the same underlying gap (disabling
+        VPP at discharge_rate=0 lets solar recharge the battery during
+        SOLAR_EXPORT too) but fixing it without spec/hardware confirmation
+        would be speculation -- tracked as a follow-up, not fixed here.
+
         Args:
             controller: HomeAssistantAPIController instance.
             grid_charge: Whether grid charging is requested.
             discharge_rate: Discharge power as a percentage (0-100).
+            block_passive_charging: Unused -- see docstring above.
 
         Returns:
             Tuple of (success, error_message). error_message is empty on success.

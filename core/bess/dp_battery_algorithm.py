@@ -610,11 +610,20 @@ def _build_period_data(
     solar_production: float,
     new_cost_basis: float,
     currency: str,
+    continuation_value: float = 0.0,
 ) -> PeriodData:
     """Build full PeriodData for the winning action of a DP cell.
 
     Called once per (t, i) cell after the inner power loop identifies the best action.
     Separated from _compute_reward to eliminate dataclass allocation in the hot path.
+
+    continuation_value: the DP's actual value-to-go from the resulting state
+    (_interpolate_value(V_next, next_soe, ...), the same term
+    _best_action_at_continuous_state adds to reward when choosing this
+    action) -- reported as decision.future_value. Defaults to 0.0 so this
+    function's own reporting-only `reward` still equals immediate_value for
+    any caller that hasn't been updated to pass the real continuation value
+    (see issue #353).
     """
     current_buy_price = buy_price[period]
     current_sell_price = sell_price[period]
@@ -686,7 +695,12 @@ def _build_period_data(
         energy_data=energy_data,
         hour=period,
         cost_basis=new_cost_basis,
-        reward=reward,
+        # extract_economic_values_from_reward derives future_value as
+        # reward - immediate_value; immediate_value is built from the same
+        # import_cost/export_revenue/battery_wear_cost terms as `reward`
+        # above, so adding continuation_value here is what makes
+        # future_value equal it instead of always coming out 0.0 (#353).
+        reward=reward + continuation_value,
         import_cost=import_cost,
         export_revenue=export_revenue,
         battery_wear_cost=battery_wear_cost,
@@ -1547,6 +1561,12 @@ def optimize_battery_schedule(
             solar_production=solar_production[t],
             new_cost_basis=new_cost_basis,
             currency=currency,
+            # Same continuation-value term _best_action_at_continuous_state
+            # added internally to choose this action (dp_battery_algorithm.py
+            # _best_action_at_continuous_state's `value = reward +
+            # _interpolate_value(...)`), reported here as future_value (#353)
+            # instead of being discarded.
+            continuation_value=_interpolate_value(V[t + 1], next_soe, battery_settings),
         )
 
         # Shadow price = marginal opportunity value of stored energy (dV/dSoE),

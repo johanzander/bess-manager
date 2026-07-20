@@ -443,6 +443,8 @@ class SettingsStore:
             BATTERY_EFFICIENCY_DISCHARGE,
             BATTERY_MIN_ACTION_PROFIT_THRESHOLD,
             EXPORT_SPOT_MULTIPLIER,
+            INVERTER_AC_POWER_MARGIN,
+            INVERTER_MAX_AC_POWER_KW,
             SPOT_MULTIPLIER,
             USE_ACTUAL_PRICE,
         )
@@ -481,6 +483,8 @@ class SettingsStore:
                 ("charging_power_rate", BATTERY_DEFAULT_CHARGING_POWER_RATE),
                 ("efficiency_charge", BATTERY_EFFICIENCY_CHARGE),
                 ("efficiency_discharge", BATTERY_EFFICIENCY_DISCHARGE),
+                ("inverter_max_ac_power_kw", INVERTER_MAX_AC_POWER_KW),
+                ("inverter_ac_power_margin", INVERTER_AC_POWER_MARGIN),
             ):
                 if key not in battery:
                     battery[key] = default

@@ -60,13 +60,22 @@ def mock_ha():
     return MockHomeAssistantController()
 
 
-def _apply_at_period(controller, mock_ha, period, grid_charge, discharge_rate):
+def _apply_at_period(
+    controller,
+    mock_ha,
+    period,
+    grid_charge,
+    discharge_rate,
+    block_passive_charging=False,
+):
     hour = period // 4
     minute = (period % 4) * 15
     with patch("core.bess.solax_modbus_growatt_controller.time.sleep"):
         with patch("core.bess.solax_modbus_growatt_controller.time_utils") as mock_time:
             mock_time.now.return_value = datetime(2026, 5, 20, hour, minute, 0)
-            controller.apply_period(mock_ha, grid_charge, discharge_rate)
+            controller.apply_period(
+                mock_ha, grid_charge, discharge_rate, block_passive_charging
+            )
 
 
 class TestControlModeValidation:
@@ -88,11 +97,22 @@ class TestIntentToVpp:
         assert enabled is True
 
     def test_idle_disables_remote_control(self, controller):
+        """SOLAR_STORAGE/IDLE (block_passive_charging=False) -> self-use."""
         power_pct, enabled = controller._intent_to_vpp(
-            grid_charge=False, discharge_rate=0
+            grid_charge=False, discharge_rate=0, block_passive_charging=False
         )
         assert power_pct == 0
         assert enabled is False
+
+    def test_solar_export_keeps_remote_control_enabled(self, controller):
+        """SOLAR_EXPORT (block_passive_charging=True) -> grid-first hold,
+        not self-use -- see #355. Remote control stays enabled with
+        power=0 instead of being disabled."""
+        power_pct, enabled = controller._intent_to_vpp(
+            grid_charge=False, discharge_rate=0, block_passive_charging=True
+        )
+        assert power_pct == 0
+        assert enabled is True
 
     def test_discharge_rate_maps_to_negative_power(self, controller):
         power_pct, enabled = controller._intent_to_vpp(
@@ -150,10 +170,39 @@ class TestApplyPeriodVpp:
         controller.create_schedule(make_schedule(intents), current_period=0)
         controller._last_written_vpp_remote_control = True  # force a change
 
-        _apply_at_period(controller, mock_ha, 0, grid_charge=False, discharge_rate=0)
+        _apply_at_period(
+            controller,
+            mock_ha,
+            0,
+            grid_charge=False,
+            discharge_rate=0,
+            block_passive_charging=False,
+        )
 
         period = mock_ha.calls["growatt_vpp_periods"][-1]
         assert period["remote_control_enabled"] is False
+
+    def test_solar_export_keeps_remote_control_enabled_on_hardware(
+        self, controller, mock_ha
+    ):
+        """#355: SOLAR_EXPORT must not fall back to self-use, which lets
+        solar surplus recharge the battery instead of exporting it."""
+        intents = hourly_to_quarterly({0: "SOLAR_EXPORT"})
+        controller.create_schedule(make_schedule(intents), current_period=0)
+        controller._last_written_vpp_remote_control = False  # force a change
+
+        _apply_at_period(
+            controller,
+            mock_ha,
+            0,
+            grid_charge=False,
+            discharge_rate=0,
+            block_passive_charging=True,
+        )
+
+        period = mock_ha.calls["growatt_vpp_periods"][-1]
+        assert period["remote_control_enabled"] is True
+        assert period["power_pct"] == 0
 
     def test_unchanged_command_skips_write(self, controller, mock_ha):
         intents = hourly_to_quarterly({2: "GRID_CHARGING"})
@@ -192,6 +241,23 @@ class TestWriteScheduleToHardwareVpp:
         assert disables == 0
         assert mock_ha.calls["tou_segments"] == []
         assert len(mock_ha.calls["growatt_vpp_periods"]) == 1
+
+    def test_solar_export_initial_write_keeps_remote_control_enabled(
+        self, controller, mock_ha
+    ):
+        """#355: the initial write_schedule_to_hardware path must apply the
+        same block_passive_charging distinction as per-period apply_period."""
+        intents = hourly_to_quarterly({2: "SOLAR_EXPORT"})
+        controller.create_schedule(make_schedule(intents), current_period=0)
+
+        writes, _disables = controller.write_schedule_to_hardware(
+            mock_ha, effective_period=8, current_tou=[]
+        )
+
+        assert writes == 1
+        period = mock_ha.calls["growatt_vpp_periods"][-1]
+        assert period["remote_control_enabled"] is True
+        assert period["power_pct"] == 0
 
 
 class TestReadAndInitializeVpp:

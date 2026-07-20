@@ -506,6 +506,20 @@ This would make the profitability gate compare apples-to-apples with the dashboa
 
 ---
 
+### Pinned scenario fixtures never exercise a realistic (nonzero) terminal value
+
+**Impact**: Medium | **Effort**: Medium-High | **Dependencies**: `core/bess/tests/unit/test_scenarios.py`, `core/bess/dp_battery_algorithm.py`, `core/bess/battery_system_manager.py`
+
+**Description**: `optimize_battery_schedule()` defaults `terminal_value_per_kwh=0.0`, and every one of the ~26 pinned scenarios in `test_scenarios.py` calls it without overriding that default — so the entire pinned-fixture regression suite always tests the DP with terminal value hardcoded to zero, regardless of what each scenario's horizon is meant to represent. In production, every real optimization run computes a nonzero terminal value via `_calculate_terminal_value()` (`battery_system_manager.py`). Found while investigating #345 (terminal-value zeroing at the extended horizon boundary): CI stayed green through that fix specifically because nothing in the pinned suite touches this code path at all, in either direction.
+
+**What to improve**: Retrofit the pinned scenarios to compute their terminal value the same way production does (`_calculate_terminal_value`'s median-buy/sell-cap formula, applied to each scenario's own price data) instead of silently defaulting to zero, then re-pin each scenario's expected cost against the new baseline.
+
+**Why not done as part of #345**: per the CHANGELOG history, changes to this exact mechanism have previously shifted "nearly every scenario's expected schedule" — retrofitting all 26 fixtures is a broad, independently risky change that conflates two different concerns ("is `_calculate_terminal_value`'s formula correct" vs. "does the DP correctly handle *some* nonzero terminal value") and shouldn't ride along with a narrow bug fix. #345/#347 instead added one new targeted pinned fixture for the extended-horizon mechanism specifically, without touching the other 26.
+
+**Files**: `core/bess/tests/unit/test_scenarios.py`, `core/bess/dp_battery_algorithm.py:1313-1327` (`optimize_battery_schedule` signature/default), `core/bess/battery_system_manager.py` (`_calculate_terminal_value`)
+
+---
+
 ## 🔧 **TECHNICAL DEBT**
 
 ### Consolidate HistoricalDataStore, PredictionSnapshotStore, and DailyViewStore

@@ -320,19 +320,20 @@ change, for any of several reasons:
   fresh optimization always starts from the real current state, not the
   previously predicted one.
 
-**Terminal value**: when the horizon does *not* yet extend into tomorrow
-(tomorrow's prices aren't published yet), the optimizer has no visibility
-past the end of what it can see — without some estimate of what leftover
-stored energy is worth beyond the horizon, it would have no reason not to
-drain the battery completely in the last visible period. To avoid that, any
-energy still stored at the horizon's end is assigned an estimated value
-based on typical prices, capped so it can never exceed what could actually
-be realized by selling right now at the best available price. This is the
-mechanism to check first if the battery appears to be holding charge near
-the end of what's currently known, or not fully discharging right before
-midnight — once tomorrow's real prices arrive and the horizon extends, this
-estimate is replaced by the real future prices, and the schedule
-re-optimizes against those instead.
+**Terminal value**: at whatever the current horizon boundary is — the end
+of today if tomorrow's prices aren't published yet, or the end of tomorrow
+once they are — the optimizer has no visibility past that point, since no
+provider ever publishes prices beyond midnight-tomorrow either. Without
+some estimate of what leftover stored energy is worth beyond the horizon,
+it would have no reason not to drain the battery completely in the last
+visible period. To avoid that, any energy still stored at the horizon's end
+is assigned an estimated value based on typical prices *within* the current
+horizon, capped so it can never exceed what could actually be realized by
+selling right now at the best available price. This is the mechanism to
+check first if the battery appears to be holding charge near the end of
+what's currently known, or not fully discharging right before midnight —
+it applies the same way whether the horizon currently ends at midnight
+today or midnight tomorrow.
 
 **Expected savings and why the number can look like it drops**: at each
 optimization run, the system records `expected_savings = actual_savings (for

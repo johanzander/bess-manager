@@ -117,6 +117,7 @@ class TestApplyPeriodScheduleRetry:
         bsm._inverter_controller.compute_rates_for_period.return_value = (
             False,
             80,
+            False,
         )
         bsm._desired_discharge_rate = 0
         bsm.adjust_charging_power = MagicMock()
@@ -144,6 +145,7 @@ class TestApplyPeriodScheduleRetry:
         bsm._inverter_controller.compute_rates_for_period.return_value = (
             False,
             80,
+            False,
         )
         bsm._desired_discharge_rate = 0
         bsm.adjust_charging_power = MagicMock()

@@ -23,10 +23,16 @@ Mode semantics (TOU):
 - ``battery_first`` — charge from grid + solar (GRID_CHARGING intent)
 - ``grid_first`` — export to grid (BATTERY_EXPORT intent)
 
-VPP intent -> power mapping mirrors ``SolaxController``:
+VPP intent -> power mapping mirrors ``SolaxController``, plus a
+block_passive_charging distinction at rate=0 (#355 -- see
+docs/superpowers/specs/2026-07-20-vpp-passive-charge-block-design.md):
 - GRID_CHARGING              -> power=+100%, remote_control enabled
 - LOAD_SUPPORT/BATTERY_EXPORT (rate>0) -> power=-rate%, remote_control enabled
-- SOLAR_STORAGE/IDLE/rate=0  -> remote_control disabled (load_first)
+- SOLAR_STORAGE/IDLE (rate=0, block_passive_charging=False) -> remote_control
+  disabled (load_first self-use -- battery may absorb solar surplus)
+- SOLAR_EXPORT (rate=0, block_passive_charging=True) -> power=0,
+  remote_control ENABLED (grid_first hold, per the Growatt VPP protocol
+  V2.01 section 3.5 -- battery held flat, solar bypasses to grid)
 
 The VPP fallback timer (``vpp_time``, register 30408) is rewritten every
 active period, resetting the inverter's own dead-man's-switch: if BESS stops
@@ -179,7 +185,11 @@ class SolaxModbusGrowattController(GrowattMinController):
     # ── Hardware interface ────────────────────────────────────────────────────
 
     def apply_period(
-        self, controller, grid_charge: bool, discharge_rate: int
+        self,
+        controller,
+        grid_charge: bool,
+        discharge_rate: int,
+        block_passive_charging: bool = False,
     ) -> tuple[bool, str]:
         """Write period control settings for the current control mode.
 
@@ -187,12 +197,22 @@ class SolaxModbusGrowattController(GrowattMinController):
             controller: HomeAssistantAPIController instance
             grid_charge: Whether to enable grid charging
             discharge_rate: Discharge power rate (0-100%), post-inhibit
+            block_passive_charging: Whether passive solar->battery charging
+                should be blocked this period (SOLAR_EXPORT). TOU mode
+                ignores this -- realized via the separate charge_rate
+                register instead. VPP mode acts on it directly (#355): it
+                has no charge_rate register, so this is its only channel for
+                distinguishing SOLAR_EXPORT (hold, block charging) from
+                SOLAR_STORAGE/IDLE (self-use, allow charging) at
+                discharge_rate=0.
 
         Returns:
             Tuple of (success, error_message). error_message is empty on success.
         """
         if self.control_mode == "vpp":
-            return self._apply_period_vpp(controller, grid_charge, discharge_rate)
+            return self._apply_period_vpp(
+                controller, grid_charge, discharge_rate, block_passive_charging
+            )
         return self._apply_period_tou(controller, grid_charge, discharge_rate)
 
     def _apply_period_tou(
@@ -254,19 +274,31 @@ class SolaxModbusGrowattController(GrowattMinController):
         return True, ""
 
     def _intent_to_vpp(
-        self, grid_charge: bool, discharge_rate: int
+        self,
+        grid_charge: bool,
+        discharge_rate: int,
+        block_passive_charging: bool = False,
     ) -> tuple[int, bool]:
-        """Map (grid_charge, discharge_rate) to (power_pct, remote_control_enabled).
+        """Map (grid_charge, discharge_rate, block_passive_charging) to
+        (power_pct, remote_control_enabled).
 
-        Mirrors ``SolaxController._write_period_to_hardware``:
-        - grid_charge=True                -> +100% (charge at max rate)
-        - grid_charge=False, rate=0        -> 0%, VPP disabled (load_first)
-        - grid_charge=False, rate>0        -> -rate% (discharge/export)
+        - grid_charge=True                       -> +100% (charge at max rate)
+        - grid_charge=False, rate=0, block=True   -> 0%, remote control ENABLED
+          (SOLAR_EXPORT). Per the Growatt VPP protocol (V2.01, section 3.5),
+          vpp_power<=0 with remote control enabled selects "grid first"
+          priority, holding the battery instead of self-use absorbing solar
+          surplus into it -- see #355 and
+          docs/superpowers/specs/2026-07-20-vpp-passive-charge-block-design.md.
+          Not yet real-hardware-validated; ships experimental pending
+          confirmation.
+        - grid_charge=False, rate=0, block=False  -> 0%, remote control DISABLED
+          (load_first self-use -- SOLAR_STORAGE/IDLE, battery may absorb solar)
+        - grid_charge=False, rate>0                -> -rate% (discharge/export)
         """
         if grid_charge:
             return 100, True
         if discharge_rate == 0:
-            return 0, False
+            return 0, block_passive_charging
         return -discharge_rate, True
 
     def _ensure_vpp_status_enabled(self, controller) -> None:
@@ -284,7 +316,11 @@ class SolaxModbusGrowattController(GrowattMinController):
         self._vpp_status_confirmed = True
 
     def _apply_period_vpp(
-        self, controller, grid_charge: bool, discharge_rate: int
+        self,
+        controller,
+        grid_charge: bool,
+        discharge_rate: int,
+        block_passive_charging: bool = False,
     ) -> tuple[bool, str]:
         """Write one period's VPP power command.
 
@@ -294,7 +330,7 @@ class SolaxModbusGrowattController(GrowattMinController):
         from lapsing during a stable run of identical periods.
         """
         power_pct, remote_control_enabled = self._intent_to_vpp(
-            grid_charge, discharge_rate
+            grid_charge, discharge_rate, block_passive_charging
         )
 
         command_changed = (
@@ -342,13 +378,18 @@ class SolaxModbusGrowattController(GrowattMinController):
             Tuple of (segments_updated, segments_disabled)
         """
         if self.control_mode == "vpp":
-            grid_charge, discharge_rate = False, 0
+            grid_charge, discharge_rate, block_passive_charging = False, 0, False
             if effective_period < len(self.strategic_intents):
                 intent = self.strategic_intents[effective_period]
                 grid_charge, discharge_rate = self._map_intent_to_rates(
                     intent, battery_action_kw=0.0
                 )
-            success, _ = self._apply_period_vpp(controller, grid_charge, discharge_rate)
+                block_passive_charging = (
+                    self.INTENT_TO_CONTROL[intent]["charge_rate"] == 0
+                )
+            success, _ = self._apply_period_vpp(
+                controller, grid_charge, discharge_rate, block_passive_charging
+            )
             return (1, 0) if success else (0, 0)
 
         mode = "load_first"

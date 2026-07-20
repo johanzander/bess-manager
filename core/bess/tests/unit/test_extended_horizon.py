@@ -7,8 +7,10 @@ import pytest
 
 from core.bess import time_utils
 from core.bess.battery_system_manager import BatterySystemManager
+from core.bess.dp_battery_algorithm import optimize_battery_schedule
 from core.bess.exceptions import PriceDataUnavailableError
 from core.bess.price_manager import MockSource
+from core.bess.settings import BatterySettings
 from core.bess.tests.conftest import MockHomeAssistantController, MockSensorCollector
 from core.bess.time_utils import get_period_count
 
@@ -283,17 +285,39 @@ class TestGatherOptimizationDataExtended:
 class TestCalculateTerminalValue:
     """Test _calculate_terminal_value() method."""
 
-    def test_zero_when_horizon_extends_past_today(self):
-        """Terminal value should be 0.0 when DP has explicit tomorrow data."""
+    def test_nonzero_when_horizon_extends_past_today(self):
+        """Terminal value should still apply the median/cap formula when the
+        horizon extends past today (#345) — the caller already truncates
+        buy_prices/sell_prices to the current optimization window, so there
+        is no reason to zero out the estimate just because that window
+        happens to cross midnight-today.
+        """
         source = MockSource([1.0] * 96)
         system = _make_system(source)
 
-        # 192 buy prices remaining but only ~96 today periods remaining from period 0
+        # 192 buy prices remaining (extends past today's ~96 remaining periods
+        # from period 0) — should use the same median/cap formula as the
+        # today-only case, not return 0.0.
         terminal_value = system._calculate_terminal_value(
             buy_prices=[1.0] * 192, sell_prices=[0.8] * 192, optimization_period=0
         )
 
-        assert terminal_value == 0.0
+        median_price = 1.0
+        max_sell_price = 0.8
+        buy_based = max(
+            0.0,
+            median_price * system.battery_settings.efficiency_discharge
+            - system.battery_settings.cycle_cost_per_kwh,
+        )
+        sell_cap = max(
+            0.0,
+            max_sell_price * system.battery_settings.efficiency_discharge
+            - system.battery_settings.cycle_cost_per_kwh,
+        )
+        expected = min(buy_based, sell_cap)
+
+        assert terminal_value == pytest.approx(expected)
+        assert terminal_value > 0.0
 
     def test_positive_when_today_only(self):
         """Terminal value should be positive when only today's data is available."""
@@ -363,6 +387,68 @@ class TestCalculateTerminalValue:
         sell_cap = max(sell_prices) * eff - 0.05
         assert buy_based < sell_cap, "test fixture must exercise the non-binding cap"
         assert terminal_value == pytest.approx(buy_based)
+
+    def test_extended_horizon_schedule_retains_charge_for_terminal_value(self):
+        """End-to-end regression for #345: with the old zeroed terminal value,
+        the DP had no reason to hold charge through the end of an extended
+        horizon and drained to the floor after its last profitable sale; with
+        the fixed (nonzero, median/cap) terminal value, it recharges and
+        holds through the horizon's end instead. This exercises the real
+        DP (`optimize_battery_schedule`), not just the isolated
+        `_calculate_terminal_value` formula the other tests in this class
+        cover -- a regression to the old zeroing behavior would make this
+        test's two runs produce identical (drained) end-of-horizon SOE.
+        """
+        source = MockSource([1.0] * 96)
+        system = _make_system(source)
+        # A fresh instance (not mutated fields) so derived min/max_soe_kwh --
+        # computed once in __post_init__ -- stay consistent with these values.
+        system.battery_settings = BatterySettings(
+            total_capacity=10.0,
+            min_soc=10.0,
+            max_soc=100.0,
+            max_charge_power_kw=10.0,
+            max_discharge_power_kw=10.0,
+            efficiency_charge=0.9,
+            efficiency_discharge=0.9,
+            cycle_cost_per_kwh=0.1,
+        )
+
+        # A great mid-horizon sell price (period 3) the DP should exploit
+        # regardless of terminal value, followed by a weak tail (periods 6-7)
+        # that's only worth holding through if the horizon's terminal value
+        # is a genuine positive estimate -- not zero.
+        prices = [1.0, 1.0, 1.0, 3.0, 1.0, 1.0, 0.3, 0.3]
+        home_consumption = [0.0] * 8
+        solar_production = [0.0] * 8
+
+        # The production formula's actual value for this price window --
+        # not a hand-copied constant, so this stays coupled to
+        # `_calculate_terminal_value` itself.
+        terminal_value = system._calculate_terminal_value(
+            buy_prices=prices, sell_prices=prices, optimization_period=0
+        )
+        assert terminal_value > 0.0
+
+        def final_soe(terminal_value_per_kwh: float) -> float:
+            result = optimize_battery_schedule(
+                buy_price=prices,
+                sell_price=prices,
+                home_consumption=home_consumption,
+                solar_production=solar_production,
+                initial_soe=10.0,
+                battery_settings=system.battery_settings,
+                period_duration_hours=1.0,
+                terminal_value_per_kwh=terminal_value_per_kwh,
+            )
+            return result.period_data[-1].energy.battery_soe_end
+
+        zeroed_final_soe = final_soe(0.0)  # pre-#345 behavior
+        fixed_final_soe = final_soe(terminal_value)  # current behavior
+
+        assert zeroed_final_soe == pytest.approx(1.0)
+        assert fixed_final_soe == pytest.approx(10.0)
+        assert fixed_final_soe > zeroed_final_soe
 
 
 class TestPrepareNextDayTimestamps:

@@ -6,7 +6,13 @@ Tests the EnergyData, EconomicData, DecisionData, and PeriodData structures
 
 from datetime import datetime
 
-from core.bess.models import DecisionData, EconomicData, EnergyData, PeriodData
+from core.bess.models import (
+    DecisionData,
+    EconomicData,
+    EnergyData,
+    PeriodData,
+    infer_intent_from_flows,
+)
 
 
 class TestEnergyData:
@@ -158,6 +164,82 @@ class TestEnergyData:
         assert energy.grid_to_home == 0.0
         # No battery discharge -> no flow can be attributed to battery export.
         assert energy.battery_to_grid == 0.0
+
+    def test_sub_resolution_export_residual_folds_into_battery_to_home(self):
+        """Issue #350: a battery_to_grid residual smaller than the lifetime
+        counter's own 0.1 kWh resolution must not be reported as a real export —
+        it gets folded back into battery_to_home instead of corrupting the
+        observed intent (BATTERY_EXPORT) with what is actually counter noise.
+
+        Reproduces the exact real period from bess-debug-2026-07-17-183806.md,
+        period 11 (02:45): battery_discharged (0.1458) and home_consumption
+        (0.1453) disagree by only 0.0006 kWh - two independent meters, not a
+        real export - and grid_exported (0.0177) independently corroborates
+        only that same tiny residual, not a real battery contribution.
+        """
+        energy = EnergyData(
+            solar_production=0.0,
+            home_consumption=0.14528749999999999,
+            grid_imported=0.0,
+            grid_exported=0.0177,
+            battery_charged=0.0,
+            battery_discharged=0.14584375,
+            battery_soe_start=5.0,
+            battery_soe_end=4.8,
+        )
+
+        assert energy.battery_to_grid == 0.0
+        assert energy.battery_to_home == energy.battery_discharged
+
+        power = energy.battery_charged - energy.battery_discharged
+        assert infer_intent_from_flows(power, energy) == "LOAD_SUPPORT"
+
+    def test_real_export_above_resolution_floor_is_not_folded(self):
+        """A genuine, well-above-resolution battery export must survive the
+        #350 fix untouched — only sub-0.1 kWh residuals get folded.
+
+        Reproduces a real overnight arbitrage discharge (period 84, 21:00):
+        2.5 kWh discharged, 0.21275 kWh to home, 2.28725 kWh to grid.
+        """
+        energy = EnergyData(
+            solar_production=0.01225,
+            home_consumption=0.225,
+            grid_imported=0.0,
+            grid_exported=2.28725,
+            battery_charged=0.0,
+            battery_discharged=2.5,
+            battery_soe_start=15.821052631578947,
+            battery_soe_end=13.189473684210526,
+        )
+
+        assert energy.battery_to_home == 0.21275
+        assert abs(energy.battery_to_grid - 2.28725) < 1e-9
+
+        power = energy.battery_charged - energy.battery_discharged
+        assert infer_intent_from_flows(power, energy) == "BATTERY_EXPORT"
+
+    def test_small_export_with_zero_home_deficit_is_not_folded(self):
+        """A small export is only #350 noise when the battery was already
+        covering a genuine home deficit. When home's need is already fully met
+        by solar (battery_to_home == 0), even a sub-0.1 kWh discharge has
+        nowhere else to have gone and must stay a real export - folding it
+        into battery_to_home would claim the battery served a home deficit
+        that never existed. Companion to
+        test_dp_no_guardrails.test_small_export_only_discharge_classified_as_battery_export.
+        """
+        energy = EnergyData(
+            solar_production=3.5,
+            home_consumption=0.2,
+            grid_imported=0.0,
+            grid_exported=3.35,
+            battery_charged=0.0,
+            battery_discharged=0.05,
+            battery_soe_start=7.68,
+            battery_soe_end=7.63,
+        )
+
+        assert energy.battery_to_home == 0.0
+        assert energy.battery_to_grid == 0.05
 
     def test_energy_balance_validation_with_tolerance(self):
         """Test energy balance validation respects tolerance."""

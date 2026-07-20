@@ -1719,12 +1719,14 @@ async def get_growatt_detailed_schedule():
             today_soc_values: list[float | None] = []
             today_actions: list[float] = []
             today_reconciled_intents: list[str] | None = None
+            today_period_data: list | None = None
             if stored_schedule_for_today:
                 opt_result_today = stored_schedule_for_today.optimization_result
                 opt_period_today = stored_schedule_for_today.optimization_period
                 today_period_count_local = get_period_count(time_utils.today())
                 planned_intents = schedule_manager.strategic_intents
                 today_reconciled_intents = []
+                today_period_data = []
                 for period_idx in range(today_period_count_local):
                     data_idx = period_idx - opt_period_today
                     planned_intent = (
@@ -1741,6 +1743,7 @@ async def get_growatt_detailed_schedule():
                             else None
                         )
                         today_actions.append(pd_today.decision.battery_action or 0.0)
+                        today_period_data.append(pd_today)
                         # Reconcile with observed_intent for actual periods so the
                         # label reflects real physical flow, not the stale plan.
                         observed_intent = pd_today.decision.observed_intent
@@ -1752,11 +1755,13 @@ async def get_growatt_detailed_schedule():
                     else:
                         today_soc_values.append(None)
                         today_actions.append(0.0)
+                        today_period_data.append(None)
                         today_reconciled_intents.append(planned_intent)
             raw_groups = schedule_manager.get_detailed_period_groups(
                 intents=today_reconciled_intents,
                 actions=today_actions if today_actions else None,
                 soc_values=today_soc_values if today_soc_values else None,
+                period_data=today_period_data,
             )
             prev_soc: float | None = None
             for group in raw_groups:
@@ -1807,6 +1812,7 @@ async def get_growatt_detailed_schedule():
                 tomorrow_intents: list[str] = []
                 tomorrow_actions: list[float] = []
                 tomorrow_soc_values: list[float | None] = []
+                tomorrow_period_data: list = []
                 # Standalone next-day schedule: same anchor adjustment as dashboard.
                 is_next_day_only = (
                     opt_period == 0
@@ -1827,6 +1833,7 @@ async def get_growatt_detailed_schedule():
                         pd = opt_result.period_data[data_idx]
                         tomorrow_intents.append(pd.decision.strategic_intent)
                         tomorrow_actions.append(pd.decision.battery_action or 0.0)
+                        tomorrow_period_data.append(pd)
                         soe = pd.energy.battery_soe_end
                         tomorrow_soc_values.append(
                             (soe / battery_settings.total_capacity * 100.0)
@@ -1840,6 +1847,7 @@ async def get_growatt_detailed_schedule():
                         intents=tomorrow_intents,
                         actions=tomorrow_actions,
                         soc_values=tomorrow_soc_values,
+                        period_data=tomorrow_period_data,
                     )
                     tomorrow_period_groups = []
                     prev_soc_tmr: float | None = None

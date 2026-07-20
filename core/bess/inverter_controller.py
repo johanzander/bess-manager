@@ -111,6 +111,13 @@ class InverterController(ABC):
         always writes an exact watt target)."""
         return 0.01
 
+    # Planned battery_to_grid (kWh) at or below which a BATTERY_EXPORT period
+    # is not committed to grid_first (#352). Matches the 0.1 kWh flow
+    # resolution used by the observed-side fold (#350/#351): an export this
+    # small could never even be *observed* as export, so forcing grid_first
+    # for it trades nothing but load-following away.
+    grid_first_export_materiality_kwh: ClassVar[float] = 0.1
+
     def __init__(self, battery_settings: BatterySettings) -> None:
         """Initialize shared inverter controller state."""
         if battery_settings is None:
@@ -137,6 +144,83 @@ class InverterController(ABC):
 
     # ── Intent → hardware rates ───────────────────────────────────────────────
 
+    def _planned_energy_for_period(self, period: int):
+        """Planned EnergyData for a period from the schedule's period_data
+        (#320 plumbing), or None when unavailable (no schedule, elapsed
+        period, out of range)."""
+        schedule = self.current_schedule
+        schedule_period_data = getattr(schedule, "period_data", None)
+        if not schedule_period_data:
+            return None
+        if not 0 <= period < len(schedule_period_data):
+            return None
+        period_data = schedule_period_data[period]
+        if period_data is None:
+            return None
+        return period_data.energy
+
+    def _forfeited_headroom_kwh(self, energy) -> float:
+        """Load-following headroom (kWh) a grid_first commitment forfeits for
+        one 15-minute period: the gap between the platform's max discharge
+        throughput and the planned discharge. This bounds the extra energy
+        load_first could have covered on an intra-period load spike that
+        grid_first's forced rate will import instead. At (near-)full rate the
+        gap is ~0 — the battery is committed to max power either way, so
+        grid_first adds no spike exposure."""
+        return max(0.0, self.max_discharge_power_kw * 0.25 - energy.battery_discharged)
+
+    def _export_demoted(self, intent: str, energy) -> bool:
+        """Whether a BATTERY_EXPORT period must fall back to load_first
+        load-following instead of committing grid_first (#352).
+
+        grid_first's discharge rate is a forced power command sized to the
+        forecast, not a load-following ceiling: any intra-period load spike
+        above it imports at buy price to protect the planned export. The
+        commitment is only worth making when the planned export is material:
+        above the 0.1 kWh flow-resolution floor AND either export-dominant
+        (larger than planned battery_to_home) or larger than the
+        load-following headroom the commitment forfeits (a near-full-rate
+        export leaves no headroom for load_first to do better with, however
+        large the home share). Everything else keeps the BATTERY_EXPORT
+        classification (the plan honestly carries the small export, #253)
+        but load-follows at full rate, forgoing pennies of export to stay
+        spike-immune.
+
+        Only meaningful where discharge_rate is a load-following ceiling —
+        on VPP-style direct power control, rate 100 would force a full-power
+        discharge instead (#324).
+        """
+        if intent != "BATTERY_EXPORT":
+            return False
+        if not self.discharge_rate_is_load_following:
+            return False
+        if energy is None:
+            return False
+        export = energy.battery_to_grid
+        return not (
+            export > self.grid_first_export_materiality_kwh
+            and (
+                export > energy.battery_to_home
+                or export > self._forfeited_headroom_kwh(energy)
+            )
+        )
+
+    def _export_demoted_for_period(self, period: int) -> bool:
+        """_export_demoted() looked up from the controller's own schedule."""
+        if not 0 <= period < len(self.strategic_intents):
+            return False
+        return self._export_demoted(
+            self.strategic_intents[period], self._planned_energy_for_period(period)
+        )
+
+    def mode_for_period(self, period: int) -> str:
+        """Battery mode for a period: INTENT_TO_MODE, except that a
+        non-material BATTERY_EXPORT period is demoted to load_first (#352)."""
+        intent = self.strategic_intents[period]
+        if self._export_demoted_for_period(period):
+            return "load_first"
+        return self.INTENT_TO_MODE.get(intent, "load_first")
+
     def compute_rates_for_period(
         self, period: int, battery_action_kw: float
     ) -> tuple[bool, int, bool]:
@@ -158,10 +242,17 @@ class InverterController(ABC):
             act on this flag directly at apply_period (see #355).
         """
         intent = self.strategic_intents[period]
+        # Demotion changes the hardware rate only, never the intent, so
+        # block_passive_charging stays derived from the intent either way.
+        block_passive_charging = self.INTENT_TO_CONTROL[intent]["charge_rate"] == 0
+        if self._export_demoted_for_period(period):
+            # Demoted period runs load_first: rate is a load-following
+            # ceiling, so 100 lets firmware cover the full actual load
+            # (LOAD_SUPPORT-style) instead of capping at the forecast.
+            return False, 100, block_passive_charging
         grid_charge, discharge_rate = self._map_intent_to_rates(
             intent, battery_action_kw
         )
-        block_passive_charging = self.INTENT_TO_CONTROL[intent]["charge_rate"] == 0
         return grid_charge, discharge_rate, block_passive_charging
 
     @staticmethod
@@ -265,7 +356,7 @@ class InverterController(ABC):
             )
 
         intent = self.strategic_intents[period]
-        mode = self.INTENT_TO_MODE[intent]
+        mode = self.mode_for_period(period)
 
         if (
             self.current_schedule is not None
@@ -338,6 +429,7 @@ class InverterController(ABC):
         intents: list[str] | None = None,
         actions: list[float] | None = None,
         soc_values: list[float | None] | None = None,
+        period_data: list | None = None,
     ) -> list[dict]:
         """Get period groups with full control parameters for display/API.
 
@@ -352,6 +444,12 @@ class InverterController(ABC):
                      is also None or the period is out of range, action defaults to 0.0.
             soc_values: Optional per-period SOC end values (%). The last period's value
                         in each group is exposed as soc_end_pct in the result.
+            period_data: Optional per-period PeriodData (None entries allowed)
+                     aligned with `intents`, used for the export-materiality
+                     demotion (#352). Required whenever `intents` is passed —
+                     the controller's own schedule may not align with a
+                     caller-supplied list (e.g. tomorrow's periods). If both
+                     are None, reads from self.current_schedule.period_data.
 
         Returns:
             List of period groups with all control parameters and time strings
@@ -371,7 +469,6 @@ class InverterController(ABC):
         period_settings = []
         for period in range(num_periods):
             intent = effective_intents[period]
-            mode = self.INTENT_TO_MODE.get(intent, "load_first")
             control = self.INTENT_TO_CONTROL.get(
                 intent,
                 {"grid_charge": False, "charge_rate": 100, "discharge_rate": 0},
@@ -382,7 +479,23 @@ class InverterController(ABC):
                 action_kwh = schedule_actions[period]
             action_kw = action_kwh / 0.25
 
-            _, discharge_rate = self._map_intent_to_rates(intent, action_kw)
+            if period_data is not None:
+                energy = (
+                    period_data[period].energy
+                    if period < len(period_data) and period_data[period] is not None
+                    else None
+                )
+            elif intents is None:
+                energy = self._planned_energy_for_period(period)
+            else:
+                energy = None
+
+            if self._export_demoted(intent, energy):
+                mode = "load_first"
+                discharge_rate = 100
+            else:
+                mode = self.INTENT_TO_MODE.get(intent, "load_first")
+                _, discharge_rate = self._map_intent_to_rates(intent, action_kw)
             charge_rate = self._compute_charge_rate(intent, control, action_kw)
 
             period_settings.append(

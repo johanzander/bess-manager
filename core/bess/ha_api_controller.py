@@ -1353,8 +1353,10 @@ class HomeAssistantAPIController:
     ) -> None:
         """Write a TOU segment via solax_modbus entity writes.
 
-        Uses select.select_option for mode/time/enabled, then button.press
-        to commit the slot to the inverter.
+        Uses select.select_option for mode/enabled and time.set_value for
+        begin/end (solax_modbus's Growatt plugin only exposes those as
+        `time.*` domain entities), then button.press to commit the slot to
+        the inverter.
 
         The enabled entity's plugin key is ``time_N_enabled`` (used in
         unique_id and BESS sensor key) while its HA entity_id contains
@@ -1373,15 +1375,20 @@ class HomeAssistantAPIController:
         mode_option = self._MODBUS_MODE_OPTIONS[batt_mode]
         enabled_option = "Enabled" if enabled else "Disabled"
 
-        # Set all 4 select entities before pressing update
-        entity_writes = [
+        # solax_modbus's Growatt plugin exposes TOU begin/end only as `time.*`
+        # domain entities (no `select.*` equivalent exists), so those two
+        # fields must go through time.set_value; select.select_option
+        # against a time.* entity id is a silent HA no-op (issue #362/#181).
+        select_writes = [
             (f"{prefix}_enabled", enabled_option),
-            (f"{prefix}_begin", start_time),
-            (f"{prefix}_end", end_time),
             (f"{prefix}_mode", mode_option),
         ]
+        time_writes = [
+            (f"{prefix}_begin", start_time),
+            (f"{prefix}_end", end_time),
+        ]
 
-        for sensor_key, option in entity_writes:
+        for sensor_key, option in select_writes:
             entity_id = self._get_entity_for_service(sensor_key)
             self._service_call_with_retry(
                 "select",
@@ -1389,6 +1396,16 @@ class HomeAssistantAPIController:
                 operation=f"TOU slot {segment_id} set {sensor_key}={option}",
                 entity_id=entity_id,
                 option=option,
+            )
+
+        for sensor_key, hhmm in time_writes:
+            entity_id = self._get_entity_for_service(sensor_key)
+            self._service_call_with_retry(
+                "time",
+                "set_value",
+                operation=f"TOU slot {segment_id} set {sensor_key}={hhmm}",
+                entity_id=entity_id,
+                time=f"{hhmm}:00",
             )
 
         # Press update button to commit the slot to inverter

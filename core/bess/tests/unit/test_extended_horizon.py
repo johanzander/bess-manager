@@ -297,9 +297,11 @@ class TestCalculateTerminalValue:
 
         # 192 buy prices remaining (extends past today's ~96 remaining periods
         # from period 0) — should use the same median/cap formula as the
-        # today-only case, not return 0.0.
+        # today-only case, not return 0.0. Sell prices vary so the cap branch
+        # applies (it is skipped on a fixed export tariff, #359).
+        sell_prices = [0.6, 0.8] * 96
         terminal_value = system._calculate_terminal_value(
-            buy_prices=[1.0] * 192, sell_prices=[0.8] * 192, optimization_period=0
+            buy_prices=[1.0] * 192, sell_prices=sell_prices, optimization_period=0
         )
 
         median_price = 1.0
@@ -386,6 +388,35 @@ class TestCalculateTerminalValue:
         buy_based = 0.6 * eff - 0.05
         sell_cap = max(sell_prices) * eff - 0.05
         assert buy_based < sell_cap, "test fixture must exercise the non-binding cap"
+        assert terminal_value == pytest.approx(buy_based)
+
+    def test_cap_skipped_on_fixed_export_tariff(self):
+        """Fixed export tariff (#359): the arbitrage-consistency cap bounds
+        terminal value by an in-horizon export opportunity the DP would forgo
+        by holding charge. A flat sell curve offers no such opportunity, and
+        applying the cap there drives terminal value below the round-trip
+        breakeven for storing surplus solar, so the buy-based estimate must
+        stand."""
+        source = MockSource([0.22] * 96)
+        system = _make_system(source)
+        system.battery_settings.cycle_cost_per_kwh = 0.02
+
+        buy_prices = [0.20, 0.22, 0.24, 0.34, 0.40]  # median = 0.24
+        sell_prices = [0.12] * 5  # fixed export tariff (e.g. Octopus Outgoing)
+
+        terminal_value = system._calculate_terminal_value(
+            buy_prices=buy_prices, sell_prices=sell_prices, optimization_period=29
+        )
+
+        eff_discharge = system.battery_settings.efficiency_discharge
+        eff_charge = system.battery_settings.efficiency_charge
+        buy_based = 0.24 * eff_discharge - 0.02
+        sell_cap = 0.12 * eff_discharge - 0.02
+        assert sell_cap < 0.12 / eff_charge, (
+            "test fixture must exercise the degenerate case: on a flat sell "
+            "curve the cap sits below the round-trip breakeven, so applying "
+            "it makes storing surplus solar impossible at any future price"
+        )
         assert terminal_value == pytest.approx(buy_based)
 
     def test_extended_horizon_schedule_retains_charge_for_terminal_value(self):

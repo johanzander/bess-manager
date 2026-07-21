@@ -1849,8 +1849,8 @@ class BatterySystemManager:
         Estimate value from the median buy price (over whatever horizon window
         the caller passed in) adjusted for efficiency and cycle cost ("avoid a
         future purchase"), capped at the best achievable in-horizon export
-        value ("arbitrage-consistency cap"). This applies unconditionally,
-        whether the horizon boundary is midnight-today or midnight-tomorrow:
+        value ("arbitrage-consistency cap"). This applies at either horizon
+        boundary, midnight-today or midnight-tomorrow:
         the caller already truncates buy_prices/sell_prices to the current
         optimization window, so the median/cap formula reflects genuine
         future price uncertainty beyond that window regardless of where it
@@ -1866,6 +1866,17 @@ class BatterySystemManager:
         without needing a market-specific threshold, and stays inert on
         ordinary/Nordic-shaped markets where the best in-horizon peak is
         already above the buy-median estimate (#246, supersedes #245).
+
+        The cap is skipped when the export tariff is fixed. It bounds terminal
+        value by an export opportunity the DP would forgo by holding charge,
+        but on a flat sell curve `max(sell_prices)` is not an opportunity to
+        forgo — it is the price available in every period, including the
+        current one, which each period's reward already prices in. Applying it
+        there double-counts the immediate export alternative and makes storing
+        surplus solar for post-horizon use arithmetically impossible for *any*
+        future price, since the cap forces
+        `terminal <= sell * efficiency_discharge < sell < sell / efficiency_charge`
+        — the round-trip breakeven that storing has to clear (#359).
 
         Args:
             buy_prices: Full buy price array (from optimization_period onwards)
@@ -1891,14 +1902,17 @@ class BatterySystemManager:
             max_sell_price * self.battery_settings.efficiency_discharge
             - self.battery_settings.cycle_cost_per_kwh,
         )
-        terminal_value = min(buy_based, sell_cap)
+        export_prices_vary = max_sell_price > min(sell_prices)
+        terminal_value = min(buy_based, sell_cap) if export_prices_vary else buy_based
 
         logger.info(
             "Terminal value: %.3f/kWh (buy_based=%.3f, sell_cap=%.3f, "
-            "median_buy=%.3f, max_sell=%.3f, efficiency=%.2f, cycle_cost=%.3f)",
+            "cap_applied=%s, median_buy=%.3f, max_sell=%.3f, "
+            "efficiency=%.2f, cycle_cost=%.3f)",
             terminal_value,
             buy_based,
             sell_cap,
+            export_prices_vary,
             median_price,
             max_sell_price,
             self.battery_settings.efficiency_discharge,

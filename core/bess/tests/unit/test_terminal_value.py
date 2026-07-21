@@ -210,6 +210,69 @@ class TestTerminalValueCapRegression:
             "reconstruction error), but the cap must still measurably help"
         )
 
+    def test_fixed_export_tariff_stores_surplus_solar(self):
+        """Fixed export tariff with a large midday solar surplus (#359).
+
+        Mirrors a real UK Octopus day: import varies 0.19-0.40, export is a
+        flat 0.12. The cap then sits below the round-trip breakeven
+        (sell / efficiency_charge), so storing surplus solar loses to
+        exporting it for *any* future price and the battery coasts to its
+        floor overnight. Skipping the cap on a flat sell curve must let the
+        DP bank the free surplus instead.
+        """
+        settings = BatterySettings(
+            total_capacity=10.0,
+            min_soc=10,
+            max_soc=100,
+            max_charge_power_kw=5.0,
+            max_discharge_power_kw=5.0,
+            cycle_cost_per_kwh=0.02,
+        )
+
+        # 63 periods (07:15 to midnight): flat daytime import, evening peak,
+        # a solar bell curve well above load, and load-only after dark.
+        buy = [0.21] * 36 + [0.35] * 8 + [0.26] * 19
+        sell = [0.12] * 63
+        solar = [0.3] * 4 + [0.9] * 12 + [1.25] * 16 + [0.6] * 8 + [0.0] * 23
+        consumption = [0.25] * 63
+
+        buy_based = max(
+            0.0,
+            statistics.median(buy) * settings.efficiency_discharge
+            - settings.cycle_cost_per_kwh,
+        )
+        sell_cap = max(
+            0.0,
+            max(sell) * settings.efficiency_discharge - settings.cycle_cost_per_kwh,
+        )
+        assert (
+            sell_cap < max(sell) / settings.efficiency_charge
+        ), "test fixture must exercise the degenerate flat-export case"
+
+        def peak_soe(terminal_value):
+            result = optimize_battery_schedule(
+                buy_price=buy,
+                sell_price=sell,
+                home_consumption=consumption,
+                battery_settings=settings,
+                solar_production=solar,
+                initial_soe=4.2,
+                terminal_value_per_kwh=terminal_value,
+            )
+            return max(pd.energy.battery_soe_end for pd in result.period_data)
+
+        soe_capped = peak_soe(min(buy_based, sell_cap))  # pre-#359 behavior
+        soe_fixed = peak_soe(buy_based)  # cap skipped on flat sell curve
+
+        assert soe_fixed > soe_capped, (
+            "skipping the degenerate cap must let the DP store surplus solar "
+            "rather than exporting all of it at the flat tariff"
+        )
+        assert soe_fixed > settings.max_soe_kwh * 0.9, (
+            "with free surplus solar and an evening/overnight import price "
+            "well above the export price, the battery should fill"
+        )
+
     def test_nordic_shaped_market_retains_reserve(self):
         """Ordinary/Nordic-shaped market with a genuine narrow evening peak:
         the best in-horizon sell price is already above the buy-median

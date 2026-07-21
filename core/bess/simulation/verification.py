@@ -110,7 +110,12 @@ def realized_under_solar_error(
         0.0,
         max(sell_price) * settings.efficiency_discharge - settings.cycle_cost_per_kwh,
     )
-    terminal_value_per_kwh = min(buy_based, sell_cap)
+    # Cap skipped on a fixed export tariff — see
+    # BatterySystemManager._calculate_terminal_value for why (#359).
+    export_prices_vary = max(sell_price) > min(sell_price)
+    terminal_value_per_kwh = (
+        min(buy_based, sell_cap) if export_prices_vary else buy_based
+    )
     result = optimize_battery_schedule(
         buy_price=buy_price,
         sell_price=sell_price,

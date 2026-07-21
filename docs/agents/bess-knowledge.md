@@ -215,7 +215,8 @@ based platforms — Growatt TOU/cloud/SPH; VPP-style platforms select
 the SOLAR_EXPORT hardware-mapping note below):
 - GRID_CHARGING → battery_first mode + grid charge ON
 - LOAD_SUPPORT → load_first mode
-- BATTERY_EXPORT → grid_first mode (battery discharge to grid)
+- BATTERY_EXPORT → grid_first mode (battery discharge to grid) — only when
+  the planned export is *material*; see the export-materiality gate below
 - SOLAR_STORAGE / SOLAR_EXPORT / IDLE → load_first mode (solar serves home first)
 
 ### BATTERY_EXPORT vs SOLAR_EXPORT (why the split exists)
@@ -230,6 +231,35 @@ inverter modes:
 Earlier both were one intent (`EXPORT_ARBITRAGE`) mapped to `grid_first`, which
 wrongly locked the inverter in grid-export mode for hours during sunny
 daytimes while the battery sat unable to help the house.
+
+### The grid_first export-materiality gate (#352)
+
+`grid_first`'s discharge rate is a **forced power command sized to the
+forecast**, not a load-following ceiling: if real house load exceeds the
+written rate, the shortfall imports at buy price for the rest of the period,
+to protect the planned export. When the planned export is small relative to
+the period's home load, that trade is systematically bad (undershoot costs
+buy price, overshoot only earns sell price).
+
+So the intent→mode decision is decoupled from classification
+(`InverterController._export_demoted`): a `BATTERY_EXPORT` period only gets
+`grid_first` when its planned `battery_to_grid` clears the 0.1 kWh flow
+resolution floor AND is either export-dominant (exceeds planned
+`battery_to_home`) or larger than the load-following headroom the
+commitment forfeits (`max_discharge × 15 min − planned discharge`) — a
+near-full-rate export leaves no headroom for `load_first` to do better
+with, so it keeps `grid_first` however large the home share is. Otherwise
+the period is *demoted for hardware only* —
+`load_first` + `discharge_rate=100` (LOAD_SUPPORT semantics, spike-immune,
+forgoing the small export) — while the reported intent stays
+`BATTERY_EXPORT` for accounting honesty (#253). The gate only applies where
+`discharge_rate_is_load_following` (Growatt MIN, solax-modbus TOU mode); on
+VPP-style direct power control, rate 100 would force a full-power discharge
+(#324). Like the SOLAR_EXPORT discharge gate, this is a sub-period
+hardware-robustness behavior invisible to the 15-minute plan/simulator.
+So a `BATTERY_EXPORT` period showing `load_first`/`discharge_rate=100` is
+**not a bug** — the planned export was too small to justify giving up
+load-following.
 
 ### The SOLAR_EXPORT discharge gate (load_first + discharge rate 0 or 100)
 

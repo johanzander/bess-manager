@@ -325,7 +325,9 @@ Each optimization provides detailed economic reasoning:
 The system classifies battery action intent using the battery power action as the primary discriminator, with energy flows as secondary input. Classification is performed by `classify_strategic_intent(power, energy_data)` in `decision_intelligence.py`:
 
 - **Discharging** (power < −0.1 kW):
-  - **BATTERY_EXPORT**: `battery_to_grid > 0.1 kWh`
+  - **BATTERY_EXPORT**: `battery_to_grid > 0.01 kWh` (#253; note that
+    `EnergyData`'s flow calculation folds sub-0.1 kWh exports into
+    `battery_to_home` when the battery already serves a home deficit, #350)
   - **LOAD_SUPPORT**: otherwise (discharge serves home load)
 - **Charging** (power > 0.1 kW):
   - **GRID_CHARGING**: `grid_to_battery > solar_to_battery` (grid is dominant charge source)
@@ -345,7 +347,8 @@ The InverterController converts action intents into hardware-specific schedules.
 | GRID_CHARGING | battery_first | On | 0% |
 | SOLAR_STORAGE | load_first | Off | 0% |
 | LOAD_SUPPORT | load_first | Off | action-derived |
-| BATTERY_EXPORT | grid_first | Off | action-derived |
+| BATTERY_EXPORT (material export) | grid_first | Off | action-derived |
+| BATTERY_EXPORT (demoted, #352) | load_first | Off | 100% |
 | SOLAR_EXPORT | load_first | Off | 0% |
 | IDLE | load_first | Off | 0% |
 
@@ -359,6 +362,8 @@ The InverterController converts action intents into hardware-specific schedules.
 for the full VPP-mode design (issue #355).
 
 **Why BATTERY_EXPORT requires grid_first**: The inverter must route battery discharge toward the grid rather than the home. In `load_first`, discharge would serve home load first; only `grid_first` guarantees battery energy reaches the grid.
+
+**The export-materiality gate (#352)**: `grid_first`'s discharge rate is a forced power command with no load-following — any intra-period load spike above the written rate imports at buy price to protect the planned export. A `BATTERY_EXPORT` period is therefore only committed to `grid_first` when its planned `battery_to_grid` exceeds the 0.1 kWh flow-resolution floor (`InverterController.grid_first_export_materiality_kwh`) and additionally either exceeds the period's planned `battery_to_home` (export-dominant) or exceeds the load-following headroom the commitment forfeits (`max_discharge_power × 15 min − planned discharge`) — a near-full-rate export leaves no headroom for `load_first` to cover a spike with, so demoting it would only forgo revenue without reducing exposure. Non-material periods are demoted *for hardware control only* to `load_first` + `discharge_rate=100` (LOAD_SUPPORT semantics), while the reported strategic intent stays `BATTERY_EXPORT` — classification and hardware-mode selection are deliberately decoupled. The gate requires `discharge_rate_is_load_following` (on VPP-style direct power control, rate 100 would force a full-power discharge, #324) and planned per-period flow data (`DPSchedule.period_data`, the #320 plumbing); without flow data, behavior falls back to the plain intent mapping. Like the intra-period discharge gate (#187/#318), this is a hardware-robustness behavior invisible to the 15-minute plan and simulator.
 
 **Schedule generation**:
 

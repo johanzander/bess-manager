@@ -69,7 +69,7 @@ where `buy_prices`/`sell_prices` are already truncated to whatever the
 current horizon is, capped at `max(sell_prices) * efficiency_discharge -
 cycle_cost` — an **arbitrage-consistency cap** that prevents the estimate
 from exceeding what could actually be realized by selling right now at the
-best available price (`core/bess/battery_system_manager.py:1840-1908`,
+best available price (`core/bess/battery_system_manager.py:1841-1921`,
 `_calculate_terminal_value`; see issues #126/#244/#246/#345). This is the
 mechanism to check first for "why didn't the battery discharge everything
 right before midnight" or "why does it hold charge near the end of the
@@ -78,6 +78,15 @@ so this remains the first thing to check even after tomorrow's prices have
 arrived (until #345, it was incorrectly zeroed in that case; see the #345/
 #126 threads for the "tonight's export moves a day later" symptom this was
 suspected of, and ultimately ruled out for a specific bundle).
+
+The cap is skipped entirely on a fixed/flat export tariff (`max(sell_prices)
+== min(sell_prices)`, e.g. UK Octopus Outgoing Fixed) — there, every period
+shares the same sell price, so `max(sell_prices)` is not a real future
+opportunity being forgone, and applying the cap anyway forces terminal value
+below the round-trip breakeven for any buy price, making it arithmetically
+impossible to store surplus solar for post-horizon use (issue #359). On any
+market with genuine price variation (Nordic, Belpex, UK variable-export),
+this carve-out is inert and the cap applies exactly as described above.
 
 **Self-throttling near self-consumption (issue #240)**: In `_compute_reward`,
 a discharge whose overshoot above `home_consumption` is

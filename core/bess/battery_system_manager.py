@@ -685,19 +685,12 @@ class BatterySystemManager:
                     prepare_next_day,
                 )
             else:
-                # Update current schedule even when TOU doesn't change
+                # Update current schedule even when TOU doesn't change.
+                # Hardware-derived state (TOU intervals, VPP confirmation,
+                # etc.) is already carried onto temp_growatt via seed_from()
+                # at creation time (#329), so no further copying is needed
+                # here before adopting it.
                 self._current_schedule = temp_schedule
-                # Carry forward hardware TOU state so stale segment detection
-                # keeps working. temp_growatt has fresh schedule/intents/hourly
-                # settings but empty TOU intervals — without this, the in-memory
-                # record of what's on the inverter is erased every cycle.
-                temp_growatt.tou_intervals = (
-                    self._inverter_controller.tou_intervals.copy()
-                )
-                if isinstance(self._inverter_controller, GrowattMinController):
-                    temp_growatt._active_tou_intervals = (
-                        self._inverter_controller._active_tou_intervals.copy()
-                    )
                 self._inverter_controller = temp_growatt
 
             # Capture prediction snapshot after schedule is applied
@@ -2372,6 +2365,7 @@ class BatterySystemManager:
 
             # Create schedule manager matching current inverter type
             temp_growatt: InverterController = self._create_inverter_controller()
+            temp_growatt.seed_from(self._inverter_controller)
             temp_growatt.strategic_intents = full_day_strategic_intents
 
             # Create schedule with rolling window — only future periods get TOU segments

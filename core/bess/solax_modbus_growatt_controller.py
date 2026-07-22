@@ -301,6 +301,18 @@ class SolaxModbusGrowattController(GrowattMinController):
             return 0, block_passive_charging
         return -discharge_rate, True
 
+    def seed_from(self, other: "GrowattMinController") -> None:
+        """See base docstring. Adds VPP confirmation/tracking state and the
+        last-written TOU mode, both of which gate redundant hardware writes."""
+        super().seed_from(other)
+        if isinstance(other, SolaxModbusGrowattController):
+            self._vpp_status_confirmed = other._vpp_status_confirmed
+            self._last_written_vpp_remote_control = (
+                other._last_written_vpp_remote_control
+            )
+            self._last_written_vpp_power = other._last_written_vpp_power
+            self._last_written_tou_mode = other._last_written_tou_mode
+
     def _ensure_vpp_status_enabled(self, controller) -> None:
         """Enable the VPP Status register once, if not already confirmed.
 

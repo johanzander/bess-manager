@@ -286,6 +286,37 @@ class TestReadAndInitializeVpp:
         assert mock_ha.calls["growatt_vpp_periods"] == []
 
 
+class TestSeedFromVpp:
+    """#329: BatterySystemManager recreates the controller every optimization
+    cycle. Without carrying forward VPP confirmation state, the fresh
+    instance re-writes the flash-backed vpp_status/allow_ac_charging
+    registers on every cycle, not just at startup."""
+
+    def test_seed_from_skips_redundant_vpp_status_write(
+        self, controller, mock_ha, battery_settings
+    ):
+        intents = hourly_to_quarterly({2: "GRID_CHARGING"})
+        controller.create_schedule(make_schedule(intents), current_period=0)
+        _apply_at_period(controller, mock_ha, 8, grid_charge=True, discharge_rate=0)
+        assert len(mock_ha.calls["growatt_vpp_status"]) == 1
+        assert len(mock_ha.calls["growatt_vpp_allow_ac_charging"]) == 1
+
+        # Simulates the next optimization cycle: a brand-new controller
+        # instance, seeded from the outgoing one before being adopted.
+        next_controller = SolaxModbusGrowattController(
+            battery_settings, control_mode="vpp"
+        )
+        next_controller.seed_from(controller)
+        next_controller.create_schedule(make_schedule(intents), current_period=0)
+
+        _apply_at_period(
+            next_controller, mock_ha, 9, grid_charge=True, discharge_rate=0
+        )
+
+        assert len(mock_ha.calls["growatt_vpp_status"]) == 1
+        assert len(mock_ha.calls["growatt_vpp_allow_ac_charging"]) == 1
+
+
 class TestCheckHealthVpp:
     def test_checks_vpp_entities_not_tou_entities(self, controller, mock_ha):
         mock_ha.sensors.update(

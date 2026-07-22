@@ -1,0 +1,173 @@
+<title>{{TITLE}}</title>
+<style>
+.viz-root {
+  color-scheme: light;
+  --surface-1: #fcfcfb; --surface-2: #f3f2ee; --border: #e2e0da;
+  --text-primary: #0b0b0b; --text-secondary: #52514e; --text-muted: #86847c;
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+  --sans: -apple-system, "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+  --c-load: #2a78d6;      /* LOAD_SUPPORT */
+  --c-solar-store: #1baf7a; /* SOLAR_STORAGE */
+  --c-solar-export: #eb6834; /* SOLAR_EXPORT */
+  --c-grid-charge: #4a3aa7;  /* GRID_CHARGING */
+  --c-export: #e34948;    /* BATTERY_EXPORT */
+  --c-idle: #b6b3a8;      /* IDLE (not a categorical data color — muted ink) */
+  --sell-line: #0b0b0b; --buy-line: #86847c;
+  --c-solar-flow: #eda100; --c-load-flow: #52514e;
+  /* Energy Trend panel series (categorical slots 1-6, fixed order) */
+  --s-export: #2a78d6; --s-pv: #008300; --s-dis: #e87ba4;
+  --s-imp: #eda100; --s-chg: #1baf7a; --s-load: #eb6834;
+  --c-shadow: #e87ba4;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) .viz-root {
+    color-scheme: dark;
+    --surface-1: #17181a; --surface-2: #1e2023; --border: #2c2f36;
+    --text-primary: #f2f2f0; --text-secondary: #c3c2b7; --text-muted: #8b8980;
+    --c-load: #3987e5; --c-solar-store: #199e70; --c-solar-export: #d95926;
+    --c-grid-charge: #9085e9; --c-export: #e66767; --c-idle: #6c6a62;
+    --sell-line: #f2f2f0; --buy-line: #8b8980;
+    --c-solar-flow: #c98500; --c-load-flow: #c3c2b7;
+    --s-export: #3987e5; --s-pv: #008300; --s-dis: #d55181;
+    --s-imp: #c98500; --s-chg: #199e70; --s-load: #d95926;
+    --c-shadow: #d55181;
+  }
+}
+:root[data-theme="dark"] .viz-root {
+  color-scheme: dark;
+  --surface-1: #17181a; --surface-2: #1e2023; --border: #2c2f36;
+  --text-primary: #f2f2f0; --text-secondary: #c3c2b7; --text-muted: #8b8980;
+  --c-load: #3987e5; --c-solar-store: #199e70; --c-solar-export: #d95926;
+  --c-grid-charge: #9085e9; --c-export: #e66767; --c-idle: #6c6a62;
+  --sell-line: #f2f2f0; --buy-line: #8b8980;
+  --c-solar-flow: #c98500; --c-load-flow: #c3c2b7;
+  --s-export: #3987e5; --s-pv: #008300; --s-dis: #d55181;
+  --s-imp: #c98500; --s-chg: #199e70; --s-load: #d95926;
+  --c-shadow: #d55181;
+}
+:root[data-theme="light"] .viz-root {
+  color-scheme: light;
+  --surface-1: #fcfcfb; --surface-2: #f3f2ee; --border: #e2e0da;
+  --text-primary: #0b0b0b; --text-secondary: #52514e; --text-muted: #86847c;
+  --c-load: #2a78d6; --c-solar-store: #1baf7a; --c-solar-export: #eb6834;
+  --c-grid-charge: #4a3aa7; --c-export: #e34948; --c-idle: #b6b3a8;
+  --sell-line: #0b0b0b; --buy-line: #86847c;
+  --c-solar-flow: #eda100; --c-load-flow: #52514e;
+  --s-export: #2a78d6; --s-pv: #008300; --s-dis: #e87ba4;
+  --s-imp: #eda100; --s-chg: #1baf7a; --s-load: #eb6834;
+  --c-shadow: #e87ba4;
+}
+* { box-sizing: border-box; }
+body { margin: 0; }
+.viz-root {
+  background: var(--surface-1); color: var(--text-primary); font-family: var(--sans);
+  padding: 24px 20px 40px; line-height: 1.45;
+}
+.wrap { max-width: 980px; margin: 0 auto; }
+h1 { font-size: 1.25rem; font-weight: 650; margin: 0 0 4px; letter-spacing: -0.01em; }
+.subtitle { color: var(--text-secondary); font-size: 0.86rem; margin: 0 0 18px; max-width: 74ch; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1px; background: var(--border);
+  border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin-bottom: 18px; }
+.stat { background: var(--surface-1); padding: 12px 14px; }
+.stat .label { color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.62rem; margin-bottom: 4px; }
+.stat .value { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 1.05rem; font-weight: 700; }
+.stat .sub { color: var(--text-secondary); font-size: 0.72rem; margin-top: 2px; }
+.stat.margin .value { color: var(--c-idle); }
+.stat.margin.positive .value { color: var(--c-solar-store); }
+.chart-card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 16px 16px 8px; margin-bottom: 10px; }
+svg { display: block; width: 100%; height: auto; overflow: visible; font-family: var(--sans); }
+.axis-label { fill: var(--text-muted); font-size: 10px; }
+.gridline { stroke: var(--border); stroke-width: 1; }
+.sell-line { fill: none; stroke: var(--sell-line); stroke-width: 2; }
+.buy-line { fill: none; stroke: var(--buy-line); stroke-width: 1.5; stroke-dasharray: 3 3; }
+.intent-bg { stroke: none; opacity: 0.16; }
+.ref-line { stroke: var(--text-muted); stroke-width: 1; stroke-dasharray: 2 3; }
+.ref-label { fill: var(--text-secondary); font-size: 10px; font-family: var(--mono); }
+.direct-label { font-size: 10.5px; font-family: var(--mono); font-weight: 600; }
+.soc-line { fill: none; stroke: var(--text-primary); stroke-width: 2; }
+.soc-area { stroke: none; fill: var(--text-primary); opacity: 0.06; }
+.series-line { fill: none; stroke-width: 2; }
+.series-area { stroke: none; opacity: 0.22; }
+.series-group { transition: opacity 0.15s; }
+.series-group.series-hidden { display: none; }
+.zero-line { stroke: var(--text-secondary); stroke-width: 1; }
+.panel-title { fill: var(--text-secondary); font-size: 10.5px; font-family: var(--sans); font-weight: 650; text-transform: uppercase; letter-spacing: 0.04em; }
+.legend { display: flex; flex-wrap: wrap; align-items: center; row-gap: 8px; font-size: 0.76rem; color: var(--text-secondary); margin: 10px 0 16px; }
+.legend .group { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.legend .group-label { font-size: 0.62rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--text-muted); margin-right: 2px; }
+.legend .group-sep { width: 100%; height: 0; }
+.legend .swatch { display: inline-flex; align-items: center; gap: 6px; }
+.dot { width: 9px; height: 9px; border-radius: 2px; display: inline-block; flex-shrink: 0; }
+.legend .dot { }
+.legend button.swatch { border: none; background: none; padding: 2px 6px 2px 2px; margin: -2px 0; border-radius: 6px;
+  font: inherit; color: var(--text-secondary); cursor: pointer; }
+.legend button.swatch:hover { background: var(--surface-2); }
+.legend button.swatch.off { opacity: 0.4; text-decoration: line-through; }
+.legend-hint { color: var(--text-muted); font-size: 0.7rem; }
+.hover-line { stroke: var(--text-secondary); stroke-width: 1; opacity: 0; pointer-events: none; }
+.hover-dot { opacity: 0; pointer-events: none; }
+.tooltip { position: absolute; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px 10px; font-family: var(--mono); font-size: 11px; pointer-events: none; opacity: 0; transition: opacity 0.08s;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.12); white-space: nowrap; z-index: 5; }
+.tooltip .t-time { font-weight: 700; margin-bottom: 3px; font-family: var(--sans); }
+.tooltip .t-section { font-size: 9.5px; font-family: var(--sans); font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.05em; color: var(--text-muted); margin: 7px 0 2px; }
+.tooltip .t-section:first-of-type { margin-top: 4px; }
+.tooltip .t-row { display: flex; justify-content: space-between; gap: 14px; color: var(--text-secondary); }
+.tooltip .t-row > span:first-child { display: inline-flex; align-items: center; gap: 5px; }
+.tooltip .t-row b { color: var(--text-primary); font-weight: 600; }
+.tooltip .t-action { display: flex; justify-content: space-between; gap: 14px; font-size: 12.5px; font-weight: 700;
+  padding: 4px 6px; margin: 0 -4px 5px; border-radius: 5px; background: var(--surface-1); }
+.chart-wrap { position: relative; }
+.footnote { color: var(--text-muted); font-size: 0.76rem; margin-top: 4px; max-width: 76ch; }
+.glossary { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px 16px;
+  margin: 10px 0 14px; padding: 12px 14px; background: var(--surface-2); border-radius: 10px; }
+.glossary dt { font-size: 0.72rem; font-weight: 700; color: var(--text-primary); display: flex; align-items: center; gap: 5px; }
+.glossary dt .dot { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
+.glossary dd { margin: 1px 0 0; font-size: 0.7rem; color: var(--text-secondary); line-height: 1.35; }
+.glossary .section-header { grid-column: 1 / -1; font-size: 0.62rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.05em; color: var(--text-muted); margin-top: 6px; }
+.glossary .section-header:first-child { margin-top: 0; }
+.source-note { color: var(--text-muted); font-size: 0.7rem; margin-top: 16px; }
+table.data-table { border-collapse: collapse; width: 100%; font-family: var(--mono); font-size: 0.72rem; margin-top: 4px; }
+table.data-table caption { text-align: left; color: var(--text-muted); font-size: 0.76rem; margin-bottom: 6px; font-family: var(--sans); }
+table.data-table th, table.data-table td { padding: 3px 8px; text-align: right; border-bottom: 1px solid var(--border); }
+table.data-table th.time, table.data-table td.time { text-align: left; }
+details.table-toggle summary { cursor: pointer; color: var(--text-secondary); font-size: 0.8rem; margin-top: 6px; }
+</style>
+
+<div class="viz-root">
+<div class="wrap">
+<h1>{{TITLE}}</h1>
+<p class="subtitle">{{SUBTITLE}}</p>
+
+<div class="stats" id="stats"></div>
+
+<div class="chart-card">
+  <div class="chart-wrap" id="chartWrap"></div>
+</div>
+
+<div class="legend" id="legend"></div>
+<p class="legend-hint">One ledger, every line individually toggleable — click any item (price lines, energy-trend series) to show/hide it. Price-panel lines listed first, then Energy Trend, then the (non-toggleable) intent-tint key.</p>
+
+<dl class="glossary" id="glossary"></dl>
+
+<p class="footnote">DP-reasoning lines (shadow price, cost basis, breakeven) only draw for periods with a recorded optimizer decision — gaps are periods with no decision data (e.g. idle periods with no beneficial action), not missing data. Dotted vertical lines mark day boundaries (00:00) when the trace spans more than one day. Hover any legend item above for its one-line definition.</p>
+
+<details class="table-toggle">
+<summary>View as table</summary>
+<div style="max-height:340px; overflow:auto; border:1px solid var(--border); border-radius:8px; margin-top:8px;">
+<table class="data-table" id="dataTable">
+<caption>All periods — time, intent, buy/sell price, solar/load, battery flows by source, SOE</caption>
+<thead><tr><th class="time">Time</th><th>Intent</th><th>Buy</th><th>Sell</th><th>Solar</th><th>Load</th><th>Solar→Home</th><th>Solar→Batt</th><th>Solar→Grid</th><th>Grid→Batt</th><th>Batt→Home</th><th>Batt→Grid</th><th>SOE start</th><th>SOE end</th><th>SOE Δ</th><th>Source</th></tr></thead>
+<tbody id="tbody"></tbody>
+</table>
+</div>
+</details>
+
+<p class="source-note">Generated by the visualize-debug-log skill. Not a live data source — a static snapshot of this debug bundle's realized sensor data plus its latest optimization run's forecast, with actual/historical periods' detailed flows and intent recomputed against this repo's current <code>core/bess/models.py</code>.</p>
+</div>
+</div>
+
+<script>

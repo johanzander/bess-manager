@@ -197,6 +197,20 @@ class TestDashboard:
         resp = _client.get("/api/dashboard")
         assert resp.status_code == 503
 
+    def test_unavailable_battery_soc_sensor_returns_clear_error(self):
+        """battery_soc sensor going 'unavailable' must not surface as an
+        opaque TypeError from dividing None by a float."""
+        ctrl = _make_started_controller()
+        ctrl.ha_controller.get_battery_soc.return_value = None
+        sys.modules["app"].bess_controller = ctrl
+
+        resp = _client.get("/api/dashboard")
+
+        assert resp.status_code == 500
+        detail = resp.json()["detail"]
+        assert "NoneType" not in detail
+        assert "battery_soc" in detail.lower() or "battery soc" in detail.lower()
+
     def test_historical_date_returns_persisted_daily_view(self):
         ctrl = _make_started_controller()
         historical_date = date(2020, 1, 1)

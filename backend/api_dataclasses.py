@@ -950,6 +950,8 @@ class APIDashboardResponse:
         total_daily_savings = actual_savings + predicted_savings
 
         # Battery SOE calculation
+        if battery_soc is None:
+            raise ValueError("battery_soc sensor is unavailable")
         battery_soe = (battery_soc / 100.0) * battery_capacity
 
         # Create cost and savings data structure for SystemStatusCard

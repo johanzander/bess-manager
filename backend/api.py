@@ -1541,6 +1541,8 @@ async def get_inverter_status():
             logger.warning(f"Failed to get current battery mode: {e}")
 
         battery_soc = controller.get_battery_soc()
+        if battery_soc is None:
+            raise ValueError("battery_soc sensor is unavailable")
         battery_soe = (battery_soc / 100.0) * battery_settings.total_capacity
         grid_charge_enabled = controller.grid_charge_enabled()
         charge_power_rate = controller.get_charging_power_rate()

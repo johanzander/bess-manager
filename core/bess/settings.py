@@ -44,6 +44,8 @@ BATTERY_MIN_ACTION_PROFIT_THRESHOLD = (
 BATTERY_DEFAULT_CHARGING_POWER_RATE = 40  # percentage
 BATTERY_EFFICIENCY_CHARGE = 0.97  # Mix of solar (98%) and grid (95%) charging
 BATTERY_EFFICIENCY_DISCHARGE = 0.95  # DC-AC conversion losses
+INVERTER_MAX_AC_POWER_KW = 0.0  # total inverter AC output cap; 0 = unconstrained
+INVERTER_AC_POWER_MARGIN = 0.05  # model-side haircut on the AC cap (0-1)
 
 # Default LFP temperature derating curve: (temp_celsius, charge_rate_percent)
 # Based on LFP battery characteristics (Battery University, manufacturer data)
@@ -129,6 +131,8 @@ class BatterySettings:
     )
     efficiency_charge: float = BATTERY_EFFICIENCY_CHARGE
     efficiency_discharge: float = BATTERY_EFFICIENCY_DISCHARGE
+    inverter_max_ac_power_kw: float = INVERTER_MAX_AC_POWER_KW
+    inverter_ac_power_margin: float = INVERTER_AC_POWER_MARGIN
     reserved_capacity: float = field(init=False)
     min_soe_kwh: float = field(init=False)
     max_soe_kwh: float = field(init=False)
@@ -137,6 +141,16 @@ class BatterySettings:
         if self.total_capacity <= 0:
             raise ValueError(
                 f"total_capacity must be positive, got {self.total_capacity}"
+            )
+        if self.inverter_max_ac_power_kw < 0:
+            raise ValueError(
+                f"inverter_max_ac_power_kw must be >= 0 (0 disables the AC cap), "
+                f"got {self.inverter_max_ac_power_kw}"
+            )
+        if not 0 <= self.inverter_ac_power_margin < 1:
+            raise ValueError(
+                f"inverter_ac_power_margin must be in [0, 1), "
+                f"got {self.inverter_ac_power_margin}"
             )
         self.min_soe_kwh = self.total_capacity * self.min_soc / 100.0
         self.max_soe_kwh = self.total_capacity * self.max_soc / 100.0

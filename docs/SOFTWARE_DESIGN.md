@@ -301,6 +301,17 @@ Home consumption gets solar first (free), then grid; battery charges from
 solar first (free), then grid (paid) — but the split is reconciled against
 measured grid import/export, not assumed from production figures alone.
 
+A related noise source survives even after #342's cap: a `battery_to_grid`
+residual can still appear when its governing aggregate (`battery_discharged`)
+is itself nonzero, indistinguishable from ordinary lifetime-counter
+quantization (0.1 kWh resolution) rather than a real export — and it
+corrupts the observational `infer_intent_from_flows` classifier's
+`BATTERY_EXPORT` label. Fixed in #350: any `battery_to_grid` below the 0.1
+kWh floor folds back into `battery_to_home`, but only when
+`battery_to_home > 0` (the battery was already covering a genuine home
+deficit) — when `battery_to_home == 0`, any nonzero export stays a real
+export, since it has no other channel to have come from.
+
 ### Decision Intelligence
 
 Each optimization provides detailed economic reasoning:
@@ -341,6 +352,11 @@ The InverterController converts action intents into hardware-specific schedules.
 **Why SOLAR_STORAGE and IDLE share the same inverter settings**: Both use `load_first` because solar energy serving the home directly is always more valuable than routing it through the battery (which incurs cycle cost). If prices are cheap enough to justify prioritizing battery charging over home load, the DP algorithm uses `GRID_CHARGING` instead, which enables AC grid-to-battery charging via `battery_first` mode. Using `battery_first` without `grid_charge` would cause unnecessary grid imports by routing solar to the battery first while the grid serves the home.
 
 **Why SOLAR_EXPORT uses load_first (not grid_first)**: Solar exports naturally in `load_first` when generation exceeds consumption — no special inverter mode is needed. `SOLAR_EXPORT` exists as a distinct intent purely for UI display (distinguishing "solar actively exporting" from "nothing happening"). Using `grid_first` for battery-idle periods would lock the inverter in a mode that prevents the battery from supporting house load during temporary solar deficits.
+
+**VPP-style control is the exception to this table** (`SolaxModbusGrowattController` `control_mode="vpp"`, `SolaxController`): these platforms have no `charge_rate` register at all (`supports_charge_rate_control=False`), so `load_first` vs. `grid_first` isn't selected via a persistent TOU mode the way it is here — it's chosen per-period from a `block_passive_charging` signal (derived from this same table's `charge_rate` column: `0` → block) threaded through `InverterController.apply_period`. See
+[`docs/INVERTER_PLATFORMS.md`](INVERTER_PLATFORMS.md)'s "SOLAR_EXPORT semantics" section and
+[`docs/superpowers/specs/2026-07-20-vpp-passive-charge-block-design.md`](superpowers/specs/2026-07-20-vpp-passive-charge-block-design.md)
+for the full VPP-mode design (issue #355).
 
 **Why BATTERY_EXPORT requires grid_first**: The inverter must route battery discharge toward the grid rather than the home. In `load_first`, discharge would serve home load first; only `grid_first` guarantees battery energy reaches the grid.
 

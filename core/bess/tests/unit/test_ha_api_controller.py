@@ -295,6 +295,74 @@ class TestSetOperations:
             assert mock.call_args[1]["value"] == 90
 
 
+class TestSetTouSegmentViaEntities:
+    """Regression test for #362: begin/end must use time.set_value, not
+    select.select_option, when the resolved entity is HA domain `time.*`
+    (the only domain solax_modbus's Growatt plugin exposes for TOU
+    begin/end — select.select_option against it is a silent HA no-op)."""
+
+    @pytest.fixture
+    def tou_ctrl(self, ctrl):
+        ctrl.sensors.update(
+            {
+                "tou_time_1_enabled": "select.pv_growatt_time_1_active",
+                "tou_time_1_begin": "time.pv_growatt_time_1_begin",
+                "tou_time_1_end": "time.pv_growatt_time_1_end",
+                "tou_time_1_mode": "select.pv_growatt_time_1_mode",
+                "tou_time_1_update": "button.pv_growatt_time_1_update",
+            }
+        )
+        return ctrl
+
+    def test_begin_end_written_via_time_set_value(self, tou_ctrl):
+        with patch.object(tou_ctrl, "_service_call_with_retry") as mock:
+            tou_ctrl.set_tou_segment_via_entities(
+                segment_id=1,
+                batt_mode="grid_first",
+                start_time="07:00",
+                end_time="08:59",
+                enabled=True,
+            )
+
+        calls_by_entity = {
+            call.kwargs["entity_id"]: call
+            for call in mock.call_args_list
+            if "entity_id" in call.kwargs
+        }
+
+        begin_call = calls_by_entity["time.pv_growatt_time_1_begin"]
+        assert begin_call.args[:2] == ("time", "set_value")
+        assert begin_call.kwargs["time"] == "07:00:00"
+
+        end_call = calls_by_entity["time.pv_growatt_time_1_end"]
+        assert end_call.args[:2] == ("time", "set_value")
+        assert end_call.kwargs["time"] == "08:59:00"
+
+    def test_mode_and_enabled_still_use_select_option(self, tou_ctrl):
+        with patch.object(tou_ctrl, "_service_call_with_retry") as mock:
+            tou_ctrl.set_tou_segment_via_entities(
+                segment_id=1,
+                batt_mode="grid_first",
+                start_time="07:00",
+                end_time="08:59",
+                enabled=True,
+            )
+
+        calls_by_entity = {
+            call.kwargs["entity_id"]: call
+            for call in mock.call_args_list
+            if "entity_id" in call.kwargs
+        }
+
+        mode_call = calls_by_entity["select.pv_growatt_time_1_mode"]
+        assert mode_call.args[:2] == ("select", "select_option")
+        assert mode_call.kwargs["option"] == "Grid First"
+
+        enabled_call = calls_by_entity["select.pv_growatt_time_1_active"]
+        assert enabled_call.args[:2] == ("select", "select_option")
+        assert enabled_call.kwargs["option"] == "Enabled"
+
+
 class TestGridChargeEnabled:
     def test_switch_on(self, ctrl):
         ctrl.session.get = _session_method_mock(

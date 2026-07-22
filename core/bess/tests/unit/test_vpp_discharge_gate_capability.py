@@ -88,7 +88,10 @@ class TestVppModeDischargeGateExcluded:
 
     def test_solar_export_gate_open_does_not_force_vpp_discharge(self):
         """Same economics that open the gate on TOU (buy high, shadow low)
-        must NOT produce a forced discharge command in VPP mode."""
+        must NOT produce a forced discharge command in VPP mode -- power
+        must stay 0. remote_control_enabled is True (grid-first hold, #355)
+        rather than a forced discharge, blocking passive solar charging
+        instead of falling back to self-use."""
         bsm, controller = _make_bsm(buy_prices=[2.0] * 96, control_mode="vpp")
         _set_intent(bsm, PERIOD, "SOLAR_EXPORT")
         _store_shadow_price(bsm, PERIOD, "SOLAR_EXPORT", shadow_price=0.5)
@@ -97,7 +100,7 @@ class TestVppModeDischargeGateExcluded:
 
         vpp_call = controller.calls["growatt_vpp_periods"][-1]
         assert vpp_call["power_pct"] == 0
-        assert vpp_call["remote_control_enabled"] is False
+        assert vpp_call["remote_control_enabled"] is True
 
     def test_solar_storage_gate_open_does_not_force_vpp_discharge(self):
         bsm, controller = _make_bsm(buy_prices=[2.0] * 96, control_mode="vpp")

@@ -12,6 +12,8 @@ export interface BatteryForm {
   efficiencyDischarge: number;
   temperatureDeratingEnabled: boolean;
   minActionProfit: number;
+  inverterMaxAcPowerKw: number;
+  inverterAcPowerMargin: number;
 }
 
 interface Props {
@@ -95,6 +97,23 @@ export function BatteryFormSection({
               {numField('Discharge Efficiency', form.efficiencyDischarge,
                 v => onChange({ ...form, efficiencyDischarge: v }), { unit: '%', min: 0, max: 100, step: 0.1 })}
             </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {numField('Inverter Max AC Power', form.inverterMaxAcPowerKw,
+                v => onChange({ ...form, inverterMaxAcPowerKw: v }),
+                { unit: 'kW — 0 disables', min: 0, step: 0.1 })}
+              {numField('Clipping Margin', form.inverterAcPowerMargin,
+                v => onChange({ ...form, inverterAcPowerMargin: v }),
+                { unit: 'fraction 0–0.9', min: 0, max: 0.9, step: 0.01 })}
+            </div>
+            <p className="text-xs text-gray-500 dark:text-gray-400 -mt-2">
+              For DC-coupled solar on a hybrid inverter whose total AC output is capped
+              (e.g. 5 kW on a Growatt MIN 5000TL-XH). When set, the optimizer treats solar
+              above the cap as lost unless the battery has room to absorb it DC-side, and
+              will defer charging (holding via SOLAR_EXPORT periods) to keep headroom for
+              the midday peak. Requires per-period charge-rate control (Growatt MIN).
+              The margin is a model-side haircut on the cap that compensates for hourly
+              forecasts hiding short peaks; it never changes what is written to hardware.
+            </p>
             {toggle('Enable temperature derating', form.temperatureDeratingEnabled,
               v => onChange({ ...form, temperatureDeratingEnabled: v }))}
             {form.temperatureDeratingEnabled && (

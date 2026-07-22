@@ -98,10 +98,12 @@ class TestApplyPeriod:
 
         with patch("core.bess.solax_modbus_growatt_controller.time_utils") as mock_time:
             mock_time.now.return_value = datetime(2026, 5, 20, hour, minute, 0)
-            grid_charge, discharge_rate = controller.compute_rates_for_period(
-                period, 0.0
+            grid_charge, discharge_rate, block_passive_charging = (
+                controller.compute_rates_for_period(period, 0.0)
             )
-            controller.apply_period(mock_ha, grid_charge, discharge_rate)
+            controller.apply_period(
+                mock_ha, grid_charge, discharge_rate, block_passive_charging
+            )
 
     def test_mode_changes_trigger_tou_write(self, controller, mock_ha):
         """TOU segment should be written when mode changes."""
@@ -243,9 +245,13 @@ class TestApplyPeriod:
         with patch("core.bess.solax_modbus_growatt_controller.time_utils") as mock_time:
             mock_time.now.return_value = datetime(2026, 5, 20, 0, 0, 0)
             # -2.0 kW discharge -> non-zero discharge_rate for LOAD_SUPPORT
-            grid_charge, discharge_rate = controller.compute_rates_for_period(0, -2.0)
+            grid_charge, discharge_rate, block_passive_charging = (
+                controller.compute_rates_for_period(0, -2.0)
+            )
             assert discharge_rate > 0  # sanity: scenario must produce a rate
-            controller.apply_period(mock_ha, grid_charge, discharge_rate)
+            controller.apply_period(
+                mock_ha, grid_charge, discharge_rate, block_passive_charging
+            )
 
         assert mock_ha.calls["discharge_rate"] == [discharge_rate]
 

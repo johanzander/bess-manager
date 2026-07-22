@@ -506,6 +506,20 @@ This would make the profitability gate compare apples-to-apples with the dashboa
 
 ---
 
+### Pinned scenario fixtures never exercise a realistic (nonzero) terminal value
+
+**Impact**: Medium | **Effort**: Medium-High | **Dependencies**: `core/bess/tests/unit/test_scenarios.py`, `core/bess/dp_battery_algorithm.py`, `core/bess/battery_system_manager.py`
+
+**Description**: `optimize_battery_schedule()` defaults `terminal_value_per_kwh=0.0`, and every one of the ~26 pinned scenarios in `test_scenarios.py` calls it without overriding that default — so the entire pinned-fixture regression suite always tests the DP with terminal value hardcoded to zero, regardless of what each scenario's horizon is meant to represent. In production, every real optimization run computes a nonzero terminal value via `_calculate_terminal_value()` (`battery_system_manager.py`). Found while investigating #345 (terminal-value zeroing at the extended horizon boundary): CI stayed green through that fix specifically because nothing in the pinned suite touches this code path at all, in either direction.
+
+**What to improve**: Retrofit the pinned scenarios to compute their terminal value the same way production does (`_calculate_terminal_value`'s median-buy/sell-cap formula, applied to each scenario's own price data) instead of silently defaulting to zero, then re-pin each scenario's expected cost against the new baseline.
+
+**Why not done as part of #345**: per the CHANGELOG history, changes to this exact mechanism have previously shifted "nearly every scenario's expected schedule" — retrofitting all 26 fixtures is a broad, independently risky change that conflates two different concerns ("is `_calculate_terminal_value`'s formula correct" vs. "does the DP correctly handle *some* nonzero terminal value") and shouldn't ride along with a narrow bug fix. #345/#347 instead added one new targeted pinned fixture for the extended-horizon mechanism specifically, without touching the other 26.
+
+**Files**: `core/bess/tests/unit/test_scenarios.py`, `core/bess/dp_battery_algorithm.py:1313-1327` (`optimize_battery_schedule` signature/default), `core/bess/battery_system_manager.py` (`_calculate_terminal_value`)
+
+---
+
 ## 🔧 **TECHNICAL DEBT**
 
 ### Consolidate HistoricalDataStore, PredictionSnapshotStore, and DailyViewStore
@@ -788,3 +802,13 @@ The `_get_hour_readings` (and thus the InfluxDB query) is called at startup (to 
 **`_idle_battery_flows`'s below-floor guard now zeroes real energy, not just floor artefacts** — filed as [#295](https://github.com/johanzander/bess-manager/issues/295).
 
 **`_interpolate_value`'s index clamp flattens continuation value below the SOE floor**: `V`'s grid (`soe_levels`) starts exactly at `min_soe_kwh`, so any `next_soe` below the floor clamps to `V_row[0]` regardless of how far below floor it is — candidates ending at different below-floor SoEs get identical continuation credit. Bounded in practice (discharge is already excluded below floor, and `next_soe` is monotonically non-decreasing once below floor) — not filed as an issue, just worth a comment in `_interpolate_value` noting the approximation if this file is touched again.
+
+---
+
+## From #353 immediate_value/future_value investigation (non-blocking)
+
+**`DecisionData.immediate_value` duplicates the live `EconomicData.grid_cost`/dashboard "Net Grid Cost" metric and should probably be removed.** Traced while building the debug-log visualization skill: `immediate_value = export_revenue - import_cost - battery_wear_cost` (`decision_intelligence.py:413`) is exactly `-(grid_cost + battery_wear_cost)`, where `grid_cost = import_cost - export_revenue` (`core/bess/models.py:232`) is the same figure already surfaced live as `netGridCost` (`backend/api.py:776-782` → `SystemStatusCard.tsx`'s headline tile). The only difference is a sign flip and whether wear cost is netted in — and neither `immediate_value` nor `future_value` (nor the `economic_chain` narrative string, nor `/api/decision-intelligence`) is reachable anywhere in the live app: `frontend/src/components/DecisionFramework.tsx`, the only consumer that renders any of these fields, is never imported by any routed page in `App.tsx` — it's orphaned/dead code. `future_value` (fixed in #353 to no longer be always `0.0`) doesn't have this exact duplication problem — there's no live "value-to-go" KPI to compare against — but it's equally unreachable today.
+
+**Suggestion**: remove `immediate_value` (and the `economic_chain` string's reliance on it) once a decision is made on `DecisionFramework.tsx`/`/api/decision-intelligence` — either wire it up to the real app using `grid_cost`/`netSavings` terminology instead of re-deriving a redundant metric, or delete the dead path entirely. Not filed as its own issue since it's a design/scope decision, not a bug.
+
+---

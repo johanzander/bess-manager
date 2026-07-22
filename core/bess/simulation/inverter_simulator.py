@@ -7,7 +7,11 @@ so that faithful control yields cent-exact equality with the plan.
 
 from dataclasses import dataclass, field
 
-from core.bess.dp_battery_algorithm import _build_period_data, _state_transition
+from core.bess.dp_battery_algorithm import (
+    _build_period_data,
+    _effective_ac_cap_kwh,
+    _state_transition,
+)
 from core.bess.inverter_controller import InverterController
 from core.bess.models import PeriodData  # noqa: F401  (type clarity)
 from core.bess.settings import BatterySettings
@@ -107,12 +111,22 @@ def mode_to_power(
         max_charge_kwh = min(rate_kw * dt, room / settings.efficiency_charge)
         return max(0.0, max_charge_kwh) / dt
 
+    # Battery discharge shares the inverter's AC stage with PV conversion —
+    # mirrors the discharge feasibility filter in the DP.
+    ac_cap_kwh = _effective_ac_cap_kwh(settings, dt)
+    if ac_cap_kwh is None:
+        ac_headroom_kwh = float("inf")
+    else:
+        ac_headroom_kwh = max(0.0, ac_cap_kwh - min(solar, ac_cap_kwh))
+
     if (
         command.battery_mode == "grid_first"
     ):  # export arbitrage: discharge to grid at rate
         available = max(0.0, soe - settings.min_soe_kwh)
         rate_kw = settings.max_discharge_power_kw * command.discharge_rate_pct / 100.0
-        delivered_kwh = min(rate_kw * dt, available * settings.efficiency_discharge)
+        delivered_kwh = min(
+            rate_kw * dt, available * settings.efficiency_discharge, ac_headroom_kwh
+        )
         return -delivered_kwh / dt
 
     # load_first
@@ -121,7 +135,10 @@ def mode_to_power(
         available = max(0.0, soe - settings.min_soe_kwh)
         rate_kw = settings.max_discharge_power_kw * command.discharge_rate_pct / 100.0
         delivered_kwh = min(
-            deficit, rate_kw * dt, available * settings.efficiency_discharge
+            deficit,
+            rate_kw * dt,
+            available * settings.efficiency_discharge,
+            ac_headroom_kwh,
         )
         return -delivered_kwh / dt
 

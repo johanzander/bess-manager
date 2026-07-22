@@ -177,6 +177,7 @@ class BatterySystemManager:
         # Discharge inhibit tracking
         self._desired_discharge_rate: int = 0  # Rate from schedule before inhibit
         self._desired_grid_charge: bool = False  # grid_charge alongside the rate above
+        self._desired_block_passive_charging: bool = False  # alongside the rate above
         self._last_applied_discharge_rate: int = 0  # Last rate written to inverter
 
         # Prediction caches (populated by _fetch_predictions)
@@ -1845,11 +1846,15 @@ class BatterySystemManager:
     ) -> float:
         """Calculate terminal value per kWh for the DP optimization.
 
-        When the horizon already extends past today (i.e. tomorrow's prices are
-        included), return 0.0 since the DP has explicit future data. Otherwise,
-        estimate value from the median buy price adjusted for efficiency and
-        cycle cost ("avoid tomorrow's purchase"), capped at the best achievable
-        in-horizon export value ("arbitrage-consistency cap").
+        Estimate value from the median buy price (over whatever horizon window
+        the caller passed in) adjusted for efficiency and cycle cost ("avoid a
+        future purchase"), capped at the best achievable in-horizon export
+        value ("arbitrage-consistency cap"). This applies at either horizon
+        boundary, midnight-today or midnight-tomorrow:
+        the caller already truncates buy_prices/sell_prices to the current
+        optimization window, so the median/cap formula reflects genuine
+        future price uncertainty beyond that window regardless of where it
+        ends (#345).
 
         The cap is required because cycle cost is only ever charged on
         charging, never on discharge (see `_compute_reward`): an uncapped
@@ -1862,6 +1867,17 @@ class BatterySystemManager:
         ordinary/Nordic-shaped markets where the best in-horizon peak is
         already above the buy-median estimate (#246, supersedes #245).
 
+        The cap is skipped when the export tariff is fixed. It bounds terminal
+        value by an export opportunity the DP would forgo by holding charge,
+        but on a flat sell curve `max(sell_prices)` is not an opportunity to
+        forgo — it is the price available in every period, including the
+        current one, which each period's reward already prices in. Applying it
+        there double-counts the immediate export alternative and makes storing
+        surplus solar for post-horizon use arithmetically impossible for *any*
+        future price, since the cap forces
+        `terminal <= sell * efficiency_discharge < sell < sell / efficiency_charge`
+        — the round-trip breakeven that storing has to clear (#359).
+
         Args:
             buy_prices: Full buy price array (from optimization_period onwards)
             sell_prices: Full sell price array (from optimization_period onwards)
@@ -1870,19 +1886,6 @@ class BatterySystemManager:
         Returns:
             Terminal value per kWh (floored at 0.0)
         """
-        today_period_count = get_period_count(time_utils.today())
-        remaining_today = today_period_count - optimization_period
-        total_horizon = len(buy_prices)
-
-        # If horizon extends past today, DP has explicit tomorrow data
-        if total_horizon > remaining_today:
-            logger.info(
-                "Horizon extends past today (%d > %d remaining), terminal value = 0.0",
-                total_horizon,
-                remaining_today,
-            )
-            return 0.0
-
         # Estimate terminal value using median (resistant to peak price outliers)
         if not buy_prices:
             return 0.0
@@ -1899,14 +1902,17 @@ class BatterySystemManager:
             max_sell_price * self.battery_settings.efficiency_discharge
             - self.battery_settings.cycle_cost_per_kwh,
         )
-        terminal_value = min(buy_based, sell_cap)
+        export_prices_vary = max_sell_price > min(sell_prices)
+        terminal_value = min(buy_based, sell_cap) if export_prices_vary else buy_based
 
         logger.info(
             "Terminal value: %.3f/kWh (buy_based=%.3f, sell_cap=%.3f, "
-            "median_buy=%.3f, max_sell=%.3f, efficiency=%.2f, cycle_cost=%.3f)",
+            "cap_applied=%s, median_buy=%.3f, max_sell=%.3f, "
+            "efficiency=%.2f, cycle_cost=%.3f)",
             terminal_value,
             buy_based,
             sell_cap,
+            export_prices_vary,
             median_price,
             max_sell_price,
             self.battery_settings.efficiency_discharge,
@@ -2533,7 +2539,7 @@ class BatterySystemManager:
                 battery_action_kw = battery_action_kwh / period_duration_hours
 
         # Delegate intent→rates mapping to the inverter controller
-        grid_charge, discharge_rate = (
+        grid_charge, discharge_rate, block_passive_charging = (
             self._inverter_controller.compute_rates_for_period(
                 period, battery_action_kw
             )
@@ -2574,6 +2580,7 @@ class BatterySystemManager:
         # apply_discharge_inhibit() can restore it when the inhibit sensor clears.
         self._desired_discharge_rate = discharge_rate
         self._desired_grid_charge = grid_charge
+        self._desired_block_passive_charging = block_passive_charging
 
         # Check discharge inhibit (e.g. EV actively charging during Tibber grid award)
         if discharge_rate > 0:
@@ -2612,7 +2619,7 @@ class BatterySystemManager:
         # full TOU schedule on the next hourly cycle).  This retry targets the
         # per-period write at finer granularity within the 15-min window.
         success, error_msg = self._inverter_controller.apply_period(
-            self.controller, grid_charge, discharge_rate
+            self.controller, grid_charge, discharge_rate, block_passive_charging
         )
 
         if not success:
@@ -2626,7 +2633,9 @@ class BatterySystemManager:
                 ),
                 error=Exception(error_msg),
             )
-            self._schedule_period_retry(period, grid_charge, discharge_rate)
+            self._schedule_period_retry(
+                period, grid_charge, discharge_rate, block_passive_charging
+            )
         else:
             self._last_applied_discharge_rate = discharge_rate
 
@@ -2643,6 +2652,7 @@ class BatterySystemManager:
         period: int,
         grid_charge: bool,
         discharge_rate: int,
+        block_passive_charging: bool = False,
         attempt: int = 1,
     ) -> None:
         """Schedule a one-shot retry of period hardware write.
@@ -2674,7 +2684,7 @@ class BatterySystemManager:
                 max_attempts + 1,
             )
             success, error_msg = self._inverter_controller.apply_period(
-                self.controller, grid_charge, discharge_rate
+                self.controller, grid_charge, discharge_rate, block_passive_charging
             )
             self._runtime_failure_tracker.dismiss_by_category("period_apply")
             if not success:
@@ -2688,7 +2698,11 @@ class BatterySystemManager:
                         error=Exception(error_msg),
                     )
                     self._schedule_period_retry(
-                        period, grid_charge, discharge_rate, attempt + 1
+                        period,
+                        grid_charge,
+                        discharge_rate,
+                        block_passive_charging,
+                        attempt + 1,
                     )
                 else:
                     self._runtime_failure_tracker.record_failure(
@@ -3118,7 +3132,10 @@ class BatterySystemManager:
         # (discharge_rate_is_load_following False) that entity is never
         # read by hardware, which made this a dead write there (#324).
         self._inverter_controller.apply_period(
-            self.controller, self._desired_grid_charge, target_rate
+            self.controller,
+            self._desired_grid_charge,
+            target_rate,
+            self._desired_block_passive_charging,
         )
         self._last_applied_discharge_rate = target_rate
 

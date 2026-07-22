@@ -340,7 +340,13 @@ class TestApplySettings:
 # Fields present in the dataclass (and BATTERY_MODEL_ATTRS) but not required
 # at startup because they have class defaults.
 _BATTERY_OPTIONAL_FIELDS = frozenset(
-    {"charging_power_rate", "efficiency_charge", "efficiency_discharge"}
+    {
+        "charging_power_rate",
+        "efficiency_charge",
+        "efficiency_discharge",
+        "inverter_max_ac_power_kw",
+        "inverter_ac_power_margin",
+    }
 )
 # min_valid is an internal algorithm parameter, never read from the settings
 # store or written by the wizard — the one field HOME_MODEL_ATTRS has that

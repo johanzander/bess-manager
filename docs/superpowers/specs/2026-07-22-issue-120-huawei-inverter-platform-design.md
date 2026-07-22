@@ -10,15 +10,13 @@ controller + detection + fixtures, ready to ship experimental, so the
 reporter can install and test immediately rather than waiting on a
 back-and-forth to gather details first.
 
-`docs/INVERTER_PLATFORMS.md` already places Huawei on the two control axes:
-
-> **Huawei** = **TX-Vendor-service (NEW)** × SM-Ephemeral (`forcible_charge`,
-> plus a persistent TOU working-mode). Needs a new `huawei_solar` transport
-> branch in detection + a `forcible_charge` service helper + a
-> `HuaweiController` modeled on `SolaxController`.
-
-This design **revises the scheduling-model half of that classification** from
-SM-Ephemeral to **SM-Period-lists**, based on source verification below.
+Huawei is placed on `docs/INVERTER_PLATFORMS.md`'s two control axes as
+**TX-Vendor-service × SM-Period-lists**: a new local-Modbus vendor
+integration (`huawei_solar`), controlled via a persistent multi-period
+charge/discharge list (`huawei_solar.set_tou_periods`), gated behind a
+working-mode select — the same shape as Growatt SPH's period lists, not
+SolaX's ephemeral per-period commands. The rationale for that placement is
+below.
 
 ## Research: what the integration actually offers
 
@@ -46,14 +44,14 @@ charge/discharge plan:
   commands, also keyed by `device_id`. No persistent state; re-issued per
   control interval by the caller.
 
-### Two real-world precedents disagree — this is a real design choice, not an architectural necessity
+### Scheduling model: SM-Period-lists, not SM-Ephemeral
 
 BESS's `InverterController` ABC is **agnostic** between persistent-schedule
 control (`GrowattMinController`, `GrowattSphController`) and ephemeral
-per-period control (`SolaxController`) — it already supports both models.
-Nothing about BESS's architecture forces one over the other for Huawei; two
-real projects independently chose differently, for reasons tied to their own
-design, not to any property of BESS:
+per-period control (`SolaxController`) — it already supports both models, so
+this is a design choice for Huawei specifically, not something the
+architecture forces. Two real-world projects independently chose
+differently, for reasons tied to their own design:
 
 - **Predbat** (`springfall2008/batpred`), a generic optimizer supporting ~20
   inverter brands behind one abstraction, replans every 5–30 min and uses
@@ -69,22 +67,17 @@ design, not to any property of BESS:
   only as a situational override (forcing export of excess battery on top of
   the base plan), never as the primary mechanism.
 
-### Flash/NVM write-wear investigation
+### Flash/NVM write-wear
 
-BESS's own `INVERTER_PLATFORMS.md` documents a real precedent for this exact
-question on Growatt GEN4: `ems_charging_rate`/`ems_discharging_rate` (TOU's
-per-period rate registers) are flash-backed, while `growatt_vpp_power`/
-`growatt_vpp_time` (VPP mode) target **RAM-backed** registers safe to rewrite
-every 15-min period — this is the documented reason BESS's long-term plan is
-to move GEN4 off TOU and onto VPP once validated. The question raised during
-design review: does the same RAM-vs-flash split exist for Huawei, making an
-ephemeral (`forcible_charge`-based) controller the better long-term choice
-here too, especially since Huawei is **local Modbus** (`manifest.json`:
-`"iot_class": "local_polling"`; README: *"exposes... functions... over
-Modbus"*) — the same low-latency local transport that makes Growatt's
-RAM-backed VPP path attractive for sub-period reactive control?
-
-Investigation found:
+Huawei is **local Modbus** (`manifest.json`: `"iot_class": "local_polling"`;
+README: *"exposes... functions... over Modbus"*), the same low-latency local
+transport that makes Growatt GEN4's RAM-backed VPP path attractive for
+sub-period reactive control (`ems_charging_rate`/`ems_discharging_rate` are
+flash-backed; `growatt_vpp_power`/`growatt_vpp_time` are RAM-backed and safe
+to rewrite every 15-min period — the documented basis for BESS's plan to move
+GEN4 off TOU and onto VPP once validated, per `INVERTER_PLATFORMS.md`). The
+same question applies here: does Huawei expose an equivalent RAM-backed path
+for battery dispatch?
 
 - Huawei's Modbus spec **does** distinguish persistent vs non-persistent
   registers in at least one documented case: open feature request
@@ -114,30 +107,29 @@ Investigation found:
   app"*). There is a **separate, faster** `energy_storage_update_coordinator`
   (`ENERGY_STORAGE_UPDATE_INTERVAL`, 30s) for live operational data, and
   `forcible_charge` is not wired to it.
-- Reading: `forcible_charge`/`forcible_discharge` appear to hit the **same
-  register class as `set_tou_periods`**, not a distinct RAM-backed fast path
-  the way `growatt_vpp_power` is distinct from `ems_charging_rate`. This is
+- `forcible_charge`/`forcible_discharge` appear to hit the **same register
+  class as `set_tou_periods`**, not a distinct RAM-backed fast path the way
+  `growatt_vpp_power` is distinct from `ems_charging_rate`. This is
   **inferred from which coordinator the integration's author chose to
   refresh after the write, not a vendor Modbus-spec citation** — a strong
-  signal (there's no reason to refresh the slow "rarely changes" group after
-  a fast-changing write) but not proof. No evidence of a Huawei equivalent to
+  signal (no reason to refresh the slow "rarely changes" group after a
+  fast-changing write) but not proof. No evidence of a Huawei equivalent to
   Growatt's VPP register was found for battery dispatch specifically.
 
-**Conclusion:** the local-Modbus/low-latency argument for ephemeral control
-is sound in principle, and mirrors real reasoning BESS already applies to
-Growatt GEN4. But unlike Growatt, where the RAM-backed path is documented and
-already the basis of a stated migration plan, **no evidence currently
-available shows Huawei exposes a lower-wear path for battery charge/discharge
-specifically** — `forcible_charge` looks, from the coordinator wiring, like
-it writes to the same class of register as the persistent TOU list. If a
-beta tester's install or a clearer vendor spec later shows otherwise, this
-is the section to revisit — see the "path to reconsidering" open item below.
+The local-Modbus/low-latency argument for ephemeral control is sound in
+principle, and mirrors real reasoning BESS already applies to Growatt GEN4.
+But unlike Growatt, where the RAM-backed path is documented and already the
+basis of a stated migration plan, **no evidence currently available shows
+Huawei exposes a lower-wear path for battery charge/discharge specifically**
+— `forcible_charge` looks, from the coordinator wiring, like it writes to
+the same class of register as the persistent TOU list. Open item #5 below
+tracks re-examining this once better evidence exists.
 
-### Write frequency, corrected
+### Write frequency
 
 BESS's scheduler recomputes the DP plan every 15 minutes
-(`update_schedule_quarterly`, `backend/app.py:319`), not hourly. But for
-persistent-schedule inverters, the **hardware write is debounced**:
+(`update_schedule_quarterly`, `backend/app.py:319`). For persistent-schedule
+inverters, the **hardware write is debounced**:
 `battery_system_manager.py`'s `_should_apply_schedule` (~line 669) only
 triggers `_apply_schedule` (the full TOU/period-list write) when the
 computed plan actually changed from what's on hardware — most 15-min ticks
@@ -145,31 +137,24 @@ don't write at all. Ephemeral inverters (SolaX today) have no persistent
 state to diff against, so `_apply_period_schedule` fires **unconditionally
 every 15-min period** (`battery_system_manager.py:712`).
 
-Applied to Huawei: `set_tou_periods` (persistent) would follow the debounced
+Applied to Huawei: `set_tou_periods` (persistent) follows the debounced
 pattern — writes only when the plan changes. `forcible_charge`/
 `forcible_discharge` (ephemeral) would need the SolaX-style unconditional
 per-quarter reissue, since there's nothing to diff against. Combined with the
 coordinator-grouping evidence above (both paths look like the same register
 class), the debounced persistent write is the lower-wear choice on current
-evidence, not the higher one.
+evidence.
 
-### Decision for this design
+### Chosen write path
 
-**This design uses `set_tou_periods` + working-mode select as the primary
-write path**, matching hsem's model, Growatt SPH's existing
-`SM-Period-lists` pattern in BESS, and the wear/frequency evidence above.
-`forcible_charge`/`forcible_discharge`/`stop_forcible_charge` are documented
-as a possible future mechanism (e.g. an immediate manual override outside
-the plan, or if a genuinely volatile register is confirmed later) but **not
-built in this pass** — no BESS use case needs them yet, and building unused
-code paths violates `CLAUDE.md`'s scope discipline.
-
-**Path to reconsidering:** if the beta tester's debug log or Huawei's
-official Modbus spec (not yet consulted directly — this investigation used
-only the HA integration's source and issue tracker) shows the forcible-charge
-registers are in fact volatile/RAM-backed despite the coordinator-grouping
-signal above, that would be grounds to revisit toward an ephemeral
-controller. This is an evidence gap, not a closed question.
+`set_tou_periods` + working-mode select is the primary write path — matching
+hsem's model, Growatt SPH's existing `SM-Period-lists` pattern in BESS, and
+the wear/frequency reasoning above. `forcible_charge`/`forcible_discharge`/
+`stop_forcible_charge` are documented as a possible future mechanism (e.g. an
+immediate manual override outside the plan, or if a genuinely volatile
+register is confirmed later — see open item #5) but **not built in this
+pass** — no BESS use case needs them yet, and building unused code paths
+violates `CLAUDE.md`'s scope discipline.
 
 ### Battery scope: LUNA2000 only
 

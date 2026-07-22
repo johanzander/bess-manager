@@ -163,6 +163,9 @@ class SolaxController(InverterController):
         logger.debug("SolaX: write_schedule_to_hardware is a no-op (per-period VPP)")
         return 0, 0
 
+    def initialize_hardware(self, controller) -> None:
+        self.sync_soc_limits(controller)
+
     def sync_soc_limits(self, controller) -> None:
         """Sync battery minimum SOC from config to the SolaX inverter.
 

@@ -86,6 +86,23 @@ class TestInverterStatus:
         assert resp.json()["inverterPlatform"] == platform
 
 
+class TestInverterStatusUnavailableBatterySoc:
+    """battery_soc sensor going 'unavailable' must not surface as an opaque
+    TypeError from dividing None by a float."""
+
+    def test_returns_clear_error(self):
+        ctrl = _make_controller("growatt_server_min")
+        ctrl.system._controller.get_battery_soc.return_value = None
+        sys.modules["app"].bess_controller = ctrl
+
+        resp = _client.get("/api/growatt/inverter_status")
+
+        assert resp.status_code == 500
+        detail = resp.json()["detail"]
+        assert "NoneType" not in detail
+        assert "battery_soc" in detail.lower() or "battery soc" in detail.lower()
+
+
 class TestInverterStatusChargePowerRate:
     """chargePowerRate must be a live sensor read, not the config default (issue #271)."""
 

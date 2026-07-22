@@ -933,6 +933,35 @@ class TestHardwareWriteRespectsSlotLimit:
             ), f"segment_id {call['segment_id']} exceeds hardware slot range 1-9"
 
 
+class _FailingController(_CapturingController):
+    """Controller stub whose writes raise, simulating a 500 from HA core."""
+
+    def set_inverter_time_segment(self, **kwargs) -> None:
+        raise RuntimeError("500 Server Error: Internal Server Error")
+
+
+class TestHardwareWriteFailurePropagates:
+    """Regression: a failed segment write must raise, not be swallowed.
+
+    Previously write_schedule_to_hardware caught per-segment write
+    exceptions and only logged them, returning normally. The caller
+    (BatterySystemManager._apply_schedule) treated that as success and
+    cleared _hardware_write_pending, so a failed write was never retried
+    and the dashboard kept showing the intended schedule as if it had
+    reached the inverter.
+    """
+
+    def test_failed_segment_write_raises(self, scheduler):
+        scheduler.strategic_intents = _OVERCAPACITY_INTENTS
+        scheduler._consolidate_and_convert_with_strategic_intents(current_period=0)
+
+        controller = _FailingController()
+        with pytest.raises(RuntimeError):
+            scheduler.write_schedule_to_hardware(
+                controller, effective_period=0, current_tou=[]
+            )
+
+
 class _SimulatingController(_CapturingController):
     """Controller stub that also models the inverter's TOU slot table.
 

@@ -202,6 +202,7 @@ class SettingsStore:
         nordpool_area: str | None = None,
         nordpool_config_entry_id: str | None = None,
         growatt_device_id: str | None = None,
+        huawei_device_id: str | None = None,
     ) -> None:
         """Merge auto-discovered values into the store and persist.
 
@@ -210,14 +211,16 @@ class SettingsStore:
         Empty strings are ignored so that a partial discovery run does not
         erase sensors that were already configured.
 
-        Nordpool area, config_entry_id, and Growatt device_id are additive:
-        they are only written when the field is currently empty.
+        Nordpool area, config_entry_id, and Growatt/Huawei device_id are
+        additive: they are only written when the field is currently empty.
 
         Args:
             sensor_map: Mapping of bess_sensor_key -> entity_id.
             nordpool_area: Nordpool price area (e.g. ``"SE4"``).
             nordpool_config_entry_id: HA config entry UUID for Nordpool.
             growatt_device_id: HA device registry ID for the Growatt device.
+            huawei_device_id: HA device registry ID for the Huawei battery
+                device.
         """
         sensors = dict(self.data.get("sensors", {}))
 
@@ -263,6 +266,15 @@ class SettingsStore:
             growatt = dict(self.data.get("growatt", {}))
             growatt["device_id"] = growatt_device_id
             self.data["growatt"] = growatt
+
+        # Huawei device_id — always update when discovery provides a value.
+        # Stored in the generic "inverter" section's device_id field (the
+        # current pattern for non-legacy platforms; growatt's own legacy
+        # device_id is migrated into inverter.device_id by _migrate_schema).
+        if huawei_device_id:
+            inverter = dict(self.data.get("inverter", {}))
+            inverter["device_id"] = huawei_device_id
+            self.data["inverter"] = inverter
 
         self._write(self.data)
         logger.info("Persisted discovered config (%d sensors)", len(sensor_map))

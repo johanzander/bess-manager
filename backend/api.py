@@ -3325,6 +3325,7 @@ async def run_setup_discovery():
                 "growatt_found": integrations["growatt_found"],
                 "device_sn": integrations["device_sn"],
                 "growatt_device_id": integrations["growatt_device_id"],
+                "huawei_device_id": integrations.get("huawei_device_id"),
                 "solax_found": integrations["solax_found"],
                 "solax_has_growatt_tou": integrations.get(
                     "solax_has_growatt_tou", False
@@ -3388,12 +3389,14 @@ async def setup_complete(payload: APISetupCompletePayload):
             payload.nordpoolArea
             or payload.nordpoolConfigEntryId
             or payload.growattDeviceId
+            or payload.huaweiDeviceId
         ):
             bess_controller.apply_discovered_config(
                 sensor_map={},  # sensors already in sections — avoid double-write
                 nordpool_area=payload.nordpoolArea,
                 nordpool_config_entry_id=payload.nordpoolConfigEntryId,
                 growatt_device_id=payload.growattDeviceId,
+                huawei_device_id=payload.huaweiDeviceId,
             )
 
         # All sections use read-modify-write so that keys not managed by the wizard
@@ -3500,6 +3503,8 @@ async def setup_complete(payload: APISetupCompletePayload):
             inv_section["platform"] = _platform
             if payload.inverterControlMode is not None:
                 inv_section["control_mode"] = payload.inverterControlMode
+            if payload.huaweiDeviceId:
+                inv_section["device_id"] = payload.huaweiDeviceId
             sections["inverter"] = inv_section
             if payload.growattDeviceId:
                 growatt_section = bess_controller.settings_store.get_section("growatt")
@@ -3540,6 +3545,8 @@ async def setup_complete(payload: APISetupCompletePayload):
         bess_controller.refresh_active_sensors()
         if payload.growattDeviceId:
             bess_controller.ha_controller.growatt_device_id = payload.growattDeviceId
+        if payload.huaweiDeviceId:
+            bess_controller.ha_controller.huawei_device_id = payload.huaweiDeviceId
 
         def _nn(d: dict) -> dict:
             """Strip None values so update() only overwrites explicitly provided fields."""

@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from core.bess.ha_api_controller import HomeAssistantAPIController
+from core.bess.tests.unit.test_registry_discovery import _huawei_registry
 
 # ---------------------------------------------------------------------------
 # Scenario loading
@@ -201,3 +202,48 @@ class TestScenarioDiscovery:
                 f"{scenario_name}: sensor {key!r} has invalid "
                 f"entity_id {entity_id!r}"
             )
+
+
+# ---------------------------------------------------------------------------
+# Huawei LUNA2000: full discover_integrations() end-to-end test
+#
+# Task 2 added `_huawei_registry()` (a source-derived entity registry
+# fixture) plus primitive-level tests for `_detect_platforms` and
+# `_map_registry_entities`, but nothing exercised `discover_integrations()`
+# itself. This closes that gap by mocking the transport layer exactly like
+# the scenario-driven tests above (`_ws_query` + `_api_request`) and
+# reusing Task 2's fixture directly, rather than a JSON scenario file.
+# ---------------------------------------------------------------------------
+
+
+def test_huawei_discover_integrations_end_to_end(monkeypatch):
+    """discover_integrations() detects Huawei LUNA2000 from the entity registry."""
+    registry = _huawei_registry()
+
+    def ws_handler(commands: list[dict]) -> list:
+        results = []
+        for cmd in commands:
+            t = cmd.get("type", "")
+            if t == "config/entity_registry/list":
+                results.append(registry)
+            elif t == "config_entries/get":
+                results.append([])
+            elif t == "config/device_registry/list":
+                results.append([])
+            else:
+                results.append([])
+        return results
+
+    def api_handler(method: str, path: str, **kwargs):
+        if method == "get" and path == "/api/states":
+            return []
+        return []
+
+    ctrl = HomeAssistantAPIController.__new__(HomeAssistantAPIController)
+    monkeypatch.setattr(ctrl, "_ws_query", ws_handler)
+    monkeypatch.setattr(ctrl, "_api_request", api_handler)
+
+    result, _states = ctrl.discover_integrations()
+
+    assert result["huawei_found"] is True
+    assert "huawei_solar_luna2000" in result["detected_inverter_platforms"]

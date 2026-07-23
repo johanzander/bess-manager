@@ -36,7 +36,7 @@ is new.
 |-----------|-------------------|-----------|-------------------|---------------------|
 | **TX-Cloud** | `growatt_server` | Vendor cloud API via HA **service calls** | ✅ | `GrowattMinController`, `GrowattSphController` |
 | **TX-Modbus** | `solax_modbus` (multi-brand: SolaX, Solis, Growatt, Sofar, AlphaESS, …) | Local Modbus **entity writes** (select/number/button) | ✅ | `SolaxModbusGrowattController`, `SolaxController` |
-| **TX-Vendor-service** | `huawei_solar` (and similar) | Local vendor integration: entity writes **+** ephemeral **service calls** (`forcible_charge`) | ❌ not yet | *(would model on `SolaxController` for the ephemeral half)* |
+| **TX-Vendor-service** | `huawei_solar` (and similar) | Local vendor integration: entity writes to persistent **TOU period lists** gated by working-mode select | ✅ | `HuaweiController` |
 | **TX-REST / TX-MQTT** | GivTCP, Solar Assistant, Sofar2mqtt | REST API / MQTT | ❌ not planned | — |
 
 `solax_modbus` is a **generic transport**, not a Growatt thing — the same channel
@@ -47,9 +47,9 @@ serves SolaX, Solis, Growatt, Sofar, etc. via per-brand register/entity names.
 | Scheduling model | Description | Implemented example |
 |------------------|-------------|---------------------|
 | **SM-TOU-numbered** | Persistent **numbered** TOU slots (start/end/mode) | Growatt MIN (cloud & GEN4 single-segment) |
-| **SM-Period-lists** | Persistent **charge/discharge period lists** (≤N each), power/SOC in the write | Growatt SPH (cloud) |
+| **SM-Period-lists** | Persistent **charge/discharge period lists** (≤N each), power/SOC in the write | Growatt SPH (cloud), Huawei LUNA2000 (local) |
 | **SM-Mode-slots** | Persistent **mode-specific** time slots | Growatt MIX/SPH GEN3 (monitoring-only today) |
-| **SM-Ephemeral** | **No persistent schedule** — push a duration-bounded command that auto-expires | SolaX VPP; Huawei `forcible_charge` would land here |
+| **SM-Ephemeral** | **No persistent schedule** — push a duration-bounded command that auto-expires | SolaX VPP |
 
 ### Common control primitives (the shared vocabulary)
 
@@ -101,7 +101,7 @@ declares which it supports, mapped to BESS sensor keys): **charge window**
 > **Note on the controller ABC:** `InverterController`'s method names are
 > TOU-centric (`get_all_tou_segments`, `get_daily_TOU_settings`,
 > `log_current_TOU_schedule`) and `_write_period_to_hardware` defaults to the
-> Growatt register interface. SM-Ephemeral inverters (SolaX today, Huawei later)
+> Growatt register interface. SM-Ephemeral inverters (SolaX today)
 > implement these by synthesizing "segments." It works; renaming to neutral terms
 > is an optional future cleanup, not a prerequisite.
 

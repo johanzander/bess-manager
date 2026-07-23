@@ -999,7 +999,7 @@ class HomeAssistantAPIController:
             operation=operation or f"Call {service_domain}.{service_name}",
             category=(
                 "battery_control"
-                if service_domain in ["number", "switch"]
+                if service_domain in ["number", "input_number", "switch"]
                 else (
                     "inverter_control"
                     if service_domain == "growatt_server"
@@ -1137,13 +1137,7 @@ class HomeAssistantAPIController:
     def set_charge_stop_soc(self, charge_stop_soc):
         """Set the charge stop state of charge (SOC)."""
         entity_id = self._get_entity_for_service("battery_charge_stop_soc")
-        self._service_call_with_retry(
-            "number",
-            "set_value",
-            operation="Set charge stop SOC",
-            entity_id=entity_id,
-            value=charge_stop_soc,
-        )
+        self._set_number_like(entity_id, charge_stop_soc, "Set charge stop SOC")
 
     def get_discharge_stop_soc(self):
         """Get the discharge stop state of charge (SOC)."""
@@ -1152,13 +1146,7 @@ class HomeAssistantAPIController:
     def set_discharge_stop_soc(self, discharge_stop_soc):
         """Set the discharge stop state of charge (SOC)."""
         entity_id = self._get_entity_for_service("battery_discharge_stop_soc")
-        self._service_call_with_retry(
-            "number",
-            "set_value",
-            operation="Set discharge stop SOC",
-            entity_id=entity_id,
-            value=discharge_stop_soc,
-        )
+        self._set_number_like(entity_id, discharge_stop_soc, "Set discharge stop SOC")
 
     def get_charging_power_rate(self):
         """Get the charging power rate."""
@@ -1167,13 +1155,7 @@ class HomeAssistantAPIController:
     def set_charging_power_rate(self, rate):
         """Set the charging power rate."""
         entity_id = self._get_entity_for_service("battery_charging_power_rate")
-        self._service_call_with_retry(
-            "number",
-            "set_value",
-            operation="Set charging power rate",
-            entity_id=entity_id,
-            value=rate,
-        )
+        self._set_number_like(entity_id, rate, "Set charging power rate")
 
     def get_discharging_power_rate(self):
         """Get the discharging power rate."""
@@ -1182,13 +1164,7 @@ class HomeAssistantAPIController:
     def set_discharging_power_rate(self, rate):
         """Set the discharging power rate."""
         entity_id = self._get_entity_for_service("battery_discharging_power_rate")
-        self._service_call_with_retry(
-            "number",
-            "set_value",
-            operation="Set discharging power rate",
-            entity_id=entity_id,
-            value=rate,
-        )
+        self._set_number_like(entity_id, rate, "Set discharging power rate")
 
     def get_battery_charge_power(self):
         """Get current battery charging power in watts."""
@@ -1197,6 +1173,22 @@ class HomeAssistantAPIController:
     def get_battery_discharge_power(self):
         """Get current battery discharging power in watts."""
         return self._get_sensor_value("battery_discharge_power")
+
+    def _set_number_like(self, entity_id: str, value, operation: str) -> None:
+        """Write a value to a number-like entity.
+
+        Supports both `number.*` (platform-native) and `input_number.*`
+        (user-configured helper) entities. The entity domain is detected
+        from the configured entity_id prefix.
+        """
+        domain = "input_number" if entity_id.startswith("input_number.") else "number"
+        self._service_call_with_retry(
+            domain,
+            "set_value",
+            operation=operation,
+            entity_id=entity_id,
+            value=value,
+        )
 
     def set_grid_charge(self, enable):
         """Enable or disable grid charging.
@@ -1627,20 +1619,8 @@ class HomeAssistantAPIController:
             entity_id=mode_entity,
             option="Enabled Battery Control",
         )
-        self._service_call_with_retry(
-            "number",
-            "set_value",
-            operation="SolaX VPP set active power",
-            entity_id=power_entity,
-            value=watts,
-        )
-        self._service_call_with_retry(
-            "number",
-            "set_value",
-            operation="SolaX VPP set autorepeat duration",
-            entity_id=repeat_entity,
-            value=1200,
-        )
+        self._set_number_like(power_entity, watts, "SolaX VPP set active power")
+        self._set_number_like(repeat_entity, 1200, "SolaX VPP set autorepeat duration")
         self._service_call_with_retry(
             "button",
             "press",
@@ -1675,13 +1655,7 @@ class HomeAssistantAPIController:
         """
         entity_id = self._get_entity_for_service("solax_battery_min_soc")
         logger.info("SolaX: setting battery minimum SOC to %d%%", min_soc)
-        self._service_call_with_retry(
-            "number",
-            "set_value",
-            operation="SolaX set battery minimum SOC",
-            entity_id=entity_id,
-            value=min_soc,
-        )
+        self._set_number_like(entity_id, min_soc, "SolaX set battery minimum SOC")
 
     def get_solax_power_control_mode(self) -> str | None:
         """Read the current SolaX power control mode."""
@@ -1774,21 +1748,15 @@ class HomeAssistantAPIController:
             return
 
         power_entity = self._get_entity_for_service("growatt_vpp_power")
-        self._service_call_with_retry(
-            "number",
-            "set_value",
-            operation=f"Growatt VPP set power -> {power_pct}%",
-            entity_id=power_entity,
-            value=power_pct,
+        self._set_number_like(
+            power_entity, power_pct, f"Growatt VPP set power -> {power_pct}%"
         )
 
         time_entity = self._get_entity_for_service("growatt_vpp_time")
-        self._service_call_with_retry(
-            "number",
-            "set_value",
-            operation=f"Growatt VPP reset fallback timer -> {fallback_minutes} min",
-            entity_id=time_entity,
-            value=fallback_minutes,
+        self._set_number_like(
+            time_entity,
+            fallback_minutes,
+            f"Growatt VPP reset fallback timer -> {fallback_minutes} min",
         )
 
     def get_growatt_vpp_status(self) -> str | None:

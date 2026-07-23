@@ -468,16 +468,21 @@ class InverterController(ABC):
         """Return the subset of TOU intervals currently written to hardware."""
 
     @abstractmethod
-    def create_schedule(
+    def apply_intents(
         self,
         schedule: DPSchedule,
         current_period: int = 0,
-        previous_tou_intervals: list[dict] | None = None,
     ) -> None:
-        """Build hardware-specific schedule from DPSchedule."""
+        """Adopt this cycle's DP intent list as current control state.
+
+        For TOU-style platforms this rebuilds persisted hardware TOU
+        intervals; for VPP/SolaX-style ephemeral platforms this is a
+        near-passthrough of the intent list (control is applied per-period
+        elsewhere, not as a batch schedule).
+        """
 
     @abstractmethod
-    def write_schedule_to_hardware(
+    def write_to_hardware(
         self,
         controller,
         effective_period: int,
@@ -490,26 +495,20 @@ class InverterController(ABC):
         """
 
     @abstractmethod
-    def compare_schedules(
-        self, other_schedule: "InverterController", from_period: int = 0
+    def evaluate_intents(
+        self, schedule: DPSchedule, current_period: int = 0
     ) -> tuple[bool, str]:
-        """Compare schedules. Returns (schedules_differ, reason)."""
+        """Would applying ``schedule`` differ from what's currently in
+        effect, from ``current_period`` onwards? Returns (differs, reason).
+
+        Read-only: must not mutate self's committed state (tou_intervals,
+        strategic_intents, etc.) — only self.corruption_detected may be set
+        as an accepted diagnostic side effect on platforms that support it.
+        """
 
     @abstractmethod
     def read_and_initialize_from_hardware(self, controller, current_hour: int) -> None:
         """Read current schedule from inverter and initialize this controller."""
-
-    def seed_from(self, other: "InverterController") -> None:
-        """Carry forward hardware-derived state onto a freshly created controller.
-
-        BatterySystemManager recreates the controller every optimization
-        cycle (build-candidate-then-swap); anything seeded from a hardware
-        read-back in read_and_initialize_from_hardware must be re-applied
-        here too, or it silently resets to the __init__ default every cycle
-        (#329). Subclasses override to add their own such fields, calling
-        super().seed_from(other) first.
-        """
-        self.tou_intervals = other.tou_intervals.copy()
 
     @abstractmethod
     def sync_soc_limits(self, controller) -> None:

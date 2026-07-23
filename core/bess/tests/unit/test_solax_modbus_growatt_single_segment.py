@@ -60,14 +60,14 @@ def mock_ha():
     return MockHomeAssistantController()
 
 
-class TestCreateSchedule:
-    """Test that create_schedule stores intents without computing TOU intervals."""
+class TestApplyIntents:
+    """Test that apply_intents stores intents without computing TOU intervals."""
 
     def test_stores_strategic_intents(self, controller):
         intents = hourly_to_quarterly({2: "GRID_CHARGING", 18: "LOAD_SUPPORT"})
         schedule = make_schedule(intents)
 
-        controller.create_schedule(schedule, current_period=0)
+        controller.apply_intents(schedule, current_period=0)
 
         assert controller.strategic_intents == intents
         assert controller.current_schedule is schedule
@@ -79,7 +79,7 @@ class TestCreateSchedule:
         )
         schedule = make_schedule(intents)
 
-        controller.create_schedule(schedule, current_period=0)
+        controller.apply_intents(schedule, current_period=0)
 
         # Should not have built multi-segment TOU intervals
         # (parent would create multiple segments for 12 hours of charging)
@@ -109,7 +109,7 @@ class TestApplyPeriod:
         """TOU segment should be written when mode changes."""
         intents = hourly_to_quarterly({0: "IDLE", 2: "GRID_CHARGING", 4: "IDLE"})
         schedule = make_schedule(intents)
-        controller.create_schedule(schedule, current_period=0)
+        controller.apply_intents(schedule, current_period=0)
 
         # Period 0 (00:00): IDLE -> load_first
         # Initial mode is None, so first period should trigger a write
@@ -131,7 +131,7 @@ class TestApplyPeriod:
         """No TOU write when mode hasn't changed."""
         intents = hourly_to_quarterly({0: "IDLE"})
         schedule = make_schedule(intents)
-        controller.create_schedule(schedule, current_period=0)
+        controller.apply_intents(schedule, current_period=0)
 
         # First apply: writes because _last_written_tou_mode is None
         self._apply_at_period(controller, mock_ha, 0, "IDLE")
@@ -145,7 +145,7 @@ class TestApplyPeriod:
         """BATTERY_EXPORT should set grid_first mode."""
         intents = hourly_to_quarterly({10: "BATTERY_EXPORT"})
         schedule = make_schedule(intents)
-        controller.create_schedule(schedule, current_period=0)
+        controller.apply_intents(schedule, current_period=0)
 
         # Set initial mode
         controller._last_written_tou_mode = "load_first"
@@ -166,7 +166,7 @@ class TestApplyPeriod:
             }
         )
         schedule = make_schedule(intents)
-        controller.create_schedule(schedule, current_period=0)
+        controller.apply_intents(schedule, current_period=0)
 
         modes_written = []
 
@@ -199,7 +199,7 @@ class TestApplyPeriod:
         """grid_charge and discharge_rate are always written, regardless of mode change."""
         intents = hourly_to_quarterly({0: "GRID_CHARGING"})
         schedule = make_schedule(intents)
-        controller.create_schedule(schedule, current_period=0)
+        controller.apply_intents(schedule, current_period=0)
 
         self._apply_at_period(controller, mock_ha, 0, "GRID_CHARGING")
 
@@ -219,7 +219,7 @@ class TestApplyPeriod:
         """
         intents = hourly_to_quarterly({0: "IDLE"})
         schedule = make_schedule(intents)
-        controller.create_schedule(schedule, current_period=0)
+        controller.apply_intents(schedule, current_period=0)
         controller._last_written_tou_mode = "load_first"
 
         self._apply_at_period(controller, mock_ha, 0, "IDLE")
@@ -239,7 +239,7 @@ class TestApplyPeriod:
 
         intents = hourly_to_quarterly({0: "LOAD_SUPPORT"})
         schedule = make_schedule(intents)
-        controller.create_schedule(schedule, current_period=0)
+        controller.apply_intents(schedule, current_period=0)
         controller._last_written_tou_mode = "load_first"
 
         with patch("core.bess.solax_modbus_growatt_controller.time_utils") as mock_time:
@@ -257,14 +257,14 @@ class TestApplyPeriod:
 
 
 class TestWriteScheduleToHardware:
-    """Test write_schedule_to_hardware initialises segment 1."""
+    """Test write_to_hardware initialises segment 1."""
 
     def test_sets_initial_mode(self, controller, mock_ha):
         intents = hourly_to_quarterly({2: "GRID_CHARGING"})
         schedule = make_schedule(intents)
-        controller.create_schedule(schedule, current_period=0)
+        controller.apply_intents(schedule, current_period=0)
 
-        writes, _disables = controller.write_schedule_to_hardware(
+        writes, _disables = controller.write_to_hardware(
             mock_ha, effective_period=8, current_tou=[]
         )
 
@@ -279,11 +279,9 @@ class TestWriteScheduleToHardware:
     def test_idle_schedule_disables_segment(self, controller, mock_ha):
         intents = hourly_to_quarterly({})  # all IDLE
         schedule = make_schedule(intents)
-        controller.create_schedule(schedule, current_period=0)
+        controller.apply_intents(schedule, current_period=0)
 
-        controller.write_schedule_to_hardware(
-            mock_ha, effective_period=0, current_tou=[]
-        )
+        controller.write_to_hardware(mock_ha, effective_period=0, current_tou=[])
 
         seg = mock_ha.calls["tou_segments"][-1]
         assert seg["enabled"] is False
@@ -291,58 +289,11 @@ class TestWriteScheduleToHardware:
     def test_seeds_mode_tracker(self, controller, mock_ha):
         intents = hourly_to_quarterly({5: "BATTERY_EXPORT"})
         schedule = make_schedule(intents)
-        controller.create_schedule(schedule, current_period=0)
+        controller.apply_intents(schedule, current_period=0)
 
-        controller.write_schedule_to_hardware(
-            mock_ha, effective_period=20, current_tou=[]
-        )
+        controller.write_to_hardware(mock_ha, effective_period=20, current_tou=[])
 
         assert controller._last_written_tou_mode == "grid_first"
-
-
-class TestSeedFrom:
-    """#329-shaped bug: BatterySystemManager recreates the controller every
-    optimization cycle. Without carrying forward _last_written_tou_mode, the
-    fresh instance treats the next period tick as a mode change and re-writes
-    the TOU segment even when the hardware already reflects that mode."""
-
-    def test_seed_from_skips_redundant_tou_write_after_recreation(
-        self, controller, mock_ha, battery_settings
-    ):
-        intents = hourly_to_quarterly({0: "GRID_CHARGING", 1: "GRID_CHARGING"})
-        schedule = make_schedule(intents)
-        controller.create_schedule(schedule, current_period=0)
-
-        grid_charge, discharge_rate, block_passive_charging = (
-            controller.compute_rates_for_period(0, 0.0)
-        )
-        with patch("core.bess.solax_modbus_growatt_controller.time_utils") as mock_time:
-            from datetime import datetime
-
-            mock_time.now.return_value = datetime(2026, 5, 20, 0, 0, 0)
-            controller.apply_period(
-                mock_ha, grid_charge, discharge_rate, block_passive_charging
-            )
-        assert len(mock_ha.calls["tou_segments"]) == 1
-
-        # Simulates the next optimization cycle: a brand-new controller
-        # instance, seeded from the outgoing one before being adopted.
-        next_controller = SolaxModbusGrowattController(battery_settings)
-        next_controller.seed_from(controller)
-        next_controller.create_schedule(schedule, current_period=0)
-
-        grid_charge, discharge_rate, block_passive_charging = (
-            next_controller.compute_rates_for_period(4, 0.0)
-        )
-        with patch("core.bess.solax_modbus_growatt_controller.time_utils") as mock_time:
-            from datetime import datetime
-
-            mock_time.now.return_value = datetime(2026, 5, 20, 1, 0, 0)
-            next_controller.apply_period(
-                mock_ha, grid_charge, discharge_rate, block_passive_charging
-            )
-
-        assert len(mock_ha.calls["tou_segments"]) == 1
 
 
 class TestReadAndInitialize:
@@ -450,46 +401,38 @@ class TestReadAndInitialize:
         assert controller._last_written_tou_mode == "load_first"
 
 
-class TestCompareSchedules:
-    """Test schedule comparison by strategic intents."""
+class TestEvaluateIntents:
+    """Test apply_intents/evaluate_intents (schedule-based comparison)."""
 
-    def test_identical_schedules(self, controller, battery_settings):
-        other = SolaxModbusGrowattController(battery_settings)
+    def test_no_change_when_intents_identical(self, controller, battery_settings):
         intents = hourly_to_quarterly({2: "GRID_CHARGING"})
+        controller.apply_intents(make_schedule(intents), current_period=0)
 
-        controller.strategic_intents = intents
-        other.strategic_intents = list(intents)
+        differs, _reason = controller.evaluate_intents(make_schedule(intents))
 
-        differs, _reason = controller.compare_schedules(other)
-        assert not differs
+        assert differs is False
 
-    def test_different_schedules(self, controller, battery_settings):
-        other = SolaxModbusGrowattController(battery_settings)
-
-        controller.strategic_intents = hourly_to_quarterly({2: "GRID_CHARGING"})
-        other.strategic_intents = hourly_to_quarterly(
-            {2: "GRID_CHARGING", 18: "BATTERY_EXPORT"}
+    def test_detects_change_when_intents_differ(self, controller, battery_settings):
+        controller.apply_intents(
+            make_schedule(hourly_to_quarterly({2: "GRID_CHARGING"})), current_period=0
         )
 
-        differs, _reason = controller.compare_schedules(other)
-        assert differs
+        differs, _reason = controller.evaluate_intents(
+            make_schedule(hourly_to_quarterly({10: "BATTERY_EXPORT"}))
+        )
+
+        assert differs is True
 
     def test_respects_from_period(self, controller, battery_settings):
-        other = SolaxModbusGrowattController(battery_settings)
-
-        # Different at period 0-3 (hour 0), same from period 8 onwards
-        controller.strategic_intents = hourly_to_quarterly(
-            {0: "GRID_CHARGING", 2: "LOAD_SUPPORT"}
+        controller.apply_intents(
+            make_schedule(hourly_to_quarterly({0: "GRID_CHARGING"})), current_period=0
         )
-        other.strategic_intents = hourly_to_quarterly({0: "IDLE", 2: "LOAD_SUPPORT"})
 
-        # Comparing from period 8 (hour 2) — should match
-        differs, _ = controller.compare_schedules(other, from_period=8)
-        assert not differs
+        differs, _ = controller.evaluate_intents(
+            make_schedule(hourly_to_quarterly({})), current_period=8
+        )
 
-        # Comparing from period 0 — should differ
-        differs, _ = controller.compare_schedules(other, from_period=0)
-        assert differs
+        assert differs is False
 
 
 class TestDisplayMethods:
@@ -522,7 +465,7 @@ class TestDisplayMethods:
             {2: "GRID_CHARGING", 6: "IDLE", 18: "LOAD_SUPPORT"}
         )
         schedule = make_schedule(intents)
-        controller.create_schedule(schedule, current_period=0)
+        controller.apply_intents(schedule, current_period=0)
 
         segments = controller.get_all_tou_segments()
         # Should have groups for each intent run

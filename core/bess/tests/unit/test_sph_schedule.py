@@ -459,6 +459,20 @@ class TestEvaluateIntentsSph:
         assert differs is True
         assert "charge" in reason.lower()
 
+    def test_detects_discharge_period_change(
+        self, manager: GrowattSphController
+    ) -> None:
+        manager.apply_intents(
+            make_schedule_mock(make_intents({14: "LOAD_SUPPORT"})), current_period=0
+        )
+
+        differs, reason = manager.evaluate_intents(
+            make_schedule_mock(make_intents({18: "BATTERY_EXPORT"}))
+        )
+
+        assert differs is True
+        assert "discharge" in reason.lower()
+
 
 # ── Helper ────────────────────────────────────────────────────────────────────
 

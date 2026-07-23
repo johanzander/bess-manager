@@ -293,6 +293,47 @@ class TestCompareSchedules:
         assert differ
 
 
+# ── evaluate_intents ──────────────────────────────────────────────────────────
+
+
+class TestEvaluateIntentsSolax:
+    def test_no_change_when_intents_identical(
+        self, controller: SolaxController
+    ) -> None:
+        intents = make_intents({2: "GRID_CHARGING"})
+        controller.apply_intents(make_schedule_mock(intents), current_period=0)
+
+        differs, _ = controller.evaluate_intents(make_schedule_mock(intents))
+
+        assert differs is False
+
+    def test_detects_change_when_intents_differ(
+        self, controller: SolaxController
+    ) -> None:
+        controller.apply_intents(
+            make_schedule_mock(make_intents({2: "GRID_CHARGING"})), current_period=0
+        )
+
+        differs, reason = controller.evaluate_intents(
+            make_schedule_mock(make_intents({10: "BATTERY_EXPORT"}))
+        )
+
+        assert differs is True
+        assert reason
+
+    def test_respects_from_period(self, controller: SolaxController) -> None:
+        controller.apply_intents(
+            make_schedule_mock(make_intents({0: "GRID_CHARGING"})), current_period=0
+        )
+
+        # Period 0-3 differs, but evaluate_intents starts at period 8 -> no diff
+        differs, _ = controller.evaluate_intents(
+            make_schedule_mock(make_intents({})), current_period=8
+        )
+
+        assert differs is False
+
+
 # ── sync_soc_limits ───────────────────────────────────────────────────────────
 
 

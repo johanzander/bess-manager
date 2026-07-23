@@ -46,6 +46,18 @@
 
 ---
 
+### **Surface Inverter Max AC Power in the setup wizard**
+
+**Impact**: Medium | **Effort**: Low | **Dependencies**: `SetupWizardPage.tsx`
+
+**Description**: `inverter_max_ac_power_kw` (PR #305) caps combined solar + discharge AC output at the inverter's rated power, preventing over-discharge plans on hybrid inverters — but it's opt-in (default 0/disabled) and currently only surfaced in Settings → Battery, not the setup wizard. Issue #304 (ridax67) hit exactly this — a planned discharge exceeding the inverter's 10kW AC limit — and had to be told about the setting after the fact. New users are unlikely to discover it unless they hit the symptom first.
+
+**Implementation**: Add the `inverterMaxAcPowerKw` / `inverterAcPowerMargin` fields to the battery step of `SetupWizardPage.tsx`, likely alongside other inverter-rating fields, with a short explanation of when to set it (hybrid/DC-coupled inverters where solar + discharge can exceed the inverter's AC rating).
+
+**Files**: `frontend/src/pages/SetupWizardPage.tsx`, `frontend/src/components/settings/BatteryFormSection.tsx` (for reference on existing field wiring)
+
+---
+
 ### **Rename `strategic_intent` to `battery_intent` throughout the codebase**
 
 **Impact**: Low | **Effort**: Low | **Dependencies**: `decision_intelligence.py`, `dp_battery_algorithm.py`, `sph_schedule.py`, `models.py`, frontend

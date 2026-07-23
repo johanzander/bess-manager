@@ -87,12 +87,13 @@ _CONFIG_ENTRY_DATA_ALLOWLIST: dict[str, frozenset[str]] = {
     "growatt": frozenset({"name", "plant_id", "url"}),
     "solax_modbus": frozenset({"name"}),
     "solax": frozenset({"name"}),
+    "huawei_solar": frozenset({"name"}),
     "entsoe": frozenset({"area", "currency", "energy_scale", "name"}),
 }
 
 # Domains whose config entries are captured in the WS discovery dump.
 _WS_TARGET_DOMAINS = frozenset(
-    {"nordpool", "growatt", "growatt_server", "solax_modbus", "solax", "entsoe"}
+    {"nordpool", "growatt", "growatt_server", "solax_modbus", "solax", "huawei_solar", "entsoe"}
 )
 
 # Domains whose entities are captured from the entity registry.
@@ -101,6 +102,7 @@ _ENTITY_REGISTRY_DOMAINS = frozenset(
         "growatt_server",
         "solax_modbus",
         "solax",
+        "huawei_solar",
         "nordpool",
         "octopus_energy",
         "entsoe",
@@ -114,6 +116,7 @@ _ENTITY_REGISTRY_DOMAINS = frozenset(
 _ENTITY_REGISTRY_KEYWORDS = (
     "growatt",
     "solax",
+    "huawei",
     "nordpool",
     "octopus",
     "entsoe",

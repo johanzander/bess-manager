@@ -274,6 +274,59 @@ def _solax_native_registry() -> list[dict]:
     ]
 
 
+def _huawei_registry(serial: str = "HW2024ABCDEF") -> list[dict]:
+    """Source-derived Huawei LUNA2000 registry (verified unique_id shapes,
+    see docs/superpowers/specs/2026-07-22-issue-120-huawei-inverter-platform-design.md).
+    """
+    return [
+        _entity(
+            "sensor.huawei_battery_state_of_capacity",
+            "huawei_solar",
+            f"{serial}_storage_state_of_capacity",
+        ),
+        _entity(
+            "sensor.huawei_battery_charge_discharge_power",
+            "huawei_solar",
+            f"{serial}_storage_charge_discharge_power",
+        ),
+        _entity(
+            "number.huawei_battery_maximum_charging_power",
+            "huawei_solar",
+            f"{serial}_storage_maximum_charging_power",
+        ),
+        _entity(
+            "number.huawei_battery_maximum_discharging_power",
+            "huawei_solar",
+            f"{serial}_storage_maximum_discharging_power",
+        ),
+        _entity(
+            "number.huawei_battery_charging_cutoff_capacity",
+            "huawei_solar",
+            f"{serial}_storage_charging_cutoff_capacity",
+        ),
+        _entity(
+            "number.huawei_battery_grid_charge_cutoff_state_of_charge",
+            "huawei_solar",
+            f"{serial}_storage_grid_charge_cutoff_state_of_charge",
+        ),
+        _entity(
+            "switch.huawei_battery_charge_from_grid_function",
+            "huawei_solar",
+            f"{serial}_storage_charge_from_grid_function",
+        ),
+        _entity(
+            "select.huawei_battery_working_mode",
+            "huawei_solar",
+            f"{serial}_storage_working_mode_settings",
+        ),
+        _entity(
+            "sensor.huawei_inverter_active_power",
+            "huawei_solar",
+            f"{serial}_active_power",
+        ),
+    ]
+
+
 # ---------------------------------------------------------------------------
 # SolaX entity registry: Growatt inverter connected via solax_modbus
 #
@@ -1596,3 +1649,29 @@ class TestSolcastEntityRegistryDiscovery:
 
         assert "solar_forecast_today" not in result
         assert "solar_forecast_tomorrow" not in result
+
+
+# ---------------------------------------------------------------------------
+# Huawei LUNA2000 detection: huawei_solar platform
+# ---------------------------------------------------------------------------
+
+
+class TestHuaweiDiscovery:
+    def setup_method(self):
+        self.ctrl = HomeAssistantAPIController(
+            ha_url="http://ha.local", token="tok", sensor_config={}
+        )
+
+    def test_huawei_entities_detected(self):
+        detected = self.ctrl._detect_platforms(
+            _huawei_registry(), {"huawei": ["huawei_solar"]}
+        )
+        assert detected["huawei"] is True
+
+    def test_huawei_map_matches_registry(self):
+        result = self.ctrl._map_registry_entities(
+            _huawei_registry(), ["huawei_solar"], self.ctrl.HUAWEI_SUFFIX_MAP
+        )
+        assert result["battery_soc"] == "sensor.huawei_battery_state_of_capacity"
+        assert result["huawei_working_mode"] == "select.huawei_battery_working_mode"
+        assert len(result) == 9

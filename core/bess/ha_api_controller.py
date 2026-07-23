@@ -2283,13 +2283,15 @@ class HomeAssistantAPIController:
         Queries the config entry and device registries to find:
         - Nordpool config_entry_id (required for nordpool.get_prices_for_date)
         - Growatt device_id (HA device registry ID for service calls)
+        - Huawei battery device_id (HA device registry ID for service calls)
 
         Args:
             device_sn: Growatt device serial number to match, or None
             entity_registry: Pre-fetched entity registry list, or None to fetch.
 
         Returns:
-            dict with keys: growatt_device_id, nordpool_config_entry_id
+            dict with keys: growatt_device_id, huawei_device_id,
+            nordpool_config_entry_id
         """
         commands = [
             {"type": "config_entries/get"},
@@ -2323,8 +2325,9 @@ class HomeAssistantAPIController:
         (which fetches everything in a single WS connection).
 
         Returns:
-            dict with keys: growatt_device_id, nordpool_config_entry_id,
-            nordpool_area, detected_platforms, octopus_found
+            dict with keys: growatt_device_id, huawei_device_id,
+            nordpool_config_entry_id, nordpool_area, detected_platforms,
+            octopus_found
         """
         # Find nordpool config_entry_id from config entries.
         nordpool_config_entry_id: str | None = None
@@ -2397,6 +2400,35 @@ class HomeAssistantAPIController:
                 if growatt_device_id:
                     break
 
+        # Find huawei_solar config_entry_id, then the *battery* device
+        # within it (huawei_solar creates multiple devices per config entry —
+        # inverter, battery, power meter, optional EMMA — so device_id must
+        # be filtered to the one whose entities include the working-mode
+        # marker, not just "any device on this config entry").
+        huawei_config_entry_id: str | None = None
+        for entry in config_entries_result:
+            if entry.get("domain") == "huawei_solar" and entry.get("state") == "loaded":
+                huawei_config_entry_id = entry["entry_id"]
+                break
+
+        huawei_device_id: str | None = None
+        if huawei_config_entry_id:
+            battery_entity_device_ids = {
+                e.get("device_id")
+                for e in entity_registry_result
+                if e.get("platform") == "huawei_solar"
+                and str(e.get("unique_id", "")).endswith(
+                    f"_{self._HUAWEI_BATTERY_MARKER_SUFFIX}"
+                )
+            }
+            for device in devices_result:
+                if (
+                    huawei_config_entry_id in device.get("config_entries", [])
+                    and device.get("id") in battery_entity_device_ids
+                ):
+                    huawei_device_id = device["id"]
+                    break
+
         # Determine inverter type from entity registry unique_id prefixes.
         # The HA growatt_server integration uses different sensor key prefixes
         # depending on the Growatt Cloud device_type:
@@ -2429,16 +2461,18 @@ class HomeAssistantAPIController:
 
         logger.info(
             "WS discovery: nordpool_config_entry_id=%s, nordpool_area=%s, "
-            "growatt_device_id=%s, octopus_found=%s, "
+            "growatt_device_id=%s, huawei_device_id=%s, octopus_found=%s, "
             "detected_platforms=%s",
             nordpool_config_entry_id,
             nordpool_area,
             growatt_device_id,
+            huawei_device_id,
             octopus_found,
             detected_platforms,
         )
         return {
             "growatt_device_id": growatt_device_id,
+            "huawei_device_id": huawei_device_id,
             "nordpool_config_entry_id": nordpool_config_entry_id,
             "nordpool_area": nordpool_area,
             "detected_platforms": detected_platforms,
@@ -2508,6 +2542,7 @@ class HomeAssistantAPIController:
         Returns:
             Tuple of (result_dict, states) where result_dict has keys:
             growatt_found, device_sn, growatt_device_id,
+            huawei_found, huawei_device_id,
             nordpool_found, nordpool_area, nordpool_config_entry_id,
             octopus_found, detected_inverter_platforms,
             detected_phase_count, currency, vat_multiplier.
@@ -2518,6 +2553,8 @@ class HomeAssistantAPIController:
             "device_sn": None,
             "growatt_device_id": None,
             "solax_found": False,
+            "huawei_found": False,
+            "huawei_device_id": None,
             "nordpool_found": False,
             "nordpool_area": None,
             "nordpool_custom_area": None,
@@ -2555,6 +2592,7 @@ class HomeAssistantAPIController:
         inverter_detected = self.detect_inverter_integrations(registry)
         result["growatt_found"] = inverter_detected.get("growatt", False)
         result["solax_found"] = inverter_detected.get("solax", False)
+        result["huawei_found"] = inverter_detected.get("huawei", False)
 
         # ── States: Growatt device SN, Nordpool area ─────────────────────
         states = self._fetch_all_states()
@@ -2592,6 +2630,7 @@ class HomeAssistantAPIController:
                 device_sn, config_entries, devices, registry
             )
             result["growatt_device_id"] = metadata["growatt_device_id"]
+            result["huawei_device_id"] = metadata.get("huawei_device_id")
             result["nordpool_config_entry_id"] = metadata["nordpool_config_entry_id"]
             if metadata["nordpool_config_entry_id"]:
                 result["nordpool_found"] = True
@@ -2620,6 +2659,8 @@ class HomeAssistantAPIController:
                 detected.append("solax_modbus_growatt_sph")
             elif self._has_solax_native_entities(registry):
                 detected.append("solax_modbus_native")
+        if result["huawei_found"]:
+            detected.append("huawei_solar_luna2000")
         result["detected_inverter_platforms"] = detected
 
         # Currency & VAT from Nordpool area or Octopus defaults
@@ -2914,6 +2955,7 @@ class HomeAssistantAPIController:
     _INVERTER_PLATFORMS: ClassVar[dict[str, list[str]]] = {
         "growatt": ["growatt_server"],
         "solax": ["solax_modbus", "solax"],
+        "huawei": ["huawei_solar"],
     }
     _PRICE_PLATFORMS: ClassVar[dict[str, list[str]]] = {
         "nordpool": ["nordpool"],

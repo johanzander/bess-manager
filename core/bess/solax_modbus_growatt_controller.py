@@ -138,13 +138,9 @@ class SolaxModbusGrowattController(GrowattMinController):
 
     # ── Schedule creation ────────────────────────────────────────────────────
 
-    def create_schedule(
-        self,
-        schedule: DPSchedule,
-        current_period: int = 0,
-        previous_tou_intervals: list[dict] | None = None,
-    ) -> None:
-        """Store strategic intents — control is applied per-period, no batch TOU needed.
+    def apply_intents(self, schedule: DPSchedule, current_period: int = 0) -> None:
+        """Adopt this cycle's DP intent list — control is applied per-period,
+        no batch TOU/VPP schedule computed here.
 
         Skips the parent's 9-segment TOU interval computation.  Strategic intents
         are stored and hourly settings calculated for API/display consumption.
@@ -152,7 +148,6 @@ class SolaxModbusGrowattController(GrowattMinController):
         Args:
             schedule: DPSchedule containing strategic_intent list.
             current_period: Current 15-minute period (0-95).
-            previous_tou_intervals: Unused for single-segment/VPP approach.
         """
         logger.info(
             "Creating %s schedule from strategic intents", self.control_mode.upper()
@@ -181,6 +176,15 @@ class SolaxModbusGrowattController(GrowattMinController):
 
         if self.control_mode == "tou":
             self._update_tou_display_state()
+
+    def create_schedule(
+        self,
+        schedule: DPSchedule,
+        current_period: int = 0,
+        previous_tou_intervals: list[dict] | None = None,
+    ) -> None:
+        """Deprecated alias for apply_intents — removed in Task 7."""
+        self.apply_intents(schedule, current_period)
 
     # ── Hardware interface ────────────────────────────────────────────────────
 
@@ -514,26 +518,15 @@ class SolaxModbusGrowattController(GrowattMinController):
 
     # ── Schedule comparison ──────────────────────────────────────────────────
 
-    def compare_schedules(
-        self,
-        other_schedule: "SolaxModbusGrowattController",
-        from_period: int = 0,
+    @staticmethod
+    def _diff_intents(
+        current: list[str], new: list[str], from_period: int
     ) -> tuple[bool, str]:
-        """Compare schedules by strategic intent list (like SolaxController).
+        """Shared diff rule for strategic-intent lists.
 
         Two schedules differ when any period at or after ``from_period`` has a
         different strategic intent.
-
-        Args:
-            other_schedule: Another controller to compare against.
-            from_period: First period to compare (earlier periods are ignored).
-
-        Returns:
-            Tuple of (schedules_differ, reason).
         """
-        current = self.strategic_intents
-        new = other_schedule.strategic_intents
-
         if not current and not new:
             return False, ""
 
@@ -553,6 +546,34 @@ class SolaxModbusGrowattController(GrowattMinController):
 
         logger.info("DECISION: Modbus schedules match")
         return False, ""
+
+    def evaluate_intents(
+        self, schedule: DPSchedule, current_period: int = 0
+    ) -> tuple[bool, str]:
+        """Compare schedules by strategic intent list (like SolaxController).
+
+        Two schedules differ when any period at or after ``current_period``
+        has a different strategic intent.
+        """
+        new = schedule.original_dp_results["strategic_intent"]
+        return self._diff_intents(self.strategic_intents, new, current_period)
+
+    def compare_schedules(
+        self,
+        other_schedule: "SolaxModbusGrowattController",
+        from_period: int = 0,
+    ) -> tuple[bool, str]:
+        """Deprecated alias for evaluate_intents — removed in Task 7.
+
+        Preserves the original controller-to-controller contract (compares
+        ``strategic_intents`` directly) rather than delegating through
+        ``evaluate_intents``, since callers may construct bare controllers
+        without ever calling ``apply_intents`` (``current_schedule`` stays
+        ``None``).
+        """
+        return self._diff_intents(
+            self.strategic_intents, other_schedule.strategic_intents, from_period
+        )
 
     # ── TOU display ──────────────────────────────────────────────────────────
 

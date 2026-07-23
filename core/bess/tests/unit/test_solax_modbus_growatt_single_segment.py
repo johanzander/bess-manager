@@ -281,9 +281,7 @@ class TestWriteScheduleToHardware:
         schedule = make_schedule(intents)
         controller.create_schedule(schedule, current_period=0)
 
-        controller.write_to_hardware(
-            mock_ha, effective_period=0, current_tou=[]
-        )
+        controller.write_to_hardware(mock_ha, effective_period=0, current_tou=[])
 
         seg = mock_ha.calls["tou_segments"][-1]
         assert seg["enabled"] is False
@@ -293,9 +291,7 @@ class TestWriteScheduleToHardware:
         schedule = make_schedule(intents)
         controller.create_schedule(schedule, current_period=0)
 
-        controller.write_to_hardware(
-            mock_ha, effective_period=20, current_tou=[]
-        )
+        controller.write_to_hardware(mock_ha, effective_period=20, current_tou=[])
 
         assert controller._last_written_tou_mode == "grid_first"
 
@@ -490,6 +486,40 @@ class TestCompareSchedules:
         # Comparing from period 0 — should differ
         differs, _ = controller.compare_schedules(other, from_period=0)
         assert differs
+
+
+class TestEvaluateIntents:
+    """Test apply_intents/evaluate_intents (schedule-based comparison)."""
+
+    def test_no_change_when_intents_identical(self, controller, battery_settings):
+        intents = hourly_to_quarterly({2: "GRID_CHARGING"})
+        controller.apply_intents(make_schedule(intents), current_period=0)
+
+        differs, _reason = controller.evaluate_intents(make_schedule(intents))
+
+        assert differs is False
+
+    def test_detects_change_when_intents_differ(self, controller, battery_settings):
+        controller.apply_intents(
+            make_schedule(hourly_to_quarterly({2: "GRID_CHARGING"})), current_period=0
+        )
+
+        differs, _reason = controller.evaluate_intents(
+            make_schedule(hourly_to_quarterly({10: "BATTERY_EXPORT"}))
+        )
+
+        assert differs is True
+
+    def test_respects_from_period(self, controller, battery_settings):
+        controller.apply_intents(
+            make_schedule(hourly_to_quarterly({0: "GRID_CHARGING"})), current_period=0
+        )
+
+        differs, _ = controller.evaluate_intents(
+            make_schedule(hourly_to_quarterly({})), current_period=8
+        )
+
+        assert differs is False
 
 
 class TestDisplayMethods:

@@ -31,9 +31,9 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
     background: isDarkMode ? '#1f2937' : '#ffffff',
     tooltip: isDarkMode ? '#374151' : '#ffffff',
     tooltipBorder: isDarkMode ? '#4b5563' : '#d1d5db',
-    soc: '#3b82f6',
+    soc: '#16a34a',
     solarCharging: '#fbbf24',
-    gridCharging: '#16a34a',
+    gridCharging: '#3b82f6',
     homeDischarging: '#f87171',
     gridDischarging: '#dc2626'
   };

@@ -169,7 +169,9 @@ class HuaweiController(InverterController):
                     "enabled": True,
                     "is_default": False,
                     "strategic_intent": (
-                        "GRID_CHARGING" if p["flag"] == "+" else "LOAD_SUPPORT/BATTERY_EXPORT"
+                        "GRID_CHARGING"
+                        if p["flag"] == "+"
+                        else "LOAD_SUPPORT/BATTERY_EXPORT"
                     ),
                     "segment_id": idx + 1,
                 }
@@ -246,10 +248,15 @@ class HuaweiController(InverterController):
             except Exception as e:
                 logger.error("FAILED: set_huawei_working_mode: %s", e)
 
+        has_charge_period = any(p["flag"] == "+" for p in self._periods)
+        try:
+            controller.set_grid_charge(has_charge_period)
+            writes += 1
+        except Exception as e:
+            logger.error("FAILED: set_grid_charge: %s", e)
+
         periods_text = self._periods_to_text()
-        logger.info(
-            "HUAWEI HARDWARE: Writing %d TOU period(s)", len(self._periods)
-        )
+        logger.info("HUAWEI HARDWARE: Writing %d TOU period(s)", len(self._periods))
         try:
             controller.write_huawei_tou_periods(periods_text)
             writes += 1
@@ -289,9 +296,7 @@ class HuaweiController(InverterController):
         create_schedule() call populates it, matching the pattern used
         when hardware state genuinely can't be read back.
         """
-        logger.info(
-            "Huawei: no TOU readback available — starting with empty schedule"
-        )
+        logger.info("Huawei: no TOU readback available — starting with empty schedule")
 
     # ── Schedule comparison ───────────────────────────────────────────────
 

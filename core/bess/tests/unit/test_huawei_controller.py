@@ -41,7 +41,9 @@ def controller(battery_settings: BatterySettings) -> HuaweiController:
 
 
 class TestScheduleBuilding:
-    def test_charge_period_produces_plus_flag(self, controller: HuaweiController) -> None:
+    def test_charge_period_produces_plus_flag(
+        self, controller: HuaweiController
+    ) -> None:
         intents = make_intents({2: "GRID_CHARGING"})
         controller.create_schedule(make_schedule_mock(intents))
         assert len(controller._periods) == 1
@@ -157,9 +159,33 @@ class TestWriteSchedule:
         controller.write_schedule_to_hardware(ha, 0, [])
         ha.write_huawei_tou_periods.assert_called_once()
 
+    def test_write_schedule_enables_grid_charge_when_charge_period_present(
+        self, controller: HuaweiController
+    ) -> None:
+        intents = make_intents({2: "GRID_CHARGING"})
+        controller.create_schedule(make_schedule_mock(intents))
+        ha = MagicMock()
+        ha.get_huawei_working_mode_options.return_value = []
+        ha.get_huawei_working_mode.return_value = "time_of_use_luna2000"
+        controller.write_schedule_to_hardware(ha, 0, [])
+        ha.set_grid_charge.assert_called_once_with(True)
+
+    def test_write_schedule_disables_grid_charge_when_no_charge_period(
+        self, controller: HuaweiController
+    ) -> None:
+        intents = make_intents({18: "LOAD_SUPPORT"})
+        controller.create_schedule(make_schedule_mock(intents))
+        ha = MagicMock()
+        ha.get_huawei_working_mode_options.return_value = []
+        ha.get_huawei_working_mode.return_value = "time_of_use_luna2000"
+        controller.write_schedule_to_hardware(ha, 0, [])
+        ha.set_grid_charge.assert_called_once_with(False)
+
 
 class TestActiveTouIntervals:
-    def test_active_tou_intervals_returns_all(self, controller: HuaweiController) -> None:
+    def test_active_tou_intervals_returns_all(
+        self, controller: HuaweiController
+    ) -> None:
         intents = make_intents({2: "GRID_CHARGING"})
         controller.create_schedule(make_schedule_mock(intents))
         assert controller.active_tou_intervals == controller.tou_intervals
@@ -179,7 +205,9 @@ class TestCompareSchedules:
     def test_different_periods_differ(
         self, controller: HuaweiController, battery_settings: BatterySettings
     ) -> None:
-        controller.create_schedule(make_schedule_mock(make_intents({2: "GRID_CHARGING"})))
+        controller.create_schedule(
+            make_schedule_mock(make_intents({2: "GRID_CHARGING"}))
+        )
         other = HuaweiController(battery_settings=battery_settings)
         other.create_schedule(make_schedule_mock(make_intents({18: "BATTERY_EXPORT"})))
         differ, _ = controller.compare_schedules(other)

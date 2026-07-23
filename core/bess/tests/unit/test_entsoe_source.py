@@ -182,6 +182,30 @@ class TestEntsoeSourceFailures:
         with pytest.raises(PriceDataUnavailableError):
             source.get_prices_for_date(time_utils.today())
 
+    def test_all_zero_prices_treated_as_not_yet_available(self):
+        """A full-length array of literal 0.0 prices is a placeholder/stub
+        snapshot from the upstream integration, not a real day-ahead
+        clearing — treat it as not-yet-available rather than caching it.
+        """
+        tomorrow = time_utils.today() + timedelta(days=1)
+        entries = [
+            {**entry, "price": 0.0} for entry in _make_entries(tomorrow, count=96)
+        ]
+        source = EntsoeSource(_make_controller(tomorrow_entries=entries), ENTITY)
+        with pytest.raises(PriceDataUnavailableError):
+            source.get_prices_for_date(tomorrow)
+
+    def test_partially_zero_prices_are_accepted(self):
+        """Real markets do have occasional zero-price periods — only an
+        entirely flat all-zero array should be rejected.
+        """
+        tomorrow = time_utils.today() + timedelta(days=1)
+        entries = _make_entries(tomorrow, count=96)
+        entries[0]["price"] = 0.0
+        source = EntsoeSource(_make_controller(tomorrow_entries=entries), ENTITY)
+        prices = source.get_prices_for_date(tomorrow)
+        assert prices[0] == pytest.approx(0.0)
+
 
 class TestEntsoeSourceHealthCheck:
     def test_health_ok(self):

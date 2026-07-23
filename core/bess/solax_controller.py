@@ -99,15 +99,6 @@ class SolaxController(InverterController):
             len(self.strategic_intents),
         )
 
-    def create_schedule(
-        self,
-        schedule: DPSchedule,
-        current_period: int = 0,
-        previous_tou_intervals: list[dict] | None = None,
-    ) -> None:
-        """Deprecated alias for apply_intents — removed in Task 7."""
-        self.apply_intents(schedule, current_period)
-
     # ── Hardware interface ────────────────────────────────────────────────────
 
     def _write_period_to_hardware(
@@ -225,10 +216,8 @@ class SolaxController(InverterController):
     ) -> tuple[bool, str]:
         """Compare two strategic-intent lists from ``from_period`` onward.
 
-        Shared by ``evaluate_intents`` (compares against a candidate built
-        from a ``DPSchedule``) and ``compare_schedules`` (compares two
-        controllers' committed ``strategic_intents`` directly, no
-        ``DPSchedule`` required).
+        Used by ``evaluate_intents`` (compares against a candidate built
+        from a ``DPSchedule``).
         """
         if not current and not new:
             return False, ""
@@ -267,19 +256,6 @@ class SolaxController(InverterController):
         """
         candidate = self._build_candidate(schedule)
         return self._diff_intents(self.strategic_intents, candidate, current_period)
-
-    def compare_schedules(
-        self, other_schedule: "SolaxController", from_period: int = 0
-    ) -> tuple[bool, str]:
-        """Deprecated alias for evaluate_intents — removed in Task 7.
-
-        Preserves its original contract (two controllers, no ``DPSchedule``
-        required) by diffing ``strategic_intents`` directly via the shared
-        ``_diff_intents`` helper.
-        """
-        return self._diff_intents(
-            self.strategic_intents, other_schedule.strategic_intents, from_period
-        )
 
     # ── TOU display ───────────────────────────────────────────────────────────
 

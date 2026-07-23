@@ -300,15 +300,6 @@ class GrowattSphController(InverterController):
             len(self.tou_intervals),
         )
 
-    def create_schedule(
-        self,
-        schedule: DPSchedule,
-        current_period: int = 0,
-        previous_tou_intervals: list[dict] | None = None,
-    ) -> None:
-        """Deprecated alias for apply_intents — removed in Task 7."""
-        self.apply_intents(schedule, current_period)
-
     # ── Hardware interface ────────────────────────────────────────────────────
 
     def write_to_hardware(
@@ -595,22 +586,6 @@ class GrowattSphController(InverterController):
 
         return self._diff_sph_periods(
             self._charge_periods, new_charge, self._discharge_periods, new_discharge
-        )
-
-    def compare_schedules(
-        self, other_schedule: "GrowattSphController", from_period: int = 0
-    ) -> tuple[bool, str]:
-        """Deprecated alias for evaluate_intents — removed in Task 7.
-
-        Compares two already-committed controllers' period lists directly
-        (no DPSchedule required) — preserves the original contract used by
-        pre-existing callers that construct a bare second controller.
-        """
-        return self._diff_sph_periods(
-            self._charge_periods,
-            other_schedule._charge_periods,
-            self._discharge_periods,
-            other_schedule._discharge_periods,
         )
 
     # ── Period settings ─────────────────────────────────────────────────────

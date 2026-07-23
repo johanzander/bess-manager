@@ -125,7 +125,7 @@ class TestIntentToVpp:
 class TestApplyPeriodVpp:
     def test_no_tou_segments_written(self, controller, mock_ha):
         intents = hourly_to_quarterly({2: "GRID_CHARGING"})
-        controller.create_schedule(make_schedule(intents), current_period=0)
+        controller.apply_intents(make_schedule(intents), current_period=0)
 
         _apply_at_period(controller, mock_ha, 8, grid_charge=True, discharge_rate=0)
 
@@ -136,7 +136,7 @@ class TestApplyPeriodVpp:
     def test_vpp_status_enabled_once(self, controller, mock_ha):
         """VPP Status/AC-charging are written once, not on every period."""
         intents = hourly_to_quarterly({2: "GRID_CHARGING", 4: "GRID_CHARGING"})
-        controller.create_schedule(make_schedule(intents), current_period=0)
+        controller.apply_intents(make_schedule(intents), current_period=0)
 
         _apply_at_period(controller, mock_ha, 8, grid_charge=True, discharge_rate=0)
         _apply_at_period(controller, mock_ha, 9, grid_charge=True, discharge_rate=0)
@@ -146,7 +146,7 @@ class TestApplyPeriodVpp:
 
     def test_charge_period_writes_positive_power(self, controller, mock_ha):
         intents = hourly_to_quarterly({2: "GRID_CHARGING"})
-        controller.create_schedule(make_schedule(intents), current_period=0)
+        controller.apply_intents(make_schedule(intents), current_period=0)
 
         _apply_at_period(controller, mock_ha, 8, grid_charge=True, discharge_rate=0)
 
@@ -157,7 +157,7 @@ class TestApplyPeriodVpp:
 
     def test_discharge_period_writes_negative_power(self, controller, mock_ha):
         intents = hourly_to_quarterly({10: "BATTERY_EXPORT"})
-        controller.create_schedule(make_schedule(intents), current_period=0)
+        controller.apply_intents(make_schedule(intents), current_period=0)
 
         _apply_at_period(controller, mock_ha, 40, grid_charge=False, discharge_rate=70)
 
@@ -167,7 +167,7 @@ class TestApplyPeriodVpp:
 
     def test_idle_disables_remote_control_on_hardware(self, controller, mock_ha):
         intents = hourly_to_quarterly({0: "IDLE"})
-        controller.create_schedule(make_schedule(intents), current_period=0)
+        controller.apply_intents(make_schedule(intents), current_period=0)
         controller._last_written_vpp_remote_control = True  # force a change
 
         _apply_at_period(
@@ -188,7 +188,7 @@ class TestApplyPeriodVpp:
         """#355: SOLAR_EXPORT must not fall back to self-use, which lets
         solar surplus recharge the battery instead of exporting it."""
         intents = hourly_to_quarterly({0: "SOLAR_EXPORT"})
-        controller.create_schedule(make_schedule(intents), current_period=0)
+        controller.apply_intents(make_schedule(intents), current_period=0)
         controller._last_written_vpp_remote_control = False  # force a change
 
         _apply_at_period(
@@ -206,7 +206,7 @@ class TestApplyPeriodVpp:
 
     def test_unchanged_command_skips_write(self, controller, mock_ha):
         intents = hourly_to_quarterly({2: "GRID_CHARGING"})
-        controller.create_schedule(make_schedule(intents), current_period=0)
+        controller.apply_intents(make_schedule(intents), current_period=0)
 
         _apply_at_period(controller, mock_ha, 8, grid_charge=True, discharge_rate=0)
         writes_after_first = len(mock_ha.calls["growatt_vpp_periods"])
@@ -219,7 +219,7 @@ class TestApplyPeriodVpp:
         self, controller, mock_ha
     ):
         intents = hourly_to_quarterly({0: "BATTERY_EXPORT"})
-        controller.create_schedule(make_schedule(intents), current_period=0)
+        controller.apply_intents(make_schedule(intents), current_period=0)
 
         _apply_at_period(controller, mock_ha, 0, grid_charge=False, discharge_rate=50)
         _apply_at_period(controller, mock_ha, 1, grid_charge=False, discharge_rate=80)
@@ -231,7 +231,7 @@ class TestApplyPeriodVpp:
 class TestWriteScheduleToHardwareVpp:
     def test_writes_initial_command_only(self, controller, mock_ha):
         intents = hourly_to_quarterly({2: "GRID_CHARGING"})
-        controller.create_schedule(make_schedule(intents), current_period=0)
+        controller.apply_intents(make_schedule(intents), current_period=0)
 
         writes, disables = controller.write_to_hardware(
             mock_ha, effective_period=8, current_tou=[]
@@ -248,7 +248,7 @@ class TestWriteScheduleToHardwareVpp:
         """#355: the initial write_to_hardware path must apply the
         same block_passive_charging distinction as per-period apply_period."""
         intents = hourly_to_quarterly({2: "SOLAR_EXPORT"})
-        controller.create_schedule(make_schedule(intents), current_period=0)
+        controller.apply_intents(make_schedule(intents), current_period=0)
 
         writes, _disables = controller.write_to_hardware(
             mock_ha, effective_period=8, current_tou=[]
@@ -286,32 +286,22 @@ class TestReadAndInitializeVpp:
         assert mock_ha.calls["growatt_vpp_periods"] == []
 
 
-class TestSeedFromVpp:
-    """#329: BatterySystemManager recreates the controller every optimization
-    cycle. Without carrying forward VPP confirmation state, the fresh
-    instance re-writes the flash-backed vpp_status/allow_ac_charging
-    registers on every cycle, not just at startup."""
+class TestNoRedundantWritesAcrossCycles:
+    """#329: applying the same intents twice in a row on the SAME controller
+    instance (no recreation at all, unlike #368's simulated-recreation test)
+    must not re-write VPP status/allow-AC-charging the second time."""
 
-    def test_seed_from_skips_redundant_vpp_status_write(
-        self, controller, mock_ha, battery_settings
-    ):
+    def test_apply_intents_twice_writes_vpp_status_once(self, controller, mock_ha):
         intents = hourly_to_quarterly({2: "GRID_CHARGING"})
-        controller.create_schedule(make_schedule(intents), current_period=0)
+        schedule = make_schedule(intents)
+
+        controller.apply_intents(schedule, current_period=0)
         _apply_at_period(controller, mock_ha, 8, grid_charge=True, discharge_rate=0)
         assert len(mock_ha.calls["growatt_vpp_status"]) == 1
-        assert len(mock_ha.calls["growatt_vpp_allow_ac_charging"]) == 1
 
-        # Simulates the next optimization cycle: a brand-new controller
-        # instance, seeded from the outgoing one before being adopted.
-        next_controller = SolaxModbusGrowattController(
-            battery_settings, control_mode="vpp"
-        )
-        next_controller.seed_from(controller)
-        next_controller.create_schedule(make_schedule(intents), current_period=0)
-
-        _apply_at_period(
-            next_controller, mock_ha, 9, grid_charge=True, discharge_rate=0
-        )
+        # Re-apply the identical schedule -- same instance, no recreation
+        controller.apply_intents(schedule, current_period=0)
+        _apply_at_period(controller, mock_ha, 9, grid_charge=True, discharge_rate=0)
 
         assert len(mock_ha.calls["growatt_vpp_status"]) == 1
         assert len(mock_ha.calls["growatt_vpp_allow_ac_charging"]) == 1

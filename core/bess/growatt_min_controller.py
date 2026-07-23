@@ -154,12 +154,6 @@ class GrowattMinController(InverterController):
     def active_tou_intervals(self, value: list[dict]) -> None:
         self._active_tou_intervals = value
 
-    def seed_from(self, other: "InverterController") -> None:
-        """See base docstring. Adds the active-TOU-subset tracker."""
-        super().seed_from(other)
-        if isinstance(other, GrowattMinController):
-            self._active_tou_intervals = other._active_tou_intervals.copy()
-
     def _group_periods_by_mode(
         self, intents: list[str], start_period: int = 0
     ) -> list[dict]:
@@ -447,15 +441,6 @@ class GrowattMinController(InverterController):
             len(self.active_tou_intervals),
         )
 
-    def create_schedule(
-        self,
-        schedule: DPSchedule,
-        current_period: int = 0,
-        previous_tou_intervals: list[dict] | None = None,
-    ) -> None:
-        """Deprecated alias for apply_intents — removed in Task 7."""
-        self.apply_intents(schedule, current_period)
-
     def _build_candidate(
         self, intents: list[str], current_period: int = 0
     ) -> tuple[list[dict], list[dict]]:
@@ -585,10 +570,9 @@ class GrowattMinController(InverterController):
         self, current_tou: list[dict], new_tou: list[dict], from_period: int
     ) -> tuple[bool, str]:
         """Compare two already-formatted TOU interval lists from a given period
-        onwards. Pure — no reads/writes of self state. Shared by evaluate_intents
-        (candidate built via _build_candidate) and compare_schedules (another
-        controller's already-committed get_daily_TOU_settings()), so the actual
-        comparison rules live in exactly one place.
+        onwards. Pure — no reads/writes of self state. Used by evaluate_intents
+        (candidate built via _build_candidate), so the actual comparison rules
+        live in exactly one place.
         """
         logger.info(f"Current schedule has {len(current_tou)} TOU intervals")
         logger.info(f"New schedule has {len(new_tou)} TOU intervals")
@@ -703,26 +687,6 @@ class GrowattMinController(InverterController):
         current_tou = self.get_daily_TOU_settings()
         new_tou = self._format_daily_tou(candidate_intervals)
 
-        return self._diff_tou_intervals(current_tou, new_tou, from_period)
-
-    def compare_schedules(
-        self, other_schedule: "GrowattMinController", from_period: int = 0
-    ) -> tuple[bool, str]:
-        """Deprecated alias — compares another controller's already-committed
-        TOU intervals directly (its original contract), unlike evaluate_intents
-        which rebuilds a candidate from a DPSchedule's intents. Removed in Task 7.
-        """
-        if self.corruption_detected:
-            logger.warning(
-                "⚠️  CORRUPTION DETECTED FLAG IS SET - FORCING HARDWARE WRITE"
-            )
-            logger.warning(
-                "This overrides normal schedule comparison to ensure corrupted intervals are cleared"
-            )
-            return True, "Corruption detected - forcing hardware write to clear"
-
-        current_tou = self.get_daily_TOU_settings()
-        new_tou = other_schedule.get_daily_TOU_settings()
         return self._diff_tou_intervals(current_tou, new_tou, from_period)
 
     def initialize_from_tou_segments(self, tou_segments, current_hour=0):

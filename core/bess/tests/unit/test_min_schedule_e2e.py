@@ -3,7 +3,7 @@ End-to-end tests: optimizer output → MIN Growatt TOU schedule.
 
 Runs the real DP optimizer on quarterly-resolution scenarios from debug logs,
 converts the OptimizationResult to a DPSchedule, feeds it through
-GrowattScheduleManager.create_schedule(), and verifies the resulting TOU
+GrowattScheduleManager.apply_intents(), and verifies the resulting TOU
 schedule meets all hardware and behavioral constraints.
 
 This closes the gap between:
@@ -123,10 +123,9 @@ def _run_and_build_schedule(
     )
 
     scheduler = GrowattScheduleManager(battery_settings)
-    scheduler.create_schedule(
+    scheduler.apply_intents(
         schedule=dp_schedule,
         current_period=current_period,
-        previous_tou_intervals=None,
     )
 
     return scheduler, strategic_intents
@@ -327,7 +326,7 @@ class TestEndToEndMidDayUpdate:
 
     @pytest.mark.parametrize("scenario_name", _get_realworld_scenarios())
     def test_mid_day_update_maintains_constraints(self, scenario_name):
-        """Running create_schedule at various current_periods maintains constraints."""
+        """Running apply_intents at various current_periods maintains constraints."""
         scenario = _load_scenario(scenario_name)
         horizon = len(scenario["base_prices"])
 
@@ -377,9 +376,7 @@ class TestEndToEndHardwareWrite:
                 )
 
         controller = CapturingController()
-        scheduler.write_to_hardware(
-            controller, effective_period=0, current_tou=[]
-        )
+        scheduler.write_to_hardware(controller, effective_period=0, current_tou=[])
 
         for call in calls:
             assert 1 <= call["segment_id"] <= 9, (
@@ -403,9 +400,7 @@ class TestEndToEndHardwareWrite:
                 write_count += 1
 
         controller = CountingController()
-        scheduler.write_to_hardware(
-            controller, effective_period=0, current_tou=[]
-        )
+        scheduler.write_to_hardware(controller, effective_period=0, current_tou=[])
 
         assert (
             write_count <= 9

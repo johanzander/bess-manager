@@ -177,15 +177,6 @@ class SolaxModbusGrowattController(GrowattMinController):
         if self.control_mode == "tou":
             self._update_tou_display_state()
 
-    def create_schedule(
-        self,
-        schedule: DPSchedule,
-        current_period: int = 0,
-        previous_tou_intervals: list[dict] | None = None,
-    ) -> None:
-        """Deprecated alias for apply_intents — removed in Task 7."""
-        self.apply_intents(schedule, current_period)
-
     # ── Hardware interface ────────────────────────────────────────────────────
 
     def apply_period(
@@ -304,18 +295,6 @@ class SolaxModbusGrowattController(GrowattMinController):
         if discharge_rate == 0:
             return 0, block_passive_charging
         return -discharge_rate, True
-
-    def seed_from(self, other: "GrowattMinController") -> None:
-        """See base docstring. Adds VPP confirmation/tracking state and the
-        last-written TOU mode, both of which gate redundant hardware writes."""
-        super().seed_from(other)
-        if isinstance(other, SolaxModbusGrowattController):
-            self._vpp_status_confirmed = other._vpp_status_confirmed
-            self._last_written_vpp_remote_control = (
-                other._last_written_vpp_remote_control
-            )
-            self._last_written_vpp_power = other._last_written_vpp_power
-            self._last_written_tou_mode = other._last_written_tou_mode
 
     def _ensure_vpp_status_enabled(self, controller) -> None:
         """Enable the VPP Status register once, if not already confirmed.
@@ -557,23 +536,6 @@ class SolaxModbusGrowattController(GrowattMinController):
         """
         new = schedule.original_dp_results["strategic_intent"]
         return self._diff_intents(self.strategic_intents, new, current_period)
-
-    def compare_schedules(
-        self,
-        other_schedule: "SolaxModbusGrowattController",
-        from_period: int = 0,
-    ) -> tuple[bool, str]:
-        """Deprecated alias for evaluate_intents — removed in Task 7.
-
-        Preserves the original controller-to-controller contract (compares
-        ``strategic_intents`` directly) rather than delegating through
-        ``evaluate_intents``, since callers may construct bare controllers
-        without ever calling ``apply_intents`` (``current_schedule`` stays
-        ``None``).
-        """
-        return self._diff_intents(
-            self.strategic_intents, other_schedule.strategic_intents, from_period
-        )
 
     # ── TOU display ──────────────────────────────────────────────────────────
 

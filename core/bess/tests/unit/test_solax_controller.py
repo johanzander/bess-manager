@@ -57,28 +57,28 @@ class TestActiveTouIntervals:
         self, controller: SolaxController
     ) -> None:
         intents = make_intents({2: "GRID_CHARGING", 20: "LOAD_SUPPORT"})
-        controller.create_schedule(make_schedule_mock(intents))
+        controller.apply_intents(make_schedule_mock(intents))
 
         assert controller.active_tou_intervals == []
 
 
-# ── create_schedule ───────────────────────────────────────────────────────────
+# ── apply_intents ───────────────────────────────────────────────────────────
 
 
-class TestCreateSchedule:
-    def test_strategic_intents_stored_after_create_schedule(
+class TestApplyIntents:
+    def test_strategic_intents_stored_after_apply_intents(
         self, controller: SolaxController
     ) -> None:
         intents = make_intents({2: "GRID_CHARGING"})
-        controller.create_schedule(make_schedule_mock(intents))
+        controller.apply_intents(make_schedule_mock(intents))
 
         assert controller.strategic_intents == intents
 
-    def test_current_schedule_stored_after_create_schedule(
+    def test_current_schedule_stored_after_apply_intents(
         self, controller: SolaxController
     ) -> None:
         schedule = make_schedule_mock(["IDLE"] * 96)
-        controller.create_schedule(schedule)
+        controller.apply_intents(schedule)
 
         assert controller.current_schedule is schedule
 
@@ -227,70 +227,6 @@ class TestWritePeriodToHardwareDischarge:
 
         mock_hw.set_solax_vpp_disabled.assert_called_once()
         mock_hw.set_solax_active_power_control.assert_not_called()
-
-
-# ── compare_schedules ─────────────────────────────────────────────────────────
-
-
-class TestCompareSchedules:
-    def test_empty_schedules_do_not_differ(
-        self, controller: SolaxController, battery_settings: BatterySettings
-    ) -> None:
-        other = SolaxController(battery_settings=battery_settings)
-        differ, _ = controller.compare_schedules(other)
-        assert not differ
-
-    def test_identical_schedules_do_not_differ(
-        self, controller: SolaxController, battery_settings: BatterySettings
-    ) -> None:
-        intents = make_intents({2: "GRID_CHARGING", 20: "LOAD_SUPPORT"})
-        schedule = make_schedule_mock(intents)
-        controller.create_schedule(schedule)
-
-        other = SolaxController(battery_settings=battery_settings)
-        other.create_schedule(schedule)
-
-        differ, _ = controller.compare_schedules(other)
-        assert not differ
-
-    def test_different_intents_are_detected(
-        self, controller: SolaxController, battery_settings: BatterySettings
-    ) -> None:
-        controller.create_schedule(
-            make_schedule_mock(make_intents({2: "GRID_CHARGING"}))
-        )
-
-        other = SolaxController(battery_settings=battery_settings)
-        other.create_schedule(make_schedule_mock(make_intents({4: "GRID_CHARGING"})))
-
-        differ, reason = controller.compare_schedules(other)
-        assert differ
-        assert reason
-
-    def test_from_period_skips_earlier_differences(
-        self, controller: SolaxController, battery_settings: BatterySettings
-    ) -> None:
-        # Period 0-3 differs, but compare_schedules starts at period 8 → no diff
-        intents_a = ["GRID_CHARGING"] * 4 + ["IDLE"] * 92
-        intents_b = ["IDLE"] * 96
-
-        controller.strategic_intents = intents_a
-
-        other = SolaxController(battery_settings=battery_settings)
-        other.strategic_intents = intents_b
-
-        differ, _ = controller.compare_schedules(other, from_period=8)
-        assert not differ
-
-    def test_different_length_intents_report_difference(
-        self, controller: SolaxController, battery_settings: BatterySettings
-    ) -> None:
-        controller.strategic_intents = ["IDLE"] * 96
-        other = SolaxController(battery_settings=battery_settings)
-        other.strategic_intents = ["IDLE"] * 48
-
-        differ, _ = controller.compare_schedules(other)
-        assert differ
 
 
 # ── evaluate_intents ──────────────────────────────────────────────────────────
@@ -443,7 +379,7 @@ class TestGetAllTouSegments:
         self, controller: SolaxController
     ) -> None:
         intents = make_intents({2: "GRID_CHARGING", 20: "LOAD_SUPPORT"})
-        controller.create_schedule(make_schedule_mock(intents))
+        controller.apply_intents(make_schedule_mock(intents))
 
         segments = controller.get_all_tou_segments()
 
@@ -455,7 +391,7 @@ class TestGetAllTouSegments:
         self, controller: SolaxController
     ) -> None:
         intents = make_intents({2: "GRID_CHARGING"})
-        controller.create_schedule(make_schedule_mock(intents))
+        controller.apply_intents(make_schedule_mock(intents))
 
         segments = controller.get_all_tou_segments()
         required_fields = {

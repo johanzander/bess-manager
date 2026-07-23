@@ -75,6 +75,7 @@ class HomeAssistantAPIController:
         token: str,
         sensor_config: dict | None = None,
         growatt_device_id: str | None = None,
+        huawei_device_id: str | None = None,
     ):
         """Initialize the Controller with Home Assistant API access.
 
@@ -83,6 +84,7 @@ class HomeAssistantAPIController:
             token: Long-lived access token for Home Assistant
             sensor_config: Sensor configuration mapping from options.json
             growatt_device_id: Growatt device ID for TOU segment operations
+            huawei_device_id: Huawei battery device ID for TOU period operations
 
         """
         self.base_url = ha_url
@@ -100,6 +102,9 @@ class HomeAssistantAPIController:
 
         # Store Growatt device ID for TOU operations
         self.growatt_device_id = growatt_device_id
+
+        # Store Huawei battery device ID for TOU period operations
+        self.huawei_device_id = huawei_device_id
 
         # Runtime failure tracker (injected by BatterySystemManager)
         self.failure_tracker = None
@@ -685,6 +690,21 @@ class HomeAssistantAPIController:
         "total_kwh_forecast_tomorrow": "solar_forecast_tomorrow",
     }
 
+    # Huawei LUNA2000 via the huawei_solar integration. unique_id format is
+    # f"{device.serial_number}_{register_key}" — verified against
+    # wlcrs/huawei_solar select.py:204, number.py:358, switch.py:200.
+    HUAWEI_SUFFIX_MAP: ClassVar[dict[str, str]] = {
+        "storage_state_of_capacity": "battery_soc",
+        "storage_charge_discharge_power": "battery_charge_power",
+        "storage_maximum_charging_power": "battery_charging_power_rate",
+        "storage_maximum_discharging_power": "battery_discharging_power_rate",
+        "storage_charging_cutoff_capacity": "battery_charge_stop_soc",
+        "storage_grid_charge_cutoff_state_of_charge": "battery_discharge_stop_soc",
+        "storage_charge_from_grid_function": "grid_charge",
+        "storage_working_mode_settings": "huawei_working_mode",
+        "active_power": "local_load_power",
+    }
+
     def resolve_sensor_for_influxdb(self, sensor_key: str) -> str | None:
         """Resolve sensor key to entity ID formatted for InfluxDB (without 'sensor.' prefix).
 
@@ -1254,6 +1274,78 @@ class HomeAssistantAPIController:
         except ValueError as e:
             logger.warning(str(e))
             return False
+
+    def get_huawei_working_mode(self) -> str | None:
+        """Get the current Huawei battery working mode (e.g. 'time_of_use_luna2000')."""
+        return self._get_raw_state("huawei_working_mode")
+
+    def get_huawei_working_mode_options(self) -> list[str]:
+        """Get the working-mode select entity's available options.
+
+        The huawei_solar integration removes 'time_of_use_luna2000' from
+        this list on LG RESU installs and 'time_of_use_lg' on LUNA2000
+        installs (select.py: StorageModeSelectEntity.__init__) — this is
+        the integration itself telling us which battery family is
+        connected, rather than BESS inferring it from an undocumented
+        device-info field. Used by HuaweiController to refuse LG RESU
+        installs with a clear error instead of writing LUNA2000-format
+        TOU periods against them.
+
+        Returns:
+            List of option strings, or [] if the entity is unavailable.
+
+        Raises:
+            SystemConfigurationError: If the working-mode sensor isn't configured.
+        """
+        entity_id = self._get_entity_for_service("huawei_working_mode")
+        response = self._api_request(
+            "get",
+            f"/api/states/{entity_id}",
+            operation="Read Huawei working mode options",
+            category="config",
+        )
+        if not response:
+            return []
+        return list(response.get("attributes", {}).get("options", []))
+
+    def set_huawei_working_mode(self, option: str) -> None:
+        """Set the Huawei battery working mode via the standard select entity.
+
+        Args:
+            option: One of the StorageWorkingModesC option strings, lowercased
+                (e.g. "time_of_use_luna2000").
+        """
+        entity_id = self._get_entity_for_service("huawei_working_mode")
+        self._service_call_with_retry(
+            "select",
+            "select_option",
+            operation=f"Set Huawei working mode to {option}",
+            entity_id=entity_id,
+            option=option,
+        )
+
+    def write_huawei_tou_periods(self, periods_text: str) -> None:
+        """Write the Huawei battery's TOU period list via huawei_solar.set_tou_periods.
+
+        Args:
+            periods_text: Newline-joined period lines, each
+                "HH:MM-HH:MM/<days>/<+|->" (+ = charge, - = discharge).
+
+        Raises:
+            SystemConfigurationError: If huawei_device_id is not configured.
+        """
+        if not self.huawei_device_id:
+            raise SystemConfigurationError(
+                "Huawei battery device_id not configured. Run the setup wizard "
+                "to configure the inverter."
+            )
+        self._service_call_with_retry(
+            "huawei_solar",
+            "set_tou_periods",
+            operation="Write Huawei TOU periods",
+            device_id=self.huawei_device_id,
+            periods=periods_text,
+        )
 
     def set_inverter_time_segment(
         self,
@@ -2863,6 +2955,10 @@ class HomeAssistantAPIController:
     )
     _SOLAX_NATIVE_MARKER_SUFFIX: ClassVar[str] = (
         "remotecontrol_power_control"  # VPP mode selector, SolaX-only
+    )
+
+    _HUAWEI_BATTERY_MARKER_SUFFIX: ClassVar[str] = (
+        "storage_working_mode_settings"  # only present on battery-equipped Huawei installs
     )
 
     _SOLAX_PLATFORMS: ClassVar[set[str]] = {"solax_modbus", "solax"}

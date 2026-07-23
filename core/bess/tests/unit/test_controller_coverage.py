@@ -203,6 +203,30 @@ class TestEvaluateIntentsGrowattMin:
         assert differs is True
         assert "Corruption" in reason
 
+    def test_stale_hardware_interval_forces_cleanup(self, min_ctrl):
+        # An interval still committed on tou_intervals (enabled, hardware-applied)
+        # but whose end_time has already passed relative to current_period must
+        # force a hardware write to clear it, even though the candidate schedule
+        # has no relevant intervals of its own to disagree about.
+        min_ctrl.tou_intervals = [
+            {
+                "segment_id": 1,
+                "batt_mode": "battery_first",
+                "start_time": "01:00",
+                "end_time": "02:00",
+                "enabled": True,
+            },
+        ]
+        all_idle = _hourly_to_quarterly({})  # no strategic intents -> no TOU needed
+
+        # current_period=20 -> 05:00, which is past the stale interval's 02:00 end
+        differs, reason = min_ctrl.evaluate_intents(
+            _make_min_schedule(all_idle), current_period=20
+        )
+
+        assert differs is True
+        assert "Stale" in reason or "cleanup" in reason.lower()
+
 
 class TestMinSyncSocLimits:
     def test_no_mismatch_skips_write(self, min_ctrl, mock_controller):

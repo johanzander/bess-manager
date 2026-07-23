@@ -160,13 +160,18 @@ class GrowattMinController(InverterController):
         if isinstance(other, GrowattMinController):
             self._active_tou_intervals = other._active_tou_intervals.copy()
 
-    def _group_periods_by_mode(self, start_period: int = 0) -> list[dict]:
+    def _group_periods_by_mode(
+        self, intents: list[str], start_period: int = 0
+    ) -> list[dict]:
         """Group consecutive 15-min periods by their battery mode.
 
         This is the core of the new 15-minute resolution TOU scheduling.
         Instead of aggregating to hours, we work directly with periods.
 
         Args:
+            intents: Strategic intents to group (the candidate being built —
+                may be self.strategic_intents, or a different candidate's
+                intents when called from _build_candidate for comparison).
             start_period: Period to start from (0-95), typically current_period
 
         Returns:
@@ -181,7 +186,7 @@ class GrowattMinController(InverterController):
                 ...
             ]
         """
-        if not self.strategic_intents:
+        if not intents:
             return []
 
         groups = []
@@ -189,10 +194,10 @@ class GrowattMinController(InverterController):
         group_start = None
         group_intents = []
 
-        num_periods = len(self.strategic_intents)
+        num_periods = len(intents)
 
         for period in range(start_period, num_periods):
-            intent = self.strategic_intents[period]
+            intent = intents[period]
             mode = self.INTENT_TO_MODE.get(intent, "load_first")
 
             if mode != current_mode:
@@ -412,28 +417,18 @@ class GrowattMinController(InverterController):
         for segment, slot in zip(needs_slot, free_slots, strict=False):
             segment["segment_id"] = slot
 
-    def create_schedule(
-        self,
-        schedule: DPSchedule,
-        current_period: int = 0,
-        previous_tou_intervals: list[dict] | None = None,
-    ):
-        """Process DPSchedule with strategic intents into Growatt MIN format."""
+    def apply_intents(self, schedule: DPSchedule, current_period: int = 0) -> None:
+        """Adopt this cycle's DP intent list, rebuilding TOU intervals from it."""
         logger.info(
             "Creating Growatt schedule using strategic intents from DP algorithm"
         )
 
-        # Always use strategic intents from DP algorithm - no fallbacks
         self.strategic_intents = schedule.original_dp_results["strategic_intent"]
 
         logger.info(
             f"Using {len(self.strategic_intents)} strategic intents from DP algorithm (quarterly resolution)"
         )
 
-        # Log intent transitions from current_period onward — periods before
-        # current_period are already elapsed and re-log identically on every
-        # hourly re-optimization otherwise (downstream TOU-segment building
-        # only processes from current_period onward too, see below).
         for period in range(max(1, current_period), len(self.strategic_intents)):
             if self.strategic_intents[period] != self.strategic_intents[period - 1]:
                 logger.info(
@@ -452,29 +447,36 @@ class GrowattMinController(InverterController):
             len(self.active_tou_intervals),
         )
 
-    def _consolidate_and_convert_with_strategic_intents(self, current_period: int = 0):
-        """Convert strategic intents to TOU intervals using 15-minute resolution.
+    def create_schedule(
+        self,
+        schedule: DPSchedule,
+        current_period: int = 0,
+        previous_tou_intervals: list[dict] | None = None,
+    ) -> None:
+        """Deprecated alias for apply_intents — removed in Task 7."""
+        self.apply_intents(schedule, current_period)
 
-        This method works directly with 15-minute periods instead of aggregating
-        to hourly intervals. This eliminates the "gap problem" where majority
-        voting created holes in charging schedules.
+    def _build_candidate(
+        self, intents: list[str], current_period: int = 0
+    ) -> tuple[list[dict], list[dict]]:
+        """Compute what tou_intervals/active_tou_intervals WOULD be for the
+        given intents, without mutating self.tou_intervals/self.active_tou_intervals.
 
-        Algorithm:
-        1. Group consecutive 15-min periods by their mapped battery mode
-        2. Create TOU intervals for non-default (battery_first, grid_first) groups
-        3. Select next 9 non-expired intervals for hardware (active_tou_intervals)
+        Shared by apply_intents (commits the result onto self) and
+        evaluate_intents (diffs the result against self's currently-applied
+        state) -- one computation, so they can never silently drift apart.
+
+        Exception to purity: reads self.tou_intervals (current committed
+        state, unchanged by this call) to check for corruption, and DOES set
+        self.corruption_detected as an accepted diagnostic side effect (see
+        docs/superpowers/specs/2026-07-23-controller-lifecycle-refactor-design.md).
         """
-        if not self.strategic_intents:
-            raise ValueError(
-                "No strategic intents available — cannot convert to TOU intervals"
-            )
-
         logger.info(
             "Converting %d strategic intents to TOU intervals using 15-minute resolution",
-            len(self.strategic_intents),
+            len(intents),
         )
 
-        # Check for corrupted existing intervals before clearing
+        # Check for corrupted existing intervals (self's real current state)
         if self.tou_intervals:
             intervals_valid = self.validate_tou_intervals_ordering(
                 self.tou_intervals, "before_strategic_intent_conversion"
@@ -494,23 +496,19 @@ class GrowattMinController(InverterController):
                 self.corruption_detected = True
                 logger.warning("CORRUPTION FLAG SET - Hardware write will be FORCED")
 
-        # Start fresh - only periods from current_period onwards get TOU segments
-        self.tou_intervals = []
-
         # Group periods by mode from current_period (rolling window)
-        period_groups = self._group_periods_by_mode(current_period)
+        period_groups = self._group_periods_by_mode(intents, current_period)
 
         logger.info(
             "Grouped %d periods into %d mode groups",
-            len(self.strategic_intents),
+            len(intents),
             len(period_groups),
         )
 
-        # Log the groups for debugging
         for group in period_groups:
             start_h, start_m = self._period_to_time(group["start_period"])
             end_h, end_m = self._period_to_time(group["end_period"])
-            end_m += 14  # Show actual end minute
+            end_m += 14
             logger.debug(
                 "Mode group: %s from %02d:%02d to %02d:%02d (%d periods)",
                 group["mode"],
@@ -521,29 +519,34 @@ class GrowattMinController(InverterController):
                 len(group["intents"]),
             )
 
-        # Convert groups to TOU intervals
         new_intervals = self._groups_to_tou_intervals(period_groups)
-
-        # Add new intervals to the list
-        self.tou_intervals.extend(new_intervals)
-
-        # Sort by start time to ensure chronological order
-        self.tou_intervals.sort(key=lambda x: x["start_time"])
-
-        # Reassign segment IDs in chronological order
-        for i, interval in enumerate(self.tou_intervals, 1):
+        new_intervals.sort(key=lambda x: x["start_time"])
+        for i, interval in enumerate(new_intervals, 1):
             interval["segment_id"] = i
 
-        # Select next 9 non-expired intervals for hardware programming
-        self.active_tou_intervals = self._select_hardware_intervals(
-            self.tou_intervals, current_period
-        )
+        active = self._select_hardware_intervals(new_intervals, current_period)
 
         logger.info(
             "TOU conversion complete: %d total intervals, %d selected for hardware",
-            len(self.tou_intervals),
-            len(self.active_tou_intervals),
+            len(new_intervals),
+            len(active),
         )
+
+        return new_intervals, active
+
+    def _consolidate_and_convert_with_strategic_intents(self, current_period: int = 0):
+        """Unchanged public behavior: mutates self.tou_intervals/active_tou_intervals
+        from self.strategic_intents. Delegates to _build_candidate, shared with
+        apply_intents/evaluate_intents, so there is one computation, not two."""
+        if not self.strategic_intents:
+            raise ValueError(
+                "No strategic intents available — cannot convert to TOU intervals"
+            )
+        new_intervals, active = self._build_candidate(
+            self.strategic_intents, current_period
+        )
+        self.tou_intervals = new_intervals
+        self.active_tou_intervals = active
 
     def _get_period_intent_summary(self, start_hour: int, end_hour: int) -> str:
         """Get a summary of intents for a period (aggregated from quarterly periods)."""
@@ -578,54 +581,24 @@ class GrowattMinController(InverterController):
         else:
             return f"{most_common[0]} (+{len(set(period_intents))-1} others)"
 
-    def compare_schedules(
-        self, other_schedule: "GrowattMinController", from_period: int = 0
+    def _diff_tou_intervals(
+        self, current_tou: list[dict], new_tou: list[dict], from_period: int
     ) -> tuple[bool, str]:
-        """Compare TOU intervals from a specific period onwards.
-
-        Uses 15-minute period granularity to match TOU segment resolution.
-
-        Args:
-            other_schedule: The new schedule to compare against
-            from_period: Period number (0-95) to start comparison from
-
-        Returns:
-            Tuple of (schedules_differ: bool, reason: str)
+        """Compare two already-formatted TOU interval lists from a given period
+        onwards. Pure — no reads/writes of self state. Shared by evaluate_intents
+        (candidate built via _build_candidate) and compare_schedules (another
+        controller's already-committed get_daily_TOU_settings()), so the actual
+        comparison rules live in exactly one place.
         """
-        from_minute = from_period * 15
-        from_hour = from_period // 4
-        from_min_in_hour = (from_period % 4) * 15
-
-        logger.info(
-            "Comparing TOU intervals from period %d (%02d:%02d) onwards",
-            from_period,
-            from_hour,
-            from_min_in_hour,
-        )
-
-        # CRITICAL: If corruption was detected, force hardware write regardless of comparison
-        if self.corruption_detected:
-            logger.warning(
-                "⚠️  CORRUPTION DETECTED FLAG IS SET - FORCING HARDWARE WRITE"
-            )
-            logger.warning(
-                "This overrides normal schedule comparison to ensure corrupted intervals are cleared"
-            )
-            return True, "Corruption detected - forcing hardware write to clear"
-
-        # Get TOU intervals
-        current_tou = self.get_daily_TOU_settings()
-        new_tou = other_schedule.get_daily_TOU_settings()
-
         logger.info(f"Current schedule has {len(current_tou)} TOU intervals")
         logger.info(f"New schedule has {len(new_tou)} TOU intervals")
 
         def interval_end_minute(interval: dict) -> int:
-            """Get end time as minutes since midnight."""
             parts = interval["end_time"].split(":")
             return int(parts[0]) * 60 + int(parts[1])
 
-        # Find relevant intervals (ending at or after from_minute)
+        from_minute = from_period * 15
+
         relevant_current = []
         relevant_new = []
 
@@ -639,11 +612,6 @@ class GrowattMinController(InverterController):
             if end_minute >= from_minute and interval.get("enabled", True):
                 relevant_new.append(interval)
 
-        # Detect stale hardware segments: current schedule has past TOU intervals
-        # that were deployed to hardware but have now expired. These must be
-        # explicitly disabled on the inverter; the Growatt treats TOU segments as
-        # daily-recurring time slots, so a stale segment will re-activate the
-        # next day at the same time, causing uncontrolled discharge/export.
         past_enabled_current = [
             i
             for i in current_tou
@@ -669,20 +637,6 @@ class GrowattMinController(InverterController):
             f"Relevant intervals: Current={len(relevant_current)}, New={len(relevant_new)}"
         )
 
-        # Log what we're comparing
-        logger.info("Current relevant TOU intervals:")
-        for interval in relevant_current:
-            logger.info(
-                f"  {interval['start_time']}-{interval['end_time']} mode={interval['batt_mode']}"
-            )
-
-        logger.info("New relevant TOU intervals:")
-        for interval in relevant_new:
-            logger.info(
-                f"  {interval['start_time']}-{interval['end_time']} mode={interval['batt_mode']}"
-            )
-
-        # Compare relevant intervals
         if len(relevant_current) != len(relevant_new):
             logger.info(
                 f"DECISION: Schedules differ - Different number of relevant intervals ({len(relevant_current)} vs {len(relevant_new)})"
@@ -692,11 +646,9 @@ class GrowattMinController(InverterController):
                 f"Different number of relevant intervals ({len(relevant_current)} vs {len(relevant_new)})",
             )
 
-        # Sort intervals by start time for proper comparison
         relevant_current.sort(key=lambda x: x["start_time"])
         relevant_new.sort(key=lambda x: x["start_time"])
 
-        # Check each relevant interval - ONLY TOU settings that matter to the inverter
         for i, (curr, new) in enumerate(
             zip(relevant_current, relevant_new, strict=False)
         ):
@@ -707,16 +659,71 @@ class GrowattMinController(InverterController):
                 or curr.get("enabled", True) != new.get("enabled", True)
             ):
                 logger.info(f"DECISION: Schedules differ - TOU interval {i} differs:")
-                logger.info(
-                    f"  Current: {curr['start_time']}-{curr['end_time']} mode={curr['batt_mode']} enabled={curr.get('enabled', True)}"
-                )
-                logger.info(
-                    f"  New:     {new['start_time']}-{new['end_time']} mode={new['batt_mode']} enabled={new.get('enabled', True)}"
-                )
                 return True, f"TOU interval {i} differs in mode or timing"
 
-        logger.info("DECISION: Schedules match - All TOU intervals are identical")
-        return False, "TOU intervals match"
+        logger.info("DECISION: Schedules match")
+        return False, ""
+
+    def evaluate_intents(
+        self, schedule: DPSchedule, current_period: int = 0
+    ) -> tuple[bool, str]:
+        """Compare TOU intervals a candidate schedule would produce against
+        what's currently applied, from a specific period onwards.
+
+        Uses 15-minute period granularity to match TOU segment resolution.
+        """
+        from_period = current_period
+        from_hour = from_period // 4
+        from_min_in_hour = (from_period % 4) * 15
+
+        logger.info(
+            "Comparing TOU intervals from period %d (%02d:%02d) onwards",
+            from_period,
+            from_hour,
+            from_min_in_hour,
+        )
+
+        candidate_intents = schedule.original_dp_results["strategic_intent"]
+        candidate_intervals, _active = self._build_candidate(
+            candidate_intents, current_period
+        )
+
+        # CRITICAL: If corruption was detected (by the _build_candidate call
+        # just above, reading self's real current tou_intervals), force
+        # hardware write regardless of comparison.
+        if self.corruption_detected:
+            logger.warning(
+                "⚠️  CORRUPTION DETECTED FLAG IS SET - FORCING HARDWARE WRITE"
+            )
+            logger.warning(
+                "This overrides normal schedule comparison to ensure corrupted intervals are cleared"
+            )
+            return True, "Corruption detected - forcing hardware write to clear"
+
+        current_tou = self.get_daily_TOU_settings()
+        new_tou = self._format_daily_tou(candidate_intervals)
+
+        return self._diff_tou_intervals(current_tou, new_tou, from_period)
+
+    def compare_schedules(
+        self, other_schedule: "GrowattMinController", from_period: int = 0
+    ) -> tuple[bool, str]:
+        """Deprecated alias — compares another controller's already-committed
+        TOU intervals directly (its original contract), unlike evaluate_intents
+        which rebuilds a candidate from a DPSchedule's intents. Removed in Task 7.
+        """
+        if self.corruption_detected:
+            logger.warning(
+                "⚠️  CORRUPTION DETECTED FLAG IS SET - FORCING HARDWARE WRITE"
+            )
+            logger.warning(
+                "This overrides normal schedule comparison to ensure corrupted intervals are cleared"
+            )
+            return True, "Corruption detected - forcing hardware write to clear"
+
+        current_tou = self.get_daily_TOU_settings()
+        new_tou = other_schedule.get_daily_TOU_settings()
+        return self._diff_tou_intervals(current_tou, new_tou, from_period)
 
     def initialize_from_tou_segments(self, tou_segments, current_hour=0):
         """Initialize GrowattMinController with TOU intervals from the inverter."""
@@ -778,22 +785,25 @@ class GrowattMinController(InverterController):
         else:
             logger.info("No active TOU segments found in inverter")
 
-    def get_daily_TOU_settings(self):
-        """Get Growatt-specific TOU settings for all battery modes."""
-        if not self.tou_intervals:
+    def _format_daily_tou(self, intervals: list[dict]) -> list[dict]:
+        """Truncate to max_intervals and fill in segment_id where missing.
+        Shared by get_daily_TOU_settings (self's committed intervals) and
+        evaluate_intents (a candidate's intervals) -- one formatting rule."""
+        if not intervals:
             return []
 
         result = []
-        for interval in self.tou_intervals[: self.max_intervals]:
+        for interval in intervals[: self.max_intervals]:
             segment = interval.copy()
-            # Preserve the segment_id from our new algorithm instead of reassigning
-            # The new tiny segments approach ensures segment IDs are already in chronological order
             if "segment_id" not in segment:
-                # Fallback for legacy intervals that might not have segment_id
                 segment["segment_id"] = len(result) + 1
             result.append(segment)
 
         return result
+
+    def get_daily_TOU_settings(self):
+        """Get Growatt-specific TOU settings for all battery modes."""
+        return self._format_daily_tou(self.tou_intervals)
 
     def get_all_tou_segments(self, current_period: int | None = None):
         """Get all TOU segments with default intervals filling gaps for complete 24-hour coverage.

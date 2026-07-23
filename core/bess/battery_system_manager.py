@@ -684,11 +684,17 @@ class BatterySystemManager:
                 # Update display data even when nothing changes on hardware.
                 # Applied TOU/VPP state on self._inverter_controller is left
                 # untouched — there's only ever one instance now (#369), so
-                # there's nothing to carry forward or swap in.
+                # there's nothing to carry forward or swap in. current_schedule
+                # IS refreshed here (unlike TOU/VPP state) because
+                # _apply_period_schedule reads current_schedule.actions for
+                # every per-period hardware write, even on a not-apply cycle
+                # where the DP re-optimized battery-action magnitudes without
+                # changing which TOU/VPP mode is active.
                 self._current_schedule = temp_schedule
                 self._inverter_controller.strategic_intents = (
                     temp_schedule.strategic_intents
                 )
+                self._inverter_controller.current_schedule = temp_schedule
 
             # Capture prediction snapshot after schedule is applied
             if not prepare_next_day:

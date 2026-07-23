@@ -456,6 +456,69 @@ class TestTouIntervalsStructure:
         assert segments[0]["is_default"] is True
 
 
+# ── _build_candidate purity ──────────────────────────────────────────────────
+
+
+class TestBuildCandidateSph:
+    def test_does_not_mutate_self_state(self, manager: GrowattSphController) -> None:
+        manager.strategic_intents = make_intents({2: "GRID_CHARGING"})
+        manager._charge_periods = ["sentinel"]
+        manager._discharge_periods = ["sentinel"]
+
+        candidate_intents = make_intents({10: "LOAD_SUPPORT"})
+        charge, _discharge, _tou = manager._build_candidate(candidate_intents)
+
+        assert manager._charge_periods == ["sentinel"]
+        assert manager._discharge_periods == ["sentinel"]
+        assert charge != ["sentinel"]
+
+    def test_matches_build_sph_periods_output(
+        self, manager: GrowattSphController
+    ) -> None:
+        intents = make_intents({2: "GRID_CHARGING", 10: "LOAD_SUPPORT"})
+        manager.strategic_intents = intents
+        manager._build_sph_periods()
+        expected_charge = [p.copy() for p in manager._charge_periods]
+        expected_discharge = [p.copy() for p in manager._discharge_periods]
+        expected_tou = [i.copy() for i in manager.tou_intervals]
+
+        manager._charge_periods = []
+        manager._discharge_periods = []
+        manager.tou_intervals = []
+        charge, discharge, tou = manager._build_candidate(intents)
+
+        assert charge == expected_charge
+        assert discharge == expected_discharge
+        assert tou == expected_tou
+
+
+# ── evaluate_intents ─────────────────────────────────────────────────────────
+
+
+class TestEvaluateIntentsSph:
+    def test_no_change_when_intents_identical(
+        self, manager: GrowattSphController
+    ) -> None:
+        intents = make_intents({2: "GRID_CHARGING"})
+        manager.apply_intents(make_schedule_mock(intents), current_period=0)
+
+        differs, _ = manager.evaluate_intents(make_schedule_mock(intents))
+
+        assert differs is False
+
+    def test_detects_charge_period_change(self, manager: GrowattSphController) -> None:
+        manager.apply_intents(
+            make_schedule_mock(make_intents({2: "GRID_CHARGING"})), current_period=0
+        )
+
+        differs, reason = manager.evaluate_intents(
+            make_schedule_mock(make_intents({10: "GRID_CHARGING"}))
+        )
+
+        assert differs is True
+        assert "charge" in reason.lower()
+
+
 # ── Helper ────────────────────────────────────────────────────────────────────
 
 

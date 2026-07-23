@@ -79,7 +79,7 @@ class GrowattSphController(InverterController):
 
         SPH inverters have no per-period entity controls (grid_charge switch,
         discharge rate number).  The entire schedule is written in
-        ``write_schedule_to_hardware`` using ``write_ac_charge_times`` /
+        ``write_to_hardware`` using ``write_ac_charge_times`` /
         ``write_ac_discharge_times``.
         """
         return True, ""
@@ -97,33 +97,39 @@ class GrowattSphController(InverterController):
 
     # ── Schedule building ─────────────────────────────────────────────────────
 
-    def _build_sph_periods(self) -> None:
-        """Build charge and discharge period lists from strategic intents."""
-        self._charge_periods, self._discharge_periods = (
-            self._build_period_list_schedule()
+    def _build_candidate(
+        self, intents: list[str]
+    ) -> tuple[list[dict], list[dict], list[dict]]:
+        """Compute charge/discharge periods and display TOU intervals for the
+        given intents, without mutating self. Shared by apply_intents (commits
+        onto self) and evaluate_intents (diffs against self's current state)."""
+        charge_periods, discharge_periods, tou_intervals = (
+            self._build_period_list_schedule(intents, commit=False)
         )
 
         logger.info(
             "SPH periods built: %d charge period(s), %d discharge period(s)",
-            len(self._charge_periods),
-            len(self._discharge_periods),
+            len(charge_periods),
+            len(discharge_periods),
         )
-        for p in self._charge_periods:
+        for p in charge_periods:
             logger.info("  Charge:    %s-%s", p["start_time"], p["end_time"])
-        for p in self._discharge_periods:
+        for p in discharge_periods:
             logger.info("  Discharge: %s-%s", p["start_time"], p["end_time"])
 
-    def create_schedule(
-        self,
-        schedule: DPSchedule,
-        current_period: int = 0,
-        previous_tou_intervals: list[dict] | None = None,
-    ) -> None:
-        """Process DPSchedule with strategic intents into SPH format.
+        return charge_periods, discharge_periods, tou_intervals
 
-        Args:
-            schedule: DPSchedule containing strategic_intent list in original_dp_results
-        """
+    def _build_sph_periods(self) -> None:
+        """Unchanged public behavior: mutates self._charge_periods/
+        self._discharge_periods/self.tou_intervals from self.strategic_intents.
+        Delegates to _build_candidate, shared with apply_intents/evaluate_intents."""
+        charge, discharge, tou = self._build_candidate(self.strategic_intents)
+        self._charge_periods = charge
+        self._discharge_periods = discharge
+        self.tou_intervals = tou
+
+    def apply_intents(self, schedule: DPSchedule, current_period: int = 0) -> None:
+        """Adopt this cycle's DP intent list, rebuilding SPH charge/discharge periods."""
         logger.info("Creating SPH schedule from strategic intents")
 
         self.strategic_intents = schedule.original_dp_results["strategic_intent"]
@@ -146,7 +152,7 @@ class GrowattSphController(InverterController):
 
     # ── Hardware interface ────────────────────────────────────────────────────
 
-    def write_schedule_to_hardware(
+    def write_to_hardware(
         self,
         controller,
         effective_period: int,
@@ -364,19 +370,21 @@ class GrowattSphController(InverterController):
 
     # ── Schedule comparison ───────────────────────────────────────────────────
 
-    def compare_schedules(
-        self, other_schedule: "GrowattSphController", from_period: int = 0
+    def evaluate_intents(
+        self, schedule: DPSchedule, current_period: int = 0
     ) -> tuple[bool, str]:
-        """Compare SPH periods with another schedule controller.
+        """Compare SPH charge/discharge periods a candidate schedule would
+        produce against what's currently applied."""
+        candidate_intents = schedule.original_dp_results["strategic_intent"]
+        new_charge, new_discharge, _tou = self._build_candidate(candidate_intents)
 
-        Args:
-            other_schedule: Another GrowattSphController to compare against
-            from_period: Comparison start period (informational for SPH)
-
-        Returns:
-            Tuple of (schedules_differ, reason)
-        """
-        return self._compare_period_list_schedules(other_schedule, "SPH")
+        return self._diff_period_lists(
+            self._charge_periods,
+            self._discharge_periods,
+            new_charge,
+            new_discharge,
+            "SPH",
+        )
 
     # ── Period settings ─────────────────────────────────────────────────────
 

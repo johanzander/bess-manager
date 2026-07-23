@@ -5,11 +5,38 @@ Targets uncovered methods in each controller to push coverage toward 90%+.
 
 import pytest
 
+from core.bess.dp_schedule import DPSchedule
 from core.bess.growatt_min_controller import GrowattMinController
 from core.bess.growatt_sph_controller import GrowattSphController
 from core.bess.settings import BatterySettings
 from core.bess.solax_controller import SolaxController
 from core.bess.solax_modbus_growatt_controller import SolaxModbusGrowattController
+
+
+def _hourly_to_quarterly(
+    hourly_intents: dict[int, str], default: str = "IDLE"
+) -> list[str]:
+    """Convert hourly strategic intents to quarterly (96 periods).
+
+    Local copy of the helper in test_growatt_tou_scheduling.py — no shared
+    fixture/helper for DPSchedule construction existed in this file yet.
+    """
+    quarterly = [default] * 96
+    for hour, intent in hourly_intents.items():
+        for period in range(hour * 4, (hour + 1) * 4):
+            quarterly[period] = intent
+    return quarterly
+
+
+def _make_min_schedule(intents: list[str]) -> DPSchedule:
+    """Build a minimal DPSchedule carrying the given strategic intents."""
+    n = len(intents)
+    return DPSchedule(
+        actions=[0.0] * n,
+        state_of_energy=[20.0] * n,
+        prices=[2.0] * n,
+        original_dp_results={"strategic_intent": intents},
+    )
 
 
 @pytest.fixture
@@ -131,67 +158,57 @@ class TestMinGetDailyTouSettings:
         assert len(result) <= min_ctrl.max_intervals
 
 
-class TestMinCompareSchedules:
-    def test_identical_schedules_match(self, battery_settings):
-        ctrl_a = GrowattMinController(battery_settings=battery_settings)
-        ctrl_b = GrowattMinController(battery_settings=battery_settings)
-        ctrl_a.tou_intervals = [
-            {
-                "segment_id": 1,
-                "batt_mode": "battery_first",
-                "start_time": "01:00",
-                "end_time": "05:00",
-                "enabled": True,
-            },
-        ]
-        ctrl_b.tou_intervals = list(ctrl_a.tou_intervals)
-        differs, _reason = ctrl_a.compare_schedules(ctrl_b, from_period=0)
+class TestEvaluateIntentsGrowattMin:
+    """No growatt_min_controller_pair/make_schedule fixture existed in this
+    file — adapted to use the min_ctrl fixture plus local
+    _hourly_to_quarterly/_make_min_schedule helpers."""
+
+    def test_no_change_when_intents_identical(self, min_ctrl):
+        intents = _hourly_to_quarterly({2: "GRID_CHARGING"})
+        min_ctrl.apply_intents(_make_min_schedule(intents), current_period=0)
+
+        differs, _reason = min_ctrl.evaluate_intents(
+            _make_min_schedule(intents), current_period=0
+        )
+
         assert differs is False
 
-    def test_different_mode_detected(self, battery_settings):
-        ctrl_a = GrowattMinController(battery_settings=battery_settings)
-        ctrl_b = GrowattMinController(battery_settings=battery_settings)
-        ctrl_a.tou_intervals = [
-            {
-                "segment_id": 1,
-                "batt_mode": "battery_first",
-                "start_time": "01:00",
-                "end_time": "05:00",
-                "enabled": True,
-            },
-        ]
-        ctrl_b.tou_intervals = [
-            {
-                "segment_id": 1,
-                "batt_mode": "grid_first",
-                "start_time": "01:00",
-                "end_time": "05:00",
-                "enabled": True,
-            },
-        ]
-        differs, _reason = ctrl_a.compare_schedules(ctrl_b, from_period=0)
-        assert differs is True
+    def test_detects_change_when_intents_differ(self, min_ctrl):
+        min_ctrl.apply_intents(
+            _make_min_schedule(_hourly_to_quarterly({2: "GRID_CHARGING"})),
+            current_period=0,
+        )
 
-    def test_different_count_detected(self, battery_settings):
-        ctrl_a = GrowattMinController(battery_settings=battery_settings)
-        ctrl_b = GrowattMinController(battery_settings=battery_settings)
-        ctrl_a.tou_intervals = [
-            {
-                "segment_id": 1,
-                "batt_mode": "battery_first",
-                "start_time": "01:00",
-                "end_time": "05:00",
-                "enabled": True,
-            },
-        ]
-        ctrl_b.tou_intervals = []
-        differs, _reason = ctrl_a.compare_schedules(ctrl_b, from_period=0)
-        assert differs is True
+        differs, reason = min_ctrl.evaluate_intents(
+            _make_min_schedule(_hourly_to_quarterly({10: "BATTERY_EXPORT"})),
+            current_period=0,
+        )
 
-    def test_past_intervals_trigger_stale_cleanup(self, battery_settings):
-        ctrl_a = GrowattMinController(battery_settings=battery_settings)
-        ctrl_b = GrowattMinController(battery_settings=battery_settings)
-        ctrl_a.tou_intervals = [
+        assert differs is True
+        assert reason
+
+    def test_corruption_forces_apply(self, min_ctrl):
+        # Two intervals are required: validate_tou_intervals_ordering treats
+        # a single-interval list as trivially ordered (len <= 1 short-circuits
+        # to True), so corruption can only be observed with >= 2 intervals.
+        intents = _hourly_to_quarterly({2: "GRID_CHARGING", 10: "BATTERY_EXPORT"})
+        min_ctrl.apply_intents(_make_min_schedule(intents), current_period=0)
+        # Corrupt hardware-committed state directly (out of chronological order)
+        min_ctrl.tou_intervals[1]["start_time"] = "01:00"
+
+        differs, reason = min_ctrl.evaluate_intents(
+            _make_min_schedule(intents), current_period=0
+        )
+
+        assert differs is True
+        assert "Corruption" in reason
+
+    def test_stale_hardware_interval_forces_cleanup(self, min_ctrl):
+        # An interval still committed on tou_intervals (enabled, hardware-applied)
+        # but whose end_time has already passed relative to current_period must
+        # force a hardware write to clear it, even though the candidate schedule
+        # has no relevant intervals of its own to disagree about.
+        min_ctrl.tou_intervals = [
             {
                 "segment_id": 1,
                 "batt_mode": "battery_first",
@@ -200,19 +217,15 @@ class TestMinCompareSchedules:
                 "enabled": True,
             },
         ]
-        ctrl_b.tou_intervals = []
-        # from_period=20 means 05:00 — the interval ending at 02:00 is stale
-        differs, reason = ctrl_a.compare_schedules(ctrl_b, from_period=20)
+        all_idle = _hourly_to_quarterly({})  # no strategic intents -> no TOU needed
+
+        # current_period=20 -> 05:00, which is past the stale interval's 02:00 end
+        differs, reason = min_ctrl.evaluate_intents(
+            _make_min_schedule(all_idle), current_period=20
+        )
+
         assert differs is True
         assert "Stale" in reason or "cleanup" in reason.lower()
-
-    def test_corruption_flag_forces_write(self, battery_settings):
-        ctrl_a = GrowattMinController(battery_settings=battery_settings)
-        ctrl_b = GrowattMinController(battery_settings=battery_settings)
-        ctrl_a.corruption_detected = True
-        differs, reason = ctrl_a.compare_schedules(ctrl_b, from_period=0)
-        assert differs is True
-        assert "orruption" in reason
 
 
 class TestMinSyncSocLimits:
@@ -305,50 +318,6 @@ class TestSphReadAndInitializeFromHardware:
         }
         sph_ctrl.read_and_initialize_from_hardware(mock_controller, current_hour=0)
         assert sph_ctrl._charge_periods == []
-
-
-class TestSphCompareSchedules:
-    def test_identical_match(self, battery_settings):
-        a = GrowattSphController(battery_settings=battery_settings)
-        b = GrowattSphController(battery_settings=battery_settings)
-        a._charge_periods = [
-            {"start_time": "01:00", "end_time": "05:00", "enabled": True}
-        ]
-        b._charge_periods = [
-            {"start_time": "01:00", "end_time": "05:00", "enabled": True}
-        ]
-        a._discharge_periods = []
-        b._discharge_periods = []
-        differs, _ = a.compare_schedules(b)
-        assert differs is False
-
-    def test_charge_difference_detected(self, battery_settings):
-        a = GrowattSphController(battery_settings=battery_settings)
-        b = GrowattSphController(battery_settings=battery_settings)
-        a._charge_periods = [
-            {"start_time": "01:00", "end_time": "05:00", "enabled": True}
-        ]
-        b._charge_periods = [
-            {"start_time": "02:00", "end_time": "06:00", "enabled": True}
-        ]
-        a._discharge_periods = []
-        b._discharge_periods = []
-        differs, reason = a.compare_schedules(b)
-        assert differs is True
-        assert "charge" in reason.lower()
-
-    def test_discharge_difference_detected(self, battery_settings):
-        a = GrowattSphController(battery_settings=battery_settings)
-        b = GrowattSphController(battery_settings=battery_settings)
-        a._charge_periods = []
-        b._charge_periods = []
-        a._discharge_periods = [
-            {"start_time": "17:00", "end_time": "21:00", "enabled": True}
-        ]
-        b._discharge_periods = []
-        differs, reason = a.compare_schedules(b)
-        assert differs is True
-        assert "discharge" in reason.lower()
 
 
 # ── InverterController base class (tested via GrowattMinController) ──────────
@@ -619,21 +588,3 @@ class TestSolaxLogSchedule:
 
 
 # ── SolaxModbusGrowattController ─────────────────────────────────────────────
-
-
-class TestModbusCompareSchedules:
-    def test_identical_match(self, battery_settings):
-        a = SolaxModbusGrowattController(battery_settings=battery_settings)
-        b = SolaxModbusGrowattController(battery_settings=battery_settings)
-        a.tou_intervals = [
-            {
-                "segment_id": 1,
-                "batt_mode": "battery_first",
-                "start_time": "01:00",
-                "end_time": "05:00",
-                "enabled": True,
-            },
-        ]
-        b.tou_intervals = list(a.tou_intervals)
-        differs, _reason = a.compare_schedules(b, from_period=0)
-        assert differs is False

@@ -57,7 +57,7 @@ class TestGridChargingProducesChargePeriod:
         self, manager: SolisModbusController
     ) -> None:
         intents = make_intents({2: "GRID_CHARGING", 3: "GRID_CHARGING"})
-        manager.create_schedule(make_schedule_mock(intents))
+        manager.apply_intents(make_schedule_mock(intents))
 
         assert len(manager._charge_periods) == 1
 
@@ -65,7 +65,7 @@ class TestGridChargingProducesChargePeriod:
         self, manager: SolisModbusController
     ) -> None:
         intents = make_intents({2: "GRID_CHARGING", 3: "GRID_CHARGING"})
-        manager.create_schedule(make_schedule_mock(intents))
+        manager.apply_intents(make_schedule_mock(intents))
 
         period = manager._charge_periods[0]
         assert period["start_time"] == "02:00"
@@ -75,10 +75,10 @@ class TestGridChargingProducesChargePeriod:
         self, manager: SolisModbusController
     ) -> None:
         intents = make_intents({2: "GRID_CHARGING"})
-        manager.create_schedule(make_schedule_mock(intents))
+        manager.apply_intents(make_schedule_mock(intents))
 
         controller = MagicMock()
-        manager.write_schedule_to_hardware(controller, 0, [])
+        manager.write_to_hardware(controller, 0, [])
 
         # Slot 1 gets the real charge period, enabled=True
         controller.write_solis_period.assert_any_call(
@@ -89,10 +89,10 @@ class TestGridChargingProducesChargePeriod:
         self, manager: SolisModbusController
     ) -> None:
         intents = make_intents({})  # All IDLE
-        manager.create_schedule(make_schedule_mock(intents))
+        manager.apply_intents(make_schedule_mock(intents))
 
         controller = MagicMock()
-        manager.write_schedule_to_hardware(controller, 0, [])
+        manager.write_to_hardware(controller, 0, [])
 
         for slot in range(1, manager.MAX_CHARGE_PERIODS + 1):
             controller.write_solis_period.assert_any_call(
@@ -108,7 +108,7 @@ class TestSolarStorageIsIdle:
         self, manager: SolisModbusController
     ) -> None:
         intents = make_intents({10: "SOLAR_STORAGE", 11: "SOLAR_STORAGE"})
-        manager.create_schedule(make_schedule_mock(intents))
+        manager.apply_intents(make_schedule_mock(intents))
 
         assert len(manager._charge_periods) == 0
 
@@ -116,7 +116,7 @@ class TestSolarStorageIsIdle:
         self, manager: SolisModbusController
     ) -> None:
         intents = make_intents({10: "SOLAR_STORAGE"})
-        manager.create_schedule(make_schedule_mock(intents))
+        manager.apply_intents(make_schedule_mock(intents))
 
         assert len(manager._discharge_periods) == 0
 
@@ -129,7 +129,7 @@ class TestDischargeIntentsProduceDischargePeriod:
         self, manager: SolisModbusController
     ) -> None:
         intents = make_intents({18: "LOAD_SUPPORT", 19: "LOAD_SUPPORT"})
-        manager.create_schedule(make_schedule_mock(intents))
+        manager.apply_intents(make_schedule_mock(intents))
 
         assert len(manager._discharge_periods) == 1
 
@@ -137,7 +137,7 @@ class TestDischargeIntentsProduceDischargePeriod:
         self, manager: SolisModbusController
     ) -> None:
         intents = make_intents({20: "BATTERY_EXPORT"})
-        manager.create_schedule(make_schedule_mock(intents))
+        manager.apply_intents(make_schedule_mock(intents))
 
         assert len(manager._discharge_periods) == 1
 
@@ -145,7 +145,7 @@ class TestDischargeIntentsProduceDischargePeriod:
         self, manager: SolisModbusController
     ) -> None:
         intents = make_intents({18: "LOAD_SUPPORT", 19: "BATTERY_EXPORT"})
-        manager.create_schedule(make_schedule_mock(intents))
+        manager.apply_intents(make_schedule_mock(intents))
 
         assert len(manager._discharge_periods) == 1
         assert manager._discharge_periods[0]["start_time"] == "18:00"
@@ -155,10 +155,10 @@ class TestDischargeIntentsProduceDischargePeriod:
         self, manager: SolisModbusController
     ) -> None:
         intents = make_intents({20: "BATTERY_EXPORT"})
-        manager.create_schedule(make_schedule_mock(intents))
+        manager.apply_intents(make_schedule_mock(intents))
 
         controller = MagicMock()
-        manager.write_schedule_to_hardware(controller, 0, [])
+        manager.write_to_hardware(controller, 0, [])
 
         controller.write_solis_period.assert_any_call(
             "discharge", 1, "20:00", "20:59", True
@@ -173,7 +173,7 @@ class TestIdleOnlyDay:
         self, manager: SolisModbusController
     ) -> None:
         intents = ["IDLE"] * 96
-        manager.create_schedule(make_schedule_mock(intents))
+        manager.apply_intents(make_schedule_mock(intents))
 
         assert len(manager._charge_periods) == 0
 
@@ -181,7 +181,7 @@ class TestIdleOnlyDay:
         self, manager: SolisModbusController
     ) -> None:
         intents = ["IDLE"] * 96
-        manager.create_schedule(make_schedule_mock(intents))
+        manager.apply_intents(make_schedule_mock(intents))
 
         assert len(manager._discharge_periods) == 0
 
@@ -189,10 +189,10 @@ class TestIdleOnlyDay:
         self, manager: SolisModbusController
     ) -> None:
         intents = ["IDLE"] * 96
-        manager.create_schedule(make_schedule_mock(intents))
+        manager.apply_intents(make_schedule_mock(intents))
 
         controller = MagicMock()
-        writes, disables = manager.write_schedule_to_hardware(controller, 0, [])
+        writes, disables = manager.write_to_hardware(controller, 0, [])
 
         assert writes == 12
         assert disables == 12
@@ -208,7 +208,7 @@ class TestPeriodLimitEnforcement:
         intents = make_intents(
             dict.fromkeys(range(0, 24, 2), "GRID_CHARGING")  # 12 non-consecutive blocks
         )
-        manager.create_schedule(make_schedule_mock(intents))
+        manager.apply_intents(make_schedule_mock(intents))
 
         assert len(manager._charge_periods) <= 6
 
@@ -218,37 +218,35 @@ class TestPeriodLimitEnforcement:
         intents = make_intents(
             dict.fromkeys(range(1, 24, 2), "LOAD_SUPPORT")  # 12 non-consecutive blocks
         )
-        manager.create_schedule(make_schedule_mock(intents))
+        manager.apply_intents(make_schedule_mock(intents))
 
         assert len(manager._discharge_periods) <= 6
 
 
-# ── Schedule comparison ──────────────────────────────────────────────────────
+# ── evaluate_intents ─────────────────────────────────────────────────────────
 
 
-class TestCompareSchedules:
-    def test_identical_schedules_do_not_differ(
-        self, manager: SolisModbusController, battery_settings: BatterySettings
+class TestEvaluateIntentsSolis:
+    def test_no_change_when_intents_identical(
+        self, manager: SolisModbusController
     ) -> None:
         intents = make_intents({2: "GRID_CHARGING"})
-        manager.create_schedule(make_schedule_mock(intents))
+        manager.apply_intents(make_schedule_mock(intents), current_period=0)
 
-        other = SolisModbusController(battery_settings=battery_settings)
-        other.create_schedule(make_schedule_mock(intents))
+        differs, _ = manager.evaluate_intents(make_schedule_mock(intents))
 
-        differ, _ = manager.compare_schedules(other)
-        assert differ is False
+        assert differs is False
 
-    def test_different_charge_periods_are_detected(
-        self, manager: SolisModbusController, battery_settings: BatterySettings
-    ) -> None:
-        manager.create_schedule(make_schedule_mock(make_intents({2: "GRID_CHARGING"})))
+    def test_detects_charge_period_change(self, manager: SolisModbusController) -> None:
+        manager.apply_intents(
+            make_schedule_mock(make_intents({2: "GRID_CHARGING"})), current_period=0
+        )
 
-        other = SolisModbusController(battery_settings=battery_settings)
-        other.create_schedule(make_schedule_mock(make_intents({5: "GRID_CHARGING"})))
+        differs, reason = manager.evaluate_intents(
+            make_schedule_mock(make_intents({5: "GRID_CHARGING"}))
+        )
 
-        differ, reason = manager.compare_schedules(other)
-        assert differ is True
+        assert differs is True
         assert "charge" in reason.lower()
 
 

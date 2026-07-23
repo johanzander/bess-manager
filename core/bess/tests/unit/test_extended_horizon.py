@@ -625,11 +625,10 @@ class TestScheduleTruncation:
         )
         assert result is not None
 
-        schedule_result = system._create_updated_schedule(
+        dp_schedule = system._create_updated_schedule(
             optimization_period, result, prices, optimization_data, True, False
         )
-        assert schedule_result is not None
-        dp_schedule, _growatt_manager = schedule_result
+        assert dp_schedule is not None
 
         # Verify all schedule arrays are bounded to today
         today_count = get_period_count(time_utils.today())

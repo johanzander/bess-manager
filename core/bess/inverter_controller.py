@@ -156,14 +156,21 @@ class InverterController(ABC):
     # period-list scheduling model. Moved here from GrowattSphController so
     # SolisModbusController can reuse them without cross-class private calls.
 
-    def _group_period_blocks(self) -> tuple[list[dict], list[dict]]:
+    def _group_period_blocks(
+        self, intents: list[str] | None = None
+    ) -> tuple[list[dict], list[dict]]:
         """Group consecutive strategic intent periods into charge and discharge blocks.
+
+        Args:
+            intents: Strategic intents to group. Defaults to ``self.strategic_intents``;
+                pass an explicit candidate list to group without mutating self.
 
         Returns:
             Tuple of (charge_blocks, discharge_blocks) where each block is a dict with
             keys 'start_period', 'end_period', and 'intents'.
         """
-        if not self.strategic_intents:
+        intents = self.strategic_intents if intents is None else intents
+        if not intents:
             return [], []
 
         charge_blocks: list[dict] = []
@@ -175,7 +182,7 @@ class InverterController(ABC):
         ]:
             current_block: dict | None = None
 
-            for period, intent in enumerate(self.strategic_intents):
+            for period, intent in enumerate(intents):
                 if intent in intent_set:
                     if current_block is None:
                         current_block = {
@@ -270,16 +277,25 @@ class InverterController(ABC):
             )
         return result
 
-    def _build_period_list_schedule(self) -> tuple[list[dict], list[dict]]:
+    def _build_period_list_schedule(
+        self, intents: list[str] | None = None, *, commit: bool = True
+    ) -> tuple[list[dict], list[dict], list[dict]]:
         """Group strategic intents into charge/discharge period lists and build
-        ``self.tou_intervals`` for display — the shared "new schedule" build for
-        any SM-Period-lists controller (Growatt SPH, Solis).
+        the display TOU intervals — the shared "new schedule" build for any
+        SM-Period-lists controller (Growatt SPH, Solis).
+
+        Args:
+            intents: Strategic intents to build from. Defaults to
+                ``self.strategic_intents``; pass a candidate list to compute
+                without depending on self's committed state.
+            commit: When True (default), also assigns ``self.tou_intervals``.
+                Callers building a read-only candidate (e.g. for diffing
+                against self's current state) must pass ``commit=False``.
 
         Returns:
-            Tuple of (charge_periods, discharge_periods) — subclasses store
-            these on ``self._charge_periods`` / ``self._discharge_periods``.
+            Tuple of (charge_periods, discharge_periods, tou_intervals).
         """
-        charge_blocks, discharge_blocks = self._group_period_blocks()
+        charge_blocks, discharge_blocks = self._group_period_blocks(intents)
         charge_blocks = self._enforce_period_limit(
             charge_blocks, self.MAX_CHARGE_PERIODS
         )
@@ -290,10 +306,12 @@ class InverterController(ABC):
         charge_periods = self._blocks_to_period_dicts(charge_blocks)
         discharge_periods = self._blocks_to_period_dicts(discharge_blocks)
 
-        self.tou_intervals = self._periods_to_tou_intervals(
+        tou_intervals = self._periods_to_tou_intervals(
             charge_periods, discharge_periods, assign_segment_ids=True
         )
-        return charge_periods, discharge_periods
+        if commit:
+            self.tou_intervals = tou_intervals
+        return charge_periods, discharge_periods, tou_intervals
 
     @staticmethod
     def _periods_to_tou_intervals(
@@ -341,20 +359,22 @@ class InverterController(ABC):
                 interval["segment_id"] = idx + 1
         return intervals
 
-    def _compare_period_list_schedules(
-        self, other_schedule: "InverterController", label: str
+    def _diff_period_lists(
+        self,
+        current_charge: list[dict],
+        current_discharge: list[dict],
+        new_charge: list[dict],
+        new_discharge: list[dict],
+        label: str,
     ) -> tuple[bool, str]:
-        """Shared ``compare_schedules`` body for SM-Period-lists controllers.
+        """Shared ``evaluate_intents`` diff body for SM-Period-lists controllers.
 
         Args:
-            other_schedule: Another controller of the same concrete type
-                (must have ``_charge_periods``/``_discharge_periods``).
+            current_charge/current_discharge: Self's currently-applied periods.
+            new_charge/new_discharge: A candidate's periods (e.g. from
+                ``_build_period_list_schedule(intents, commit=False)``).
             label: Platform label used in log/reason strings (e.g. "SPH", "Solis").
         """
-        current_charge = self._charge_periods
-        new_charge = other_schedule._charge_periods
-        current_discharge = self._discharge_periods
-        new_discharge = other_schedule._discharge_periods
 
         def _periods_equal(a: list[dict], b: list[dict]) -> bool:
             if len(a) != len(b):
@@ -722,16 +742,21 @@ class InverterController(ABC):
         """Return the subset of TOU intervals currently written to hardware."""
 
     @abstractmethod
-    def create_schedule(
+    def apply_intents(
         self,
         schedule: DPSchedule,
         current_period: int = 0,
-        previous_tou_intervals: list[dict] | None = None,
     ) -> None:
-        """Build hardware-specific schedule from DPSchedule."""
+        """Adopt this cycle's DP intent list as current control state.
+
+        For TOU-style platforms this rebuilds persisted hardware TOU
+        intervals; for VPP/SolaX-style ephemeral platforms this is a
+        near-passthrough of the intent list (control is applied per-period
+        elsewhere, not as a batch schedule).
+        """
 
     @abstractmethod
-    def write_schedule_to_hardware(
+    def write_to_hardware(
         self,
         controller,
         effective_period: int,
@@ -744,26 +769,20 @@ class InverterController(ABC):
         """
 
     @abstractmethod
-    def compare_schedules(
-        self, other_schedule: "InverterController", from_period: int = 0
+    def evaluate_intents(
+        self, schedule: DPSchedule, current_period: int = 0
     ) -> tuple[bool, str]:
-        """Compare schedules. Returns (schedules_differ, reason)."""
+        """Would applying ``schedule`` differ from what's currently in
+        effect, from ``current_period`` onwards? Returns (differs, reason).
+
+        Read-only: must not mutate self's committed state (tou_intervals,
+        strategic_intents, etc.) — only self.corruption_detected may be set
+        as an accepted diagnostic side effect on platforms that support it.
+        """
 
     @abstractmethod
     def read_and_initialize_from_hardware(self, controller, current_hour: int) -> None:
         """Read current schedule from inverter and initialize this controller."""
-
-    def seed_from(self, other: "InverterController") -> None:
-        """Carry forward hardware-derived state onto a freshly created controller.
-
-        BatterySystemManager recreates the controller every optimization
-        cycle (build-candidate-then-swap); anything seeded from a hardware
-        read-back in read_and_initialize_from_hardware must be re-applied
-        here too, or it silently resets to the __init__ default every cycle
-        (#329). Subclasses override to add their own such fields, calling
-        super().seed_from(other) first.
-        """
-        self.tou_intervals = other.tou_intervals.copy()
 
     @abstractmethod
     def sync_soc_limits(self, controller) -> None:

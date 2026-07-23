@@ -27,6 +27,7 @@ export const INVERTER_INTEGRATION_IDS: Record<string, string> = {
   solax_modbus_growatt_min: 'solax_modbus_growatt_min',
   solax_modbus_growatt_sph: 'solax_modbus_growatt_sph',
   solax_modbus_native: 'solax_modbus_native',
+  huawei_solar_luna2000: 'huawei_solar_luna2000',
 };
 
 // Platform IDs are now used consistently at all layers — no conversion needed.
@@ -38,6 +39,7 @@ export const VALID_PLATFORMS = [
   'solax_modbus_growatt_min',
   'solax_modbus_growatt_sph',
   'solax_modbus_native',
+  'huawei_solar_luna2000',
 ] as const;
 
 export type PlatformId = typeof VALID_PLATFORMS[number];
@@ -55,6 +57,7 @@ export interface PerPlatformSensors {
   solax_modbus_growatt_min: Record<string, string>;
   solax_modbus_growatt_sph: Record<string, string>;
   solax_modbus_native: Record<string, string>;
+  huawei_solar_luna2000: Record<string, string>;
   shared: Record<string, string>;
 }
 
@@ -73,6 +76,7 @@ export function emptyPerPlatformSensors(platform = ''): PerPlatformSensors {
     solax_modbus_growatt_min: {},
     solax_modbus_growatt_sph: {},
     solax_modbus_native: {},
+    huawei_solar_luna2000: {},
     shared: {},
   };
 }
@@ -350,6 +354,38 @@ export const INTEGRATIONS: IntegrationDef[] = [
           { key: 'growatt_vpp_allow_ac_charging', label: 'VPP Allow AC Charging', required: true },
           { key: 'growatt_vpp_time', label: 'VPP Time (Fallback Timer)', required: true },
           { key: 'growatt_vpp_power', label: 'VPP Power', required: true },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'huawei_solar_luna2000',
+    name: 'Huawei LUNA2000',
+    required: true,
+    description: 'Huawei LUNA2000 battery controlled via the huawei_solar integration (local Modbus)',
+    sensorGroups: [
+      {
+        name: 'Battery Monitoring',
+        sensors: [
+          { key: 'battery_soc', label: 'State of Capacity', required: true },
+          { key: 'battery_charge_power', label: 'Charge/Discharge Power', required: true },
+        ],
+      },
+      {
+        name: 'Battery Control',
+        sensors: [
+          { key: 'huawei_working_mode', label: 'Working Mode (select)', required: true },
+          { key: 'battery_charging_power_rate', label: 'Maximum Charging Power', required: false },
+          { key: 'battery_discharging_power_rate', label: 'Maximum Discharging Power', required: false },
+          { key: 'battery_charge_stop_soc', label: 'Charging Cutoff Capacity', required: true },
+          { key: 'battery_discharge_stop_soc', label: 'Grid-Charge Cutoff SOC', required: true },
+          { key: 'grid_charge', label: 'Charge From Grid Function', required: false },
+        ],
+      },
+      {
+        name: 'Power Monitoring',
+        sensors: [
+          { key: 'local_load_power', label: 'Inverter Active Power', required: false },
         ],
       },
     ],

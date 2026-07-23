@@ -499,6 +499,18 @@ class InverterController(ABC):
     def read_and_initialize_from_hardware(self, controller, current_hour: int) -> None:
         """Read current schedule from inverter and initialize this controller."""
 
+    def seed_from(self, other: "InverterController") -> None:
+        """Carry forward hardware-derived state onto a freshly created controller.
+
+        BatterySystemManager recreates the controller every optimization
+        cycle (build-candidate-then-swap); anything seeded from a hardware
+        read-back in read_and_initialize_from_hardware must be re-applied
+        here too, or it silently resets to the __init__ default every cycle
+        (#329). Subclasses override to add their own such fields, calling
+        super().seed_from(other) first.
+        """
+        self.tou_intervals = other.tou_intervals.copy()
+
     @abstractmethod
     def sync_soc_limits(self, controller) -> None:
         """Sync SOC limits from config to inverter hardware."""

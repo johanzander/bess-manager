@@ -154,6 +154,12 @@ class GrowattMinController(InverterController):
     def active_tou_intervals(self, value: list[dict]) -> None:
         self._active_tou_intervals = value
 
+    def seed_from(self, other: "InverterController") -> None:
+        """See base docstring. Adds the active-TOU-subset tracker."""
+        super().seed_from(other)
+        if isinstance(other, GrowattMinController):
+            self._active_tou_intervals = other._active_tou_intervals.copy()
+
     def _group_periods_by_mode(self, start_period: int = 0) -> list[dict]:
         """Group consecutive 15-min periods by their battery mode.
 

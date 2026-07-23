@@ -300,6 +300,51 @@ class TestWriteScheduleToHardware:
         assert controller._last_written_tou_mode == "grid_first"
 
 
+class TestSeedFrom:
+    """#329-shaped bug: BatterySystemManager recreates the controller every
+    optimization cycle. Without carrying forward _last_written_tou_mode, the
+    fresh instance treats the next period tick as a mode change and re-writes
+    the TOU segment even when the hardware already reflects that mode."""
+
+    def test_seed_from_skips_redundant_tou_write_after_recreation(
+        self, controller, mock_ha, battery_settings
+    ):
+        intents = hourly_to_quarterly({0: "GRID_CHARGING", 1: "GRID_CHARGING"})
+        schedule = make_schedule(intents)
+        controller.create_schedule(schedule, current_period=0)
+
+        grid_charge, discharge_rate, block_passive_charging = (
+            controller.compute_rates_for_period(0, 0.0)
+        )
+        with patch("core.bess.solax_modbus_growatt_controller.time_utils") as mock_time:
+            from datetime import datetime
+
+            mock_time.now.return_value = datetime(2026, 5, 20, 0, 0, 0)
+            controller.apply_period(
+                mock_ha, grid_charge, discharge_rate, block_passive_charging
+            )
+        assert len(mock_ha.calls["tou_segments"]) == 1
+
+        # Simulates the next optimization cycle: a brand-new controller
+        # instance, seeded from the outgoing one before being adopted.
+        next_controller = SolaxModbusGrowattController(battery_settings)
+        next_controller.seed_from(controller)
+        next_controller.create_schedule(schedule, current_period=0)
+
+        grid_charge, discharge_rate, block_passive_charging = (
+            next_controller.compute_rates_for_period(4, 0.0)
+        )
+        with patch("core.bess.solax_modbus_growatt_controller.time_utils") as mock_time:
+            from datetime import datetime
+
+            mock_time.now.return_value = datetime(2026, 5, 20, 1, 0, 0)
+            next_controller.apply_period(
+                mock_ha, grid_charge, discharge_rate, block_passive_charging
+            )
+
+        assert len(mock_ha.calls["tou_segments"]) == 1
+
+
 class TestReadAndInitialize:
     """Test read_and_initialize_from_hardware with migration cleanup."""
 

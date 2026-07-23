@@ -5,6 +5,7 @@ exercising the real _api_request / _service_call_with_retry / _get_raw_state
 code paths without needing a live Home Assistant instance.
 """
 
+import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -138,6 +139,21 @@ class TestApiRequest:
         result = ctrl._api_request("get", "/api/states/sensor.battery_soc")
         assert result == {"state": "50"}
 
+    def test_404_logs_error_by_default(self, ctrl, caplog):
+        ctrl.session.get = _session_method_mock("get", return_value=_mock_404())
+        with caplog.at_level(logging.DEBUG, logger="core.bess.ha_api_controller"):
+            with pytest.raises(requests.HTTPError):
+                ctrl._api_request("get", "/api/states/sensor.missing")
+        assert any(r.levelno == logging.ERROR for r in caplog.records)
+
+    def test_404_logs_debug_when_optional(self, ctrl, caplog):
+        ctrl.session.get = _session_method_mock("get", return_value=_mock_404())
+        with caplog.at_level(logging.DEBUG, logger="core.bess.ha_api_controller"):
+            with pytest.raises(requests.HTTPError):
+                ctrl._api_request("get", "/api/states/sensor.missing", optional=True)
+        assert not any(r.levelno == logging.ERROR for r in caplog.records)
+        assert any(r.levelno == logging.DEBUG for r in caplog.records)
+
 
 # ── _service_call_with_retry ─────────────────────────────────────────────────
 
@@ -176,6 +192,17 @@ class TestServiceCallWithRetry:
             )
             mock.assert_called_once()
             assert result == {"data": []}
+
+    def test_input_number_domain_categorized_as_battery_control(self, ctrl):
+        """Regression test for #372: input_number writes must be classified
+        the same as number writes, or a failed write to a user-configured
+        input_number.* entity silently degrades to the generic 'other'
+        category in the runtime failure alert UI."""
+        with patch.object(ctrl, "_api_request", return_value=None) as mock:
+            ctrl._service_call_with_retry(
+                "input_number", "set_value", entity_id="input_number.x", value=1
+            )
+            assert mock.call_args.kwargs["category"] == "battery_control"
 
 
 # ── _get_raw_state / _get_sensor_value / _get_binary_state ───────────────────
@@ -277,6 +304,90 @@ class TestSetOperations:
         with patch.object(ctrl, "_service_call_with_retry") as mock:
             ctrl.set_charge_stop_soc(90)
             assert mock.call_args[1]["value"] == 90
+
+    def test_set_charge_stop_soc_input_number_entity(self, ctrl):
+        """Regression test for #372: a user-overridden input_number.* entity
+        must be written via input_number.set_value, not number.set_value —
+        the latter is scoped to the number platform and silently fails
+        against an input_number entity."""
+        ctrl.sensors["battery_charge_stop_soc"] = "input_number.charge_stop_soc"
+        with patch.object(ctrl, "_service_call_with_retry") as mock:
+            ctrl.set_charge_stop_soc(90)
+            assert mock.call_args[0][:2] == ("input_number", "set_value")
+            assert mock.call_args[1]["value"] == 90
+
+    def test_set_charge_stop_soc_number_entity_still_uses_number_domain(self, ctrl):
+        with patch.object(ctrl, "_service_call_with_retry") as mock:
+            ctrl.set_charge_stop_soc(90)
+            assert mock.call_args[0][:2] == ("number", "set_value")
+
+
+class TestSetTouSegmentViaEntities:
+    """Regression test for #362: begin/end must use time.set_value, not
+    select.select_option, when the resolved entity is HA domain `time.*`
+    (the only domain solax_modbus's Growatt plugin exposes for TOU
+    begin/end — select.select_option against it is a silent HA no-op)."""
+
+    @pytest.fixture
+    def tou_ctrl(self, ctrl):
+        ctrl.sensors.update(
+            {
+                "tou_time_1_enabled": "select.pv_growatt_time_1_active",
+                "tou_time_1_begin": "time.pv_growatt_time_1_begin",
+                "tou_time_1_end": "time.pv_growatt_time_1_end",
+                "tou_time_1_mode": "select.pv_growatt_time_1_mode",
+                "tou_time_1_update": "button.pv_growatt_time_1_update",
+            }
+        )
+        return ctrl
+
+    def test_begin_end_written_via_time_set_value(self, tou_ctrl):
+        with patch.object(tou_ctrl, "_service_call_with_retry") as mock:
+            tou_ctrl.set_tou_segment_via_entities(
+                segment_id=1,
+                batt_mode="grid_first",
+                start_time="07:00",
+                end_time="08:59",
+                enabled=True,
+            )
+
+        calls_by_entity = {
+            call.kwargs["entity_id"]: call
+            for call in mock.call_args_list
+            if "entity_id" in call.kwargs
+        }
+
+        begin_call = calls_by_entity["time.pv_growatt_time_1_begin"]
+        assert begin_call.args[:2] == ("time", "set_value")
+        assert begin_call.kwargs["time"] == "07:00:00"
+
+        end_call = calls_by_entity["time.pv_growatt_time_1_end"]
+        assert end_call.args[:2] == ("time", "set_value")
+        assert end_call.kwargs["time"] == "08:59:00"
+
+    def test_mode_and_enabled_still_use_select_option(self, tou_ctrl):
+        with patch.object(tou_ctrl, "_service_call_with_retry") as mock:
+            tou_ctrl.set_tou_segment_via_entities(
+                segment_id=1,
+                batt_mode="grid_first",
+                start_time="07:00",
+                end_time="08:59",
+                enabled=True,
+            )
+
+        calls_by_entity = {
+            call.kwargs["entity_id"]: call
+            for call in mock.call_args_list
+            if "entity_id" in call.kwargs
+        }
+
+        mode_call = calls_by_entity["select.pv_growatt_time_1_mode"]
+        assert mode_call.args[:2] == ("select", "select_option")
+        assert mode_call.kwargs["option"] == "Grid First"
+
+        enabled_call = calls_by_entity["select.pv_growatt_time_1_active"]
+        assert enabled_call.args[:2] == ("select", "select_option")
+        assert enabled_call.kwargs["option"] == "Enabled"
 
 
 class TestGridChargeEnabled:

@@ -20,6 +20,7 @@ which is both exact with respect to the *true* action space and always
 executable exactly as planned.
 """
 
+import numpy as np
 import pytest
 
 from core.bess.dp_battery_algorithm import (
@@ -267,3 +268,104 @@ def test_charge_candidate_present_when_above_classification_threshold():
     )
     assert candidate is not None
     assert candidate > 0.0
+
+
+def test_compute_reward_self_throttle_threshold_is_parameterized():
+    """#320: a platform with no self-throttle (self_throttle_export_threshold_kwh=0)
+    must credit export revenue for the smallest overshoot; the default (0.01)
+    must not."""
+    from core.bess.dp_battery_algorithm import _compute_reward
+
+    settings = make_battery_settings(max_discharge_power_kw=5.0)
+    # power chosen so grid_exported lands strictly between 0 and 0.01 kWh
+    # at dt=1.0h: home_consumption=1.0, discharge=1.005 kW -> export=0.005 kWh
+    reward_default, _ = _compute_reward(
+        power=-1.005,
+        soe=15.0,
+        next_soe=15.0 - 1.005 * 1.0 / settings.efficiency_discharge,
+        period=0,
+        home_consumption=1.0,
+        battery_settings=settings,
+        dt=1.0,
+        buy_price=[0.30],
+        sell_price=[0.10],
+        solar_production=0.0,
+        cost_basis=0.0,
+    )
+    reward_no_throttle, _ = _compute_reward(
+        power=-1.005,
+        soe=15.0,
+        next_soe=15.0 - 1.005 * 1.0 / settings.efficiency_discharge,
+        period=0,
+        home_consumption=1.0,
+        battery_settings=settings,
+        dt=1.0,
+        buy_price=[0.30],
+        sell_price=[0.10],
+        solar_production=0.0,
+        cost_basis=0.0,
+        self_throttle_export_threshold_kwh=0.0,
+    )
+    # no_throttle credits the 0.005 kWh export at sell_price=0.10; default
+    # zeroes it out (self-throttled), so no_throttle's reward is higher.
+    assert reward_no_throttle > reward_default
+    assert reward_no_throttle == pytest.approx(reward_default + 0.005 * 0.10, abs=1e-9)
+
+
+def test_discharge_candidates_use_injected_resolution():
+    """#320: a platform with finer resolution than Growatt's 1%-of-max grid
+    (e.g. a hypothetical 0.5%-of-max step) must produce twice as many
+    candidates over the same feasible range, not the hardcoded /100 step."""
+    settings = make_battery_settings(max_discharge_power_kw=10.0)
+    default_candidates = _discharge_candidates(
+        soe=15.0,
+        battery_settings=settings,
+        dt=1.0,
+        home_consumption=1.234,
+        solar_production=0.0,
+    )
+    finer_candidates = _discharge_candidates(
+        soe=15.0,
+        battery_settings=settings,
+        dt=1.0,
+        home_consumption=1.234,
+        solar_production=0.0,
+        discharge_resolution_kw=settings.max_discharge_power_kw / 200,
+    )
+    assert len(finer_candidates) > len(default_candidates)
+    # every finer-grid candidate must still be an exact multiple of the
+    # *injected* step, not the hardcoded 1% step
+    step = settings.max_discharge_power_kw / 200
+    for p in finer_candidates:
+        pct = p / step
+        assert pct == pytest.approx(round(pct), abs=1e-6)
+
+
+def test_interpolate_value_extrapolates_below_min_soe():
+    """#336: a below-floor SOE (a live sensor reading under min_soe_kwh,
+    tolerated per #233's _soe_floor) must not be flattened to V_row[0].
+
+    Real bundle evidence (bess-debug-2026-07-18-104523.md): with
+    initial_soe=3.75kWh < min_soe_kwh=4.05kWh, every candidate whose
+    next_soe stayed below the floor was clamped to the same degenerate
+    V_row[0] value, so "charge a little" and "don't charge" looked equally
+    worthless and the DP exported free solar at negative prices for 24
+    straight periods instead of storing it. The value function must
+    extrapolate the local gradient below the floor instead of clamping,
+    so states below the floor are still distinguishable by how close they
+    are to it.
+    """
+    settings = make_battery_settings(
+        total_capacity=20.0, min_soc=11.0
+    )  # min_soe_kwh = 2.2
+    step = 0.05  # SOE_STEP_KWH
+    # V_row has a gradient of 1.0 value/kWh between the first two grid points
+    V_row = np.array([2.0, 2.0 + step, 4.0, 6.0])
+
+    soe_one_step_below_floor = settings.min_soe_kwh - step
+    value = _interpolate_value(V_row, soe_one_step_below_floor, settings)
+
+    # Extrapolating the V_row[0]->V_row[1] gradient one step below the
+    # floor should yield ~1.95, not the clamped-flat 2.0.
+    assert value == pytest.approx(1.95, abs=1e-9)
+    assert value != pytest.approx(V_row[0], abs=1e-9)

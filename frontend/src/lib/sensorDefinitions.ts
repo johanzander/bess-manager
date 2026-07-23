@@ -290,6 +290,16 @@ export const INTEGRATIONS: IntegrationDef[] = [
           { key: 'tou_time_1_update', label: 'Time Slot 1 Update', required: true },
         ],
       },
+      {
+        name: 'VPP Control (experimental — alternative to TOU Schedule)',
+        sensors: [
+          { key: 'growatt_vpp_status', label: 'VPP Status', required: false },
+          { key: 'growatt_vpp_remote_control', label: 'VPP Remote Control', required: false },
+          { key: 'growatt_vpp_allow_ac_charging', label: 'VPP Allow AC Charging', required: false },
+          { key: 'growatt_vpp_time', label: 'VPP Time (Fallback Timer)', required: false },
+          { key: 'growatt_vpp_power', label: 'VPP Power', required: false },
+        ],
+      },
     ],
   },
   {
@@ -334,6 +344,16 @@ export const INTEGRATIONS: IntegrationDef[] = [
           { key: 'lifetime_import_from_grid', label: 'Grid Import Total', required: false },
           { key: 'lifetime_export_to_grid', label: 'Grid Export Total', required: false },
           { key: 'lifetime_load_consumption', label: 'Total Load', required: false },
+        ],
+      },
+      {
+        name: 'VPP Control (experimental)',
+        sensors: [
+          { key: 'growatt_vpp_status', label: 'VPP Status', required: true },
+          { key: 'growatt_vpp_remote_control', label: 'VPP Remote Control', required: true },
+          { key: 'growatt_vpp_allow_ac_charging', label: 'VPP Allow AC Charging', required: true },
+          { key: 'growatt_vpp_time', label: 'VPP Time (Fallback Timer)', required: true },
+          { key: 'growatt_vpp_power', label: 'VPP Power', required: true },
         ],
       },
     ],

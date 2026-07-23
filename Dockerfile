@@ -40,7 +40,7 @@ RUN apk add --no-cache \
 
 WORKDIR /app
 
-COPY backend/app.py backend/api.py backend/api_conversion.py backend/api_dataclasses.py backend/ai_chat.py backend/log_config.py backend/settings_store.py backend/requirements.txt ./
+COPY backend/app.py backend/api.py backend/api_conversion.py backend/api_dataclasses.py backend/ai_chat.py backend/log_config.py backend/requirements.txt ./
 
 COPY core/ /app/core/
 

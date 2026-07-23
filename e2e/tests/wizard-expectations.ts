@@ -188,4 +188,17 @@ export const EXPECTATIONS: Record<string, WizardExpectation> = {
     dischargeInhibitFound: false,
     weatherFound: false,
   },
+  'ci-wizard-growatt-vpp': {
+    growattFound: false,
+    solaxFound: true,
+    inverterPlatform: 'solax_modbus_growatt_sph',
+    nordpoolFound: true,
+    octopusFound: false,
+    autoSelectedProvider: 'nordpool_official',
+    phaseCount: 3,
+    solcastFound: false,
+    consumptionForecastFound: false,
+    dischargeInhibitFound: false,
+    weatherFound: false,
+  },
 };

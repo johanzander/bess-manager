@@ -6,9 +6,10 @@ in _aggregate_quarterly_to_hourly.
 """
 
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from unittest.mock import MagicMock
 
+import pytest
 from api import router
 from api_dataclasses import APIDashboardHourlyData, APIDashboardSummary
 from fastapi import FastAPI
@@ -47,6 +48,41 @@ def _make_period(period: int) -> PeriodData:
         period=period,
         energy=energy,
         timestamp=datetime(2025, 7, 13, period // 4, (period % 4) * 15),
+        data_source="predicted",
+        economic=economic,
+        decision=decision,
+    )
+
+
+def _make_period_with_costs(
+    period: int, day: date, grid_cost: float, grid_only_cost: float
+) -> PeriodData:
+    energy = EnergyData(
+        solar_production=0.5,
+        home_consumption=0.5,
+        battery_charged=0.0,
+        battery_discharged=0.0,
+        grid_imported=0.0,
+        grid_exported=0.0,
+        battery_soe_start=15.0,
+        battery_soe_end=15.0,
+    )
+    economic = EconomicData(
+        buy_price=1.0,
+        sell_price=0.5,
+        hourly_cost=grid_cost,
+        grid_cost=grid_cost,
+        grid_only_cost=grid_only_cost,
+        solar_only_cost=0.0,
+        hourly_savings=0.0,
+    )
+    decision = DecisionData(strategic_intent="IDLE", observed_intent="IDLE")
+    return PeriodData(
+        period=period,
+        energy=energy,
+        timestamp=datetime.combine(
+            day, datetime.min.time().replace(hour=period // 4, minute=(period % 4) * 15)
+        ),
         data_source="predicted",
         economic=economic,
         decision=decision,
@@ -161,6 +197,20 @@ class TestDashboard:
         resp = _client.get("/api/dashboard")
         assert resp.status_code == 503
 
+    def test_unavailable_battery_soc_sensor_returns_clear_error(self):
+        """battery_soc sensor going 'unavailable' must not surface as an
+        opaque TypeError from dividing None by a float."""
+        ctrl = _make_started_controller()
+        ctrl.ha_controller.get_battery_soc.return_value = None
+        sys.modules["app"].bess_controller = ctrl
+
+        resp = _client.get("/api/dashboard")
+
+        assert resp.status_code == 500
+        detail = resp.json()["detail"]
+        assert "NoneType" not in detail
+        assert "battery_soc" in detail.lower() or "battery soc" in detail.lower()
+
     def test_historical_date_returns_persisted_daily_view(self):
         ctrl = _make_started_controller()
         historical_date = date(2020, 1, 1)
@@ -193,6 +243,50 @@ class TestDashboard:
         resp = _client.get("/api/dashboard?date=2020-01-01")
 
         assert resp.status_code == 404
+
+
+class TestDashboardFullHorizonCost:
+    """Issue #287: when a 2-day (192-period) DP plan is active, Net Grid Cost /
+    Net Savings must also expose the full-horizon total, not just today's slice.
+    """
+
+    def test_full_horizon_fields_absent_for_single_day_schedule(self):
+        sys.modules["app"].bess_controller = _make_started_controller()
+        resp = _client.get("/api/dashboard")
+        assert resp.status_code == 200
+        summary = resp.json()["summary"]
+        assert summary["horizonDays"] == 1
+        assert summary["netGridCostFullHorizon"] is None
+        assert summary["netSavingsFullHorizon"] is None
+
+    def test_full_horizon_fields_present_for_two_day_schedule(self):
+        ctrl = _make_started_controller()
+
+        today = time_utils.today()
+        period_data = [
+            _make_period_with_costs(i, today, grid_cost=0.0, grid_only_cost=0.5)
+            for i in range(96)
+        ] + [
+            _make_period_with_costs(
+                i - 96, today + timedelta(days=1), grid_cost=0.1, grid_only_cost=0.2
+            )
+            for i in range(96, 192)
+        ]
+        mock_schedule = MagicMock()
+        mock_schedule.optimization_period = 0
+        mock_schedule.optimization_result.period_data = period_data
+        ctrl.system.schedule_store.get_latest_schedule.return_value = mock_schedule
+
+        sys.modules["app"].bess_controller = ctrl
+        resp = _client.get("/api/dashboard")
+
+        assert resp.status_code == 200
+        summary = resp.json()["summary"]
+        assert summary["horizonDays"] == 2
+        # today: 96 periods * (grid_cost=0.0, grid_only_cost=0.5) -> netGrid=0.0, gridOnly=48.0
+        # tomorrow: 96 periods * (grid_cost=0.1, grid_only_cost=0.2) -> netGrid=9.6, gridOnly=19.2
+        assert summary["netGridCostFullHorizon"]["value"] == pytest.approx(9.6)
+        assert summary["netSavingsFullHorizon"]["value"] == pytest.approx(57.6)
 
 
 class TestDashboardAvailableDates:

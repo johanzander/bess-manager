@@ -36,8 +36,10 @@ class DebugReportFormatter:
                 self._format_ha_ws_discovery(export),
                 self._format_addon_options(export),
                 self._format_entity_snapshot(export),
+                self._format_ha_statistics(export),
                 self._format_inverter_tou(export),
                 self._format_historical_data(export),
+                self._format_previous_days(export),
                 self._format_schedules(export),
                 self._format_snapshots(export),
                 self._format_logs(export),
@@ -339,6 +341,30 @@ Findings (top) and System Logs (bottom).*
 
 </details>"""
 
+    def _format_ha_statistics(self, export: DebugDataExport) -> str:
+        """Format the raw HA Recorder statistics behind ha_statistics.
+
+        Lets a mock replay serve the exact recorder response back instead of
+        approximating a 7-day profile from a single real day of history.
+        """
+        ha_stats = export.ha_statistics
+        stats = ha_stats.get("stats", [])
+
+        summary = f"""## HA Statistics (recorder replay data)
+
+**Statistic ID**: {ha_stats.get("statistic_id", "N/A")}
+
+**Entries**: {len(stats)}"""
+
+        if not stats:
+            return summary + "\n\n*No recorder statistics available*"
+
+        return summary + f"""
+
+```json
+{self._format_json(ha_stats)}
+```"""
+
     def _format_inverter_tou(self, export: DebugDataExport) -> str:
         segments = export.inverter_tou_segments
         count = len(segments)
@@ -355,6 +381,41 @@ Findings (top) and System Logs (bottom).*
 ```json
 {self._format_json(segments)}
 ```"""
+
+    def _build_period_table(self, periods: list[dict | None]) -> str:
+        """Render a period list as the shared intent/observed/SOE/solar/import/savings table.
+
+        Used for both today's historical data and persisted prior-day views —
+        same PeriodData shape, same columns.
+        """
+        rows = [
+            "| Per | Time  | Src    | Intent           | Observed         |"
+            " SOE kWh | Solar | Import | Savings |",
+            "|-----|-------|--------|------------------|------------------|"
+            "---------|-------|--------|---------|",
+        ]
+        for p in periods:
+            if p is None:
+                continue
+            period = p.get("period", "")
+            time_str = format_period(period) if isinstance(period, int) else ""
+            src = p.get("data_source", "")[:6]
+            dec = p.get("decision", {})
+            intent = dec.get("strategic_intent", "")[:16]
+            observed = (dec.get("observed_intent") or "")[:16]
+            en = p.get("energy", {})
+            soe_s = en.get("battery_soe_start", 0)
+            soe_e = en.get("battery_soe_end", 0)
+            solar = en.get("solar_production", 0)
+            imp = en.get("grid_imported", 0)
+            econ = p.get("economic", {})
+            savings = econ.get("hourly_savings", 0)
+            rows.append(
+                f"| {period:>3} | {time_str:5} | {src:<6} |"
+                f" {intent:<16} | {observed:<16} |"
+                f" {soe_s:>4.1f}→{soe_e:<4.1f} | {solar:>5.2f} | {imp:>6.2f} | {savings:>7.4f} |"
+            )
+        return "\n".join(rows)
 
     def _format_historical_data(self, export: DebugDataExport) -> str:
         """Format historical data section with summary.
@@ -391,35 +452,7 @@ Findings (top) and System Logs (bottom).*
             return summary_text + details
 
         # Compact: markdown table for quick analysis + full JSON collapsible for replay.
-        rows = [
-            "| Per | Time  | Src    | Intent           | Observed         |"
-            " SOE kWh | Solar | Import | Savings |",
-            "|-----|-------|--------|------------------|------------------|"
-            "---------|-------|--------|---------|",
-        ]
-        for p in export.historical_periods:
-            if p is None:
-                continue
-            period = p.get("period", "")
-            time_str = format_period(period) if isinstance(period, int) else ""
-            src = p.get("data_source", "")[:6]
-            dec = p.get("decision", {})
-            intent = dec.get("strategic_intent", "")[:16]
-            observed = (dec.get("observed_intent") or "")[:16]
-            en = p.get("energy", {})
-            soe_s = en.get("battery_soe_start", 0)
-            soe_e = en.get("battery_soe_end", 0)
-            solar = en.get("solar_production", 0)
-            imp = en.get("grid_imported", 0)
-            econ = p.get("economic", {})
-            savings = econ.get("hourly_savings", 0)
-            rows.append(
-                f"| {period:>3} | {time_str:5} | {src:<6} |"
-                f" {intent:<16} | {observed:<16} |"
-                f" {soe_s:>4.1f}→{soe_e:<4.1f} | {solar:>5.2f} | {imp:>6.2f} | {savings:>7.4f} |"
-            )
-
-        table = "\n".join(rows)
+        table = self._build_period_table(export.historical_periods)
 
         details = f"""
 <details>
@@ -432,6 +465,43 @@ Findings (top) and System Logs (bottom).*
 </details>"""
 
         return summary_text + f"\n\n{table}" + details
+
+    def _format_previous_days(self, export: DebugDataExport) -> str:
+        """Format persisted prior-day DailyViews (planned intent vs. observed actuals).
+
+        The in-memory "today" stores (historical_periods, schedules,
+        snapshots, logs) are cleared at midnight, so a bundle exported soon
+        after day rollover cannot show what happened yesterday evening.
+        DailyViewStore is never cleared, so this section is the only place
+        that data can come from.
+
+        Args:
+            export: DebugDataExport data
+
+        Returns:
+            Markdown previous-days section
+        """
+        header = "## Previous Days"
+
+        if not export.previous_days:
+            return header + "\n\n*No prior-day data available*"
+
+        sections = [header]
+        for day in export.previous_days:
+            table = self._build_period_table(day.get("periods", []))
+
+            sections.append(
+                f"""### {day.get("date")}
+
+**Total Savings**: {day.get("total_savings", 0)} |"""
+                f""" **Actual Periods**: {day.get("actual_count", 0)} |"""
+                f""" **Predicted Periods**: {day.get("predicted_count", 0)} |"""
+                f""" **Missing Periods**: {day.get("missing_count", 0)}
+
+{table}"""
+            )
+
+        return "\n\n".join(sections)
 
     def _format_schedules(self, export: DebugDataExport) -> str:
         """Format optimization schedules section with summary.

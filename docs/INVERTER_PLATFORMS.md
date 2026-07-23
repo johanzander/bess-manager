@@ -191,6 +191,114 @@ These use **mode-specific time slots** rather than numbered TOU slots:
 load consumption but no `total_yield`. BESS derives
 `lifetime_system_production` from `lifetime_solar_energy`.
 
+### Growatt VPP control mode (GEN3 + GEN4) — *(experimental)*
+
+*Not yet real-world validated — see
+[`docs/agents/memory/project_platform_maturity.md`](agents/memory/project_platform_maturity.md).*
+
+`solax_modbus_growatt_min` (GEN4) and `solax_modbus_growatt_sph` (GEN3) both
+support a second control strategy, `control_mode="vpp"`, selectable via the
+`inverter.control_mode` setting (`"tou"` or `"vpp"`; GEN4 default remains
+`"tou"` — GEN3 always runs `"vpp"` since it has no working TOU path). VPP
+uses Growatt's remote power control registers instead of a persistent TOU
+schedule — the same **SM-Ephemeral** model the SolaX platform below already
+uses. See issue [#118](https://github.com/johanzander/bess-manager/issues/118).
+
+Verified against `wills106/homeassistant-solax-modbus`'s
+`custom_components/solax_modbus/plugin_growatt.py` (`NUMBER_TYPES`/
+`SELECT_TYPES`, `allowedtypes=GEN3 | GEN4` — present on both generations):
+
+| BESS Sensor Key | Entity Type | Register | Purpose |
+|-----------------|-------------|----------|---------|
+| `growatt_vpp_status` | select | 30100 | Master VPP enable (written once at startup) |
+| `growatt_vpp_remote_control` | select | 30407 | Per-period VPP active/inactive |
+| `growatt_vpp_allow_ac_charging` | select | 30410 | Allow charging from grid via VPP (written once) |
+| `growatt_vpp_time` | number | 30408 | Fallback timer, minutes — reset every active period; reverts inverter to `load_first` on its own if BESS stops writing |
+| `growatt_vpp_power` | number | 30409 | Power target, -100..100% (negative=discharge/export, positive=charge) |
+
+**Intent → VPP mapping** (mirrors `SolaxController`, plus a
+`block_passive_charging` distinction at rate=0 — see "SOLAR_EXPORT
+semantics" below):
+- `GRID_CHARGING` → `vpp_power=+100%`, remote control enabled
+- `LOAD_SUPPORT`/`BATTERY_EXPORT` (rate>0) → `vpp_power=-rate%`, remote control enabled
+- `SOLAR_STORAGE`/`IDLE` (rate=0, `block_passive_charging=False`) → remote
+  control disabled (`load_first`/self-use — battery may absorb solar surplus)
+- `SOLAR_EXPORT` (rate=0, `block_passive_charging=True`) → `vpp_power=0`,
+  remote control **enabled** (`grid_first` hold)
+
+**SOLAR_EXPORT semantics (fixed — issue [#355](https://github.com/johanzander/bess-manager/issues/355)):**
+The Growatt VPP protocol
+([`GROWATT VPP COMMUNICATION PROTOCOL OF INVERTER V2.01`](https://github.com/user-attachments/files/18301858/2.1.GROWATT.VPP.COMMUNICATION.PROTOCOL.OF.INVERTER_V2.01.pdf),
+2024-9-20, linked from issue #118 — the authoritative vendor register
+reference for all Growatt VPP work; check here first before assuming any
+Growatt VPP register behavior), §3.5 "Remote power control schematic
+diagram", p.32) documents that with
+`vpp_remote_control` (30407) *enabled*, the sign of `vpp_power` (30409)
+selects the firmware priority mode: **`> 0` → battery first (charge); `≤ 0`
+→ grid first**. That is, `vpp_power=0` while remote control stays *enabled*
+is a distinct, documented state — `grid first`, the same solar-goes-to-load-
+then-grid priority TOU mode uses for `BATTERY_EXPORT` — not the same thing as
+*disabling* remote control, which instead falls through to plain `load
+first` self-use (battery-first for any solar surplus).
+
+The controller previously conflated these two zero-power states: it always
+disabled remote control at `rate=0`, landing in self-use `load_first`
+instead of the documented `grid_first` hold, which let solar surplus
+recharge the battery during `SOLAR_EXPORT` periods instead of holding it out
+and exporting. The DP's SOLAR_EXPORT-below-max candidate (issue #313)
+assumes charging can be blocked, an assumption that only holds for
+TOU-style hardware rate control unless VPP mode is given an equivalent
+signal — see
+[`docs/superpowers/specs/2026-07-20-vpp-passive-charge-block-design.md`](superpowers/specs/2026-07-20-vpp-passive-charge-block-design.md)
+for the full design (a `block_passive_charging` flag threaded through
+`InverterController.apply_period`, computed once from intent, acted on only
+by forced-power/VPP-style controllers).
+
+`SOLAR_EXPORT` now keeps `vpp_remote_control` **enabled** and writes
+`vpp_power=0` instead of disabling remote control, selecting the documented
+`grid first` state instead of self-use `load_first`. **Not yet
+real-hardware-validated**: whether `grid first` reached via a forced
+`vpp_power=0` command holds the battery exactly like `grid_first` under TOU
+is a firmware behavior claim the register table documents the *mode
+selection logic* for, not the runtime power-flow guarantee — ships as
+experimental pending confirmation from a real debug export (no existing TOU
+code path exercises `grid_first` with a zero target either, so there's no
+already-proven precedent to lean on).
+
+`SolaxController` (real SolaX hardware) has the same underlying
+architectural gap but is **not** fixed here — no SolaX vendor protocol has
+been verified the way the Growatt spec was, so extending this fix there
+would be speculation, not a verified command. Tracked as a follow-up.
+
+**Enable sequence** (real-hardware-tested, see issue #118 comments): write
+`vpp_status=Enabled` + `vpp_allow_ac_charging=Enabled`, wait ~1s, then write
+`vpp_remote_control` — VPP Remote Control has no effect while VPP Status is
+disabled. State survives controller re-instantiation (BESS recreates the
+controller each optimization cycle) by reading the VPP registers back from
+hardware in `read_and_initialize_from_hardware`, the same pattern TOU mode
+already uses — not class-level statics.
+
+**Out of scope:** sub-period reactive power correction against a live P1/smart
+meter reading (demonstrated in community forks of this feature) is not built
+into BESS — BESS stays on its 15-minute period model. Users wanting tighter
+self-consumption can add their own HA automation nudging `growatt_vpp_power`
+between BESS's writes, using the sensor key above as the target entity.
+
+**Why VPP over TOU long-term:** VPP's per-period writes
+(`growatt_vpp_power`/`growatt_vpp_time`) target RAM-backed registers, safe to
+rewrite every period. TOU mode's per-period rate control instead writes
+`ems_charging_rate`/`ems_discharging_rate`, which are flash-backed — fine at
+TOU's lower write frequency, but not something VPP mode should ever fall back
+to, since it writes far more often. This is the reasoning behind the
+"Path to deprecating TOU" plan above, not yet a recommendation: GEN4 default
+stays `"tou"` until VPP is validated on real hardware (see the platform
+maturity note at the top of this section).
+
+**Path to deprecating TOU:** once GEN4 VPP is validated on real hardware, the
+GEN4 default flips to `"vpp"`, then the `"tou"` code path and setting are
+removed entirely in a later release — no user migration needed, since this is
+a setting inside the existing platform IDs, not a new platform ID.
+
 ### Growatt SPH (Cloud) — `growatt_sph`
 
 SPH inverters use separate charge and discharge period lists (max 3 each)

@@ -330,6 +330,22 @@ class TestSyncSocLimits:
         mock_hw.set_solax_min_soc.assert_not_called()
 
 
+# ── initialize_hardware ────────────────────────────────────────────────────────
+
+
+class TestInitializeHardware:
+    def test_initialize_hardware_syncs_soc_limits(
+        self, controller: SolaxController, battery_settings: BatterySettings
+    ) -> None:
+        mock_hw = MagicMock()
+        mock_hw.get_solax_power_control_mode.return_value = "Self Use Mode"
+        mock_hw.get_solax_min_soc.return_value = int(battery_settings.min_soc) + 1
+
+        controller.initialize_hardware(mock_hw)
+
+        mock_hw.set_solax_min_soc.assert_called_once_with(int(battery_settings.min_soc))
+
+
 # ── check_health ──────────────────────────────────────────────────────────────
 
 

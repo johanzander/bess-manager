@@ -56,6 +56,12 @@ SHARED_SENSOR_KEYS = frozenset(
     }
 )
 
+# Control strategies for solax_modbus_growatt_min/solax_modbus_growatt_sph.
+# GEN4 (solax_modbus_growatt_min) supports both; GEN3
+# (solax_modbus_growatt_sph) has no working TOU path, so "vpp" is its only
+# real choice (see issue #118).
+VALID_CONTROL_MODES = ("tou", "vpp")
+
 # All valid inverter platform IDs.
 VALID_PLATFORMS = (
     "growatt_server_min",
@@ -412,7 +418,7 @@ class SettingsStore:
                 "entsoe": {"entity": ""},
             },
             "growatt": {"inverter_type": "", "device_id": ""},
-            "inverter": {"platform": "", "device_id": ""},
+            "inverter": {"platform": "", "device_id": "", "control_mode": "tou"},
             "sensors": {
                 "platform": "",
                 "growatt_server_min": {},
@@ -439,6 +445,8 @@ class SettingsStore:
             BATTERY_EFFICIENCY_DISCHARGE,
             BATTERY_MIN_ACTION_PROFIT_THRESHOLD,
             EXPORT_SPOT_MULTIPLIER,
+            INVERTER_AC_POWER_MARGIN,
+            INVERTER_MAX_AC_POWER_KW,
             SPOT_MULTIPLIER,
             USE_ACTUAL_PRICE,
         )
@@ -477,6 +485,8 @@ class SettingsStore:
                 ("charging_power_rate", BATTERY_DEFAULT_CHARGING_POWER_RATE),
                 ("efficiency_charge", BATTERY_EFFICIENCY_CHARGE),
                 ("efficiency_discharge", BATTERY_EFFICIENCY_DISCHARGE),
+                ("inverter_max_ac_power_kw", INVERTER_MAX_AC_POWER_KW),
+                ("inverter_ac_power_margin", INVERTER_AC_POWER_MARGIN),
             ):
                 if key not in battery:
                     battery[key] = default
@@ -574,6 +584,24 @@ class SettingsStore:
                     platform,
                 )
                 changed = True
+
+        # Add missing inverter.control_mode. GEN3 (solax_modbus_growatt_sph)
+        # has no working TOU path, so it defaults straight to "vpp" (see
+        # issue #118); every other existing install defaults to "tou" so
+        # nobody's working setup silently changes control strategy.
+        inverter = self.data.get("inverter")
+        if isinstance(inverter, dict) and "control_mode" not in inverter:
+            inverter["control_mode"] = (
+                "vpp"
+                if inverter.get("platform") == "solax_modbus_growatt_sph"
+                else "tou"
+            )
+            self.data["inverter"] = inverter
+            logger.info(
+                "Schema migration: added inverter.control_mode = %s",
+                inverter["control_mode"],
+            )
+            changed = True
 
         # Migrate flat sensors → per-platform structure
         sensors = self.data.get("sensors")

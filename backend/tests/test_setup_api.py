@@ -99,9 +99,14 @@ def complete_controller():
         result.update(sensors.get(platform, {}))
         return result
 
+    def _refresh_active_sensors() -> None:
+        active = _get_active_sensors()
+        ctrl.ha_controller.sensors = {k: v for k, v in active.items() if v}
+
     ctrl.settings_store.get_section.side_effect = _get_section
     ctrl.settings_store.save_all.side_effect = _save_all
     ctrl.settings_store.get_active_sensors.side_effect = _get_active_sensors
+    ctrl.refresh_active_sensors.side_effect = _refresh_active_sensors
 
     sys.modules["app"].bess_controller = ctrl
     return ctrl
@@ -155,7 +160,10 @@ class TestGetSetupStatus:
     """GET /api/setup/status."""
 
     def test_wizard_needed_when_no_sensors(self, mock_controller):
-        mock_controller.ha_controller.sensors = {"battery_soc": "", "solar_power": ""}
+        mock_controller.settings_store.get_active_sensors.return_value = {
+            "battery_soc": "",
+            "solar_power": "",
+        }
         resp = _client.get("/api/setup/status")
         assert resp.status_code == 200
         body = resp.json()
@@ -163,7 +171,7 @@ class TestGetSetupStatus:
         assert body["configuredSensors"] == 0
 
     def test_wizard_not_needed_when_sensors_configured(self, mock_controller):
-        mock_controller.ha_controller.sensors = {
+        mock_controller.settings_store.get_active_sensors.return_value = {
             "battery_soc": "sensor.growatt_battery_soc",
             "solar_power": "sensor.growatt_solar_power",
         }
@@ -175,7 +183,7 @@ class TestGetSetupStatus:
         assert body["totalSensors"] == 2
 
     def test_partially_configured_still_needs_wizard(self, mock_controller):
-        mock_controller.ha_controller.sensors = {
+        mock_controller.settings_store.get_active_sensors.return_value = {
             "battery_soc": "sensor.growatt_battery_soc",
             "solar_power": "",
             "import_power": "",
@@ -604,6 +612,64 @@ class TestSetupComplete:
         complete_controller.system.switch_inverter_platform.assert_called_once_with(
             "growatt_server_sph"
         )
+
+    def test_control_mode_persisted_for_solax_modbus_growatt_min(
+        self, complete_controller
+    ):
+        _client.post(
+            "/api/setup/complete",
+            json=_full_wizard_payload(
+                inverterPlatform="solax_modbus_growatt_min",
+                inverterControlMode="vpp",
+            ),
+        )
+        call_args = complete_controller.settings_store.save_all.call_args[0][0]
+        assert call_args["inverter"]["control_mode"] == "vpp"
+
+    def test_control_mode_switched_live_for_solax_modbus_growatt_min(
+        self, complete_controller
+    ):
+        _client.post(
+            "/api/setup/complete",
+            json=_full_wizard_payload(
+                inverterPlatform="solax_modbus_growatt_min",
+                inverterControlMode="vpp",
+            ),
+        )
+        complete_controller.system.switch_control_mode.assert_called_once_with("vpp")
+
+    def test_control_mode_not_switched_live_for_other_platforms(
+        self, complete_controller
+    ):
+        _client.post(
+            "/api/setup/complete",
+            json=_full_wizard_payload(
+                inverterPlatform="growatt_server_min",
+                inverterControlMode="tou",
+            ),
+        )
+        complete_controller.system.switch_control_mode.assert_not_called()
+
+    def test_control_mode_not_switched_live_for_solax_modbus_growatt_sph(
+        self, complete_controller
+    ):
+        """GEN3 is already resolved to 'vpp' by switch_inverter_platform().
+
+        A stale client-side 'tou' default (the wizard form's initial state)
+        must not be re-applied via switch_control_mode() — the real
+        BatterySystemManager rejects any control_mode other than 'vpp' for
+        this platform and would raise, turning the wizard's last step into
+        an HTTP 500 (regression: this Mock-based test suite couldn't catch
+        it until the real E2E stack exercised the actual rejection logic).
+        """
+        _client.post(
+            "/api/setup/complete",
+            json=_full_wizard_payload(
+                inverterPlatform="solax_modbus_growatt_sph",
+                inverterControlMode="tou",
+            ),
+        )
+        complete_controller.system.switch_control_mode.assert_not_called()
 
     def test_sensors_applied_to_ha_controller(self, complete_controller):
         _client.post("/api/setup/complete", json=_full_wizard_payload())

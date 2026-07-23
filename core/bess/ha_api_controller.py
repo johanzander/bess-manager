@@ -557,6 +557,14 @@ class HomeAssistantAPIController:
         # silently bind a control that does nothing.
         "ems_discharging_stop_soc_on_grid": "battery_discharge_stop_soc",
         "charger_switch": "grid_charge",
+        # VPP remote power control (registers 30100/30407-30410, GEN3|GEN4).
+        # See issue #118 — verified against wills106/homeassistant-solax-modbus
+        # plugin_growatt.py NUMBER_TYPES/SELECT_TYPES.
+        "vpp_status": "growatt_vpp_status",
+        "vpp_remote_control": "growatt_vpp_remote_control",
+        "vpp_allow_ac_charging": "growatt_vpp_allow_ac_charging",
+        "vpp_time": "growatt_vpp_time",
+        "vpp_power": "growatt_vpp_power",
         # TOU time slots (9 slots)
         "time_1_enabled": "tou_time_1_enabled",
         "time_1_begin": "tou_time_1_begin",
@@ -629,6 +637,14 @@ class HomeAssistantAPIController:
         "battery_first_maximum_soc": "battery_charge_stop_soc",
         "load_first_battery_minimum_soc": "battery_discharge_stop_soc",
         "charger_switch": "grid_charge",
+        # VPP remote power control (registers 30100/30407-30410, GEN3|GEN4).
+        # Same registers as GEN4 — verified allowedtypes=GEN3|GEN4 in
+        # wills106/homeassistant-solax-modbus plugin_growatt.py.
+        "vpp_status": "growatt_vpp_status",
+        "vpp_remote_control": "growatt_vpp_remote_control",
+        "vpp_allow_ac_charging": "growatt_vpp_allow_ac_charging",
+        "vpp_time": "growatt_vpp_time",
+        "vpp_power": "growatt_vpp_power",
     }
 
     # SolaX native inverters via solax_modbus integration
@@ -938,6 +954,7 @@ class HomeAssistantAPIController:
         operation=None,
         category=None,
         context: dict | None = None,
+        optional: bool = False,
         **kwargs,
     ):
         """Make an API request to Home Assistant with retry logic.
@@ -948,6 +965,8 @@ class HomeAssistantAPIController:
             operation: Optional human-readable operation description for failure tracking
             category: Optional operation category for failure tracking
             context: Optional dict of contextual parameters for failure diagnostics
+            optional: If True, a 404 is expected (e.g. probing a legacy/disabled
+                entity) and is logged at debug level instead of error
             **kwargs: Additional arguments for requests
 
         Returns:
@@ -984,10 +1003,16 @@ class HomeAssistantAPIController:
                     and e.response is not None
                     and e.response.status_code == 404
                 ):
-                    logger.error(
-                        "API request to %s failed: Sensor not found (404). This indicates a missing or misconfigured sensor.",
-                        url,
-                    )
+                    if optional:
+                        logger.debug(
+                            "API request to %s failed: Sensor not found (404, optional).",
+                            url,
+                        )
+                    else:
+                        logger.error(
+                            "API request to %s failed: Sensor not found (404). This indicates a missing or misconfigured sensor.",
+                            url,
+                        )
                     raise  # Fail immediately on 404
 
                 if attempt < self.max_attempts - 1:  # Not the last attempt
@@ -1096,7 +1121,7 @@ class HomeAssistantAPIController:
             operation=operation or f"Call {service_domain}.{service_name}",
             category=(
                 "battery_control"
-                if service_domain in ["number", "switch"]
+                if service_domain in ["number", "input_number", "switch"]
                 else (
                     "inverter_control"
                     if service_domain == "growatt_server"
@@ -1234,13 +1259,7 @@ class HomeAssistantAPIController:
     def set_charge_stop_soc(self, charge_stop_soc):
         """Set the charge stop state of charge (SOC)."""
         entity_id = self._get_entity_for_service("battery_charge_stop_soc")
-        self._service_call_with_retry(
-            "number",
-            "set_value",
-            operation="Set charge stop SOC",
-            entity_id=entity_id,
-            value=charge_stop_soc,
-        )
+        self._set_number_like(entity_id, charge_stop_soc, "Set charge stop SOC")
 
     def get_discharge_stop_soc(self):
         """Get the discharge stop state of charge (SOC)."""
@@ -1249,13 +1268,7 @@ class HomeAssistantAPIController:
     def set_discharge_stop_soc(self, discharge_stop_soc):
         """Set the discharge stop state of charge (SOC)."""
         entity_id = self._get_entity_for_service("battery_discharge_stop_soc")
-        self._service_call_with_retry(
-            "number",
-            "set_value",
-            operation="Set discharge stop SOC",
-            entity_id=entity_id,
-            value=discharge_stop_soc,
-        )
+        self._set_number_like(entity_id, discharge_stop_soc, "Set discharge stop SOC")
 
     def get_charging_power_rate(self):
         """Get the charging power rate."""
@@ -1264,13 +1277,7 @@ class HomeAssistantAPIController:
     def set_charging_power_rate(self, rate):
         """Set the charging power rate."""
         entity_id = self._get_entity_for_service("battery_charging_power_rate")
-        self._service_call_with_retry(
-            "number",
-            "set_value",
-            operation="Set charging power rate",
-            entity_id=entity_id,
-            value=rate,
-        )
+        self._set_number_like(entity_id, rate, "Set charging power rate")
 
     def get_discharging_power_rate(self):
         """Get the discharging power rate."""
@@ -1279,13 +1286,7 @@ class HomeAssistantAPIController:
     def set_discharging_power_rate(self, rate):
         """Set the discharging power rate."""
         entity_id = self._get_entity_for_service("battery_discharging_power_rate")
-        self._service_call_with_retry(
-            "number",
-            "set_value",
-            operation="Set discharging power rate",
-            entity_id=entity_id,
-            value=rate,
-        )
+        self._set_number_like(entity_id, rate, "Set discharging power rate")
 
     def get_battery_charge_power(self):
         """Get current battery charging power in watts."""
@@ -1294,6 +1295,22 @@ class HomeAssistantAPIController:
     def get_battery_discharge_power(self):
         """Get current battery discharging power in watts."""
         return self._get_sensor_value("battery_discharge_power")
+
+    def _set_number_like(self, entity_id: str, value, operation: str) -> None:
+        """Write a value to a number-like entity.
+
+        Supports both `number.*` (platform-native) and `input_number.*`
+        (user-configured helper) entities. The entity domain is detected
+        from the configured entity_id prefix.
+        """
+        domain = "input_number" if entity_id.startswith("input_number.") else "number"
+        self._service_call_with_retry(
+            domain,
+            "set_value",
+            operation=operation,
+            entity_id=entity_id,
+            value=value,
+        )
 
     def set_grid_charge(self, enable):
         """Enable or disable grid charging.
@@ -1450,8 +1467,10 @@ class HomeAssistantAPIController:
     ) -> None:
         """Write a TOU segment via solax_modbus entity writes.
 
-        Uses select.select_option for mode/time/enabled, then button.press
-        to commit the slot to the inverter.
+        Uses select.select_option for mode/enabled and time.set_value for
+        begin/end (solax_modbus's Growatt plugin only exposes those as
+        `time.*` domain entities), then button.press to commit the slot to
+        the inverter.
 
         The enabled entity's plugin key is ``time_N_enabled`` (used in
         unique_id and BESS sensor key) while its HA entity_id contains
@@ -1470,15 +1489,20 @@ class HomeAssistantAPIController:
         mode_option = self._MODBUS_MODE_OPTIONS[batt_mode]
         enabled_option = "Enabled" if enabled else "Disabled"
 
-        # Set all 4 select entities before pressing update
-        entity_writes = [
+        # solax_modbus's Growatt plugin exposes TOU begin/end only as `time.*`
+        # domain entities (no `select.*` equivalent exists), so those two
+        # fields must go through time.set_value; select.select_option
+        # against a time.* entity id is a silent HA no-op (issue #362/#181).
+        select_writes = [
             (f"{prefix}_enabled", enabled_option),
-            (f"{prefix}_begin", start_time),
-            (f"{prefix}_end", end_time),
             (f"{prefix}_mode", mode_option),
         ]
+        time_writes = [
+            (f"{prefix}_begin", start_time),
+            (f"{prefix}_end", end_time),
+        ]
 
-        for sensor_key, option in entity_writes:
+        for sensor_key, option in select_writes:
             entity_id = self._get_entity_for_service(sensor_key)
             self._service_call_with_retry(
                 "select",
@@ -1486,6 +1510,16 @@ class HomeAssistantAPIController:
                 operation=f"TOU slot {segment_id} set {sensor_key}={option}",
                 entity_id=entity_id,
                 option=option,
+            )
+
+        for sensor_key, hhmm in time_writes:
+            entity_id = self._get_entity_for_service(sensor_key)
+            self._service_call_with_retry(
+                "time",
+                "set_value",
+                operation=f"TOU slot {segment_id} set {sensor_key}={hhmm}",
+                entity_id=entity_id,
+                time=f"{hhmm}:00",
             )
 
         # Press update button to commit the slot to inverter
@@ -1520,10 +1554,18 @@ class HomeAssistantAPIController:
                 continue
 
             try:
-                enabled_state = self._api_request("get", f"/api/states/{enabled_id}")
-                begin_state = self._api_request("get", f"/api/states/{begin_id}")
-                end_state = self._api_request("get", f"/api/states/{end_id}")
-                mode_state = self._api_request("get", f"/api/states/{mode_id}")
+                enabled_state = self._api_request(
+                    "get", f"/api/states/{enabled_id}", optional=True
+                )
+                begin_state = self._api_request(
+                    "get", f"/api/states/{begin_id}", optional=True
+                )
+                end_state = self._api_request(
+                    "get", f"/api/states/{end_id}", optional=True
+                )
+                mode_state = self._api_request(
+                    "get", f"/api/states/{mode_id}", optional=True
+                )
 
                 enabled_val = enabled_state.get("state", "Disabled")
                 batt_mode = mode_reverse.get(
@@ -1817,20 +1859,8 @@ class HomeAssistantAPIController:
             entity_id=mode_entity,
             option="Enabled Battery Control",
         )
-        self._service_call_with_retry(
-            "number",
-            "set_value",
-            operation="SolaX VPP set active power",
-            entity_id=power_entity,
-            value=watts,
-        )
-        self._service_call_with_retry(
-            "number",
-            "set_value",
-            operation="SolaX VPP set autorepeat duration",
-            entity_id=repeat_entity,
-            value=1200,
-        )
+        self._set_number_like(power_entity, watts, "SolaX VPP set active power")
+        self._set_number_like(repeat_entity, 1200, "SolaX VPP set autorepeat duration")
         self._service_call_with_retry(
             "button",
             "press",
@@ -1865,13 +1895,7 @@ class HomeAssistantAPIController:
         """
         entity_id = self._get_entity_for_service("solax_battery_min_soc")
         logger.info("SolaX: setting battery minimum SOC to %d%%", min_soc)
-        self._service_call_with_retry(
-            "number",
-            "set_value",
-            operation="SolaX set battery minimum SOC",
-            entity_id=entity_id,
-            value=min_soc,
-        )
+        self._set_number_like(entity_id, min_soc, "SolaX set battery minimum SOC")
 
     def get_solax_power_control_mode(self) -> str | None:
         """Read the current SolaX power control mode."""
@@ -1880,6 +1904,108 @@ class HomeAssistantAPIController:
     def get_solax_min_soc(self) -> float | None:
         """Read the current battery minimum SOC from the SolaX inverter."""
         return self._get_sensor_value("solax_battery_min_soc")
+
+    # ── Growatt VPP remote power control (solax_modbus GEN3|GEN4) ─────────────
+    #
+    # VPP registers (30100/30407/30408/30409/30410) are available on both
+    # Growatt GEN3 (MIX/SPA/SPH) and GEN4 (MIN/MOD/MID) via the solax_modbus
+    # Growatt plugin — verified against plugin_growatt.py NUMBER_TYPES /
+    # SELECT_TYPES (allowedtypes=GEN3|GEN4). Unlike TOU slots, VPP gives
+    # per-period power control with no persistent schedule (see issue #118).
+
+    def set_growatt_vpp_status(self, enabled: bool) -> None:
+        """Enable/disable the Growatt VPP Status register (30100).
+
+        Written once at startup (or after a restart finds it disabled) —
+        VPP Remote Control has no effect while VPP Status is disabled.
+        """
+        entity_id = self._get_entity_for_service("growatt_vpp_status")
+        option = "Enabled" if enabled else "Disabled"
+        logger.info("Growatt VPP: status -> %s", option)
+        self._service_call_with_retry(
+            "select",
+            "select_option",
+            operation=f"Growatt VPP status -> {option}",
+            entity_id=entity_id,
+            option=option,
+        )
+
+    def set_growatt_vpp_allow_ac_charging(self, enabled: bool) -> None:
+        """Enable/disable AC charging via the Growatt VPP register (30410).
+
+        Written once at startup — controls whether ``vpp_power`` may charge
+        the battery from the grid (positive values) as opposed to solar-only.
+        """
+        entity_id = self._get_entity_for_service("growatt_vpp_allow_ac_charging")
+        option = "Enabled" if enabled else "Disabled"
+        logger.info("Growatt VPP: allow AC charging -> %s", option)
+        self._service_call_with_retry(
+            "select",
+            "select_option",
+            operation=f"Growatt VPP allow AC charging -> {option}",
+            entity_id=entity_id,
+            option=option,
+        )
+
+    def set_growatt_vpp_period(
+        self, remote_control_enabled: bool, power_pct: int, fallback_minutes: int
+    ) -> None:
+        """Write one period's VPP command: remote control, power, and fallback timer.
+
+        ``vpp_time`` is rewritten every period the command is active, resetting
+        the inverter's own fallback timer (register 30408) — if BESS stops
+        writing (crash, restart), the inverter reverts to ``load_first`` on its
+        own once the timer lapses, giving a hardware dead-man's-switch.
+
+        Args:
+            remote_control_enabled: Whether VPP Remote Control (30407) should
+                be enabled for this period. False reverts the inverter to
+                load_first.
+            power_pct: Target power as a percentage (-100..100). Negative =
+                discharge/export, positive = charge from grid. Ignored when
+                ``remote_control_enabled`` is False.
+            fallback_minutes: Value to (re)write to ``vpp_time`` (30408) when
+                ``remote_control_enabled`` is True.
+        """
+        remote_control_entity = self._get_entity_for_service(
+            "growatt_vpp_remote_control"
+        )
+        option = "Enabled" if remote_control_enabled else "Disabled"
+        logger.info(
+            "Growatt VPP: remote control -> %s%s",
+            option,
+            f", power={power_pct}%" if remote_control_enabled else "",
+        )
+        self._service_call_with_retry(
+            "select",
+            "select_option",
+            operation=f"Growatt VPP remote control -> {option}",
+            entity_id=remote_control_entity,
+            option=option,
+        )
+
+        if not remote_control_enabled:
+            return
+
+        power_entity = self._get_entity_for_service("growatt_vpp_power")
+        self._set_number_like(
+            power_entity, power_pct, f"Growatt VPP set power -> {power_pct}%"
+        )
+
+        time_entity = self._get_entity_for_service("growatt_vpp_time")
+        self._set_number_like(
+            time_entity,
+            fallback_minutes,
+            f"Growatt VPP reset fallback timer -> {fallback_minutes} min",
+        )
+
+    def get_growatt_vpp_status(self) -> str | None:
+        """Read the current Growatt VPP Status register state."""
+        return self._get_raw_state("growatt_vpp_status")
+
+    def get_growatt_vpp_remote_control(self) -> str | None:
+        """Read the current Growatt VPP Remote Control register state."""
+        return self._get_raw_state("growatt_vpp_remote_control")
 
     # ─────────────────────────────────────────────────────────────────────────
 

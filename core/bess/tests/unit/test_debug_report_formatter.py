@@ -19,8 +19,10 @@ def _minimal_export(**overrides) -> DebugDataExport:
         "energy_provider_config": {},
         "addon_options": {},
         "entity_snapshot": {},
+        "ha_statistics": {},
         "historical_periods": [],
         "historical_summary": {"total_periods": 0, "periods_with_data": 0},
+        "previous_days": [],
         "inverter_tou_segments": [],
         "schedules": [],
         "schedules_summary": {"total_schedules": 0},
@@ -100,3 +102,46 @@ class TestPeriodDecisionsTimeColumn:
 
         assert "|  86 | 21:30 |" in report
         assert "|  86 | 21:45 |" not in report
+
+
+class TestFormatPreviousDays:
+    def test_no_previous_days_shows_message(self):
+        export = _minimal_export(previous_days=[])
+
+        report = DebugReportFormatter()._format_previous_days(export)
+
+        assert "## Previous Days" in report
+        assert "No prior-day data available" in report
+
+    def test_renders_period_table_for_each_persisted_day(self):
+        period = {
+            "period": 76,
+            "data_source": "actual",
+            "decision": {"strategic_intent": "BATTERY_EXPORT", "observed_intent": None},
+            "energy": {
+                "battery_soe_start": 8.1,
+                "battery_soe_end": 7.3,
+                "solar_production": 0.0,
+                "grid_imported": 0.0,
+            },
+            "economic": {"hourly_savings": 0.12},
+        }
+        export = _minimal_export(
+            previous_days=[
+                {
+                    "date": "2026-07-17",
+                    "periods": [period],
+                    "total_savings": 4.56,
+                    "actual_count": 1,
+                    "predicted_count": 0,
+                    "missing_count": 0,
+                }
+            ]
+        )
+
+        report = DebugReportFormatter()._format_previous_days(export)
+
+        assert "## Previous Days" in report
+        assert "2026-07-17" in report
+        assert "BATTERY_EXPORT" in report
+        assert "|  76 | 19:00 |" in report

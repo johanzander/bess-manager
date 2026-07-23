@@ -53,11 +53,14 @@ const SetupWizardPage: React.FC = () => {
     efficiencyDischarge: 97,
     temperatureDeratingEnabled: false,
     minActionProfit: 8.0,
+    inverterMaxAcPowerKw: 0,
+    inverterAcPowerMargin: 0.05,
   });
 
   const [inverterForm, setInverterForm] = useState<InverterForm>({
     inverterPlatform: 'growatt_server_min',
     deviceId: '',
+    controlMode: 'tou',
   });
 
   const [homeForm, setHomeForm] = useState<HomeForm>({
@@ -271,6 +274,9 @@ const SetupWizardPage: React.FC = () => {
       if (invNew.platform) {
         setInverterForm(f => ({ ...f, inverterPlatform: invNew.platform }));
       }
+      if (invNew.controlMode) {
+        setInverterForm(f => ({ ...f, controlMode: invNew.controlMode }));
+      }
       if (inv.deviceId) setInverterForm(f => ({ ...f, deviceId: inv.deviceId }));
     }).catch((err: unknown) => {
       const status = (err as { response?: { status?: number } })?.response?.status;
@@ -335,6 +341,7 @@ const SetupWizardPage: React.FC = () => {
         entsoeEntity: pricingForm.entsoeEntity || undefined,
         // Inverter
         inverterPlatform: inverterForm.inverterPlatform,
+        inverterControlMode: inverterForm.controlMode ?? 'tou',
         // Control mode
         demoMode: controlMode === 'demo',
       });

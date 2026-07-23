@@ -74,6 +74,11 @@ class EnergyData:
     battery_soe_start: float  # kWh (changed from battery_soc_start)
     battery_soe_end: float  # kWh (changed from battery_soc_end)
 
+    # Solar lost to the inverter AC output cap (kWh) — DC production the
+    # inverter could neither convert to AC nor store in a full/rate-limited
+    # battery. Zero unless the inverter_max_ac_power_kw feature is enabled.
+    clipped_solar: float = 0.0
+
     # Detailed flows (calculated automatically in __post_init__)
     solar_to_home: float = field(default=0.0, init=False)
     solar_to_battery: float = field(default=0.0, init=False)
@@ -101,11 +106,21 @@ class EnergyData:
         # Step 1: Solar allocation (home has highest priority)
         solar_to_home = min(self.solar_production, self.home_consumption)
         remaining_solar = self.solar_production - solar_to_home
-        remaining_consumption = self.home_consumption - solar_to_home
 
-        # Solar priority: home first, then battery charging, then grid export
+        # Solar priority: home first, then battery charging, then grid export.
         solar_to_battery = min(remaining_solar, self.battery_charged)
-        solar_to_grid = max(0, remaining_solar - solar_to_battery)
+
+        # Battery charging is DC-coupled, so only what is left after it must
+        # pass the inverter's AC stage - and clipped solar never made it
+        # through. Both solar_to_home and solar_to_grid are therefore limited
+        # by that AC throughput, not by raw DC production.
+        ac_solar = max(
+            0.0, self.solar_production - solar_to_battery - self.clipped_solar
+        )
+        solar_to_home = min(solar_to_home, ac_solar)
+        solar_to_grid = ac_solar - solar_to_home
+
+        remaining_consumption = self.home_consumption - solar_to_home
 
         # Step 2: Battery discharge allocation (home consumption priority)
         battery_to_home = min(self.battery_discharged, remaining_consumption)
@@ -119,14 +134,39 @@ class EnergyData:
         grid_to_battery = min(
             max(0, self.battery_charged - solar_to_battery), self.grid_imported
         )
-        # Grid to home is the remainder of actual imports
-        grid_to_home = self.grid_imported - grid_to_battery
+        # Grid to home is capped by what home still needs after solar+battery.
+        # Any leftover grid_imported beyond that is cross-sensor noise between
+        # independent lifetime counters (see validate_energy_balance's
+        # tolerance) - it must not be invented as a flow to an entity that
+        # consumed nothing.
+        grid_to_home = min(
+            remaining_consumption, max(0, self.grid_imported - grid_to_battery)
+        )
 
-        # Step 4: Export flow reconciliation (ensure exports match measured total)
-        calculated_export = solar_to_grid + battery_to_grid
-        if self.grid_exported != calculated_export:
-            # Adjust battery_to_grid to match actual grid export total
-            battery_to_grid = self.grid_exported - solar_to_grid
+        # Step 4: Export flow reconciliation, capped by what the battery
+        # actually discharged - never invented to force-match grid_exported,
+        # for the same cross-sensor-noise reason as grid_to_home above.
+        battery_to_grid = min(
+            max(0, self.grid_exported - solar_to_grid),
+            self.battery_discharged - battery_to_home,
+        )
+
+        # A battery_to_grid below the lifetime counter's own 0.1 kWh resolution
+        # can't be told apart from counter noise between battery_discharged and
+        # home_consumption - and unlike a real export, it doesn't require the
+        # inverter to have been in an export-capable mode. Fold it back into
+        # battery_to_home rather than let it flip the observed intent to
+        # BATTERY_EXPORT (see issue #350).
+        #
+        # Only when battery_to_home > 0: the battery was already covering a
+        # genuine home deficit, so a sub-resolution overshoot plausibly means
+        # home_consumption's own meter under-read by that amount. When
+        # battery_to_home == 0 (home's need was already fully met by solar),
+        # there's no deficit to fold into - any nonzero export, however small,
+        # has nowhere else to have gone and must stay a real export.
+        if battery_to_home > 0 and 0 < battery_to_grid < 0.1:
+            battery_to_home += battery_to_grid
+            battery_to_grid = 0.0
 
         # Assign calculated flows
         self.solar_to_home = solar_to_home
@@ -149,7 +189,12 @@ class EnergyData:
 
     def validate_energy_balance(self, tolerance: float = 0.2) -> tuple[bool, str]:
         """Validate energy balance - always warn and continue, never fail."""
-        energy_in = self.solar_production + self.grid_imported + self.battery_discharged
+        energy_in = (
+            self.solar_production
+            - self.clipped_solar
+            + self.grid_imported
+            + self.battery_discharged
+        )
         energy_out = self.home_consumption + self.grid_exported + self.battery_charged
         balance_error = abs(energy_in - energy_out)
 
@@ -229,14 +274,25 @@ class EconomicData:
         # Grid-only baseline: cost if we only used grid (no solar, no battery)
         grid_only_cost = energy_data.home_consumption * buy_price
 
-        # Solar-only baseline: cost if we had solar but no battery
+        # Solar-only baseline: cost if we had solar but no battery.
+        # A battery-less system faces the same inverter AC cap, so only the
+        # AC-deliverable share of production counts. Clipping means the AC
+        # stage was saturated, so its throughput that period - production less
+        # what went DC-side to the battery, less what was clipped - is the cap.
+        usable_solar = energy_data.solar_production
+        if energy_data.clipped_solar > 0:
+            usable_solar = max(
+                0.0,
+                energy_data.solar_production
+                - energy_data.solar_to_battery
+                - energy_data.clipped_solar,
+            )
+
         # If solar > consumption, we export excess at sell_price
         # If solar < consumption, we import deficit at buy_price
         solar_only_cost = (
-            max(0, energy_data.home_consumption - energy_data.solar_production)
-            * buy_price
-            - max(0, energy_data.solar_production - energy_data.home_consumption)
-            * sell_price
+            max(0, energy_data.home_consumption - usable_solar) * buy_price
+            - max(0, usable_solar - energy_data.home_consumption) * sell_price
         )
 
         # Savings: solar-only baseline minus actual cost

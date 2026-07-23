@@ -106,9 +106,14 @@ def mock_controller():
         result.update(sensors.get(platform, {}))
         return result
 
+    def _refresh_active_sensors() -> None:
+        active = _get_active_sensors()
+        ctrl.ha_controller.sensors = {k: v for k, v in active.items() if v}
+
     ctrl.settings_store.get_section.side_effect = _get_section
     ctrl.settings_store.save_section.side_effect = _save_section
     ctrl.settings_store.get_active_sensors.side_effect = _get_active_sensors
+    ctrl.refresh_active_sensors.side_effect = _refresh_active_sensors
 
     ctrl.ha_controller.sensors = {}
 
@@ -195,6 +200,78 @@ class TestPatchSettingsSectionRouting:
             assert (
                 resp.status_code == 200
             ), f"Section '{section}' was unexpectedly rejected: {resp.text}"
+
+
+class TestPatchSettingsInverter:
+    """PATCH .../inverter — platform switch and Growatt-modbus control_mode."""
+
+    def test_requires_platform(self, mock_controller):
+        resp = _client.patch("/api/settings", json={"inverter": {"controlMode": "vpp"}})
+        assert resp.status_code == 400
+
+    def test_platform_switched_live(self, mock_controller):
+        _client.patch(
+            "/api/settings", json={"inverter": {"platform": "solax_modbus_growatt_min"}}
+        )
+        mock_controller.system.switch_inverter_platform.assert_called_once_with(
+            "solax_modbus_growatt_min"
+        )
+
+    def test_control_mode_switched_live_for_growatt_modbus_min(self, mock_controller):
+        _client.patch(
+            "/api/settings",
+            json={
+                "inverter": {
+                    "platform": "solax_modbus_growatt_min",
+                    "controlMode": "vpp",
+                }
+            },
+        )
+        mock_controller.system.switch_control_mode.assert_called_once_with("vpp")
+
+    def test_control_mode_not_switched_for_other_platforms(self, mock_controller):
+        _client.patch(
+            "/api/settings",
+            json={
+                "inverter": {
+                    "platform": "solax_modbus_native",
+                    "controlMode": "vpp",
+                }
+            },
+        )
+        mock_controller.system.switch_control_mode.assert_not_called()
+
+    def test_control_mode_persisted_snake_case(self, mock_controller):
+        _client.patch(
+            "/api/settings",
+            json={
+                "inverter": {
+                    "platform": "solax_modbus_growatt_sph",
+                    "controlMode": "vpp",
+                }
+            },
+        )
+        assert mock_controller.settings_store.data["inverter"]["control_mode"] == "vpp"
+
+    def test_control_mode_not_switched_live_for_growatt_modbus_sph(
+        self, mock_controller
+    ):
+        """GEN3 is already resolved to 'vpp' by switch_inverter_platform().
+
+        A stale client-side 'tou' default must not be re-applied via
+        switch_control_mode() — the real BatterySystemManager rejects any
+        control_mode other than 'vpp' for this platform and would raise.
+        """
+        _client.patch(
+            "/api/settings",
+            json={
+                "inverter": {
+                    "platform": "solax_modbus_growatt_sph",
+                    "controlMode": "tou",
+                }
+            },
+        )
+        mock_controller.system.switch_control_mode.assert_not_called()
 
 
 class TestPatchSettingsCamelToSnake:

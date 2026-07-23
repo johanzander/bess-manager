@@ -1,10 +1,19 @@
-# Inverter platform maturity levels
+# Platform / provider maturity
 
-Only Growatt cloud (`growatt_server_min`, `growatt_server_sph`) and Growatt
-GEN4 via solax_modbus (`solax_modbus_growatt_min`) are real-world tested.
+Tracks which inverter platforms and price providers are real-world validated
+versus experimental. The `experimental` marker (README/USER_GUIDE tag + this
+file) is the stability flag for this codebase — see `feature-lifecycle` skill.
 
-Experimental / not yet real-world validated:
+## Experimental / not yet real-world validated
 
+- **Growatt VPP control mode** (`inverter.control_mode="vpp"`, on top of the
+  `solax_modbus_growatt_min` (GEN4) and `solax_modbus_growatt_sph` (GEN3)
+  platforms) — shipped per issue
+  [#118](https://github.com/johanzander/bess-manager/issues/118). Not yet
+  confirmed against real hardware; GEN4's existing `"tou"` control mode is
+  unaffected and remains the default there. Move to the validated list below
+  once a beta tester confirms (`feature-lifecycle` Stage 5), naming their
+  scenario.
 - `solax_modbus_growatt_sph` (GEN3) — monitoring-only, schedule control not implemented.
 - `solax_modbus_native` (SolaX VPP).
 - `solis_modbus` (Solis hybrid via Pho3niX90/solis_modbus, added for issue
@@ -12,3 +21,9 @@ Experimental / not yet real-world validated:
   (release v4.1.6) but has not been confirmed against a real Solis
   installation. Do not describe it as validated in user-facing docs or
   release notes until a beta tester confirms via a debug log.
+
+## Real-world validated
+
+(Populate as platforms/providers graduate through `feature-lifecycle` Stage 6.
+Candidates not yet formally tracked here: Growatt cloud MIN/SPH, GEN4 Growatt
+TOU via solax_modbus — all in production use prior to this file's creation.)

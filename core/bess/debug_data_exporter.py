@@ -50,7 +50,7 @@ import os
 import re
 import sys
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -294,6 +294,13 @@ _LOG_KEY_PATTERNS = re.compile(
 
 _COMPACT_LOG_TAIL = 50  # Always include this many trailing lines for recent context
 
+# How many prior calendar days' persisted DailyViews to include. The "today"
+# stores (historical_store, schedule_store, prediction_snapshot_store) are
+# cleared at midnight, so a bundle exported shortly after day rollover has
+# no way to show what happened yesterday evening unless it also reads from
+# DailyViewStore, which is never cleared.
+_PREVIOUS_DAYS_TO_INCLUDE = 2
+
 
 @dataclass
 class DebugDataExport:
@@ -312,8 +319,10 @@ class DebugDataExport:
     energy_provider_config: dict
     addon_options: dict
     entity_snapshot: dict
+    ha_statistics: dict
     historical_periods: list[dict]
     historical_summary: dict
+    previous_days: list[dict]
     inverter_tou_segments: list[dict]
     schedules: list[dict]
     schedules_summary: dict
@@ -355,6 +364,8 @@ class DebugDataAggregator:
             addon_options       — entity ID mappings + inverter device config
             inverter_tou_segments — seeds mock inverter with real hardware state
             historical_periods  — full JSON seeds the in-memory historical store
+            ha_statistics       — raw recorder stats behind ha_statistics strategy;
+                                  mock replays them verbatim instead of approximating
             price_data          — raw pre-markup prices for the optimization replay
 
         UC2 (AI behaviour analysis):
@@ -397,9 +408,11 @@ class DebugDataAggregator:
             energy_provider_config=self._serialize_energy_provider_config(),
             addon_options=self._serialize_addon_options(),
             entity_snapshot=self._serialize_entity_snapshot(),
+            ha_statistics=self._serialize_ha_statistics(),
             inverter_tou_segments=self._serialize_inverter_tou(),
             historical_periods=self._serialize_historical_data(),
             historical_summary=self._summarize_historical_data(),
+            previous_days=self._serialize_previous_days(),
             schedules=self._serialize_schedules(compact=compact),
             schedules_summary=self._summarize_schedules(),
             snapshots=self._serialize_snapshots(compact=compact),
@@ -672,6 +685,15 @@ class DebugDataAggregator:
         """Return a copy of a HA state dict with HA-internal metadata removed."""
         return {k: v for k, v in state.items() if k not in self._HA_METADATA_KEYS}
 
+    def _capture_entity_state(self, snapshot: dict, controller, entity_id: str) -> None:
+        """Fetch one entity's raw state into snapshot, logging (not raising) on failure."""
+        try:
+            state = controller.get_entity_state_raw(entity_id)
+            if state:
+                snapshot[entity_id] = self._strip_ha_metadata(state)
+        except Exception as e:
+            logger.warning("Failed to fetch entity %s: %s", entity_id, e)
+
     def _serialize_entity_snapshot(self) -> dict:
         """Fetch raw HA entity state for every entity BESS reads.
 
@@ -688,42 +710,30 @@ class DebugDataAggregator:
             return {}
         snapshot: dict = {}
 
-        # All entities registered in the sensor map — use the public info API to resolve
-        # entity IDs so resolution goes through the same path as normal sensor reads.
-        seen_entities: set[str] = set()
-        for method_name in controller.METHOD_SENSOR_MAP:
-            info = controller.get_method_sensor_info(method_name)
-            entity_id = info.get("entity_id")
-            if (
-                not entity_id
-                or info.get("status") == "not_configured"
-                or entity_id in seen_entities
-            ):
-                continue
-            seen_entities.add(entity_id)
-            try:
-                state = controller.get_entity_state_raw(entity_id)
-                if state:
-                    snapshot[entity_id] = self._strip_ha_metadata(state)
-            except Exception as e:
-                logger.warning("Failed to fetch entity %s: %s", entity_id, e)
+        # controller.sensors is the single source of truth for every
+        # entity_id this installation is configured to know about — every
+        # resolution path (METHOD_SENSOR_MAP, _get_entity_for_service,
+        # _get_raw_state) ultimately looks up this same map
+        # (_resolve_entity_id). Capturing it directly, rather than deriving
+        # from a curated subset like METHOD_SENSOR_MAP, means a new
+        # entity-reading code path (TOU segments, VPP registers, ...) is
+        # automatically captured for replay without needing a matching
+        # special case here. BESSController.refresh_active_sensors() keeps
+        # this map synced with SettingsStore after every settings mutation,
+        # so it's never a stale startup-time copy.
+        seen_entities: set[str] = set(controller.sensors.values())
+        for entity_id in seen_entities:
+            if entity_id:
+                self._capture_entity_state(snapshot, controller, entity_id)
 
-        # Price provider entities (not in METHOD_SENSOR_MAP)
+        # Price provider entities (not in controller.sensors)
         config = self.system._energy_provider_config
         provider = config["provider"]
 
         if provider == "nordpool_hacs":
-            nordpool_cfg = config["nordpool_hacs"]
-            entity_id = nordpool_cfg.get("entity")
+            entity_id = config["nordpool_hacs"].get("entity")
             if entity_id:
-                try:
-                    state = controller.get_entity_state_raw(entity_id)
-                    if state:
-                        snapshot[entity_id] = self._strip_ha_metadata(state)
-                except Exception as e:
-                    logger.warning(
-                        "Failed to fetch nordpool entity %s: %s", entity_id, e
-                    )
+                self._capture_entity_state(snapshot, controller, entity_id)
 
         elif provider == "octopus":
             octopus_cfg = config["octopus"]
@@ -735,25 +745,12 @@ class DebugDataAggregator:
             ):
                 entity_id = octopus_cfg.get(key)
                 if entity_id:
-                    try:
-                        state = controller.get_entity_state_raw(entity_id)
-                        if state:
-                            snapshot[entity_id] = self._strip_ha_metadata(state)
-                    except Exception as e:
-                        logger.warning(
-                            "Failed to fetch octopus entity %s: %s", entity_id, e
-                        )
+                    self._capture_entity_state(snapshot, controller, entity_id)
 
         elif provider == "entsoe":
-            entsoe_cfg = config["entsoe"]
-            entity_id = entsoe_cfg.get("entity")
+            entity_id = config["entsoe"].get("entity")
             if entity_id:
-                try:
-                    state = controller.get_entity_state_raw(entity_id)
-                    if state:
-                        snapshot[entity_id] = self._strip_ha_metadata(state)
-                except Exception as e:
-                    logger.warning("Failed to fetch entsoe entity %s: %s", entity_id, e)
+                self._capture_entity_state(snapshot, controller, entity_id)
 
         elif provider != "nordpool_official":
             # nordpool_official uses service calls — no entity state to capture
@@ -779,6 +776,24 @@ class DebugDataAggregator:
         except Exception as e:
             logger.warning("Failed to serialize inverter TOU segments: %s", e)
             return []
+
+    def _serialize_ha_statistics(self) -> dict:
+        """Serialize the raw HA Recorder statistics behind the ha_statistics
+        consumption strategy, for exact-fidelity mock replay.
+
+        Best-effort: returns {} if the data source isn't available (not
+        configured, or the recorder has insufficient history) — this must
+        never break the debug export.
+
+        Returns:
+            {"statistic_id": str, "stats": list[{"start": ..., "change": ...}]}
+            or {} if unavailable.
+        """
+        try:
+            return self.system.get_ha_statistics_for_debug_export() or {}
+        except Exception as e:
+            logger.warning("Failed to serialize HA statistics: %s", e)
+            return {}
 
     def _serialize_historical_data(self) -> list[dict]:
         """Serialize historical data from today's periods.
@@ -829,6 +844,32 @@ class DebugDataAggregator:
         except Exception as e:
             logger.exception(f"Failed to summarize historical data: {e}")
             return {"error": str(e)}
+
+    def _serialize_previous_days(self) -> list[dict]:
+        """Serialize the most recently persisted DailyViews (yesterday, etc.).
+
+        DailyViewStore keeps one full day (planned intent + observed actuals
+        per period) forever, independent of the in-memory "today" stores
+        that get cleared at midnight — this is the only source a debug
+        export can use to show what happened on a prior calendar day.
+
+        Returns:
+            List of DailyView dicts, most recent day first. Skips days with
+            no persisted view (e.g. add-on wasn't running yet).
+        """
+        try:
+            today = time_utils.today()
+            result = []
+            for days_ago in range(1, _PREVIOUS_DAYS_TO_INCLUDE + 1):
+                view = self.system.daily_view_store.load_day(
+                    today - timedelta(days=days_ago)
+                )
+                if view is not None:
+                    result.append(asdict(view))
+            return result
+        except Exception as e:
+            logger.warning("Failed to serialize previous days: %s", e)
+            return []
 
     def _serialize_schedules(self, compact: bool = True) -> list[dict]:
         """Serialize optimization schedules from today.

@@ -36,6 +36,15 @@ class GrowattSphController(InverterController):
 
     supports_charge_rate_control: ClassVar[bool] = False
 
+    # discharge_rate_is_load_following is irrelevant today -- SPH's
+    # _write_period_to_hardware is a no-op and its batch grouping
+    # (DISCHARGE_INTENTS) excludes SOLAR_EXPORT/SOLAR_STORAGE, so the
+    # intra-period discharge gate (#187/#318) never reaches hardware here
+    # either way. Explicitly False (rather than inheriting the base
+    # default True) so that if per-period writes are ever added to SPH,
+    # they don't silently reproduce #324's forced-discharge failure mode.
+    discharge_rate_is_load_following: ClassVar[bool] = False
+
     MAX_CHARGE_PERIODS = 3
     MAX_DISCHARGE_PERIODS = 3
 
@@ -60,7 +69,11 @@ class GrowattSphController(InverterController):
         self._discharge_periods: list[dict] = []
 
     def _write_period_to_hardware(
-        self, controller, grid_charge: bool, discharge_rate: int
+        self,
+        controller,
+        grid_charge: bool,
+        discharge_rate: int,
+        block_passive_charging: bool = False,
     ) -> tuple[bool, str]:
         """No-op: SPH deploys the full schedule atomically via service calls.
 

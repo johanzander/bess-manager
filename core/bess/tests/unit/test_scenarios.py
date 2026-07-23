@@ -82,6 +82,8 @@ def build_scenario_inputs(scenario_name):
         efficiency_charge=battery["efficiency_charge"],
         efficiency_discharge=battery["efficiency_discharge"],
         cycle_cost_per_kwh=battery["cycle_cost_per_kwh"],
+        inverter_max_ac_power_kw=battery.get("inverter_max_ac_power_kw", 0.0),
+        inverter_ac_power_margin=battery.get("inverter_ac_power_margin", 0.0),
     )
 
     if price_data:
@@ -89,11 +91,17 @@ def build_scenario_inputs(scenario_name):
         vat_multiplier = price_data["vat_multiplier"]
         additional_costs = price_data["additional_costs"]
         tax_reduction = price_data["tax_reduction"]
+        # Optional -- default to PriceManager's own default (1.0, no adjustment)
+        # so existing fixtures that don't set these are unaffected.
+        spot_multiplier = price_data.get("spot_multiplier", 1.0)
+        export_spot_multiplier = price_data.get("export_spot_multiplier", 1.0)
     else:
         markup_rate = MARKUP_RATE
         vat_multiplier = VAT_MULTIPLIER
         additional_costs = ADDITIONAL_COSTS
         tax_reduction = TAX_REDUCTION
+        spot_multiplier = 1.0
+        export_spot_multiplier = 1.0
 
     price_manager = PriceManager(
         MockSource(base_prices),
@@ -102,6 +110,8 @@ def build_scenario_inputs(scenario_name):
         additional_costs=additional_costs,
         tax_reduction=tax_reduction,
         area="SE4",
+        spot_multiplier=spot_multiplier,
+        export_spot_multiplier=export_spot_multiplier,
     )
     buy_prices = price_manager.get_buy_prices(raw_prices=base_prices)
     sell_prices = price_manager.get_sell_prices(raw_prices=base_prices)

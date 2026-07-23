@@ -69,14 +69,15 @@ from .weather import fetch_temperature_forecast
 logger = logging.getLogger(__name__)
 
 
-def solar_export_discharge_rate(
+def intra_period_discharge_gate(
     buy_price: float, shadow_price: float, eff_d: float
 ) -> int:
-    """Intra-period discharge gate for a SOLAR_EXPORT period.
+    """Intra-period discharge gate for a SOLAR_EXPORT or SOLAR_STORAGE period.
 
-    SOLAR_EXPORT maps to load_first; the battery only discharges to cover an
-    actual (sub-period) solar deficit. Whether it SHOULD is economic: cover from
-    battery only when the stored energy is worth less than buying from grid now.
+    Both intents map to load_first with a planned discharge_rate=0; the battery
+    only discharges to cover an actual (sub-period) solar/load deficit. Whether
+    it SHOULD is economic: cover from battery only when the stored energy is
+    worth less than buying from grid now.
 
     Using 1 kWh of SoE delivers ``eff_d`` kWh to the home, avoiding
     ``eff_d * buy_price``; ``shadow_price`` is the marginal opportunity value of
@@ -145,6 +146,9 @@ class BatterySystemManager:
         self.inverter_platform: str | None = self._resolve_initial_platform(
             addon_options or {}
         )
+        self.control_mode: str = self._resolve_control_mode(
+            addon_options or {}, self.inverter_platform
+        )
         self._inverter_controller: InverterController | None = (
             self._create_inverter_controller()
         )
@@ -173,6 +177,8 @@ class BatterySystemManager:
 
         # Discharge inhibit tracking
         self._desired_discharge_rate: int = 0  # Rate from schedule before inhibit
+        self._desired_grid_charge: bool = False  # grid_charge alongside the rate above
+        self._desired_block_passive_charging: bool = False  # alongside the rate above
         self._last_applied_discharge_rate: int = 0  # Last rate written to inverter
 
         # Prediction caches (populated by _fetch_predictions)
@@ -263,6 +269,28 @@ class BatterySystemManager:
         )
         return platform
 
+    VALID_CONTROL_MODES: ClassVar[set[str]] = {"tou", "vpp"}
+
+    @staticmethod
+    def _resolve_control_mode(options: dict, platform: str | None) -> str:
+        """Determine control_mode for solax_modbus_growatt_min/_sph platforms.
+
+        GEN3 (solax_modbus_growatt_sph) has no working TOU path — it always
+        runs "vpp" regardless of what's stored. GEN4 (solax_modbus_growatt_min)
+        reads ``inverter.control_mode``, defaulting to "tou" (existing
+        behaviour, unchanged for current installs). Other platforms don't use
+        this setting at all; it's returned as "tou" but ignored by their
+        controllers.
+        """
+        if platform == "solax_modbus_growatt_sph":
+            return "vpp"
+        mode = options.get("inverter", {}).get("control_mode", "tou")
+        assert mode in BatterySystemManager.VALID_CONTROL_MODES, (
+            f"Unknown control_mode '{mode}', "
+            f"expected one of {sorted(BatterySystemManager.VALID_CONTROL_MODES)}"
+        )
+        return mode
+
     @property
     def _supports_charge_rate_control(self) -> bool:
         if not self._inverter_controller:
@@ -287,7 +315,10 @@ class BatterySystemManager:
             "solax_modbus_growatt_min",
             "solax_modbus_growatt_sph",
         ):
-            return SolaxModbusGrowattController(battery_settings=self.battery_settings)
+            return SolaxModbusGrowattController(
+                battery_settings=self.battery_settings,
+                control_mode=self.control_mode,
+            )
         return GrowattMinController(battery_settings=self.battery_settings)
 
     def switch_inverter_platform(self, platform: str) -> None:
@@ -318,6 +349,58 @@ class BatterySystemManager:
         )
 
         self.inverter_platform = platform
+        self.control_mode = self._resolve_control_mode({}, platform)
+        self._inverter_controller = self._create_inverter_controller()
+        logger.info(
+            "Inverter controller recreated: %s",
+            type(self._inverter_controller).__name__,
+        )
+
+    def switch_control_mode(self, control_mode: str) -> None:
+        """Switch control_mode (tou/vpp) for the current Growatt-modbus platform.
+
+        Only meaningful for ``solax_modbus_growatt_min`` (GEN4) — GEN3
+        (``solax_modbus_growatt_sph``) always runs "vpp" and rejects any
+        other value, since it has no working TOU path.
+
+        Args:
+            control_mode: "tou" or "vpp"
+
+        Raises:
+            SystemConfigurationError: If control_mode is invalid, or the
+                current platform doesn't use this setting.
+        """
+        if control_mode not in self.VALID_CONTROL_MODES:
+            raise SystemConfigurationError(
+                message=f"Unknown control_mode '{control_mode}', "
+                f"expected one of {sorted(self.VALID_CONTROL_MODES)}"
+            )
+        if self.inverter_platform not in (
+            "solax_modbus_growatt_min",
+            "solax_modbus_growatt_sph",
+        ):
+            raise SystemConfigurationError(
+                message=f"control_mode is not applicable to platform "
+                f"'{self.inverter_platform}'"
+            )
+        if (
+            self.inverter_platform == "solax_modbus_growatt_sph"
+            and control_mode != "vpp"
+        ):
+            raise SystemConfigurationError(
+                message="solax_modbus_growatt_sph (GEN3) has no working TOU "
+                "path — control_mode must be 'vpp'"
+            )
+
+        if control_mode == self.control_mode:
+            return
+
+        logger.info(
+            "Switching Growatt-modbus control_mode: %s -> %s",
+            self.control_mode,
+            control_mode,
+        )
+        self.control_mode = control_mode
         self._inverter_controller = self._create_inverter_controller()
         logger.info(
             "Inverter controller recreated: %s",
@@ -607,19 +690,12 @@ class BatterySystemManager:
                     prepare_next_day,
                 )
             else:
-                # Update current schedule even when TOU doesn't change
+                # Update current schedule even when TOU doesn't change.
+                # Hardware-derived state (TOU intervals, VPP confirmation,
+                # etc.) is already carried onto temp_growatt via seed_from()
+                # at creation time (#329), so no further copying is needed
+                # here before adopting it.
                 self._current_schedule = temp_schedule
-                # Carry forward hardware TOU state so stale segment detection
-                # keeps working. temp_growatt has fresh schedule/intents/hourly
-                # settings but empty TOU intervals — without this, the in-memory
-                # record of what's on the inverter is erased every cycle.
-                temp_growatt.tou_intervals = (
-                    self._inverter_controller.tou_intervals.copy()
-                )
-                if isinstance(self._inverter_controller, GrowattMinController):
-                    temp_growatt._active_tou_intervals = (
-                        self._inverter_controller._active_tou_intervals.copy()
-                    )
                 self._inverter_controller = temp_growatt
 
             # Capture prediction snapshot after schedule is applied
@@ -753,12 +829,6 @@ class BatterySystemManager:
 
     def _fetch_and_initialize_historical_data(self, status_callback=None) -> None:
         """Fetch and initialize historical data using quarterly resolution."""
-        if not is_influxdb_configured():
-            logger.info(
-                "InfluxDB is not configured — skipping historical data backfill"
-            )
-            return
-
         try:
             now = time_utils.now()
             current_period = now.hour * 4 + now.minute // 15
@@ -769,6 +839,12 @@ class BatterySystemManager:
 
             if current_period > 0 and self._load_historical_seed(current_period):
                 self.sensor_collector.warm_readings_cache()
+                return
+
+            if not is_influxdb_configured():
+                logger.info(
+                    "InfluxDB is not configured — skipping historical data backfill"
+                )
                 return
 
             if current_period > 0:
@@ -973,6 +1049,8 @@ class BatterySystemManager:
                     quarterly = self.home_settings.default_hourly / 4.0
                     forecast = [quarterly] * 96
                 elif name == "influxdb_7d_avg":
+                    if not is_influxdb_configured():
+                        raise ValueError("InfluxDB not configured")
                     forecast = self._get_influxdb_7d_avg_forecast()
                 elif name == "ha_statistics":
                     forecast = self._get_ha_statistics_forecast()
@@ -1141,15 +1219,22 @@ class BatterySystemManager:
 
         return avg_profile
 
-    def _get_ha_statistics_forecast(self) -> list[float]:
-        """Get consumption forecast from HA Recorder long-term statistics.
+    def _fetch_ha_statistics_raw(self) -> tuple[str, list[dict]]:
+        """Resolve the load-consumption statistic_id and fetch its raw 7-day stats.
 
-        Queries the last 7 days of hourly energy statistics for the load
-        consumption sensor and builds a time-of-day-shaped profile. Unlike
-        the flat "sensor" strategy, this captures intra-day variation
-        (morning/evening peaks, overnight baseline).
+        Shared by _get_ha_statistics_forecast (which reduces this to a
+        time-of-day profile) and get_ha_statistics_for_debug_export (which
+        exports it verbatim for exact-fidelity mock replay).
+
+        Returns:
+            (statistic_id, stats) — stats is the raw HA Recorder
+            list of {"start": ..., "change": ...} entries.
+
+        Raises:
+            HAStatisticsUnavailableError: sensor not configured, or no
+                statistics data available for it in the past 7 days.
         """
-        from datetime import time, timezone
+        from datetime import time
 
         # Resolve entity_id via controller's canonical resolution path
         try:
@@ -1209,6 +1294,39 @@ class BatterySystemManager:
                 f"No statistics data returned for {target_sensor} "
                 f"(statistic_id: {statistic_id}) in the past 7 days"
             )
+
+        return statistic_id, stats
+
+    def get_ha_statistics_for_debug_export(self) -> dict | None:
+        """Best-effort raw HA Recorder statistics, for the debug export.
+
+        Captures the exact {start, change} entries HA returned so a mock
+        replay can serve them back verbatim instead of approximating from
+        a single day of historical periods. Returns None if the
+        ha_statistics data source isn't available (e.g. not configured, or
+        the recorder has insufficient history) — this must never break the
+        debug export.
+        """
+        if self._controller is None:
+            return None
+        try:
+            statistic_id, stats = self._fetch_ha_statistics_raw()
+        except HAStatisticsUnavailableError:
+            return None
+        return {"statistic_id": statistic_id, "stats": stats}
+
+    def _get_ha_statistics_forecast(self) -> list[float]:
+        """Get consumption forecast from HA Recorder long-term statistics.
+
+        Queries the last 7 days of hourly energy statistics for the load
+        consumption sensor and builds a time-of-day-shaped profile. Unlike
+        the flat "sensor" strategy, this captures intra-day variation
+        (morning/evening peaks, overnight baseline).
+        """
+        from datetime import timezone
+
+        target_sensor, stats = self._fetch_ha_statistics_raw()
+        tz = time_utils.TIMEZONE
 
         # Group hourly change values by hour-of-day (0-23)
         hourly_buckets: dict[int, list[float]] = {h: [] for h in range(24)}
@@ -1726,11 +1844,15 @@ class BatterySystemManager:
     ) -> float:
         """Calculate terminal value per kWh for the DP optimization.
 
-        When the horizon already extends past today (i.e. tomorrow's prices are
-        included), return 0.0 since the DP has explicit future data. Otherwise,
-        estimate value from the median buy price adjusted for efficiency and
-        cycle cost ("avoid tomorrow's purchase"), capped at the best achievable
-        in-horizon export value ("arbitrage-consistency cap").
+        Estimate value from the median buy price (over whatever horizon window
+        the caller passed in) adjusted for efficiency and cycle cost ("avoid a
+        future purchase"), capped at the best achievable in-horizon export
+        value ("arbitrage-consistency cap"). This applies at either horizon
+        boundary, midnight-today or midnight-tomorrow:
+        the caller already truncates buy_prices/sell_prices to the current
+        optimization window, so the median/cap formula reflects genuine
+        future price uncertainty beyond that window regardless of where it
+        ends (#345).
 
         The cap is required because cycle cost is only ever charged on
         charging, never on discharge (see `_compute_reward`): an uncapped
@@ -1743,6 +1865,17 @@ class BatterySystemManager:
         ordinary/Nordic-shaped markets where the best in-horizon peak is
         already above the buy-median estimate (#246, supersedes #245).
 
+        The cap is skipped when the export tariff is fixed. It bounds terminal
+        value by an export opportunity the DP would forgo by holding charge,
+        but on a flat sell curve `max(sell_prices)` is not an opportunity to
+        forgo — it is the price available in every period, including the
+        current one, which each period's reward already prices in. Applying it
+        there double-counts the immediate export alternative and makes storing
+        surplus solar for post-horizon use arithmetically impossible for *any*
+        future price, since the cap forces
+        `terminal <= sell * efficiency_discharge < sell < sell / efficiency_charge`
+        — the round-trip breakeven that storing has to clear (#359).
+
         Args:
             buy_prices: Full buy price array (from optimization_period onwards)
             sell_prices: Full sell price array (from optimization_period onwards)
@@ -1751,19 +1884,6 @@ class BatterySystemManager:
         Returns:
             Terminal value per kWh (floored at 0.0)
         """
-        today_period_count = get_period_count(time_utils.today())
-        remaining_today = today_period_count - optimization_period
-        total_horizon = len(buy_prices)
-
-        # If horizon extends past today, DP has explicit tomorrow data
-        if total_horizon > remaining_today:
-            logger.info(
-                "Horizon extends past today (%d > %d remaining), terminal value = 0.0",
-                total_horizon,
-                remaining_today,
-            )
-            return 0.0
-
         # Estimate terminal value using median (resistant to peak price outliers)
         if not buy_prices:
             return 0.0
@@ -1780,14 +1900,17 @@ class BatterySystemManager:
             max_sell_price * self.battery_settings.efficiency_discharge
             - self.battery_settings.cycle_cost_per_kwh,
         )
-        terminal_value = min(buy_based, sell_cap)
+        export_prices_vary = max_sell_price > min(sell_prices)
+        terminal_value = min(buy_based, sell_cap) if export_prices_vary else buy_based
 
         logger.info(
             "Terminal value: %.3f/kWh (buy_based=%.3f, sell_cap=%.3f, "
-            "median_buy=%.3f, max_sell=%.3f, efficiency=%.2f, cycle_cost=%.3f)",
+            "cap_applied=%s, median_buy=%.3f, max_sell=%.3f, "
+            "efficiency=%.2f, cycle_cost=%.3f)",
             terminal_value,
             buy_based,
             sell_cap,
+            export_prices_vary,
             median_price,
             max_sell_price,
             self.battery_settings.efficiency_discharge,
@@ -1921,6 +2044,18 @@ class BatterySystemManager:
             )
 
             # Run DP optimization with strategic intent capture - returns OptimizationResult directly
+            discharge_resolution_kw = (
+                self._inverter_controller.discharge_resolution_kw(
+                    self.battery_settings.max_discharge_power_kw
+                )
+                if self._inverter_controller is not None
+                else None
+            )
+            self_throttle_export_threshold_kwh = (
+                self._inverter_controller.self_throttle_export_threshold_kwh
+                if self._inverter_controller is not None
+                else None
+            )
             result = optimize_battery_schedule(
                 buy_price=buy_prices,
                 sell_price=sell_prices,
@@ -1933,6 +2068,8 @@ class BatterySystemManager:
                 terminal_value_per_kwh=terminal_value,
                 currency=self.home_settings.currency,
                 max_charge_power_per_period=max_charge_power_per_period,
+                discharge_resolution_kw=discharge_resolution_kw,
+                self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
             )
 
             # Add timestamps to period data (algorithm is time-agnostic, operates on relative indices)
@@ -2087,13 +2224,22 @@ class BatterySystemManager:
                     f"No previous strategic intents available, initializing {num_periods} periods to IDLE"
                 )
 
-            # Fill in optimized periods from the new optimization result
+            # Fill in optimized periods from the new optimization result.
+            # Unlike full_day_strategic_intents (which carries forward real
+            # values for already-elapsed periods too, see above),
+            # full_day_period_data has no equivalent "previous" source to
+            # carry forward, so pre-optimization-period entries stay None
+            # -- the two lists are the same length but not both fully
+            # populated at the same indices. A future consumer zipping them
+            # together must treat None as "no data for this period."
+            full_day_period_data: list = [None] * len(full_day_strategic_intents)
             for i, period_data in enumerate(period_data_list):
                 target_period = optimization_period + i
                 if target_period < len(full_day_strategic_intents):
                     full_day_strategic_intents[target_period] = (
                         period_data.decision.strategic_intent
                     )
+                    full_day_period_data[target_period] = period_data
 
             # Store this run's actual starting SOE (kWh) in OptimizationResult.
             # Must always reflect what the DP started this specific run from,
@@ -2212,8 +2358,11 @@ class BatterySystemManager:
                 summary=summary_dict,  # Now properly converted to dict
                 solar_charged=solar_charged,
                 original_dp_results={
-                    "strategic_intent": full_day_strategic_intents
-                },  # Store strategic intents
+                    "strategic_intent": full_day_strategic_intents,
+                    "period_data": full_day_period_data,
+                },  # Store strategic intents and period data (#320: period_data is
+                # preparatory plumbing for a future controller-side flip-
+                # suppression feature, deferred, no consumer in this repo yet)
             )
 
             # Override the strategic intents in the schedule with corrected data
@@ -2221,6 +2370,7 @@ class BatterySystemManager:
 
             # Create schedule manager matching current inverter type
             temp_growatt: InverterController = self._create_inverter_controller()
+            temp_growatt.seed_from(self._inverter_controller)
             temp_growatt.strategic_intents = full_day_strategic_intents
 
             # Create schedule with rolling window — only future periods get TOU segments
@@ -2388,18 +2538,29 @@ class BatterySystemManager:
                 battery_action_kw = battery_action_kwh / period_duration_hours
 
         # Delegate intent→rates mapping to the inverter controller
-        grid_charge, discharge_rate = (
+        grid_charge, discharge_rate, block_passive_charging = (
             self._inverter_controller.compute_rates_for_period(
                 period, battery_action_kw
             )
         )
 
-        # SOLAR_EXPORT discharge gate: the optimizer plans hold (rate 0), but
-        # load_first lets the battery cover an intra-period solar dip. Allow that
-        # only when the stored energy is worth less than buying from grid now
-        # (shadow_price = DP marginal value of stored SoE). This is a sub-period
-        # hardware-robustness behaviour, invisible to the 15-min plan/sim.
-        if strategic_intent == "SOLAR_EXPORT":
+        # SOLAR_EXPORT/SOLAR_STORAGE discharge gate: the optimizer plans hold
+        # (rate 0), but load_first lets the battery cover an intra-period
+        # solar/load dip. Allow that only when the stored energy is worth less
+        # than buying from grid now (shadow_price = DP marginal value of
+        # stored SoE). This is a sub-period hardware-robustness behaviour,
+        # invisible to the 15-min plan/sim. Only valid where discharge_rate is
+        # a load-following ceiling -- on platforms where it's an immediate
+        # forced power command (VPP-style control), opening the gate would
+        # force a full-power discharge instead of gently covering a dip (#324).
+        if (
+            strategic_intent
+            in (
+                "SOLAR_EXPORT",
+                "SOLAR_STORAGE",
+            )
+            and self._inverter_controller.discharge_rate_is_load_following
+        ):
             stored = self.schedule_store.get_latest_schedule()
             if stored is not None:
                 idx = period - stored.optimization_period
@@ -2408,7 +2569,7 @@ class BatterySystemManager:
                     shadow = pd_list[idx].decision.shadow_price
                     buy_prices, _ = self.price_manager.get_available_prices()
                     if period < len(buy_prices):
-                        discharge_rate = solar_export_discharge_rate(
+                        discharge_rate = intra_period_discharge_gate(
                             buy_prices[period],
                             shadow,
                             self.battery_settings.efficiency_discharge,
@@ -2417,6 +2578,8 @@ class BatterySystemManager:
         # Store the schedule's desired discharge rate before inhibit check so that
         # apply_discharge_inhibit() can restore it when the inhibit sensor clears.
         self._desired_discharge_rate = discharge_rate
+        self._desired_grid_charge = grid_charge
+        self._desired_block_passive_charging = block_passive_charging
 
         # Check discharge inhibit (e.g. EV actively charging during Tibber grid award)
         if discharge_rate > 0:
@@ -2455,7 +2618,7 @@ class BatterySystemManager:
         # full TOU schedule on the next hourly cycle).  This retry targets the
         # per-period write at finer granularity within the 15-min window.
         success, error_msg = self._inverter_controller.apply_period(
-            self.controller, grid_charge, discharge_rate
+            self.controller, grid_charge, discharge_rate, block_passive_charging
         )
 
         if not success:
@@ -2469,7 +2632,9 @@ class BatterySystemManager:
                 ),
                 error=Exception(error_msg),
             )
-            self._schedule_period_retry(period, grid_charge, discharge_rate)
+            self._schedule_period_retry(
+                period, grid_charge, discharge_rate, block_passive_charging
+            )
         else:
             self._last_applied_discharge_rate = discharge_rate
 
@@ -2486,6 +2651,7 @@ class BatterySystemManager:
         period: int,
         grid_charge: bool,
         discharge_rate: int,
+        block_passive_charging: bool = False,
         attempt: int = 1,
     ) -> None:
         """Schedule a one-shot retry of period hardware write.
@@ -2517,7 +2683,7 @@ class BatterySystemManager:
                 max_attempts + 1,
             )
             success, error_msg = self._inverter_controller.apply_period(
-                self.controller, grid_charge, discharge_rate
+                self.controller, grid_charge, discharge_rate, block_passive_charging
             )
             self._runtime_failure_tracker.dismiss_by_category("period_apply")
             if not success:
@@ -2531,7 +2697,11 @@ class BatterySystemManager:
                         error=Exception(error_msg),
                     )
                     self._schedule_period_retry(
-                        period, grid_charge, discharge_rate, attempt + 1
+                        period,
+                        grid_charge,
+                        discharge_rate,
+                        block_passive_charging,
+                        attempt + 1,
                     )
                 else:
                     self._runtime_failure_tracker.record_failure(
@@ -2955,7 +3125,17 @@ class BatterySystemManager:
                 self._desired_discharge_rate,
             )
 
-        self.controller.set_discharging_power_rate(target_rate)
+        # Route through the inverter controller's own per-period write path
+        # (same as _apply_period_schedule) rather than writing the EMS
+        # discharge_rate entity directly -- on VPP-style platforms
+        # (discharge_rate_is_load_following False) that entity is never
+        # read by hardware, which made this a dead write there (#324).
+        self._inverter_controller.apply_period(
+            self.controller,
+            self._desired_grid_charge,
+            target_rate,
+            self._desired_block_passive_charging,
+        )
         self._last_applied_discharge_rate = target_rate
 
     def get_settings(self):

@@ -25,8 +25,16 @@ class InverterController(ABC):
     - SOLAR_STORAGE  → grid_charge=False, charge_rate=100, discharge_rate=0
     - LOAD_SUPPORT   → grid_charge=False, charge_rate=0,   discharge_rate=<action-derived>
     - BATTERY_EXPORT → grid_charge=False, charge_rate=0,   discharge_rate=<action-derived>
-    - SOLAR_EXPORT   → grid_charge=False, charge_rate=100, discharge_rate=0
+    - SOLAR_EXPORT   → grid_charge=False, charge_rate=0,   discharge_rate=0
     - IDLE           → grid_charge=False, charge_rate=100, discharge_rate=0
+
+    SOLAR_EXPORT's charge_rate=0 (#313): blocks passive solar->battery
+    charging so solar bypasses to grid even when the battery has room --
+    unlike IDLE, which is meant to pass through to hardware's normal
+    self-use charging. Before #313 these were identical (charge_rate=100),
+    harmless while SOLAR_EXPORT only ever occurred with a full battery
+    (nothing left to charge anyway either way), but wrong once the DP can
+    choose SOLAR_EXPORT below max SOE.
     """
 
     # Map strategic intents to inverter control settings.
@@ -44,7 +52,7 @@ class InverterController(ABC):
             "charge_rate": 0,
             "discharge_rate": 100,
         },
-        "SOLAR_EXPORT": {"grid_charge": False, "charge_rate": 100, "discharge_rate": 0},
+        "SOLAR_EXPORT": {"grid_charge": False, "charge_rate": 0, "discharge_rate": 0},
         "IDLE": {"grid_charge": False, "charge_rate": 100, "discharge_rate": 0},
     }
 
@@ -90,6 +98,33 @@ class InverterController(ABC):
     # left at 0 on the base since not every controller uses period lists.
     MAX_CHARGE_PERIODS: ClassVar[int] = 0
     MAX_DISCHARGE_PERIODS: ClassVar[int] = 0
+
+    # Whether discharge_rate acts as a ceiling under native load-following
+    # firmware (only draws what's needed to cover an actual deficit) rather
+    # than an immediate forced power command executed regardless of actual
+    # load. True for TOU/load_first-based control (Growatt MIN cloud,
+    # solax_modbus TOU mode). False for VPP-style direct power control
+    # (SolaxController, solax_modbus VPP mode), where a discharge_rate>0
+    # written by the intra-period discharge gate (#187/#318) would force a
+    # full-power discharge instead of gently covering a dip (#324).
+    discharge_rate_is_load_following: ClassVar[bool] = True
+
+    def discharge_resolution_kw(self, max_discharge_power_kw: float) -> float:
+        """Smallest controllable discharge increment this platform can
+        execute, in kW. Default: Growatt's integer-percent-of-max grid (1%
+        steps) -- real hardware only accepts an integer percent rate
+        (core/bess/simulation/inverter_simulator.py::_map_rates, postmortem
+        #282). Override on a platform whose hardware resolution differs."""
+        return max_discharge_power_kw / 100
+
+    @property
+    def self_throttle_export_threshold_kwh(self) -> float:
+        """Discharge overshoot (kWh) below which this platform silently
+        delivers only what the home needs rather than exporting the excess
+        (Growatt MIN's `load_first` behavior, #240). Default: 0.01 kWh.
+        Override on a platform with no such self-throttle (e.g. one that
+        always writes an exact watt target)."""
+        return 0.01
 
     def __init__(self, battery_settings: BatterySettings) -> None:
         """Initialize shared inverter controller state."""
@@ -358,7 +393,7 @@ class InverterController(ABC):
 
     def compute_rates_for_period(
         self, period: int, battery_action_kw: float
-    ) -> tuple[bool, int]:
+    ) -> tuple[bool, int, bool]:
         """Map strategic intent for a period to hardware control rates.
 
         Args:
@@ -366,10 +401,22 @@ class InverterController(ABC):
             battery_action_kw: Battery power in kW (positive=charge, negative=discharge)
 
         Returns:
-            Tuple of (grid_charge, discharge_rate_percent)
+            Tuple of (grid_charge, discharge_rate_percent, block_passive_charging).
+            block_passive_charging is True when this intent's
+            INTENT_TO_CONTROL charge_rate is 0 -- i.e. passive solar->battery
+            charging should be blocked (SOLAR_EXPORT), not just left at a
+            forced discharge rate of 0 (LOAD_SUPPORT/BATTERY_EXPORT with no
+            action this period). Register-based platforms already realize
+            this via the separate charge_rate register (adjust_charging_power());
+            forced-power/VPP-style platforms have no such register and must
+            act on this flag directly at apply_period (see #355).
         """
         intent = self.strategic_intents[period]
-        return self._map_intent_to_rates(intent, battery_action_kw)
+        grid_charge, discharge_rate = self._map_intent_to_rates(
+            intent, battery_action_kw
+        )
+        block_passive_charging = self.INTENT_TO_CONTROL[intent]["charge_rate"] == 0
+        return grid_charge, discharge_rate, block_passive_charging
 
     @staticmethod
     def _scale_to_percent(power_kw: float, max_power_kw: float) -> int:
@@ -425,7 +472,11 @@ class InverterController(ABC):
             raise ValueError(f"Unknown strategic intent: {intent}")
 
     def apply_period(
-        self, controller, grid_charge: bool, discharge_rate: int
+        self,
+        controller,
+        grid_charge: bool,
+        discharge_rate: int,
+        block_passive_charging: bool = False,
     ) -> tuple[bool, str]:
         """Write period control settings to hardware.
 
@@ -436,11 +487,19 @@ class InverterController(ABC):
             controller: HomeAssistantAPIController instance
             grid_charge: Whether to enable grid charging
             discharge_rate: Discharge power rate (0-100%), post-inhibit
+            block_passive_charging: Whether passive solar->battery charging
+                should be blocked this period (SOLAR_EXPORT). Register-based
+                platforms realize this via the separate charge_rate register
+                (adjust_charging_power()) and ignore this flag. Forced-power
+                platforms with no such register (VPP-style) act on it
+                directly -- see #355.
 
         Returns:
             Tuple of (success, error_message). error_message is empty on success.
         """
-        return self._write_period_to_hardware(controller, grid_charge, discharge_rate)
+        return self._write_period_to_hardware(
+            controller, grid_charge, discharge_rate, block_passive_charging
+        )
 
     def get_period_settings(self, period: int) -> dict:
         """Get control settings for a specific 15-minute period.
@@ -471,8 +530,8 @@ class InverterController(ABC):
             num_periods = len(self.current_schedule.actions)
             period_duration_hours = 24.0 / num_periods
             battery_action_kw = battery_action_kwh / period_duration_hours
-            grid_charge, discharge_rate = self.compute_rates_for_period(
-                period, battery_action_kw
+            grid_charge, discharge_rate, _block_passive_charging = (
+                self.compute_rates_for_period(period, battery_action_kw)
             )
             charge_rate = self._compute_charge_rate(
                 intent, self.INTENT_TO_CONTROL[intent], battery_action_kw
@@ -694,6 +753,18 @@ class InverterController(ABC):
     def read_and_initialize_from_hardware(self, controller, current_hour: int) -> None:
         """Read current schedule from inverter and initialize this controller."""
 
+    def seed_from(self, other: "InverterController") -> None:
+        """Carry forward hardware-derived state onto a freshly created controller.
+
+        BatterySystemManager recreates the controller every optimization
+        cycle (build-candidate-then-swap); anything seeded from a hardware
+        read-back in read_and_initialize_from_hardware must be re-applied
+        here too, or it silently resets to the __init__ default every cycle
+        (#329). Subclasses override to add their own such fields, calling
+        super().seed_from(other) first.
+        """
+        self.tou_intervals = other.tou_intervals.copy()
+
     @abstractmethod
     def sync_soc_limits(self, controller) -> None:
         """Sync SOC limits from config to inverter hardware."""
@@ -708,17 +779,28 @@ class InverterController(ABC):
         """
 
     def _write_period_to_hardware(
-        self, controller, grid_charge: bool, discharge_rate: int
+        self,
+        controller,
+        grid_charge: bool,
+        discharge_rate: int,
+        block_passive_charging: bool = False,
     ) -> tuple[bool, str]:
         """Write per-period control settings to hardware.
 
         Default implementation uses Growatt register interface (grid_charge +
         discharge_rate). SolaX overrides with VPP commands.
 
+        block_passive_charging is unused here: register-based platforms
+        (Growatt TOU/cloud, this default) realize "block passive solar
+        charging" via the separate charge_rate register, written by
+        BatterySystemManager.adjust_charging_power() -- not via this method.
+
         Args:
             controller: HomeAssistantAPIController instance
             grid_charge: Whether to enable grid charging
             discharge_rate: Discharge power rate (0-100%)
+            block_passive_charging: Unused by this default implementation --
+                see docstring above.
 
         Returns:
             Tuple of (success, error_message). error_message is empty on success.

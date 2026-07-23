@@ -394,6 +394,7 @@ class APIDashboardHourlyData:
     solarToHome: FormattedValue
     solarToBattery: FormattedValue
     solarToGrid: FormattedValue
+    clippedSolar: FormattedValue
     gridToHome: FormattedValue
     gridToBattery: FormattedValue
     batteryToHome: FormattedValue
@@ -513,6 +514,10 @@ class APIDashboardHourlyData:
                 hourly.energy.solar_to_grid,
                 "energy_kwh_only",
             ),
+            clippedSolar=safe_format(
+                hourly.energy.clipped_solar,
+                "energy_kwh_only",
+            ),
             gridToHome=safe_format(
                 hourly.energy.grid_to_home,
                 "energy_kwh_only",
@@ -620,6 +625,13 @@ class APIDashboardSummary:
     averagePrice: FormattedValue
     finalBatterySoe: FormattedValue
 
+    # Full-horizon totals (issue #287): populated only when the DP is running
+    # a 2-day plan, so a decision that correctly defers value to tomorrow
+    # doesn't look like a loss when only today's slice is shown.
+    horizonDays: int = 1
+    netGridCostFullHorizon: FormattedValue | None = None
+    netSavingsFullHorizon: FormattedValue | None = None
+
     @classmethod
     def from_totals(
         cls, totals: dict, costs: dict, battery_capacity: float, currency: str
@@ -651,6 +663,23 @@ class APIDashboardSummary:
                 total_optimized_cost, "currency", currency
             ),
             netGridCost=create_formatted_value(costs["netGrid"], "currency", currency),
+            horizonDays=costs.get("horizonDays", 1),
+            netGridCostFullHorizon=(
+                create_formatted_value(
+                    costs["netGridFullHorizon"], "currency", currency
+                )
+                if "netGridFullHorizon" in costs
+                else None
+            ),
+            netSavingsFullHorizon=(
+                create_formatted_value(
+                    costs["gridOnlyFullHorizon"] - costs["netGridFullHorizon"],
+                    "currency",
+                    currency,
+                )
+                if "netGridFullHorizon" in costs
+                else None
+            ),
             netSavings=create_formatted_value(
                 total_grid_only_cost - costs["netGrid"], "currency", currency
             ),
@@ -921,6 +950,8 @@ class APIDashboardResponse:
         total_daily_savings = actual_savings + predicted_savings
 
         # Battery SOE calculation
+        if battery_soc is None:
+            raise ValueError("battery_soc sensor is unavailable")
         battery_soe = (battery_soc / 100.0) * battery_capacity
 
         # Create cost and savings data structure for SystemStatusCard
@@ -1104,6 +1135,9 @@ class APISetupCompletePayload(BaseModel):
     entsoeEntity: str | None = None
     # Inverter
     inverterPlatform: str | None = None
+    # Growatt-via-solax_modbus control strategy ("tou" or "vpp"); ignored by
+    # other platforms and forced to "vpp" server-side for GEN3.
+    inverterControlMode: str | None = None
     # Control mode
     demoMode: bool | None = None
 

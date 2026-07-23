@@ -46,6 +46,18 @@
 
 ---
 
+### **Surface Inverter Max AC Power in the setup wizard**
+
+**Impact**: Medium | **Effort**: Low | **Dependencies**: `SetupWizardPage.tsx`
+
+**Description**: `inverter_max_ac_power_kw` (PR #305) caps combined solar + discharge AC output at the inverter's rated power, preventing over-discharge plans on hybrid inverters — but it's opt-in (default 0/disabled) and currently only surfaced in Settings → Battery, not the setup wizard. Issue #304 (ridax67) hit exactly this — a planned discharge exceeding the inverter's 10kW AC limit — and had to be told about the setting after the fact. New users are unlikely to discover it unless they hit the symptom first.
+
+**Implementation**: Add the `inverterMaxAcPowerKw` / `inverterAcPowerMargin` fields to the battery step of `SetupWizardPage.tsx`, likely alongside other inverter-rating fields, with a short explanation of when to set it (hybrid/DC-coupled inverters where solar + discharge can exceed the inverter's AC rating).
+
+**Files**: `frontend/src/pages/SetupWizardPage.tsx`, `frontend/src/components/settings/BatteryFormSection.tsx` (for reference on existing field wiring)
+
+---
+
 ### **Rename `strategic_intent` to `battery_intent` throughout the codebase**
 
 **Impact**: Low | **Effort**: Low | **Dependencies**: `decision_intelligence.py`, `dp_battery_algorithm.py`, `sph_schedule.py`, `models.py`, frontend
@@ -506,6 +518,20 @@ This would make the profitability gate compare apples-to-apples with the dashboa
 
 ---
 
+### Pinned scenario fixtures never exercise a realistic (nonzero) terminal value
+
+**Impact**: Medium | **Effort**: Medium-High | **Dependencies**: `core/bess/tests/unit/test_scenarios.py`, `core/bess/dp_battery_algorithm.py`, `core/bess/battery_system_manager.py`
+
+**Description**: `optimize_battery_schedule()` defaults `terminal_value_per_kwh=0.0`, and every one of the ~26 pinned scenarios in `test_scenarios.py` calls it without overriding that default — so the entire pinned-fixture regression suite always tests the DP with terminal value hardcoded to zero, regardless of what each scenario's horizon is meant to represent. In production, every real optimization run computes a nonzero terminal value via `_calculate_terminal_value()` (`battery_system_manager.py`). Found while investigating #345 (terminal-value zeroing at the extended horizon boundary): CI stayed green through that fix specifically because nothing in the pinned suite touches this code path at all, in either direction.
+
+**What to improve**: Retrofit the pinned scenarios to compute their terminal value the same way production does (`_calculate_terminal_value`'s median-buy/sell-cap formula, applied to each scenario's own price data) instead of silently defaulting to zero, then re-pin each scenario's expected cost against the new baseline.
+
+**Why not done as part of #345**: per the CHANGELOG history, changes to this exact mechanism have previously shifted "nearly every scenario's expected schedule" — retrofitting all 26 fixtures is a broad, independently risky change that conflates two different concerns ("is `_calculate_terminal_value`'s formula correct" vs. "does the DP correctly handle *some* nonzero terminal value") and shouldn't ride along with a narrow bug fix. #345/#347 instead added one new targeted pinned fixture for the extended-horizon mechanism specifically, without touching the other 26.
+
+**Files**: `core/bess/tests/unit/test_scenarios.py`, `core/bess/dp_battery_algorithm.py:1313-1327` (`optimize_battery_schedule` signature/default), `core/bess/battery_system_manager.py` (`_calculate_terminal_value`)
+
+---
+
 ## 🔧 **TECHNICAL DEBT**
 
 ### Consolidate HistoricalDataStore, PredictionSnapshotStore, and DailyViewStore
@@ -564,6 +590,33 @@ These concepts are orthogonal but interact in non-obvious ways. The correct mapp
 This eliminates the `required_methods` parameter entirely and makes the policy self-consistent: optional components can never show ERROR, required components always show ERROR on failure.
 
 **Files**: `core/bess/health_check.py`, `core/bess/power_monitor.py`, `core/bess/health_check.py` (all `perform_health_check()` call sites)
+
+---
+
+### Remove dead `min_action_profit_threshold` config
+
+**Impact**: Low | **Effort**: Low | **Dependencies**: `settings.py`, `settings_store.py`
+
+**Description**: `min_action_profit_threshold` was the configurable gate for the DP's old profit-threshold/all-IDLE-rejection mechanism. That mechanism was removed in the "Bellman-optimality guardrail removal" refactor (commit `ee24537f`/`f57d4fed`, `docs/superpowers/specs/2026-07-06-dp-bellman-guardrail-removal-design.md`) — the current all-IDLE safety net (`core/bess/dp_battery_algorithm.py:1514-1536`) is a plain cost comparison that doesn't read this setting at all. The field is still declared in `core/bess/settings.py:127` and migrated in `backend/settings_store.py:389,480`, and likely still surfaced in the setup wizard/settings UI, but nothing consumes it anymore. Found while auditing `docs/agents/bess-knowledge.md` and `docs/SOFTWARE_DESIGN.md` for staleness (2026-07-19).
+
+**What needs to change**:
+
+- Remove `min_action_profit_threshold` from `BatterySettings` (`core/bess/settings.py`)
+- Remove it from the settings-store schema/migration (`backend/settings_store.py`)
+- Check the frontend (settings forms, setup wizard) for a corresponding field and remove it
+- Verify no other code path reads it (grep before deleting)
+
+**Files**: `core/bess/settings.py`, `backend/settings_store.py`, frontend settings components
+
+---
+
+### Reconsider whether the all-IDLE numerical safety net is still needed
+
+**Impact**: Low | **Effort**: Low-Medium | **Dependencies**: `dp_battery_algorithm.py`, `docs/superpowers/specs/2026-07-06-dp-bellman-guardrail-removal-design.md`
+
+**Description**: After the "Bellman-optimality guardrail removal" refactor, `optimize_battery_schedule` still unconditionally computes a plain all-IDLE schedule and swaps it in if cheaper (`core/bess/dp_battery_algorithm.py:1514-1536`). Backward induction is optimal by construction — `IDLE` is always an available action at every period, so the DP's own schedule should never come out worse. The design doc's own investigation found this only guards a small residual (~0.16 SEK on one fixture, down from 0.27 SEK after an earlier partial fix) from SOE-grid discretization, "not provably zero without it." Worth revisiting whether finer discretization, the continuous-action reformulation mentioned as out-of-scope in that design doc, or another approach could close the residual gap fully, making this comparison genuinely removable rather than kept indefinitely as insurance.
+
+**Files**: `core/bess/dp_battery_algorithm.py` (lines 1514-1536), `docs/superpowers/specs/2026-07-06-dp-bellman-guardrail-removal-design.md`
 
 ---
 
@@ -746,8 +799,28 @@ The `_get_hour_readings` (and thus the InfluxDB query) is called at startup (to 
 
 ---
 
+## From #317 period-group intent reconciliation code review (non-blocking)
+
+**`backend/api.py`'s new `today_reconciled_intents` build has two silent fallbacks** (`planned_intent` defaults to `"IDLE"` when `period_idx >= len(planned_intents)`, and out-of-range periods also append `planned_intent`) that follow the existing `INTENT_TO_MODE.get(intent, "load_first")` convention in `inverter_controller.py`, but technically fall under `docs/agents/rules.md`'s "Explicit failure over silent degradation" rule. Low risk since it's a display-only path, not a control path, and the pattern is already pervasive in this file — not filed as a blocker.
+
+**Behavior change on cold start**: previously, if `schedule_manager.strategic_intents` was empty (e.g. right after startup, before the controller applies a schedule) but `schedule_store.get_latest_schedule()` already had a stored schedule, `get_detailed_period_groups()` returned `[]` outright (its `if not effective_intents: return []` early exit). Now the endpoint always builds a full per-period `today_reconciled_intents` list (defaulting missing planned entries to `"IDLE"`), so period_groups will render partial data (actual periods reconciled, future periods shown as `"IDLE"`) in that window instead of nothing. This looks like an improvement in line with the issue's intent (show what's real, not what's stale) but is a user-visible behavior change worth knowing about if it's ever reported as "showing IDLE for periods with no plan yet."
+
+**Files**: `backend/api.py` (`get_growatt_detailed_schedule`, ~lines 1719-1758)
+
+---
+
 ## From #233 SOE-floor-clamp fix code review (non-blocking, pre-existing)
 
 **`_idle_battery_flows`'s below-floor guard now zeroes real energy, not just floor artefacts** — filed as [#295](https://github.com/johanzander/bess-manager/issues/295).
 
 **`_interpolate_value`'s index clamp flattens continuation value below the SOE floor**: `V`'s grid (`soe_levels`) starts exactly at `min_soe_kwh`, so any `next_soe` below the floor clamps to `V_row[0]` regardless of how far below floor it is — candidates ending at different below-floor SoEs get identical continuation credit. Bounded in practice (discharge is already excluded below floor, and `next_soe` is monotonically non-decreasing once below floor) — not filed as an issue, just worth a comment in `_interpolate_value` noting the approximation if this file is touched again.
+
+---
+
+## From #353 immediate_value/future_value investigation (non-blocking)
+
+**`DecisionData.immediate_value` duplicates the live `EconomicData.grid_cost`/dashboard "Net Grid Cost" metric and should probably be removed.** Traced while building the debug-log visualization skill: `immediate_value = export_revenue - import_cost - battery_wear_cost` (`decision_intelligence.py:413`) is exactly `-(grid_cost + battery_wear_cost)`, where `grid_cost = import_cost - export_revenue` (`core/bess/models.py:232`) is the same figure already surfaced live as `netGridCost` (`backend/api.py:776-782` → `SystemStatusCard.tsx`'s headline tile). The only difference is a sign flip and whether wear cost is netted in — and neither `immediate_value` nor `future_value` (nor the `economic_chain` narrative string, nor `/api/decision-intelligence`) is reachable anywhere in the live app: `frontend/src/components/DecisionFramework.tsx`, the only consumer that renders any of these fields, is never imported by any routed page in `App.tsx` — it's orphaned/dead code. `future_value` (fixed in #353 to no longer be always `0.0`) doesn't have this exact duplication problem — there's no live "value-to-go" KPI to compare against — but it's equally unreachable today.
+
+**Suggestion**: remove `immediate_value` (and the `economic_chain` string's reliance on it) once a decision is made on `DecisionFramework.tsx`/`/api/decision-intelligence` — either wire it up to the real app using `grid_cost`/`netSavings` terminology instead of re-deriving a redundant metric, or delete the dead path entirely. Not filed as its own issue since it's a design/scope decision, not a bug.
+
+---

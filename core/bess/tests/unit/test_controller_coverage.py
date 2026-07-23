@@ -477,39 +477,60 @@ class TestApplyPeriod:
 class TestComputeRatesForPeriod:
     def test_grid_charging_intent(self, min_ctrl):
         min_ctrl.strategic_intents = ["GRID_CHARGING"] * 4
-        grid_charge, discharge_rate = min_ctrl.compute_rates_for_period(
-            0, battery_action_kw=5.0
+        grid_charge, discharge_rate, block_passive_charging = (
+            min_ctrl.compute_rates_for_period(0, battery_action_kw=5.0)
         )
         assert grid_charge is True
         assert discharge_rate == 0
+        assert block_passive_charging is False
 
     def test_export_arbitrage_intent(self, min_ctrl):
         min_ctrl.strategic_intents = ["BATTERY_EXPORT"] * 4
-        grid_charge, discharge_rate = min_ctrl.compute_rates_for_period(
-            0, battery_action_kw=-3.0
+        grid_charge, discharge_rate, block_passive_charging = (
+            min_ctrl.compute_rates_for_period(0, battery_action_kw=-3.0)
         )
         assert grid_charge is False
         assert discharge_rate > 0
+        assert block_passive_charging is True
 
     def test_export_arbitrage_full_power(self, min_ctrl):
         min_ctrl.strategic_intents = ["BATTERY_EXPORT"] * 4
-        _grid_charge, discharge_rate = min_ctrl.compute_rates_for_period(
+        _grid_charge, discharge_rate, _block = min_ctrl.compute_rates_for_period(
             0, battery_action_kw=-min_ctrl.max_discharge_power_kw
         )
         assert discharge_rate == 100
 
     def test_idle_intent(self, min_ctrl):
         min_ctrl.strategic_intents = ["IDLE"] * 4
-        grid_charge, discharge_rate = min_ctrl.compute_rates_for_period(
-            0, battery_action_kw=0.0
+        grid_charge, discharge_rate, block_passive_charging = (
+            min_ctrl.compute_rates_for_period(0, battery_action_kw=0.0)
         )
         assert grid_charge is False
         assert discharge_rate == 0
+        assert block_passive_charging is False
+
+    def test_solar_export_intent_blocks_passive_charging(self, min_ctrl):
+        min_ctrl.strategic_intents = ["SOLAR_EXPORT"] * 4
+        grid_charge, discharge_rate, block_passive_charging = (
+            min_ctrl.compute_rates_for_period(0, battery_action_kw=0.0)
+        )
+        assert grid_charge is False
+        assert discharge_rate == 0
+        assert block_passive_charging is True
+
+    def test_solar_storage_intent_allows_passive_charging(self, min_ctrl):
+        min_ctrl.strategic_intents = ["SOLAR_STORAGE"] * 4
+        grid_charge, discharge_rate, block_passive_charging = (
+            min_ctrl.compute_rates_for_period(0, battery_action_kw=0.0)
+        )
+        assert grid_charge is False
+        assert discharge_rate == 0
+        assert block_passive_charging is False
 
     def test_load_support_partial_discharge(self, min_ctrl):
         # 1.5 kW of 15.0 kW max → 10%
         min_ctrl.strategic_intents = ["LOAD_SUPPORT"] * 4
-        grid_charge, discharge_rate = min_ctrl.compute_rates_for_period(
+        grid_charge, discharge_rate, _block = min_ctrl.compute_rates_for_period(
             0, battery_action_kw=-1.5
         )
         assert grid_charge is False
@@ -517,14 +538,14 @@ class TestComputeRatesForPeriod:
 
     def test_load_support_full_discharge(self, min_ctrl):
         min_ctrl.strategic_intents = ["LOAD_SUPPORT"] * 4
-        _grid_charge, discharge_rate = min_ctrl.compute_rates_for_period(
+        _grid_charge, discharge_rate, _block = min_ctrl.compute_rates_for_period(
             0, battery_action_kw=-min_ctrl.max_discharge_power_kw
         )
         assert discharge_rate == 100
 
     def test_load_support_zero_action(self, min_ctrl):
         min_ctrl.strategic_intents = ["LOAD_SUPPORT"] * 4
-        _grid_charge, discharge_rate = min_ctrl.compute_rates_for_period(
+        _grid_charge, discharge_rate, _block = min_ctrl.compute_rates_for_period(
             0, battery_action_kw=0.0
         )
         assert discharge_rate == 0

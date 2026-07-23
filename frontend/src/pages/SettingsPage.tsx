@@ -40,6 +40,7 @@ const EMPTY_BATTERY: BatteryForm = {
   cycleCostPerKwh: 0,
   efficiencyCharge: 97, efficiencyDischarge: 97,
   temperatureDeratingEnabled: false, minActionProfit: 0,
+  inverterMaxAcPowerKw: 0, inverterAcPowerMargin: 0.05,
 };
 const EMPTY_HOME: HomeForm = {
   consumption: 3.5, consumptionStrategy: 'sensor',
@@ -56,7 +57,7 @@ const EMPTY_PRICING: PricingForm = {
   area: '', markupRate: 0, vatMultiplier: 1.25, additionalCosts: 0,
   taxReduction: 0, spotMultiplier: 1.0, exportSpotMultiplier: 1.0,
 };
-const EMPTY_INVERTER: InverterForm = { inverterPlatform: 'growatt_server_min', deviceId: '' };
+const EMPTY_INVERTER: InverterForm = { inverterPlatform: 'growatt_server_min', deviceId: '', controlMode: 'tou' };
 
 // ---------------------------------------------------------------------------
 // Component
@@ -170,6 +171,8 @@ const SettingsPage: React.FC = () => {
         efficiencyDischarge: bat_s.efficiencyDischarge ?? 0.95,
         temperatureDeratingEnabled: bat_s.temperatureDerating?.enabled ?? false,
         minActionProfit: bat_s.minActionProfitThreshold ?? 0,
+        inverterMaxAcPowerKw: bat_s.inverterMaxAcPowerKw ?? 0,
+        inverterAcPowerMargin: bat_s.inverterAcPowerMargin ?? 0.05,
       };
       setBatteryForm(bat);
       savedBattery.current = JSON.stringify(bat);
@@ -212,6 +215,7 @@ const SettingsPage: React.FC = () => {
       const inv: InverterForm = {
         inverterPlatform: uiType,
         deviceId: growatt_s.deviceId ?? '',
+        controlMode: (invNew.controlMode as 'tou' | 'vpp' | undefined) ?? 'tou',
       };
       setInverterForm(inv);
       savedInverter.current = JSON.stringify(inv);
@@ -447,6 +451,8 @@ const SettingsPage: React.FC = () => {
           minActionProfitThreshold: batteryForm.minActionProfit,
           efficiencyCharge: batteryForm.efficiencyCharge,
           efficiencyDischarge: batteryForm.efficiencyDischarge,
+          inverterMaxAcPowerKw: batteryForm.inverterMaxAcPowerKw,
+          inverterAcPowerMargin: batteryForm.inverterAcPowerMargin,
           temperatureDerating: {
             enabled: batteryForm.temperatureDeratingEnabled,
             weatherEntity: sensors.shared?.['weather_entity'] ?? '',
@@ -457,6 +463,7 @@ const SettingsPage: React.FC = () => {
         },
         inverter: {
           platform: inverterForm.inverterPlatform,
+          controlMode: inverterForm.controlMode ?? 'tou',
         },
       });
       savedBattery.current = JSON.stringify(batteryForm);

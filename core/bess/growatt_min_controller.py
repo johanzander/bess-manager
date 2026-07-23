@@ -154,6 +154,12 @@ class GrowattMinController(InverterController):
     def active_tou_intervals(self, value: list[dict]) -> None:
         self._active_tou_intervals = value
 
+    def seed_from(self, other: "InverterController") -> None:
+        """See base docstring. Adds the active-TOU-subset tracker."""
+        super().seed_from(other)
+        if isinstance(other, GrowattMinController):
+            self._active_tou_intervals = other._active_tou_intervals.copy()
+
     def _group_periods_by_mode(self, start_period: int = 0) -> list[dict]:
         """Group consecutive 15-min periods by their battery mode.
 
@@ -1274,6 +1280,7 @@ class GrowattMinController(InverterController):
         # Apply updates to hardware
         writes = 0
         disables = 0
+        failures: list[str] = []
 
         if to_disable or to_update:
             logger.info(
@@ -1298,6 +1305,10 @@ class GrowattMinController(InverterController):
                 except Exception as e:
                     logger.error("FAILED: Failed to disable TOU segment: %s", e)
                     # Failure already recorded by _api_request via record_failure_once
+                    failures.append(
+                        f"disable segment {segment.get('segment_id')} "
+                        f"({segment['start_time']}-{segment['end_time']}): {e}"
+                    )
 
             # Then update/add
             for segment in to_update:
@@ -1315,8 +1326,22 @@ class GrowattMinController(InverterController):
                 except Exception as e:
                     logger.error("FAILED: Failed to update TOU segment: %s", e)
                     # Failure already recorded by _api_request via record_failure_once
+                    failures.append(
+                        f"update segment {segment.get('segment_id')} "
+                        f"({segment['start_time']}-{segment['end_time']}): {e}"
+                    )
         else:
             logger.info("No TOU segment changes needed")
+
+        if failures:
+            # Propagate so the caller (battery_system_manager._apply_schedule)
+            # sets _hardware_write_pending=True and retries next cycle instead
+            # of silently treating the write as applied (issue: dashboard/UI
+            # showed the intended schedule as active while these segments
+            # never reached the inverter).
+            raise RuntimeError(
+                f"{len(failures)} TOU segment write(s) failed: {'; '.join(failures)}"
+            )
 
         return writes, disables
 

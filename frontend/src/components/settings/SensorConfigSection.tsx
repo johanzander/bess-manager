@@ -12,6 +12,9 @@ import type { HealthStatus } from '../../types';
 export interface InverterForm {
   inverterPlatform: string;
   deviceId: string;
+  /** Growatt-via-solax_modbus control strategy. GEN4 default "tou"; GEN3 is
+   * always "vpp" server-side regardless of this value. */
+  controlMode?: 'tou' | 'vpp';
 }
 
 // ---------------------------------------------------------------------------
@@ -394,6 +397,42 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
                     );
                   })}
                 </div>
+
+                {/* Growatt-via-solax_modbus control mode (TOU vs VPP) */}
+                {inverterForm.inverterPlatform === 'solax_modbus_growatt_min' && (
+                  <div className="mt-3">
+                    <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
+                      Control Mode <span className="text-[9px] text-orange-500 dark:text-orange-400 font-medium">(VPP experimental)</span>
+                    </span>
+                    <div className="flex flex-wrap items-center gap-2 mt-1">
+                      {([
+                        { value: 'tou' as const, label: 'TOU Schedule (default)' },
+                        { value: 'vpp' as const, label: 'VPP Remote Power' },
+                      ]).map(opt => {
+                        const selected = (inverterForm.controlMode ?? 'tou') === opt.value;
+                        return (
+                          <button
+                            key={opt.value}
+                            type="button"
+                            onClick={() => onInverterChange({ ...inverterForm, controlMode: opt.value })}
+                            className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                              selected
+                                ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-300 dark:border-blue-600 text-blue-700 dark:text-blue-300'
+                                : 'bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-gray-300 dark:hover:border-gray-500'
+                            }`}
+                          >
+                            {opt.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+                {inverterForm.inverterPlatform === 'solax_modbus_growatt_sph' && (
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-3">
+                    Control mode: <span className="font-medium">VPP Remote Power</span> — GEN3 has no working TOU path, so VPP is the only control mode.
+                  </p>
+                )}
               </TabsContent>
 
               <TabsContent value="solis">

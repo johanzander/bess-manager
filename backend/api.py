@@ -33,11 +33,11 @@ from api_dataclasses import (
 )
 from fastapi import APIRouter, HTTPException, Query
 from loguru import logger
-from settings_store import VALID_PLATFORMS
 
 from core.bess import time_utils
 from core.bess.health_check import describe_failing_checks, run_system_health_checks
 from core.bess.savings_aggregator import DEFAULT_COUNTS, build_buckets
+from core.bess.settings_store import VALID_PLATFORMS
 from core.bess.time_utils import get_period_count
 
 router = APIRouter()
@@ -315,17 +315,23 @@ async def patch_settings(updates: dict):
                         detail="Inverter section requires a 'platform' field",
                     )
 
-            elif store_key == "sensors":
-                # Update live ha_controller.sensors from the merged flat view
-                active = bess_controller.settings_store.get_active_sensors()
-                bess_controller.ha_controller.sensors = {
-                    k: v for k, v in active.items() if v
-                }
+                # Only GEN4 (solax_modbus_growatt_min) accepts an explicit
+                # control_mode here: GEN3 (solax_modbus_growatt_sph) was
+                # already resolved to "vpp" by switch_inverter_platform()
+                # above, and re-applying a stale client-side "tou" default
+                # would raise, since GEN3 rejects any other value.
+                control_mode = section.get("control_mode")
+                if control_mode and platform == "solax_modbus_growatt_min":
+                    bess_controller.system.switch_control_mode(control_mode)
 
             elif store_key == "demo_mode":
                 enabled = section.get("enabled", False)
                 bess_controller.system.set_demo_mode(enabled)
 
+        # Any of the sections above (sensors directly, or growatt/inverter via
+        # a platform switch) can change which sensors are active — refresh
+        # unconditionally rather than only on a "sensors" key match.
+        bess_controller.refresh_active_sensors()
         _refresh_health(bess_controller)
         return await get_settings()
 
@@ -460,6 +466,11 @@ def _aggregate_quarterly_to_hourly(
             ),
             solarToGrid=create_formatted_value(
                 sum(p.solarToGrid.value for p in quarter_periods),
+                "energy_kwh_only",
+                currency,
+            ),
+            clippedSolar=create_formatted_value(
+                sum(p.clippedSolar.value for p in quarter_periods),
                 "energy_kwh_only",
                 currency,
             ),
@@ -775,6 +786,21 @@ async def get_dashboard_data(
             "optimized": total_optimized_cost,
             "netGrid": total_net_grid_cost,
         }
+
+        # Issue #287: when a 2-day DP plan is active, tomorrow_data already
+        # holds the deferred-to-tomorrow slice — fold it into a full-horizon
+        # total so the dashboard doesn't make a correctly-deferred decision
+        # look like a loss.
+        if tomorrow_data:
+            costs["netGridFullHorizon"] = total_net_grid_cost + sum(
+                h.gridCost.value for h in tomorrow_data
+            )
+            costs["gridOnlyFullHorizon"] = total_grid_only_cost + sum(
+                h.gridOnlyCost.value for h in tomorrow_data
+            )
+            costs["horizonDays"] = 2
+        else:
+            costs["horizonDays"] = 1
 
         if is_historical:
             # No live sensor state applies to a past day — derive SOC from the
@@ -1515,6 +1541,8 @@ async def get_inverter_status():
             logger.warning(f"Failed to get current battery mode: {e}")
 
         battery_soc = controller.get_battery_soc()
+        if battery_soc is None:
+            raise ValueError("battery_soc sensor is unavailable")
         battery_soe = (battery_soc / 100.0) * battery_settings.total_capacity
         grid_charge_enabled = controller.grid_charge_enabled()
         charge_power_rate = controller.get_charging_power_rate()
@@ -1692,12 +1720,20 @@ async def get_growatt_detailed_schedule():
             )
             today_soc_values: list[float | None] = []
             today_actions: list[float] = []
+            today_reconciled_intents: list[str] | None = None
             if stored_schedule_for_today:
                 opt_result_today = stored_schedule_for_today.optimization_result
                 opt_period_today = stored_schedule_for_today.optimization_period
                 today_period_count_local = get_period_count(time_utils.today())
+                planned_intents = schedule_manager.strategic_intents
+                today_reconciled_intents = []
                 for period_idx in range(today_period_count_local):
                     data_idx = period_idx - opt_period_today
+                    planned_intent = (
+                        planned_intents[period_idx]
+                        if planned_intents and period_idx < len(planned_intents)
+                        else "IDLE"
+                    )
                     if 0 <= data_idx < len(opt_result_today.period_data):
                         pd_today = opt_result_today.period_data[data_idx]
                         soe = pd_today.energy.battery_soe_end
@@ -1707,10 +1743,20 @@ async def get_growatt_detailed_schedule():
                             else None
                         )
                         today_actions.append(pd_today.decision.battery_action or 0.0)
+                        # Reconcile with observed_intent for actual periods so the
+                        # label reflects real physical flow, not the stale plan.
+                        observed_intent = pd_today.decision.observed_intent
+                        today_reconciled_intents.append(
+                            observed_intent
+                            if pd_today.data_source == "actual" and observed_intent
+                            else planned_intent
+                        )
                     else:
                         today_soc_values.append(None)
                         today_actions.append(0.0)
+                        today_reconciled_intents.append(planned_intent)
             raw_groups = schedule_manager.get_detailed_period_groups(
+                intents=today_reconciled_intents,
                 actions=today_actions if today_actions else None,
                 soc_values=today_soc_values if today_soc_values else None,
             )
@@ -3085,7 +3131,7 @@ async def get_setup_status():
     """
     from app import bess_controller
 
-    sensors = bess_controller.ha_controller.sensors
+    sensors = bess_controller.settings_store.get_active_sensors()
     total = len(sensors)
     configured = sum(1 for v in sensors.values() if v)
     system_configured = bess_controller.system.is_configured
@@ -3455,6 +3501,8 @@ async def setup_complete(payload: APISetupCompletePayload):
                 )
             inv_section = bess_controller.settings_store.get_section("inverter")
             inv_section["platform"] = _platform
+            if payload.inverterControlMode is not None:
+                inv_section["control_mode"] = payload.inverterControlMode
             sections["inverter"] = inv_section
             if payload.growattDeviceId:
                 growatt_section = bess_controller.settings_store.get_section("growatt")
@@ -3475,15 +3523,24 @@ async def setup_complete(payload: APISetupCompletePayload):
             bess_controller.system.switch_inverter_platform(
                 sections["inverter"]["platform"]
             )
+            # switch_inverter_platform() resets control_mode to its platform
+            # default — apply an explicit wizard choice afterward. Only
+            # solax_modbus_growatt_min (GEN4) accepts an explicit choice here:
+            # GEN3 (solax_modbus_growatt_sph) was already resolved to "vpp"
+            # by switch_inverter_platform() above, and re-applying a stale
+            # client-side "tou" default would raise, since GEN3 rejects any
+            # other value.
+            if (
+                payload.inverterControlMode is not None
+                and sections["inverter"]["platform"] == "solax_modbus_growatt_min"
+            ):
+                bess_controller.system.switch_control_mode(payload.inverterControlMode)
 
         # Apply settings to live system so BESS starts immediately
-        # without requiring a restart.
-        if payload.sensors:
-            # Update live ha_controller.sensors from the merged flat view
-            active = bess_controller.settings_store.get_active_sensors()
-            bess_controller.ha_controller.sensors = {
-                k: v for k, v in active.items() if v
-            }
+        # without requiring a restart. Unconditional, not gated on
+        # payload.sensors: an inverter platform switch above also changes
+        # which per-platform sensor sub-dict is active.
+        bess_controller.refresh_active_sensors()
         if payload.growattDeviceId:
             bess_controller.ha_controller.growatt_device_id = payload.growattDeviceId
 

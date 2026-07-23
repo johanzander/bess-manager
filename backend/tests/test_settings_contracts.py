@@ -41,7 +41,6 @@ from datetime import date
 from unittest.mock import MagicMock, patch
 
 import pytest
-import settings_store as _sm
 from api_conversion import (
     BATTERY_MODEL_ATTRS,
     BATTERY_REQUIRED_FIELDS,
@@ -49,9 +48,10 @@ from api_conversion import (
     HOME_REQUIRED_FIELDS,
     PRICE_REQUIRED_FIELDS,
 )
-from settings_store import SettingsStore
 
+import core.bess.settings_store as _sm
 from core.bess.settings import BatterySettings, HomeSettings
+from core.bess.settings_store import SettingsStore
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -340,7 +340,13 @@ class TestApplySettings:
 # Fields present in the dataclass (and BATTERY_MODEL_ATTRS) but not required
 # at startup because they have class defaults.
 _BATTERY_OPTIONAL_FIELDS = frozenset(
-    {"charging_power_rate", "efficiency_charge", "efficiency_discharge"}
+    {
+        "charging_power_rate",
+        "efficiency_charge",
+        "efficiency_discharge",
+        "inverter_max_ac_power_kw",
+        "inverter_ac_power_margin",
+    }
 )
 # min_valid is an internal algorithm parameter, never read from the settings
 # store or written by the wizard — the one field HOME_MODEL_ATTRS has that

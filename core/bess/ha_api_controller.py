@@ -1295,7 +1295,7 @@ class HomeAssistantAPIController:
             List of option strings, or [] if the entity is unavailable.
 
         Raises:
-            SystemConfigurationError: If the working-mode sensor isn't configured.
+            ValueError: If the working-mode sensor isn't configured.
         """
         entity_id = self._get_entity_for_service("huawei_working_mode")
         response = self._api_request(
@@ -1314,6 +1314,9 @@ class HomeAssistantAPIController:
         Args:
             option: One of the StorageWorkingModesC option strings, lowercased
                 (e.g. "time_of_use_luna2000").
+
+        Raises:
+            ValueError: If the working-mode sensor isn't configured.
         """
         entity_id = self._get_entity_for_service("huawei_working_mode")
         self._service_call_with_retry(

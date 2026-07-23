@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - Platform ID: `huawei_solar_luna2000` (not the design doc's shorthand `"huawei"` — aligned to existing naming convention during planning; update the design doc's shorthand mentally, no doc edit needed since it never hardcoded the literal string in code).
-- LUNA2000 battery only. LG RESU is out of scope — no code path claims to support it; where the design doc leaves LUNA2000-vs-LG-RESU detection an open item (exact device-info field name), Task 3 raises a clear "battery type not detected" error rather than guessing, per `docs/agents/rules.md` no-silent-fallbacks.
+- LUNA2000 battery only. LG RESU is out of scope. Detection uses the `huawei_solar` integration's own signal, not a guessed device-info field: the working-mode select entity's `options` attribute omits `time_of_use_luna2000` on LG RESU installs and `time_of_use_lg` on LUNA2000 installs (verified in `select.py`'s `StorageModeSelectEntity.__init__`). Task 1 adds `get_huawei_working_mode_options()`; Task 3's `write_schedule_to_hardware` checks it and raises `SystemConfigurationError` before writing LUNA2000-format periods against an LG RESU battery, per `docs/agents/rules.md` no-silent-fallbacks.
 - Device ID: Huawei needs its own `huawei_device_id` (HA device-registry ID of the **battery** device) — kept as a separate field end-to-end (settings, API payload, `HomeAssistantAPIController` constructor), not overloaded onto the existing `growatt_device_id` field, since they're different vendors' concepts stored under different config sections.
 - No silent fallbacks anywhere (`docs/agents/rules.md`): every write path raises clearly on missing entities/config rather than no-op.
 - Run `.venv/bin/pytest -m "not slow"` after every backend task; run `cd frontend && npx tsc --noEmit && npm run lint:fix` after every frontend task.
@@ -26,7 +26,7 @@
 - Test: `core/bess/tests/unit/test_ha_api_controller.py` (or nearest existing controller-method test file — check for one before creating; if none exists for this class's service-call methods, create `core/bess/tests/unit/test_huawei_ha_controller.py`)
 
 **Interfaces:**
-- Produces: `HomeAssistantAPIController.huawei_device_id: str | None` (constructor param, mirrors `growatt_device_id`), `HUAWEI_SUFFIX_MAP: ClassVar[dict[str, str]]`, `set_huawei_working_mode(option: str) -> None`, `get_huawei_working_mode() -> str | None`, `write_huawei_tou_periods(periods_text: str) -> None`.
+- Produces: `HomeAssistantAPIController.huawei_device_id: str | None` (constructor param, mirrors `growatt_device_id`), `HUAWEI_SUFFIX_MAP: ClassVar[dict[str, str]]`, `set_huawei_working_mode(option: str) -> None`, `get_huawei_working_mode() -> str | None`, `get_huawei_working_mode_options() -> list[str]`, `write_huawei_tou_periods(periods_text: str) -> None`.
 
 - [ ] **Step 1: Add `huawei_device_id` constructor param**
 
@@ -97,6 +97,35 @@ Add near `set_grid_charge`/`grid_charge_enabled` (after line ~1234):
     def get_huawei_working_mode(self) -> str | None:
         """Get the current Huawei battery working mode (e.g. 'time_of_use_luna2000')."""
         return self._get_raw_state("huawei_working_mode")
+
+    def get_huawei_working_mode_options(self) -> list[str]:
+        """Get the working-mode select entity's available options.
+
+        The huawei_solar integration removes 'time_of_use_luna2000' from
+        this list on LG RESU installs and 'time_of_use_lg' on LUNA2000
+        installs (select.py: StorageModeSelectEntity.__init__) — this is
+        the integration itself telling us which battery family is
+        connected, rather than BESS inferring it from an undocumented
+        device-info field. Used by HuaweiController to refuse LG RESU
+        installs with a clear error instead of writing LUNA2000-format
+        TOU periods against them.
+
+        Returns:
+            List of option strings, or [] if the entity is unavailable.
+
+        Raises:
+            SystemConfigurationError: If the working-mode sensor isn't configured.
+        """
+        entity_id = self._get_entity_for_service("huawei_working_mode")
+        response = self._api_request(
+            "get",
+            f"/api/states/{entity_id}",
+            operation="Read Huawei working mode options",
+            category="config",
+        )
+        if not response:
+            return []
+        return list(response.get("attributes", {}).get("options", []))
 
     def set_huawei_working_mode(self, option: str) -> None:
         """Set the Huawei battery working mode via the standard select entity.
@@ -195,6 +224,33 @@ class TestHuaweiServiceCalls:
         )
         with pytest.raises(SystemConfigurationError):
             ctrl.write_huawei_tou_periods("06:00-08:00/1234567/+")
+
+    def test_get_huawei_working_mode_options_returns_attribute_list(
+        self, controller: HomeAssistantAPIController
+    ) -> None:
+        with patch.object(controller, "_api_request") as mock_request:
+            mock_request.return_value = {
+                "state": "maximise_self_consumption",
+                "attributes": {
+                    "options": [
+                        "adaptive",
+                        "fixed_charge_discharge",
+                        "maximise_self_consumption",
+                        "time_of_use_luna2000",
+                        "fully_fed_to_grid",
+                    ]
+                },
+            }
+            options = controller.get_huawei_working_mode_options()
+            assert "time_of_use_luna2000" in options
+            assert "time_of_use_lg" not in options
+
+    def test_get_huawei_working_mode_options_empty_when_no_response(
+        self, controller: HomeAssistantAPIController
+    ) -> None:
+        with patch.object(controller, "_api_request") as mock_request:
+            mock_request.return_value = None
+            assert controller.get_huawei_working_mode_options() == []
 ```
 
 - [ ] **Step 5: Run tests to verify they fail**
@@ -205,7 +261,7 @@ Expected: FAIL — `set_huawei_working_mode`/`write_huawei_tou_periods` don't ex
 - [ ] **Step 6: Verify tests pass after Steps 1-3**
 
 Run: `.venv/bin/pytest core/bess/tests/unit/test_huawei_ha_controller.py -v`
-Expected: PASS (3 tests).
+Expected: PASS (5 tests).
 
 - [ ] **Step 7: Commit**
 
@@ -441,6 +497,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from core.bess.exceptions import SystemConfigurationError
 from core.bess.huawei_controller import HuaweiController
 from core.bess.settings import BatterySettings
 
@@ -513,6 +570,10 @@ class TestWriteSchedule:
         intents = make_intents({2: "GRID_CHARGING"})
         controller.create_schedule(make_schedule_mock(intents))
         ha = MagicMock()
+        ha.get_huawei_working_mode_options.return_value = [
+            "maximise_self_consumption",
+            "time_of_use_luna2000",
+        ]
         ha.get_huawei_working_mode.return_value = "maximise_self_consumption"
         controller.write_schedule_to_hardware(ha, 0, [])
         ha.set_huawei_working_mode.assert_called_once_with("time_of_use_luna2000")
@@ -523,6 +584,7 @@ class TestWriteSchedule:
         intents = make_intents({2: "GRID_CHARGING"})
         controller.create_schedule(make_schedule_mock(intents))
         ha = MagicMock()
+        ha.get_huawei_working_mode_options.return_value = []
         ha.get_huawei_working_mode.return_value = "time_of_use_luna2000"
         controller.write_schedule_to_hardware(ha, 0, [])
         ha.set_huawei_working_mode.assert_not_called()
@@ -533,6 +595,7 @@ class TestWriteSchedule:
         intents = make_intents({2: "GRID_CHARGING", 18: "LOAD_SUPPORT"})
         controller.create_schedule(make_schedule_mock(intents))
         ha = MagicMock()
+        ha.get_huawei_working_mode_options.return_value = []
         ha.get_huawei_working_mode.return_value = "time_of_use_luna2000"
         controller.write_schedule_to_hardware(ha, 0, [])
         ha.write_huawei_tou_periods.assert_called_once()
@@ -546,9 +609,43 @@ class TestWriteSchedule:
         intents = make_intents({})
         controller.create_schedule(make_schedule_mock(intents))
         ha = MagicMock()
+        ha.get_huawei_working_mode_options.return_value = []
         ha.get_huawei_working_mode.return_value = "time_of_use_luna2000"
         controller.write_schedule_to_hardware(ha, 0, [])
         ha.write_huawei_tou_periods.assert_called_once_with("")
+
+    def test_write_schedule_raises_for_lg_resu_battery(
+        self, controller: HuaweiController
+    ) -> None:
+        """LG RESU installs never expose 'time_of_use_luna2000' as an option
+        (select.py removes it in StorageModeSelectEntity.__init__) —
+        writing LUNA2000-format periods against one would be silently wrong."""
+        intents = make_intents({2: "GRID_CHARGING"})
+        controller.create_schedule(make_schedule_mock(intents))
+        ha = MagicMock()
+        ha.get_huawei_working_mode_options.return_value = [
+            "adaptive",
+            "fixed_charge_discharge",
+            "maximise_self_consumption",
+            "time_of_use_lg",
+            "fully_fed_to_grid",
+        ]
+        with pytest.raises(SystemConfigurationError):
+            controller.write_schedule_to_hardware(ha, 0, [])
+        ha.write_huawei_tou_periods.assert_not_called()
+
+    def test_write_schedule_proceeds_when_options_unavailable(
+        self, controller: HuaweiController
+    ) -> None:
+        """An empty options list (entity unreadable) doesn't block the
+        write — only a confirmed non-LUNA2000 option list does."""
+        intents = make_intents({2: "GRID_CHARGING"})
+        controller.create_schedule(make_schedule_mock(intents))
+        ha = MagicMock()
+        ha.get_huawei_working_mode_options.return_value = []
+        ha.get_huawei_working_mode.return_value = "time_of_use_luna2000"
+        controller.write_schedule_to_hardware(ha, 0, [])
+        ha.write_huawei_tou_periods.assert_called_once()
 
 
 class TestActiveTouIntervals:
@@ -614,6 +711,7 @@ from typing import ClassVar
 
 from . import time_utils
 from .dp_schedule import DPSchedule
+from .exceptions import SystemConfigurationError
 from .inverter_controller import InverterController
 from .settings import BatterySettings
 
@@ -801,10 +899,26 @@ class HuaweiController(InverterController):
     ) -> tuple[int, int]:
         """Write Huawei TOU periods to hardware.
 
-        Gates the write behind the working-mode select: sets it to
+        First confirms the connected battery is LUNA2000 (via the
+        integration-exposed working-mode option list — see
+        HomeAssistantAPIController.get_huawei_working_mode_options), then
+        gates the write behind the working-mode select: sets it to
         time_of_use_luna2000 only when drifted, then writes the full
         period list (always a full rewrite — no differential update).
+
+        Raises:
+            SystemConfigurationError: If the connected battery does not
+                expose 'time_of_use_luna2000' as a working-mode option
+                (i.e. it's an LG RESU battery, not supported).
         """
+        available_modes = controller.get_huawei_working_mode_options()
+        if available_modes and WORKING_MODE_TOU not in available_modes:
+            raise SystemConfigurationError(
+                "Connected Huawei battery does not support "
+                f"'{WORKING_MODE_TOU}' (available modes: {available_modes}). "
+                "Only LUNA2000 batteries are supported — LG RESU is not."
+            )
+
         writes = 0
 
         current_mode = controller.get_huawei_working_mode()

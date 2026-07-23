@@ -642,7 +642,6 @@ class TestShouldApplySchedule:
             is_first_run=False,
             period=10,
             prepare_next_day=False,
-            temp_growatt=system._inverter_controller,
             optimization_period=10,
             temp_schedule=None,
         )

@@ -650,7 +650,7 @@ class BatterySystemManager:
                 return False
 
             # Create new schedule
-            schedule_result = self._create_updated_schedule(
+            temp_schedule = self._create_updated_schedule(
                 optimization_period,
                 optimization_result,
                 prices,
@@ -659,18 +659,15 @@ class BatterySystemManager:
                 prepare_next_day,
             )
 
-            if schedule_result is None:
+            if temp_schedule is None:
                 logger.error("Failed to create updated schedule")
                 return False
-
-            temp_schedule, temp_growatt = schedule_result
 
             # Determine if we should apply the new schedule
             should_apply, reason = self._should_apply_schedule(
                 is_first_run,
                 current_period,
                 prepare_next_day,
-                temp_growatt,
                 optimization_period,
                 temp_schedule,
             )
@@ -680,18 +677,18 @@ class BatterySystemManager:
                 self._apply_schedule(
                     current_period,
                     temp_schedule,
-                    temp_growatt,
                     reason,
                     prepare_next_day,
                 )
             else:
-                # Update current schedule even when TOU doesn't change.
-                # Hardware-derived state (TOU intervals, VPP confirmation,
-                # etc.) is already carried onto temp_growatt via seed_from()
-                # at creation time (#329), so no further copying is needed
-                # here before adopting it.
+                # Update display data even when nothing changes on hardware.
+                # Applied TOU/VPP state on self._inverter_controller is left
+                # untouched — there's only ever one instance now (#369), so
+                # there's nothing to carry forward or swap in.
                 self._current_schedule = temp_schedule
-                self._inverter_controller = temp_growatt
+                self._inverter_controller.strategic_intents = (
+                    temp_schedule.strategic_intents
+                )
 
             # Capture prediction snapshot after schedule is applied
             if not prepare_next_day:
@@ -2136,7 +2133,7 @@ class BatterySystemManager:
         optimization_data: dict[str, list[float]],
         is_first_run: bool,
         prepare_next_day: bool,
-    ) -> tuple[DPSchedule, InverterController] | None:
+    ) -> DPSchedule | None:
         """Create updated schedule from OptimizationResult with strategic intents and CORRECT SOC mapping."""
 
         try:
@@ -2363,26 +2360,7 @@ class BatterySystemManager:
             # Override the strategic intents in the schedule with corrected data
             temp_schedule.strategic_intents = full_day_strategic_intents
 
-            # Create schedule manager matching current inverter type
-            temp_growatt: InverterController = self._create_inverter_controller()
-            temp_growatt.seed_from(self._inverter_controller)
-            temp_growatt.strategic_intents = full_day_strategic_intents
-
-            # Create schedule with rolling window — only future periods get TOU segments
-            effective_period = 0 if prepare_next_day else optimization_period
-            previous_tou = (
-                []
-                if prepare_next_day
-                else self._inverter_controller.active_tou_intervals.copy()
-            )
-            logger.info(f"Creating Growatt schedule for period={effective_period}")
-            temp_growatt.create_schedule(
-                temp_schedule,
-                current_period=effective_period,
-                previous_tou_intervals=previous_tou,
-            )
-
-            return temp_schedule, temp_growatt
+            return temp_schedule
 
         except Exception as e:
             logger.error(f"Failed to create schedule: {e}")
@@ -2394,7 +2372,6 @@ class BatterySystemManager:
         is_first_run: bool,
         period: int,
         prepare_next_day: bool,
-        temp_growatt: InverterController,
         optimization_period: int,
         temp_schedule: DPSchedule,
     ) -> tuple[bool, str]:
@@ -2412,8 +2389,8 @@ class BatterySystemManager:
         # Special case: preparing next day (runs at 23:55 for 00:00 start)
         if prepare_next_day:
             # Compare full day TOU settings for tomorrow (from start of day)
-            schedules_differ, reason = self._inverter_controller.compare_schedules(
-                other_schedule=temp_growatt, from_period=0
+            schedules_differ, reason = self._inverter_controller.evaluate_intents(
+                temp_schedule, current_period=0
             )
 
             logger.info(
@@ -2425,8 +2402,8 @@ class BatterySystemManager:
 
         # Normal case: compare TOU settings from current period onwards
         try:
-            schedules_differ, reason = self._inverter_controller.compare_schedules(
-                other_schedule=temp_growatt, from_period=period
+            schedules_differ, reason = self._inverter_controller.evaluate_intents(
+                temp_schedule, current_period=period
             )
 
             if schedules_differ:
@@ -2444,7 +2421,6 @@ class BatterySystemManager:
         self,
         period: int,
         temp_schedule: DPSchedule,
-        temp_growatt: InverterController,
         reason: str,
         prepare_next_day: bool,
     ) -> None:
@@ -2464,30 +2440,27 @@ class BatterySystemManager:
         logger.info("Schedule update required: %s", reason)
         self._current_schedule = temp_schedule
 
-        # Adopt the new controller BEFORE the hardware write so that
-        # strategic intents, period settings, and TOU state are available
-        # even when the write fails (e.g. missing TOU entity mappings,
-        # Modbus timeout).  The _hardware_write_pending flag ensures the
-        # write is retried on the next quarterly cycle.
-        current_tou = self._inverter_controller.active_tou_intervals
-        self._inverter_controller = temp_growatt
+        # Read the currently-active TOU intervals BEFORE apply_intents
+        # rebuilds them, so write_to_hardware still sees what's on hardware
+        # right now (used for stale-segment cleanup on some platforms).
+        current_tou = self._inverter_controller.active_tou_intervals.copy()
+        effective_period = 0 if prepare_next_day else period
+        self._inverter_controller.apply_intents(temp_schedule, effective_period)
 
         try:
-            effective_period = 0 if prepare_next_day else period
-
             if self._controller is None:
                 logger.error("Cannot apply schedule: controller is not available")
             else:
-                temp_growatt.write_to_hardware(
+                self._inverter_controller.write_to_hardware(
                     self._controller, effective_period, current_tou
                 )
 
             # Clear corruption flag after successful hardware write
-            if temp_growatt.corruption_detected:
+            if self._inverter_controller.corruption_detected:
                 logger.info(
                     "Corruption recovery complete - clearing corruption flag after successful hardware write"
                 )
-                temp_growatt.corruption_detected = False
+                self._inverter_controller.corruption_detected = False
 
             self._hardware_write_pending = False
             logger.info("Schedule applied successfully")

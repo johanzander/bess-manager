@@ -158,6 +158,9 @@ const SetupWizardPage: React.FC = () => {
       if (d.growattDeviceId) {
         setInverterForm(f => ({ ...f, deviceId: d.growattDeviceId! }));
       }
+      if (d.huaweiDeviceId) {
+        setInverterForm(f => ({ ...f, deviceId: d.huaweiDeviceId! }));
+      }
 
       // Build per-platform sensor structure from discovery results.
       // platformSensors has per-platform dicts; shared sensors come from d.sensors.
@@ -304,7 +307,16 @@ const SetupWizardPage: React.FC = () => {
         nordpoolArea: discovery.nordpoolArea || discovery.nordpoolCustomArea || pricingForm.area,
         // Prefer the user-entered form value; fall back to auto-detected value
         nordpoolConfigEntryId: pricingForm.nordpoolConfigEntryId || discovery.nordpoolConfigEntryId,
-        growattDeviceId: inverterForm.deviceId || discovery.growattDeviceId,
+        // deviceId is a single shared form field reused across platforms; only
+        // attribute it to the platform actually selected, or a stale value
+        // typed for one platform gets cross-written into the other's device_id
+        // (backend persists whichever field is non-null unconditionally).
+        growattDeviceId: inverterForm.inverterPlatform === 'huawei_solar_luna2000'
+          ? discovery.growattDeviceId
+          : inverterForm.deviceId || discovery.growattDeviceId,
+        huaweiDeviceId: inverterForm.inverterPlatform === 'huawei_solar_luna2000'
+          ? inverterForm.deviceId || discovery.huaweiDeviceId
+          : discovery.huaweiDeviceId,
         // Battery
         totalCapacity: batteryForm.totalCapacity,
         minSoc: batteryForm.minSoc,

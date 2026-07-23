@@ -65,7 +65,7 @@ class SolaxModbusGrowattController(GrowattMinController):
     mode each period when needed. ``control_mode="vpp"`` issues per-period VPP
     power commands instead, with no persistent TOU schedule — analogous to
     how ``SolaxController`` applies per-period VPP commands for real SolaX
-    hardware, with ``write_schedule_to_hardware`` doing only the one-time VPP
+    hardware, with ``write_to_hardware`` doing only the one-time VPP
     enable sequence.
     """
 
@@ -138,13 +138,9 @@ class SolaxModbusGrowattController(GrowattMinController):
 
     # ── Schedule creation ────────────────────────────────────────────────────
 
-    def create_schedule(
-        self,
-        schedule: DPSchedule,
-        current_period: int = 0,
-        previous_tou_intervals: list[dict] | None = None,
-    ) -> None:
-        """Store strategic intents — control is applied per-period, no batch TOU needed.
+    def apply_intents(self, schedule: DPSchedule, current_period: int = 0) -> None:
+        """Adopt this cycle's DP intent list — control is applied per-period,
+        no batch TOU/VPP schedule computed here.
 
         Skips the parent's 9-segment TOU interval computation.  Strategic intents
         are stored and hourly settings calculated for API/display consumption.
@@ -152,7 +148,6 @@ class SolaxModbusGrowattController(GrowattMinController):
         Args:
             schedule: DPSchedule containing strategic_intent list.
             current_period: Current 15-minute period (0-95).
-            previous_tou_intervals: Unused for single-segment/VPP approach.
         """
         logger.info(
             "Creating %s schedule from strategic intents", self.control_mode.upper()
@@ -301,18 +296,6 @@ class SolaxModbusGrowattController(GrowattMinController):
             return 0, block_passive_charging
         return -discharge_rate, True
 
-    def seed_from(self, other: "GrowattMinController") -> None:
-        """See base docstring. Adds VPP confirmation/tracking state and the
-        last-written TOU mode, both of which gate redundant hardware writes."""
-        super().seed_from(other)
-        if isinstance(other, SolaxModbusGrowattController):
-            self._vpp_status_confirmed = other._vpp_status_confirmed
-            self._last_written_vpp_remote_control = (
-                other._last_written_vpp_remote_control
-            )
-            self._last_written_vpp_power = other._last_written_vpp_power
-            self._last_written_tou_mode = other._last_written_tou_mode
-
     def _ensure_vpp_status_enabled(self, controller) -> None:
         """Enable the VPP Status register once, if not already confirmed.
 
@@ -366,7 +349,7 @@ class SolaxModbusGrowattController(GrowattMinController):
             logger.error("FAILED: Growatt VPP period write: %s", e)
             return False, str(e)
 
-    def write_schedule_to_hardware(
+    def write_to_hardware(
         self,
         controller,
         effective_period: int,
@@ -514,26 +497,15 @@ class SolaxModbusGrowattController(GrowattMinController):
 
     # ── Schedule comparison ──────────────────────────────────────────────────
 
-    def compare_schedules(
-        self,
-        other_schedule: "SolaxModbusGrowattController",
-        from_period: int = 0,
+    @staticmethod
+    def _diff_intents(
+        current: list[str], new: list[str], from_period: int
     ) -> tuple[bool, str]:
-        """Compare schedules by strategic intent list (like SolaxController).
+        """Shared diff rule for strategic-intent lists.
 
         Two schedules differ when any period at or after ``from_period`` has a
         different strategic intent.
-
-        Args:
-            other_schedule: Another controller to compare against.
-            from_period: First period to compare (earlier periods are ignored).
-
-        Returns:
-            Tuple of (schedules_differ, reason).
         """
-        current = self.strategic_intents
-        new = other_schedule.strategic_intents
-
         if not current and not new:
             return False, ""
 
@@ -553,6 +525,17 @@ class SolaxModbusGrowattController(GrowattMinController):
 
         logger.info("DECISION: Modbus schedules match")
         return False, ""
+
+    def evaluate_intents(
+        self, schedule: DPSchedule, current_period: int = 0
+    ) -> tuple[bool, str]:
+        """Compare schedules by strategic intent list (like SolaxController).
+
+        Two schedules differ when any period at or after ``current_period``
+        has a different strategic intent.
+        """
+        new = schedule.original_dp_results["strategic_intent"]
+        return self._diff_intents(self.strategic_intents, new, current_period)
 
     # ── TOU display ──────────────────────────────────────────────────────────
 

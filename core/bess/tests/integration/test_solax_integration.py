@@ -8,7 +8,6 @@ from types import SimpleNamespace
 
 from core.bess.battery_system_manager import BatterySystemManager
 from core.bess.price_manager import MockSource
-from core.bess.solax_controller import SolaxController
 from core.bess.tests.conftest import MockHomeAssistantController
 
 
@@ -149,14 +148,14 @@ class TestSolaxGridChargeAtMaxPower:
 
 
 class TestSolaxNoTouHardwareWrites:
-    def test_write_schedule_to_hardware_is_noop(self) -> None:
+    def test_write_to_hardware_is_noop(self) -> None:
         bsm, hw = _make_bsm_solax()
         intents = ["IDLE"] * 96
         intents[PERIOD] = "GRID_CHARGING"
         bsm._inverter_controller.strategic_intents = intents
 
-        # write_schedule_to_hardware should not call any hardware method
-        writes, disables = bsm._inverter_controller.write_schedule_to_hardware(
+        # write_to_hardware should not call any hardware method
+        writes, disables = bsm._inverter_controller.write_to_hardware(
             hw, effective_period=0, current_tou=[]
         )
 
@@ -168,39 +167,6 @@ class TestSolaxNoTouHardwareWrites:
     def test_active_tou_intervals_always_empty(self) -> None:
         bsm, _hw = _make_bsm_solax()
         assert bsm._inverter_controller.active_tou_intervals == []
-
-
-# ── Schedule comparison ───────────────────────────────────────────────────────
-
-
-class TestSolaxScheduleComparison:
-    def test_identical_schedules_are_equal(self) -> None:
-        bsm, _ = _make_bsm_solax()
-        settings = bsm._inverter_controller.battery_settings
-
-        intents = ["IDLE"] * 96
-        intents[8 * 4] = "GRID_CHARGING"
-
-        bsm._inverter_controller.strategic_intents = intents
-
-        other = SolaxController(battery_settings=settings)
-        other.strategic_intents = list(intents)
-
-        differ, _ = bsm._inverter_controller.compare_schedules(other)
-        assert not differ
-
-    def test_changed_intent_triggers_redeploy(self) -> None:
-        bsm, _ = _make_bsm_solax()
-        settings = bsm._inverter_controller.battery_settings
-
-        bsm._inverter_controller.strategic_intents = ["IDLE"] * 96
-
-        other = SolaxController(battery_settings=settings)
-        other.strategic_intents = ["IDLE"] * 95 + ["GRID_CHARGING"]
-
-        differ, reason = bsm._inverter_controller.compare_schedules(other)
-        assert differ
-        assert reason
 
 
 # ── Health check integration ──────────────────────────────────────────────────

@@ -5,7 +5,7 @@ using MockHomeAssistantController from conftest.
 """
 
 from datetime import datetime, timedelta
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -642,7 +642,6 @@ class TestShouldApplySchedule:
             is_first_run=False,
             period=10,
             prepare_next_day=False,
-            temp_growatt=system._inverter_controller,
             optimization_period=10,
             temp_schedule=None,
         )
@@ -743,3 +742,69 @@ class TestAddTimestampsToPeriodData:
         for pd in result.period_data:
             assert pd.timestamp is not None
             assert pd.timestamp.date() == expected_date
+
+
+class TestNotApplyBranchRefreshesCurrentSchedule:
+    """Regression for issue #369 finding 1.
+
+    _apply_period_schedule (called every cycle, apply or not) reads
+    self._inverter_controller.current_schedule.actions to compute the
+    hardware battery_action_kw for the current period. Before the
+    InverterController-recreation refactor, the not-apply branch swapped in
+    a whole new controller object whose current_schedule had already been
+    set by create_schedule(); that refresh was lost when the branch was
+    rewritten to update fields individually. If current_schedule isn't
+    explicitly refreshed on the not-apply path, every not-apply cycle writes
+    hardware commands computed from a stale, previously-applied schedule's
+    action values instead of the freshly computed ones.
+    """
+
+    def test_current_schedule_refreshed_when_schedule_not_applied(self, system):
+        first_schedule = MagicMock(actions=[1.0, 2.0], strategic_intents=["IDLE"])
+        second_schedule = MagicMock(actions=[5.0, 6.0], strategic_intents=["IDLE"])
+
+        with (
+            patch.object(system, "_handle_special_cases"),
+            patch.object(
+                system, "_get_price_data", return_value=([1.0], [MagicMock()])
+            ),
+            patch.object(system, "_update_energy_data"),
+            patch.object(system, "_get_current_battery_soc", return_value=50.0),
+            patch.object(
+                system, "_gather_optimization_data", return_value=(0, MagicMock())
+            ),
+            patch.object(system, "_run_optimization", return_value=MagicMock()),
+            patch.object(
+                system,
+                "_create_updated_schedule",
+                side_effect=[first_schedule, second_schedule],
+            ),
+            patch.object(
+                system,
+                "_should_apply_schedule",
+                side_effect=[(True, "first: applied"), (False, "second: no change")],
+            ),
+            patch.object(system, "_apply_schedule") as mock_apply_schedule,
+            patch.object(system, "_apply_period_schedule"),
+            patch.object(system, "_capture_prediction_snapshot"),
+            patch.object(system, "log_battery_schedule"),
+        ):
+            # First cycle: should_apply=True. _apply_schedule is mocked out
+            # (its internals are not under test here), so emulate the one
+            # side effect this test cares about: it sets current_schedule.
+            def fake_apply_schedule(*_args, **_kwargs):
+                system._inverter_controller.current_schedule = first_schedule
+
+            mock_apply_schedule.side_effect = fake_apply_schedule
+
+            assert system.update_battery_schedule(0, prepare_next_day=False) is True
+            assert system._inverter_controller.current_schedule is first_schedule
+
+            # Second cycle: should_apply=False (TOU/VPP intents unchanged),
+            # but the DP produced different action magnitudes. The not-apply
+            # branch must still refresh current_schedule so the next
+            # _apply_period_schedule call reads the fresh actions.
+            assert system.update_battery_schedule(1, prepare_next_day=False) is True
+
+        assert system._inverter_controller.current_schedule is second_schedule
+        assert system._inverter_controller.current_schedule.actions == [5.0, 6.0]

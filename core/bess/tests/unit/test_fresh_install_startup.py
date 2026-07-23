@@ -125,14 +125,12 @@ class TestFreshInstallStartup:
 
         from unittest.mock import MagicMock
 
-        temp_growatt = MagicMock()
         temp_schedule = MagicMock()
 
         should_apply, reason = system._should_apply_schedule(
             is_first_run=False,
             period=10,
             prepare_next_day=False,
-            temp_growatt=temp_growatt,
             optimization_period=10,
             temp_schedule=temp_schedule,
         )
